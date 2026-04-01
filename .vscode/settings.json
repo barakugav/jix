@@ -4,6 +4,7 @@
         "macros/Cargo.toml"
     ],
     "cSpell.words": [
-        "itemsize"
+        "itemsize",
+        "strided"
     ]
 }
