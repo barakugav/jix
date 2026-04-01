@@ -1,0 +1,25 @@
+[package]
+name = "zix"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+arrayvec = "0.7"
+cfg-if = "1"
+zix-macros = { path = "macros" }
+half = { version = "2", default-features = false, optional = true }
+num-complex = { version = "0.4", default-features = false, optional = true }
+
+
+[features]
+half = ["dep:half"]
+num-complex = ["dep:num-complex"]
+
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+
+[dev-dependencies]
+static_assertions = "1.1"

@@ -1,0 +1,12 @@
+[package]
+name = "zix-macros"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+proc-macro-crate = "3.5"
