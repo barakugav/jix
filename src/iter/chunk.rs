@@ -169,32 +169,29 @@ mod tests {
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn layout(chunk_shape: &[usize]) -> ChunksLayout {
-        ChunksLayout {
-            chunk_shape: chunk_shape.iter().copied().collect(),
-            chunk_size: chunk_shape.iter().product(),
-        }
-    }
-
     /// Build a `NdIter` over the chunk-space range that corresponds to the element-space
     /// `[begin, end)` range, using `NdIterExtChunkOffsetSize` as the extension.
     fn make_iter<Ix: Idx>(
         shape: &[Ix],
         begin: &[Ix],
         end: &[Ix],
-        chunk: &[usize],
+        chunk: &[Ix],
     ) -> NdIter<Ix, NdIterExtChunkOffsetSize<Ix>> {
-        let l = layout(chunk);
-        let ext = NdIterExtChunkOffsetSize::new(shape, begin, end, &l);
-        let chunk_begin: Vec<Ix> = begin
+        let chunk_usize = chunk
             .iter()
-            .zip(chunk)
-            .map(|(&b, &c)| b / c.try_into().unwrap())
-            .collect();
+            .map(|&c| c.try_into().unwrap())
+            .collect::<DimArray<usize>>();
+        let shape_usize = shape
+            .iter()
+            .map(|&s| s.try_into().unwrap())
+            .collect::<DimArray<usize>>();
+        let layout = ChunksLayout::new(&chunk_usize, &shape_usize);
+        let ext = NdIterExtChunkOffsetSize::new(shape, begin, end, &layout);
+        let chunk_begin: Vec<Ix> = begin.iter().zip(chunk).map(|(&b, &c)| b / c).collect();
         let chunk_end: Vec<Ix> = end
             .iter()
             .zip(chunk)
-            .map(|(&e, &c)| e.div_ceil(c.try_into().unwrap()))
+            .map(|(&e, &c)| e.div_ceil(c))
             .collect();
         NdIter::new_with_begin(&chunk_begin, &chunk_end, ext)
     }

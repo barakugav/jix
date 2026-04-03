@@ -1,0 +1,1 @@
+- overflow checks in shape.iter().product()

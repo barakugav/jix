@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package zix.v1;
+
+message Header {
+    fixed32 magic = 1;
+    string version = 2;
+    optional FooterSpec footer_spec = 3;
+}
+
+message FooterSpec {
+    uint32 size = 3;
+    fixed32 magic = 4;
+}
+
+message Footer {
+    fixed32 magic = 1;
+    sfixed64 main_section_offset = 2;
+    fixed64 main_section_length = 3;
+}
+
+message Section {
+    int64 offset = 1;
+    uint64 size = 2;
+}
+

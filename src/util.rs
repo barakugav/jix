@@ -12,12 +12,15 @@ pub(crate) trait Idx:
     + core::ops::Add<Output = Self>
     + core::ops::Sub<Output = Self>
     + core::ops::AddAssign
+    + core::ops::SubAssign
+    + core::ops::Mul<Output = Self>
     + core::ops::Div<Output = Self>
     + core::ops::Rem<Output = Self>
     + TryInto<usize, Error: core::fmt::Debug>
     + TryFrom<usize, Error: core::fmt::Debug>
     + core::fmt::Display
     + core::fmt::Debug
+    + core::iter::Sum
 {
     const ZERO: Self;
     const ONE: Self;
@@ -39,3 +42,14 @@ macro_rules! impl_idx_for_primitive {
 impl_idx_for_primitive!(usize);
 impl_idx_for_primitive!(u32);
 impl_idx_for_primitive!(u64);
+
+pub(crate) fn default_strides<Ix: Idx>(shape: &[Ix]) -> DimArray<Ix> {
+    let ndim = shape.len();
+    let mut strides = (0..ndim).map(|_| Ix::ONE).collect::<DimArray<_>>();
+    if ndim > 0 {
+        for dim in (0..ndim - 1).rev() {
+            strides[dim] = strides[dim + 1] * shape[dim + 1];
+        }
+    }
+    strides
+}

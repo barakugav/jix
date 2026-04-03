@@ -1,5 +1,5 @@
 use crate::iter::NdIterExtension;
-use crate::util::{DimArray, Idx};
+use crate::util::{DimArray, Idx, default_strides};
 
 /// An nd-iterator extension that tracks a `*const u8` pointer into a strided buffer.
 ///
@@ -70,6 +70,57 @@ where
     fn next(&self) -> *mut u8 {
         self.current_ptr
     }
+}
+
+/// An nd-iterator extension that tracks an offset into a strided array.
+///
+/// On each dimension change the offset is adjusted by the difference in element counts:
+/// `offset += (after - before) * stride[dim]`.
+pub(crate) struct NdIterExtensionStridesOffset<Ix> {
+    strides: DimArray<Ix>,
+    offset: Ix,
+}
+impl<Ix> NdIterExtensionStridesOffset<Ix>
+where
+    Ix: Idx,
+{
+    pub fn new(strides: &[Ix], initial_offset: Ix) -> Self {
+        Self {
+            strides: strides.iter().cloned().collect::<DimArray<_>>(),
+            offset: initial_offset,
+        }
+    }
+}
+impl<Ix> NdIterExtension<Ix> for NdIterExtensionStridesOffset<Ix>
+where
+    Ix: Idx,
+{
+    type Item<'a>
+        = Ix
+    where
+        Self: 'a;
+
+    fn on_increase(&mut self, dim: usize, _before: Ix, _after: Ix, diff: Ix) {
+        self.offset += diff * self.strides[dim];
+    }
+    fn on_decrease(&mut self, dim: usize, _before: Ix, _after: Ix, diff: Ix) {
+        self.offset -= diff * self.strides[dim];
+    }
+
+    fn next(&self) -> Ix {
+        self.offset
+    }
+}
+
+pub(crate) fn nd_iter_ext_logical_global_index<Ix: Idx>(
+    shape: &[Ix],
+    begin: &[Ix],
+) -> NdIterExtensionStridesOffset<Ix> {
+    let logical_strides = default_strides(shape);
+    let initial_offset = (0..shape.len())
+        .map(|dim| begin[dim] * logical_strides[dim])
+        .sum();
+    NdIterExtensionStridesOffset::new(&logical_strides, initial_offset)
 }
 
 #[cfg(test)]

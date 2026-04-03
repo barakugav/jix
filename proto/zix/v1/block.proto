@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package zix.v1;
+
+import "zix/v1/structure.proto";
+
+message BlockTable {
+    uint32 itemsize = 1;
+    uint64 nitems = 2;
+    uint64 block_size = 3;
+    Section cdata = 4;
+    Section block_offsets = 5;
+}

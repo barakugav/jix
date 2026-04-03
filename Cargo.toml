@@ -4,12 +4,17 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
+ndarray = "0.17.0"
 arrayvec = "0.7"
 cfg-if = "1"
 zix-macros = { path = "macros" }
 half = { version = "2", default-features = false, optional = true }
 num-complex = { version = "0.4", default-features = false, optional = true }
+zstd = "0.13"
+prost = "0.14"
 
+[build-dependencies]
+prost-build = "0.14"
 
 [features]
 half = ["dep:half"]
@@ -23,3 +28,4 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dev-dependencies]
 static_assertions = "1.1"
+tempfile = "3"
