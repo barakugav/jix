@@ -6,6 +6,7 @@ use prost::Message;
 
 use crate::dtype::Itemsize;
 use crate::schema::{self, ArchiveType};
+use crate::storage::BlockSize;
 use crate::storage::codec::Encoder;
 use crate::storage::common::{ArchiveReader, ArchiveWriter};
 use crate::util::{cast_slice, cast_slice_mut};
@@ -16,8 +17,6 @@ const _: () = const {
         "Only little-endian is supported"
     );
 };
-
-pub(crate) type BlockSize = u32;
 
 pub(crate) struct Block<'a> {
     pub(crate) cdata: &'a [u8],

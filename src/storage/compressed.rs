@@ -3,14 +3,14 @@ use std::cell::RefCell;
 use std::io;
 
 use crate::NDIM_MAX;
+use crate::array::BlocksLayout;
 use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut};
-use crate::storage::Storage;
-use crate::storage::block::{BlockSize, BlockTable};
+use crate::storage::block::BlockTable;
 use crate::storage::codec::{Decoder, Encoder};
-use crate::array::BlocksLayout;
+use crate::storage::{BlockSize, Storage};
 use crate::util::{DimArray, ceil_to_multiple, default_strides, full_dim_array};
 
 pub(crate) struct CompressedStorage {
@@ -21,116 +21,6 @@ pub(crate) struct CompressedStorage {
 
 impl CompressedStorage {
     pub(crate) fn from_block_table(blocks: BlockTable<'static>, dtype: Dtype) -> io::Result<Self> {
-        Ok(Self {
-            blocks,
-            dtype,
-            decoder: RefCell::new(Decoder::new()?),
-        })
-    }
-
-    pub fn from_ndarray<T, D>(
-        array: &ndarray::ArrayView<T, D>,
-        block_shape: &[usize],
-    ) -> io::Result<Self>
-    where
-        T: Dtyped,
-        D: ndarray::Dimension,
-    {
-        let ndim = array.ndim();
-        assert!(ndim < NDIM_MAX);
-        assert_eq!(ndim, block_shape.len());
-        let dtype = T::dtype();
-        let itemsize = dtype.itemsize() as usize;
-        let shape = array.shape().iter().cloned().collect::<DimArray<_>>();
-
-        let block_shape_clamped = block_shape
-            .iter()
-            .zip(&shape)
-            .map(|(&b, &s)| b.min(s))
-            .collect::<DimArray<_>>();
-        let padded_shape = block_shape_clamped
-            .iter()
-            .zip(&shape)
-            .map(|(&b, &s)| if s == 0 { 0 } else { ceil_to_multiple(s, b) })
-            .collect::<DimArray<_>>();
-        let blocks_layout = BlocksLayout::new(&block_shape_clamped, &shape);
-        let nblocks = blocks_layout.grid_shape.iter().product::<usize>();
-
-        let mut block_iter = NdIter::new(
-            &blocks_layout.grid_shape,
-            NdIterExtBlockOffsetSize::new(
-                &shape,
-                &full_dim_array(0, ndim),
-                &shape,
-                &blocks_layout,
-            ),
-        );
-
-        let mut encoder = Encoder::new(3)?;
-        let mut cdata = Vec::<u8>::new();
-        let mut block_offsets =
-            Vec::<u64>::with_capacity(if nblocks == 0 { 0 } else { nblocks + 1 });
-        if nblocks > 0 {
-            block_offsets.push(0);
-        }
-        let block_capacity_bytes = blocks_layout.block_size * itemsize;
-        let max_blk_cdata_len = encoder.encode_bound(block_capacity_bytes);
-        let mut tmp_block_data = Vec::<u8>::with_capacity(block_capacity_bytes);
-        let tmp_block_strides = default_strides(&block_shape_clamped, itemsize);
-        let strides = array
-            .strides()
-            .iter()
-            .map(|&s| usize::try_from(s).unwrap() * size_of::<T>())
-            .collect::<DimArray<_>>();
-        while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
-            debug_assert!(block_inner_offset.iter().all(|&o| o == 0));
-
-            // Init block data to zeros (padding elements stay zero).
-            tmp_block_data.clear();
-            tmp_block_data.resize(block_capacity_bytes, 0);
-
-            let initial_arr_offset = (0..ndim)
-                .map(|dim| {
-                    let idx =
-                        block_idx[dim] * blocks_layout.block_shape[dim] + block_inner_offset[dim];
-                    idx * strides[dim]
-                })
-                .sum::<usize>();
-            let initial_arr_ptr = unsafe { array.as_ptr().cast::<u8>().add(initial_arr_offset) };
-            let initial_block_offset = (0..ndim)
-                .map(|dim| block_inner_offset[dim] * tmp_block_strides[dim])
-                .sum::<usize>();
-            let initial_block_ptr =
-                unsafe { tmp_block_data.as_mut_ptr().add(initial_block_offset) };
-            let mut iter = NdIter::new(
-                block_size,
-                (
-                    NdIterExtensionStridesPtr::new(&strides, initial_arr_ptr),
-                    NdIterExtensionStridesPtrMut::new(&tmp_block_strides, initial_block_ptr),
-                ),
-            );
-            while let Some((_idx, (src, dst))) = iter.next() {
-                unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
-            }
-
-            let cdata_len = cdata.len();
-            cdata.reserve(max_blk_cdata_len);
-            unsafe { cdata.set_len(cdata_len + max_blk_cdata_len) };
-            let blk_buf = &mut cdata[cdata_len..];
-            let blk_cdata_len = encoder.encode(&tmp_block_data, blk_buf)?;
-            debug_assert!(blk_cdata_len <= max_blk_cdata_len);
-            unsafe { cdata.set_len(cdata_len + blk_cdata_len) };
-            block_offsets.push(cdata.len() as u64);
-        }
-
-        let blocks = BlockTable::new(
-            Cow::Owned(cdata),
-            Cow::Owned(block_offsets),
-            dtype.itemsize(),
-            padded_shape.iter().product::<usize>(),
-            blocks_layout.block_size as BlockSize,
-        );
-
         Ok(Self {
             blocks,
             dtype,
@@ -153,11 +43,14 @@ impl Storage for CompressedStorage {
     }
 
     fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()> {
-        let block = self.blocks.get_block(block_idx);
         let b_size_bytes = self.block_len() as usize * self.blocks.itemsize as usize;
         if buf.len() < b_size_bytes {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Buffer too small"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Buffer too small",
+            ));
         }
+        let block = self.blocks.get_block(block_idx);
         let nbytes = self.decoder.borrow_mut().decode(&block, buf)?;
         debug_assert_eq!(nbytes, b_size_bytes);
         Ok(())
@@ -168,9 +61,9 @@ impl Storage for CompressedStorage {
 mod tests {
     use super::CompressedStorage;
     use crate::dtype::Dtyped;
-    use crate::storage::Storage;
-    use crate::storage::block::{BlockSize, BlockTable};
+    use crate::storage::block::BlockTable;
     use crate::storage::codec::Encoder;
+    use crate::storage::{BlockSize, Storage};
     use crate::util::cast_slice;
 
     fn make_storage<T: Dtyped>(items: &[T], block_len: BlockSize) -> CompressedStorage {

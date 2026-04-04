@@ -1,17 +1,38 @@
+pub(crate) mod block;
+pub(crate) mod codec;
+mod common;
+pub(crate) mod compressed;
+mod plain;
+
 use std::io;
 
 use crate::dtype::Dtype;
 
-mod block;
-pub(crate) use block::BlockSize;
-mod codec;
-mod common;
-mod compressed;
-mod plain;
+pub(crate) type BlockSize = u32;
 
+/// Storage of 1D array items, organized in blocks.
+///
+/// The number of items must be divisible by the block length, there is not support for partial blocks.
+/// At all times the storage hold the invariants:
+/// - `block_len > 0`
+/// - `nitems % block_len == 0`
 pub(crate) trait Storage {
+    /// Get the dtype of items in this storage.
     fn dtype(&self) -> &Dtype;
+
+    /// Get the total number of items in this storage.
     fn nitems(&self) -> usize;
+
+    /// Get the length of a block in this storage.
+    ///
+    /// Note that the units are in items, not bytes.
     fn block_len(&self) -> BlockSize;
+
+    /// Read a block of items into the provided buffer.
+    ///
+    /// # Arguments
+    ///
+    /// - `block_idx`: The index of the block to read, in the range `0..(nitems / block_len)`.
+    /// - `buf`: The buffer to read the block into. Must be of size `block_len * dtype.itemsize()`.
     fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()>;
 }

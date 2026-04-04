@@ -1,11 +1,9 @@
 use std::io;
 
 use crate::dtype::Dtype;
-use crate::storage::Storage;
-use crate::storage::block::BlockSize;
+use crate::storage::{BlockSize, Storage};
 
 pub(crate) struct PlainStorage {
-    /// Items stored in block-major C-order: all elements of block 0, then block 1, etc.
     data: Vec<u8>,
     dtype: Dtype,
     nitems: usize,
@@ -17,16 +15,44 @@ impl PlainStorage {
         assert!(block_len > 0);
         assert!(nitems % block_len as usize == 0);
         assert_eq!(data.len(), nitems * dtype.itemsize() as usize);
-        Self { data, dtype, nitems, block_len }
+        Self {
+            data,
+            dtype,
+            nitems,
+            block_len,
+        }
+    }
+}
+
+impl Storage for PlainStorage {
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+
+    fn nitems(&self) -> usize {
+        self.nitems
+    }
+
+    fn block_len(&self) -> BlockSize {
+        self.block_len
+    }
+
+    fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()> {
+        let block_bytes = self.block_len as usize * self.dtype.itemsize() as usize;
+        let start = block_idx * block_bytes;
+        buf.copy_from_slice(&self.data[start..start + block_bytes]);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::mem::MaybeUninit;
+
     use super::PlainStorage;
     use crate::dtype::Dtyped;
     use crate::storage::Storage;
-    use crate::util::cast_slice;
+    use crate::util::{cast_slice, cast_slice_mut};
 
     fn make_storage<T: Dtyped>(items: &[T], block_len: u32) -> PlainStorage {
         let data = unsafe { cast_slice::<T, u8>(items) }.to_vec();
@@ -34,10 +60,10 @@ mod tests {
     }
 
     fn read_block_items<T: Dtyped>(storage: &PlainStorage, idx: usize) -> Vec<T> {
-        let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
-        let mut buf = vec![0u8; block_bytes];
-        storage.read_block(idx, &mut buf).unwrap();
-        unsafe { cast_slice::<u8, T>(&buf) }.to_vec()
+        let mut buf = vec![MaybeUninit::<T>::uninit(); storage.block_len() as usize];
+        let buf_bytes = unsafe { cast_slice_mut::<_, u8>(buf.as_mut_slice()) };
+        storage.read_block(idx, buf_bytes).unwrap();
+        unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(buf) }
     }
 
     #[test]
@@ -77,26 +103,5 @@ mod tests {
             make_storage(&[0u8; 7], 4);
         });
         assert!(result.is_err());
-    }
-}
-
-impl Storage for PlainStorage {
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
-    fn nitems(&self) -> usize {
-        self.nitems
-    }
-
-    fn block_len(&self) -> BlockSize {
-        self.block_len
-    }
-
-    fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()> {
-        let block_bytes = self.block_len as usize * self.dtype.itemsize() as usize;
-        let start = block_idx * block_bytes;
-        buf[..block_bytes].copy_from_slice(&self.data[start..start + block_bytes]);
-        Ok(())
     }
 }

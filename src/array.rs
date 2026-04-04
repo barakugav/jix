@@ -4,16 +4,27 @@ use std::ops::Range;
 use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
-use crate::iter::strides::{NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index};
-use crate::util::default_strides;
+use crate::iter::strides::{
+    NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
+};
 use crate::storage::Storage;
+use crate::storage::compressed::CompressedStorage;
 use crate::util::DimArray;
+use crate::util::default_strides;
+use std::borrow::Cow;
+use std::cell::RefCell;
+
+use crate::NDIM_MAX;
+use crate::storage::BlockSize;
+use crate::storage::block::BlockTable;
+use crate::storage::codec::{Decoder, Encoder};
+use crate::util::{ceil_to_multiple, full_dim_array};
 
 pub(crate) struct BlocksLayout {
     pub(crate) block_shape: DimArray<usize>,
     /// Number of blocks in each dimension.
     pub(crate) grid_shape: DimArray<usize>,
-    /// Total items per block: `block_shape.iter().product()`.
+    /// Total items per block (`block_shape.iter().product()`).
     pub(crate) block_size: usize,
 }
 
@@ -64,7 +75,120 @@ where
     pub fn shape(&self) -> &[usize] {
         &self.shape
     }
+}
 
+impl Array<CompressedStorage> {
+    pub fn from_ndarray<T, D>(
+        array: &ndarray::ArrayView<T, D>,
+        block_shape: &[usize],
+    ) -> io::Result<Self>
+    where
+        T: Dtyped,
+        D: ndarray::Dimension,
+    {
+        let ndim = array.ndim();
+        assert!(ndim < NDIM_MAX);
+        assert_eq!(ndim, block_shape.len());
+        let dtype = T::dtype();
+        let itemsize = dtype.itemsize() as usize;
+        let shape = array.shape().iter().cloned().collect::<DimArray<_>>();
+
+        let block_shape = block_shape
+            .iter()
+            .zip(&shape)
+            .map(|(&b, &s)| b.min(s))
+            .collect::<DimArray<_>>();
+        let padded_shape = block_shape
+            .iter()
+            .zip(&shape)
+            .map(|(&b, &s)| if s == 0 { 0 } else { ceil_to_multiple(s, b) })
+            .collect::<DimArray<_>>();
+        let b_layout = BlocksLayout::new(&block_shape, &shape);
+        let nblocks = b_layout.grid_shape.iter().product::<usize>();
+
+        let mut block_iter = NdIter::new(
+            &b_layout.grid_shape,
+            NdIterExtBlockOffsetSize::new(&shape, &full_dim_array(0, ndim), &shape, &b_layout),
+        );
+
+        let mut encoder = Encoder::new(3)?;
+        let mut cdata = Vec::<u8>::new();
+        let mut block_offsets =
+            Vec::<u64>::with_capacity(if nblocks == 0 { 0 } else { nblocks + 1 });
+        if nblocks > 0 {
+            block_offsets.push(0);
+        }
+        let block_capacity_bytes = b_layout.block_size * itemsize;
+        let max_blk_cdata_len = encoder.encode_bound(block_capacity_bytes);
+        let mut tmp_block_data = Vec::<u8>::with_capacity(block_capacity_bytes);
+        let tmp_block_strides = default_strides(&block_shape, itemsize);
+        let strides = array
+            .strides()
+            .iter()
+            .map(|&s| usize::try_from(s).unwrap() * size_of::<T>())
+            .collect::<DimArray<_>>();
+        while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
+            debug_assert!(block_inner_offset.iter().all(|&o| o == 0));
+
+            // Init chunk data to zeros.
+            // The padding elements (if any) will not be written by the iter below, so they will stay zeros.
+            tmp_block_data.clear();
+            tmp_block_data.resize(block_capacity_bytes, 0);
+
+            // TODO: fast path for contiguous data
+            let initial_arr_offset = (0..ndim)
+                .map(|dim| {
+                    let idx = block_idx[dim] * b_layout.block_shape[dim] + block_inner_offset[dim];
+                    idx * strides[dim]
+                })
+                .sum::<usize>();
+            let initial_arr_ptr = unsafe { array.as_ptr().cast::<u8>().add(initial_arr_offset) };
+            let initial_block_offset = (0..ndim)
+                .map(|dim| block_inner_offset[dim] * tmp_block_strides[dim])
+                .sum::<usize>();
+            let initial_block_ptr =
+                unsafe { tmp_block_data.as_mut_ptr().add(initial_block_offset) };
+            let mut iter = NdIter::new(
+                block_size,
+                (
+                    NdIterExtensionStridesPtr::new(&strides, initial_arr_ptr),
+                    NdIterExtensionStridesPtrMut::new(&tmp_block_strides, initial_block_ptr),
+                ),
+            );
+            while let Some((_idx, (src, dst))) = iter.next() {
+                unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
+            }
+
+            let cdata_len = cdata.len();
+            cdata.reserve(max_blk_cdata_len);
+            unsafe { cdata.set_len(cdata_len + max_blk_cdata_len) };
+            let blk_buf = &mut cdata[cdata_len..];
+            let blk_cdata_len = encoder.encode(&tmp_block_data, blk_buf)?;
+            debug_assert!(blk_cdata_len <= max_blk_cdata_len);
+            unsafe { cdata.set_len(cdata_len + blk_cdata_len) };
+            block_offsets.push(cdata.len() as u64);
+        }
+
+        let blocks = BlockTable::new(
+            Cow::Owned(cdata),
+            Cow::Owned(block_offsets),
+            dtype.itemsize(),
+            padded_shape.iter().product::<usize>(),
+            b_layout.block_size as BlockSize,
+        );
+
+        Ok(Self {
+            storage: CompressedStorage::from_block_table(blocks, dtype)?,
+            shape,
+            blocks_layout: b_layout,
+        })
+    }
+}
+
+impl<S> Array<S>
+where
+    S: Storage,
+{
     pub fn to_ndarray<T>(&self) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
@@ -87,7 +211,10 @@ where
         let itemsize = dtype.itemsize() as usize;
         assert_eq!(dtype, &T::dtype());
         // Output is sized to the requested range, not the full array shape.
-        let out_shape = range.iter().map(|r| r.end - r.start).collect::<DimArray<_>>();
+        let out_shape = range
+            .iter()
+            .map(|r| r.end - r.start)
+            .collect::<DimArray<_>>();
         let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
         let out_strides = array
             .strides()
@@ -142,8 +269,7 @@ where
             // Map the active region's start to its position in the output array.
             let out_start = (0..ndim)
                 .map(|dim| {
-                    let full_idx =
-                        block_idx[dim] * bl.block_shape[dim] + block_inner_offset[dim];
+                    let full_idx = block_idx[dim] * bl.block_shape[dim] + block_inner_offset[dim];
                     let out_idx = full_idx - range[dim].start;
                     out_idx * out_strides[dim]
                 })
@@ -212,7 +338,11 @@ mod tests {
             .iter()
             .map(|b| unsafe { cast_slice::<T, u8>(b) }.to_vec())
             .collect();
-        MockStorage { blocks: byte_blocks, dtype, block_len }
+        MockStorage {
+            blocks: byte_blocks,
+            dtype,
+            block_len,
+        }
     }
 
     fn array<T: Dtyped>(
@@ -243,7 +373,10 @@ mod tests {
     fn to_ndarray_1d_single_block() {
         let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
         let got: ArrayD<u8> = a.to_ndarray().unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![4], vec![0, 1, 2, 3]).unwrap());
+        assert_eq!(
+            got,
+            ArrayD::from_shape_vec(vec![4], vec![0, 1, 2, 3]).unwrap()
+        );
     }
 
     #[test]
@@ -315,10 +448,7 @@ mod tests {
         // range [3..6) → output shape [3], values [3,4,5]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let got: ArrayD<u8> = a.sub_ndarray(&[3..6]).unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3], vec![3, 4, 5]).unwrap()
-        );
+        assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![3, 4, 5]).unwrap());
     }
 
     #[test]
@@ -337,10 +467,7 @@ mod tests {
         // range [1..2) → output shape [1], value [1]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let got: ArrayD<u8> = a.sub_ndarray(&[1..2]).unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![1], vec![1]).unwrap()
-        );
+        assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1]).unwrap());
     }
 
     // -----------------------------------------------------------------------
