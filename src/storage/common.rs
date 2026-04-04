@@ -1,8 +1,8 @@
 use std::io::{self, Read, Seek, Write};
 use std::ops::{Deref, DerefMut};
 
-use prost::{Message, bytes};
-use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
+use prost::Message;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::schema::Section;
 use crate::schema::{self, ArchiveType};

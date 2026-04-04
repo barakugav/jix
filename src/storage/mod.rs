@@ -13,12 +13,7 @@ pub(crate) trait ArrayStorage {
     fn dtype(&self) -> &Dtype;
     fn shape(&self) -> &[usize];
     fn chunks_layout(&self) -> &ChunksLayout;
-    fn get_chunk_data(
-        &self,
-        chunk_global_id: usize,
-        chunk_idx: &[usize],
-        buf: &mut [u8],
-    ) -> io::Result<()>;
+    fn get_chunk_data(&self, chunk_global_id: usize, buf: &mut [u8]) -> io::Result<()>;
 }
 pub(crate) struct ChunksLayout {
     pub(crate) chunk_shape: DimArray<usize>,
@@ -103,12 +98,13 @@ pub(crate) mod tests {
         let chunk_buf_strides = default_strides(chunk_shape, itemsize);
 
         let mut chunk_iter = IdxIter::new(chunk_space_shape);
-        let mut chunk_global_id = 0;
+        let chunk_space_strides = default_strides(chunk_space_shape, 1);
         while let Some(chunk_idx) = chunk_iter.next() {
+            let chunk_global_id = (0..ndim)
+                .map(|d| chunk_idx[d] * chunk_space_strides[d])
+                .sum::<usize>();
             let byte_buf = unsafe { cast_slice_mut::<T, u8>(chunk_buf.as_mut_slice()) };
-            storage
-                .get_chunk_data(chunk_global_id, &chunk_idx, byte_buf)
-                .unwrap();
+            storage.get_chunk_data(chunk_global_id, byte_buf).unwrap();
 
             let mut iter = IdxIter::new(&chunk_shape);
             while let Some(c_inner_idx) = iter.next() {
@@ -129,7 +125,6 @@ pub(crate) mod tests {
                 let expected = &reference[idx.as_slice()];
                 assert_eq!(value, *expected,);
             }
-            chunk_global_id += 1;
         }
     }
 }

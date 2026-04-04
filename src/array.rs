@@ -89,7 +89,7 @@ where
             tmp_buf.reserve(buf_len);
             unsafe { tmp_buf.set_len(buf_len) };
             self.storage
-                .get_chunk_data(chunk_global_id, &chunk_idx, tmp_buf.as_mut_slice())?;
+                .get_chunk_data(chunk_global_id, tmp_buf.as_mut_slice())?;
 
             let array_initial_offset = (0..ndim)
                 .map(|dim| {

@@ -4,7 +4,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::strides::NdIterExtensionStridesPtr;
 use crate::storage::{ArrayStorage, ChunksLayout};
-use crate::util::DimArray;
+use crate::util::{DimArray, full_dim_array};
 
 struct PlainStorage<A> {
     /// Arbitrary object that keeps the data pointer alive.
@@ -66,12 +66,7 @@ impl<A> ArrayStorage for PlainStorage<A> {
     fn chunks_layout(&self) -> &ChunksLayout {
         &self.chunks_layout
     }
-    fn get_chunk_data(
-        &self,
-        _chunk_global_id: usize,
-        chunk_idx: &[usize],
-        buf: &mut [u8],
-    ) -> io::Result<()> {
+    fn get_chunk_data(&self, chunk_global_id: usize, buf: &mut [u8]) -> io::Result<()> {
         let itemsize = self.dtype.itemsize() as usize;
         if buf.len() < self.chunks_layout.chunk_size * itemsize {
             return Err(io::Error::new(
@@ -81,8 +76,16 @@ impl<A> ArrayStorage for PlainStorage<A> {
         }
 
         let ndim = self.shape.len();
-        assert_eq!(chunk_idx.len(), ndim);
+        // assert_eq!(chunk_idx.len(), ndim);
 
+        let chunk_idx = (0..ndim)
+            .scan((chunk_global_id, 1), |(global_idx, stride), dim| {
+                let idx = *global_idx / *stride;
+                *global_idx = *global_idx % *stride;
+                *stride *= self.chunks_layout.chunk_space_shape[dim];
+                Some(idx)
+            })
+            .collect::<DimArray<_>>();
         let chunk_shape = &self.chunks_layout.chunk_shape;
         let base_src_offset = (0..ndim)
             .map(|dim| {

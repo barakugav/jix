@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::io;
 
 use crate::NDIM_MAX;
-use crate::dtype::{Dtype, Dtyped, Itemsize};
+use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::chunk::NdIterExtChunkOffsetSize;
 use crate::iter::strides::{NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut};
@@ -57,12 +57,7 @@ impl CompressedStorage {
 
         let mut chunk_iter = NdIter::new(
             &c_layout.chunk_space_shape,
-            NdIterExtChunkOffsetSize::new(
-                &shape,
-                &full_dim_array(0, ndim),
-                &shape,
-                &c_layout,
-            ),
+            NdIterExtChunkOffsetSize::new(&shape, &full_dim_array(0, ndim), &shape, &c_layout),
         );
 
         let mut encoder = Encoder::new(3)?;
@@ -151,12 +146,7 @@ impl ArrayStorage for CompressedStorage {
     fn chunks_layout(&self) -> &ChunksLayout {
         &self.chunks_layout
     }
-    fn get_chunk_data(
-        &self,
-        chunk_global_id: usize,
-        _chunk_idx: &[usize],
-        buf: &mut [u8],
-    ) -> io::Result<()> {
+    fn get_chunk_data(&self, chunk_global_id: usize, buf: &mut [u8]) -> io::Result<()> {
         let itemsize = self.dtype.itemsize() as usize;
         let b_size_bytes = self.chunks_layout.chunk_size * itemsize;
         if buf.len() < b_size_bytes {
