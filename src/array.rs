@@ -172,13 +172,13 @@ impl Array<CompressedStorage> {
         let blocks = BlockTable::new(
             Cow::Owned(cdata),
             Cow::Owned(block_offsets),
-            dtype.itemsize(),
+            dtype,
             padded_shape.iter().product::<usize>(),
             b_layout.block_size as BlockSize,
         );
 
         Ok(Self {
-            storage: CompressedStorage::from_block_table(blocks, dtype)?,
+            storage: CompressedStorage::from_block_table(blocks)?,
             shape,
             blocks_layout: b_layout,
         })

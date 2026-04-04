@@ -15,15 +15,13 @@ use crate::util::{DimArray, ceil_to_multiple, default_strides, full_dim_array};
 
 pub(crate) struct CompressedStorage {
     blocks: BlockTable<'static>,
-    dtype: Dtype,
     decoder: RefCell<Decoder>,
 }
 
 impl CompressedStorage {
-    pub(crate) fn from_block_table(blocks: BlockTable<'static>, dtype: Dtype) -> io::Result<Self> {
+    pub(crate) fn from_block_table(blocks: BlockTable<'static>) -> io::Result<Self> {
         Ok(Self {
             blocks,
-            dtype,
             decoder: RefCell::new(Decoder::new()?),
         })
     }
@@ -31,7 +29,7 @@ impl CompressedStorage {
 
 impl Storage for CompressedStorage {
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        &self.blocks.dtype
     }
 
     fn nitems(&self) -> usize {
@@ -43,7 +41,7 @@ impl Storage for CompressedStorage {
     }
 
     fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()> {
-        let b_size_bytes = self.block_len() as usize * self.blocks.itemsize as usize;
+        let b_size_bytes = self.block_len() as usize * self.blocks.dtype.itemsize() as usize;
         if buf.len() < b_size_bytes {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -70,12 +68,12 @@ mod tests {
         let mut encoder = Encoder::new(3).unwrap();
         let blocks = BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
-            size_of::<T>() as _,
+            T::dtype(),
             block_len,
             &mut encoder,
         )
         .unwrap();
-        CompressedStorage::from_block_table(blocks, T::dtype()).unwrap()
+        CompressedStorage::from_block_table(blocks).unwrap()
     }
 
     fn read_block_items<T: Dtyped>(storage: &CompressedStorage, idx: usize) -> Vec<T> {

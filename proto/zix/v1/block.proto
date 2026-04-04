@@ -6,16 +6,16 @@ import "zix/v1/dtype.proto";
 import "zix/v1/structure.proto";
 
 message BlockTable {
-    uint32 itemsize = 1;
+    Dtype dtype = 1;
     uint64 nitems = 2;
     uint64 block_size = 3;
     Section cdata = 4;
     Section block_offsets = 5;
 }
 
-message Array {
-    BlockTable blocks = 1;
-    Dtype dtype = 2;
-    repeated uint64 shape = 3;
-    repeated uint64 block_shape = 4;
-}
+// message Array {
+//     BlockTable blocks = 1;
+//     Dtype dtype = 2;
+//     repeated uint64 shape = 3;
+//     repeated uint64 block_shape = 4;
+// }

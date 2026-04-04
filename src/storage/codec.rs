@@ -31,6 +31,6 @@ impl Decoder {
     }
 
     pub(crate) fn decode(&mut self, block: &Block, dst: &mut [u8]) -> io::Result<usize> {
-        self.inner.decompress_to_buffer(block.cdata, dst)
+        self.inner.decompress_to_buffer(&block.cdata, dst)
     }
 }

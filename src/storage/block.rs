@@ -4,7 +4,7 @@ use std::path::Path;
 
 use prost::Message;
 
-use crate::dtype::Itemsize;
+use crate::dtype::Dtype;
 use crate::schema::{self, ArchiveType};
 use crate::storage::BlockSize;
 use crate::storage::codec::Encoder;
@@ -20,15 +20,13 @@ const _: () = const {
 
 pub(crate) struct Block<'a> {
     pub(crate) cdata: &'a [u8],
-    pub(crate) itemsize: Itemsize,
-    pub(crate) nitems: BlockSize,
 }
 
 pub(crate) struct BlockTable<'a> {
     cdata: Cow<'a, [u8]>,
     block_offsets: Cow<'a, [u64]>, // (nblocks+1,)
 
-    pub(crate) itemsize: Itemsize,
+    pub(crate) dtype: Dtype,
     pub(crate) nitems: usize,
 
     pub(crate) nblocks: usize,
@@ -40,7 +38,7 @@ impl<'a> BlockTable<'a> {
     pub(crate) fn new(
         cdata: Cow<'a, [u8]>,
         block_offsets: Cow<'a, [u64]>,
-        itemsize: Itemsize,
+        dtype: Dtype,
         nitems: usize,
         block_size: BlockSize,
     ) -> Self {
@@ -57,7 +55,7 @@ impl<'a> BlockTable<'a> {
         Self {
             cdata,
             block_offsets,
-            itemsize,
+            dtype,
             nitems,
             nblocks,
             block_size,
@@ -69,8 +67,6 @@ impl<'a> BlockTable<'a> {
         let end = self.block_offsets[idx + 1] as usize;
         Block {
             cdata: &self.cdata[begin..end],
-            itemsize: self.itemsize,
-            nitems: self.block_size,
         }
     }
 
@@ -94,7 +90,7 @@ impl<'a> BlockTable<'a> {
 
         // Write table and footer
         let table = schema::BlockTable {
-            itemsize: self.itemsize as u32,
+            dtype: Some(self.dtype.to_proto()),
             nitems: self.nitems as u64,
             block_size: self.block_size as u64,
             cdata: Some(cdata),
@@ -148,7 +144,7 @@ impl<'a> BlockTable<'a> {
         Ok(Self::new(
             Cow::Owned(cdata),
             Cow::Owned(block_offsets),
-            table.itemsize as Itemsize,
+            Dtype::from_proto(table.dtype.as_ref().unwrap()),
             table.nitems as usize,
             table.block_size as BlockSize,
         ))
@@ -158,10 +154,11 @@ impl<'a> BlockTable<'a> {
 impl BlockTable<'static> {
     pub fn build_from_data(
         data: &[u8],
-        itemsize: Itemsize,
+        dtype: Dtype,
         block_size: BlockSize,
         encoder: &mut Encoder,
     ) -> io::Result<Self> {
+        let itemsize = dtype.itemsize();
         assert!(itemsize > 0);
         assert!(block_size > 0);
         assert!(data.len() % itemsize as usize == 0);
@@ -194,7 +191,7 @@ impl BlockTable<'static> {
         Ok(Self::new(
             Cow::Owned(cdata),
             Cow::Owned(block_offsets),
-            itemsize,
+            dtype,
             nitems,
             block_size,
         ))
