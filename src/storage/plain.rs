@@ -1,141 +1,102 @@
 use std::io;
 
-use crate::dtype::{Dtype, Dtyped};
-use crate::iter::NdIter;
-use crate::iter::strides::NdIterExtensionStridesPtr;
-use crate::storage::{ArrayStorage, ChunksLayout};
-use crate::util::{DimArray, full_dim_array};
+use crate::dtype::Dtype;
+use crate::storage::Storage;
+use crate::storage::block::BlockSize;
 
-struct PlainStorage<A> {
-    /// Arbitrary object that keeps the data pointer alive.
-    allocation: A,
-    /// # Invariants:
-    /// - `data as usize % alignment == 0`
-    data: *const u8,
+pub(crate) struct PlainStorage {
+    /// Items stored in block-major C-order: all elements of block 0, then block 1, etc.
+    data: Vec<u8>,
     dtype: Dtype,
-    shape: DimArray<usize>,
-    /// strides in bytes units.
-    /// # Invariants:
-    /// - all(strides[i] % dtype.alignment() == 0)
-    /// - len(strides) == len(shape)
-    strides: DimArray<usize>,
-    /// # Invariants:
-    /// - len(chunk_shape) == len(shape)`
-    /// - all(0 <= chunk_shape[i] <= shape[i])`
-    /// - all(shape[i] == 0 or chunk_shape[i] > 0)` (chunk_shape[i] cant be zero unless shape[i] is also zero)
-    chunks_layout: ChunksLayout,
+    nitems: usize,
+    block_len: BlockSize,
 }
-impl<T> PlainStorage<Vec<T>> {
-    pub fn from_ndarray<D>(array: ndarray::Array<T, D>) -> Self
-    where
-        T: Dtyped,
-        D: ndarray::Dimension,
-    {
-        let dtype = T::dtype();
-        let shape = array.shape().iter().cloned().collect::<DimArray<_>>();
-        let strides = array
-            .strides()
-            .iter()
-            .map(|&s| usize::try_from(s).unwrap() * core::mem::size_of::<T>())
-            .collect::<DimArray<_>>();
-        let data = array.as_ptr() as *const u8;
-        let allocation = array.into_raw_vec_and_offset().0;
 
-        // no need for chunks in plain storage
-        // TODO: use chunks for both performance and testing
-        let chunk_shape = &shape;
-        let chunks_layout = ChunksLayout::new(chunk_shape, &shape);
-
-        Self {
-            allocation,
-            data,
-            dtype,
-            shape,
-            strides,
-            chunks_layout,
-        }
-    }
-}
-impl<A> ArrayStorage for PlainStorage<A> {
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-    fn chunks_layout(&self) -> &ChunksLayout {
-        &self.chunks_layout
-    }
-    fn get_chunk_data(&self, chunk_global_id: usize, buf: &mut [u8]) -> io::Result<()> {
-        let itemsize = self.dtype.itemsize() as usize;
-        if buf.len() < self.chunks_layout.chunk_size * itemsize {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Buffer too small",
-            ));
-        }
-
-        let ndim = self.shape.len();
-        // assert_eq!(chunk_idx.len(), ndim);
-
-        let chunk_idx = (0..ndim)
-            .scan((chunk_global_id, 1), |(global_idx, stride), dim| {
-                let idx = *global_idx / *stride;
-                *global_idx = *global_idx % *stride;
-                *stride *= self.chunks_layout.chunk_space_shape[dim];
-                Some(idx)
-            })
-            .collect::<DimArray<_>>();
-        let chunk_shape = &self.chunks_layout.chunk_shape;
-        let base_src_offset = (0..ndim)
-            .map(|dim| {
-                let idx_elements = chunk_idx[dim] * chunk_shape[dim];
-                assert!(idx_elements < self.shape[dim]);
-                idx_elements * self.strides[dim]
-            })
-            .sum::<usize>();
-        let src_data = unsafe { self.data.add(base_src_offset) };
-
-        // TODO: fast path for contiguous storage
-        let mut iter = NdIter::new(
-            &self.chunks_layout.chunk_shape,
-            NdIterExtensionStridesPtr::new(&self.strides, src_data),
-        );
-        let mut offset = 0;
-        while let Some((_idx, src_ptr)) = iter.next() {
-            let dst_ptr = unsafe { buf.as_mut_ptr().add(offset * itemsize) };
-            unsafe { std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize) };
-            offset += 1;
-        }
-        Ok(())
+impl PlainStorage {
+    pub(crate) fn new(data: Vec<u8>, dtype: Dtype, nitems: usize, block_len: BlockSize) -> Self {
+        assert!(block_len > 0);
+        assert!(nitems % block_len as usize == 0);
+        assert_eq!(data.len(), nitems * dtype.itemsize() as usize);
+        Self { data, dtype, nitems, block_len }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use ndarray::ArrayD;
-
     use super::PlainStorage;
-    use crate::storage::tests::check_storage_matches_array;
+    use crate::dtype::Dtyped;
+    use crate::storage::Storage;
+    use crate::util::cast_slice;
 
-    #[test]
-    fn matches_1d() {
-        let arr = ArrayD::from_shape_vec(vec![8], (0i32..8).collect()).unwrap();
-        let storage = PlainStorage::from_ndarray(arr.clone());
-        check_storage_matches_array(&storage, &arr);
+    fn make_storage<T: Dtyped>(items: &[T], block_len: u32) -> PlainStorage {
+        let data = unsafe { cast_slice::<T, u8>(items) }.to_vec();
+        PlainStorage::new(data, T::dtype(), items.len(), block_len)
+    }
+
+    fn read_block_items<T: Dtyped>(storage: &PlainStorage, idx: usize) -> Vec<T> {
+        let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
+        let mut buf = vec![0u8; block_bytes];
+        storage.read_block(idx, &mut buf).unwrap();
+        unsafe { cast_slice::<u8, T>(&buf) }.to_vec()
     }
 
     #[test]
-    fn matches_2d() {
-        let arr = ArrayD::from_shape_vec(vec![3, 4], (0i32..12).collect()).unwrap();
-        let storage = PlainStorage::from_ndarray(arr.clone());
-        check_storage_matches_array(&storage, &arr);
+    fn single_block_u8_round_trips() {
+        let items: Vec<u8> = (0..8).collect();
+        let s = make_storage(&items, 8);
+        assert_eq!(s.nitems(), 8);
+        assert_eq!(s.block_len(), 8);
+        assert_eq!(s.dtype(), &u8::dtype());
+        assert_eq!(read_block_items::<u8>(&s, 0), items);
     }
 
     #[test]
-    fn matches_3d() {
-        let arr = ArrayD::from_shape_vec(vec![2, 3, 4], (0i32..24).collect()).unwrap();
-        let storage = PlainStorage::from_ndarray(arr.clone());
-        check_storage_matches_array(&storage, &arr);
+    fn two_blocks_i32_round_trips() {
+        let items: Vec<i32> = (0..8).collect();
+        let s = make_storage(&items, 4);
+        assert_eq!(s.nitems(), 8);
+        assert_eq!(s.block_len(), 4);
+        assert_eq!(read_block_items::<i32>(&s, 0), items[..4]);
+        assert_eq!(read_block_items::<i32>(&s, 1), items[4..]);
+    }
+
+    #[test]
+    fn multiple_blocks_f32_round_trips() {
+        let items: Vec<f32> = (0..12).map(|x| x as f32 * 0.5).collect();
+        let s = make_storage(&items, 4);
+        assert_eq!(s.nitems(), 12);
+        assert_eq!(s.block_len(), 4);
+        for b in 0..3 {
+            assert_eq!(read_block_items::<f32>(&s, b), items[b * 4..(b + 1) * 4]);
+        }
+    }
+
+    #[test]
+    fn non_divisible_panics() {
+        let result = std::panic::catch_unwind(|| {
+            make_storage(&[0u8; 7], 4);
+        });
+        assert!(result.is_err());
+    }
+}
+
+impl Storage for PlainStorage {
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+
+    fn nitems(&self) -> usize {
+        self.nitems
+    }
+
+    fn block_len(&self) -> BlockSize {
+        self.block_len
+    }
+
+    fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()> {
+        let block_bytes = self.block_len as usize * self.dtype.itemsize() as usize;
+        let start = block_idx * block_bytes;
+        buf[..block_bytes].copy_from_slice(&self.data[start..start + block_bytes]);
+        Ok(())
     }
 }

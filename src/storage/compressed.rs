@@ -5,28 +5,29 @@ use std::io;
 use crate::NDIM_MAX;
 use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
-use crate::iter::chunk::NdIterExtChunkOffsetSize;
+use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut};
+use crate::storage::Storage;
 use crate::storage::block::{BlockSize, BlockTable};
 use crate::storage::codec::{Decoder, Encoder};
-use crate::storage::{ArrayStorage, ChunksLayout};
+use crate::array::BlocksLayout;
 use crate::util::{DimArray, ceil_to_multiple, default_strides, full_dim_array};
 
-struct CompressedStorage {
+pub(crate) struct CompressedStorage {
     blocks: BlockTable<'static>,
-
     dtype: Dtype,
-    shape: DimArray<usize>,
-    padded_shape: DimArray<usize>,
-    /// # Invariants:
-    /// - len(chunk_shape) == len(shape)`
-    /// - all(0 <= chunk_shape[i] <= shape[i])`
-    /// - all(shape[i] == 0 or chunk_shape[i] > 0)` (chunk_shape[i] cant be zero unless shape[i] is also zero)
-    chunks_layout: ChunksLayout,
-
     decoder: RefCell<Decoder>,
 }
+
 impl CompressedStorage {
+    pub(crate) fn from_block_table(blocks: BlockTable<'static>, dtype: Dtype) -> io::Result<Self> {
+        Ok(Self {
+            blocks,
+            dtype,
+            decoder: RefCell::new(Decoder::new()?),
+        })
+    }
+
     pub fn from_ndarray<T, D>(
         array: &ndarray::ArrayView<T, D>,
         block_shape: &[usize],
@@ -42,22 +43,27 @@ impl CompressedStorage {
         let itemsize = dtype.itemsize() as usize;
         let shape = array.shape().iter().cloned().collect::<DimArray<_>>();
 
-        let block_shape = block_shape
+        let block_shape_clamped = block_shape
             .iter()
             .zip(&shape)
             .map(|(&b, &s)| b.min(s))
             .collect::<DimArray<_>>();
-        let padded_shape = block_shape
+        let padded_shape = block_shape_clamped
             .iter()
             .zip(&shape)
             .map(|(&b, &s)| if s == 0 { 0 } else { ceil_to_multiple(s, b) })
             .collect::<DimArray<_>>();
-        let c_layout = ChunksLayout::new(&block_shape, &shape);
-        let nblocks = c_layout.chunk_space_shape.iter().product::<usize>();
+        let blocks_layout = BlocksLayout::new(&block_shape_clamped, &shape);
+        let nblocks = blocks_layout.grid_shape.iter().product::<usize>();
 
-        let mut chunk_iter = NdIter::new(
-            &c_layout.chunk_space_shape,
-            NdIterExtChunkOffsetSize::new(&shape, &full_dim_array(0, ndim), &shape, &c_layout),
+        let mut block_iter = NdIter::new(
+            &blocks_layout.grid_shape,
+            NdIterExtBlockOffsetSize::new(
+                &shape,
+                &full_dim_array(0, ndim),
+                &shape,
+                &blocks_layout,
+            ),
         );
 
         let mut encoder = Encoder::new(3)?;
@@ -67,41 +73,40 @@ impl CompressedStorage {
         if nblocks > 0 {
             block_offsets.push(0);
         }
-        let chunk_capacity_bytes = c_layout.chunk_size * itemsize;
-        let max_blk_cdata_len = encoder.encode_bound(chunk_capacity_bytes);
-        let mut tmp_chunk_data = Vec::<u8>::with_capacity(chunk_capacity_bytes);
-        let tmp_chunk_strides = default_strides(&c_layout.chunk_shape, itemsize);
+        let block_capacity_bytes = blocks_layout.block_size * itemsize;
+        let max_blk_cdata_len = encoder.encode_bound(block_capacity_bytes);
+        let mut tmp_block_data = Vec::<u8>::with_capacity(block_capacity_bytes);
+        let tmp_block_strides = default_strides(&block_shape_clamped, itemsize);
         let strides = array
             .strides()
             .iter()
             .map(|&s| usize::try_from(s).unwrap() * size_of::<T>())
             .collect::<DimArray<_>>();
-        while let Some((chunk_idx, (chunk_inner_offset, chunk_size))) = chunk_iter.next() {
-            debug_assert!(chunk_inner_offset.iter().all(|&o| o == 0));
+        while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
+            debug_assert!(block_inner_offset.iter().all(|&o| o == 0));
 
-            // Init chunk data to zeros.
-            // The padding elements (if any) will not be written by the iter below, so they will stay zeros.
-            tmp_chunk_data.clear();
-            tmp_chunk_data.resize(chunk_capacity_bytes, 0);
+            // Init block data to zeros (padding elements stay zero).
+            tmp_block_data.clear();
+            tmp_block_data.resize(block_capacity_bytes, 0);
 
-            // TODO: fast path for contiguous data
             let initial_arr_offset = (0..ndim)
                 .map(|dim| {
-                    let idx = chunk_idx[dim] * c_layout.chunk_shape[dim] + chunk_inner_offset[dim];
+                    let idx =
+                        block_idx[dim] * blocks_layout.block_shape[dim] + block_inner_offset[dim];
                     idx * strides[dim]
                 })
                 .sum::<usize>();
             let initial_arr_ptr = unsafe { array.as_ptr().cast::<u8>().add(initial_arr_offset) };
-            let initial_chunk_offset = (0..ndim)
-                .map(|dim| chunk_inner_offset[dim] * tmp_chunk_strides[dim])
+            let initial_block_offset = (0..ndim)
+                .map(|dim| block_inner_offset[dim] * tmp_block_strides[dim])
                 .sum::<usize>();
-            let initial_chunk_ptr =
-                unsafe { tmp_chunk_data.as_mut_ptr().add(initial_chunk_offset) };
+            let initial_block_ptr =
+                unsafe { tmp_block_data.as_mut_ptr().add(initial_block_offset) };
             let mut iter = NdIter::new(
-                chunk_size,
+                block_size,
                 (
                     NdIterExtensionStridesPtr::new(&strides, initial_arr_ptr),
-                    NdIterExtensionStridesPtrMut::new(&tmp_chunk_strides, initial_chunk_ptr),
+                    NdIterExtensionStridesPtrMut::new(&tmp_block_strides, initial_block_ptr),
                 ),
             );
             while let Some((_idx, (src, dst))) = iter.next() {
@@ -112,7 +117,7 @@ impl CompressedStorage {
             cdata.reserve(max_blk_cdata_len);
             unsafe { cdata.set_len(cdata_len + max_blk_cdata_len) };
             let blk_buf = &mut cdata[cdata_len..];
-            let blk_cdata_len = encoder.encode(&tmp_chunk_data, blk_buf)?;
+            let blk_cdata_len = encoder.encode(&tmp_block_data, blk_buf)?;
             debug_assert!(blk_cdata_len <= max_blk_cdata_len);
             unsafe { cdata.set_len(cdata_len + blk_cdata_len) };
             block_offsets.push(cdata.len() as u64);
@@ -123,40 +128,36 @@ impl CompressedStorage {
             Cow::Owned(block_offsets),
             dtype.itemsize(),
             padded_shape.iter().product::<usize>(),
-            c_layout.chunk_size as BlockSize,
+            blocks_layout.block_size as BlockSize,
         );
 
         Ok(Self {
             blocks,
             dtype,
-            shape,
-            padded_shape,
-            chunks_layout: c_layout,
             decoder: RefCell::new(Decoder::new()?),
         })
     }
 }
-impl ArrayStorage for CompressedStorage {
+
+impl Storage for CompressedStorage {
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-    fn chunks_layout(&self) -> &ChunksLayout {
-        &self.chunks_layout
-    }
-    fn get_chunk_data(&self, chunk_global_id: usize, buf: &mut [u8]) -> io::Result<()> {
-        let itemsize = self.dtype.itemsize() as usize;
-        let b_size_bytes = self.chunks_layout.chunk_size * itemsize;
-        if buf.len() < b_size_bytes {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Buffer too small",
-            ));
-        }
 
-        let block = self.blocks.get_block(chunk_global_id);
+    fn nitems(&self) -> usize {
+        self.blocks.nitems
+    }
+
+    fn block_len(&self) -> BlockSize {
+        self.blocks.block_size
+    }
+
+    fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()> {
+        let block = self.blocks.get_block(block_idx);
+        let b_size_bytes = self.block_len() as usize * self.blocks.itemsize as usize;
+        if buf.len() < b_size_bytes {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Buffer too small"));
+        }
         let nbytes = self.decoder.borrow_mut().decode(&block, buf)?;
         debug_assert_eq!(nbytes, b_size_bytes);
         Ok(())
@@ -165,37 +166,68 @@ impl ArrayStorage for CompressedStorage {
 
 #[cfg(test)]
 mod tests {
-    use ndarray::ArrayD;
-
     use super::CompressedStorage;
-    use crate::storage::tests::check_storage_matches_array;
+    use crate::dtype::Dtyped;
+    use crate::storage::Storage;
+    use crate::storage::block::{BlockSize, BlockTable};
+    use crate::storage::codec::Encoder;
+    use crate::util::cast_slice;
 
-    #[test]
-    fn matches_1d_divisible() {
-        let arr = ArrayD::from_shape_vec(vec![12], (0i32..12).collect()).unwrap();
-        let storage = CompressedStorage::from_ndarray(&arr.view(), &[4]).unwrap();
-        check_storage_matches_array(&storage, &arr);
+    fn make_storage<T: Dtyped>(items: &[T], block_len: BlockSize) -> CompressedStorage {
+        let mut encoder = Encoder::new(3).unwrap();
+        let blocks = BlockTable::build_from_data(
+            unsafe { cast_slice::<T, u8>(items) },
+            size_of::<T>() as _,
+            block_len,
+            &mut encoder,
+        )
+        .unwrap();
+        CompressedStorage::from_block_table(blocks, T::dtype()).unwrap()
+    }
+
+    fn read_block_items<T: Dtyped>(storage: &CompressedStorage, idx: usize) -> Vec<T> {
+        let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
+        let mut buf = vec![0u8; block_bytes];
+        storage.read_block(idx, &mut buf).unwrap();
+        unsafe { cast_slice::<u8, T>(&buf) }.to_vec()
     }
 
     #[test]
-    fn matches_2d_divisible() {
-        let arr = ArrayD::from_shape_vec(vec![4, 6], (0i32..24).collect()).unwrap();
-        let storage = CompressedStorage::from_ndarray(&arr.view(), &[2, 3]).unwrap();
-        check_storage_matches_array(&storage, &arr);
+    fn single_block_u8_round_trips() {
+        let items: Vec<u8> = (0..8).collect();
+        let s = make_storage(&items, 8);
+        assert_eq!(s.nitems(), 8);
+        assert_eq!(s.block_len(), 8);
+        assert_eq!(s.dtype(), &u8::dtype());
+        assert_eq!(read_block_items::<u8>(&s, 0), items);
     }
 
     #[test]
-    fn matches_2d_with_padding() {
-        // shape [5, 7], block [3, 4] — neither dimension divides evenly
-        let arr = ArrayD::from_shape_vec(vec![5, 7], (0i32..35).collect()).unwrap();
-        let storage = CompressedStorage::from_ndarray(&arr.view(), &[3, 4]).unwrap();
-        check_storage_matches_array(&storage, &arr);
+    fn two_blocks_i32_round_trips() {
+        let items: Vec<i32> = (0..8).collect();
+        let s = make_storage(&items, 4);
+        assert_eq!(s.nitems(), 8);
+        assert_eq!(s.block_len(), 4);
+        assert_eq!(read_block_items::<i32>(&s, 0), items[..4]);
+        assert_eq!(read_block_items::<i32>(&s, 1), items[4..]);
     }
 
     #[test]
-    fn matches_3d_with_padding() {
-        let arr = ArrayD::from_shape_vec(vec![3, 5, 4], (0i32..60).collect()).unwrap();
-        let storage = CompressedStorage::from_ndarray(&arr.view(), &[2, 3, 4]).unwrap();
-        check_storage_matches_array(&storage, &arr);
+    fn multiple_blocks_f32_round_trips() {
+        let items: Vec<f32> = (0..12).map(|x| x as f32 * 0.5).collect();
+        let s = make_storage(&items, 4);
+        assert_eq!(s.nitems(), 12);
+        assert_eq!(s.block_len(), 4);
+        for b in 0..3 {
+            assert_eq!(read_block_items::<f32>(&s, b), items[b * 4..(b + 1) * 4]);
+        }
+    }
+
+    #[test]
+    fn buffer_too_small_returns_error() {
+        let items: Vec<u8> = (0..4).collect();
+        let s = make_storage(&items, 4);
+        let mut buf = vec![0u8; 3]; // one byte short
+        assert!(s.read_block(0, &mut buf).is_err());
     }
 }

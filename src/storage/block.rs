@@ -29,13 +29,13 @@ pub(crate) struct BlockTable<'a> {
     cdata: Cow<'a, [u8]>,
     block_offsets: Cow<'a, [u64]>, // (nblocks+1,)
 
-    itemsize: Itemsize,
-    nitems: usize,
+    pub(crate) itemsize: Itemsize,
+    pub(crate) nitems: usize,
 
-    nblocks: usize,
+    pub(crate) nblocks: usize,
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
     /// Note the units are items, not bytes.
-    block_size: BlockSize,
+    pub(crate) block_size: BlockSize,
 }
 impl<'a> BlockTable<'a> {
     pub(crate) fn new(
