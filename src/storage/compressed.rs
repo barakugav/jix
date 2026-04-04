@@ -60,7 +60,7 @@ impl CompressedStorage {
             NdIterExtChunkOffsetSize::new(
                 &shape,
                 &full_dim_array(0, ndim),
-                &c_layout.chunk_space_shape,
+                &shape,
                 &c_layout,
             ),
         );
@@ -128,7 +128,7 @@ impl CompressedStorage {
             Cow::Owned(block_offsets),
             dtype.itemsize(),
             padded_shape.iter().product::<usize>(),
-            chunk_capacity_bytes as BlockSize,
+            c_layout.chunk_size as BlockSize,
         );
 
         Ok(Self {
@@ -170,5 +170,42 @@ impl ArrayStorage for CompressedStorage {
         let nbytes = self.decoder.borrow_mut().decode(&block, buf)?;
         debug_assert_eq!(nbytes, b_size_bytes);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ndarray::ArrayD;
+
+    use super::CompressedStorage;
+    use crate::storage::tests::check_storage_matches_array;
+
+    #[test]
+    fn matches_1d_divisible() {
+        let arr = ArrayD::from_shape_vec(vec![12], (0i32..12).collect()).unwrap();
+        let storage = CompressedStorage::from_ndarray(&arr.view(), &[4]).unwrap();
+        check_storage_matches_array(&storage, &arr);
+    }
+
+    #[test]
+    fn matches_2d_divisible() {
+        let arr = ArrayD::from_shape_vec(vec![4, 6], (0i32..24).collect()).unwrap();
+        let storage = CompressedStorage::from_ndarray(&arr.view(), &[2, 3]).unwrap();
+        check_storage_matches_array(&storage, &arr);
+    }
+
+    #[test]
+    fn matches_2d_with_padding() {
+        // shape [5, 7], block [3, 4] — neither dimension divides evenly
+        let arr = ArrayD::from_shape_vec(vec![5, 7], (0i32..35).collect()).unwrap();
+        let storage = CompressedStorage::from_ndarray(&arr.view(), &[3, 4]).unwrap();
+        check_storage_matches_array(&storage, &arr);
+    }
+
+    #[test]
+    fn matches_3d_with_padding() {
+        let arr = ArrayD::from_shape_vec(vec![3, 5, 4], (0i32..60).collect()).unwrap();
+        let storage = CompressedStorage::from_ndarray(&arr.view(), &[2, 3, 4]).unwrap();
+        check_storage_matches_array(&storage, &arr);
     }
 }

@@ -107,3 +107,32 @@ impl<A> ArrayStorage for PlainStorage<A> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ndarray::ArrayD;
+
+    use super::PlainStorage;
+    use crate::storage::tests::check_storage_matches_array;
+
+    #[test]
+    fn matches_1d() {
+        let arr = ArrayD::from_shape_vec(vec![8], (0i32..8).collect()).unwrap();
+        let storage = PlainStorage::from_ndarray(arr.clone());
+        check_storage_matches_array(&storage, &arr);
+    }
+
+    #[test]
+    fn matches_2d() {
+        let arr = ArrayD::from_shape_vec(vec![3, 4], (0i32..12).collect()).unwrap();
+        let storage = PlainStorage::from_ndarray(arr.clone());
+        check_storage_matches_array(&storage, &arr);
+    }
+
+    #[test]
+    fn matches_3d() {
+        let arr = ArrayD::from_shape_vec(vec![2, 3, 4], (0i32..24).collect()).unwrap();
+        let storage = PlainStorage::from_ndarray(arr.clone());
+        check_storage_matches_array(&storage, &arr);
+    }
+}
