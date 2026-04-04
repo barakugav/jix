@@ -443,6 +443,8 @@ pub unsafe trait Dtyped: Copy + 'static {
 // Re-export derive macro
 pub use zix_macros::Dtyped;
 
+use crate::util::ceil_to_multiple;
+
 macro_rules! impl_dtyped_scalar {
     ($ty:ty, $kind:ident) => {
         unsafe impl Dtyped for $ty {
@@ -523,11 +525,6 @@ cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
         pub im: T,
     }
 } }
-
-fn ceil_to_multiple(x: Itemsize, m: Itemsize) -> Itemsize {
-    assert!(m > 0);
-    x.div_ceil(m) * m
-}
 
 #[cfg(test)]
 mod tests {

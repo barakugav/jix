@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package zix.v1;
 
+import "zix/v1/dtype.proto";
 import "zix/v1/structure.proto";
 
 message BlockTable {
@@ -10,4 +11,11 @@ message BlockTable {
     uint64 block_size = 3;
     Section cdata = 4;
     Section block_offsets = 5;
+}
+
+message Array {
+    BlockTable blocks = 1;
+    Dtype dtype = 2;
+    repeated uint64 shape = 3;
+    repeated uint64 block_shape = 4;
 }

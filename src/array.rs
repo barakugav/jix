@@ -1,7 +1,7 @@
+use std::io;
 use std::ops::Range;
 
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::Error;
 use crate::iter::NdIter;
 use crate::iter::chunk::NdIterExtChunkOffsetSize;
 use crate::iter::strides::{NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index};
@@ -31,7 +31,7 @@ where
         self.storage.shape()
     }
 
-    pub fn to_ndarray<T>(&self) -> Result<ndarray::ArrayD<T>, Error>
+    pub fn to_ndarray<T>(&self) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
     {
@@ -43,7 +43,7 @@ where
         self.sub_ndarray(&full_range)
     }
 
-    pub fn sub_ndarray<T>(&self, range: &[Range<usize>]) -> Result<ndarray::ArrayD<T>, Error>
+    pub fn sub_ndarray<T>(&self, range: &[Range<usize>]) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
     {

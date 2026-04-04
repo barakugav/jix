@@ -1,10 +1,12 @@
+use std::io;
+
 use crate::dtype::Dtype;
-use crate::error::Error;
 use crate::util::DimArray;
 
 mod block;
 mod codec;
 mod common;
+mod compressed;
 mod plain;
 
 pub(crate) trait ArrayStorage {
@@ -16,7 +18,7 @@ pub(crate) trait ArrayStorage {
         chunk_global_id: usize,
         chunk_idx: &[usize],
         buf: &mut [u8],
-    ) -> Result<(), Error>;
+    ) -> io::Result<()>;
 }
 pub(crate) struct ChunksLayout {
     pub(crate) chunk_shape: DimArray<usize>,

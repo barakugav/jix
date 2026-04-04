@@ -2,7 +2,6 @@
 
 mod array;
 pub mod dtype;
-mod error;
 mod iter;
 mod ops;
 mod schema;

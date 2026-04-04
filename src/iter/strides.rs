@@ -116,7 +116,7 @@ pub(crate) fn nd_iter_ext_logical_global_index<Ix: Idx>(
     shape: &[Ix],
     begin: &[Ix],
 ) -> NdIterExtensionStridesOffset<Ix> {
-    let logical_strides = default_strides(shape);
+    let logical_strides = default_strides(shape, Ix::ONE);
     let initial_offset = (0..shape.len())
         .map(|dim| begin[dim] * logical_strides[dim])
         .sum();

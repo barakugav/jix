@@ -1,5 +1,6 @@
+use std::io;
+
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::Error;
 use crate::iter::NdIter;
 use crate::iter::strides::NdIterExtensionStridesPtr;
 use crate::storage::{ArrayStorage, ChunksLayout};
@@ -31,12 +32,12 @@ impl<T> PlainStorage<Vec<T>> {
         D: ndarray::Dimension,
     {
         let dtype = T::dtype();
-        let shape: DimArray<usize> = array.shape().iter().cloned().collect();
+        let shape = array.shape().iter().cloned().collect::<DimArray<_>>();
         let strides = array
             .strides()
             .iter()
             .map(|&s| usize::try_from(s).unwrap() * core::mem::size_of::<T>())
-            .collect();
+            .collect::<DimArray<_>>();
         let data = array.as_ptr() as *const u8;
         let allocation = array.into_raw_vec_and_offset().0;
 
@@ -70,10 +71,13 @@ impl<A> ArrayStorage for PlainStorage<A> {
         _chunk_global_id: usize,
         chunk_idx: &[usize],
         buf: &mut [u8],
-    ) -> Result<(), Error> {
+    ) -> io::Result<()> {
         let itemsize = self.dtype.itemsize() as usize;
         if buf.len() < self.chunks_layout.chunk_size * itemsize {
-            return Err(Error::BufferTooSmall);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Buffer too small",
+            ));
         }
 
         let ndim = self.shape.len();
