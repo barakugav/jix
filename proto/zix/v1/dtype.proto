@@ -8,7 +8,7 @@ message Dtype {
         DtypeScalar scalar = 1;
         DtypeStruct struct = 2;
     }
-    repeated int64 shape = 3;
+    repeated uint64 shape = 3;
     uint32 itemsize = 4;
     uint32 alignment = 5;
 }

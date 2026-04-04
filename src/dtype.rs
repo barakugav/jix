@@ -1,3 +1,4 @@
+use crate::util::IxIterExt;
 use std::collections::HashSet;
 
 /// The type used to represent dtype alignment in bytes.
@@ -12,7 +13,7 @@ pub type Itemsize = u16;
 ///
 /// Note this is not the shape of the array, but rather the inner shape of the dtype.
 pub const DTYPE_SHAPE_MAX_NDIM: usize = 4;
-type DtypeShape = arrayvec::ArrayVec<Itemsize, DTYPE_SHAPE_MAX_NDIM>;
+pub(crate) type DtypeShape = arrayvec::ArrayVec<Itemsize, DTYPE_SHAPE_MAX_NDIM>;
 
 /// Description of a type layout and inner fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,6 +305,32 @@ impl Dtype {
     pub fn try_to_scalar(&self) -> Option<DtypeScalarKind> {
         let scalar = self.scalar_kind()?;
         (Self::of_scalar(scalar) == *self).then_some(scalar)
+    }
+
+    /// Set the shape of the dtype, updating the itemsize accordingly.
+    ///
+    /// The maximum number of dimensions allowed in the shape is [`DTYPE_SHAPE_MAX_NDIM`].
+    /// The product of the shape dimensions must not exceed [`Itemsize::MAX`].
+    ///
+    /// The itemsize will be updated to `itemsize *= new_shape.product() / old_shape.product()`.
+    pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<(), DtypeError> {
+        let shape: DtypeShape = shape.try_into().map_err(|_| DtypeError::InvalidShape)?; // too many dims
+        let shape_prod = shape
+            .iter()
+            .cloned()
+            .try_product()
+            .ok_or(DtypeError::InvalidShape)?; // overflow
+        if shape_prod == 0 {
+            return Err(DtypeError::InvalidShape);
+        }
+        let current_shape_size = self.shape.iter().cloned().product::<Itemsize>();
+        assert!(self.itemsize % current_shape_size == 0);
+        let base_itemsize = self.itemsize / current_shape_size;
+        self.itemsize = base_itemsize
+            .checked_mul(shape_prod)
+            .ok_or(DtypeError::InvalidShape)?; // overflow
+        self.shape = shape;
+        Ok(())
     }
 }
 
@@ -1045,5 +1072,72 @@ mod tests {
         let fields = dtype.fields().unwrap();
         assert_eq!(fields[0], ("inner".to_string(), 0, NestedStruct::dtype()));
         assert_eq!(fields[1], ("x".to_string(), 24, u32::dtype()));
+    }
+
+    // ---- set_shape ----
+
+    #[test]
+    fn set_shape_on_scalar_sets_shape_and_scales_itemsize() {
+        let mut d = i32::dtype();
+        assert_eq!(d.shape(), &[] as &[Itemsize]);
+        assert_eq!(d.itemsize(), 4);
+        d.set_shape(&[3, 2]).unwrap();
+        assert_eq!(d.shape(), &[3, 2]);
+        assert_eq!(d.itemsize(), 4 * 3 * 2);
+        assert_eq!(d.alignment(), 4);
+        assert_eq!(d.scalar_kind(), Some(DtypeScalarKind::I32));
+    }
+
+    #[test]
+    fn set_shape_empty_resets_to_scalar() {
+        let mut d = <[u8; 5] as Dtyped>::dtype();
+        assert_eq!(d.shape(), &[5]);
+        assert_eq!(d.itemsize(), 5);
+        d.set_shape(&[]).unwrap();
+        assert_eq!(d.shape(), &[] as &[Itemsize]);
+        assert_eq!(d.itemsize(), 1);
+    }
+
+    #[test]
+    fn set_shape_replaces_existing_shape() {
+        let mut d = <[[f32; 4]; 2] as Dtyped>::dtype();
+        assert_eq!(d.shape(), &[2, 4]);
+        assert_eq!(d.itemsize(), 2 * 4 * 4);
+        d.set_shape(&[10]).unwrap();
+        assert_eq!(d.shape(), &[10]);
+        assert_eq!(d.itemsize(), 10 * 4);
+    }
+
+    #[test]
+    fn set_shape_zero_dimension_errors() {
+        let mut d = i32::dtype();
+        assert_eq!(d.set_shape(&[0]), Err(DtypeError::InvalidShape));
+        assert_eq!(d.set_shape(&[3, 0, 1]), Err(DtypeError::InvalidShape));
+    }
+
+    #[test]
+    fn set_shape_too_many_dims_errors() {
+        let mut d = u8::dtype();
+        assert_eq!(
+            d.set_shape(&[1, 1, 1, 1, 1]),
+            Err(DtypeError::InvalidShape)
+        );
+    }
+
+    #[test]
+    fn set_shape_max_dims_succeeds() {
+        let mut d = u8::dtype();
+        d.set_shape(&[1, 1, 1, 1]).unwrap();
+        assert_eq!(d.shape(), &[1, 1, 1, 1]);
+        assert_eq!(d.itemsize(), 1);
+    }
+
+    #[test]
+    fn set_shape_overflow_errors() {
+        let mut d = u8::dtype();
+        assert_eq!(
+            d.set_shape(&[Itemsize::MAX, Itemsize::MAX]),
+            Err(DtypeError::InvalidShape)
+        );
     }
 }

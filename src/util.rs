@@ -26,6 +26,7 @@ pub(crate) trait Idx:
     const ONE: Self;
 
     fn div_ceil(self, rhs: Self) -> Self;
+    fn checked_mul(self, rhs: Self) -> Option<Self>;
 }
 macro_rules! impl_idx_for_primitive {
     ($t:ty) => {
@@ -35,6 +36,10 @@ macro_rules! impl_idx_for_primitive {
 
             fn div_ceil(self, rhs: Self) -> Self {
                 self.div_ceil(rhs)
+            }
+
+            fn checked_mul(self, rhs: Self) -> Option<Self> {
+                self.checked_mul(rhs)
             }
         }
     };
@@ -85,4 +90,19 @@ pub(crate) fn full_dim_array<T: Clone>(value: T, len: usize) -> DimArray<T> {
 pub(crate) fn ceil_to_multiple<Ix: Idx>(x: Ix, m: Ix) -> Ix {
     assert!(m > Ix::ZERO);
     x.div_ceil(m) * m
+}
+
+pub(crate) trait IxIterExt: Iterator {
+    fn try_product(self) -> Option<Self::Item>;
+}
+impl<Ix, Iter> IxIterExt for Iter
+where
+    Ix: Idx,
+    Iter: Iterator<Item = Ix>,
+{
+    fn try_product(self) -> Option<Self::Item> {
+        self.fold(Some(Ix::ONE), |acc, x| {
+            acc.and_then(|acc| acc.checked_mul(x))
+        })
+    }
 }

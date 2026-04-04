@@ -144,7 +144,7 @@ impl<'a> BlockTable<'a> {
         Ok(Self::new(
             Cow::Owned(cdata),
             Cow::Owned(block_offsets),
-            Dtype::from_proto(table.dtype.as_ref().unwrap()),
+            Dtype::from_proto(table.dtype.as_ref().unwrap())?,
             table.nitems as usize,
             table.block_size as BlockSize,
         ))
@@ -203,7 +203,7 @@ mod tests {
     use std::io::{self, Cursor};
 
     use super::{BlockSize, BlockTable};
-    use crate::dtype::{Dtyped, Itemsize};
+    use crate::dtype::Dtyped;
     use crate::storage::codec::{Decoder, Encoder};
     use crate::util::cast_slice;
 
@@ -216,7 +216,7 @@ mod tests {
 
     fn decode_block(table: &BlockTable, idx: usize, decoder: &mut Decoder) -> Vec<u8> {
         let blk = table.get_block(idx);
-        let out_len = blk.itemsize as usize * blk.nitems as usize;
+        let out_len = table.dtype.itemsize() as usize * table.block_size as usize;
         let mut out = vec![0u8; out_len];
         decoder.decode(&blk, &mut out).unwrap();
         out
@@ -232,7 +232,7 @@ mod tests {
     {
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
-            size_of::<T>() as Itemsize,
+            T::dtype(),
             block_size,
             encoder,
         )
@@ -311,7 +311,7 @@ mod tests {
         assert_eq!(table2.nblocks, 1);
         assert_eq!(table2.nitems, 8);
         assert_eq!(table2.block_size, 8);
-        assert_eq!(table2.itemsize, 1);
+        assert_eq!(table2.dtype, u8::dtype());
         assert_eq!(decode_block(&table2, 0, &mut make_decoder()), items);
     }
 
