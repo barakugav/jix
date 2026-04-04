@@ -8,16 +8,14 @@ use crate::iter::strides::{
     NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
 };
 use crate::storage::Storage;
-use crate::storage::compressed::CompressedStorage;
 use crate::util::DimArray;
 use crate::util::default_strides;
 use std::borrow::Cow;
-use std::cell::RefCell;
 
 use crate::NDIM_MAX;
 use crate::storage::BlockSize;
 use crate::storage::block::BlockTable;
-use crate::storage::codec::{Decoder, Encoder};
+use crate::storage::codec::Encoder;
 use crate::util::{ceil_to_multiple, full_dim_array};
 
 pub(crate) struct BlocksLayout {
@@ -77,7 +75,7 @@ where
     }
 }
 
-impl Array<CompressedStorage> {
+impl Array<BlockTable<'static>> {
     pub fn from_ndarray<T, D>(
         array: &ndarray::ArrayView<T, D>,
         block_shape: &[usize],
@@ -178,7 +176,7 @@ impl Array<CompressedStorage> {
         );
 
         Ok(Self {
-            storage: CompressedStorage::from_block_table(blocks)?,
+            storage: blocks,
             shape,
             blocks_layout: b_layout,
         })
@@ -303,6 +301,20 @@ mod tests {
     use crate::util::cast_slice;
 
     use super::Array;
+
+    // -----------------------------------------------------------------------
+    // from_ndarray roundtrip helper
+    // -----------------------------------------------------------------------
+
+    fn roundtrip<T, S, D>(src: &ndarray::ArrayBase<S, D>, block_shape: &[usize]) -> ArrayD<T>
+    where
+        T: Dtyped,
+        S: ndarray::Data<Elem = T>,
+        D: ndarray::Dimension,
+    {
+        let a = Array::from_ndarray(&src.view(), block_shape).unwrap();
+        a.to_ndarray().unwrap()
+    }
 
     // -----------------------------------------------------------------------
     // MockStorage: serves pre-built typed blocks
@@ -495,6 +507,149 @@ mod tests {
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 3], vec![8, 9, 10, 14, 15, 16]).unwrap()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // from_ndarray — 1D
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn from_ndarray_1d_single_block() {
+        let src = ndarray::array![0u8, 1, 2, 3];
+        assert_eq!(roundtrip(&src, &[4]), src.view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_1d_multi_block() {
+        let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
+        assert_eq!(roundtrip(&src, &[3]), src.view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_1d_with_padding() {
+        // size 5, block 3 → padded to 6; shape reported as 5
+        let src = ndarray::array![0u8, 1, 2, 3, 4];
+        let a = Array::from_ndarray(&src.view(), &[3]).unwrap();
+        assert_eq!(a.shape(), &[5]);
+        let got: ArrayD<u8> = a.to_ndarray().unwrap();
+        assert_eq!(got, src.view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_1d_i32() {
+        let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
+        assert_eq!(roundtrip(&src, &[4]), src.view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_1d_f32() {
+        let src = ndarray::array![0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5];
+        assert_eq!(roundtrip(&src, &[4]), src.view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_block_larger_than_shape_is_clamped() {
+        // block_shape [10] > array size [4]; should clamp to [4]
+        let src = ndarray::array![0u8, 1, 2, 3];
+        let a = Array::from_ndarray(&src.view(), &[10]).unwrap();
+        assert_eq!(a.shape(), &[4]);
+        assert_eq!(a.to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_1d_noncontiguous() {
+        // Step-2 slice of [0..10] → [0, 2, 4, 6, 8]
+        let src = ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let view = src.slice(ndarray::s![..;2]);
+        let a = Array::from_ndarray(&view, &[3]).unwrap();
+        assert_eq!(a.shape(), &[5]);
+        assert_eq!(
+            a.to_ndarray::<u8>().unwrap(),
+            ndarray::array![0u8, 2, 4, 6, 8].view().into_dyn()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // from_ndarray — metadata
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn from_ndarray_metadata() {
+        let src = ndarray::array![0i32, 1, 2, 3, 4, 5];
+        let a = Array::from_ndarray(&src.view(), &[3]).unwrap();
+        assert_eq!(a.ndim(), 1);
+        assert_eq!(a.shape(), &[6]);
+        assert_eq!(a.dtype(), &i32::dtype());
+    }
+
+    // -----------------------------------------------------------------------
+    // from_ndarray — 2D
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn from_ndarray_2d() {
+        #[rustfmt::skip]
+        let src = ndarray::array![
+            [0u8,  1,  2,  3,  4,  5],
+            [6,    7,  8,  9, 10, 11],
+            [12,  13, 14, 15, 16, 17],
+            [18,  19, 20, 21, 22, 23],
+        ];
+        assert_eq!(roundtrip(&src, &[2, 3]), src.view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_2d_with_padding() {
+        // shape [3,5], block [2,3] → padded to [4,6]; shape reported as [3,5]
+        #[rustfmt::skip]
+        let src = ndarray::array![
+            [0i32,  1,  2,  3,  4],
+            [5,     6,  7,  8,  9],
+            [10,   11, 12, 13, 14],
+        ];
+        let a = Array::from_ndarray(&src.view(), &[2, 3]).unwrap();
+        assert_eq!(a.shape(), &[3, 5]);
+        assert_eq!(a.to_ndarray::<i32>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_2d_noncontiguous() {
+        // Fortran-order (column-major) array
+        let src = ndarray::Array2::<u8>::from_shape_vec(
+            ndarray::ShapeBuilder::f((3, 4)),
+            (0..12).collect(),
+        )
+        .unwrap();
+        assert_eq!(roundtrip(&src, &[2, 2]), src.view().into_dyn());
+    }
+
+    // -----------------------------------------------------------------------
+    // from_ndarray + sub_ndarray integration
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn from_ndarray_then_sub_ndarray_1d() {
+        let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
+        let a = Array::from_ndarray(&src.view(), &[3]).unwrap();
+        let got: ArrayD<u8> = a.sub_ndarray(&[1..5]).unwrap();
+        assert_eq!(got, ndarray::array![1u8, 2, 3, 4].view().into_dyn());
+    }
+
+    #[test]
+    fn from_ndarray_then_sub_ndarray_2d() {
+        #[rustfmt::skip]
+        let src = ndarray::array![
+            [0u8,  1,  2,  3,  4,  5],
+            [6,    7,  8,  9, 10, 11],
+            [12,  13, 14, 15, 16, 17],
+            [18,  19, 20, 21, 22, 23],
+        ];
+        let a = Array::from_ndarray(&src.view(), &[2, 3]).unwrap();
+        let got: ArrayD<u8> = a.sub_ndarray(&[1..3, 2..5]).unwrap();
+        assert_eq!(
+            got,
+            ndarray::array![[8u8, 9, 10], [14, 15, 16]].view().into_dyn()
         );
     }
 }

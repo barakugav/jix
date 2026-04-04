@@ -1,7 +1,6 @@
+mod archive;
 pub(crate) mod block;
 pub(crate) mod codec;
-mod common;
-pub(crate) mod compressed;
 mod plain;
 
 use std::io;

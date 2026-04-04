@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 
@@ -6,9 +7,9 @@ use prost::Message;
 
 use crate::dtype::Dtype;
 use crate::schema::{self, ArchiveType};
-use crate::storage::BlockSize;
-use crate::storage::codec::Encoder;
-use crate::storage::common::{ArchiveReader, ArchiveWriter};
+use crate::storage::archive::{ArchiveReader, ArchiveWriter};
+use crate::storage::codec::{Decoder, Encoder};
+use crate::storage::{BlockSize, Storage};
 use crate::util::{cast_slice, cast_slice_mut};
 
 const _: () = const {
@@ -33,6 +34,8 @@ pub(crate) struct BlockTable<'a> {
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
     /// Note the units are items, not bytes.
     pub(crate) block_size: BlockSize,
+
+    decoder: RefCell<Option<Decoder>>,
 }
 impl<'a> BlockTable<'a> {
     pub(crate) fn new(
@@ -59,6 +62,7 @@ impl<'a> BlockTable<'a> {
             nitems,
             nblocks,
             block_size,
+            decoder: RefCell::new(None),
         }
     }
 
@@ -198,12 +202,47 @@ impl BlockTable<'static> {
     }
 }
 
+impl<'a> Storage for BlockTable<'a> {
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+
+    fn nitems(&self) -> usize {
+        self.nitems
+    }
+
+    fn block_len(&self) -> BlockSize {
+        self.block_size
+    }
+
+    fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()> {
+        let b_size_bytes = self.block_len() as usize * self.dtype.itemsize() as usize;
+        if buf.len() < b_size_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Buffer too small",
+            ));
+        }
+        let block = self.get_block(block_idx);
+
+        let mut decoder = self.decoder.borrow_mut();
+        if decoder.is_none() {
+            *decoder = Some(Decoder::new()?);
+        }
+        let decoder = decoder.as_mut().unwrap();
+        let nbytes = decoder.decode(&block, buf)?;
+        debug_assert_eq!(nbytes, b_size_bytes);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{self, Cursor};
 
     use super::{BlockSize, BlockTable};
     use crate::dtype::Dtyped;
+    use crate::storage::Storage;
     use crate::storage::codec::{Decoder, Encoder};
     use crate::util::cast_slice;
 
@@ -359,5 +398,62 @@ mod tests {
             .flat_map(|i| decode_block(&table2, i, &mut decoder))
             .collect();
         assert_eq!(recovered, unsafe { cast_slice::<u32, u8>(&items) });
+    }
+
+    fn make_storage<T: Dtyped>(items: &[T], block_len: BlockSize) -> BlockTable<'static> {
+        let mut encoder = Encoder::new(3).unwrap();
+        BlockTable::build_from_data(
+            unsafe { cast_slice::<T, u8>(items) },
+            T::dtype(),
+            block_len,
+            &mut encoder,
+        )
+        .unwrap()
+    }
+
+    fn read_block_items<T: Dtyped>(storage: &BlockTable, idx: usize) -> Vec<T> {
+        let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
+        let mut buf = vec![0u8; block_bytes];
+        storage.read_block(idx, &mut buf).unwrap();
+        unsafe { cast_slice::<u8, T>(&buf) }.to_vec()
+    }
+
+    #[test]
+    fn single_block_u8_round_trips() {
+        let items: Vec<u8> = (0..8).collect();
+        let s = make_storage(&items, 8);
+        assert_eq!(s.nitems(), 8);
+        assert_eq!(s.block_len(), 8);
+        assert_eq!(s.dtype(), &u8::dtype());
+        assert_eq!(read_block_items::<u8>(&s, 0), items);
+    }
+
+    #[test]
+    fn two_blocks_i32_round_trips() {
+        let items: Vec<i32> = (0..8).collect();
+        let s = make_storage(&items, 4);
+        assert_eq!(s.nitems(), 8);
+        assert_eq!(s.block_len(), 4);
+        assert_eq!(read_block_items::<i32>(&s, 0), items[..4]);
+        assert_eq!(read_block_items::<i32>(&s, 1), items[4..]);
+    }
+
+    #[test]
+    fn multiple_blocks_f32_round_trips() {
+        let items: Vec<f32> = (0..12).map(|x| x as f32 * 0.5).collect();
+        let s = make_storage(&items, 4);
+        assert_eq!(s.nitems(), 12);
+        assert_eq!(s.block_len(), 4);
+        for b in 0..3 {
+            assert_eq!(read_block_items::<f32>(&s, b), items[b * 4..(b + 1) * 4]);
+        }
+    }
+
+    #[test]
+    fn buffer_too_small_returns_error() {
+        let items: Vec<u8> = (0..4).collect();
+        let s = make_storage(&items, 4);
+        let mut buf = vec![0u8; 3]; // one byte short
+        assert!(s.read_block(0, &mut buf).is_err());
     }
 }
