@@ -53,3 +53,26 @@ pub(crate) fn default_strides<Ix: Idx>(shape: &[Ix]) -> DimArray<Ix> {
     }
     strides
 }
+
+pub(crate) unsafe fn cast_slice<T, U>(slice: &[T]) -> &[U]
+where
+    T: Copy + Sized,
+    U: Copy + Sized,
+{
+    let (ptr, len) = (slice.as_ptr(), slice.len());
+    let len_bytes = len * size_of::<T>();
+    assert!(ptr as usize % align_of::<U>() == 0);
+    assert!(size_of::<U>() > 0 && len_bytes % size_of::<U>() == 0);
+    unsafe { std::slice::from_raw_parts(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
+}
+pub(crate) unsafe fn cast_slice_mut<T, U>(slice: &mut [T]) -> &mut [U]
+where
+    T: Copy + Sized,
+    U: Copy + Sized,
+{
+    let (ptr, len) = (slice.as_mut_ptr(), slice.len());
+    let len_bytes = len * size_of::<T>();
+    assert!(ptr as usize % align_of::<U>() == 0);
+    assert!(size_of::<U>() > 0 && len_bytes % size_of::<U>() == 0);
+    unsafe { std::slice::from_raw_parts_mut(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
+}

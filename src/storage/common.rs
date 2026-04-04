@@ -1,24 +1,43 @@
 use std::io::{self, Read, Seek, Write};
 use std::ops::{Deref, DerefMut};
 
-use prost::Message;
+use prost::{Message, bytes};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
-use crate::schema;
 use crate::schema::Section;
+use crate::schema::{self, ArchiveType};
 
-const HEADER_MAGIC: u32 = 0x20d95dac;
+const MAGIC: &[u8; 4] = b"ZIX1";
 
-pub(crate) struct Writer<W> {
+#[derive(Default, FromBytes, IntoBytes, Immutable)]
+#[repr(C)]
+struct Header {
+    magic: [u8; 4],
+}
+
+#[derive(Default, FromBytes, IntoBytes, Immutable)]
+#[repr(C)]
+struct Footer {
+    main_section_size: u32,
+    file_metadata_size: u32,
+    magic: [u8; 4],
+}
+
+pub(crate) struct ArchiveWriter<W> {
     writer: W,
     base_offset: u64,
     tmp_buf: Vec<u8>,
 }
-impl<W> Writer<W> {
+impl<W> ArchiveWriter<W> {
     pub(crate) fn new(mut writer: W) -> io::Result<Self>
     where
         W: Write + Seek,
     {
         let base_offset = writer.stream_position()?;
+
+        let header = Header { magic: *MAGIC };
+        writer.write_all(header.as_bytes())?;
+
         Ok(Self {
             writer,
             base_offset,
@@ -44,22 +63,6 @@ impl<W> Writer<W> {
 
     pub(crate) fn inner_mut(&mut self) -> &mut W {
         &mut self.writer
-    }
-
-    pub(crate) fn write_header(
-        &mut self,
-        footer_spec: Option<&schema::FooterSpec>,
-    ) -> io::Result<()>
-    where
-        W: Write,
-    {
-        let header = schema::Header {
-            magic: HEADER_MAGIC,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            footer_spec: footer_spec.cloned(),
-        };
-        self.write_message(&header)?;
-        Ok(())
     }
 
     pub(crate) fn write_section(&mut self, data: &[u8], alignment: usize) -> io::Result<Section>
@@ -88,64 +91,62 @@ impl<W> Writer<W> {
     pub(crate) fn write_main_section_and_footer(
         &mut self,
         main_section: &impl Message,
-        footer_spec: &schema::FooterSpec,
+        archive_type: ArchiveType,
     ) -> io::Result<()>
     where
         W: Write + Seek,
     {
-        let main_section_offset = self.stream_position()?;
         let main_section_size = self.write_message(main_section)?;
-
-        let footer = schema::Footer {
-            magic: footer_spec.magic,
-            main_section_offset: main_section_offset as i64 - self.base_offset as i64,
-            main_section_length: main_section_size as u64,
+        let file_metadata_size = self.write_message(&schema::FileMetadata {
+            archive_type: archive_type as i32,
+            lib_version_semver: 0, // TODO
+        })?;
+        let footer = Footer {
+            main_section_size: main_section_size.try_into().unwrap(),
+            file_metadata_size: file_metadata_size.try_into().unwrap(),
+            magic: *MAGIC,
         };
-        let footer_size = self.write_message(&footer)?;
-        assert_eq!(footer_size, footer_spec.size as usize);
+        self.write_all(footer.as_bytes())?;
         Ok(())
     }
-
-    pub(crate) fn new_footer_spec(&self) -> schema::FooterSpec {
-        let magic = {
-            // Generate a random magic.
-            // we dont want to depend on an additional crate just for this, and rand is not yet stable in std.
-            // We can create a hash_map::RandomState and hash a fixed value with it to get a random value that is
-            // different on every run.
-            // hash_map::RandomState uses the unstable std random under the hood.
-            use std::hash::BuildHasher;
-            let magic = 0xd3be9ab084788933_u64;
-            let magic = std::collections::hash_map::RandomState::new().hash_one(magic);
-            let magic = (magic >> 32) as u32 ^ (magic as u32);
-            magic
-        };
-        schema::FooterSpec { size: 24, magic }
-    }
 }
-impl<W> Deref for Writer<W> {
+impl<W> Deref for ArchiveWriter<W> {
     type Target = W;
     fn deref(&self) -> &W {
         &self.writer
     }
 }
-impl<W> DerefMut for Writer<W> {
+impl<W> DerefMut for ArchiveWriter<W> {
     fn deref_mut(&mut self) -> &mut W {
         &mut self.writer
     }
 }
 
-pub(crate) struct Reader<R> {
+pub(crate) struct ArchiveReader<R> {
     reader: R,
     base_offset: u64,
     length: u64,
     tmp_buf: Vec<u8>,
 }
-impl<R> Reader<R> {
+impl<R> ArchiveReader<R> {
     pub(crate) fn new(mut reader: R, length: u64) -> io::Result<Self>
     where
         R: Read + Seek,
     {
+        if length < (size_of::<Header>() + size_of::<Footer>()) as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "zix file too short",
+            ));
+        }
+
         let base_offset = reader.stream_position()?;
+
+        let header = Header::read_from_io(&mut reader)?;
+        if &header.magic != MAGIC {
+            return Err(io::Error::other("invalid zix file: invalid header magic"));
+        }
+
         Ok(Self {
             reader,
             base_offset,
@@ -236,25 +237,6 @@ impl<R> Reader<R> {
         &mut self.reader
     }
 
-    pub(crate) fn read_header(&mut self) -> io::Result<schema::Header>
-    where
-        R: Read,
-    {
-        let header = self.try_read_message::<schema::Header>()?.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "unexpected end of file while reading header",
-            )
-        })?;
-        if header.magic != HEADER_MAGIC {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "invalid header magic",
-            ));
-        }
-        Ok(header)
-    }
-
     pub(crate) fn read_section(&mut self, section: &Section) -> io::Result<Vec<u8>>
     where
         R: Read + Seek,
@@ -275,56 +257,59 @@ impl<R> Reader<R> {
         Ok(())
     }
 
-    pub(crate) fn read_footer_and_main_section<M>(
+    pub(crate) fn read_file_meta_and_main_section(
         &mut self,
-        footer_spec: &Option<schema::FooterSpec>,
-    ) -> io::Result<(schema::Footer, M)>
+    ) -> io::Result<(schema::FileMetadata, &[u8])>
     where
         R: Read + Seek,
-        M: Message + Default,
     {
-        let footer_spec = footer_spec.as_ref().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "missing footer spec in header")
-        })?;
-
-        if footer_spec.size as u64 > self.length {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "file too small to contain footer",
-            ));
-        }
-        self.seek_relative_to_base(self.length as i64 - (footer_spec.size as i64))?;
-        let footer_bytes = self.read_slice(footer_spec.size as usize)?;
-        let footer = schema::Footer::decode_length_delimited(footer_bytes)?;
-        if footer.magic != footer_spec.magic {
+        // Read footer
+        debug_assert!(self.length >= (size_of::<Header>() + size_of::<Footer>()) as u64);
+        let footer_offset = self.length - size_of::<Footer>() as u64;
+        self.seek_relative_to_base(footer_offset as i64)?;
+        let footer = Footer::read_from_io(&mut self.reader)?;
+        if &footer.magic != MAGIC {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid footer magic",
             ));
         }
 
-        self.seek_relative_to_base(footer.main_section_offset)?;
-        let main_section_bytes = self.read_slice(footer.main_section_length as usize)?;
-        let main_section = M::decode_length_delimited(main_section_bytes)?;
+        // Read main section and file metadata bytes (in a single read)
+        let main_section_offset = footer_offset
+            .checked_sub(footer.file_metadata_size as u64 + footer.main_section_size as u64)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid footer: main section and file metadata sizes are too large",
+                )
+            })?;
+        self.seek_relative_to_base(main_section_offset as i64)?;
+        let (main_section_bytes, file_meta_bytes) = self
+            .read_slice(footer.file_metadata_size as usize + footer.main_section_size as usize)?
+            .split_at(footer.main_section_size as usize);
 
-        Ok((footer, main_section))
+        // Decode file metadata
+        let file_meta = schema::FileMetadata::decode_length_delimited(file_meta_bytes)?;
+
+        Ok((file_meta, main_section_bytes))
     }
 
     pub(crate) fn seek_relative_to_base(&mut self, offset: i64) -> io::Result<u64>
     where
         R: Seek,
     {
-        let pos = (self.base_offset as i64 + offset) as u64;
+        let pos: u64 = (self.base_offset as i64 + offset).try_into().unwrap();
         self.seek(std::io::SeekFrom::Start(pos))
     }
 }
-impl<R> Deref for Reader<R> {
+impl<R> Deref for ArchiveReader<R> {
     type Target = R;
     fn deref(&self) -> &R {
         &self.reader
     }
 }
-impl<R> DerefMut for Reader<R> {
+impl<R> DerefMut for ArchiveReader<R> {
     fn deref_mut(&mut self) -> &mut R {
         &mut self.reader
     }

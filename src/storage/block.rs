@@ -2,10 +2,13 @@ use std::borrow::Cow;
 use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 
-use crate::dtype::Itemsize;
-use crate::schema;
+use prost::Message;
+
+use crate::dtype::{Dtyped, Itemsize};
+use crate::schema::{self, ArchiveType};
 use crate::storage::codec::Encoder;
-use crate::storage::common::{Reader, Writer};
+use crate::storage::common::{ArchiveReader, ArchiveWriter};
+use crate::util::{cast_slice, cast_slice_mut};
 
 const _: () = const {
     assert!(
@@ -87,16 +90,12 @@ impl<'a> BlockTable<'a> {
     where
         W: Write + Seek,
     {
-        let mut writer = Writer::new(writer)?;
-
-        // Write header
-        let footer_spec = writer.new_footer_spec();
-        writer.write_header(Some(&footer_spec))?;
+        let mut writer = ArchiveWriter::new(writer)?;
 
         // Write body data sections
         let cdata = writer.write_section(&self.cdata, align_of::<u8>())?;
         let block_offsets = writer.write_section(
-            cast_slice_u64_u8(self.block_offsets.as_ref()),
+            unsafe { cast_slice::<u64, u8>(self.block_offsets.as_ref()) },
             align_of::<u64>(),
         )?;
 
@@ -108,7 +107,7 @@ impl<'a> BlockTable<'a> {
             cdata: Some(cdata),
             block_offsets: Some(block_offsets),
         };
-        writer.write_main_section_and_footer(&table, &footer_spec)?;
+        writer.write_main_section_and_footer(&table, schema::ArchiveType::BlockTable)?;
 
         Ok(())
     }
@@ -123,13 +122,21 @@ impl<'a> BlockTable<'a> {
     where
         R: Read + Seek,
     {
-        // Read header
-        let mut reader = Reader::new(reader, len)?;
-        let header = reader.read_header()?;
+        let mut reader = ArchiveReader::new(reader, len)?;
 
         // Read footer and table
-        let (_footer, table) =
-            reader.read_footer_and_main_section::<schema::BlockTable>(&header.footer_spec)?;
+        let (f_meta, table_bytes) = reader.read_file_meta_and_main_section()?;
+        if f_meta.archive_type != schema::ArchiveType::BlockTable as i32 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "unexpected zix file type: expected {:?}, actual {:?}",
+                    schema::ArchiveType::BlockTable,
+                    ArchiveType::try_from(f_meta.archive_type)
+                ),
+            ));
+        }
+        let table = schema::BlockTable::decode_length_delimited(table_bytes)?;
 
         // Read body data sections
         let cdata = reader.read_section(table.cdata.as_ref().unwrap())?;
@@ -139,10 +146,9 @@ impl<'a> BlockTable<'a> {
                 block_offsets_section.size as usize / std::mem::size_of::<u64>();
             let mut block_offsets = Vec::<u64>::with_capacity(block_offsets_len);
             unsafe { block_offsets.set_len(block_offsets_len) };
-            reader.read_section_into(
-                block_offsets_section,
-                cast_slice_mut_u64_u8(block_offsets.as_mut_slice()),
-            )?;
+            reader.read_section_into(block_offsets_section, unsafe {
+                cast_slice_mut::<u64, u8>(block_offsets.as_mut_slice())
+            })?;
             block_offsets
         };
 
@@ -154,15 +160,6 @@ impl<'a> BlockTable<'a> {
             table.block_size as BlockSize,
         ))
     }
-}
-
-fn cast_slice_u64_u8(slice: &[u64]) -> &[u8] {
-    let (ptr, len) = (slice.as_ptr(), slice.len());
-    unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), len * size_of::<u64>()) }
-}
-fn cast_slice_mut_u64_u8(slice: &mut [u64]) -> &mut [u8] {
-    let (ptr, len) = (slice.as_mut_ptr(), slice.len());
-    unsafe { std::slice::from_raw_parts_mut(ptr.cast::<u8>(), len * size_of::<u64>()) }
 }
 
 impl BlockTable<'static> {
@@ -179,10 +176,10 @@ impl BlockTable<'static> {
         let block_size_bytes = block_size as usize * itemsize as usize;
         let mut cdata = Vec::<u8>::new();
         let mut block_offsets = Vec::<u64>::with_capacity(nblocks.saturating_sub(1));
-        let max_blk_cdata_len = encoder.encode_bound(block_size_bytes);
+        let max_full_blk_cdata_len = encoder.encode_bound(block_size_bytes);
         for b_data in data.chunks(block_size_bytes) {
             let max_blk_cdata_len = if b_data.len() == block_size_bytes {
-                max_blk_cdata_len
+                max_full_blk_cdata_len
             } else {
                 encoder.encode_bound(b_data.len())
             };
@@ -212,11 +209,12 @@ impl BlockTable<'static> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
 
     use super::{BlockSize, BlockTable};
-    use crate::dtype::Itemsize;
+    use crate::dtype::{Dtyped, Itemsize};
     use crate::storage::codec::{Decoder, Encoder};
+    use crate::util::cast_slice;
 
     fn make_encoder() -> Encoder {
         Encoder::new(3).unwrap()
@@ -233,66 +231,81 @@ mod tests {
         out
     }
 
+    fn build_from_items<T>(
+        items: &[T],
+        block_size: BlockSize,
+        encoder: &mut Encoder,
+    ) -> io::Result<BlockTable<'static>>
+    where
+        T: Dtyped,
+    {
+        BlockTable::build_from_data(
+            unsafe { cast_slice::<T, u8>(items) },
+            size_of::<T>() as Itemsize,
+            block_size,
+            encoder,
+        )
+    }
+
     #[test]
     fn build_single_block() {
-        let data: Vec<u8> = (0u8..8).collect();
+        let items: Vec<u8> = (0u8..8).collect();
         let mut encoder = make_encoder();
-        let table = BlockTable::build_from_data(&data, 1, 16, &mut encoder).unwrap();
+        let table = build_from_items(&items, 16, &mut encoder).unwrap();
         assert_eq!(table.nblocks, 1);
         assert_eq!(table.nitems, 8);
-        let decoded = decode_block(&table, 0, &mut make_decoder());
-        assert_eq!(decoded, data);
+        assert_eq!(decode_block(&table, 0, &mut make_decoder()), items);
     }
 
     #[test]
     fn build_multiple_blocks_exact_divisor() {
         // 12 items, block_size=4 → 3 full blocks
-        let data: Vec<u8> = (0u8..12).collect();
+        let items: Vec<u8> = (0u8..12).collect();
         let mut encoder = make_encoder();
-        let table = BlockTable::build_from_data(&data, 1, 4, &mut encoder).unwrap();
+        let table = build_from_items(&items, 4, &mut encoder).unwrap();
         assert_eq!(table.nblocks, 3);
         assert_eq!(table.nitems, 12);
         let mut decoder = make_decoder();
-        assert_eq!(decode_block(&table, 0, &mut decoder), &data[0..4]);
-        assert_eq!(decode_block(&table, 1, &mut decoder), &data[4..8]);
-        assert_eq!(decode_block(&table, 2, &mut decoder), &data[8..12]);
+        assert_eq!(decode_block(&table, 0, &mut decoder), items[0..4]);
+        assert_eq!(decode_block(&table, 1, &mut decoder), items[4..8]);
+        assert_eq!(decode_block(&table, 2, &mut decoder), items[8..12]);
     }
 
     #[test]
     fn build_multiple_blocks_partial_last() {
         // 10 items, block_size=4 → blocks of 4, 4, 2
-        let data: Vec<u8> = (0u8..10).collect();
+        let items: Vec<u8> = (0u8..10).collect();
         let mut encoder = make_encoder();
-        let table = BlockTable::build_from_data(&data, 1, 4, &mut encoder).unwrap();
+        let table = build_from_items(&items, 4, &mut encoder).unwrap();
         assert_eq!(table.nblocks, 3);
         assert_eq!(table.get_block(2).nitems, 2);
-        let mut decoder = make_decoder();
-        assert_eq!(decode_block(&table, 2, &mut decoder), &data[8..10]);
+        assert_eq!(decode_block(&table, 2, &mut make_decoder()), items[8..10]);
     }
 
     #[test]
     fn build_with_itemsize_greater_than_one() {
-        // 4 u32 values → 16 bytes, itemsize=4, block_size=2
-        let values: Vec<u32> = vec![10, 20, 30, 40];
-        let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        // 4 u32 values, block_size=2
+        let items: Vec<u32> = vec![10, 20, 30, 40];
         let mut encoder = make_encoder();
-        let table = BlockTable::build_from_data(&data, 4, 2, &mut encoder).unwrap();
+        let table = build_from_items(&items, 2, &mut encoder).unwrap();
         assert_eq!(table.nblocks, 2);
         assert_eq!(table.nitems, 4);
         let mut decoder = make_decoder();
-        let blk0 = decode_block(&table, 0, &mut decoder);
-        let blk1 = decode_block(&table, 1, &mut decoder);
-        assert_eq!(&blk0, &data[0..8]);
-        assert_eq!(&blk1, &data[8..16]);
+        assert_eq!(decode_block(&table, 0, &mut decoder), unsafe {
+            cast_slice::<u32, u8>(&items[0..2])
+        });
+        assert_eq!(decode_block(&table, 1, &mut decoder), unsafe {
+            cast_slice::<u32, u8>(&items[2..4])
+        });
     }
 
     // -----------------------------------------------------------------------
     // write_to / read_from round-trip
     // -----------------------------------------------------------------------
 
-    fn round_trip(data: &[u8], itemsize: Itemsize, block_size: BlockSize) -> BlockTable<'static> {
+    fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<'static> {
         let mut encoder = make_encoder();
-        let table = BlockTable::build_from_data(data, itemsize, block_size, &mut encoder).unwrap();
+        let table = build_from_items(items, block_size, &mut encoder).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
         table.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
@@ -302,34 +315,32 @@ mod tests {
 
     #[test]
     fn round_trip_single_block() {
-        let data: Vec<u8> = (0u8..8).collect();
-        let table2 = round_trip(&data, 1, 16);
+        let items: Vec<u8> = (0u8..8).collect();
+        let table2 = round_trip(&items, 16);
         assert_eq!(table2.nblocks, 1);
         assert_eq!(table2.nitems, 8);
         assert_eq!(table2.block_size, 16);
         assert_eq!(table2.itemsize, 1);
-        let decoded = decode_block(&table2, 0, &mut make_decoder());
-        assert_eq!(decoded, data);
+        assert_eq!(decode_block(&table2, 0, &mut make_decoder()), items);
     }
 
     #[test]
     fn round_trip_multiple_blocks() {
-        let data: Vec<u8> = (0u8..10).collect();
-        let table = round_trip(&data, 1, 4);
+        let items: Vec<u8> = (0u8..10).collect();
+        let table = round_trip(&items, 4);
         assert_eq!(table.nblocks, 3);
         assert_eq!(table.nitems, 10);
         let mut decoder = make_decoder();
         let recovered: Vec<u8> = (0..table.nblocks)
             .flat_map(|i| decode_block(&table, i, &mut decoder))
             .collect();
-        assert_eq!(recovered, data);
+        assert_eq!(recovered, items);
     }
 
     #[test]
     fn round_trip_preserves_block_offsets_ordering() {
-        let data: Vec<u8> = (0u8..12).collect();
-        let table2 = round_trip(&data, 1, 3);
-        // block_offsets should be strictly increasing
+        let items: Vec<u8> = (0u8..12).collect();
+        let table2 = round_trip(&items, 3);
         let offs = table2.block_offsets.as_ref();
         assert!(offs.windows(2).all(|w| w[0] < w[1]));
     }
@@ -340,9 +351,9 @@ mod tests {
 
     #[test]
     fn round_trip_file() {
-        let data: Vec<u8> = (0u32..17).flat_map(|v| v.to_le_bytes()).collect();
+        let items: Vec<u32> = (0u32..17).collect();
         let mut encoder = make_encoder();
-        let table = BlockTable::build_from_data(&data, 4, 3, &mut encoder).unwrap();
+        let table = build_from_items(&items, 3, &mut encoder).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
         let path = tmp_file.path();
@@ -356,6 +367,6 @@ mod tests {
         let recovered: Vec<u8> = (0..table2.nblocks)
             .flat_map(|i| decode_block(&table2, i, &mut decoder))
             .collect();
-        assert_eq!(recovered, data);
+        assert_eq!(recovered, unsafe { cast_slice::<u32, u8>(&items) });
     }
 }
