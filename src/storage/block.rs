@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::io::{self, Read, Seek, Write};
 
 use zerocopy::{FromBytes, IntoBytes};
@@ -7,7 +6,7 @@ use zerocopy::{FromBytes, IntoBytes};
 use crate::dtype::Dtype;
 use crate::schema::{self, ArchiveType};
 use crate::storage::archive::{ArchiveReader, ArchiveWriter, Section};
-use crate::storage::codec::{Decoder, Encoder};
+use crate::storage::codec::{Encoder, ReadContext};
 use crate::storage::{BlockSize, Storage};
 use crate::util::{cast_slice, cast_slice_mut};
 
@@ -17,10 +16,6 @@ const _: () = const {
         "Only little-endian is supported"
     );
 };
-
-pub(crate) struct Block<'a> {
-    pub(crate) cdata: &'a [u8],
-}
 
 pub(crate) struct BlockTable<'a> {
     cdata: Cow<'a, [u8]>,
@@ -33,8 +28,6 @@ pub(crate) struct BlockTable<'a> {
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
     /// Note the units are items, not bytes.
     pub(crate) block_size: BlockSize,
-
-    decoder: RefCell<Option<Decoder>>,
 }
 impl<'a> BlockTable<'a> {
     pub(crate) fn new(
@@ -61,15 +54,6 @@ impl<'a> BlockTable<'a> {
             nitems,
             nblocks,
             block_size,
-            decoder: RefCell::new(None),
-        }
-    }
-
-    pub fn get_block(&self, idx: usize) -> Block {
-        let begin = self.block_offsets[idx] as usize;
-        let end = self.block_offsets[idx + 1] as usize;
-        Block {
-            cdata: &self.cdata[begin..end],
         }
     }
 
@@ -257,7 +241,12 @@ impl<'a> Storage for BlockTable<'a> {
         self.block_size
     }
 
-    fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()> {
+    fn read_block(
+        &self,
+        block_idx: usize,
+        buf: &mut [u8],
+        context: &mut ReadContext,
+    ) -> io::Result<()> {
         let b_size_bytes = self.block_len() as usize * self.dtype.itemsize() as usize;
         if buf.len() < b_size_bytes {
             return Err(io::Error::new(
@@ -265,14 +254,12 @@ impl<'a> Storage for BlockTable<'a> {
                 "Buffer too small",
             ));
         }
-        let block = self.get_block(block_idx);
 
-        let mut decoder = self.decoder.borrow_mut();
-        if decoder.is_none() {
-            *decoder = Some(Decoder::new()?);
-        }
-        let decoder = decoder.as_mut().unwrap();
-        let nbytes = decoder.decode(&block, buf)?;
+        let begin = self.block_offsets[block_idx] as usize;
+        let end = self.block_offsets[block_idx + 1] as usize;
+        let b_cdata = &self.cdata[begin..end];
+
+        let nbytes = context.decode(b_cdata, buf)?;
         debug_assert_eq!(nbytes, b_size_bytes);
         Ok(())
     }
@@ -285,22 +272,21 @@ mod tests {
     use super::{BlockSize, BlockTable};
     use crate::dtype::Dtyped;
     use crate::storage::Storage;
-    use crate::storage::codec::{Decoder, Encoder};
+    use crate::storage::codec::{Encoder, ReadContext};
     use crate::util::cast_slice;
 
     fn make_encoder() -> Encoder {
         Encoder::new(3).unwrap()
     }
-    fn make_decoder() -> Decoder {
-        Decoder::new().unwrap()
+    fn make_decoder() -> ReadContext {
+        ReadContext::new().unwrap()
     }
 
-    fn decode_block(table: &BlockTable, idx: usize, decoder: &mut Decoder) -> Vec<u8> {
-        let blk = table.get_block(idx);
-        let out_len = table.dtype.itemsize() as usize * table.block_size as usize;
-        let mut out = vec![0u8; out_len];
-        decoder.decode(&blk, &mut out).unwrap();
-        out
+    fn decode_block(table: &BlockTable, idx: usize, context: &mut ReadContext) -> Vec<u8> {
+        let block_bytes = table.block_len() as usize * table.dtype().itemsize() as usize;
+        let mut buf = vec![0u8; block_bytes];
+        table.read_block(idx, &mut buf, context).unwrap();
+        buf
     }
 
     fn build_from_items<T>(
@@ -459,9 +445,10 @@ mod tests {
     }
 
     fn read_block_items<T: Dtyped>(storage: &BlockTable, idx: usize) -> Vec<T> {
+        let mut context = ReadContext::new().unwrap();
         let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
         let mut buf = vec![0u8; block_bytes];
-        storage.read_block(idx, &mut buf).unwrap();
+        storage.read_block(idx, &mut buf, &mut context).unwrap();
         unsafe { cast_slice::<u8, T>(&buf) }.to_vec()
     }
 
@@ -501,6 +488,7 @@ mod tests {
         let items: Vec<u8> = (0..4).collect();
         let s = make_storage(&items, 4);
         let mut buf = vec![0u8; 3]; // one byte short
-        assert!(s.read_block(0, &mut buf).is_err());
+        let mut context = ReadContext::new().unwrap();
+        assert!(s.read_block(0, &mut buf, &mut context).is_err());
     }
 }

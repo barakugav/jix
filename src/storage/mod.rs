@@ -5,7 +5,7 @@ mod plain;
 
 use std::io;
 
-use crate::dtype::Dtype;
+use crate::{dtype::Dtype, storage::codec::ReadContext};
 
 pub(crate) type BlockSize = u32;
 
@@ -15,7 +15,7 @@ pub(crate) type BlockSize = u32;
 /// At all times the storage hold the invariants:
 /// - `block_len > 0`
 /// - `nitems % block_len == 0`
-pub(crate) trait Storage {
+pub trait Storage {
     /// Get the dtype of items in this storage.
     fn dtype(&self) -> &Dtype;
 
@@ -33,5 +33,11 @@ pub(crate) trait Storage {
     ///
     /// - `block_idx`: The index of the block to read, in the range `0..(nitems / block_len)`.
     /// - `buf`: The buffer to read the block into. Must be of size `block_len * dtype.itemsize()`.
-    fn read_block(&self, block_idx: usize, buf: &mut [u8]) -> io::Result<()>;
+    /// - `context`: a read context containing global configuration and reuseable buffers.
+    fn read_block(
+        &self,
+        block_idx: usize,
+        buf: &mut [u8],
+        context: &mut ReadContext,
+    ) -> io::Result<()>;
 }

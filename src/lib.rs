@@ -1,6 +1,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-mod array;
+pub mod array;
 pub mod dtype;
 mod iter;
 mod ops;
