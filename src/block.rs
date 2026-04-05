@@ -1,4 +1,5 @@
-use std::io::{self, Read, Seek, Write};
+use std::fs::File;
+use std::io::{self, BufReader, Read, Seek, Write};
 
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -186,12 +187,18 @@ impl BlockTable<Owned> {
                 ),
             ));
         }
-        Self::read_content(&mut reader)
+        Self::read_content(&mut reader, Owned::read_from)
     }
+}
 
-    pub(crate) fn read_content<R>(reader: &mut ArchiveReader<R>) -> io::Result<Self>
+impl<A> BlockTable<A> {
+    pub(crate) fn read_content<R>(
+        reader: &mut ArchiveReader<R>,
+        read_sections: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> io::Result<A>,
+    ) -> io::Result<Self>
     where
         R: Read + Seek,
+        A: BlockTableAllocation,
     {
         let header = reader.read_message::<schema::BlockTableHeader>()?;
 
@@ -225,24 +232,10 @@ impl BlockTable<Owned> {
         };
 
         // Read body data sections
-        let cdata = reader.read_section(&cdata_section)?;
-        let block_offsets = {
-            let block_offsets_section = &block_offsets_section;
-            let block_offsets_len =
-                block_offsets_section.size as usize / std::mem::size_of::<u64>();
-            let mut block_offsets = Vec::<u64>::with_capacity(block_offsets_len);
-            unsafe { block_offsets.set_len(block_offsets_len) };
-            reader.read_section_into(block_offsets_section, unsafe {
-                cast_slice_mut::<u64, u8>(block_offsets.as_mut_slice())
-            })?;
-            block_offsets
-        };
+        let allocation = read_sections(reader, cdata_section, block_offsets_section)?;
 
         Ok(Self::new(
-            Owned {
-                cdata,
-                block_offsets,
-            },
+            allocation,
             Dtype::from_proto(header.dtype.as_ref().unwrap())?,
             header.nitems as usize,
             header.block_size as BlockSize,
@@ -309,6 +302,35 @@ pub struct Owned {
     pub(crate) cdata: Vec<u8>,
     pub(crate) block_offsets: Vec<u64>,
 }
+impl Owned {
+    pub(crate) fn read_from<R>(
+        reader: &mut ArchiveReader<R>,
+        cdata_section: Section,
+        block_offsets_section: Section,
+    ) -> io::Result<Owned>
+    where
+        R: Read + Seek,
+    {
+        let cdata = reader.read_section(&cdata_section)?;
+
+        let block_offsets = {
+            let block_offsets_section = &block_offsets_section;
+            let block_offsets_len =
+                block_offsets_section.size as usize / std::mem::size_of::<u64>();
+            let mut block_offsets = Vec::<u64>::with_capacity(block_offsets_len);
+            unsafe { block_offsets.set_len(block_offsets_len) };
+            reader.read_section_into(block_offsets_section, unsafe {
+                cast_slice_mut::<u64, u8>(block_offsets.as_mut_slice())
+            })?;
+            block_offsets
+        };
+
+        Ok(Owned {
+            cdata,
+            block_offsets,
+        })
+    }
+}
 #[doc(hidden)]
 pub struct Borrowed<'a> {
     pub(crate) cdata: &'a [u8],
@@ -319,6 +341,44 @@ pub struct Mmap {
     pub(crate) cdata: &'static [u8],
     pub(crate) block_offsets: &'static [u64],
     pub(crate) mmap: memmap2::Mmap,
+}
+impl Mmap {
+    pub(crate) fn new(mmap: memmap2::Mmap, cdata: Section, block_offsets: Section) -> Self {
+        let cdata = {
+            let offset = cdata.offset as usize;
+            let size = cdata.size as usize;
+            let slice = &mmap[offset..offset + size];
+            // SAFETY: We require that the mmap outlives the returned slice, and that the caller does not mutate the slice.
+            unsafe { std::mem::transmute::<&[u8], &'static [u8]>(slice) }
+        };
+        let block_offsets = {
+            let offset = block_offsets.offset as usize;
+            let size = block_offsets.size as usize;
+            let buf = &mmap[offset..offset + size];
+            let slice = unsafe { cast_slice::<u8, u64>(buf) };
+            unsafe { std::mem::transmute::<&[u64], &'static [u64]>(slice) }
+        };
+        Self {
+            cdata,
+            block_offsets,
+            mmap,
+        }
+    }
+
+    pub(crate) fn read_from<R>(
+        reader: &mut ArchiveReader<R>,
+        mut cdata_section: Section,
+        mut block_offsets_section: Section,
+        mmap: memmap2::Mmap,
+    ) -> io::Result<Mmap>
+    where
+        R: Read + Seek,
+    {
+        let base_offset = reader.base_offset() as i64;
+        cdata_section.offset += base_offset;
+        block_offsets_section.offset += base_offset;
+        Ok(Mmap::new(mmap, cdata_section, block_offsets_section))
+    }
 }
 impl BlockTableAllocation for Owned {
     fn cdata(&self) -> &[u8] {

@@ -228,6 +228,10 @@ impl<R> ArchiveReader<R> {
         &mut self.reader
     }
 
+    pub(crate) fn base_offset(&self) -> u64 {
+        self.base_offset
+    }
+
     pub(crate) fn read_section(&mut self, section: &Section) -> io::Result<Vec<u8>>
     where
         R: Read + Seek,
