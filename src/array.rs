@@ -16,7 +16,7 @@ use crate::schema::ArchiveType;
 use crate::util::DimArray;
 use crate::util::{MaybeOwned, default_strides};
 
-use crate::block::{BlockSize, BlockTable, BlockTableAllocation};
+use crate::block::{BlockSize, BlockTable, BlockTableAllocation, BlockTableBuilder};
 use crate::codec::{Encoder, ReadContext};
 use crate::util::{ceil_to_multiple, full_dim_array};
 use crate::{NDIM_MAX, schema};
@@ -106,28 +106,17 @@ impl Array<Owned> {
             .zip(&shape)
             .map(|(&b, &s)| b.min(s))
             .collect::<DimArray<_>>();
-        let padded_shape = block_shape
-            .iter()
-            .zip(&shape)
-            .map(|(&b, &s)| if s == 0 { 0 } else { ceil_to_multiple(s, b) })
-            .collect::<DimArray<_>>();
         let b_layout = BlocksLayout::new(&block_shape, &shape);
-        let nblocks = b_layout.grid_shape.iter().product::<usize>();
 
         let mut block_iter = NdIter::new(
             &b_layout.grid_shape,
             NdIterExtBlockOffsetSize::new(&shape, &full_dim_array(0, ndim), &shape, &b_layout),
         );
 
-        let mut encoder = Encoder::new(3)?;
-        let mut cdata = Vec::<u8>::new();
-        let mut block_offsets =
-            Vec::<u64>::with_capacity(if nblocks == 0 { 0 } else { nblocks + 1 });
-        if nblocks > 0 {
-            block_offsets.push(0);
-        }
+        let encoder = Encoder::new(3)?;
         let block_capacity_bytes = b_layout.block_size * itemsize;
-        let max_blk_cdata_len = encoder.encode_bound(block_capacity_bytes);
+        let mut builder =
+            BlockTableBuilder::new(dtype.clone(), b_layout.block_size as BlockSize, encoder);
         let mut tmp_block_data = Vec::<u8>::with_capacity(block_capacity_bytes);
         let tmp_block_strides = default_strides(&block_shape, itemsize);
         let strides = array
@@ -167,25 +156,11 @@ impl Array<Owned> {
                 unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
             }
 
-            let cdata_len = cdata.len();
-            cdata.reserve(max_blk_cdata_len);
-            unsafe { cdata.set_len(cdata_len + max_blk_cdata_len) };
-            let blk_buf = &mut cdata[cdata_len..];
-            let blk_cdata_len = encoder.encode(&tmp_block_data, blk_buf)?;
-            debug_assert!(blk_cdata_len <= max_blk_cdata_len);
-            unsafe { cdata.set_len(cdata_len + blk_cdata_len) };
-            block_offsets.push(cdata.len() as u64);
+            builder.add_block(&tmp_block_data)?;
         }
 
-        let blocks = BlockTable::new(
-            Owned(crate::block::Owned {
-                cdata,
-                block_offsets,
-            }),
-            dtype,
-            padded_shape.iter().product::<usize>(),
-            b_layout.block_size as BlockSize,
-        );
+        let blocks = builder.finish();
+        let blocks = unsafe { blocks.swap_allocation(Owned) };
 
         Ok(Self {
             storage: blocks,
@@ -567,9 +542,8 @@ mod tests {
             .iter()
             .flat_map(|b| unsafe { cast_slice::<T, u8>(b) }.iter().copied())
             .collect();
-        let mut encoder = Encoder::new(3).unwrap();
-        let blocks =
-            BlockTable::build_from_data(&data, T::dtype(), block_len, &mut encoder).unwrap();
+        let encoder = Encoder::new(3).unwrap();
+        let blocks = BlockTable::build_from_data(&data, T::dtype(), block_len, encoder).unwrap();
         let blocks = unsafe { blocks.swap_allocation(|alloc| Owned(alloc)) };
         blocks
     }

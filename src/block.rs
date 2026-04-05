@@ -248,7 +248,7 @@ impl BlockTable<Owned> {
         data: &[u8],
         dtype: Dtype,
         block_size: BlockSize,
-        encoder: &mut Encoder,
+        encoder: Encoder,
     ) -> io::Result<Self> {
         let itemsize = dtype.itemsize();
         assert!(itemsize > 0);
@@ -256,39 +256,13 @@ impl BlockTable<Owned> {
         assert!(data.len() % itemsize as usize == 0);
         let nitems = data.len() / itemsize as usize;
         assert!(nitems % block_size as usize == 0);
-        let nblocks = nitems / block_size as usize;
 
         let b_size_bytes = block_size as usize * itemsize as usize;
-        let mut cdata = Vec::<u8>::new();
-        let mut block_offsets =
-            Vec::<u64>::with_capacity(if nblocks == 0 { 0 } else { nblocks + 1 });
-        if nblocks > 0 {
-            block_offsets.push(0);
-        }
-        let max_blk_cdata_len = encoder.encode_bound(b_size_bytes);
+        let mut builder = BlockTableBuilder::new(dtype, block_size, encoder);
         for b_data in data.chunks(b_size_bytes) {
-            let cdata_len = cdata.len();
-
-            cdata.reserve(max_blk_cdata_len);
-            unsafe { cdata.set_len(cdata_len + max_blk_cdata_len) };
-            let blk_buf = &mut cdata[cdata_len..];
-
-            let blk_cdata_len = encoder.encode(b_data, blk_buf)?;
-            debug_assert!(blk_cdata_len <= max_blk_cdata_len);
-            unsafe { cdata.set_len(cdata_len + blk_cdata_len) };
-
-            block_offsets.push(cdata.len() as u64);
+            builder.add_block(b_data)?;
         }
-
-        Ok(Self::new(
-            Owned {
-                cdata,
-                block_offsets,
-            },
-            dtype,
-            nitems,
-            block_size,
-        ))
+        Ok(builder.finish())
     }
 }
 
@@ -405,6 +379,65 @@ impl BlockTableAllocation for Mmap {
     }
 }
 
+pub(crate) struct BlockTableBuilder {
+    dtype: Dtype,
+    block_size: BlockSize,
+    encoder: Encoder,
+    cdata: Vec<u8>,
+    block_offsets: Vec<u64>,
+    max_blk_cdata_len: usize,
+}
+impl BlockTableBuilder {
+    pub(crate) fn new(dtype: Dtype, block_size: BlockSize, encoder: Encoder) -> Self {
+        assert!(dtype.itemsize() > 0);
+        assert!(block_size > 0);
+        let b_size_bytes = block_size as usize * dtype.itemsize() as usize;
+        let max_blk_cdata_len = encoder.encode_bound(b_size_bytes);
+        Self {
+            dtype,
+            block_size,
+            encoder,
+            cdata: Vec::new(),
+            block_offsets: Vec::new(),
+            max_blk_cdata_len,
+        }
+    }
+
+    pub(crate) fn add_block(&mut self, block_data: &[u8]) -> io::Result<()> {
+        let b_size_bytes = self.block_size as usize * self.dtype.itemsize() as usize;
+        assert_eq!(block_data.len(), b_size_bytes);
+
+        let cdata_len = self.cdata.len();
+        self.cdata.reserve(self.max_blk_cdata_len);
+        unsafe { self.cdata.set_len(cdata_len + self.max_blk_cdata_len) };
+        let blk_buf = &mut self.cdata[cdata_len..];
+
+        let blk_cdata_len = self.encoder.encode(block_data, blk_buf)?;
+        debug_assert!(blk_cdata_len <= self.max_blk_cdata_len);
+        unsafe { self.cdata.set_len(cdata_len + blk_cdata_len) };
+
+        if self.block_offsets.is_empty() {
+            self.block_offsets.push(0);
+        }
+        self.block_offsets.push(self.cdata.len() as u64);
+        Ok(())
+    }
+
+    pub(crate) fn finish(self) -> BlockTable<Owned> {
+        let nblocks = self.block_offsets.len().saturating_sub(1);
+        let nitems = nblocks * self.block_size as usize;
+        BlockTable::new(
+            Owned {
+                cdata: self.cdata,
+                block_offsets: self.block_offsets,
+            },
+            self.dtype,
+            nitems,
+            self.block_size,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{self, Cursor};
@@ -435,7 +468,7 @@ mod tests {
     fn build_from_items<T>(
         items: &[T],
         block_size: BlockSize,
-        encoder: &mut Encoder,
+        encoder: Encoder,
     ) -> io::Result<BlockTable<Owned>>
     where
         T: Dtyped,
@@ -451,8 +484,8 @@ mod tests {
     #[test]
     fn build_single_block() {
         let items: Vec<u8> = (0u8..8).collect();
-        let mut encoder = make_encoder();
-        let table = build_from_items(&items, 8, &mut encoder).unwrap();
+        let encoder = make_encoder();
+        let table = build_from_items(&items, 8, encoder).unwrap();
         assert_eq!(table.nblocks, 1);
         assert_eq!(table.nitems, 8);
         assert_eq!(decode_block(&table, 0, &mut make_decoder()), items);
@@ -462,8 +495,8 @@ mod tests {
     fn build_multiple_blocks_exact_divisor() {
         // 12 items, block_size=4 → 3 full blocks
         let items: Vec<u8> = (0u8..12).collect();
-        let mut encoder = make_encoder();
-        let table = build_from_items(&items, 4, &mut encoder).unwrap();
+        let encoder = make_encoder();
+        let table = build_from_items(&items, 4, encoder).unwrap();
         assert_eq!(table.nblocks, 3);
         assert_eq!(table.nitems, 12);
         let mut decoder = make_decoder();
@@ -476,9 +509,9 @@ mod tests {
     fn build_multiple_blocks_non_divisible_panics() {
         // 10 items, block_size=4 → not divisible, should panic
         let items: Vec<u8> = (0u8..10).collect();
-        let mut encoder = make_encoder();
+        let encoder = make_encoder();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            build_from_items(&items, 4, &mut encoder).unwrap();
+            build_from_items(&items, 4, encoder).unwrap();
         }));
         assert!(result.is_err());
     }
@@ -487,8 +520,8 @@ mod tests {
     fn build_with_itemsize_greater_than_one() {
         // 4 u32 values, block_size=2
         let items: Vec<u32> = vec![10, 20, 30, 40];
-        let mut encoder = make_encoder();
-        let table = build_from_items(&items, 2, &mut encoder).unwrap();
+        let encoder = make_encoder();
+        let table = build_from_items(&items, 2, encoder).unwrap();
         assert_eq!(table.nblocks, 2);
         assert_eq!(table.nitems, 4);
         let mut decoder = make_decoder();
@@ -505,8 +538,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<Owned> {
-        let mut encoder = make_encoder();
-        let table = build_from_items(items, block_size, &mut encoder).unwrap();
+        let encoder = make_encoder();
+        let table = build_from_items(items, block_size, encoder).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
         table.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
@@ -553,8 +586,8 @@ mod tests {
     #[test]
     fn round_trip_file() {
         let items: Vec<u32> = (0u32..18).collect();
-        let mut encoder = make_encoder();
-        let table = build_from_items(&items, 3, &mut encoder).unwrap();
+        let encoder = make_encoder();
+        let table = build_from_items(&items, 3, encoder).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
         let path = tmp_file.path();
@@ -577,12 +610,12 @@ mod tests {
     }
 
     fn make_storage<T: Dtyped>(items: &[T], block_len: BlockSize) -> BlockTable<Owned> {
-        let mut encoder = Encoder::new(3).unwrap();
+        let encoder = Encoder::new(3).unwrap();
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
             T::dtype(),
             block_len,
-            &mut encoder,
+            encoder,
         )
         .unwrap()
     }
