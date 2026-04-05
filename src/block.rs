@@ -3,11 +3,10 @@ use std::io::{self, Read, Seek, Write};
 
 use zerocopy::{FromBytes, IntoBytes};
 
+use crate::archive::{ArchiveReader, ArchiveWriter, Section};
+use crate::codec::{Encoder, ReadContext};
 use crate::dtype::Dtype;
 use crate::schema::{self, ArchiveType};
-use crate::storage::archive::{ArchiveReader, ArchiveWriter, Section};
-use crate::storage::codec::{Encoder, ReadContext};
-use crate::storage::{BlockSize, Storage};
 use crate::util::{cast_slice, cast_slice_mut};
 
 const _: () = const {
@@ -17,6 +16,14 @@ const _: () = const {
     );
 };
 
+pub(crate) type BlockSize = u32;
+
+/// Storage of 1D array items, organized in blocks.
+///
+/// The number of items must be divisible by the block length, there is no support for partial blocks.
+/// At all times the storage holds the invariants:
+/// - `block_size > 0`
+/// - `nitems % block_size == 0`
 pub(crate) struct BlockTable<'a> {
     cdata: Cow<'a, [u8]>,
     block_offsets: Cow<'a, [u64]>, // (nblocks+1,)
@@ -57,7 +64,54 @@ impl<'a> BlockTable<'a> {
         }
     }
 
-    pub fn write_to<W>(&self, writer: W) -> io::Result<()>
+    /// Get the dtype of items in this storage.
+    pub(crate) fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+
+    /// Get the total number of items in this storage.
+    pub(crate) fn nitems(&self) -> usize {
+        self.nitems
+    }
+
+    /// Get the length of a block in this storage.
+    ///
+    /// Note that the units are in items, not bytes.
+    pub(crate) fn block_len(&self) -> BlockSize {
+        self.block_size
+    }
+
+    /// Read a block of items into the provided buffer.
+    ///
+    /// # Arguments
+    ///
+    /// - `block_idx`: The index of the block to read, in the range `0..(nitems / block_len)`.
+    /// - `buf`: The buffer to read the block into. Must be of size `block_len * dtype.itemsize()`.
+    /// - `context`: a read context containing global configuration and reuseable buffers.
+    pub(crate) fn read_block(
+        &self,
+        block_idx: usize,
+        buf: &mut [u8],
+        context: &mut ReadContext,
+    ) -> io::Result<()> {
+        let b_size_bytes = self.block_len() as usize * self.dtype.itemsize() as usize;
+        if buf.len() < b_size_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Buffer too small",
+            ));
+        }
+
+        let begin = self.block_offsets[block_idx] as usize;
+        let end = self.block_offsets[block_idx + 1] as usize;
+        let b_cdata = &self.cdata[begin..end];
+
+        let nbytes = context.decode(b_cdata, buf)?;
+        debug_assert_eq!(nbytes, b_size_bytes);
+        Ok(())
+    }
+
+    pub(crate) fn write_to<W>(&self, writer: W) -> io::Result<()>
     where
         W: Write + Seek,
     {
@@ -103,7 +157,7 @@ impl<'a> BlockTable<'a> {
         Ok(())
     }
 
-    pub fn read_from<R>(reader: R, len: u64) -> io::Result<Self>
+    pub(crate) fn read_from<R>(reader: R, len: u64) -> io::Result<Self>
     where
         R: Read + Seek,
     {
@@ -122,7 +176,7 @@ impl<'a> BlockTable<'a> {
         Self::read_content(&mut reader)
     }
 
-    pub fn read_content<R>(reader: &mut ArchiveReader<R>) -> io::Result<Self>
+    pub(crate) fn read_content<R>(reader: &mut ArchiveReader<R>) -> io::Result<Self>
     where
         R: Read + Seek,
     {
@@ -228,51 +282,13 @@ impl BlockTable<'static> {
     }
 }
 
-impl<'a> Storage for BlockTable<'a> {
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
-    fn nitems(&self) -> usize {
-        self.nitems
-    }
-
-    fn block_len(&self) -> BlockSize {
-        self.block_size
-    }
-
-    fn read_block(
-        &self,
-        block_idx: usize,
-        buf: &mut [u8],
-        context: &mut ReadContext,
-    ) -> io::Result<()> {
-        let b_size_bytes = self.block_len() as usize * self.dtype.itemsize() as usize;
-        if buf.len() < b_size_bytes {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Buffer too small",
-            ));
-        }
-
-        let begin = self.block_offsets[block_idx] as usize;
-        let end = self.block_offsets[block_idx + 1] as usize;
-        let b_cdata = &self.cdata[begin..end];
-
-        let nbytes = context.decode(b_cdata, buf)?;
-        debug_assert_eq!(nbytes, b_size_bytes);
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::{self, Cursor};
 
     use super::{BlockSize, BlockTable};
+    use crate::codec::{Encoder, ReadContext};
     use crate::dtype::Dtyped;
-    use crate::storage::Storage;
-    use crate::storage::codec::{Encoder, ReadContext};
     use crate::util::cast_slice;
 
     fn make_encoder() -> Encoder {

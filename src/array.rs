@@ -1,6 +1,7 @@
 use std::io::{self, Read, Seek, Write};
 use std::ops::Range;
 
+use crate::archive::{ArchiveReader, ArchiveWriter};
 use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
@@ -8,15 +9,12 @@ use crate::iter::strides::{
     NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
 };
 use crate::schema::ArchiveType;
-use crate::storage::Storage;
-use crate::storage::archive::{ArchiveReader, ArchiveWriter};
 use crate::util::default_strides;
 use crate::util::{CowMut, DimArray};
 use std::borrow::Cow;
 
-use crate::storage::BlockSize;
-use crate::storage::block::BlockTable;
-use crate::storage::codec::{Encoder, ReadContext};
+use crate::block::{BlockSize, BlockTable};
+use crate::codec::{Encoder, ReadContext};
 use crate::util::{ceil_to_multiple, full_dim_array};
 use crate::{NDIM_MAX, schema};
 
@@ -45,17 +43,18 @@ impl BlocksLayout {
     }
 }
 
-pub struct Array<S> {
-    pub(crate) storage: S,
+pub struct Array {
+    pub(crate) storage: BlockTable<'static>,
     pub(crate) shape: DimArray<usize>,
     pub(crate) blocks_layout: BlocksLayout,
 }
 
-impl<S> Array<S>
-where
-    S: Storage,
-{
-    pub(crate) fn new(storage: S, shape: &[usize], block_shape: &[usize]) -> Self {
+impl Array {
+    pub(crate) fn new(
+        storage: BlockTable<'static>,
+        shape: &[usize],
+        block_shape: &[usize],
+    ) -> Self {
         let blocks_layout = BlocksLayout::new(block_shape, shape);
         Self {
             storage,
@@ -75,9 +74,7 @@ where
     pub fn shape(&self) -> &[usize] {
         &self.shape
     }
-}
 
-impl Array<BlockTable<'static>> {
     pub fn from_ndarray<T, D>(
         array: &ndarray::ArrayView<T, D>,
         block_shape: &[usize],
@@ -183,17 +180,8 @@ impl Array<BlockTable<'static>> {
             blocks_layout: b_layout,
         })
     }
-}
 
-pub struct ArrayRead<'a, S> {
-    array: &'a Array<S>,
-    context: CowMut<'a, ReadContext>,
-}
-impl<S> Array<S>
-where
-    S: Storage,
-{
-    pub fn read(&self) -> ArrayRead<'_, S> {
+    pub fn read(&self) -> ArrayRead<'_> {
         let context = ReadContext::new().expect("failed to create read context");
         ArrayRead {
             array: self,
@@ -201,7 +189,7 @@ where
         }
     }
 
-    pub fn read_with_context<'a>(&'a self, context: &'a mut ReadContext) -> ArrayRead<'a, S> {
+    pub fn read_ctx<'a>(&'a self, context: &'a mut ReadContext) -> ArrayRead<'a> {
         ArrayRead {
             array: self,
             context: CowMut::Borrowed(context),
@@ -209,10 +197,12 @@ where
     }
 }
 
-impl<'a, S> ArrayRead<'a, S>
-where
-    S: Storage,
-{
+pub struct ArrayRead<'a> {
+    array: &'a Array,
+    context: CowMut<'a, ReadContext>,
+}
+
+impl<'a> ArrayRead<'a> {
     pub fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
@@ -331,7 +321,7 @@ where
     }
 }
 
-impl Array<BlockTable<'static>> {
+impl Array {
     pub fn write_to<W>(&self, writer: W) -> io::Result<()>
     where
         W: Write + Seek,
@@ -424,13 +414,13 @@ impl Array<BlockTable<'static>> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, Cursor};
+    use std::io::Cursor;
 
     use ndarray::ArrayD;
 
-    use crate::dtype::{Dtype, Dtyped};
-    use crate::storage::codec::ReadContext;
-    use crate::storage::{BlockSize, Storage};
+    use crate::block::{BlockSize, BlockTable};
+    use crate::codec::Encoder;
+    use crate::dtype::Dtyped;
     use crate::util::cast_slice;
 
     use super::Array;
@@ -450,57 +440,21 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // MockStorage: serves pre-built typed blocks
+    // Helper: build a BlockTable from pre-arranged typed blocks
     // -----------------------------------------------------------------------
 
-    struct MockStorage {
-        blocks: Vec<Vec<u8>>,
-        dtype: Dtype,
-        block_len: BlockSize,
-    }
-
-    impl Storage for MockStorage {
-        fn dtype(&self) -> &Dtype {
-            &self.dtype
-        }
-        fn nitems(&self) -> usize {
-            self.blocks.len() * self.block_len as usize
-        }
-        fn block_len(&self) -> BlockSize {
-            self.block_len
-        }
-        fn read_block(
-            &self,
-            idx: usize,
-            buf: &mut [u8],
-            context: &mut ReadContext,
-        ) -> io::Result<()> {
-            let src = &self.blocks[idx];
-            buf[..src.len()].copy_from_slice(src);
-            Ok(())
-        }
-    }
-
-    fn mock<T: Dtyped>(blocks: &[&[T]]) -> MockStorage {
+    fn make_block_table<T: Dtyped>(blocks: &[&[T]]) -> BlockTable<'static> {
         let block_len = blocks[0].len() as BlockSize;
-        let dtype = T::dtype();
-        let byte_blocks = blocks
+        let data: Vec<u8> = blocks
             .iter()
-            .map(|b| unsafe { cast_slice::<T, u8>(b) }.to_vec())
+            .flat_map(|b| unsafe { cast_slice::<T, u8>(b) }.iter().copied())
             .collect();
-        MockStorage {
-            blocks: byte_blocks,
-            dtype,
-            block_len,
-        }
+        let mut encoder = Encoder::new(3).unwrap();
+        BlockTable::build_from_data(&data, T::dtype(), block_len, &mut encoder).unwrap()
     }
 
-    fn array<T: Dtyped>(
-        blocks: &[&[T]],
-        shape: &[usize],
-        block_shape: &[usize],
-    ) -> Array<MockStorage> {
-        Array::new(mock(blocks), shape, block_shape)
+    fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array {
+        Array::new(make_block_table(blocks), shape, block_shape)
     }
 
     // -----------------------------------------------------------------------
@@ -797,10 +751,7 @@ mod tests {
     // write_to / read_from round-trip
     // -----------------------------------------------------------------------
 
-    fn array_round_trip<T, S, D>(
-        src: &ndarray::ArrayBase<S, D>,
-        block_shape: &[usize],
-    ) -> Array<crate::storage::block::BlockTable<'static>>
+    fn array_round_trip<T, S, D>(src: &ndarray::ArrayBase<S, D>, block_shape: &[usize]) -> Array
     where
         T: Dtyped,
         S: ndarray::Data<Elem = T>,
