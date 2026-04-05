@@ -3,31 +3,23 @@ syntax = "proto3";
 package zix.v1;
 
 import "zix/v1/dtype.proto";
-import "zix/v1/structure.proto";
 
-message BlockTable {
-    Dtype dtype = 1;
-    uint64 nitems = 2;
-    uint64 block_size = 3;
+message BlockTableHeader {
+  Dtype dtype = 1;
+  uint64 nitems = 2;
+  uint64 block_size = 3;
 
-    // The sections that exist in the table of contents of the block table.
-    //
-    // A table with { offset: i64, size: u64 } (C struct) rows exists immediately after this message.
-    // Each row describes the offset and size of a section in the block table file.
-    // The table_of_contents field specifies which sections exist in the table of contents, like a tag per row.
-    // The TOC is encoded in this way instead of repeated protobuf messages so it will have a fixed
-    // size and we can override it in-place after writing the file body.
-    repeated TableOfContents table_of_contents = 4;
-    enum TableOfContents {
-        TABLE_OF_CONTENTS_UNSPECIFIED = 0;
-        TABLE_OF_CONTENTS_CDATA = 1;
-        TABLE_OF_CONTENTS_BLOCK_OFFSETS = 2;
-    }
+  // The sections that exist in the table of contents of the block table.
+  //
+  // A table with { offset: i64, size: u64 } (C struct) rows exists immediately after this message.
+  // Each row describes the offset and size of a section in the block table file.
+  // The table_of_contents field specifies which sections exist in the table of contents, like a tag per row.
+  // The TOC is encoded in this way instead of repeated protobuf messages so it will have a fixed
+  // size and we can override it in-place after writing the file body.
+  repeated TableOfContents table_of_contents = 4;
+  enum TableOfContents {
+    TABLE_OF_CONTENTS_UNSPECIFIED = 0;
+    TABLE_OF_CONTENTS_CDATA = 1;
+    TABLE_OF_CONTENTS_BLOCK_OFFSETS = 2;
+  }
 }
-
-// message Array {
-//     BlockTable blocks = 1;
-//     Dtype dtype = 2;
-//     repeated uint64 shape = 3;
-//     repeated uint64 block_shape = 4;
-// }

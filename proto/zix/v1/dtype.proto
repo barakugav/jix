@@ -4,50 +4,52 @@ package zix.v1;
 
 // Description of a type layout and inner fields
 message Dtype {
-    oneof kind {
-        DtypeScalar scalar = 1;
-        DtypeStruct struct = 2;
-    }
-    repeated uint64 shape = 3;
-    uint32 itemsize = 4;
-    uint32 alignment = 5;
+  oneof kind {
+    DtypeScalar scalar = 1;
+    DtypeStruct struct = 2;
+  }
+  repeated uint64 shape = 3;
+  uint32 itemsize = 4;
+  uint32 alignment = 5;
 }
+
 message DtypeScalar {
-    DtypeScalarKind kind = 1;
-    Endianness endianness = 2;
+  DtypeScalarKind kind = 1;
+  Endianness endianness = 2;
 }
+
 message DtypeStruct {
-    message Field {
-        string name = 1;
-        uint32 offset = 2;
-        Dtype dtype = 3;
-    }
-    // The fields of the struct dtype, sorted by their offsets in ascending order.
-    repeated Field fields = 1;
+  message Field {
+    string name = 1;
+    uint32 offset = 2;
+    Dtype dtype = 3;
+  }
+  // The fields of the struct dtype, sorted by their offsets in ascending order.
+  repeated Field fields = 1;
 }
 
 // The kind of a scalar dtype
 enum DtypeScalarKind {
-    DTYPE_SCALAR_KIND_UNSPECIFIED = 0;
-    DTYPE_SCALAR_KIND_I8 = 1;
-    DTYPE_SCALAR_KIND_I16 = 2;
-    DTYPE_SCALAR_KIND_I32 = 3;
-    DTYPE_SCALAR_KIND_I64 = 4;
-    DTYPE_SCALAR_KIND_U8 = 5;
-    DTYPE_SCALAR_KIND_U16 = 6;
-    DTYPE_SCALAR_KIND_U32 = 7;
-    DTYPE_SCALAR_KIND_U64 = 8;
-    DTYPE_SCALAR_KIND_F16 = 9;
-    DTYPE_SCALAR_KIND_F32 = 10;
-    DTYPE_SCALAR_KIND_F64 = 11;
-    DTYPE_SCALAR_KIND_COMPLEX_F32 = 12;
-    DTYPE_SCALAR_KIND_COMPLEX_F64 = 13;
-    DTYPE_SCALAR_KIND_BOOL = 14;
+  DTYPE_SCALAR_KIND_UNSPECIFIED = 0;
+  DTYPE_SCALAR_KIND_I8 = 1;
+  DTYPE_SCALAR_KIND_I16 = 2;
+  DTYPE_SCALAR_KIND_I32 = 3;
+  DTYPE_SCALAR_KIND_I64 = 4;
+  DTYPE_SCALAR_KIND_U8 = 5;
+  DTYPE_SCALAR_KIND_U16 = 6;
+  DTYPE_SCALAR_KIND_U32 = 7;
+  DTYPE_SCALAR_KIND_U64 = 8;
+  DTYPE_SCALAR_KIND_F16 = 9;
+  DTYPE_SCALAR_KIND_F32 = 10;
+  DTYPE_SCALAR_KIND_F64 = 11;
+  DTYPE_SCALAR_KIND_COMPLEX_F32 = 12;
+  DTYPE_SCALAR_KIND_COMPLEX_F64 = 13;
+  DTYPE_SCALAR_KIND_BOOL = 14;
 }
 
 // Endianness of a scalar
 enum Endianness {
-    ENDIANNESS_UNSPECIFIED = 0;
-    ENDIANNESS_LITTLE = 1;
-    ENDIANNESS_BIG = 2;
+  ENDIANNESS_UNSPECIFIED = 0;
+  ENDIANNESS_LITTLE = 1;
+  ENDIANNESS_BIG = 2;
 }

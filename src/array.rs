@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Read, Seek, Write};
 use std::ops::Range;
 
 use crate::dtype::{Dtype, Dtyped};
@@ -7,16 +7,18 @@ use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{
     NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
 };
+use crate::schema::ArchiveType;
 use crate::storage::Storage;
+use crate::storage::archive::{ArchiveReader, ArchiveWriter};
 use crate::util::DimArray;
 use crate::util::default_strides;
 use std::borrow::Cow;
 
-use crate::NDIM_MAX;
 use crate::storage::BlockSize;
 use crate::storage::block::BlockTable;
 use crate::storage::codec::Encoder;
 use crate::util::{ceil_to_multiple, full_dim_array};
+use crate::{NDIM_MAX, schema};
 
 pub(crate) struct BlocksLayout {
     pub(crate) block_shape: DimArray<usize>,
@@ -290,9 +292,100 @@ where
     }
 }
 
+impl Array<BlockTable<'static>> {
+    pub fn write_to<W>(&self, writer: W) -> io::Result<()>
+    where
+        W: Write + Seek,
+    {
+        let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1)?;
+
+        let header = schema::ArrayHeader {
+            shape: self.shape.iter().cloned().map(|s| s as u64).collect(),
+            block_shape: self
+                .blocks_layout
+                .block_shape
+                .iter()
+                .cloned()
+                .map(|s| s as u64)
+                .collect(),
+        };
+        writer.write_message(&header)?;
+
+        self.storage.write_content(&mut writer)
+    }
+
+    pub fn read_from<R>(reader: R, len: u64) -> io::Result<Self>
+    where
+        R: Read + Seek,
+    {
+        let mut reader = ArchiveReader::new(reader, len)?;
+        let f_meta = reader.read_file_meta()?;
+        if f_meta.archive_type != schema::ArchiveType::ArrayV1 as i32 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "unexpected zix file type: expected {:?}, actual {:?}",
+                    schema::ArchiveType::ArrayV1,
+                    ArchiveType::try_from(f_meta.archive_type)
+                ),
+            ));
+        }
+
+        let header = reader.read_message::<schema::ArrayHeader>()?;
+        let ndim = header.shape.len();
+        if ndim > NDIM_MAX {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("array ndim {ndim} exceeds maximum supported ndim {NDIM_MAX}"),
+            ));
+        }
+        let shape = header
+            .shape
+            .iter()
+            .cloned()
+            .map(|s| s as usize)
+            .collect::<DimArray<_>>();
+        if header.block_shape.len() != ndim {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "array block_shape has different ndim {} than shape {ndim}",
+                    header.block_shape.len(),
+                ),
+            ));
+        }
+        let block_shape = header
+            .block_shape
+            .iter()
+            .cloned()
+            .map(|s| s as usize)
+            .collect::<DimArray<_>>();
+        let padded_shape = block_shape
+            .iter()
+            .zip(&shape)
+            .map(|(&b, &s)| if s == 0 { 0 } else { ceil_to_multiple(s, b) })
+            .collect::<DimArray<_>>();
+
+        let blocks = BlockTable::read_content(&mut reader)?;
+        let expected_nitems = padded_shape.iter().product::<usize>();
+        if blocks.nitems() != expected_nitems {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "array blocks nitems {} does not match shape product {}",
+                    blocks.nitems(),
+                    expected_nitems
+                ),
+            ));
+        }
+
+        Ok(Self::new(blocks, &shape, &block_shape))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io;
+    use std::io::{self, Cursor};
 
     use ndarray::ArrayD;
 
@@ -649,7 +742,120 @@ mod tests {
         let got: ArrayD<u8> = a.sub_ndarray(&[1..3, 2..5]).unwrap();
         assert_eq!(
             got,
-            ndarray::array![[8u8, 9, 10], [14, 15, 16]].view().into_dyn()
+            ndarray::array![[8u8, 9, 10], [14, 15, 16]]
+                .view()
+                .into_dyn()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // write_to / read_from round-trip
+    // -----------------------------------------------------------------------
+
+    fn array_round_trip<T, S, D>(
+        src: &ndarray::ArrayBase<S, D>,
+        block_shape: &[usize],
+    ) -> Array<crate::storage::block::BlockTable<'static>>
+    where
+        T: Dtyped,
+        S: ndarray::Data<Elem = T>,
+        D: ndarray::Dimension,
+    {
+        let a = Array::from_ndarray(&src.view(), block_shape).unwrap();
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        a.write_to(&mut buf).unwrap();
+        let bytes = buf.into_inner();
+        let len = bytes.len() as u64;
+        Array::read_from(Cursor::new(bytes), len).unwrap()
+    }
+
+    #[test]
+    fn write_read_1d_single_block() {
+        let src = ndarray::array![0u8, 1, 2, 3];
+        let a2 = array_round_trip::<u8, _, _>(&src, &[4]);
+        assert_eq!(a2.shape(), &[4]);
+        assert_eq!(a2.ndim(), 1);
+        assert_eq!(a2.dtype(), &u8::dtype());
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn write_read_1d_multi_block() {
+        let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
+        let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
+        assert_eq!(a2.shape(), &[6]);
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn write_read_1d_with_padding() {
+        // size 5, block 3 → padded to 6; shape is preserved as 5
+        let src = ndarray::array![0u8, 1, 2, 3, 4];
+        let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
+        assert_eq!(a2.shape(), &[5]);
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn write_read_1d_i32() {
+        let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
+        let a2 = array_round_trip::<i32, _, _>(&src, &[4]);
+        assert_eq!(a2.dtype(), &i32::dtype());
+        assert_eq!(a2.to_ndarray::<i32>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn write_read_1d_f32() {
+        let src = ndarray::array![0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5];
+        let a2 = array_round_trip::<f32, _, _>(&src, &[3]);
+        assert_eq!(a2.dtype(), &f32::dtype());
+        assert_eq!(a2.to_ndarray::<f32>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn write_read_2d() {
+        #[rustfmt::skip]
+        let src = ndarray::array![
+            [0u8,  1,  2,  3,  4,  5],
+            [6,    7,  8,  9, 10, 11],
+            [12,  13, 14, 15, 16, 17],
+            [18,  19, 20, 21, 22, 23],
+        ];
+        let a2 = array_round_trip::<u8, _, _>(&src, &[2, 3]);
+        assert_eq!(a2.shape(), &[4, 6]);
+        assert_eq!(a2.ndim(), 2);
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn write_read_2d_with_padding() {
+        // shape [3,5], block [2,3] → padded to [4,6]; shape preserved as [3,5]
+        #[rustfmt::skip]
+        let src = ndarray::array![
+            [0i32,  1,  2,  3,  4],
+            [5,     6,  7,  8,  9],
+            [10,   11, 12, 13, 14],
+        ];
+        let a2 = array_round_trip::<i32, _, _>(&src, &[2, 3]);
+        assert_eq!(a2.shape(), &[3, 5]);
+        assert_eq!(a2.to_ndarray::<i32>().unwrap(), src.view().into_dyn());
+    }
+
+    #[test]
+    fn write_read_file() {
+        let src = ndarray::array![0u32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        let a = Array::from_ndarray(&src.view(), &[4]).unwrap();
+
+        let tmp_file = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp_file.path().to_path_buf();
+        a.write_to(std::fs::File::create(&path).unwrap()).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let len = file.metadata().unwrap().len();
+        let a2 = Array::read_from(file, len).unwrap();
+
+        assert_eq!(a2.shape(), &[12]);
+        assert_eq!(a2.dtype(), &u32::dtype());
+        assert_eq!(a2.to_ndarray::<u32>().unwrap(), src.view().into_dyn());
     }
 }

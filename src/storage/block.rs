@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::io::{self, Read, Seek, Write};
-use std::path::Path;
 
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -74,28 +73,29 @@ impl<'a> BlockTable<'a> {
         }
     }
 
-    pub fn write_to_file(&self, path: &Path) -> io::Result<()> {
-        let mut writer = std::fs::File::create(path)?;
-        self.write_to(&mut writer)
-    }
-
-    pub fn write_to<W>(&self, writer: &mut W) -> io::Result<()>
+    pub fn write_to<W>(&self, writer: W) -> io::Result<()>
     where
         W: Write + Seek,
     {
         let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::BlockTable)?;
+        self.write_content(&mut writer)
+    }
 
-        // Write table
-        let table = schema::BlockTable {
+    pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> io::Result<()>
+    where
+        W: Write + Seek,
+    {
+        // Write header
+        let header = schema::BlockTableHeader {
             dtype: Some(self.dtype.to_proto()),
             nitems: self.nitems as u64,
             block_size: self.block_size as u64,
             table_of_contents: vec![
-                schema::block_table::TableOfContents::BlockOffsets as i32,
-                schema::block_table::TableOfContents::Cdata as i32,
+                schema::block_table_header::TableOfContents::BlockOffsets as i32,
+                schema::block_table_header::TableOfContents::Cdata as i32,
             ],
         };
-        writer.write_message(&table)?;
+        writer.write_message(&header)?;
 
         // Write table of contents (placeholder for now, will be overwritten later)
         let mut toc = [Section::default(); 2];
@@ -119,12 +119,6 @@ impl<'a> BlockTable<'a> {
         Ok(())
     }
 
-    pub fn read_from_file(path: &Path) -> io::Result<Self> {
-        let file = std::fs::File::open(path)?;
-        let reader_len = file.metadata()?.len();
-        Self::read_from(file, reader_len)
-    }
-
     pub fn read_from<R>(reader: R, len: u64) -> io::Result<Self>
     where
         R: Read + Seek,
@@ -141,9 +135,16 @@ impl<'a> BlockTable<'a> {
                 ),
             ));
         }
-        let table = reader.read_message::<schema::BlockTable>()?;
+        Self::read_content(&mut reader)
+    }
 
-        if table.table_of_contents.len() != 2 {
+    pub fn read_content<R>(reader: &mut ArchiveReader<R>) -> io::Result<Self>
+    where
+        R: Read + Seek,
+    {
+        let header = reader.read_message::<schema::BlockTableHeader>()?;
+
+        if header.table_of_contents.len() != 2 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "expected 2 sections in table of contents",
@@ -152,11 +153,13 @@ impl<'a> BlockTable<'a> {
         let toc = <[Section; 2]>::read_from_io(reader.inner_mut())?;
         let mut cdata_section = None;
         let mut block_offsets_section = None;
-        for (toc_idx, toc_entry) in table.table_of_contents().enumerate() {
+        for (toc_idx, toc_entry) in header.table_of_contents().enumerate() {
             match toc_entry {
-                schema::block_table::TableOfContents::Unspecified => {} // fail later
-                schema::block_table::TableOfContents::Cdata => cdata_section = Some(toc[toc_idx]),
-                schema::block_table::TableOfContents::BlockOffsets => {
+                schema::block_table_header::TableOfContents::Unspecified => {} // fail later
+                schema::block_table_header::TableOfContents::Cdata => {
+                    cdata_section = Some(toc[toc_idx])
+                }
+                schema::block_table_header::TableOfContents::BlockOffsets => {
                     block_offsets_section = Some(toc[toc_idx])
                 }
             }
@@ -187,9 +190,9 @@ impl<'a> BlockTable<'a> {
         Ok(Self::new(
             Cow::Owned(cdata),
             Cow::Owned(block_offsets),
-            Dtype::from_proto(table.dtype.as_ref().unwrap())?,
-            table.nitems as usize,
-            table.block_size as BlockSize,
+            Dtype::from_proto(header.dtype.as_ref().unwrap())?,
+            header.nitems as usize,
+            header.block_size as BlockSize,
         ))
     }
 }
@@ -426,9 +429,14 @@ mod tests {
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
         let path = tmp_file.path();
-        table.write_to_file(&path).unwrap();
-        let table2 = BlockTable::read_from_file(&path).unwrap();
-        let _ = std::fs::remove_file(&path);
+        table
+            .write_to(&mut std::fs::File::create(path).unwrap())
+            .unwrap();
+
+        let file = std::fs::File::open(path).unwrap();
+        let reader_len = file.metadata().unwrap().len();
+        let table2 = BlockTable::read_from(file, reader_len).unwrap();
+        std::fs::remove_file(&path).unwrap();
 
         assert_eq!(table2.nblocks, 6);
         assert_eq!(table2.nitems, 18);

@@ -1,4 +1,4 @@
-mod archive;
+pub(crate) mod archive;
 pub(crate) mod block;
 pub(crate) mod codec;
 mod plain;
