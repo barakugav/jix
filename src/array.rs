@@ -1,3 +1,5 @@
+use std::any::TypeId;
+use std::cell::Cell;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, Write};
 use std::ops::Range;
@@ -74,17 +76,11 @@ impl<A> Array<A> {
 
     pub fn data(&self) -> ArrayData<'_, A> {
         let context = ReadContext::new().expect("failed to create read context");
-        ArrayData {
-            array: self,
-            context: MaybeOwned::Owned(context),
-        }
+        ArrayData::new(self, MaybeOwned::Owned(context))
     }
 
     pub fn data_ctx<'a>(&'a self, context: &'a ReadContext) -> ArrayData<'a, A> {
-        ArrayData {
-            array: self,
-            context: MaybeOwned::Borrowed(context),
-        }
+        ArrayData::new(self, MaybeOwned::Borrowed(context))
     }
 }
 
@@ -202,9 +198,18 @@ impl Array<Owned> {
 pub struct ArrayData<'a, A> {
     array: &'a Array<A>,
     context: MaybeOwned<'a, ReadContext>,
+    type_id: Cell<Option<TypeId>>,
 }
 
 impl<'a, A> ArrayData<'a, A> {
+    fn new(array: &'a Array<A>, context: MaybeOwned<'a, ReadContext>) -> Self {
+        Self {
+            array,
+            context,
+            type_id: Cell::new(None),
+        }
+    }
+
     pub fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
@@ -215,6 +220,28 @@ impl<'a, A> ArrayData<'a, A> {
 
     pub fn shape(&self) -> &[usize] {
         self.array.shape()
+    }
+
+    fn check_type<T: Dtyped>(&self) -> io::Result<()> {
+        let type_id = TypeId::of::<T>();
+        if self.type_id.get() == Some(type_id) {
+            return Ok(());
+        }
+
+        let dtype = T::dtype();
+        if self.dtype() != &dtype {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "requested type {:?} does not match array dtype {:?}",
+                    dtype,
+                    self.dtype()
+                ),
+            ));
+        }
+
+        self.type_id.set(Some(type_id));
+        Ok(())
     }
 
     pub fn to_ndarray<T>(&self) -> io::Result<ndarray::ArrayD<T>>
@@ -239,7 +266,7 @@ impl<'a, A> ArrayData<'a, A> {
         let ndim = shape.len();
         let dtype = self.dtype();
         let itemsize = dtype.itemsize() as usize;
-        assert_eq!(dtype, &T::dtype());
+        self.check_type::<T>()?;
         // Output is sized to the requested range, not the full array shape.
         let out_shape = range
             .iter()
@@ -1103,5 +1130,40 @@ mod tests {
         assert_eq!(read.shape(), &[6]);
         assert_eq!(read.data().to_ndarray::<u8>().unwrap(), src2.into_dyn());
         drop(tmp_file);
+    }
+
+    // -----------------------------------------------------------------------
+    // type_id cache tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn check_type_cached_correct_dtype_multiple_reads() {
+        // Repeated reads with the correct dtype should all succeed (the cached
+        // TypeId path is exercised from the second call onward).
+        let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
+        let data = a.data();
+        let expected = ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap();
+        for _ in 0..4 {
+            assert_eq!(data.to_ndarray::<u8>().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn check_type_interleaved_correct_and_incorrect_dtype() {
+        // Reads with the wrong dtype should always return an error, even after
+        // a successful read has primed the TypeId cache.
+        let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
+        let data = a.data();
+        let expected = ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap();
+
+        // First two reads: wrong types — must error before cache is primed.
+        assert!(data.to_ndarray::<u32>().is_err());
+        assert!(data.to_ndarray::<i8>().is_err());
+        // Third read: correct — primes the cache.
+        assert_eq!(data.to_ndarray::<u8>().unwrap(), expected);
+        // Fourth read: wrong type — must error even after cache is primed.
+        assert!(data.to_ndarray::<u32>().is_err());
+        // Fifth read: correct — cache still valid.
+        assert_eq!(data.to_ndarray::<u8>().unwrap(), expected);
     }
 }
