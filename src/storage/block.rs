@@ -3,11 +3,11 @@ use std::cell::RefCell;
 use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 
-use prost::Message;
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::dtype::Dtype;
 use crate::schema::{self, ArchiveType};
-use crate::storage::archive::{ArchiveReader, ArchiveWriter};
+use crate::storage::archive::{ArchiveReader, ArchiveWriter, Section};
 use crate::storage::codec::{Decoder, Encoder};
 use crate::storage::{BlockSize, Storage};
 use crate::util::{cast_slice, cast_slice_mut};
@@ -83,7 +83,24 @@ impl<'a> BlockTable<'a> {
     where
         W: Write + Seek,
     {
-        let mut writer = ArchiveWriter::new(writer)?;
+        let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::BlockTable)?;
+
+        // Write table
+        let table = schema::BlockTable {
+            dtype: Some(self.dtype.to_proto()),
+            nitems: self.nitems as u64,
+            block_size: self.block_size as u64,
+            table_of_contents: vec![
+                schema::block_table::TableOfContents::BlockOffsets as i32,
+                schema::block_table::TableOfContents::Cdata as i32,
+            ],
+        };
+        writer.write_message(&table)?;
+
+        // Write table of contents (placeholder for now, will be overwritten later)
+        let mut toc = [Section::default(); 2];
+        let toc_offset = writer.stream_position()?;
+        writer.write_all(toc.as_bytes())?;
 
         // Write body data sections
         let cdata = writer.write_section(&self.cdata, align_of::<u8>())?;
@@ -92,15 +109,12 @@ impl<'a> BlockTable<'a> {
             align_of::<u64>(),
         )?;
 
-        // Write table and footer
-        let table = schema::BlockTable {
-            dtype: Some(self.dtype.to_proto()),
-            nitems: self.nitems as u64,
-            block_size: self.block_size as u64,
-            cdata: Some(cdata),
-            block_offsets: Some(block_offsets),
-        };
-        writer.write_main_section_and_footer(&table, schema::ArchiveType::BlockTable)?;
+        // Go back and write table of contents
+        toc = [block_offsets, cdata];
+        let current_pos = writer.stream_position()?;
+        writer.seek(io::SeekFrom::Start(toc_offset))?;
+        writer.write_all(toc.as_bytes())?;
+        writer.seek(io::SeekFrom::Start(current_pos))?;
 
         Ok(())
     }
@@ -116,9 +130,7 @@ impl<'a> BlockTable<'a> {
         R: Read + Seek,
     {
         let mut reader = ArchiveReader::new(reader, len)?;
-
-        // Read footer and table
-        let (f_meta, table_bytes) = reader.read_file_meta_and_main_section()?;
+        let f_meta = reader.read_file_meta()?;
         if f_meta.archive_type != schema::ArchiveType::BlockTable as i32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -129,12 +141,39 @@ impl<'a> BlockTable<'a> {
                 ),
             ));
         }
-        let table = schema::BlockTable::decode_length_delimited(table_bytes)?;
+        let table = reader.read_message::<schema::BlockTable>()?;
+
+        if table.table_of_contents.len() != 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "expected 2 sections in table of contents",
+            ));
+        }
+        let toc = <[Section; 2]>::read_from_io(reader.inner_mut())?;
+        let mut cdata_section = None;
+        let mut block_offsets_section = None;
+        for (toc_idx, toc_entry) in table.table_of_contents().enumerate() {
+            match toc_entry {
+                schema::block_table::TableOfContents::Unspecified => {} // fail later
+                schema::block_table::TableOfContents::Cdata => cdata_section = Some(toc[toc_idx]),
+                schema::block_table::TableOfContents::BlockOffsets => {
+                    block_offsets_section = Some(toc[toc_idx])
+                }
+            }
+        }
+        let (Some(cdata_section), Some(block_offsets_section)) =
+            (cdata_section, block_offsets_section)
+        else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "missing sections in table of contents",
+            ));
+        };
 
         // Read body data sections
-        let cdata = reader.read_section(table.cdata.as_ref().unwrap())?;
+        let cdata = reader.read_section(&cdata_section)?;
         let block_offsets = {
-            let block_offsets_section = table.block_offsets.as_ref().unwrap();
+            let block_offsets_section = &block_offsets_section;
             let block_offsets_len =
                 block_offsets_section.size as usize / std::mem::size_of::<u64>();
             let mut block_offsets = Vec::<u64>::with_capacity(block_offsets_len);

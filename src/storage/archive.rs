@@ -4,8 +4,8 @@ use std::ops::{Deref, DerefMut};
 use prost::Message;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
-use crate::schema::Section;
 use crate::schema::{self, ArchiveType};
+use crate::util::ceil_to_multiple;
 
 const MAGIC: &[u8; 4] = b"ZIX1";
 
@@ -15,12 +15,11 @@ struct Header {
     magic: [u8; 4],
 }
 
-#[derive(Default, FromBytes, IntoBytes, Immutable)]
+#[derive(Default, Clone, Copy, FromBytes, IntoBytes, Immutable)]
 #[repr(C)]
-struct Footer {
-    main_section_size: u32,
-    file_metadata_size: u32,
-    magic: [u8; 4],
+pub(crate) struct Section {
+    pub(crate) offset: i64,
+    pub(crate) size: u64,
 }
 
 pub(crate) struct ArchiveWriter<W> {
@@ -29,20 +28,27 @@ pub(crate) struct ArchiveWriter<W> {
     tmp_buf: Vec<u8>,
 }
 impl<W> ArchiveWriter<W> {
-    pub(crate) fn new(mut writer: W) -> io::Result<Self>
+    pub(crate) fn new(mut writer: W, archive_type: ArchiveType) -> io::Result<Self>
     where
         W: Write + Seek,
     {
         let base_offset = writer.stream_position()?;
+        let mut writer = Self {
+            writer,
+            base_offset,
+            tmp_buf: Vec::new(),
+        };
 
         let header = Header { magic: *MAGIC };
         writer.write_all(header.as_bytes())?;
 
-        Ok(Self {
-            writer,
-            base_offset,
-            tmp_buf: Vec::new(),
-        })
+        let file_metadata = schema::FileMetadata {
+            archive_type: archive_type as i32,
+            lib_version_semver: 0, // TODO
+        };
+        writer.write_message(&file_metadata)?;
+
+        Ok(writer)
     }
 
     pub(crate) fn write_message(&mut self, message: &impl Message) -> io::Result<usize>
@@ -65,12 +71,19 @@ impl<W> ArchiveWriter<W> {
         &mut self.writer
     }
 
+    pub(crate) fn offset_from_base(&mut self) -> io::Result<u64>
+    where
+        W: Seek,
+    {
+        Ok(self.stream_position()? - self.base_offset)
+    }
+
     pub(crate) fn write_section(&mut self, data: &[u8], alignment: usize) -> io::Result<Section>
     where
         W: Write + Seek,
     {
         let offset = self.stream_position()?;
-        let padded_offset = offset.div_ceil(alignment as u64) * alignment as u64;
+        let padded_offset = ceil_to_multiple(offset, alignment as u64);
         let padding = padded_offset - offset;
         if padding > 0 {
             self.tmp_buf.clear();
@@ -86,28 +99,6 @@ impl<W> ArchiveWriter<W> {
             offset: offset as i64 - self.base_offset as i64,
             size,
         })
-    }
-
-    pub(crate) fn write_main_section_and_footer(
-        &mut self,
-        main_section: &impl Message,
-        archive_type: ArchiveType,
-    ) -> io::Result<()>
-    where
-        W: Write + Seek,
-    {
-        let main_section_size = self.write_message(main_section)?;
-        let file_metadata_size = self.write_message(&schema::FileMetadata {
-            archive_type: archive_type as i32,
-            lib_version_semver: 0, // TODO
-        })?;
-        let footer = Footer {
-            main_section_size: main_section_size.try_into().unwrap(),
-            file_metadata_size: file_metadata_size.try_into().unwrap(),
-            magic: *MAGIC,
-        };
-        self.write_all(footer.as_bytes())?;
-        Ok(())
     }
 }
 impl<W> Deref for ArchiveWriter<W> {
@@ -133,7 +124,7 @@ impl<R> ArchiveReader<R> {
     where
         R: Read + Seek,
     {
-        if length < (size_of::<Header>() + size_of::<Footer>()) as u64 {
+        if length < size_of::<Header>() as u64 {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "zix file too short",
@@ -257,42 +248,11 @@ impl<R> ArchiveReader<R> {
         Ok(())
     }
 
-    pub(crate) fn read_file_meta_and_main_section(
-        &mut self,
-    ) -> io::Result<(schema::FileMetadata, &[u8])>
+    pub(crate) fn read_file_meta(&mut self) -> io::Result<schema::FileMetadata>
     where
-        R: Read + Seek,
+        R: Read,
     {
-        // Read footer
-        debug_assert!(self.length >= (size_of::<Header>() + size_of::<Footer>()) as u64);
-        let footer_offset = self.length - size_of::<Footer>() as u64;
-        self.seek_relative_to_base(footer_offset as i64)?;
-        let footer = Footer::read_from_io(&mut self.reader)?;
-        if &footer.magic != MAGIC {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "invalid footer magic",
-            ));
-        }
-
-        // Read main section and file metadata bytes (in a single read)
-        let main_section_offset = footer_offset
-            .checked_sub(footer.file_metadata_size as u64 + footer.main_section_size as u64)
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "invalid footer: main section and file metadata sizes are too large",
-                )
-            })?;
-        self.seek_relative_to_base(main_section_offset as i64)?;
-        let (main_section_bytes, file_meta_bytes) = self
-            .read_slice(footer.file_metadata_size as usize + footer.main_section_size as usize)?
-            .split_at(footer.main_section_size as usize);
-
-        // Decode file metadata
-        let file_meta = schema::FileMetadata::decode_length_delimited(file_meta_bytes)?;
-
-        Ok((file_meta, main_section_bytes))
+        self.read_message()
     }
 
     pub(crate) fn seek_relative_to_base(&mut self, offset: i64) -> io::Result<u64>

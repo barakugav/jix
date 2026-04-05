@@ -23,7 +23,3 @@ enum ArchiveType {
     ARCHIVE_TYPE_BLOCK_TABLE = 1;
 }
 
-message Section {
-    int64 offset = 1;
-    uint64 size = 2;
-}
