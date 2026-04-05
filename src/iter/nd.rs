@@ -36,8 +36,8 @@ where
 
     /// Creates an iterator over `[begin, end)` in every dimension.
     pub(crate) fn new_with_begin(begin: &[Ix], end: &[Ix], extensions: E) -> Self {
-        let begin = begin.iter().cloned().collect::<DimArray<_>>();
-        let end = end.iter().cloned().collect::<DimArray<_>>();
+        let begin: DimArray<_> = begin.try_into().unwrap();
+        let end: DimArray<_> = end.try_into().unwrap();
         assert_eq!(begin.len(), end.len());
         assert!(begin.iter().zip(end.iter()).all(|(&b, &e)| b <= e));
         let current_idx = begin.clone();

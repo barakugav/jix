@@ -30,7 +30,7 @@ pub(crate) struct BlocksLayout {
 
 impl BlocksLayout {
     pub(crate) fn new(block_shape: &[usize], shape: &[usize]) -> Self {
-        let block_shape = block_shape.iter().cloned().collect::<DimArray<_>>();
+        let block_shape: DimArray<_> = block_shape.try_into().unwrap();
         let grid_shape = shape
             .iter()
             .zip(&block_shape)
@@ -59,7 +59,7 @@ where
         let blocks_layout = BlocksLayout::new(block_shape, shape);
         Self {
             storage,
-            shape: shape.iter().cloned().collect(),
+            shape: shape.try_into().unwrap(),
             blocks_layout,
         }
     }
@@ -91,7 +91,7 @@ impl Array<BlockTable<'static>> {
         assert_eq!(ndim, block_shape.len());
         let dtype = T::dtype();
         let itemsize = dtype.itemsize() as usize;
-        let shape = array.shape().iter().cloned().collect::<DimArray<_>>();
+        let shape: DimArray<_> = array.shape().try_into().unwrap();
 
         let block_shape = block_shape
             .iter()

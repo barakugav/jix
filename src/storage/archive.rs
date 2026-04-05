@@ -255,12 +255,14 @@ impl<R> ArchiveReader<R> {
         self.read_message()
     }
 
-    pub(crate) fn seek_relative_to_base(&mut self, offset: i64) -> io::Result<u64>
+    pub(crate) fn seek_relative_to_base(&mut self, offset: i64) -> io::Result<()>
     where
         R: Seek,
     {
-        let pos: u64 = (self.base_offset as i64 + offset).try_into().unwrap();
-        self.seek(std::io::SeekFrom::Start(pos))
+        let pos = self.base_offset as i64 + offset;
+        // Prefer seek_relative over seek as BufReader always discard its buffer on seek
+        let pos_relative = pos - self.stream_position()? as i64;
+        self.seek_relative(pos_relative)
     }
 }
 impl<R> Deref for ArchiveReader<R> {

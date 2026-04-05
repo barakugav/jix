@@ -47,7 +47,7 @@ impl NdIterExtensionStridesPtrMut {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
     pub fn new(strides: &[usize], initial_ptr: *mut u8) -> Self {
         Self {
-            strides: strides.iter().cloned().collect::<DimArray<_>>(),
+            strides: strides.try_into().unwrap(),
             current_ptr: initial_ptr,
         }
     }
@@ -86,7 +86,7 @@ where
 {
     pub fn new(strides: &[Ix], initial_offset: Ix) -> Self {
         Self {
-            strides: strides.iter().cloned().collect::<DimArray<_>>(),
+            strides: strides.try_into().unwrap(),
             offset: initial_offset,
         }
     }
