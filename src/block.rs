@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::io::{self, Read, Seek, Write};
 
 use zerocopy::{FromBytes, IntoBytes};
@@ -24,10 +23,7 @@ pub(crate) type BlockSize = u32;
 /// At all times the storage holds the invariants:
 /// - `block_size > 0`
 /// - `nitems % block_size == 0`
-pub(crate) struct BlockTable<'a> {
-    cdata: Cow<'a, [u8]>,
-    block_offsets: Cow<'a, [u64]>, // (nblocks+1,)
-
+pub(crate) struct BlockTable<A> {
     pub(crate) dtype: Dtype,
     pub(crate) nitems: usize,
 
@@ -35,18 +31,19 @@ pub(crate) struct BlockTable<'a> {
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
     /// Note the units are items, not bytes.
     pub(crate) block_size: BlockSize,
+
+    allocation: A,
 }
-impl<'a> BlockTable<'a> {
-    pub(crate) fn new(
-        cdata: Cow<'a, [u8]>,
-        block_offsets: Cow<'a, [u64]>,
-        dtype: Dtype,
-        nitems: usize,
-        block_size: BlockSize,
-    ) -> Self {
+impl<A> BlockTable<A> {
+    pub(crate) fn new(allocation: A, dtype: Dtype, nitems: usize, block_size: BlockSize) -> Self
+    where
+        A: BlockTableAllocation,
+    {
         assert!(block_size > 0);
         assert!(nitems % block_size as usize == 0);
         let nblocks = nitems / block_size as usize;
+        let cdata = allocation.cdata();
+        let block_offsets = allocation.block_offsets();
         if nblocks == 0 {
             assert_eq!(block_offsets.len(), 0);
         } else {
@@ -55,12 +52,21 @@ impl<'a> BlockTable<'a> {
             debug_assert!(*block_offsets.last().unwrap() <= cdata.len() as u64);
         }
         Self {
-            cdata,
-            block_offsets,
+            allocation,
             dtype,
             nitems,
             nblocks,
             block_size,
+        }
+    }
+
+    pub(crate) unsafe fn swap_allocation<A2>(self, map: impl FnOnce(A) -> A2) -> BlockTable<A2> {
+        BlockTable {
+            allocation: map(self.allocation),
+            dtype: self.dtype,
+            nitems: self.nitems,
+            nblocks: self.nblocks,
+            block_size: self.block_size,
         }
     }
 
@@ -93,7 +99,10 @@ impl<'a> BlockTable<'a> {
         block_idx: usize,
         buf: &mut [u8],
         context: &mut ReadContext,
-    ) -> io::Result<()> {
+    ) -> io::Result<()>
+    where
+        A: BlockTableAllocation,
+    {
         let b_size_bytes = self.block_len() as usize * self.dtype.itemsize() as usize;
         if buf.len() < b_size_bytes {
             return Err(io::Error::new(
@@ -102,9 +111,10 @@ impl<'a> BlockTable<'a> {
             ));
         }
 
-        let begin = self.block_offsets[block_idx] as usize;
-        let end = self.block_offsets[block_idx + 1] as usize;
-        let b_cdata = &self.cdata[begin..end];
+        let block_offsets = self.allocation.block_offsets();
+        let begin = block_offsets[block_idx] as usize;
+        let end = block_offsets[block_idx + 1] as usize;
+        let b_cdata = &self.allocation.cdata()[begin..end];
 
         let nbytes = context.decode(b_cdata, buf)?;
         debug_assert_eq!(nbytes, b_size_bytes);
@@ -114,6 +124,7 @@ impl<'a> BlockTable<'a> {
     pub(crate) fn write_to<W>(&self, writer: W) -> io::Result<()>
     where
         W: Write + Seek,
+        A: BlockTableAllocation,
     {
         let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::BlockTable)?;
         self.write_content(&mut writer)
@@ -122,6 +133,7 @@ impl<'a> BlockTable<'a> {
     pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> io::Result<()>
     where
         W: Write + Seek,
+        A: BlockTableAllocation,
     {
         // Write header
         let header = schema::BlockTableHeader {
@@ -141,9 +153,9 @@ impl<'a> BlockTable<'a> {
         writer.write_all(toc.as_bytes())?;
 
         // Write body data sections
-        let cdata = writer.write_section(&self.cdata, align_of::<u8>())?;
+        let cdata = writer.write_section(&self.allocation.cdata(), align_of::<u8>())?;
         let block_offsets = writer.write_section(
-            unsafe { cast_slice::<u64, u8>(self.block_offsets.as_ref()) },
+            unsafe { cast_slice::<u64, u8>(self.allocation.block_offsets()) },
             align_of::<u64>(),
         )?;
 
@@ -156,7 +168,8 @@ impl<'a> BlockTable<'a> {
 
         Ok(())
     }
-
+}
+impl BlockTable<Owned> {
     pub(crate) fn read_from<R>(reader: R, len: u64) -> io::Result<Self>
     where
         R: Read + Seek,
@@ -226,8 +239,10 @@ impl<'a> BlockTable<'a> {
         };
 
         Ok(Self::new(
-            Cow::Owned(cdata),
-            Cow::Owned(block_offsets),
+            Owned {
+                cdata,
+                block_offsets,
+            },
             Dtype::from_proto(header.dtype.as_ref().unwrap())?,
             header.nitems as usize,
             header.block_size as BlockSize,
@@ -235,7 +250,7 @@ impl<'a> BlockTable<'a> {
     }
 }
 
-impl BlockTable<'static> {
+impl BlockTable<Owned> {
     pub fn build_from_data(
         data: &[u8],
         dtype: Dtype,
@@ -273,12 +288,60 @@ impl BlockTable<'static> {
         }
 
         Ok(Self::new(
-            Cow::Owned(cdata),
-            Cow::Owned(block_offsets),
+            Owned {
+                cdata,
+                block_offsets,
+            },
             dtype,
             nitems,
             block_size,
         ))
+    }
+}
+
+#[doc(hidden)]
+pub trait BlockTableAllocation {
+    fn cdata(&self) -> &[u8];
+    fn block_offsets(&self) -> &[u64];
+}
+#[doc(hidden)]
+pub struct Owned {
+    pub(crate) cdata: Vec<u8>,
+    pub(crate) block_offsets: Vec<u64>,
+}
+#[doc(hidden)]
+pub struct Borrowed<'a> {
+    pub(crate) cdata: &'a [u8],
+    pub(crate) block_offsets: &'a [u64],
+}
+#[doc(hidden)]
+pub struct Mmap {
+    pub(crate) cdata: &'static [u8],
+    pub(crate) block_offsets: &'static [u64],
+    pub(crate) mmap: memmap2::Mmap,
+}
+impl BlockTableAllocation for Owned {
+    fn cdata(&self) -> &[u8] {
+        &self.cdata
+    }
+    fn block_offsets(&self) -> &[u64] {
+        &self.block_offsets
+    }
+}
+impl<'a> BlockTableAllocation for Borrowed<'a> {
+    fn cdata(&self) -> &[u8] {
+        self.cdata
+    }
+    fn block_offsets(&self) -> &[u64] {
+        self.block_offsets
+    }
+}
+impl BlockTableAllocation for Mmap {
+    fn cdata(&self) -> &[u8] {
+        self.cdata
+    }
+    fn block_offsets(&self) -> &[u64] {
+        self.block_offsets
     }
 }
 
@@ -287,6 +350,7 @@ mod tests {
     use std::io::{self, Cursor};
 
     use super::{BlockSize, BlockTable};
+    use crate::block::{BlockTableAllocation, Owned};
     use crate::codec::{Encoder, ReadContext};
     use crate::dtype::Dtyped;
     use crate::util::cast_slice;
@@ -298,7 +362,10 @@ mod tests {
         ReadContext::new().unwrap()
     }
 
-    fn decode_block(table: &BlockTable, idx: usize, context: &mut ReadContext) -> Vec<u8> {
+    fn decode_block<A>(table: &BlockTable<A>, idx: usize, context: &mut ReadContext) -> Vec<u8>
+    where
+        A: BlockTableAllocation,
+    {
         let block_bytes = table.block_len() as usize * table.dtype().itemsize() as usize;
         let mut buf = vec![0u8; block_bytes];
         table.read_block(idx, &mut buf, context).unwrap();
@@ -309,7 +376,7 @@ mod tests {
         items: &[T],
         block_size: BlockSize,
         encoder: &mut Encoder,
-    ) -> io::Result<BlockTable<'static>>
+    ) -> io::Result<BlockTable<Owned>>
     where
         T: Dtyped,
     {
@@ -377,7 +444,7 @@ mod tests {
     // write_to / read_from round-trip
     // -----------------------------------------------------------------------
 
-    fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<'static> {
+    fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<Owned> {
         let mut encoder = make_encoder();
         let table = build_from_items(items, block_size, &mut encoder).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
@@ -415,7 +482,7 @@ mod tests {
     fn round_trip_preserves_block_offsets_ordering() {
         let items: Vec<u8> = (0u8..12).collect();
         let table2 = round_trip(&items, 3);
-        let offs = table2.block_offsets.as_ref();
+        let offs = table2.allocation.block_offsets();
         assert!(offs.windows(2).all(|w| w[0] < w[1]));
     }
 
@@ -449,7 +516,7 @@ mod tests {
         assert_eq!(recovered, unsafe { cast_slice::<u32, u8>(&items) });
     }
 
-    fn make_storage<T: Dtyped>(items: &[T], block_len: BlockSize) -> BlockTable<'static> {
+    fn make_storage<T: Dtyped>(items: &[T], block_len: BlockSize) -> BlockTable<Owned> {
         let mut encoder = Encoder::new(3).unwrap();
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
@@ -460,7 +527,10 @@ mod tests {
         .unwrap()
     }
 
-    fn read_block_items<T: Dtyped>(storage: &BlockTable, idx: usize) -> Vec<T> {
+    fn read_block_items<T: Dtyped, A: BlockTableAllocation>(
+        storage: &BlockTable<A>,
+        idx: usize,
+    ) -> Vec<T> {
         let mut context = ReadContext::new().unwrap();
         let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
         let mut buf = vec![0u8; block_bytes];
@@ -475,7 +545,7 @@ mod tests {
         assert_eq!(s.nitems(), 8);
         assert_eq!(s.block_len(), 8);
         assert_eq!(s.dtype(), &u8::dtype());
-        assert_eq!(read_block_items::<u8>(&s, 0), items);
+        assert_eq!(read_block_items::<u8, _>(&s, 0), items);
     }
 
     #[test]
@@ -484,8 +554,8 @@ mod tests {
         let s = make_storage(&items, 4);
         assert_eq!(s.nitems(), 8);
         assert_eq!(s.block_len(), 4);
-        assert_eq!(read_block_items::<i32>(&s, 0), items[..4]);
-        assert_eq!(read_block_items::<i32>(&s, 1), items[4..]);
+        assert_eq!(read_block_items::<i32, _>(&s, 0), items[..4]);
+        assert_eq!(read_block_items::<i32, _>(&s, 1), items[4..]);
     }
 
     #[test]
@@ -495,7 +565,7 @@ mod tests {
         assert_eq!(s.nitems(), 12);
         assert_eq!(s.block_len(), 4);
         for b in 0..3 {
-            assert_eq!(read_block_items::<f32>(&s, b), items[b * 4..(b + 1) * 4]);
+            assert_eq!(read_block_items::<f32, _>(&s, b), items[b * 4..(b + 1) * 4]);
         }
     }
 

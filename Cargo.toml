@@ -13,6 +13,7 @@ num-complex = { version = "0.4", default-features = false, optional = true }
 zstd = "0.13"
 prost = "0.14"
 zerocopy = { version = "0.8", features = ["derive", "std"] }
+memmap2 = "0.9"
 
 [build-dependencies]
 prost-build = "0.14"
