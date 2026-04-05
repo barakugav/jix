@@ -107,6 +107,19 @@ where
     }
 }
 
+pub(crate) enum MaybeOwned<'a, T> {
+    Owned(T),
+    Borrowed(&'a T),
+}
+impl<'a, T> AsRef<T> for MaybeOwned<'a, T> {
+    fn as_ref(&self) -> &T {
+        match self {
+            MaybeOwned::Owned(t) => t,
+            MaybeOwned::Borrowed(t) => t,
+        }
+    }
+}
+
 pub(crate) enum CowMut<'a, T> {
     Owned(T),
     Borrowed(&'a mut T),

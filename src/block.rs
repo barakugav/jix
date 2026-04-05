@@ -98,7 +98,7 @@ impl<A> BlockTable<A> {
         &self,
         block_idx: usize,
         buf: &mut [u8],
-        context: &mut ReadContext,
+        context: &ReadContext,
     ) -> io::Result<()>
     where
         A: BlockTableAllocation,

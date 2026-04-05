@@ -1,3 +1,4 @@
+use std::cell::UnsafeCell;
 use std::io;
 
 pub(crate) struct Encoder {
@@ -19,16 +20,17 @@ impl Encoder {
     }
 }
 pub struct ReadContext {
-    inner: zstd::bulk::Decompressor<'static>,
+    inner: UnsafeCell<zstd::bulk::Decompressor<'static>>,
 }
 impl ReadContext {
     pub(crate) fn new() -> io::Result<Self> {
         Ok(Self {
-            inner: zstd::bulk::Decompressor::new()?,
+            inner: UnsafeCell::new(zstd::bulk::Decompressor::new()?),
         })
     }
 
-    pub(crate) fn decode(&mut self, cdata: &[u8], dst: &mut [u8]) -> io::Result<usize> {
-        self.inner.decompress_to_buffer(cdata, dst)
+    pub(crate) fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> io::Result<usize> {
+        let inner = unsafe { &mut *self.inner.get() };
+        inner.decompress_to_buffer(cdata, dst)
     }
 }

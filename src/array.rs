@@ -9,9 +9,8 @@ use crate::iter::strides::{
     NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
 };
 use crate::schema::ArchiveType;
-use crate::util::default_strides;
-use crate::util::{CowMut, DimArray};
-use std::borrow::Cow;
+use crate::util::DimArray;
+use crate::util::{MaybeOwned, default_strides};
 
 use crate::block::{BlockSize, BlockTable, BlockTableAllocation};
 use crate::codec::{Encoder, ReadContext};
@@ -111,18 +110,18 @@ impl<A> Array<A> {
         &self.shape
     }
 
-    pub fn read(&self) -> ArrayRead<'_, A> {
+    pub fn data(&self) -> ArrayData<'_, A> {
         let context = ReadContext::new().expect("failed to create read context");
-        ArrayRead {
+        ArrayData {
             array: self,
-            context: CowMut::Owned(context),
+            context: MaybeOwned::Owned(context),
         }
     }
 
-    pub fn read_ctx<'a>(&'a self, context: &'a mut ReadContext) -> ArrayRead<'a, A> {
-        ArrayRead {
+    pub fn data_ctx<'a>(&'a self, context: &'a ReadContext) -> ArrayData<'a, A> {
+        ArrayData {
             array: self,
-            context: CowMut::Borrowed(context),
+            context: MaybeOwned::Borrowed(context),
         }
     }
 }
@@ -237,12 +236,12 @@ impl Array<Owned> {
     }
 }
 
-pub struct ArrayRead<'a, A> {
+pub struct ArrayData<'a, A> {
     array: &'a Array<A>,
-    context: CowMut<'a, ReadContext>,
+    context: MaybeOwned<'a, ReadContext>,
 }
 
-impl<'a, A> ArrayRead<'a, A> {
+impl<'a, A> ArrayData<'a, A> {
     pub fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
@@ -255,7 +254,7 @@ impl<'a, A> ArrayRead<'a, A> {
         self.array.shape()
     }
 
-    pub fn to_ndarray<T>(&mut self) -> io::Result<ndarray::ArrayD<T>>
+    pub fn to_ndarray<T>(&self) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
         A: ArrayAllocation,
@@ -268,7 +267,7 @@ impl<'a, A> ArrayRead<'a, A> {
         self.sub_ndarray(&full_range)
     }
 
-    pub fn sub_ndarray<T>(&mut self, range: &[Range<usize>]) -> io::Result<ndarray::ArrayD<T>>
+    pub fn sub_ndarray<T>(&self, range: &[Range<usize>]) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
         A: ArrayAllocation,
@@ -322,7 +321,7 @@ impl<'a, A> ArrayRead<'a, A> {
         let full_buf_len = b_layout.block_size * itemsize;
         let mut tmp_buf = Vec::with_capacity(full_buf_len);
         unsafe { tmp_buf.set_len(full_buf_len) };
-        let context = self.context.as_mut();
+        let context = self.context.as_ref();
         while let Some((block_idx, (block_global_id, (block_inner_offset, block_size)))) =
             block_iter.next()
         {
@@ -482,7 +481,7 @@ mod tests {
         D: ndarray::Dimension,
     {
         let a = Array::from_ndarray(&src.view(), block_shape).unwrap();
-        a.read().to_ndarray().unwrap()
+        a.data().to_ndarray().unwrap()
     }
 
     // -----------------------------------------------------------------------
@@ -525,7 +524,7 @@ mod tests {
     #[test]
     fn to_ndarray_1d_single_block() {
         let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
-        let got: ArrayD<u8> = a.read().to_ndarray().unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![4], vec![0, 1, 2, 3]).unwrap()
@@ -535,7 +534,7 @@ mod tests {
     #[test]
     fn to_ndarray_1d_two_blocks() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.read().to_ndarray().unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
@@ -545,7 +544,7 @@ mod tests {
     #[test]
     fn to_ndarray_1d_i32() {
         let a = array(&[&[10i32, 20, 30, 40], &[50, 60, 70, 80]], &[8], &[4]);
-        let got: ArrayD<i32> = a.read().to_ndarray().unwrap();
+        let got: ArrayD<i32> = a.data().to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![8], vec![10, 20, 30, 40, 50, 60, 70, 80]).unwrap()
@@ -575,7 +574,7 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let got: ArrayD<u8> = a.read().to_ndarray().unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![4, 6], (0u8..24).collect()).unwrap()
@@ -589,7 +588,7 @@ mod tests {
     #[test]
     fn sub_ndarray_1d_full_range() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.read().sub_ndarray(&[0..6]).unwrap();
+        let got: ArrayD<u8> = a.data().sub_ndarray(&[0..6]).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
@@ -600,7 +599,7 @@ mod tests {
     fn sub_ndarray_1d_aligned_second_block() {
         // range [3..6) → output shape [3], values [3,4,5]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.read().sub_ndarray(&[3..6]).unwrap();
+        let got: ArrayD<u8> = a.data().sub_ndarray(&[3..6]).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![3, 4, 5]).unwrap());
     }
 
@@ -608,7 +607,7 @@ mod tests {
     fn sub_ndarray_1d_cross_block_boundary() {
         // range [1..5) → output shape [4], values [1,2,3,4]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.read().sub_ndarray(&[1..5]).unwrap();
+        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..5]).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![4], vec![1, 2, 3, 4]).unwrap()
@@ -619,7 +618,7 @@ mod tests {
     fn sub_ndarray_1d_within_single_block() {
         // range [1..2) → output shape [1], value [1]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.read().sub_ndarray(&[1..2]).unwrap();
+        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..2]).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1]).unwrap());
     }
 
@@ -644,7 +643,7 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let got: ArrayD<u8> = a.read().sub_ndarray(&[1..3, 2..5]).unwrap();
+        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..3, 2..5]).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 3], vec![8, 9, 10, 14, 15, 16]).unwrap()
@@ -673,7 +672,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3, 4];
         let a = Array::from_ndarray(&src.view(), &[3]).unwrap();
         assert_eq!(a.shape(), &[5]);
-        let got: ArrayD<u8> = a.read().to_ndarray().unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
         assert_eq!(got, src.view().into_dyn());
     }
 
@@ -695,7 +694,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3];
         let a = Array::from_ndarray(&src.view(), &[10]).unwrap();
         assert_eq!(a.shape(), &[4]);
-        assert_eq!(a.read().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+        assert_eq!(a.data().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
     }
 
     #[test]
@@ -706,7 +705,7 @@ mod tests {
         let a = Array::from_ndarray(&view, &[3]).unwrap();
         assert_eq!(a.shape(), &[5]);
         assert_eq!(
-            a.read().to_ndarray::<u8>().unwrap(),
+            a.data().to_ndarray::<u8>().unwrap(),
             ndarray::array![0u8, 2, 4, 6, 8].view().into_dyn()
         );
     }
@@ -751,7 +750,7 @@ mod tests {
         ];
         let a = Array::from_ndarray(&src.view(), &[2, 3]).unwrap();
         assert_eq!(a.shape(), &[3, 5]);
-        assert_eq!(a.read().to_ndarray::<i32>().unwrap(), src.view().into_dyn());
+        assert_eq!(a.data().to_ndarray::<i32>().unwrap(), src.view().into_dyn());
     }
 
     #[test]
@@ -773,7 +772,7 @@ mod tests {
     fn from_ndarray_then_sub_ndarray_1d() {
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
         let a = Array::from_ndarray(&src.view(), &[3]).unwrap();
-        let got: ArrayD<u8> = a.read().sub_ndarray(&[1..5]).unwrap();
+        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..5]).unwrap();
         assert_eq!(got, ndarray::array![1u8, 2, 3, 4].view().into_dyn());
     }
 
@@ -787,7 +786,7 @@ mod tests {
             [18,  19, 20, 21, 22, 23],
         ];
         let a = Array::from_ndarray(&src.view(), &[2, 3]).unwrap();
-        let got: ArrayD<u8> = a.read().sub_ndarray(&[1..3, 2..5]).unwrap();
+        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..3, 2..5]).unwrap();
         assert_eq!(
             got,
             ndarray::array![[8u8, 9, 10], [14, 15, 16]]
@@ -824,7 +823,7 @@ mod tests {
         assert_eq!(a2.shape(), &[4]);
         assert_eq!(a2.ndim(), 1);
         assert_eq!(a2.dtype(), &u8::dtype());
-        assert_eq!(a2.read().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
     }
 
     #[test]
@@ -832,7 +831,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
         let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
         assert_eq!(a2.shape(), &[6]);
-        assert_eq!(a2.read().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
     }
 
     #[test]
@@ -841,7 +840,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3, 4];
         let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
         assert_eq!(a2.shape(), &[5]);
-        assert_eq!(a2.read().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
     }
 
     #[test]
@@ -850,7 +849,7 @@ mod tests {
         let a2 = array_round_trip::<i32, _, _>(&src, &[4]);
         assert_eq!(a2.dtype(), &i32::dtype());
         assert_eq!(
-            a2.read().to_ndarray::<i32>().unwrap(),
+            a2.data().to_ndarray::<i32>().unwrap(),
             src.view().into_dyn()
         );
     }
@@ -861,7 +860,7 @@ mod tests {
         let a2 = array_round_trip::<f32, _, _>(&src, &[3]);
         assert_eq!(a2.dtype(), &f32::dtype());
         assert_eq!(
-            a2.read().to_ndarray::<f32>().unwrap(),
+            a2.data().to_ndarray::<f32>().unwrap(),
             src.view().into_dyn()
         );
     }
@@ -878,7 +877,7 @@ mod tests {
         let a2 = array_round_trip::<u8, _, _>(&src, &[2, 3]);
         assert_eq!(a2.shape(), &[4, 6]);
         assert_eq!(a2.ndim(), 2);
-        assert_eq!(a2.read().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
+        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.view().into_dyn());
     }
 
     #[test]
@@ -893,7 +892,7 @@ mod tests {
         let a2 = array_round_trip::<i32, _, _>(&src, &[2, 3]);
         assert_eq!(a2.shape(), &[3, 5]);
         assert_eq!(
-            a2.read().to_ndarray::<i32>().unwrap(),
+            a2.data().to_ndarray::<i32>().unwrap(),
             src.view().into_dyn()
         );
     }
@@ -914,7 +913,7 @@ mod tests {
         assert_eq!(a2.shape(), &[12]);
         assert_eq!(a2.dtype(), &u32::dtype());
         assert_eq!(
-            a2.read().to_ndarray::<u32>().unwrap(),
+            a2.data().to_ndarray::<u32>().unwrap(),
             src.view().into_dyn()
         );
     }
