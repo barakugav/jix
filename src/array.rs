@@ -21,6 +21,7 @@ use crate::codec::{Encoder, ReadContext};
 use crate::util::{ceil_to_multiple, full_dim_array};
 use crate::{NDIM_MAX, schema};
 
+#[derive(Clone)]
 pub struct BlocksLayout {
     pub(crate) block_shape: DimArray<usize>,
     /// Number of blocks in each dimension.
@@ -46,7 +47,7 @@ impl BlocksLayout {
     }
 }
 pub struct Array<S> {
-    storage: S,
+    pub(crate) storage: S,
 }
 
 impl<S: ArrayStorage> Array<S> {
@@ -571,6 +572,32 @@ impl ArrayStorage for Mmap {
         context: &ReadContext,
     ) -> io::Result<()> {
         self.blocks.read_block(block_idx, buf, context)
+    }
+}
+
+impl<'a, S> ArrayStorage for &'a S
+where
+    S: ArrayStorage,
+{
+    fn dtype(&self) -> &crate::dtype::Dtype {
+        (*self).dtype()
+    }
+
+    fn shape(&self) -> &[usize] {
+        (*self).shape()
+    }
+
+    fn blocks_layout(&self) -> &crate::array::BlocksLayout {
+        (*self).blocks_layout()
+    }
+
+    fn read_block(
+        &self,
+        block_idx: usize,
+        buf: &mut [u8],
+        context: &crate::codec::ReadContext,
+    ) -> std::io::Result<()> {
+        (*self).read_block(block_idx, buf, context)
     }
 }
 
