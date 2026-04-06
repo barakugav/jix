@@ -24,7 +24,7 @@ pub(crate) type BlockSize = u32;
 /// At all times the storage holds the invariants:
 /// - `block_size > 0`
 /// - `nitems % block_size == 0`
-pub(crate) struct BlockTable<A> {
+pub(crate) struct BlockTable<S> {
     pub(crate) dtype: Dtype,
     pub(crate) nitems: usize,
 
@@ -33,18 +33,18 @@ pub(crate) struct BlockTable<A> {
     /// Note the units are items, not bytes.
     pub(crate) block_size: BlockSize,
 
-    allocation: A,
+    storage: S,
 }
-impl<A> BlockTable<A> {
-    pub(crate) fn new(allocation: A, dtype: Dtype, nitems: usize, block_size: BlockSize) -> Self
+impl<S> BlockTable<S> {
+    pub(crate) fn new(storage: S, dtype: Dtype, nitems: usize, block_size: BlockSize) -> Self
     where
-        A: BlockTableAllocation,
+        S: BlockTableStorage,
     {
         assert!(block_size > 0);
         assert!(nitems % block_size as usize == 0);
         let nblocks = nitems / block_size as usize;
-        let cdata = allocation.cdata();
-        let block_offsets = allocation.block_offsets();
+        let cdata = storage.cdata();
+        let block_offsets = storage.block_offsets();
         if nblocks == 0 {
             assert_eq!(block_offsets.len(), 0);
         } else {
@@ -53,7 +53,7 @@ impl<A> BlockTable<A> {
             debug_assert!(*block_offsets.last().unwrap() <= cdata.len() as u64);
         }
         Self {
-            allocation,
+            storage,
             dtype,
             nitems,
             nblocks,
@@ -61,9 +61,9 @@ impl<A> BlockTable<A> {
         }
     }
 
-    pub(crate) unsafe fn swap_allocation<A2>(self, map: impl FnOnce(A) -> A2) -> BlockTable<A2> {
+    pub(crate) unsafe fn swap_storage<S2>(self, map: impl FnOnce(S) -> S2) -> BlockTable<S2> {
         BlockTable {
-            allocation: map(self.allocation),
+            storage: map(self.storage),
             dtype: self.dtype,
             nitems: self.nitems,
             nblocks: self.nblocks,
@@ -102,7 +102,7 @@ impl<A> BlockTable<A> {
         context: &ReadContext,
     ) -> io::Result<()>
     where
-        A: BlockTableAllocation,
+        S: BlockTableStorage,
     {
         let b_size_bytes = self.block_len() as usize * self.dtype.itemsize() as usize;
         if buf.len() < b_size_bytes {
@@ -112,10 +112,10 @@ impl<A> BlockTable<A> {
             ));
         }
 
-        let block_offsets = self.allocation.block_offsets();
+        let block_offsets = self.storage.block_offsets();
         let begin = block_offsets[block_idx] as usize;
         let end = block_offsets[block_idx + 1] as usize;
-        let b_cdata = &self.allocation.cdata()[begin..end];
+        let b_cdata = &self.storage.cdata()[begin..end];
 
         let nbytes = context.decode(b_cdata, buf)?;
         debug_assert_eq!(nbytes, b_size_bytes);
@@ -125,7 +125,7 @@ impl<A> BlockTable<A> {
     pub(crate) fn write_to<W>(&self, writer: W) -> io::Result<()>
     where
         W: Write + Seek,
-        A: BlockTableAllocation,
+        S: BlockTableStorage,
     {
         let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::BlockTable)?;
         self.write_content(&mut writer)
@@ -134,7 +134,7 @@ impl<A> BlockTable<A> {
     pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> io::Result<()>
     where
         W: Write + Seek,
-        A: BlockTableAllocation,
+        S: BlockTableStorage,
     {
         // Write header
         let header = schema::BlockTableHeader {
@@ -154,9 +154,9 @@ impl<A> BlockTable<A> {
         writer.write_all(toc.as_bytes())?;
 
         // Write body data sections
-        let cdata = writer.write_section(&self.allocation.cdata(), align_of::<u8>())?;
+        let cdata = writer.write_section(&self.storage.cdata(), align_of::<u8>())?;
         let block_offsets = writer.write_section(
-            unsafe { cast_slice::<u64, u8>(self.allocation.block_offsets()) },
+            unsafe { cast_slice::<u64, u8>(self.storage.block_offsets()) },
             align_of::<u64>(),
         )?;
 
@@ -191,14 +191,14 @@ impl BlockTable<Owned> {
     }
 }
 
-impl<A> BlockTable<A> {
+impl<S> BlockTable<S> {
     pub(crate) fn read_content<R>(
         reader: &mut ArchiveReader<R>,
-        read_sections: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> io::Result<A>,
+        read_storage: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> io::Result<S>,
     ) -> io::Result<Self>
     where
         R: Read + Seek,
-        A: BlockTableAllocation,
+        S: BlockTableStorage,
     {
         let header = reader.read_message::<schema::BlockTableHeader>()?;
 
@@ -232,10 +232,10 @@ impl<A> BlockTable<A> {
         };
 
         // Read body data sections
-        let allocation = read_sections(reader, cdata_section, block_offsets_section)?;
+        let storage = read_storage(reader, cdata_section, block_offsets_section)?;
 
         Ok(Self::new(
-            allocation,
+            storage,
             Dtype::from_proto(header.dtype.as_ref().unwrap())?,
             header.nitems as usize,
             header.block_size as BlockSize,
@@ -267,7 +267,7 @@ impl BlockTable<Owned> {
 }
 
 #[doc(hidden)]
-pub trait BlockTableAllocation {
+pub trait BlockTableStorage {
     fn cdata(&self) -> &[u8];
     fn block_offsets(&self) -> &[u64];
 }
@@ -354,7 +354,7 @@ impl Mmap {
         Ok(Mmap::new(mmap, cdata_section, block_offsets_section))
     }
 }
-impl BlockTableAllocation for Owned {
+impl BlockTableStorage for Owned {
     fn cdata(&self) -> &[u8] {
         &self.cdata
     }
@@ -362,7 +362,7 @@ impl BlockTableAllocation for Owned {
         &self.block_offsets
     }
 }
-impl<'a> BlockTableAllocation for Borrowed<'a> {
+impl<'a> BlockTableStorage for Borrowed<'a> {
     fn cdata(&self) -> &[u8] {
         self.cdata
     }
@@ -370,7 +370,7 @@ impl<'a> BlockTableAllocation for Borrowed<'a> {
         self.block_offsets
     }
 }
-impl BlockTableAllocation for Mmap {
+impl BlockTableStorage for Mmap {
     fn cdata(&self) -> &[u8] {
         self.cdata
     }
@@ -443,7 +443,7 @@ mod tests {
     use std::io::{self, Cursor};
 
     use super::{BlockSize, BlockTable};
-    use crate::block::{BlockTableAllocation, Owned};
+    use crate::block::{BlockTableStorage, Owned};
     use crate::codec::{Encoder, ReadContext};
     use crate::dtype::Dtyped;
     use crate::util::cast_slice;
@@ -455,9 +455,9 @@ mod tests {
         ReadContext::new().unwrap()
     }
 
-    fn decode_block<A>(table: &BlockTable<A>, idx: usize, context: &mut ReadContext) -> Vec<u8>
+    fn decode_block<S>(table: &BlockTable<S>, idx: usize, context: &mut ReadContext) -> Vec<u8>
     where
-        A: BlockTableAllocation,
+        S: BlockTableStorage,
     {
         let block_bytes = table.block_len() as usize * table.dtype().itemsize() as usize;
         let mut buf = vec![0u8; block_bytes];
@@ -575,7 +575,7 @@ mod tests {
     fn round_trip_preserves_block_offsets_ordering() {
         let items: Vec<u8> = (0u8..12).collect();
         let table2 = round_trip(&items, 3);
-        let offs = table2.allocation.block_offsets();
+        let offs = table2.storage.block_offsets();
         assert!(offs.windows(2).all(|w| w[0] < w[1]));
     }
 
@@ -620,10 +620,11 @@ mod tests {
         .unwrap()
     }
 
-    fn read_block_items<T: Dtyped, A: BlockTableAllocation>(
-        storage: &BlockTable<A>,
-        idx: usize,
-    ) -> Vec<T> {
+    fn read_block_items<T, S>(storage: &BlockTable<S>, idx: usize) -> Vec<T>
+    where
+        T: Dtyped,
+        S: BlockTableStorage,
+    {
         let mut context = ReadContext::new().unwrap();
         let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
         let mut buf = vec![0u8; block_bytes];
