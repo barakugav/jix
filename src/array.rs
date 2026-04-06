@@ -21,7 +21,7 @@ use crate::codec::{Encoder, ReadContext};
 use crate::util::{ceil_to_multiple, full_dim_array};
 use crate::{NDIM_MAX, schema};
 
-pub(crate) struct BlocksLayout {
+pub struct BlocksLayout {
     pub(crate) block_shape: DimArray<usize>,
     /// Number of blocks in each dimension.
     pub(crate) grid_shape: DimArray<usize>,
@@ -45,33 +45,25 @@ impl BlocksLayout {
         }
     }
 }
-
 pub struct Array<S> {
-    pub(crate) blocks: BlockTable<S>,
-    pub(crate) shape: DimArray<usize>,
-    pub(crate) blocks_layout: BlocksLayout,
+    storage: S,
 }
 
-impl<S> Array<S> {
-    pub(crate) fn new(blocks: BlockTable<S>, shape: &[usize], block_shape: &[usize]) -> Self {
-        let blocks_layout = BlocksLayout::new(block_shape, shape);
-        Self {
-            blocks,
-            shape: shape.try_into().unwrap(),
-            blocks_layout,
-        }
-    }
-
+impl<S: ArrayStorage> Array<S> {
     pub fn dtype(&self) -> &Dtype {
-        self.blocks.dtype()
+        self.storage.dtype()
     }
 
     pub fn ndim(&self) -> usize {
-        self.shape.len()
+        self.storage.shape().len()
     }
 
     pub fn shape(&self) -> &[usize] {
-        &self.shape
+        self.storage.shape()
+    }
+
+    pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
+        self.storage.blocks_layout()
     }
 
     pub fn data(&self) -> ArrayData<'_, S> {
@@ -160,12 +152,9 @@ impl Array<Owned> {
         }
 
         let blocks = builder.finish();
-        let blocks = unsafe { blocks.swap_storage(Owned) };
 
         Ok(Self {
-            blocks,
-            shape,
-            blocks_layout: b_layout,
+            storage: Owned::new(blocks, shape, b_layout),
         })
     }
 }
@@ -176,7 +165,7 @@ pub struct ArrayData<'a, S> {
     type_id_cache: Cell<Option<TypeId>>,
 }
 
-impl<'a, S> ArrayData<'a, S> {
+impl<'a, S: ArrayStorage> ArrayData<'a, S> {
     fn new(array: &'a Array<S>, context: MaybeOwned<'a, ReadContext>) -> Self {
         Self {
             array,
@@ -222,7 +211,6 @@ impl<'a, S> ArrayData<'a, S> {
     pub fn to_ndarray<T>(&self) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
-        S: ArrayStorage,
     {
         let full_range = self
             .shape()
@@ -235,7 +223,6 @@ impl<'a, S> ArrayData<'a, S> {
     pub fn sub_ndarray<T>(&self, range: &[Range<usize>]) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
-        S: ArrayStorage,
     {
         let shape = self.shape();
         let ndim = shape.len();
@@ -254,7 +241,7 @@ impl<'a, S> ArrayData<'a, S> {
             .map(|&s| s as usize * itemsize)
             .collect::<DimArray<_>>();
 
-        let b_layout = &self.array.blocks_layout;
+        let b_layout = self.array.blocks_layout();
         let block_strides = default_strides(&b_layout.block_shape, itemsize);
 
         // Element-space begin/end for NdIterExtBlockOffsetSize.
@@ -291,7 +278,7 @@ impl<'a, S> ArrayData<'a, S> {
             block_iter.next()
         {
             self.array
-                .blocks
+                .storage
                 .read_block(block_global_id, &mut tmp_buf, context)?;
 
             // Navigate to the active region within the block buffer.
@@ -327,18 +314,17 @@ impl<'a, S> ArrayData<'a, S> {
     }
 }
 
-impl<S> Array<S> {
+impl Array<Owned> {
     pub fn write_to<W>(&self, writer: W) -> io::Result<()>
     where
         W: Write + Seek,
-        S: ArrayStorage,
     {
         let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1)?;
 
         let header = schema::ArrayHeader {
-            shape: self.shape.iter().cloned().map(|s| s as u64).collect(),
+            shape: self.shape().iter().cloned().map(|s| s as u64).collect(),
             block_shape: self
-                .blocks_layout
+                .blocks_layout()
                 .block_shape
                 .iter()
                 .cloned()
@@ -347,7 +333,7 @@ impl<S> Array<S> {
         };
         writer.write_message(&header)?;
 
-        self.blocks.write_content(&mut writer)
+        self.storage.blocks.write_content(&mut writer)
     }
 }
 
@@ -356,17 +342,11 @@ impl Array<Owned> {
     where
         R: Read + Seek,
     {
-        Self::read_from_impl(
-            reader,
-            len,
-            |reader, cdata_section, block_offsets_section| {
-                Ok(Owned(crate::block::Owned::read_from(
-                    reader,
-                    cdata_section,
-                    block_offsets_section,
-                )?))
-            },
-        )
+        let (blocks, shape, blocks_layout) =
+            Self::read_from_impl(reader, len, crate::block::Owned::read_from)?;
+        Ok(Self {
+            storage: Owned::new(blocks, shape, blocks_layout),
+        })
     }
 }
 impl Array<Mmap> {
@@ -375,29 +355,29 @@ impl Array<Mmap> {
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         let mut reader = BufReader::new(file);
         reader.seek(io::SeekFrom::Start(offset))?;
-        Self::read_from_impl(
+
+        let (blocks, shape, blocks_layout) = Self::read_from_impl(
             reader,
             len,
             |reader, cdata_section, block_offsets_section| {
-                Ok(Mmap(crate::block::Mmap::read_from(
-                    reader,
-                    cdata_section,
-                    block_offsets_section,
-                    mmap,
-                )?))
+                crate::block::Mmap::read_from(reader, cdata_section, block_offsets_section, mmap)
             },
-        )
+        )?;
+
+        Ok(Self {
+            storage: Mmap::new(blocks, shape, blocks_layout),
+        })
     }
 }
 impl<S> Array<S> {
-    fn read_from_impl<R>(
+    fn read_from_impl<R, BS>(
         reader: R,
         len: u64,
-        read_storage: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> io::Result<S>,
-    ) -> io::Result<Self>
+        read_block_storage: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> io::Result<BS>,
+    ) -> io::Result<(BlockTable<BS>, DimArray<usize>, BlocksLayout)>
     where
         R: Read + Seek,
-        S: ArrayStorage,
+        BS: BlockTableStorage,
     {
         let mut reader = ArchiveReader::new(reader, len)?;
         let f_meta = reader.read_file_meta()?;
@@ -447,7 +427,8 @@ impl<S> Array<S> {
             .map(|(&b, &s)| if s == 0 { 0 } else { ceil_to_multiple(s, b) })
             .collect::<DimArray<_>>();
 
-        let blocks = BlockTable::read_content(&mut reader, read_storage)?;
+        let blocks_layout = BlocksLayout::new(&block_shape, &shape);
+        let blocks = BlockTable::read_content(&mut reader, read_block_storage)?;
         let expected_nitems = padded_shape.iter().product::<usize>();
         if blocks.nitems() != expected_nitems {
             return Err(io::Error::new(
@@ -460,47 +441,136 @@ impl<S> Array<S> {
             ));
         }
 
-        Ok(Self::new(blocks, &shape, &block_shape))
+        Ok((blocks, shape, blocks_layout))
     }
 }
 
-pub trait ArrayStorage {
-    #[doc(hidden)]
-    type __BlockTableStorage: BlockTableStorage;
-    #[doc(hidden)]
-    fn __block_table_storage(&self) -> &Self::__BlockTableStorage;
-}
-impl<S> BlockTableStorage for S
-where
-    S: ArrayStorage,
-{
-    fn cdata(&self) -> &[u8] {
-        self.__block_table_storage().cdata()
-    }
+pub trait ArrayStorage: Sized {
+    fn dtype(&self) -> &Dtype;
+    fn shape(&self) -> &[usize];
+    fn blocks_layout(&self) -> &BlocksLayout;
 
-    fn block_offsets(&self) -> &[u64] {
-        self.__block_table_storage().block_offsets()
+    fn read_block(&self, block_idx: usize, buf: &mut [u8], context: &ReadContext)
+    -> io::Result<()>;
+}
+pub struct Owned {
+    blocks: BlockTable<crate::block::Owned>,
+    shape: DimArray<usize>,
+    blocks_layout: BlocksLayout,
+}
+impl Owned {
+    fn new(
+        blocks: BlockTable<crate::block::Owned>,
+        shape: DimArray<usize>,
+        blocks_layout: BlocksLayout,
+    ) -> Self {
+        Self {
+            blocks,
+            shape,
+            blocks_layout,
+        }
     }
 }
-pub struct Owned(crate::block::Owned);
 impl ArrayStorage for Owned {
-    type __BlockTableStorage = crate::block::Owned;
-    fn __block_table_storage(&self) -> &Self::__BlockTableStorage {
-        &self.0
+    fn dtype(&self) -> &Dtype {
+        self.blocks.dtype()
+    }
+
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn blocks_layout(&self) -> &BlocksLayout {
+        &self.blocks_layout
+    }
+
+    fn read_block(
+        &self,
+        block_idx: usize,
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> io::Result<()> {
+        self.blocks.read_block(block_idx, buf, context)
     }
 }
-pub struct Borrowed<'a>(crate::block::Borrowed<'a>);
+pub struct Borrowed<'a> {
+    blocks: BlockTable<crate::block::Borrowed<'a>>,
+    shape: DimArray<usize>,
+    blocks_layout: BlocksLayout,
+}
+impl<'a> Borrowed<'a> {
+    fn new(
+        blocks: BlockTable<crate::block::Borrowed<'a>>,
+        shape: DimArray<usize>,
+        blocks_layout: BlocksLayout,
+    ) -> Self {
+        Self {
+            blocks,
+            shape,
+            blocks_layout,
+        }
+    }
+}
 impl<'a> ArrayStorage for Borrowed<'a> {
-    type __BlockTableStorage = crate::block::Borrowed<'a>;
-    fn __block_table_storage(&self) -> &Self::__BlockTableStorage {
-        &self.0
+    fn dtype(&self) -> &Dtype {
+        self.blocks.dtype()
+    }
+
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn blocks_layout(&self) -> &BlocksLayout {
+        &self.blocks_layout
+    }
+
+    fn read_block(
+        &self,
+        block_idx: usize,
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> io::Result<()> {
+        self.blocks.read_block(block_idx, buf, context)
     }
 }
-pub struct Mmap(crate::block::Mmap);
+pub struct Mmap {
+    blocks: BlockTable<crate::block::Mmap>,
+    shape: DimArray<usize>,
+    blocks_layout: BlocksLayout,
+}
+impl Mmap {
+    fn new(
+        blocks: BlockTable<crate::block::Mmap>,
+        shape: DimArray<usize>,
+        blocks_layout: BlocksLayout,
+    ) -> Self {
+        Self {
+            blocks,
+            shape,
+            blocks_layout,
+        }
+    }
+}
 impl ArrayStorage for Mmap {
-    type __BlockTableStorage = crate::block::Mmap;
-    fn __block_table_storage(&self) -> &Self::__BlockTableStorage {
-        &self.0
+    fn dtype(&self) -> &Dtype {
+        self.blocks.dtype()
+    }
+
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn blocks_layout(&self) -> &BlocksLayout {
+        &self.blocks_layout
+    }
+
+    fn read_block(
+        &self,
+        block_idx: usize,
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> io::Result<()> {
+        self.blocks.read_block(block_idx, buf, context)
     }
 }
 
@@ -510,7 +580,7 @@ mod tests {
 
     use ndarray::ArrayD;
 
-    use crate::array::Owned;
+    use crate::array::{BlocksLayout, Owned};
     use crate::block::{BlockSize, BlockTable};
     use crate::codec::Encoder;
     use crate::dtype::Dtyped;
@@ -536,20 +606,25 @@ mod tests {
     // Helper: build a BlockTable from pre-arranged typed blocks
     // -----------------------------------------------------------------------
 
-    fn make_block_table<T: Dtyped>(blocks: &[&[T]]) -> BlockTable<Owned> {
+    fn make_block_table<T: Dtyped>(blocks: &[&[T]]) -> BlockTable<crate::block::Owned> {
         let block_len = blocks[0].len() as BlockSize;
         let data: Vec<u8> = blocks
             .iter()
             .flat_map(|b| unsafe { cast_slice::<T, u8>(b) }.iter().copied())
             .collect();
         let encoder = Encoder::new(3).unwrap();
-        let blocks = BlockTable::build_from_data(&data, T::dtype(), block_len, encoder).unwrap();
-        let blocks = unsafe { blocks.swap_storage(|alloc| Owned(alloc)) };
-        blocks
+        BlockTable::build_from_data(&data, T::dtype(), block_len, encoder).unwrap()
     }
 
     fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Owned> {
-        Array::new(make_block_table(blocks), shape, block_shape)
+        let blocks_layout = BlocksLayout::new(block_shape, shape);
+        Array {
+            storage: Owned {
+                blocks: make_block_table(blocks),
+                shape: shape.try_into().unwrap(),
+                blocks_layout,
+            },
+        }
     }
 
     // -----------------------------------------------------------------------
