@@ -29,5 +29,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 
 [dev-dependencies]
+paste = "1"
+rand = "0.10"
 static_assertions = "1.1"
 tempfile = "3"

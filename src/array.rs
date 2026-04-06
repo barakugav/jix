@@ -51,6 +51,10 @@ pub struct Array<S> {
 }
 
 impl<S: ArrayStorage> Array<S> {
+    pub(crate) fn new(storage: S) -> Self {
+        Self { storage }
+    }
+
     pub fn dtype(&self) -> &Dtype {
         self.storage.dtype()
     }
@@ -574,21 +578,28 @@ impl ArrayStorage for Mmap {
         self.blocks.read_block(block_idx, buf, context)
     }
 }
-
-impl<'a, S> ArrayStorage for &'a S
+pub struct Ref<'a, S> {
+    storage: &'a S,
+}
+impl<'a, S> Ref<'a, S> {
+    pub(crate) fn new(storage: &'a S) -> Self {
+        Self { storage }
+    }
+}
+impl<'a, S> ArrayStorage for Ref<'a, S>
 where
     S: ArrayStorage,
 {
     fn dtype(&self) -> &crate::dtype::Dtype {
-        (*self).dtype()
+        self.storage.dtype()
     }
 
     fn shape(&self) -> &[usize] {
-        (*self).shape()
+        self.storage.shape()
     }
 
     fn blocks_layout(&self) -> &crate::array::BlocksLayout {
-        (*self).blocks_layout()
+        self.storage.blocks_layout()
     }
 
     fn read_block(
@@ -597,7 +608,7 @@ where
         buf: &mut [u8],
         context: &crate::codec::ReadContext,
     ) -> std::io::Result<()> {
-        (*self).read_block(block_idx, buf, context)
+        self.storage.read_block(block_idx, buf, context)
     }
 }
 

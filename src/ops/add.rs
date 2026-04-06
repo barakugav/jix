@@ -1,264 +1,283 @@
-use crate::array::{Array, ArrayStorage, BlocksLayout};
-use crate::dtype::{Dtype, DtypeScalarKind};
-use crate::util::{DimArray, cast_slice, cast_slice_mut};
+use std::io;
 
-pub struct Add<S1, S2> {
-    a: Array<S1>,
-    b: Array<S2>,
+use crate::array::{Array, ArrayStorage, Ref};
+use crate::dtype::{Complex, f16};
+use crate::ops::scalar::{ScalarOp2, ScalarOp2Base};
 
-    dtype: Dtype,
-    shape: DimArray<usize>,
-    blocks_layout: BlocksLayout,
-}
-impl<S1, S2> ArrayStorage for Add<S1, S2>
-where
-    S1: ArrayStorage,
-    S2: ArrayStorage,
-{
-    fn dtype(&self) -> &crate::dtype::Dtype {
-        &self.dtype
-    }
+macro_rules! define_op {
+    ($Name:ident, $op_trait:ident, $op_fn:ident, $op:tt) => {
+        pub struct $Name<S1, S2>(ScalarOp2Base<S1, S2>);
+        impl<'a, 'b, S1, S2> $Name<Ref<'a, S1>, Ref<'b, S2>> {
+            pub(crate) fn new(a: &'a Array<S1>, b: &'b Array<S2>) -> io::Result<Self>
+            where
+                S1: ArrayStorage,
+                S2: ArrayStorage,
+            {
+                if a.shape() != b.shape() {
+                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "shape mismatch"));
+                }
+                if a.dtype() != b.dtype() {
+                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "dtype mismatch"));
+                }
+                Ok(Self(ScalarOp2Base {
+                    a: Array::new(Ref::new(&a.storage)),
+                    b: Array::new(Ref::new(&b.storage)),
 
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
-    }
-
-    fn read_block(
-        &self,
-        block_idx: usize,
-        buf: &mut [u8],
-        context: &crate::codec::ReadContext,
-    ) -> std::io::Result<()> {
-        let mut buf2 = vec![0u8; buf.len()];
-        self.a.storage.read_block(block_idx, buf, context)?;
-        self.b.storage.read_block(block_idx, &mut buf2, context)?;
-        Ok(match self.a.dtype().try_to_scalar() {
-            Some(DtypeScalarKind::I8) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, i8>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, i8>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
+                    dtype: a.dtype().clone(),
+                    shape: a.shape().try_into().unwrap(),
+                    blocks_layout: a.blocks_layout().clone(),
+                }))
             }
-            Some(DtypeScalarKind::I16) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, i16>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, i16>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::I32) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, i32>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, i32>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::I64) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, i64>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, i64>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::U8) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, u8>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, u8>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::U16) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, u16>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, u16>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::U32) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, u32>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, u32>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::U64) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, u64>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, u64>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::F16) => {
-                cfg_if::cfg_if! {  if #[cfg(feature = "half")] {
-                    let buf1 = unsafe { cast_slice_mut::<u8, half::f16>(buf) };
-                    let buf2 = unsafe { cast_slice::<u8, half::f16>(&buf2) };
-                    for (a, b) in buf1.iter_mut().zip(buf2) {
-                        *a += *b;
-                    }
-                } else {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Unsupported,
-                        "f16 support requires the `half` feature",
-                    ));
-                } }
-            }
-            Some(DtypeScalarKind::F32) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, f32>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, f32>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::F64) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, f64>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, f64>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a += *b;
-                }
-            }
-            Some(DtypeScalarKind::ComplexF32) => {
-                cfg_if::cfg_if! {  if #[cfg(feature = "num-complex")] {
-                    let buf1 = unsafe { cast_slice_mut::<u8, num_complex::Complex<f32>>(buf) };
-                    let buf2 = unsafe { cast_slice::<u8, num_complex::Complex<f32>>(&buf2) };
-                    for (a, b) in buf1.iter_mut().zip(buf2) {
-                        *a += *b;
-                    }
-                } else {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Unsupported,
-                        "complex f32 support requires the `num-complex` feature",
-                    ));
-                } }
-            }
-            Some(DtypeScalarKind::ComplexF64) => {
-                cfg_if::cfg_if! {  if #[cfg(feature = "num-complex")] {
-                    let buf1 = unsafe { cast_slice_mut::<u8, num_complex::Complex<f64>>(buf) };
-                    let buf2 = unsafe { cast_slice::<u8, num_complex::Complex<f64>>(&buf2) };
-                    for (a, b) in buf1.iter_mut().zip(buf2) {
-                        *a += *b;
-                    }
-                } else {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Unsupported,
-                        "complex f64 support requires the `num-complex` feature",
-                    ));
-                } }
-            }
-            Some(DtypeScalarKind::Bool) | None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "unsupported dtype for addition",
-                ));
-            }
-        })
-    }
-}
-impl<'a, 'b, S1, S2> core::ops::Add<&'b Array<S2>> for &'a Array<S1>
-where
-    S1: ArrayStorage,
-    S2: ArrayStorage,
-{
-    type Output = Array<Add<&'a S1, &'b S2>>;
-    fn add(self, b: &'b Array<S2>) -> Array<Add<&'a S1, &'b S2>> {
-        // TODO: check shapes, dtype
-        Array {
-            storage: Add {
-                a: Array {
-                    storage: &self.storage,
-                },
-                b: Array {
-                    storage: &b.storage,
-                },
-
-                dtype: self.dtype().clone(),
-                shape: self.shape().try_into().unwrap(),
-                blocks_layout: self.blocks_layout().clone(),
-            },
         }
-    }
+        impl<'a, 'b, S1, S2> core::ops::$op_trait<&'b Array<S2>> for &'a Array<S1>
+        where
+            S1: ArrayStorage,
+            S2: ArrayStorage,
+        {
+            type Output = Array<$Name<Ref<'a, S1>, Ref<'b, S2>>>;
+            fn $op_fn(self, b: &'b Array<S2>) -> Array<$Name<Ref<'a, S1>, Ref<'b, S2>>> {
+                Array::new($Name::new(self, b).unwrap())
+            }
+        }
+
+        impl<S1, S2> ScalarOp2 for $Name<S1, S2> {
+            fn apply_i8(a: i8, b: i8) -> i8 { a $op b }
+            fn apply_i16(a: i16, b: i16) -> i16 { a $op b }
+            fn apply_i32(a: i32, b: i32) -> i32 { a $op b }
+            fn apply_i64(a: i64, b: i64) -> i64 { a $op b }
+            fn apply_u8(a: u8, b: u8) -> u8 { a $op b }
+            fn apply_u16(a: u16, b: u16) -> u16 { a $op b }
+            fn apply_u32(a: u32, b: u32) -> u32 { a $op b }
+            fn apply_u64(a: u64, b: u64) -> u64 { a $op b }
+
+            #[allow(unused_variables)]
+            fn apply_f16(a: f16, b: f16) -> f16 {
+                cfg_if::cfg_if! { if #[cfg(feature = "half")] {
+                    a $op b
+                } else {
+                    unimplemented!()
+                } }
+            }
+
+            fn apply_f32(a: f32, b: f32) -> f32 { a $op b }
+            fn apply_f64(a: f64, b: f64) -> f64 { a $op b }
+
+            #[allow(unused_variables)]
+            fn apply_complex_f32(a: Complex<f32>, b: Complex<f32>) -> Complex<f32> {
+                cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
+                    a $op b
+                } else {
+                    unimplemented!()
+                } }
+            }
+
+            #[allow(unused_variables)]
+            fn apply_complex_f64(a: Complex<f64>, b: Complex<f64>) -> Complex<f64> {
+                cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
+                    a $op b
+                } else {
+                    unimplemented!()
+                } }
+            }
+
+            #[allow(unused_variables)]
+            fn apply_bool(a: bool, b: bool) -> bool {
+                unimplemented!()
+            }
+
+            type S1 = S1;
+            type S2 = S2;
+            fn base(&self) -> &ScalarOp2Base<S1, S2> {
+                &self.0
+            }
+        }
+    };
 }
+
+define_op!(Add, Add, add, +);
+define_op!(Sub, Sub, sub, -);
+define_op!(Mul, Mul, mul, *);
+define_op!(Div, Div, div, /);
 
 #[cfg(test)]
 mod tests {
-    use crate::array::Array;
+    // Bring half::f16 into scope under the name `f16` so the macro ident resolves correctly.
+    #[cfg(feature = "half")]
+    use crate::dtype::f16;
+    #[cfg(feature = "num-complex")]
+    type complex_f32 = crate::dtype::Complex<f32>;
+    #[cfg(feature = "num-complex")]
+    type complex_f64 = crate::dtype::Complex<f64>;
 
-    #[test]
-    fn add_1d_i32() {
-        let a = ndarray::array![1i32, 2, 3, 4].into_dyn();
-        let b = ndarray::array![10i32, 20, 30, 40].into_dyn();
-        let za = Array::from_ndarray(&a, &[4]).unwrap();
-        let zb = Array::from_ndarray(&b, &[4]).unwrap();
-        let got = (&za + &zb).data().to_ndarray::<i32>().unwrap();
-        assert_eq!(got, &a + &b);
+    trait TestVal: Sized {
+        fn sample(rng: &mut rand::rngs::StdRng) -> Self;
+    }
+    macro_rules! impl_test_val {
+        ($range:expr, $($t:ty),+) => {
+            $(impl TestVal for $t {
+                fn sample(rng: &mut rand::rngs::StdRng) -> Self {
+                    use rand::RngExt;
+                    rng.random_range($range) as Self
+                }
+            })+
+        };
+    }
+    // [1,4]:  max cube 4³=64  < i8::MAX (127)
+    // [1,30]: max cube 30³=27k < i16::MAX (32767)
+    // [1,100]: safe for i32/i64/f32/f64
+    impl_test_val!(1u8..=4, i8, u8);
+    impl_test_val!(1u8..=30, i16, u16, u32, u64);
+    impl_test_val!(1u8..=100, i32, i64, f32, f64);
+    #[cfg(feature = "half")]
+    impl TestVal for f16 {
+        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
+            use rand::RngExt;
+            Self::from_f32(rng.random_range(1u8..=15u8) as f32)
+        }
+    }
+    #[cfg(feature = "num-complex")]
+    impl TestVal for complex_f32 {
+        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
+            use rand::RngExt;
+            Self::new(rng.random_range(1u8..=15u8) as f32, 0.0)
+        }
+    }
+    #[cfg(feature = "num-complex")]
+    impl TestVal for complex_f64 {
+        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
+            use rand::RngExt;
+            Self::new(rng.random_range(1u8..=15u8) as f64, 0.0)
+        }
     }
 
-    #[test]
-    fn add_1d_i32_multi_block() {
-        let a = ndarray::array![1i32, 2, 3, 4, 5, 6].into_dyn();
-        let b = ndarray::array![10i32, 20, 30, 40, 50, 60].into_dyn();
-        let za = Array::from_ndarray(&a, &[2]).unwrap();
-        let zb = Array::from_ndarray(&b, &[2]).unwrap();
-        let got = (&za + &zb).data().to_ndarray::<i32>().unwrap();
-        assert_eq!(got, &a + &b);
+    fn rand_array<T: TestVal>(rng: &mut rand::rngs::StdRng, shape: &[usize]) -> ndarray::ArrayD<T> {
+        ndarray::Array::from_shape_fn(ndarray::IxDyn(shape), |_| T::sample(rng))
     }
 
-    #[test]
-    fn add_1d_f64() {
-        let a = ndarray::array![1.0f64, 2.5, 3.0].into_dyn();
-        let b = ndarray::array![0.5f64, 1.5, 2.0].into_dyn();
-        let za = Array::from_ndarray(&a, &[3]).unwrap();
-        let zb = Array::from_ndarray(&b, &[3]).unwrap();
-        let got = (&za + &zb).data().to_ndarray::<f64>().unwrap();
-        assert_eq!(got, &a + &b);
+    // Generates 5 test functions per (op, dtype).
+    // Each TestVal impl controls the sampling range for its type.
+    macro_rules! test_op_dtype {
+        ($op:tt, $dtype:ident) => {
+            paste::paste! {
+                #[test]
+                fn [<test_ $dtype _1d>]() {
+                    use rand::{SeedableRng, rngs::StdRng};
+                    use crate::array::Array;
+                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
+                    let mut rng = StdRng::seed_from_u64(seed);
+                    let b = super::rand_array::<$dtype>(&mut rng, &[4]);
+                    let a = super::rand_array::<$dtype>(&mut rng, &[4]) + &b;
+                    let za = Array::from_ndarray(&a, &[4]).unwrap();
+                    let zb = Array::from_ndarray(&b, &[4]).unwrap();
+                    let actual = (&za $op &zb).data().to_ndarray::<$dtype>().unwrap();
+                    let expected = &a $op &b;
+                    assert_eq!(actual, expected);
+                }
+
+                #[test]
+                fn [<test_ $dtype _1d_multi_block>]() {
+                    use rand::{SeedableRng, rngs::StdRng};
+                    use crate::array::Array;
+                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
+                    let mut rng = StdRng::seed_from_u64(seed);
+                    let b = super::rand_array::<$dtype>(&mut rng, &[6]);
+                    let a = super::rand_array::<$dtype>(&mut rng, &[6]) + &b;
+                    let za = Array::from_ndarray(&a, &[2]).unwrap();
+                    let zb = Array::from_ndarray(&b, &[2]).unwrap();
+                    let actual = (&za $op &zb).data().to_ndarray::<$dtype>().unwrap();
+                    let expected = &a $op &b;
+                    assert_eq!(actual, expected);
+                }
+
+                #[test]
+                fn [<test_ $dtype _2d>]() {
+                    use rand::{SeedableRng, rngs::StdRng};
+                    use crate::array::Array;
+                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
+                    let mut rng = StdRng::seed_from_u64(seed);
+                    let b = super::rand_array::<$dtype>(&mut rng, &[2, 3]);
+                    let a = super::rand_array::<$dtype>(&mut rng, &[2, 3]) + &b;
+                    let za = Array::from_ndarray(&a, &[2, 3]).unwrap();
+                    let zb = Array::from_ndarray(&b, &[2, 3]).unwrap();
+                    let actual = (&za $op &zb).data().to_ndarray::<$dtype>().unwrap();
+                    let expected = &a $op &b;
+                    assert_eq!(actual, expected);
+                }
+
+                #[test]
+                fn [<test_ $dtype _2d_multi_block>]() {
+                    use rand::{SeedableRng, rngs::StdRng};
+                    use crate::array::Array;
+                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
+                    let mut rng = StdRng::seed_from_u64(seed);
+                    let b = super::rand_array::<$dtype>(&mut rng, &[4, 4]);
+                    let a = super::rand_array::<$dtype>(&mut rng, &[4, 4]) + &b;
+                    let za = Array::from_ndarray(&a, &[2, 2]).unwrap();
+                    let zb = Array::from_ndarray(&b, &[2, 2]).unwrap();
+                    let actual = (&za $op &zb).data().to_ndarray::<$dtype>().unwrap();
+                    let expected = &a $op &b;
+                    assert_eq!(actual, expected);
+                }
+
+                #[test]
+                fn [<test_ $dtype _three_arrays>]() {
+                    if size_of::<$dtype>() < 2 {
+                        // Skip this test for small types to avoid overflow in ops.
+                        return;
+                    }
+                    use rand::{SeedableRng, rngs::StdRng};
+                    use crate::array::Array;
+                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
+                    let mut rng = StdRng::seed_from_u64(seed);
+                    let c = super::rand_array::<$dtype>(&mut rng, &[4]);
+                    let b = super::rand_array::<$dtype>(&mut rng, &[4]);
+                    let a = super::rand_array::<$dtype>(&mut rng, &[4]) + &b + &c;
+                    let za = Array::from_ndarray(&a, &[4]).unwrap();
+                    let zb = Array::from_ndarray(&b, &[4]).unwrap();
+                    let zc = Array::from_ndarray(&c, &[4]).unwrap();
+                    let zab = &za $op &zb;
+                    let actual = (&zab $op &zc).data().to_ndarray::<$dtype>().unwrap();
+                    let expected = &(&a $op &b) $op &c;
+                    assert_eq!(actual, expected);
+                }
+            }
+        };
     }
 
-    #[test]
-    fn add_2d_f32() {
-        let a = ndarray::array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
-        let b = ndarray::array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]].into_dyn();
-        let za = Array::from_ndarray(&a, &[2, 3]).unwrap();
-        let zb = Array::from_ndarray(&b, &[2, 3]).unwrap();
-        let got = (&za + &zb).data().to_ndarray::<f32>().unwrap();
-        assert_eq!(got, &a + &b);
+    // Creates a module named $mod_name with one test set per dtype, all using $op.
+    // Optional trailing groups add feature-gated dtypes: #[cfg(feature = "...")] [dtype, ...]
+    macro_rules! test_op {
+        ($mod_name:ident, $op:tt, [$($dtype:ident),+] $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+])*) => {
+            mod $mod_name {
+                // Import feature-gated type aliases defined in the parent tests module.
+                $(#[cfg($cfg)] use super::{$($cfg_dtype),+};)*
+                $(test_op_dtype!($op, $dtype);)+
+                $($(
+                    #[cfg($cfg)]
+                    test_op_dtype!($op, $cfg_dtype);
+                )+)*
+            }
+        };
     }
 
-    #[test]
-    fn add_2d_i32_multi_block() {
-        #[rustfmt::skip]
-        let a = ndarray::array![
-            [1i32,  2,  3,  4],
-            [5,     6,  7,  8],
-            [9,    10, 11, 12],
-            [13,   14, 15, 16],
-        ].into_dyn();
-        #[rustfmt::skip]
-        let b = ndarray::array![
-            [100i32, 200, 300, 400],
-            [500,    600, 700, 800],
-            [900,   1000, 1100, 1200],
-            [1300,  1400, 1500, 1600],
-        ].into_dyn();
-        let za = Array::from_ndarray(&a, &[2, 2]).unwrap();
-        let zb = Array::from_ndarray(&b, &[2, 2]).unwrap();
-        let got = (&za + &zb).data().to_ndarray::<i32>().unwrap();
-        assert_eq!(got, &a + &b);
-    }
-
-    #[test]
-    fn add_three_arrays_1d_i32() {
-        let a = ndarray::array![1i32, 2, 3, 4].into_dyn();
-        let b = ndarray::array![10i32, 20, 30, 40].into_dyn();
-        let c = ndarray::array![100i32, 200, 300, 400].into_dyn();
-        let za = Array::from_ndarray(&a, &[4]).unwrap();
-        let zb = Array::from_ndarray(&b, &[4]).unwrap();
-        let zc = Array::from_ndarray(&c, &[4]).unwrap();
-        let zab = &za + &zb;
-        let got = (&zab + &zc).data().to_ndarray::<i32>().unwrap();
-        assert_eq!(got, &(&a + &b) + &c);
-    }
+    test_op!(add, +,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        #[cfg(feature = "half")] [f16],
+        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
+    );
+    test_op!(sub, -,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        #[cfg(feature = "half")] [f16],
+        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
+    );
+    test_op!(mul, *,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        #[cfg(feature = "half")] [f16],
+        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
+    );
+    test_op!(div, /,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        #[cfg(feature = "half")] [f16],
+        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
+    );
 }
