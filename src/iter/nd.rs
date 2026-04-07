@@ -1,4 +1,4 @@
-use crate::util::{DimArray, Idx, full_dim_array};
+use crate::util::{DimArray, Idx, dim_arr};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
 ///
@@ -30,7 +30,7 @@ where
 {
     /// Creates an iterator over `[0, shape)` in every dimension.
     pub(crate) fn new(shape: &[Ix], extensions: E) -> Self {
-        let begin = full_dim_array(Ix::ZERO, shape.len());
+        let begin = dim_arr(shape.len(), |_| Ix::ZERO);
         Self::new_with_begin(&begin, shape, extensions)
     }
 

@@ -4,6 +4,9 @@ mod aligned_vec;
 pub(crate) use aligned_vec::AlignedBytes;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
+pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
+    (0..ndim).map(f).collect()
+}
 
 pub(crate) trait Idx:
     Clone
@@ -54,7 +57,7 @@ impl_idx_for_primitive!(u64);
 
 pub(crate) fn default_strides<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<Ix> {
     let ndim = shape.len();
-    let mut strides = full_dim_array(itemsize, ndim);
+    let mut strides = dim_arr(ndim, |_| itemsize);
     if ndim > 0 {
         for dim in (0..ndim - 1).rev() {
             strides[dim] = strides[dim + 1] * shape[dim + 1];
@@ -84,10 +87,6 @@ where
     assert!(ptr as usize % align_of::<U>() == 0);
     assert!(size_of::<U>() > 0 && len_bytes % size_of::<U>() == 0);
     unsafe { std::slice::from_raw_parts_mut(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
-}
-
-pub(crate) fn full_dim_array<T: Clone>(value: T, len: usize) -> DimArray<T> {
-    (0..len).map(|_| value.clone()).collect()
 }
 
 pub(crate) fn ceil_to_multiple<Ix: Idx>(x: Ix, m: Ix) -> Ix {

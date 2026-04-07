@@ -27,7 +27,6 @@ pub(crate) struct BlockTable<S> {
     pub(crate) dtype: Dtype,
     pub(crate) nitems: usize,
 
-    pub(crate) nblocks: usize,
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
     /// Note the units are items, not bytes.
     pub(crate) block_size: BlockSize,
@@ -55,18 +54,7 @@ impl<S> BlockTable<S> {
             storage,
             dtype,
             nitems,
-            nblocks,
             block_size,
-        }
-    }
-
-    pub(crate) unsafe fn swap_storage<S2>(self, map: impl FnOnce(S) -> S2) -> BlockTable<S2> {
-        BlockTable {
-            storage: map(self.storage),
-            dtype: self.dtype,
-            nitems: self.nitems,
-            nblocks: self.nblocks,
-            block_size: self.block_size,
         }
     }
 
@@ -121,6 +109,7 @@ impl<S> BlockTable<S> {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn write_to<W>(&self, writer: W) -> io::Result<()>
     where
         W: Write + Seek,
@@ -170,6 +159,7 @@ impl<S> BlockTable<S> {
     }
 }
 impl BlockTable<Owned> {
+    #[allow(unused)]
     pub(crate) fn read_from<R>(reader: R, len: u64) -> io::Result<Self>
     where
         R: Read + Seek,
@@ -243,7 +233,8 @@ impl<S> BlockTable<S> {
 }
 
 impl BlockTable<Owned> {
-    pub fn build_from_data(
+    #[allow(unused)]
+    pub(crate) fn build_from_data(
         data: &[u8],
         dtype: Dtype,
         block_size: BlockSize,
@@ -313,6 +304,7 @@ pub struct Borrowed<'a> {
 pub struct Mmap {
     pub(crate) cdata: &'static [u8],
     pub(crate) block_offsets: &'static [u64],
+    #[allow(unused)] // keep the mmap alive
     pub(crate) mmap: memmap2::Mmap,
 }
 impl Mmap {
@@ -485,7 +477,7 @@ mod tests {
         let items: Vec<u8> = (0u8..8).collect();
         let encoder = make_encoder();
         let table = build_from_items(&items, 8, encoder).unwrap();
-        assert_eq!(table.nblocks, 1);
+        assert_eq!(table.storage.block_offsets.len(), 2);
         assert_eq!(table.nitems, 8);
         assert_eq!(decode_block(&table, 0, &mut make_decoder()), items);
     }
@@ -496,7 +488,7 @@ mod tests {
         let items: Vec<u8> = (0u8..12).collect();
         let encoder = make_encoder();
         let table = build_from_items(&items, 4, encoder).unwrap();
-        assert_eq!(table.nblocks, 3);
+        assert_eq!(table.storage.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
         let mut decoder = make_decoder();
         assert_eq!(decode_block(&table, 0, &mut decoder), items[0..4]);
@@ -521,7 +513,7 @@ mod tests {
         let items: Vec<u32> = vec![10, 20, 30, 40];
         let encoder = make_encoder();
         let table = build_from_items(&items, 2, encoder).unwrap();
-        assert_eq!(table.nblocks, 2);
+        assert_eq!(table.storage.block_offsets.len(), 3);
         assert_eq!(table.nitems, 4);
         let mut decoder = make_decoder();
         assert_eq!(decode_block(&table, 0, &mut decoder), unsafe {
@@ -550,7 +542,7 @@ mod tests {
     fn round_trip_single_block() {
         let items: Vec<u8> = (0u8..8).collect();
         let table2 = round_trip(&items, 8);
-        assert_eq!(table2.nblocks, 1);
+        assert_eq!(table2.storage.block_offsets.len(), 2);
         assert_eq!(table2.nitems, 8);
         assert_eq!(table2.block_size, 8);
         assert_eq!(table2.dtype, u8::dtype());
@@ -561,10 +553,10 @@ mod tests {
     fn round_trip_multiple_blocks() {
         let items: Vec<u8> = (0u8..12).collect();
         let table = round_trip(&items, 4);
-        assert_eq!(table.nblocks, 3);
+        assert_eq!(table.storage.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
         let mut decoder = make_decoder();
-        let recovered: Vec<u8> = (0..table.nblocks)
+        let recovered: Vec<u8> = (0..table.storage.block_offsets.len() - 1)
             .flat_map(|i| decode_block(&table, i, &mut decoder))
             .collect();
         assert_eq!(recovered, items);
@@ -599,10 +591,10 @@ mod tests {
         let table2 = BlockTable::read_from(file, reader_len).unwrap();
         std::fs::remove_file(&path).unwrap();
 
-        assert_eq!(table2.nblocks, 6);
+        assert_eq!(table2.storage.block_offsets.len(), 7);
         assert_eq!(table2.nitems, 18);
         let mut decoder = make_decoder();
-        let recovered: Vec<u8> = (0..table2.nblocks)
+        let recovered: Vec<u8> = (0..table2.storage.block_offsets.len() - 1)
             .flat_map(|i| decode_block(&table2, i, &mut decoder))
             .collect();
         assert_eq!(recovered, unsafe { cast_slice::<u32, u8>(&items) });

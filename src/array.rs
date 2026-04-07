@@ -13,37 +13,23 @@ use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut};
 use crate::schema::ArchiveType;
 use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, Mmap, Owned};
-use crate::util::{AlignedBytes, DimArray, cast_slice_mut};
+use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr};
 use crate::util::{MaybeOwned, default_strides};
 
 use crate::block::{BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage};
 use crate::codec::{Encoder, ReadContext};
-use crate::util::{ceil_to_multiple, full_dim_array};
+use crate::util::ceil_to_multiple;
 use crate::{NDIM_MAX, schema};
 
 #[derive(Clone)]
 pub struct BlocksLayout {
     pub(crate) block_shape: DimArray<usize>,
-    /// Number of blocks in each dimension.
-    pub(crate) grid_shape: DimArray<usize>,
-    /// Total items per block (`block_shape.iter().product()`).
-    pub(crate) block_size: usize,
 }
 
 impl BlocksLayout {
-    pub(crate) fn new(block_shape: &[usize], shape: &[usize]) -> Self {
+    pub(crate) fn new(block_shape: &[usize]) -> Self {
         let block_shape: DimArray<_> = block_shape.try_into().unwrap();
-        let grid_shape = shape
-            .iter()
-            .zip(&block_shape)
-            .map(|(&s, &b)| s.div_ceil(b))
-            .collect();
-        let block_size = block_shape.iter().product();
-        Self {
-            block_shape,
-            grid_shape,
-            block_size,
-        }
+        Self { block_shape }
     }
 }
 pub struct Array<S> {
@@ -98,19 +84,13 @@ impl Array<Owned> {
         let itemsize = dtype.itemsize() as usize;
         let shape: DimArray<_> = array.shape().try_into().unwrap();
 
-        let block_shape = block_shape
-            .iter()
-            .zip(&shape)
-            .map(|(&b, &s)| b.min(s))
-            .collect::<DimArray<_>>();
-        let b_layout = BlocksLayout::new(&block_shape, &shape);
+        let block_shape = dim_arr(ndim, |dim| block_shape[dim].min(shape[dim]));
 
         let tmp_block_strides = default_strides(&block_shape, itemsize);
-        let strides = array
-            .strides()
-            .iter()
-            .map(|&s| usize::try_from(s).unwrap() * size_of::<T>())
-            .collect::<DimArray<_>>();
+        let strides = array.strides();
+        let strides = dim_arr(ndim, |dim| {
+            usize::try_from(strides[dim]).unwrap() * size_of::<T>()
+        });
 
         return Self::from_block_fn(
             &shape,
@@ -120,8 +100,7 @@ impl Array<Owned> {
                 // TODO: fast path for contiguous data
                 let initial_arr_offset = (0..ndim)
                     .map(|dim| {
-                        let idx =
-                            block_idx[dim] * b_layout.block_shape[dim] + block_inner_offset[dim];
+                        let idx = block_idx[dim] * block_shape[dim] + block_inner_offset[dim];
                         idx * strides[dim]
                     })
                     .sum::<usize>();
@@ -158,22 +137,18 @@ impl Array<Owned> {
         let itemsize = dtype.itemsize() as usize;
         let shape: DimArray<_> = shape.try_into().unwrap();
 
-        let block_shape = block_shape
-            .iter()
-            .zip(&shape)
-            .map(|(&b, &s)| b.min(s))
-            .collect::<DimArray<_>>();
-        let b_layout = BlocksLayout::new(&block_shape, &shape);
+        let block_shape = dim_arr(ndim, |dim| block_shape[dim].min(shape[dim]));
+        let grid_shape = dim_arr(shape.len(), |dim| shape[dim].div_ceil(block_shape[dim]));
+        let block_size = block_shape.iter().product::<usize>();
 
         let mut block_iter = NdIter::new(
-            &b_layout.grid_shape,
-            NdIterExtBlockOffsetSize::new(&shape, &full_dim_array(0, ndim), &shape, &b_layout),
+            &grid_shape,
+            NdIterExtBlockOffsetSize::new(&shape, &dim_arr(ndim, |_| 0), &shape, &block_shape),
         );
 
         let encoder = Encoder::new(3)?;
-        let block_capacity_bytes = b_layout.block_size * itemsize;
-        let mut builder =
-            BlockTableBuilder::new(dtype.clone(), b_layout.block_size as BlockSize, encoder);
+        let block_capacity_bytes = block_size * itemsize;
+        let mut builder = BlockTableBuilder::new(dtype.clone(), block_size as BlockSize, encoder);
         let mut tmp_block_data =
             AlignedBytes::with_capacity(dtype.alignment() as usize, block_capacity_bytes);
         while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
@@ -197,7 +172,11 @@ impl Array<Owned> {
         let blocks = builder.finish();
 
         Ok(Self {
-            storage: Owned(ArrayBlockTableStorageBase::new(blocks, shape, b_layout)),
+            storage: Owned(ArrayBlockTableStorageBase::new(
+                blocks,
+                shape,
+                BlocksLayout { block_shape },
+            )),
         })
     }
 }
@@ -255,11 +234,8 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
     where
         T: Dtyped,
     {
-        let full_range = self
-            .shape()
-            .iter()
-            .map(|&dim| 0..dim)
-            .collect::<DimArray<_>>();
+        let shape = self.shape();
+        let full_range = dim_arr(shape.len(), |dim| 0..shape[dim]);
         self.to_ndarray_sub(&full_range)
     }
 
@@ -268,11 +244,10 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         T: Dtyped,
     {
         self.check_type::<T>()?;
+        let ndim = self.ndim();
+        assert_eq!(ndim, range.len());
         // Output is sized to the requested range, not the full array shape.
-        let out_shape = range
-            .iter()
-            .map(|r| r.end - r.start)
-            .collect::<DimArray<_>>();
+        let out_shape = dim_arr(ndim, |dim| range[dim].end - range[dim].start);
         let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
         // TODO: call read_data multiple times with smaller blocks
         self.array.storage.read_data(
@@ -298,13 +273,11 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
             block_shape,
             dtype,
             |block_idx, block_inner_offset, block_size, output_block| {
-                let range = (0..ndim)
-                    .map(|dim| {
-                        let start = block_idx[dim] * block_shape[dim] + block_inner_offset[dim];
-                        let end = start + block_size[dim];
-                        start..end
-                    })
-                    .collect::<DimArray<_>>();
+                let range = dim_arr(ndim, |dim| {
+                    let start = block_idx[dim] * block_shape[dim] + block_inner_offset[dim];
+                    let end = start + block_size[dim];
+                    start..end
+                });
 
                 let full_block = (0..ndim)
                     .all(|dim| block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim]);
@@ -442,12 +415,7 @@ impl<S> Array<S> {
                 format!("array ndim {ndim} exceeds maximum supported ndim {NDIM_MAX}"),
             ));
         }
-        let shape = header
-            .shape
-            .iter()
-            .cloned()
-            .map(|s| s as usize)
-            .collect::<DimArray<_>>();
+        let shape = dim_arr(ndim, |dim| header.shape[dim] as usize);
         if header.block_shape.len() != ndim {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -457,19 +425,16 @@ impl<S> Array<S> {
                 ),
             ));
         }
-        let block_shape = header
-            .block_shape
-            .iter()
-            .cloned()
-            .map(|s| s as usize)
-            .collect::<DimArray<_>>();
-        let padded_shape = block_shape
-            .iter()
-            .zip(&shape)
-            .map(|(&b, &s)| if s == 0 { 0 } else { ceil_to_multiple(s, b) })
-            .collect::<DimArray<_>>();
+        let block_shape = dim_arr(ndim, |dim| header.block_shape[dim] as usize);
+        let padded_shape = dim_arr(ndim, |dim| {
+            if shape[dim] == 0 {
+                0
+            } else {
+                ceil_to_multiple(shape[dim], block_shape[dim])
+            }
+        });
 
-        let blocks_layout = BlocksLayout::new(&block_shape, &shape);
+        let blocks_layout = BlocksLayout::new(&block_shape);
         let blocks = BlockTable::read_content(&mut reader, read_block_storage)?;
         let expected_nitems = padded_shape.iter().product::<usize>();
         if blocks.nitems() != expected_nitems {
@@ -530,12 +495,11 @@ mod tests {
     }
 
     fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Owned> {
-        let blocks_layout = BlocksLayout::new(block_shape, shape);
         Array {
             storage: Owned(ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),
                 shape.try_into().unwrap(),
-                blocks_layout,
+                BlocksLayout::new(block_shape),
             )),
         }
     }
@@ -1250,11 +1214,7 @@ mod tests {
         // Block grid 2×2×2 = 8 blocks; every boundary block is partial in at least
         // one dimension, and the single corner block [1,1,1] is partial in all three:
         //   size [1,1,2] vs block_shape [2,2,3].
-        let src = ndarray::Array3::<u8>::from_shape_vec(
-            [3, 3, 5],
-            (0u8..45).collect(),
-        )
-        .unwrap();
+        let src = ndarray::Array3::<u8>::from_shape_vec([3, 3, 5], (0u8..45).collect()).unwrap();
         let a = Array::from_ndarray(&src, &[2, 2, 3]).unwrap();
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[3, 3, 5]);
@@ -1269,7 +1229,10 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         let a = Array::from_ndarray(&src, &[4]).unwrap();
         let b = a.data().copy().unwrap();
-        assert_eq!(a.blocks_layout().block_shape[..], b.blocks_layout().block_shape[..]);
+        assert_eq!(
+            a.blocks_layout().block_shape[..],
+            b.blocks_layout().block_shape[..]
+        );
     }
 
     #[test]

@@ -63,20 +63,20 @@ impl<W> ArchiveWriter<W> {
         Ok(msg_len)
     }
 
-    pub(crate) fn into_inner(self) -> W {
-        self.writer
-    }
+    // pub(crate) fn into_inner(self) -> W {
+    //     self.writer
+    // }
 
-    pub(crate) fn inner_mut(&mut self) -> &mut W {
-        &mut self.writer
-    }
+    // pub(crate) fn inner_mut(&mut self) -> &mut W {
+    //     &mut self.writer
+    // }
 
-    pub(crate) fn offset_from_base(&mut self) -> io::Result<u64>
-    where
-        W: Seek,
-    {
-        Ok(self.stream_position()? - self.base_offset)
-    }
+    // pub(crate) fn offset_from_base(&mut self) -> io::Result<u64>
+    // where
+    //     W: Seek,
+    // {
+    //     Ok(self.stream_position()? - self.base_offset)
+    // }
 
     pub(crate) fn write_section(&mut self, data: &[u8], alignment: usize) -> io::Result<Section>
     where
@@ -220,9 +220,9 @@ impl<R> ArchiveReader<R> {
         Ok(self.tmp_buf.as_slice())
     }
 
-    pub(crate) fn into_inner(self) -> R {
-        self.reader
-    }
+    // pub(crate) fn into_inner(self) -> R {
+    //     self.reader
+    // }
 
     pub(crate) fn inner_mut(&mut self) -> &mut R {
         &mut self.reader

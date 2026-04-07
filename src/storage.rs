@@ -8,8 +8,8 @@ use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{
     NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
 };
-use crate::util::DimArray;
 use crate::util::default_strides;
+use crate::util::{DimArray, dim_arr};
 
 use crate::block::{BlockTable, BlockTableStorage};
 use crate::codec::ReadContext;
@@ -98,12 +98,12 @@ impl<S> ArrayBlockTableStorageBase<S> {
     {
         let ndim = self.shape.len();
         assert_eq!(index.len(), ndim);
-        let b_layout = &self.blocks_layout;
+        let block_shape = &self.blocks_layout.block_shape;
         let mut b_range = DimArray::default();
         let mut single_full_block = true;
         for dim in 0..ndim {
             let i_range = &index[dim];
-            let b = b_layout.block_shape[dim];
+            let b = block_shape[dim];
             let b_begin = i_range.start / b;
             let b_end = i_range.end.div_ceil(b);
             b_range.push(b_begin..b_end);
@@ -111,21 +111,20 @@ impl<S> ArrayBlockTableStorageBase<S> {
                 b_begin + 1 == b_end && i_range.start % b == 0 && i_range.end % b == 0;
         }
 
+        let shape = self.shape.as_slice();
+        let grid_shape = dim_arr(shape.len(), |dim| shape[dim].div_ceil(block_shape[dim]));
+
         // Fast path for aligned single-block read
         if single_full_block {
             let block_idx = (0..ndim).fold(0, |blk_idx, dim| {
-                blk_idx * b_layout.grid_shape[dim] + b_range[dim].start
+                blk_idx * grid_shape[dim] + b_range[dim].start
             });
             return self.blocks.read_block(block_idx, buf, context);
         }
 
-        let shape = self.shape.as_slice();
         let dtype = self.blocks.dtype();
         let itemsize = dtype.itemsize() as usize;
-        let out_shape = index
-            .iter()
-            .map(|r| r.end - r.start)
-            .collect::<DimArray<_>>();
+        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let out_size = out_shape.iter().product::<usize>();
         if buf.len() != out_size * itemsize {
             return Err(io::Error::new(
@@ -138,35 +137,27 @@ impl<S> ArrayBlockTableStorageBase<S> {
             ));
         }
         let out_strides = default_strides(&out_shape, itemsize);
-        let block_strides = default_strides(&b_layout.block_shape, itemsize);
+        let block_strides = default_strides(&block_shape, itemsize);
 
         // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = index.iter().map(|r| r.start).collect::<DimArray<_>>();
-        let elem_end = index.iter().map(|r| r.end).collect::<DimArray<_>>();
+        let elem_begin = dim_arr(ndim, |dim| index[dim].start);
+        let elem_end = dim_arr(ndim, |dim| index[dim].end);
 
         // Block-space begin/end for NdIter.
-        let block_begin = index
-            .iter()
-            .zip(&b_layout.block_shape)
-            .map(|(r, &b)| r.start / b)
-            .collect::<DimArray<_>>();
-        let block_end = index
-            .iter()
-            .zip(&b_layout.block_shape)
-            .map(|(r, &b)| r.end.div_ceil(b))
-            .collect::<DimArray<_>>();
+        let block_begin = dim_arr(ndim, |dim| index[dim].start / block_shape[dim]);
+        let block_end = dim_arr(ndim, |dim| index[dim].end.div_ceil(block_shape[dim]));
 
         let mut block_iter = NdIter::new_with_begin(
             &block_begin,
             &block_end,
             (
-                nd_iter_ext_logical_global_index(&b_layout.grid_shape, &block_begin),
-                NdIterExtBlockOffsetSize::new(shape, &elem_begin, &elem_end, b_layout),
+                nd_iter_ext_logical_global_index(&grid_shape, &block_begin),
+                NdIterExtBlockOffsetSize::new(shape, &elem_begin, &elem_end, block_shape),
             ),
         );
 
         // Pre-allocate a buffer large enough for a full block.
-        let full_buf_len = b_layout.block_size * itemsize;
+        let full_buf_len = block_shape.iter().product::<usize>() * itemsize;
         let mut tmp_buf = Vec::with_capacity(full_buf_len); // TODO: move to ReadContext
         unsafe { tmp_buf.set_len(full_buf_len) };
         while let Some((block_idx, (block_global_id, (block_inner_offset, block_size)))) =
@@ -184,8 +175,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
             // Map the active region's start to its position in the output array.
             let out_start = (0..ndim)
                 .map(|dim| {
-                    let full_idx =
-                        block_idx[dim] * b_layout.block_shape[dim] + block_inner_offset[dim];
+                    let full_idx = block_idx[dim] * block_shape[dim] + block_inner_offset[dim];
                     let out_idx = full_idx - index[dim].start;
                     out_idx * out_strides[dim]
                 })

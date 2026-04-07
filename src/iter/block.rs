@@ -1,6 +1,5 @@
-use crate::array::BlocksLayout;
 use crate::iter::NdIterExtension;
-use crate::util::{DimArray, Idx};
+use crate::util::{DimArray, Idx, dim_arr};
 
 /// [`NdIterExtension`] that tracks the per-block inner offset and active size for each dimension
 /// as a block-space index advances through an N-dimensional sub-range.
@@ -42,18 +41,8 @@ impl<Ix> NdIterExtBlockOffsetSize<Ix>
 where
     Ix: Idx,
 {
-    pub(crate) fn new(
-        shape: &[Ix],
-        begin: &[Ix],
-        end: &[Ix],
-        blocks_layout: &BlocksLayout,
-    ) -> Self {
+    pub(crate) fn new(shape: &[Ix], begin: &[Ix], end: &[Ix], block_shape: &[Ix]) -> Self {
         let ndim = shape.len();
-        let block_shape = blocks_layout
-            .block_shape
-            .iter()
-            .map(|&c| c.try_into().unwrap())
-            .collect::<DimArray<Ix>>();
         assert_eq!(ndim, begin.len());
         assert_eq!(ndim, end.len());
         assert_eq!(ndim, block_shape.len());
@@ -88,16 +77,10 @@ where
             ));
         }
 
-        let inner_offset = borders
-            .iter()
-            .map(|(low, _high)| low.inner_offset)
-            .collect::<DimArray<Ix>>();
-        let current_block_size = borders
-            .iter()
-            .map(|(low, _high)| low.length)
-            .collect::<DimArray<Ix>>();
+        let inner_offset = dim_arr(ndim, |dim| borders[dim].0.inner_offset);
+        let current_block_size = dim_arr(ndim, |dim| borders[dim].0.length);
         Self {
-            block_shape: block_shape.clone(),
+            block_shape: block_shape.try_into().unwrap(),
             borders,
             inner_offset,
             current_block_size,
@@ -145,7 +128,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::BlocksLayout;
     use crate::iter::NdIter;
     use crate::util::Idx;
 
@@ -155,16 +137,7 @@ mod tests {
         end: &[Ix],
         block: &[Ix],
     ) -> NdIter<Ix, NdIterExtBlockOffsetSize<Ix>> {
-        let block_usize = block
-            .iter()
-            .map(|&c| c.try_into().unwrap())
-            .collect::<DimArray<usize>>();
-        let shape_usize = shape
-            .iter()
-            .map(|&s| s.try_into().unwrap())
-            .collect::<DimArray<usize>>();
-        let layout = BlocksLayout::new(&block_usize, &shape_usize);
-        let ext = NdIterExtBlockOffsetSize::new(shape, begin, end, &layout);
+        let ext = NdIterExtBlockOffsetSize::new(shape, begin, end, block);
         let block_begin: Vec<Ix> = begin.iter().zip(block).map(|(&b, &c)| b / c).collect();
         let block_end: Vec<Ix> = end
             .iter()
