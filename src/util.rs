@@ -120,26 +120,26 @@ impl<'a, T> AsRef<T> for MaybeOwned<'a, T> {
     }
 }
 
-pub(crate) enum CowMut<'a, T> {
-    Owned(T),
-    Borrowed(&'a mut T),
-}
-impl<'a, T> AsRef<T> for CowMut<'a, T> {
-    fn as_ref(&self) -> &T {
-        match self {
-            CowMut::Owned(t) => t,
-            CowMut::Borrowed(t) => t,
-        }
-    }
-}
-impl<'a, T> AsMut<T> for CowMut<'a, T> {
-    fn as_mut(&mut self) -> &mut T {
-        match self {
-            CowMut::Owned(t) => t,
-            CowMut::Borrowed(t) => t,
-        }
-    }
-}
+// pub(crate) enum CowMut<'a, T> {
+//     Owned(T),
+//     Borrowed(&'a mut T),
+// }
+// impl<'a, T> AsRef<T> for CowMut<'a, T> {
+//     fn as_ref(&self) -> &T {
+//         match self {
+//             CowMut::Owned(t) => t,
+//             CowMut::Borrowed(t) => t,
+//         }
+//     }
+// }
+// impl<'a, T> AsMut<T> for CowMut<'a, T> {
+//     fn as_mut(&mut self) -> &mut T {
+//         match self {
+//             CowMut::Owned(t) => t,
+//             CowMut::Borrowed(t) => t,
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

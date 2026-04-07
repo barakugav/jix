@@ -8,6 +8,7 @@ pub mod dtype;
 mod iter;
 mod ops;
 mod schema;
+mod storage;
 mod util;
 
 /// Maximum number of dimensions supported by the library for an array.

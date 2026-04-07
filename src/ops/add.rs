@@ -1,32 +1,20 @@
 use std::io;
 
-use crate::array::{Array, ArrayStorage, Ref};
+use crate::array::Array;
 use crate::dtype::{Complex, f16};
-use crate::ops::scalar::{ScalarOp2, ScalarOp2Base};
+use crate::ops::scalar::{ScalarOp2, ScalarOp2Kernel};
+use crate::storage::{ArrayStorage, Ref};
 
 macro_rules! define_op {
-    ($Name:ident, $op_trait:ident, $op_fn:ident, $op:tt) => {
-        pub struct $Name<S1, S2>(ScalarOp2Base<S1, S2>);
-        impl<'a, 'b, S1, S2> $Name<Ref<'a, S1>, Ref<'b, S2>> {
-            pub(crate) fn new(a: &'a Array<S1>, b: &'b Array<S2>) -> io::Result<Self>
+    ($Name:ident, $NameKernel:ident, $op_trait:ident, $op_fn:ident, $op:tt) => {
+        pub struct $Name<S1, S2>(ScalarOp2<$NameKernel, S1, S2>);
+        impl<S1, S2> $Name<S1, S2> {
+            pub(crate) fn new(a: Array<S1>, b: Array<S2>) -> io::Result<Self>
             where
                 S1: ArrayStorage,
                 S2: ArrayStorage,
             {
-                if a.shape() != b.shape() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "shape mismatch"));
-                }
-                if a.dtype() != b.dtype() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "dtype mismatch"));
-                }
-                Ok(Self(ScalarOp2Base {
-                    a: Array::new(Ref::new(&a.storage)),
-                    b: Array::new(Ref::new(&b.storage)),
-
-                    dtype: a.dtype().clone(),
-                    shape: a.shape().try_into().unwrap(),
-                    blocks_layout: a.blocks_layout().clone(),
-                }))
+                Ok(Self(ScalarOp2::new($NameKernel, a, b)?))
             }
         }
         impl<'a, 'b, S1, S2> core::ops::$op_trait<&'b Array<S2>> for &'a Array<S1>
@@ -35,23 +23,29 @@ macro_rules! define_op {
             S2: ArrayStorage,
         {
             type Output = Array<$Name<Ref<'a, S1>, Ref<'b, S2>>>;
+            #[track_caller]
             fn $op_fn(self, b: &'b Array<S2>) -> Array<$Name<Ref<'a, S1>, Ref<'b, S2>>> {
-                Array::new($Name::new(self, b).unwrap())
+                let a = Array::new(Ref(&self.storage));
+                let b = Array::new(Ref(&b.storage));
+                let op = $Name::new(a, b).unwrap();
+                Array::new(op)
             }
         }
+        crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: ArrayStorage, S2: ArrayStorage);
 
-        impl<S1, S2> ScalarOp2 for $Name<S1, S2> {
-            fn apply_i8(a: i8, b: i8) -> i8 { a $op b }
-            fn apply_i16(a: i16, b: i16) -> i16 { a $op b }
-            fn apply_i32(a: i32, b: i32) -> i32 { a $op b }
-            fn apply_i64(a: i64, b: i64) -> i64 { a $op b }
-            fn apply_u8(a: u8, b: u8) -> u8 { a $op b }
-            fn apply_u16(a: u16, b: u16) -> u16 { a $op b }
-            fn apply_u32(a: u32, b: u32) -> u32 { a $op b }
-            fn apply_u64(a: u64, b: u64) -> u64 { a $op b }
+        struct $NameKernel;
+        impl ScalarOp2Kernel for $NameKernel {
+            fn apply_i8(&self, a: i8, b: i8) -> i8 { a $op b }
+            fn apply_i16(&self, a: i16, b: i16) -> i16 { a $op b }
+            fn apply_i32(&self, a: i32, b: i32) -> i32 { a $op b }
+            fn apply_i64(&self, a: i64, b: i64) -> i64 { a $op b }
+            fn apply_u8(&self, a: u8, b: u8) -> u8 { a $op b }
+            fn apply_u16(&self, a: u16, b: u16) -> u16 { a $op b }
+            fn apply_u32(&self, a: u32, b: u32) -> u32 { a $op b }
+            fn apply_u64(&self, a: u64, b: u64) -> u64 { a $op b }
 
             #[allow(unused_variables)]
-            fn apply_f16(a: f16, b: f16) -> f16 {
+            fn apply_f16(&self, a: f16, b: f16) -> f16 {
                 cfg_if::cfg_if! { if #[cfg(feature = "half")] {
                     a $op b
                 } else {
@@ -59,11 +53,11 @@ macro_rules! define_op {
                 } }
             }
 
-            fn apply_f32(a: f32, b: f32) -> f32 { a $op b }
-            fn apply_f64(a: f64, b: f64) -> f64 { a $op b }
+            fn apply_f32(&self, a: f32, b: f32) -> f32 { a $op b }
+            fn apply_f64(&self, a: f64, b: f64) -> f64 { a $op b }
 
             #[allow(unused_variables)]
-            fn apply_complex_f32(a: Complex<f32>, b: Complex<f32>) -> Complex<f32> {
+            fn apply_complex_f32(&self, a: Complex<f32>, b: Complex<f32>) -> Complex<f32> {
                 cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
                     a $op b
                 } else {
@@ -72,7 +66,7 @@ macro_rules! define_op {
             }
 
             #[allow(unused_variables)]
-            fn apply_complex_f64(a: Complex<f64>, b: Complex<f64>) -> Complex<f64> {
+            fn apply_complex_f64(&self, a: Complex<f64>, b: Complex<f64>) -> Complex<f64> {
                 cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
                     a $op b
                 } else {
@@ -81,81 +75,49 @@ macro_rules! define_op {
             }
 
             #[allow(unused_variables)]
-            fn apply_bool(a: bool, b: bool) -> bool {
+            fn apply_bool(&self, a: bool, b: bool) -> bool {
                 unimplemented!()
             }
 
-            type S1 = S1;
-            type S2 = S2;
-            fn base(&self) -> &ScalarOp2Base<S1, S2> {
-                &self.0
+            fn is_support_dtype(&self, dtype: &crate::dtype::Dtype) -> bool {
+                use crate::dtype::DtypeScalarKind;
+                let Some(scalar_kind) = dtype.try_to_scalar() else {
+                    return false;
+                };
+                matches!(scalar_kind,
+                    DtypeScalarKind::I8
+                    | DtypeScalarKind::I16
+                    | DtypeScalarKind::I32
+                    | DtypeScalarKind::I64
+                    | DtypeScalarKind::U8
+                    | DtypeScalarKind::U16
+                    | DtypeScalarKind::U32
+                    | DtypeScalarKind::U64
+                    | DtypeScalarKind::F32
+                    | DtypeScalarKind::F64
+                )
+                || (cfg!(feature = "half") && matches!(scalar_kind,
+                    DtypeScalarKind::F16
+                ))
+                || (cfg!(feature = "num-complex") && matches!(scalar_kind,
+                    DtypeScalarKind::ComplexF32
+                    | DtypeScalarKind::ComplexF64
+                ))
             }
         }
     };
 }
 
-define_op!(Add, Add, add, +);
-define_op!(Sub, Sub, sub, -);
-define_op!(Mul, Mul, mul, *);
-define_op!(Div, Div, div, /);
+define_op!(Add, AddKernel, Add, add, +);
+define_op!(Sub, SubKernel, Sub, sub, -);
+define_op!(Mul, MulKernel, Mul, mul, *);
+define_op!(Div, DivKernel, Div, div, /);
 
 #[cfg(test)]
 mod tests {
-    // Bring half::f16 into scope under the name `f16` so the macro ident resolves correctly.
-    #[cfg(feature = "half")]
-    use crate::dtype::f16;
-    #[cfg(feature = "num-complex")]
-    type complex_f32 = crate::dtype::Complex<f32>;
-    #[cfg(feature = "num-complex")]
-    type complex_f64 = crate::dtype::Complex<f64>;
-
-    trait TestVal: Sized {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self;
-    }
-    macro_rules! impl_test_val {
-        ($range:expr, $($t:ty),+) => {
-            $(impl TestVal for $t {
-                fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-                    use rand::RngExt;
-                    rng.random_range($range) as Self
-                }
-            })+
-        };
-    }
-    // [1,4]:  max cube 4³=64  < i8::MAX (127)
-    // [1,30]: max cube 30³=27k < i16::MAX (32767)
-    // [1,100]: safe for i32/i64/f32/f64
-    impl_test_val!(1u8..=4, i8, u8);
-    impl_test_val!(1u8..=30, i16, u16, u32, u64);
-    impl_test_val!(1u8..=100, i32, i64, f32, f64);
-    #[cfg(feature = "half")]
-    impl TestVal for f16 {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
-            Self::from_f32(rng.random_range(1u8..=15u8) as f32)
-        }
-    }
-    #[cfg(feature = "num-complex")]
-    impl TestVal for complex_f32 {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
-            Self::new(rng.random_range(1u8..=15u8) as f32, 0.0)
-        }
-    }
-    #[cfg(feature = "num-complex")]
-    impl TestVal for complex_f64 {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
-            Self::new(rng.random_range(1u8..=15u8) as f64, 0.0)
-        }
-    }
-
-    fn rand_array<T: TestVal>(rng: &mut rand::rngs::StdRng, shape: &[usize]) -> ndarray::ArrayD<T> {
-        ndarray::Array::from_shape_fn(ndarray::IxDyn(shape), |_| T::sample(rng))
-    }
 
     // Generates 5 test functions per (op, dtype).
-    // Each TestVal impl controls the sampling range for its type.
+    // Each Scalar impl controls the sampling range for its type.
     macro_rules! test_op_dtype {
         ($op:tt, $dtype:ident) => {
             paste::paste! {
@@ -280,4 +242,57 @@ mod tests {
         #[cfg(feature = "half")] [f16],
         #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
     );
+
+    // Bring half::f16 into scope under the name `f16` so the macro ident resolves correctly.
+    #[cfg(feature = "half")]
+    use crate::dtype::f16;
+    #[cfg(feature = "num-complex")]
+    type complex_f32 = crate::dtype::Complex<f32>;
+    #[cfg(feature = "num-complex")]
+    type complex_f64 = crate::dtype::Complex<f64>;
+
+    trait Scalar: Sized {
+        fn sample(rng: &mut rand::rngs::StdRng) -> Self;
+    }
+    macro_rules! impl_test_val {
+        ($range:expr, $($t:ty),+) => {
+            $(impl Scalar for $t {
+                fn sample(rng: &mut rand::rngs::StdRng) -> Self {
+                    use rand::RngExt;
+                    rng.random_range($range) as Self
+                }
+            })+
+        };
+    }
+    // [1,4]:  max cube 4³=64  < i8::MAX (127)
+    // [1,30]: max cube 30³=27k < i16::MAX (32767)
+    // [1,100]: safe for i32/i64/f32/f64
+    impl_test_val!(1u8..=4, i8, u8);
+    impl_test_val!(1u8..=30, i16, u16, u32, u64);
+    impl_test_val!(1u8..=100, i32, i64, f32, f64);
+    #[cfg(feature = "half")]
+    impl Scalar for f16 {
+        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
+            use rand::RngExt;
+            Self::from_f32(rng.random_range(1u8..=15u8) as f32)
+        }
+    }
+    #[cfg(feature = "num-complex")]
+    impl Scalar for complex_f32 {
+        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
+            use rand::RngExt;
+            Self::new(rng.random_range(1u8..=15u8) as f32, 0.0)
+        }
+    }
+    #[cfg(feature = "num-complex")]
+    impl Scalar for complex_f64 {
+        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
+            use rand::RngExt;
+            Self::new(rng.random_range(1u8..=15u8) as f64, 0.0)
+        }
+    }
+
+    fn rand_array<T: Scalar>(rng: &mut rand::rngs::StdRng, shape: &[usize]) -> ndarray::ArrayD<T> {
+        ndarray::Array::from_shape_fn(ndarray::IxDyn(shape), |_| T::sample(rng))
+    }
 }

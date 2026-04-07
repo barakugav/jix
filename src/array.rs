@@ -10,10 +10,9 @@ use crate::archive::{ArchiveReader, ArchiveWriter, Section};
 use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
-use crate::iter::strides::{
-    NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
-};
+use crate::iter::strides::{NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut};
 use crate::schema::ArchiveType;
+use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, Mmap, Owned};
 use crate::util::{DimArray, cast_slice_mut};
 use crate::util::{MaybeOwned, default_strides};
 
@@ -223,17 +222,13 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
             .iter()
             .map(|&dim| 0..dim)
             .collect::<DimArray<_>>();
-        self.sub_ndarray(&full_range)
+        self.to_ndarray_sub(&full_range)
     }
 
-    pub fn sub_ndarray<T>(&self, range: &[Range<usize>]) -> io::Result<ndarray::ArrayD<T>>
+    pub fn to_ndarray_sub<T>(&self, range: &[Range<usize>]) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
     {
-        let shape = self.shape();
-        let ndim = shape.len();
-        let dtype = self.dtype();
-        let itemsize = dtype.itemsize() as usize;
         self.check_type::<T>()?;
         // Output is sized to the requested range, not the full array shape.
         let out_shape = range
@@ -389,217 +384,6 @@ impl<S> Array<S> {
     }
 }
 
-pub trait ArrayStorage: Sized {
-    fn dtype(&self) -> &Dtype;
-    fn shape(&self) -> &[usize];
-    fn blocks_layout(&self) -> &BlocksLayout;
-
-    fn read_data(
-        &self,
-        index: &[Range<usize>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()>;
-}
-pub struct Owned(ArrayBlockTableStorageBase<crate::block::Owned>);
-pub struct Borrowed<'a>(ArrayBlockTableStorageBase<crate::block::Borrowed<'a>>);
-pub struct Mmap(ArrayBlockTableStorageBase<crate::block::Mmap>);
-macro_rules! impl_array_storage {
-    ($ty:ty) => {
-        impl ArrayStorage for $ty {
-            fn dtype(&self) -> &Dtype {
-                self.0.blocks.dtype()
-            }
-            fn shape(&self) -> &[usize] {
-                &self.0.shape
-            }
-            fn blocks_layout(&self) -> &BlocksLayout {
-                &self.0.blocks_layout
-            }
-            fn read_data(
-                &self,
-                index: &[Range<usize>],
-                buf: &mut [u8],
-                context: &ReadContext,
-            ) -> io::Result<()> {
-                self.0.read_data(index, buf, context)
-            }
-        }
-    };
-}
-impl_array_storage!(Owned);
-impl_array_storage!(Borrowed<'_>);
-impl_array_storage!(Mmap);
-
-struct ArrayBlockTableStorageBase<S> {
-    blocks: BlockTable<S>,
-    shape: DimArray<usize>,
-    blocks_layout: BlocksLayout,
-}
-impl<S> ArrayBlockTableStorageBase<S> {
-    fn new(blocks: BlockTable<S>, shape: DimArray<usize>, blocks_layout: BlocksLayout) -> Self {
-        Self {
-            blocks,
-            shape,
-            blocks_layout,
-        }
-    }
-
-    fn read_data(
-        &self,
-        index: &[Range<usize>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()>
-    where
-        S: BlockTableStorage,
-    {
-        let ndim = self.shape.len();
-        assert_eq!(index.len(), ndim);
-        let b_layout = &self.blocks_layout;
-        let mut b_range = DimArray::default();
-        let mut single_full_block = true;
-        for dim in 0..ndim {
-            let i_range = &index[dim];
-            let b = b_layout.block_shape[dim];
-            let b_begin = i_range.start / b;
-            let b_end = i_range.end.div_ceil(b);
-            b_range.push(b_begin..b_end);
-            single_full_block &=
-                b_begin + 1 == b_end && i_range.start % b == 0 && i_range.end % b == 0;
-        }
-
-        // Fast path for aligned single-block read
-        if single_full_block {
-            let block_idx = (0..ndim).fold(0, |blk_idx, dim| {
-                blk_idx * b_layout.grid_shape[dim] + b_range[dim].start
-            });
-            return self.blocks.read_block(block_idx, buf, context);
-        }
-
-        let shape = self.shape.as_slice();
-        let dtype = self.blocks.dtype();
-        let itemsize = dtype.itemsize() as usize;
-        let out_shape = index
-            .iter()
-            .map(|r| r.end - r.start)
-            .collect::<DimArray<_>>();
-        let out_size = out_shape.iter().product::<usize>();
-        if buf.len() < out_size * itemsize {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "output buffer is too small: expected at least {} bytes, actual {} bytes",
-                    out_size * itemsize,
-                    buf.len()
-                ),
-            ));
-        }
-        let out_strides = default_strides(&out_shape, itemsize);
-        let block_strides = default_strides(&b_layout.block_shape, itemsize);
-
-        // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = index.iter().map(|r| r.start).collect::<DimArray<_>>();
-        let elem_end = index.iter().map(|r| r.end).collect::<DimArray<_>>();
-
-        // Block-space begin/end for NdIter.
-        let block_begin = index
-            .iter()
-            .zip(&b_layout.block_shape)
-            .map(|(r, &b)| r.start / b)
-            .collect::<DimArray<_>>();
-        let block_end = index
-            .iter()
-            .zip(&b_layout.block_shape)
-            .map(|(r, &b)| r.end.div_ceil(b))
-            .collect::<DimArray<_>>();
-
-        let mut block_iter = NdIter::new_with_begin(
-            &block_begin,
-            &block_end,
-            (
-                nd_iter_ext_logical_global_index(&b_layout.grid_shape, &block_begin),
-                NdIterExtBlockOffsetSize::new(shape, &elem_begin, &elem_end, b_layout),
-            ),
-        );
-
-        // Pre-allocate a buffer large enough for a full block.
-        let full_buf_len = b_layout.block_size * itemsize;
-        let mut tmp_buf = Vec::with_capacity(full_buf_len); // TODO: move to ReadContext
-        unsafe { tmp_buf.set_len(full_buf_len) };
-        while let Some((block_idx, (block_global_id, (block_inner_offset, block_size)))) =
-            block_iter.next()
-        {
-            self.blocks
-                .read_block(block_global_id, &mut tmp_buf, context)?;
-
-            // Navigate to the active region within the block buffer (block-local strides).
-            let active_start = (0..ndim)
-                .map(|dim| block_inner_offset[dim] * block_strides[dim])
-                .sum::<usize>();
-            let src_ptr = unsafe { tmp_buf.as_ptr().add(active_start) };
-
-            // Map the active region's start to its position in the output array.
-            let out_start = (0..ndim)
-                .map(|dim| {
-                    let full_idx =
-                        block_idx[dim] * b_layout.block_shape[dim] + block_inner_offset[dim];
-                    let out_idx = full_idx - index[dim].start;
-                    out_idx * out_strides[dim]
-                })
-                .sum::<usize>();
-            let dst_ptr = unsafe { buf.as_mut_ptr().add(out_start) };
-
-            let mut iter = NdIter::new(
-                &block_size,
-                (
-                    NdIterExtensionStridesPtr::new(&block_strides, src_ptr),
-                    NdIterExtensionStridesPtrMut::new(&out_strides, dst_ptr),
-                ),
-            );
-            while let Some((_idx, (src, dst))) = iter.next() {
-                unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
-            }
-        }
-
-        Ok(())
-    }
-}
-
-pub struct Ref<'a, S> {
-    storage: &'a S,
-}
-impl<'a, S> Ref<'a, S> {
-    pub(crate) fn new(storage: &'a S) -> Self {
-        Self { storage }
-    }
-}
-impl<'a, S> ArrayStorage for Ref<'a, S>
-where
-    S: ArrayStorage,
-{
-    fn dtype(&self) -> &crate::dtype::Dtype {
-        self.storage.dtype()
-    }
-
-    fn shape(&self) -> &[usize] {
-        self.storage.shape()
-    }
-
-    fn blocks_layout(&self) -> &crate::array::BlocksLayout {
-        self.storage.blocks_layout()
-    }
-
-    fn read_data(
-        &self,
-        index: &[Range<usize>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
-        self.storage.read_data(index, buf, context)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::{Cursor, Seek, Write};
@@ -730,13 +514,13 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // sub_ndarray — 1D
+    // to_ndarray_sub — 1D
     // -----------------------------------------------------------------------
 
     #[test]
-    fn sub_ndarray_1d_full_range() {
+    fn to_ndarray_sub_1d_full_range() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().sub_ndarray(&[0..6]).unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[0..6]).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
@@ -744,18 +528,18 @@ mod tests {
     }
 
     #[test]
-    fn sub_ndarray_1d_aligned_second_block() {
+    fn to_ndarray_sub_1d_aligned_second_block() {
         // range [3..6) → output shape [3], values [3,4,5]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().sub_ndarray(&[3..6]).unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[3..6]).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![3, 4, 5]).unwrap());
     }
 
     #[test]
-    fn sub_ndarray_1d_cross_block_boundary() {
+    fn to_ndarray_sub_1d_cross_block_boundary() {
         // range [1..5) → output shape [4], values [1,2,3,4]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..5]).unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..5]).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![4], vec![1, 2, 3, 4]).unwrap()
@@ -763,15 +547,15 @@ mod tests {
     }
 
     #[test]
-    fn sub_ndarray_1d_within_single_block() {
+    fn to_ndarray_sub_1d_within_single_block() {
         // range [1..2) → output shape [1], value [1]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..2]).unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..2]).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1]).unwrap());
     }
 
     // -----------------------------------------------------------------------
-    // sub_ndarray — 2D
+    // to_ndarray_sub — 2D
     // shape=[4,6], block_shape=[2,3], data as in to_ndarray_2d test.
     // range=[1..3, 2..5] → output shape [2,3]:
     //   [8,  9,  10]
@@ -779,7 +563,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn sub_ndarray_2d() {
+    fn to_ndarray_sub_2d() {
         #[rustfmt::skip]
         let a = array(
             &[
@@ -791,7 +575,7 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..3, 2..5]).unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..3, 2..5]).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 3], vec![8, 9, 10, 14, 15, 16]).unwrap()
@@ -913,19 +697,19 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // from_ndarray + sub_ndarray integration
+    // from_ndarray + to_ndarray_sub integration
     // -----------------------------------------------------------------------
 
     #[test]
-    fn from_ndarray_then_sub_ndarray_1d() {
+    fn from_ndarray_then_to_ndarray_sub_1d() {
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
         let a = Array::from_ndarray(&src, &[3]).unwrap();
-        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..5]).unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..5]).unwrap();
         assert_eq!(got, ndarray::array![1u8, 2, 3, 4].into_dyn());
     }
 
     #[test]
-    fn from_ndarray_then_sub_ndarray_2d() {
+    fn from_ndarray_then_to_ndarray_sub_2d() {
         #[rustfmt::skip]
         let src = ndarray::array![
             [0u8,  1,  2,  3,  4,  5],
@@ -934,7 +718,7 @@ mod tests {
             [18,  19, 20, 21, 22, 23],
         ];
         let a = Array::from_ndarray(&src, &[2, 3]).unwrap();
-        let got: ArrayD<u8> = a.data().sub_ndarray(&[1..3, 2..5]).unwrap();
+        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..3, 2..5]).unwrap();
         assert_eq!(got, ndarray::array![[8u8, 9, 10], [14, 15, 16]].into_dyn());
     }
 
