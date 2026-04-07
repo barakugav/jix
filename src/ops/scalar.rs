@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::io;
 
 use crate::array::{Array, BlocksLayout};
@@ -26,11 +27,15 @@ pub(crate) trait ScalarOp2Kernel {
 
 pub(crate) struct ScalarOp2<Op, S1, S2> {
     op: Op,
+
     a: Array<S1>,
     b: Array<S2>,
+
     dtype: Dtype,
     shape: DimArray<usize>,
     blocks_layout: BlocksLayout,
+
+    tmp_buf: RefCell<Vec<u8>>,
 }
 impl<Op, S1, S2> ScalarOp2<Op, S1, S2> {
     pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> io::Result<Self>
@@ -64,6 +69,7 @@ impl<Op, S1, S2> ScalarOp2<Op, S1, S2> {
             blocks_layout: a.blocks_layout().clone(),
             a,
             b,
+            tmp_buf: RefCell::new(Vec::new()),
         })
     }
 }
@@ -91,7 +97,10 @@ where
         buf: &mut [u8],
         context: &crate::codec::ReadContext,
     ) -> std::io::Result<()> {
-        let mut buf2 = vec![0u8; buf.len()];
+        let mut buf2 = self.tmp_buf.borrow_mut();
+        buf2.clear();
+        buf2.resize(buf.len(), 0);
+
         self.a.storage.read_data(index, buf, context)?;
         self.b.storage.read_data(index, &mut buf2, context)?;
 

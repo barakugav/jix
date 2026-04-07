@@ -19,6 +19,19 @@ pub trait ArrayStorage {
     fn shape(&self) -> &[usize];
     fn blocks_layout(&self) -> &BlocksLayout;
 
+    /// Read the specified slice of the array into the provided buffer.
+    ///
+    /// # Arguments
+    ///
+    /// - `index`: A slice of ranges, one per dimension, specifying the slice of the array to read.
+    ///   Each range is half-open: `start..end`, where `start` is inclusive and `end` is exclusive.
+    /// - `buf`: A mutable byte slice to store the read data.
+    ///   The size of the buffer must be exactly equal to the number of elements in the specified
+    ///   slice multiplied by the item size of the array's dtype.
+    ///   The buffer base pointer must be suitably aligned for the array's dtype.
+    ///   Elements should be laid out in row-major order (C-style contiguous) in the buffer.
+    /// - `context`: A context object that may be used for caching or other purposes during the
+    ///   read operation. See `ReadContext` for more details.
     fn read_data(
         &self,
         index: &[Range<usize>],
@@ -114,11 +127,11 @@ impl<S> ArrayBlockTableStorageBase<S> {
             .map(|r| r.end - r.start)
             .collect::<DimArray<_>>();
         let out_size = out_shape.iter().product::<usize>();
-        if buf.len() < out_size * itemsize {
+        if buf.len() != out_size * itemsize {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "output buffer is too small: expected at least {} bytes, actual {} bytes",
+                    "output buffer has incorrect size: expected {} bytes, actual {} bytes",
                     out_size * itemsize,
                     buf.len()
                 ),
