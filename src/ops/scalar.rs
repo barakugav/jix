@@ -34,47 +34,33 @@ pub(crate) struct ScalarOp2Base<S1, S2> {
     pub(crate) shape: DimArray<usize>,
     pub(crate) blocks_layout: BlocksLayout,
 }
-
-impl<Op> ArrayStorage for Op
-where
-    Op: ScalarOp2,
-    Op::S1: ArrayStorage,
-    Op::S2: ArrayStorage,
-{
-    fn dtype(&self) -> &Dtype {
-        &self.base().dtype
-    }
-
-    fn shape(&self) -> &[usize] {
-        &self.base().shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.base().blocks_layout
-    }
-
-    fn read_block(
+impl<S1, S2> ScalarOp2Base<S1, S2> {
+    fn read_data<Op>(
         &self,
-        block_idx: usize,
+        index: &[std::ops::Range<usize>],
         buf: &mut [u8],
         context: &crate::codec::ReadContext,
-    ) -> std::io::Result<()> {
-        let self_ = self.base();
+    ) -> std::io::Result<()>
+    where
+        Op: ScalarOp2<S1 = S1, S2 = S2>,
+        Op::S1: ArrayStorage,
+        Op::S2: ArrayStorage,
+    {
         let mut buf2 = vec![0u8; buf.len()];
-        self_.a.storage.read_block(block_idx, buf, context)?;
-        self_.b.storage.read_block(block_idx, &mut buf2, context)?;
+        self.a.storage.read_data(index, buf, context)?;
+        self.b.storage.read_data(index, &mut buf2, context)?;
 
         macro_rules! impl_add {
             ($ty:ty, $apply:ident) => {
                 let buf1 = unsafe { cast_slice_mut::<u8, $ty>(buf) };
                 let buf2 = unsafe { cast_slice::<u8, $ty>(&buf2) };
                 for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a = Self::$apply(*a, *b);
+                    *a = Op::$apply(*a, *b);
                 }
             };
         }
 
-        Ok(match self_.dtype.try_to_scalar() {
+        Ok(match self.dtype.try_to_scalar() {
             Some(DtypeScalarKind::I8) => {
                 impl_add!(i8, apply_i8);
             }
@@ -142,5 +128,33 @@ where
                 ));
             }
         })
+    }
+}
+
+impl<Op> ArrayStorage for Op
+where
+    Op: ScalarOp2,
+    Op::S1: ArrayStorage,
+    Op::S2: ArrayStorage,
+{
+    fn dtype(&self) -> &Dtype {
+        &self.base().dtype
+    }
+
+    fn shape(&self) -> &[usize] {
+        &self.base().shape
+    }
+
+    fn blocks_layout(&self) -> &BlocksLayout {
+        &self.base().blocks_layout
+    }
+
+    fn read_data(
+        &self,
+        index: &[std::ops::Range<usize>],
+        buf: &mut [u8],
+        context: &crate::codec::ReadContext,
+    ) -> std::io::Result<()> {
+        self.base().read_data::<Self>(index, buf, context)
     }
 }

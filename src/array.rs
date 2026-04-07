@@ -2,6 +2,7 @@ use std::any::TypeId;
 use std::cell::Cell;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, Write};
+use std::mem::MaybeUninit;
 use std::ops::Range;
 use std::path::Path;
 
@@ -13,7 +14,7 @@ use crate::iter::strides::{
     NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
 };
 use crate::schema::ArchiveType;
-use crate::util::DimArray;
+use crate::util::{DimArray, cast_slice_mut};
 use crate::util::{MaybeOwned, default_strides};
 
 use crate::block::{BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage};
@@ -159,7 +160,7 @@ impl Array<Owned> {
         let blocks = builder.finish();
 
         Ok(Self {
-            storage: Owned::new(blocks, shape, b_layout),
+            storage: Owned(ArrayBlockTableStorageBase::new(blocks, shape, b_layout)),
         })
     }
 }
@@ -240,81 +241,11 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
             .map(|r| r.end - r.start)
             .collect::<DimArray<_>>();
         let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
-        let out_strides = array
-            .strides()
-            .iter()
-            .map(|&s| s as usize * itemsize)
-            .collect::<DimArray<_>>();
-
-        let b_layout = self.array.blocks_layout();
-        let block_strides = default_strides(&b_layout.block_shape, itemsize);
-
-        // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = range.iter().map(|r| r.start).collect::<DimArray<_>>();
-        let elem_end = range.iter().map(|r| r.end).collect::<DimArray<_>>();
-
-        // Block-space begin/end for NdIter.
-        let block_begin = range
-            .iter()
-            .zip(&b_layout.block_shape)
-            .map(|(r, &b)| r.start / b)
-            .collect::<DimArray<_>>();
-        let block_end = range
-            .iter()
-            .zip(&b_layout.block_shape)
-            .map(|(r, &b)| r.end.div_ceil(b))
-            .collect::<DimArray<_>>();
-
-        let mut block_iter = NdIter::new_with_begin(
-            &block_begin,
-            &block_end,
-            (
-                nd_iter_ext_logical_global_index(&b_layout.grid_shape, &block_begin),
-                NdIterExtBlockOffsetSize::new(shape, &elem_begin, &elem_end, b_layout),
-            ),
-        );
-
-        // Pre-allocate a buffer large enough for a full block.
-        let full_buf_len = b_layout.block_size * itemsize;
-        let mut tmp_buf = Vec::with_capacity(full_buf_len);
-        unsafe { tmp_buf.set_len(full_buf_len) };
-        let context = self.context.as_ref();
-        while let Some((block_idx, (block_global_id, (block_inner_offset, block_size)))) =
-            block_iter.next()
-        {
-            self.array
-                .storage
-                .read_block(block_global_id, &mut tmp_buf, context)?;
-
-            // Navigate to the active region within the block buffer.
-            let active_start = (0..ndim)
-                .map(|dim| block_inner_offset[dim] * block_strides[dim])
-                .sum::<usize>();
-            let src_ptr = unsafe { tmp_buf.as_ptr().add(active_start) };
-
-            // Map the active region's start to its position in the output array.
-            let out_start = (0..ndim)
-                .map(|dim| {
-                    let full_idx =
-                        block_idx[dim] * b_layout.block_shape[dim] + block_inner_offset[dim];
-                    let out_idx = full_idx - range[dim].start;
-                    out_idx * out_strides[dim]
-                })
-                .sum::<usize>();
-            let dst_ptr = unsafe { array.as_mut_ptr().cast::<u8>().add(out_start) };
-
-            let mut iter = NdIter::new(
-                &block_size,
-                (
-                    NdIterExtensionStridesPtr::new(&block_strides, src_ptr),
-                    NdIterExtensionStridesPtrMut::new(&out_strides, dst_ptr),
-                ),
-            );
-            while let Some((_idx, (src, dst))) = iter.next() {
-                unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
-            }
-        }
-
+        self.array.storage.read_data(
+            range,
+            unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) },
+            self.context.as_ref(),
+        )?;
         Ok(unsafe { array.assume_init() })
     }
 }
@@ -338,7 +269,7 @@ impl Array<Owned> {
         };
         writer.write_message(&header)?;
 
-        self.storage.blocks.write_content(&mut writer)
+        self.storage.0.blocks.write_content(&mut writer)
     }
 }
 
@@ -350,7 +281,11 @@ impl Array<Owned> {
         let (blocks, shape, blocks_layout) =
             Self::read_from_impl(reader, len, crate::block::Owned::read_from)?;
         Ok(Self {
-            storage: Owned::new(blocks, shape, blocks_layout),
+            storage: Owned(ArrayBlockTableStorageBase::new(
+                blocks,
+                shape,
+                blocks_layout,
+            )),
         })
     }
 }
@@ -370,7 +305,11 @@ impl Array<Mmap> {
         )?;
 
         Ok(Self {
-            storage: Mmap::new(blocks, shape, blocks_layout),
+            storage: Mmap(ArrayBlockTableStorageBase::new(
+                blocks,
+                shape,
+                blocks_layout,
+            )),
         })
     }
 }
@@ -455,129 +394,178 @@ pub trait ArrayStorage: Sized {
     fn shape(&self) -> &[usize];
     fn blocks_layout(&self) -> &BlocksLayout;
 
-    fn read_block(&self, block_idx: usize, buf: &mut [u8], context: &ReadContext)
-    -> io::Result<()>;
+    fn read_data(
+        &self,
+        index: &[Range<usize>],
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> io::Result<()>;
 }
-pub struct Owned {
-    blocks: BlockTable<crate::block::Owned>,
+pub struct Owned(ArrayBlockTableStorageBase<crate::block::Owned>);
+pub struct Borrowed<'a>(ArrayBlockTableStorageBase<crate::block::Borrowed<'a>>);
+pub struct Mmap(ArrayBlockTableStorageBase<crate::block::Mmap>);
+macro_rules! impl_array_storage {
+    ($ty:ty) => {
+        impl ArrayStorage for $ty {
+            fn dtype(&self) -> &Dtype {
+                self.0.blocks.dtype()
+            }
+            fn shape(&self) -> &[usize] {
+                &self.0.shape
+            }
+            fn blocks_layout(&self) -> &BlocksLayout {
+                &self.0.blocks_layout
+            }
+            fn read_data(
+                &self,
+                index: &[Range<usize>],
+                buf: &mut [u8],
+                context: &ReadContext,
+            ) -> io::Result<()> {
+                self.0.read_data(index, buf, context)
+            }
+        }
+    };
+}
+impl_array_storage!(Owned);
+impl_array_storage!(Borrowed<'_>);
+impl_array_storage!(Mmap);
+
+struct ArrayBlockTableStorageBase<S> {
+    blocks: BlockTable<S>,
     shape: DimArray<usize>,
     blocks_layout: BlocksLayout,
 }
-impl Owned {
-    fn new(
-        blocks: BlockTable<crate::block::Owned>,
-        shape: DimArray<usize>,
-        blocks_layout: BlocksLayout,
-    ) -> Self {
+impl<S> ArrayBlockTableStorageBase<S> {
+    fn new(blocks: BlockTable<S>, shape: DimArray<usize>, blocks_layout: BlocksLayout) -> Self {
         Self {
             blocks,
             shape,
             blocks_layout,
         }
     }
-}
-impl ArrayStorage for Owned {
-    fn dtype(&self) -> &Dtype {
-        self.blocks.dtype()
-    }
 
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
-    }
-
-    fn read_block(
+    fn read_data(
         &self,
-        block_idx: usize,
+        index: &[Range<usize>],
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> io::Result<()> {
-        self.blocks.read_block(block_idx, buf, context)
-    }
-}
-pub struct Borrowed<'a> {
-    blocks: BlockTable<crate::block::Borrowed<'a>>,
-    shape: DimArray<usize>,
-    blocks_layout: BlocksLayout,
-}
-impl<'a> Borrowed<'a> {
-    fn new(
-        blocks: BlockTable<crate::block::Borrowed<'a>>,
-        shape: DimArray<usize>,
-        blocks_layout: BlocksLayout,
-    ) -> Self {
-        Self {
-            blocks,
-            shape,
-            blocks_layout,
+    ) -> io::Result<()>
+    where
+        S: BlockTableStorage,
+    {
+        let ndim = self.shape.len();
+        assert_eq!(index.len(), ndim);
+        let b_layout = &self.blocks_layout;
+        let mut b_range = DimArray::default();
+        let mut single_full_block = true;
+        for dim in 0..ndim {
+            let i_range = &index[dim];
+            let b = b_layout.block_shape[dim];
+            let b_begin = i_range.start / b;
+            let b_end = i_range.end.div_ceil(b);
+            b_range.push(b_begin..b_end);
+            single_full_block &=
+                b_begin + 1 == b_end && i_range.start % b == 0 && i_range.end % b == 0;
         }
-    }
-}
-impl<'a> ArrayStorage for Borrowed<'a> {
-    fn dtype(&self) -> &Dtype {
-        self.blocks.dtype()
-    }
 
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
-    }
-
-    fn read_block(
-        &self,
-        block_idx: usize,
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
-        self.blocks.read_block(block_idx, buf, context)
-    }
-}
-pub struct Mmap {
-    blocks: BlockTable<crate::block::Mmap>,
-    shape: DimArray<usize>,
-    blocks_layout: BlocksLayout,
-}
-impl Mmap {
-    fn new(
-        blocks: BlockTable<crate::block::Mmap>,
-        shape: DimArray<usize>,
-        blocks_layout: BlocksLayout,
-    ) -> Self {
-        Self {
-            blocks,
-            shape,
-            blocks_layout,
+        // Fast path for aligned single-block read
+        if single_full_block {
+            let block_idx = (0..ndim).fold(0, |blk_idx, dim| {
+                blk_idx * b_layout.grid_shape[dim] + b_range[dim].start
+            });
+            return self.blocks.read_block(block_idx, buf, context);
         }
+
+        let shape = self.shape.as_slice();
+        let dtype = self.blocks.dtype();
+        let itemsize = dtype.itemsize() as usize;
+        let out_shape = index
+            .iter()
+            .map(|r| r.end - r.start)
+            .collect::<DimArray<_>>();
+        let out_size = out_shape.iter().product::<usize>();
+        if buf.len() < out_size * itemsize {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "output buffer is too small: expected at least {} bytes, actual {} bytes",
+                    out_size * itemsize,
+                    buf.len()
+                ),
+            ));
+        }
+        let out_strides = default_strides(&out_shape, itemsize);
+        let block_strides = default_strides(&b_layout.block_shape, itemsize);
+
+        // Element-space begin/end for NdIterExtBlockOffsetSize.
+        let elem_begin = index.iter().map(|r| r.start).collect::<DimArray<_>>();
+        let elem_end = index.iter().map(|r| r.end).collect::<DimArray<_>>();
+
+        // Block-space begin/end for NdIter.
+        let block_begin = index
+            .iter()
+            .zip(&b_layout.block_shape)
+            .map(|(r, &b)| r.start / b)
+            .collect::<DimArray<_>>();
+        let block_end = index
+            .iter()
+            .zip(&b_layout.block_shape)
+            .map(|(r, &b)| r.end.div_ceil(b))
+            .collect::<DimArray<_>>();
+
+        let mut block_iter = NdIter::new_with_begin(
+            &block_begin,
+            &block_end,
+            (
+                nd_iter_ext_logical_global_index(&b_layout.grid_shape, &block_begin),
+                NdIterExtBlockOffsetSize::new(shape, &elem_begin, &elem_end, b_layout),
+            ),
+        );
+
+        // Pre-allocate a buffer large enough for a full block.
+        let full_buf_len = b_layout.block_size * itemsize;
+        let mut tmp_buf = Vec::with_capacity(full_buf_len); // TODO: move to ReadContext
+        unsafe { tmp_buf.set_len(full_buf_len) };
+        while let Some((block_idx, (block_global_id, (block_inner_offset, block_size)))) =
+            block_iter.next()
+        {
+            self.blocks
+                .read_block(block_global_id, &mut tmp_buf, context)?;
+
+            // Navigate to the active region within the block buffer (block-local strides).
+            let active_start = (0..ndim)
+                .map(|dim| block_inner_offset[dim] * block_strides[dim])
+                .sum::<usize>();
+            let src_ptr = unsafe { tmp_buf.as_ptr().add(active_start) };
+
+            // Map the active region's start to its position in the output array.
+            let out_start = (0..ndim)
+                .map(|dim| {
+                    let full_idx =
+                        block_idx[dim] * b_layout.block_shape[dim] + block_inner_offset[dim];
+                    let out_idx = full_idx - index[dim].start;
+                    out_idx * out_strides[dim]
+                })
+                .sum::<usize>();
+            let dst_ptr = unsafe { buf.as_mut_ptr().add(out_start) };
+
+            let mut iter = NdIter::new(
+                &block_size,
+                (
+                    NdIterExtensionStridesPtr::new(&block_strides, src_ptr),
+                    NdIterExtensionStridesPtrMut::new(&out_strides, dst_ptr),
+                ),
+            );
+            while let Some((_idx, (src, dst))) = iter.next() {
+                unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
+            }
+        }
+
+        Ok(())
     }
 }
-impl ArrayStorage for Mmap {
-    fn dtype(&self) -> &Dtype {
-        self.blocks.dtype()
-    }
 
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
-    }
-
-    fn read_block(
-        &self,
-        block_idx: usize,
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
-        self.blocks.read_block(block_idx, buf, context)
-    }
-}
 pub struct Ref<'a, S> {
     storage: &'a S,
 }
@@ -602,13 +590,13 @@ where
         self.storage.blocks_layout()
     }
 
-    fn read_block(
+    fn read_data(
         &self,
-        block_idx: usize,
+        index: &[Range<usize>],
         buf: &mut [u8],
-        context: &crate::codec::ReadContext,
-    ) -> std::io::Result<()> {
-        self.storage.read_block(block_idx, buf, context)
+        context: &ReadContext,
+    ) -> io::Result<()> {
+        self.storage.read_data(index, buf, context)
     }
 }
 
@@ -618,7 +606,7 @@ mod tests {
 
     use ndarray::ArrayD;
 
-    use crate::array::{BlocksLayout, Owned};
+    use crate::array::{ArrayBlockTableStorageBase, BlocksLayout, Owned};
     use crate::block::{BlockSize, BlockTable};
     use crate::codec::Encoder;
     use crate::dtype::Dtyped;
@@ -657,11 +645,11 @@ mod tests {
     fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Owned> {
         let blocks_layout = BlocksLayout::new(block_shape, shape);
         Array {
-            storage: Owned {
-                blocks: make_block_table(blocks),
-                shape: shape.try_into().unwrap(),
+            storage: Owned(ArrayBlockTableStorageBase::new(
+                make_block_table(blocks),
+                shape.try_into().unwrap(),
                 blocks_layout,
-            },
+            )),
         }
     }
 
