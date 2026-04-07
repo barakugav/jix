@@ -99,7 +99,8 @@ where
     ) -> std::io::Result<()> {
         let mut buf2 = self.tmp_buf.borrow_mut();
         buf2.clear();
-        buf2.resize(buf.len(), 0);
+        buf2.reserve(buf.len());
+        unsafe { buf2.set_len(buf.len()) };
 
         self.a.storage.read_data(index, buf, context)?;
         self.b.storage.read_data(index, &mut buf2, context)?;

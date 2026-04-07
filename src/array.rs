@@ -105,6 +105,65 @@ impl Array<Owned> {
             .collect::<DimArray<_>>();
         let b_layout = BlocksLayout::new(&block_shape, &shape);
 
+        let tmp_block_strides = default_strides(&block_shape, itemsize);
+        let strides = array
+            .strides()
+            .iter()
+            .map(|&s| usize::try_from(s).unwrap() * size_of::<T>())
+            .collect::<DimArray<_>>();
+
+        return Self::from_block_fn(
+            &shape,
+            &block_shape,
+            dtype,
+            |block_idx, block_inner_offset, block_size, out_buf| {
+                // TODO: fast path for contiguous data
+                let initial_arr_offset = (0..ndim)
+                    .map(|dim| {
+                        let idx =
+                            block_idx[dim] * b_layout.block_shape[dim] + block_inner_offset[dim];
+                        idx * strides[dim]
+                    })
+                    .sum::<usize>();
+                let initial_arr_ptr =
+                    unsafe { array.as_ptr().cast::<u8>().add(initial_arr_offset) };
+                let initial_block_offset = (0..ndim)
+                    .map(|dim| block_inner_offset[dim] * tmp_block_strides[dim])
+                    .sum::<usize>();
+                let initial_block_ptr = unsafe { out_buf.as_mut_ptr().add(initial_block_offset) };
+                let mut iter = NdIter::new(
+                    block_size,
+                    (
+                        NdIterExtensionStridesPtr::new(&strides, initial_arr_ptr),
+                        NdIterExtensionStridesPtrMut::new(&tmp_block_strides, initial_block_ptr),
+                    ),
+                );
+                while let Some((_idx, (src, dst))) = iter.next() {
+                    unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
+                }
+            },
+        );
+    }
+
+    pub(crate) fn from_block_fn(
+        shape: &[usize],
+        block_shape: &[usize],
+        dtype: Dtype,
+        mut f: impl FnMut(&[usize], &[usize], &[usize], &mut [u8]),
+    ) -> io::Result<Array<Owned>> {
+        let ndim = shape.len();
+        assert!(ndim < NDIM_MAX);
+        assert_eq!(ndim, block_shape.len());
+        let itemsize = dtype.itemsize() as usize;
+        let shape: DimArray<_> = shape.try_into().unwrap();
+
+        let block_shape = block_shape
+            .iter()
+            .zip(&shape)
+            .map(|(&b, &s)| b.min(s))
+            .collect::<DimArray<_>>();
+        let b_layout = BlocksLayout::new(&block_shape, &shape);
+
         let mut block_iter = NdIter::new(
             &b_layout.grid_shape,
             NdIterExtBlockOffsetSize::new(&shape, &full_dim_array(0, ndim), &shape, &b_layout),
@@ -115,43 +174,20 @@ impl Array<Owned> {
         let mut builder =
             BlockTableBuilder::new(dtype.clone(), b_layout.block_size as BlockSize, encoder);
         let mut tmp_block_data = Vec::<u8>::with_capacity(block_capacity_bytes);
-        let tmp_block_strides = default_strides(&block_shape, itemsize);
-        let strides = array
-            .strides()
-            .iter()
-            .map(|&s| usize::try_from(s).unwrap() * size_of::<T>())
-            .collect::<DimArray<_>>();
         while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
-            debug_assert!(block_inner_offset.iter().all(|&o| o == 0));
+            debug_assert!(block_inner_offset.iter().all(|&o| o == 0)); // TODO
 
             // Init chunk data to zeros.
             // The padding elements (if any) will not be written by the iter below, so they will stay zeros.
             tmp_block_data.clear();
             tmp_block_data.resize(block_capacity_bytes, 0);
 
-            // TODO: fast path for contiguous data
-            let initial_arr_offset = (0..ndim)
-                .map(|dim| {
-                    let idx = block_idx[dim] * b_layout.block_shape[dim] + block_inner_offset[dim];
-                    idx * strides[dim]
-                })
-                .sum::<usize>();
-            let initial_arr_ptr = unsafe { array.as_ptr().cast::<u8>().add(initial_arr_offset) };
-            let initial_block_offset = (0..ndim)
-                .map(|dim| block_inner_offset[dim] * tmp_block_strides[dim])
-                .sum::<usize>();
-            let initial_block_ptr =
-                unsafe { tmp_block_data.as_mut_ptr().add(initial_block_offset) };
-            let mut iter = NdIter::new(
+            f(
+                block_idx,
+                block_inner_offset,
                 block_size,
-                (
-                    NdIterExtensionStridesPtr::new(&strides, initial_arr_ptr),
-                    NdIterExtensionStridesPtrMut::new(&tmp_block_strides, initial_block_ptr),
-                ),
+                &mut tmp_block_data,
             );
-            while let Some((_idx, (src, dst))) = iter.next() {
-                unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
-            }
 
             builder.add_block(&tmp_block_data)?;
         }
@@ -236,6 +272,7 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
             .map(|r| r.end - r.start)
             .collect::<DimArray<_>>();
         let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
+        // TODO: call read_data multiple times with smaller blocks
         self.array.storage.read_data(
             range,
             unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) },
