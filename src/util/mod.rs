@@ -1,8 +1,7 @@
-use std::ptr::{NonNull, null_mut};
-
 use crate::NDIM_MAX;
 
 mod aligned_vec;
+pub(crate) use aligned_vec::AlignedBytes;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
@@ -141,28 +140,6 @@ impl<'a, T> AsRef<T> for MaybeOwned<'a, T> {
 //         match self {
 //             CowMut::Owned(t) => t,
 //             CowMut::Borrowed(t) => t,
-//         }
-//     }
-// }
-
-// struct AlignedVecU8 {
-//     ptr: NonNull<u8>,
-//     capacity: usize,
-//     len: usize,
-//     alignment: usize,
-// }
-// impl AlignedVecU8 {
-//     fn new(align: usize) -> Self {
-//         Self {
-//             ptr: unsafe { NonNull::new_unchecked(null_mut::<u8>().wrapping_add(align)) },
-//             capacity: 0,
-//             len: 0,
-//             alignment: align,
-//         }
-//     }
-//     fn reserve(&mut self, additional: usize) {
-//         if additional > self.capacity().wrapping_sub(self.len) {
-//             unsafe { self.buf.grow_amortized(self.len, additional) };
 //         }
 //     }
 // }

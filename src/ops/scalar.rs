@@ -4,7 +4,7 @@ use std::io;
 use crate::array::{Array, BlocksLayout};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
 use crate::storage::ArrayStorage;
-use crate::util::{DimArray, cast_slice, cast_slice_mut};
+use crate::util::{AlignedBytes, DimArray, cast_slice, cast_slice_mut};
 
 pub(crate) trait ScalarOp2Kernel {
     fn apply_i8(&self, a: i8, b: i8) -> i8;
@@ -35,7 +35,7 @@ pub(crate) struct ScalarOp2<Op, S1, S2> {
     shape: DimArray<usize>,
     blocks_layout: BlocksLayout,
 
-    tmp_buf: RefCell<Vec<u8>>,
+    tmp_buf: RefCell<AlignedBytes>,
 }
 impl<Op, S1, S2> ScalarOp2<Op, S1, S2> {
     pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> io::Result<Self>
@@ -67,9 +67,9 @@ impl<Op, S1, S2> ScalarOp2<Op, S1, S2> {
             dtype: a.dtype().clone(),
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
+            tmp_buf: RefCell::new(AlignedBytes::new(a.dtype().alignment() as usize)),
             a,
             b,
-            tmp_buf: RefCell::new(Vec::new()),
         })
     }
 }
