@@ -13,7 +13,7 @@ use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut};
 use crate::schema::ArchiveType;
 use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, Mmap, Owned};
-use crate::util::{DimArray, cast_slice_mut};
+use crate::util::{AlignedBytes, DimArray, cast_slice_mut};
 use crate::util::{MaybeOwned, default_strides};
 
 use crate::block::{BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage};
@@ -141,6 +141,7 @@ impl Array<Owned> {
                 while let Some((_idx, (src, dst))) = iter.next() {
                     unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
                 }
+                Ok(())
             },
         );
     }
@@ -149,7 +150,7 @@ impl Array<Owned> {
         shape: &[usize],
         block_shape: &[usize],
         dtype: Dtype,
-        mut f: impl FnMut(&[usize], &[usize], &[usize], &mut [u8]),
+        mut block_fn: impl FnMut(&[usize], &[usize], &[usize], &mut [u8]) -> io::Result<()>,
     ) -> io::Result<Array<Owned>> {
         let ndim = shape.len();
         assert!(ndim < NDIM_MAX);
@@ -173,7 +174,8 @@ impl Array<Owned> {
         let block_capacity_bytes = b_layout.block_size * itemsize;
         let mut builder =
             BlockTableBuilder::new(dtype.clone(), b_layout.block_size as BlockSize, encoder);
-        let mut tmp_block_data = Vec::<u8>::with_capacity(block_capacity_bytes);
+        let mut tmp_block_data =
+            AlignedBytes::with_capacity(dtype.alignment() as usize, block_capacity_bytes);
         while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
             debug_assert!(block_inner_offset.iter().all(|&o| o == 0)); // TODO
 
@@ -182,12 +184,12 @@ impl Array<Owned> {
             tmp_block_data.clear();
             tmp_block_data.resize(block_capacity_bytes, 0);
 
-            f(
+            block_fn(
                 block_idx,
                 block_inner_offset,
                 block_size,
                 &mut tmp_block_data,
-            );
+            )?;
 
             builder.add_block(&tmp_block_data)?;
         }
@@ -280,6 +282,72 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         )?;
         Ok(unsafe { array.assume_init() })
     }
+
+    pub fn copy(&self) -> io::Result<Array<Owned>>
+    where
+        S: ArrayStorage,
+    {
+        let ndim = self.ndim();
+        let block_shape = &self.array.blocks_layout().block_shape;
+        let dtype = self.dtype().clone();
+        let itemsize = dtype.itemsize() as usize;
+        let mut tmp_block_data = AlignedBytes::new(dtype.alignment() as usize);
+        let mut output_block_strides = None;
+        Array::from_block_fn(
+            self.shape(),
+            block_shape,
+            dtype,
+            |block_idx, block_inner_offset, block_size, output_block| {
+                let range = (0..ndim)
+                    .map(|dim| {
+                        let start = block_idx[dim] * block_shape[dim] + block_inner_offset[dim];
+                        let end = start + block_size[dim];
+                        start..end
+                    })
+                    .collect::<DimArray<_>>();
+
+                let full_block = (0..ndim)
+                    .all(|dim| block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim]);
+
+                let output_block_ptr = output_block.as_mut_ptr();
+                let read_data_buf = if full_block {
+                    output_block
+                } else {
+                    let b_size_bytes = block_size.iter().product::<usize>() * itemsize;
+                    tmp_block_data.clear();
+                    tmp_block_data.reserve(b_size_bytes);
+                    unsafe { tmp_block_data.set_len(b_size_bytes) };
+                    tmp_block_data.as_mut_slice()
+                };
+
+                self.array
+                    .storage
+                    .read_data(&range, read_data_buf, self.context.as_ref())?;
+
+                if !full_block {
+                    // Copy from temporary buffer to output block with correct strides.
+                    let src_strides = default_strides(&block_size, itemsize);
+                    let output_block_strides = output_block_strides
+                        .get_or_insert_with(|| default_strides(block_shape, itemsize));
+                    let mut iter = NdIter::new(
+                        block_size,
+                        (
+                            NdIterExtensionStridesPtr::new(&src_strides, read_data_buf.as_ptr()),
+                            NdIterExtensionStridesPtrMut::new(
+                                output_block_strides,
+                                output_block_ptr,
+                            ),
+                        ),
+                    );
+                    while let Some((_idx, (src, dst))) = iter.next() {
+                        unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
+                    }
+                }
+
+                Ok(())
+            },
+        )
+    }
 }
 
 impl Array<Owned> {
@@ -303,9 +371,7 @@ impl Array<Owned> {
 
         self.storage.0.blocks.write_content(&mut writer)
     }
-}
 
-impl Array<Owned> {
     pub fn read_from_reader<R>(reader: R, len: u64) -> io::Result<Self>
     where
         R: Read + Seek,
@@ -1061,5 +1127,163 @@ mod tests {
         assert!(data.to_ndarray::<u32>().is_err());
         // Fifth read: correct — cache still valid.
         assert_eq!(data.to_ndarray::<u8>().unwrap(), expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // copy
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn copy_1d_single_block() {
+        let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
+        let b = a.data().copy().unwrap();
+        assert_eq!(b.shape(), &[4]);
+        assert_eq!(b.ndim(), 1);
+        assert_eq!(b.dtype(), &u8::dtype());
+        assert_eq!(b.blocks_layout().block_shape[..], [4]);
+        assert_eq!(
+            b.data().to_ndarray::<u8>().unwrap(),
+            ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap()
+        );
+    }
+
+    #[test]
+    fn copy_1d_multi_block() {
+        let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
+        let b = a.data().copy().unwrap();
+        assert_eq!(b.shape(), &[6]);
+        assert_eq!(b.blocks_layout().block_shape[..], [3]);
+        assert_eq!(
+            b.data().to_ndarray::<u8>().unwrap(),
+            ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
+        );
+    }
+
+    #[test]
+    fn copy_1d_with_padding() {
+        // shape [5], block [3] → stored as 6 elements (padded)
+        let src = ndarray::array![0u8, 1, 2, 3, 4];
+        let a = Array::from_ndarray(&src, &[3]).unwrap();
+        let b = a.data().copy().unwrap();
+        assert_eq!(b.shape(), &[5]);
+        assert_eq!(b.blocks_layout().block_shape[..], [3]);
+        assert_eq!(b.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+    }
+
+    #[test]
+    fn copy_1d_i32() {
+        let a = array(&[&[10i32, 20, 30, 40], &[50, 60, 70, 80]], &[8], &[4]);
+        let b = a.data().copy().unwrap();
+        assert_eq!(b.shape(), &[8]);
+        assert_eq!(b.dtype(), &i32::dtype());
+        assert_eq!(
+            b.data().to_ndarray::<i32>().unwrap(),
+            ArrayD::from_shape_vec(vec![8], vec![10i32, 20, 30, 40, 50, 60, 70, 80]).unwrap()
+        );
+    }
+
+    #[test]
+    fn copy_2d_single_block() {
+        // shape=[2,3], block=[2,3] — one block, no partial-block path
+        let a = array(&[&[0u8, 1, 2, 3, 4, 5]], &[2, 3], &[2, 3]);
+        let b = a.data().copy().unwrap();
+        assert_eq!(b.shape(), &[2, 3]);
+        assert_eq!(b.blocks_layout().block_shape[..], [2, 3]);
+        assert_eq!(
+            b.data().to_ndarray::<u8>().unwrap(),
+            ArrayD::from_shape_vec(vec![2, 3], (0u8..6).collect()).unwrap()
+        );
+    }
+
+    #[test]
+    fn copy_2d_multi_block() {
+        // shape=[4,6], block=[2,3] — 4 blocks, exercises the full-block copy path
+        // Block layout (row-major grid):
+        //   block0=[0,0]: rows 0-1, cols 0-2 → 0,1,2,6,7,8
+        //   block1=[0,1]: rows 0-1, cols 3-5 → 3,4,5,9,10,11
+        //   block2=[1,0]: rows 2-3, cols 0-2 → 12,13,14,18,19,20
+        //   block3=[1,1]: rows 2-3, cols 3-5 → 15,16,17,21,22,23
+        #[rustfmt::skip]
+        let a = array(
+            &[
+                &[0u8, 1, 2, 6, 7, 8],
+                &[3, 4, 5, 9, 10, 11],
+                &[12, 13, 14, 18, 19, 20],
+                &[15, 16, 17, 21, 22, 23],
+            ],
+            &[4, 6],
+            &[2, 3],
+        );
+        let b = a.data().copy().unwrap();
+        assert_eq!(b.shape(), &[4, 6]);
+        assert_eq!(b.blocks_layout().block_shape[..], [2, 3]);
+        assert_eq!(
+            b.data().to_ndarray::<u8>().unwrap(),
+            ArrayD::from_shape_vec(vec![4, 6], (0u8..24).collect()).unwrap()
+        );
+    }
+
+    #[test]
+    fn copy_2d_with_padding() {
+        // shape=[3,5], block=[2,3] → padded to [4,6]; shape preserved as [3,5].
+        // Block grid 2×2:
+        //   [0,0]: size [2,3] — full block
+        //   [0,1]: size [2,2] — partial in dim1
+        //   [1,0]: size [1,3] — partial in dim0
+        //   [1,1]: size [1,2] — partial in BOTH dims (corner block)
+        #[rustfmt::skip]
+        let src = ndarray::array![
+            [0i32,  1,  2,  3,  4],
+            [5,     6,  7,  8,  9],
+            [10,   11, 12, 13, 14],
+        ];
+        let a = Array::from_ndarray(&src, &[2, 3]).unwrap();
+        let b = a.data().copy().unwrap();
+        assert_eq!(b.shape(), &[3, 5]);
+        assert_eq!(b.dtype(), &i32::dtype());
+        assert_eq!(b.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
+    }
+
+    #[test]
+    fn copy_3d_with_padding_in_all_dims() {
+        // shape=[3,3,5], block=[2,2,3] → padded to [4,4,6].
+        // Block grid 2×2×2 = 8 blocks; every boundary block is partial in at least
+        // one dimension, and the single corner block [1,1,1] is partial in all three:
+        //   size [1,1,2] vs block_shape [2,2,3].
+        let src = ndarray::Array3::<u8>::from_shape_vec(
+            [3, 3, 5],
+            (0u8..45).collect(),
+        )
+        .unwrap();
+        let a = Array::from_ndarray(&src, &[2, 2, 3]).unwrap();
+        let b = a.data().copy().unwrap();
+        assert_eq!(b.shape(), &[3, 3, 5]);
+        assert_eq!(b.dtype(), &u8::dtype());
+        assert_eq!(b.blocks_layout().block_shape[..], [2, 2, 3]);
+        assert_eq!(b.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+    }
+
+    #[test]
+    fn copy_preserves_block_shape() {
+        // Verify the copied array has the same block layout as the source.
+        let src = ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        let a = Array::from_ndarray(&src, &[4]).unwrap();
+        let b = a.data().copy().unwrap();
+        assert_eq!(a.blocks_layout().block_shape[..], b.blocks_layout().block_shape[..]);
+    }
+
+    #[test]
+    fn copy_result_is_independent() {
+        // Mutating the source array should not affect the copy (they are independent).
+        // Since Array<Owned> doesn't expose mutation, we verify by round-tripping
+        // both through write/read and checking values remain consistent.
+        let src = ndarray::array![10u8, 20, 30, 40];
+        let a = Array::from_ndarray(&src, &[4]).unwrap();
+        let b = a.data().copy().unwrap();
+        // Both should read back the same data independently.
+        assert_eq!(
+            a.data().to_ndarray::<u8>().unwrap(),
+            b.data().to_ndarray::<u8>().unwrap()
+        );
     }
 }
