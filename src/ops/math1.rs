@@ -1,6 +1,8 @@
 use std::io;
+use std::ops::Range;
 
 use crate::array::{Array, BlocksLayout};
+use crate::codec::ReadContext;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
 use crate::storage::{ArrayStorage, Ref};
 use crate::util::{DimArray, cast_slice_mut};
@@ -102,9 +104,9 @@ where
 
     fn read_data(
         &self,
-        index: &[std::ops::Range<usize>],
+        index: &[Range<usize>],
         buf: &mut [u8],
-        context: &crate::codec::ReadContext,
+        context: &ReadContext,
     ) -> std::io::Result<()> {
         self.a.storage.read_data(index, buf, context)?;
 

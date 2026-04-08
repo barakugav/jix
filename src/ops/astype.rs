@@ -1,7 +1,9 @@
 use std::cell::RefCell;
 use std::io;
+use std::ops::Range;
 
 use crate::array::{Array, BlocksLayout};
+use crate::codec::ReadContext;
 #[cfg(feature = "half")]
 use crate::dtype::f16;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind};
@@ -44,12 +46,10 @@ impl<S> AsType<S> {
             ));
         }
 
-        let shape = a.shape().try_into().unwrap();
-        let blocks_layout = a.blocks_layout().clone();
         Ok(Self {
             dtype,
-            shape,
-            blocks_layout,
+            shape: a.shape().try_into().unwrap(),
+            blocks_layout: a.blocks_layout().clone(),
             tmp_buf: RefCell::new(AlignedBytes::new(src_dtype.alignment() as usize)),
             a,
         })
@@ -103,9 +103,9 @@ where
 
     fn read_data(
         &self,
-        index: &[std::ops::Range<usize>],
+        index: &[Range<usize>],
         buf: &mut [u8],
-        context: &crate::codec::ReadContext,
+        context: &ReadContext,
     ) -> io::Result<()> {
         let (src_dtype, dst_dtype) = (self.a.dtype(), &self.dtype);
         let (src_itemsize, dst_itemsize) =
