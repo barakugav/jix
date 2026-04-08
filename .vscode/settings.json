@@ -3,6 +3,7 @@
         "Cargo.toml",
         "macros/Cargo.toml"
     ],
+    "rust-analyzer.cargo.features": "all",
     "cSpell.words": [
         "itemsize",
         "nitems",
