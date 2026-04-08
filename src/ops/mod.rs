@@ -1,2 +1,2 @@
-mod add;
-mod scalar;
+mod math1;
+mod math2;
