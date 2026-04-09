@@ -16,4 +16,5 @@ target
 #.idea/
 
 
-*/Cargo.lock
+zix/Cargo.lock
+zix-macros/Cargo.lock

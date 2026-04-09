@@ -1,13 +1,23 @@
 use pyo3::prelude::*;
+use pyo3_stub_gen::define_stub_info_gatherer;
 
-/// A Python module implemented in Rust.
+mod array;
+
 #[pymodule]
-mod zix {
-    use pyo3::prelude::*;
+fn zix(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
-    /// Formats the sum of two numbers as string.
-    #[pyfunction]
-    fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-        Ok((a + b).to_string())
-    }
+    m.add_class::<array::Array>()?;
+
+    // m.add_function(wrap_pyfunction!(ndarray::read_ndarray, m)?)?;
+
+    // pyo3_log::Logger::new(m.py(), pyo3_log::Caching::Nothing)
+    //     .unwrap()
+    //     .filter(log::LevelFilter::Trace)
+    //     .install()
+    //     .unwrap();
+
+    Ok(())
 }
+
+define_stub_info_gatherer!(gen_pyi);
