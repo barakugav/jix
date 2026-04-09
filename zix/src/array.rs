@@ -253,13 +253,17 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         // Output is sized to the requested range, not the full array shape.
         let out_shape = dim_arr(ndim, |dim| range[dim].end - range[dim].start);
         let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
-        // TODO: call read_data multiple times with smaller blocks
-        self.array.storage.read_data(
-            range,
-            unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) },
-            self.context.as_ref(),
-        )?;
+        self.to_ndarray_buf(range, {
+            unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) }
+        })?;
         Ok(unsafe { array.assume_init() })
+    }
+
+    pub fn to_ndarray_buf(&self, range: &[Range<usize>], buf: &mut [u8]) -> io::Result<()> {
+        // TODO: call read_data multiple times with smaller blocks
+        self.array
+            .storage
+            .read_data(range, buf, self.context.as_ref())
     }
 
     pub fn copy(&self) -> io::Result<Array<Owned>>

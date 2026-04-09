@@ -2,6 +2,8 @@ use pyo3::prelude::*;
 use pyo3_stub_gen::define_stub_info_gatherer;
 
 mod array;
+mod dtype;
+mod util;
 
 #[pymodule]
 fn zix(m: &Bound<'_, PyModule>) -> PyResult<()> {

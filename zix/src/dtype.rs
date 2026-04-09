@@ -21,7 +21,7 @@ pub struct Dtype {
     kind: DtypeKind,
     shape: DtypeShape,
     itemsize: Itemsize,
-    alignment: Alignment,
+    alignment: (Alignment, bool),
 }
 /// An inner enum of [`Dtype`], either a scalar or a struct.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +101,7 @@ impl Dtype {
             },
             shape: DtypeShape::new_const(),
             itemsize: kind.itemsize(),
-            alignment: kind.alignment(),
+            alignment: (kind.alignment(), true),
         }
     }
 
@@ -128,20 +128,7 @@ impl Dtype {
 
         fn determine_itemsize_and_alignment(
             fields: &[(String, Itemsize, Dtype)],
-        ) -> Result<(Itemsize, Alignment), DtypeError> {
-            let mut expected_offset = 0; // assuming sorted by offset
-            let is_packed = fields.iter().all({
-                |(_f_name, offset, dtype)| {
-                    let packed = *offset == expected_offset;
-                    expected_offset += dtype.itemsize();
-                    packed
-                }
-            });
-            if is_packed {
-                let itemsize = expected_offset;
-                return Ok((itemsize, 1));
-            }
-
+        ) -> Result<(Itemsize, (Alignment, bool)), DtypeError> {
             let mut expected_offset = 0;
             let is_aligned = fields.iter().all({
                 |(_f_name, offset, dtype)| {
@@ -159,20 +146,33 @@ impl Dtype {
                     .max()
                     .unwrap_or(1);
                 let itemsize = ceil_to_multiple(expected_offset, max_alignment as Itemsize);
-                return Ok((itemsize, max_alignment));
+                return Ok((itemsize, (max_alignment, true)));
+            }
+
+            let mut expected_offset = 0; // assuming sorted by offset
+            let is_packed = fields.iter().all({
+                |(_f_name, offset, dtype)| {
+                    let packed = *offset == expected_offset;
+                    expected_offset += dtype.itemsize();
+                    packed
+                }
+            });
+            if is_packed {
+                let itemsize = expected_offset;
+                return Ok((itemsize, (1, false)));
             }
 
             Err(DtypeError::InvalidOffsets)
         }
 
-        let (itemsize, alignment) = determine_itemsize_and_alignment(&fields)?;
+        let (itemsize, (alignment, is_aligned)) = determine_itemsize_and_alignment(&fields)?;
         Ok(Self {
             kind: DtypeKind::Struct {
                 fields: fields.into_boxed_slice(),
             },
             shape: DtypeShape::new(),
             itemsize,
-            alignment,
+            alignment: (alignment, is_aligned),
         })
     }
 
@@ -199,54 +199,13 @@ impl Dtype {
         }
         let element_itemsize = itemsize / shape_prod;
 
-        if alignment == 1 {
-            // packed struct
-
-            let mut expected_offset = 0;
-            let is_packed = fields.iter().all({
-                |(_name, offset, dtype)| {
-                    let packed = *offset == expected_offset;
-                    expected_offset += dtype.itemsize();
-                    packed
-                }
-            });
-            if !is_packed {
-                return Err(DtypeError::InvalidOffsets);
-            }
-            let expected_itemsize = expected_offset;
-            if expected_itemsize != element_itemsize {
-                return Err(DtypeError::InvalidItemsize);
-            }
+        let is_aligned;
+        if Self::is_aligned_struct(&fields, element_itemsize, alignment) {
+            is_aligned = true;
+        } else if Self::is_packed_struct(&fields, element_itemsize, alignment) {
+            is_aligned = false;
         } else {
-            // aligned struct
-
-            let max_alignment = fields
-                .iter()
-                .map(|(_name, _offset, dtype)| dtype.alignment())
-                .max()
-                .unwrap_or(1);
-            if alignment != max_alignment {
-                return Err(DtypeError::InvalidAlignment);
-            }
-
-            let mut expected_offset = 0;
-            let is_aligned = fields.iter().all({
-                |(_name, offset, dtype)| {
-                    expected_offset =
-                        ceil_to_multiple(expected_offset, dtype.alignment() as Itemsize);
-                    let aligned = *offset == expected_offset;
-                    expected_offset += dtype.itemsize();
-                    aligned
-                }
-            });
-            if !is_aligned {
-                return Err(DtypeError::InvalidOffsets);
-            }
-
-            let expected_itemsize = ceil_to_multiple(expected_offset, max_alignment as Itemsize);
-            if expected_itemsize != element_itemsize {
-                return Err(DtypeError::InvalidItemsize);
-            }
+            return Err(DtypeError::InvalidOffsets);
         }
 
         Ok(Self {
@@ -255,8 +214,71 @@ impl Dtype {
             },
             shape,
             itemsize,
-            alignment,
+            alignment: (alignment, is_aligned),
         })
+    }
+
+    fn is_aligned_struct(
+        fields: &[(String, Itemsize, Dtype)],
+        itemsize: Itemsize,
+        alignment: Alignment,
+    ) -> bool {
+        let max_alignment = fields
+            .iter()
+            .map(|(_name, _offset, dtype)| dtype.alignment())
+            .max()
+            .unwrap_or(1);
+        if alignment != max_alignment {
+            return false;
+        }
+
+        let mut expected_offset = 0;
+        let is_aligned = fields.iter().all({
+            |(_name, offset, dtype)| {
+                expected_offset = ceil_to_multiple(expected_offset, dtype.alignment() as Itemsize);
+                let aligned = *offset == expected_offset;
+                expected_offset += dtype.itemsize();
+                aligned
+            }
+        });
+        if !is_aligned {
+            return false;
+        }
+
+        let expected_itemsize = ceil_to_multiple(expected_offset, max_alignment as Itemsize);
+        if expected_itemsize != itemsize {
+            return false;
+        }
+
+        true
+    }
+
+    fn is_packed_struct(
+        fields: &[(String, Itemsize, Dtype)],
+        itemsize: Itemsize,
+        alignment: Alignment,
+    ) -> bool {
+        if alignment != 1 {
+            return false;
+        }
+
+        let mut expected_offset = 0;
+        let is_packed = fields.iter().all({
+            |(_name, offset, dtype)| {
+                let packed = *offset == expected_offset;
+                expected_offset += dtype.itemsize();
+                packed
+            }
+        });
+        if !is_packed {
+            return false;
+        }
+        let expected_itemsize = expected_offset;
+        if expected_itemsize != itemsize {
+            return false;
+        }
+
+        true
     }
 
     /// Get the scalar kind of the dtype, if it is a scalar dtype.
@@ -298,7 +320,16 @@ impl Dtype {
     /// For struct dtypes, the alignment is either `1` for packed dtypes, or the maximum alignment of the inner fields
     /// for aligned structs.
     pub fn alignment(&self) -> Alignment {
-        self.alignment
+        self.alignment.0
+    }
+
+    /// Returns whether the dtype is aligned (like C structs) or packed.
+    ///
+    /// Packed structs have alignment of 1, and fields are laid out back to back without any padding.
+    /// Aligned structs have alignment equal to the maximum alignment of their fields, and have padding between fields
+    /// such that each field is aligned to its alignment requirement.
+    pub fn is_aligned(&self) -> bool {
+        self.alignment.1
     }
 
     /// Try to convert this dtype to a scalar dtype, if it matches a default scalar layout.
@@ -652,27 +683,26 @@ mod tests {
     }
 
     #[test]
-    fn from_fields_ambiguous_single_field_detected_as_packed() {
+    fn from_fields_ambiguous_single_field_detected_as_aligned() {
         // Single field: packed and aligned offsets are identical.
-        // from_fields tries packed first, so it always returns alignment=1.
+        // from_fields tries aligned first, so it always returns the aligned layout.
         let dtype = Dtype::from_fields(vec![("x".to_string(), 0, f64::dtype())]).unwrap();
         assert_eq!(dtype.itemsize(), 8);
-        assert_eq!(dtype.alignment(), 1);
+        assert_eq!(dtype.alignment(), 8);
     }
 
     #[test]
-    fn from_fields_ambiguous_i32_u8_detected_as_packed() {
-        // { a: i32 at 0, b: u8 at 4 } — cumulative sizes match packed offsets exactly,
-        // so from_fields returns packed layout (itemsize=5, alignment=1) even though
-        // these same offsets are also valid for an aligned C struct.
+    fn from_fields_ambiguous_i32_u8_detected_as_aligned() {
+        // { a: i32 at 0, b: u8 at 4 } — offsets are valid for both packed and aligned layouts.
+        // from_fields tries aligned first and returns alignment=4, itemsize=8 (padded to align 4).
         // Use new_struct() when explicit control is needed.
         let dtype = Dtype::from_fields(vec![
             ("a".to_string(), 0, i32::dtype()),
             ("b".to_string(), 4, u8::dtype()),
         ])
         .unwrap();
-        assert_eq!(dtype.alignment(), 1);
-        assert_eq!(dtype.itemsize(), 5);
+        assert_eq!(dtype.alignment(), 4);
+        assert_eq!(dtype.itemsize(), 8);
     }
 
     #[test]
@@ -805,10 +835,11 @@ mod tests {
 
     #[test]
     fn new_struct_wrong_alignment_errors() {
-        // f64 field requires alignment 8; declaring alignment 4 should be rejected.
+        // f64 field requires alignment 8; declaring alignment 4 is rejected as invalid offsets
+        // (alignment 4 matches neither packed=1 nor aligned=8 layout).
         assert_eq!(
             Dtype::new_struct(vec![("a".to_string(), 0, f64::dtype())], &[], 8, 4),
-            Err(DtypeError::InvalidAlignment),
+            Err(DtypeError::InvalidOffsets),
         );
     }
 
@@ -831,7 +862,8 @@ mod tests {
 
     #[test]
     fn new_struct_itemsize_too_small_errors() {
-        // Packed i32+u8 must be exactly 5; declaring 4 is wrong.
+        // Packed i32+u8 must be exactly 5; declaring 4 is rejected as invalid offsets
+        // (is_packed_struct checks itemsize as part of offset validation).
         assert_eq!(
             Dtype::new_struct(
                 vec![
@@ -842,7 +874,7 @@ mod tests {
                 4,
                 1,
             ),
-            Err(DtypeError::InvalidItemsize),
+            Err(DtypeError::InvalidOffsets),
         );
     }
 

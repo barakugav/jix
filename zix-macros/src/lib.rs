@@ -95,10 +95,10 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 
                         #({
                             let field_dtype = <#field_types as #zix_crate::dtype::Dtyped>::dtype();
-                            let field_size = field_dtype.itemsize;
+                            let field_size = field_dtype.itemsize();
 
                             if ! #is_packed {
-                                let field_alignment = field_dtype.alignment;
+                                let field_alignment = field_dtype.alignment();
                                 alignment = alignment.max(field_alignment);
                                 total_size = ceil_to_multiple(total_size, field_alignment as #zix_crate::dtype::Itemsize);
                             }
@@ -116,11 +116,11 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                             kind: #zix_crate::dtype::DtypeKind::Struct { fields: fields.into_boxed_slice() },
                             shape: Default::default(),
                             itemsize: total_size,
-                            alignment,
+                            alignment: (alignment, !#is_packed),
                         };
 
-                        debug_assert_eq!(dtype.itemsize as usize, std::mem::size_of::<Self>());
-                        debug_assert_eq!(dtype.alignment as usize, std::mem::align_of::<Self>());
+                        debug_assert_eq!(dtype.itemsize() as usize, std::mem::size_of::<Self>());
+                        debug_assert_eq!(dtype.alignment() as usize, std::mem::align_of::<Self>());
                         dtype
                     }
                 }
@@ -152,8 +152,8 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                 {
                     fn dtype() -> #zix_crate::dtype::Dtype {
                         let dtype = <#field_type as #zix_crate::dtype::Dtyped>::dtype();
-                        debug_assert_eq!(dtype.itemsize as usize, std::mem::size_of::<Self>());
-                        debug_assert_eq!(dtype.alignment  as usize, std::mem::align_of::<Self>());
+                        debug_assert_eq!(dtype.itemsize() as usize, std::mem::size_of::<Self>());
+                        debug_assert_eq!(dtype.alignment() as usize, std::mem::align_of::<Self>());
                         dtype
                     }
                 }
