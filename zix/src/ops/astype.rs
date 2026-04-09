@@ -62,10 +62,10 @@ impl<S> AsType<S> {
             return false; // non scalar
         };
 
-        if !cfg!(feature = "half") {
-            if src_scalar == DtypeScalarKind::F16 || dst_scalar == DtypeScalarKind::F16 {
-                return false; // f16 not supported without "half" feature
-            }
+        if !cfg!(feature = "half")
+            && (src_scalar == DtypeScalarKind::F16 || dst_scalar == DtypeScalarKind::F16)
+        {
+            return false; // f16 not supported without "half" feature
         }
 
         let is_complex = |kind| {
@@ -109,7 +109,7 @@ where
         let nitems = buf.len() / dst_itemsize;
 
         let in_place = src_itemsize == dst_itemsize
-            && buf.as_ptr() as usize % src_dtype.alignment() as usize == 0;
+            && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment() as usize);
         let mut tmp_buf;
         let (read_buf, dst) = if in_place {
             let ptr = buf.as_mut_ptr();

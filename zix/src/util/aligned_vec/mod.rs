@@ -63,14 +63,14 @@ impl DerefMut for AlignedBytes {
 impl AsRef<[u8]> for AlignedBytes {
     #[inline]
     fn as_ref(&self) -> &[u8] {
-        &**self
+        self
     }
 }
 
 impl AsMut<[u8]> for AlignedBytes {
     #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut **self
+        self
     }
 }
 
@@ -315,7 +315,7 @@ impl AlignedBytes {
             let ptr: *mut u8 = vec.buf.ptr.as_ptr();
 
             for (i, item) in slice.iter().enumerate() {
-                unsafe { ptr.add(i).write(item.clone()) };
+                unsafe { ptr.add(i).write(*item) };
                 *len += 1;
             }
         }
@@ -394,7 +394,7 @@ impl AlignedBytes {
 
             // Write all elements except the last one
             for _ in 1..n {
-                core::ptr::write(ptr, value.clone());
+                core::ptr::write(ptr, value);
                 ptr = ptr.add(1);
                 // Increment the length in every step in case clone() panics
                 self.len += 1;

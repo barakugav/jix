@@ -140,7 +140,7 @@ impl<ArraysT> Concat<ArraysT> {
 
         Ok(Self {
             dtype: dtype.clone(),
-            shape: shape,
+            shape,
             blocks_layout: arrays.blocks_layout(0).clone(),
             arrays,
             concat_axis: axis,

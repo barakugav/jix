@@ -45,6 +45,10 @@ impl<S: ArrayStorage> Array<S> {
         &self.storage
     }
 
+    pub fn into_storage(self) -> S {
+        self.storage
+    }
+
     pub fn dtype(&self) -> &Dtype {
         self.storage.dtype()
     }
@@ -96,7 +100,7 @@ impl Array<Owned> {
             usize::try_from(strides[dim]).unwrap() * size_of::<T>()
         });
 
-        return Self::from_block_fn(
+        Self::from_block_fn(
             &shape,
             &block_shape,
             dtype,
@@ -126,7 +130,7 @@ impl Array<Owned> {
                 }
                 Ok(())
             },
-        );
+        )
     }
 
     pub(crate) fn from_block_fn(
@@ -307,7 +311,7 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
 
                 if !full_block {
                     // Copy from temporary buffer to output block with correct strides.
-                    let src_strides = default_strides(&block_size, itemsize);
+                    let src_strides = default_strides(block_size, itemsize);
                     let output_block_strides = output_block_strides
                         .get_or_insert_with(|| default_strides(block_shape, itemsize));
                     let mut iter = NdIter::new(

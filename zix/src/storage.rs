@@ -108,7 +108,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
             let b_end = i_range.end.div_ceil(b);
             b_range.push(b_begin..b_end);
             single_full_block &=
-                b_begin + 1 == b_end && i_range.start % b == 0 && i_range.end % b == 0;
+                b_begin + 1 == b_end && i_range.start.is_multiple_of(b) && i_range.end.is_multiple_of(b);
         }
 
         let shape = self.shape.as_slice();
@@ -137,7 +137,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
             ));
         }
         let out_strides = default_strides(&out_shape, itemsize);
-        let block_strides = default_strides(&block_shape, itemsize);
+        let block_strides = default_strides(block_shape, itemsize);
 
         // Element-space begin/end for NdIterExtBlockOffsetSize.
         let elem_begin = dim_arr(ndim, |dim| index[dim].start);
@@ -183,7 +183,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
             let dst_ptr = unsafe { buf.as_mut_ptr().add(out_start) };
 
             let mut iter = NdIter::new(
-                &block_size,
+                block_size,
                 (
                     NdIterExtStridesPtr::new(&block_strides, src_ptr),
                     NdIterExtStridesPtrMut::new(&out_strides, dst_ptr),

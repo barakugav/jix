@@ -148,7 +148,7 @@ impl<Ix> NdIterExtension<Ix> for () {
     type Item<'a> = ();
     fn on_increase(&mut self, _dim: usize, _before: Ix, _after: Ix, _diff: Ix) {}
     fn on_decrease(&mut self, _dim: usize, _before: Ix, _after: Ix, _diff: Ix) {}
-    fn next(&self) -> () {}
+    fn next(&self) {}
 }
 impl<Ix, T1> NdIterExtension<Ix> for (T1,)
 where

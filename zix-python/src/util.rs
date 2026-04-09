@@ -2,6 +2,10 @@ use zix_core::NDIM_MAX;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
+pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
+    (0..ndim).map(f).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use pyo3::prelude::*;

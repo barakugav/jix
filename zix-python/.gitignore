@@ -69,3 +69,6 @@ docs/_build/
 
 # Pyenv
 .python-version
+
+# auto generated stubs
+python/zix/__init__.pyi

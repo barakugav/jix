@@ -1545,6 +1545,7 @@ version = "0.0.0"
 dependencies = [
  "arrayvec",
  "ctor",
+ "ndarray",
  "numpy",
  "pyo3",
  "pyo3-stub-gen",

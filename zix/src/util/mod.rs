@@ -76,8 +76,8 @@ where
 {
     let (ptr, len) = (slice.as_ptr(), slice.len());
     let len_bytes = len * size_of::<T>();
-    assert!(ptr as usize % align_of::<U>() == 0);
-    assert!(size_of::<U>() > 0 && len_bytes % size_of::<U>() == 0);
+    assert!((ptr as usize).is_multiple_of(align_of::<U>()));
+    assert!(size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
     unsafe { std::slice::from_raw_parts(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
 pub(crate) unsafe fn cast_slice_mut<T, U>(slice: &mut [T]) -> &mut [U]
@@ -87,8 +87,8 @@ where
 {
     let (ptr, len) = (slice.as_mut_ptr(), slice.len());
     let len_bytes = len * size_of::<T>();
-    assert!(ptr as usize % align_of::<U>() == 0);
-    assert!(size_of::<U>() > 0 && len_bytes % size_of::<U>() == 0);
+    assert!((ptr as usize).is_multiple_of(align_of::<U>()));
+    assert!(size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
     unsafe { std::slice::from_raw_parts_mut(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
 

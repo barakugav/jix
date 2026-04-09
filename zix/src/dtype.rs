@@ -194,7 +194,7 @@ impl Dtype {
         if shape_prod == 0 {
             return Err(DtypeError::InvalidShape);
         }
-        if itemsize % shape_prod != 0 {
+        if !itemsize.is_multiple_of(shape_prod) {
             return Err(DtypeError::InvalidItemsize);
         }
         let element_itemsize = itemsize / shape_prod;
@@ -355,7 +355,7 @@ impl Dtype {
             return Err(DtypeError::InvalidShape);
         }
         let current_shape_size = self.shape.iter().cloned().product::<Itemsize>();
-        assert!(self.itemsize % current_shape_size == 0);
+        assert!(self.itemsize.is_multiple_of(current_shape_size));
         let base_itemsize = self.itemsize / current_shape_size;
         self.itemsize = base_itemsize
             .checked_mul(shape_prod)

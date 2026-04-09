@@ -3,6 +3,7 @@ use pyo3_stub_gen::define_stub_info_gatherer;
 
 mod array;
 mod dtype;
+mod storage;
 mod util;
 
 #[pymodule]

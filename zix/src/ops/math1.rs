@@ -119,7 +119,7 @@ where
             };
         }
 
-        Ok(match self.dtype.try_to_scalar() {
+        match self.dtype.try_to_scalar() {
             Some(DtypeScalarKind::I8) => {
                 apply_loop!(i8, apply_i8);
             }
@@ -168,7 +168,8 @@ where
                     "only scalar dtypes are supported for MathOp1",
                 ));
             }
-        })
+        }
+        Ok(())
     }
 }
 

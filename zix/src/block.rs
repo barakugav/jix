@@ -39,7 +39,7 @@ impl<S> BlockTable<S> {
         S: BlockTableStorage,
     {
         assert!(block_size > 0);
-        assert!(nitems % block_size as usize == 0);
+        assert!(nitems.is_multiple_of(block_size as usize));
         let nblocks = nitems / block_size as usize;
         let cdata = storage.cdata();
         let block_offsets = storage.block_offsets();
@@ -142,7 +142,7 @@ impl<S> BlockTable<S> {
         writer.write_all(toc.as_bytes())?;
 
         // Write body data sections
-        let cdata = writer.write_section(&self.storage.cdata(), align_of::<u8>())?;
+        let cdata = writer.write_section(self.storage.cdata(), align_of::<u8>())?;
         let block_offsets = writer.write_section(
             unsafe { cast_slice::<u64, u8>(self.storage.block_offsets()) },
             align_of::<u64>(),
@@ -243,9 +243,9 @@ impl BlockTable<Owned> {
         let itemsize = dtype.itemsize();
         assert!(itemsize > 0);
         assert!(block_size > 0);
-        assert!(data.len() % itemsize as usize == 0);
+        assert!(data.len().is_multiple_of(itemsize as usize));
         let nitems = data.len() / itemsize as usize;
-        assert!(nitems % block_size as usize == 0);
+        assert!(nitems.is_multiple_of(block_size as usize));
 
         let b_size_bytes = block_size as usize * itemsize as usize;
         let mut builder = BlockTableBuilder::new(dtype, block_size, encoder);
