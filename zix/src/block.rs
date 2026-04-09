@@ -437,7 +437,7 @@ mod tests {
     use crate::block::{BlockTableStorage, Owned};
     use crate::codec::{Encoder, ReadContext};
     use crate::dtype::Dtyped;
-    use crate::util::cast_slice;
+    use crate::util::{AlignedBytes, cast_slice};
 
     fn make_encoder() -> Encoder {
         Encoder::new(3).unwrap()
@@ -574,6 +574,7 @@ mod tests {
     // write_to_file / read_from_file round-trip
     // -----------------------------------------------------------------------
 
+    #[cfg(not(miri))]
     #[test]
     fn round_trip_file() {
         let items: Vec<u32> = (0u32..18).collect();
@@ -618,7 +619,8 @@ mod tests {
     {
         let mut context = ReadContext::new().unwrap();
         let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
-        let mut buf = vec![0u8; block_bytes];
+        let mut buf = AlignedBytes::with_capacity(T::dtype().alignment() as usize, block_bytes);
+        unsafe { buf.set_len(block_bytes) };
         storage.read_block(idx, &mut buf, &mut context).unwrap();
         unsafe { cast_slice::<u8, T>(&buf) }.to_vec()
     }

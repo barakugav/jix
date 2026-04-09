@@ -883,6 +883,7 @@ mod tests {
         assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn write_read_file() {
         let src = ndarray::array![0u32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
@@ -989,6 +990,7 @@ mod tests {
         unsafe { super::Array::<super::Mmap>::read_from_file_mmap(&path, 0, len) }.unwrap()
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn mmap_read_1d_single_block() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -1000,6 +1002,7 @@ mod tests {
         assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn mmap_read_1d_multi_block() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -1009,6 +1012,7 @@ mod tests {
         assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn mmap_read_1d_i32() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -1018,6 +1022,7 @@ mod tests {
         assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn mmap_read_2d() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -1034,6 +1039,7 @@ mod tests {
         assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn mmap_read_nonzero_offset() {
         // Write two arrays back-to-back; read the second via its offset.

@@ -2,7 +2,7 @@
     "rust-analyzer.linkedProjects": [
         "zix/Cargo.toml",
         "zix-macros/Cargo.toml",
-        "zix-pyo3/Cargo.toml"
+        "zix-python/Cargo.toml"
     ],
     "rust-analyzer.cargo.features": "all",
     "cSpell.words": [

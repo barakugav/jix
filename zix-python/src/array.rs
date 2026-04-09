@@ -1,5 +1,4 @@
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
@@ -23,12 +22,10 @@ impl Array {
     // }
 
     fn __add__(&self, _other: &Self) -> pyo3::PyResult<Self> {
-        let arr = &self.0 + &self.0;
         let a = ZixArray::from_storage(self.0.storage().clone());
         let b = ZixArray::from_storage(self.0.storage().clone());
         let storage = DynStorage(Arc::new(zix_core::ops::Add::new(a, b)?));
-        // ZixArray::from_storage(
-        unimplemented!()
+        Ok(Self(ZixArray::from_storage(storage)))
     }
 }
 

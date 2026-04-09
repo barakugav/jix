@@ -282,10 +282,9 @@ mod tests {
             paste::paste! {
                 #[test]
                 fn [<test_ $dtype _1d>]() {
-                    use rand::{SeedableRng, rngs::StdRng};
                     use crate::array::Array;
                     let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = StdRng::seed_from_u64(seed);
+                    let mut rng = fastrand::Rng::with_seed(seed);
                     let b = super::rand_array::<$dtype>(&mut rng, &[4]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[4]) + &b;
                     let za = Array::from_ndarray(&a, &[4]).unwrap();
@@ -297,10 +296,9 @@ mod tests {
 
                 #[test]
                 fn [<test_ $dtype _1d_multi_block>]() {
-                    use rand::{SeedableRng, rngs::StdRng};
                     use crate::array::Array;
                     let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = StdRng::seed_from_u64(seed);
+                    let mut rng = fastrand::Rng::with_seed(seed);
                     let b = super::rand_array::<$dtype>(&mut rng, &[6]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[6]) + &b;
                     let za = Array::from_ndarray(&a, &[2]).unwrap();
@@ -312,10 +310,9 @@ mod tests {
 
                 #[test]
                 fn [<test_ $dtype _2d>]() {
-                    use rand::{SeedableRng, rngs::StdRng};
                     use crate::array::Array;
                     let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = StdRng::seed_from_u64(seed);
+                    let mut rng = fastrand::Rng::with_seed(seed);
                     let b = super::rand_array::<$dtype>(&mut rng, &[2, 3]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[2, 3]) + &b;
                     let za = Array::from_ndarray(&a, &[2, 3]).unwrap();
@@ -327,10 +324,9 @@ mod tests {
 
                 #[test]
                 fn [<test_ $dtype _2d_multi_block>]() {
-                    use rand::{SeedableRng, rngs::StdRng};
                     use crate::array::Array;
                     let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = StdRng::seed_from_u64(seed);
+                    let mut rng = fastrand::Rng::with_seed(seed);
                     let b = super::rand_array::<$dtype>(&mut rng, &[4, 4]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[4, 4]) + &b;
                     let za = Array::from_ndarray(&a, &[2, 2]).unwrap();
@@ -346,10 +342,9 @@ mod tests {
                         // Skip this test for small types to avoid overflow in ops.
                         return;
                     }
-                    use rand::{SeedableRng, rngs::StdRng};
                     use crate::array::Array;
                     let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = StdRng::seed_from_u64(seed);
+                    let mut rng = fastrand::Rng::with_seed(seed);
                     let c = super::rand_array::<$dtype>(&mut rng, &[4]);
                     let b = super::rand_array::<$dtype>(&mut rng, &[4]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[4]) + &b + &c;
@@ -406,19 +401,20 @@ mod tests {
     #[cfg(feature = "half")]
     use crate::dtype::f16;
     #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
     type complex_f32 = crate::dtype::Complex<f32>;
     #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
     type complex_f64 = crate::dtype::Complex<f64>;
 
     trait Scalar: Sized {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self;
+        fn sample(rng: &mut fastrand::Rng) -> Self;
     }
     macro_rules! impl_test_val {
         ($range:expr, $($t:ty),+) => {
             $(impl Scalar for $t {
-                fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-                    use rand::RngExt;
-                    rng.random_range($range) as Self
+                fn sample(rng: &mut fastrand::Rng) -> Self {
+                    rng.u8($range) as Self
                 }
             })+
         };
@@ -426,32 +422,29 @@ mod tests {
     // [1,4]:  max cube 4³=64  < i8::MAX (127)
     // [1,30]: max cube 30³=27k < i16::MAX (32767)
     // [1,100]: safe for i32/i64/f32/f64
-    impl_test_val!(1u8..=4, i8, u8);
-    impl_test_val!(1u8..=30, i16, u16, u32, u64);
-    impl_test_val!(1u8..=100, i32, i64, f32, f64);
+    impl_test_val!(1..=4, i8, u8);
+    impl_test_val!(1..=30, i16, u16, u32, u64);
+    impl_test_val!(1..=100, i32, i64, f32, f64);
     #[cfg(feature = "half")]
     impl Scalar for f16 {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
-            Self::from_f32(rng.random_range(1u8..=15u8) as f32)
+        fn sample(rng: &mut fastrand::Rng) -> Self {
+            Self::from_f32(rng.u8(1..=15) as f32)
         }
     }
     #[cfg(feature = "num-complex")]
     impl Scalar for complex_f32 {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
-            Self::new(rng.random_range(1u8..=15u8) as f32, 0.0)
+        fn sample(rng: &mut fastrand::Rng) -> Self {
+            Self::new(rng.u8(1..=15) as f32, 0.0)
         }
     }
     #[cfg(feature = "num-complex")]
     impl Scalar for complex_f64 {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
-            Self::new(rng.random_range(1u8..=15u8) as f64, 0.0)
+        fn sample(rng: &mut fastrand::Rng) -> Self {
+            Self::new(rng.u8(1..=15) as f64, 0.0)
         }
     }
 
-    fn rand_array<T: Scalar>(rng: &mut rand::rngs::StdRng, shape: &[usize]) -> ndarray::ArrayD<T> {
+    fn rand_array<T: Scalar>(rng: &mut fastrand::Rng, shape: &[usize]) -> ndarray::ArrayD<T> {
         ndarray::Array::from_shape_fn(ndarray::IxDyn(shape), |_| T::sample(rng))
     }
 }

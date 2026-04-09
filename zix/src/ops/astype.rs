@@ -111,15 +111,17 @@ where
         let in_place = src_itemsize == dst_itemsize
             && buf.as_ptr() as usize % src_dtype.alignment() as usize == 0;
         let mut tmp_buf;
-        let (tmp_buf, dst) = if in_place {
-            let dst = buf.as_mut_ptr();
-            (buf, dst)
+        let (read_buf, dst) = if in_place {
+            let ptr = buf.as_mut_ptr();
+            ((ptr, buf.len()), ptr)
         } else {
             tmp_buf = context.tmp_buf(nitems * src_itemsize, src_dtype.alignment());
-            (tmp_buf.as_mut_slice(), buf.as_mut_ptr())
+            let tmp_buf = tmp_buf.as_mut_slice();
+            ((tmp_buf.as_mut_ptr(), tmp_buf.len()), buf.as_mut_ptr())
         };
-        self.a.storage.read_data(index, tmp_buf, context)?;
-        let src = tmp_buf.as_ptr();
+        let read_buf = unsafe { std::slice::from_raw_parts_mut(read_buf.0, read_buf.1) };
+        self.a.storage.read_data(index, read_buf, context)?;
+        let src = read_buf.as_ptr();
 
         if src_dtype == dst_dtype {
             debug_assert!(in_place);
@@ -261,27 +263,25 @@ mod tests {
 
     // --- scalar sampling ---
     trait Scalar: Sized + Copy + 'static {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self;
+        fn sample(rng: &mut fastrand::Rng) -> Self;
     }
     macro_rules! impl_scalar {
-        ($range:expr, $($t:ty),+) => {
+        ($($t:ty),+) => {
             $(impl Scalar for $t {
-                fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-                    use rand::RngExt;
-                    rng.random_range($range) as Self
+                fn sample(rng: &mut fastrand::Rng) -> Self {
+                    (rng.f64() * 9.0 + 1.0) as Self
                 }
             })+
         };
     }
-    impl_scalar!(1u8..=10, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
+    impl_scalar!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
     impl Scalar for bool {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
-            rng.random_range(0u8..=1u8) != 0
+        fn sample(rng: &mut fastrand::Rng) -> Self {
+            rng.bool()
         }
     }
 
-    fn rand_array<T: Scalar>(rng: &mut rand::rngs::StdRng, shape: &[usize]) -> ndarray::ArrayD<T> {
+    fn rand_array<T: Scalar>(rng: &mut fastrand::Rng, shape: &[usize]) -> ndarray::ArrayD<T> {
         ndarray::Array::from_shape_fn(ndarray::IxDyn(shape), |_| T::sample(rng))
     }
 
@@ -340,9 +340,8 @@ mod tests {
     mod f16_impls {
         use super::*;
         impl Scalar for f16 {
-            fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-                use rand::RngExt;
-                f16::from_f32(rng.random_range(1u8..=10u8) as f32)
+            fn sample(rng: &mut fastrand::Rng) -> Self {
+                f16::from_f32(rng.f32() * 9.0 + 1.0)
             }
         }
         // f16 cannot use `as` for conversions; go through f32
@@ -380,20 +379,18 @@ mod tests {
     }
 
     impl Scalar for Complex<f32> {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
+        fn sample(rng: &mut fastrand::Rng) -> Self {
             Self {
-                re: rng.random_range(1u8..=10u8) as f32,
-                im: rng.random_range(1u8..=10u8) as f32,
+                re: rng.f32() * 9.0 + 1.0,
+                im: rng.f32() * 9.0 + 1.0,
             }
         }
     }
     impl Scalar for Complex<f64> {
-        fn sample(rng: &mut rand::rngs::StdRng) -> Self {
-            use rand::RngExt;
+        fn sample(rng: &mut fastrand::Rng) -> Self {
             Self {
-                re: rng.random_range(1u8..=10u8) as f64,
-                im: rng.random_range(1u8..=10u8) as f64,
+                re: rng.f64() * 9.0 + 1.0,
+                im: rng.f64() * 9.0 + 1.0,
             }
         }
     }
@@ -431,7 +428,6 @@ mod tests {
             mod $mod_name {
                 use super::*;
                 use crate::dtype::Dtyped;
-                use rand::{SeedableRng, rngs::StdRng};
 
                 fn seed() -> u64 {
                     stringify!($mod_name)
@@ -443,7 +439,7 @@ mod tests {
 
                 #[test]
                 fn cast_1d() {
-                    let mut rng = StdRng::seed_from_u64(seed());
+                    let mut rng = fastrand::Rng::with_seed(seed());
                     let a = rand_array::<$src>(&mut rng, &[8]);
                     let za = Array::from_ndarray(&a, &[8]).unwrap();
                     let actual = za
@@ -457,7 +453,7 @@ mod tests {
 
                 #[test]
                 fn cast_1d_multi_block() {
-                    let mut rng = StdRng::seed_from_u64(seed() ^ 1);
+                    let mut rng = fastrand::Rng::with_seed(seed() ^ 1);
                     let a = rand_array::<$src>(&mut rng, &[6]);
                     let za = Array::from_ndarray(&a, &[2]).unwrap();
                     let actual = za
@@ -471,7 +467,7 @@ mod tests {
 
                 #[test]
                 fn cast_2d() {
-                    let mut rng = StdRng::seed_from_u64(seed() ^ 2);
+                    let mut rng = fastrand::Rng::with_seed(seed() ^ 2);
                     let a = rand_array::<$src>(&mut rng, &[3, 4]);
                     let za = Array::from_ndarray(&a, &[3, 4]).unwrap();
                     let actual = za
@@ -485,7 +481,7 @@ mod tests {
 
                 #[test]
                 fn cast_2d_multi_block() {
-                    let mut rng = StdRng::seed_from_u64(seed() ^ 3);
+                    let mut rng = fastrand::Rng::with_seed(seed() ^ 3);
                     let a = rand_array::<$src>(&mut rng, &[4, 4]);
                     let za = Array::from_ndarray(&a, &[2, 2]).unwrap();
                     let actual = za

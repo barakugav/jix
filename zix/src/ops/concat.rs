@@ -249,7 +249,8 @@ where
             };
             self.arrays.read_data(arr, &sub_index, read_buf, context)?;
 
-            if in_place {
+            if !in_place {
+                // Scatter from tmp_buf into buf.
                 // src: C-strides of sub_shape.
                 // dst: output_strides for dims before concat_axis (wider due to full output width),
                 //      sub_strides for dims at/after (sizes match the output there).
@@ -262,10 +263,11 @@ where
                     }
                 });
 
+                let src_base = read_buf.as_ptr();
                 let mut iter = NdIter::new(
                     &sub_shape,
                     (
-                        NdIterExtStridesPtr::new(&sub_strides, read_buf.as_ptr()),
+                        NdIterExtStridesPtr::new(&sub_strides, src_base),
                         NdIterExtStridesPtrMut::new(&dst_strides, unsafe {
                             buf.as_mut_ptr().add(buf_offset)
                         }),

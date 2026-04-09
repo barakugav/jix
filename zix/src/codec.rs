@@ -5,38 +5,56 @@ use crate::dtype::Alignment;
 use crate::util::AlignedBytes;
 
 pub(crate) struct Encoder {
+    #[cfg(not(miri))]
     inner: zstd::bulk::Compressor<'static>,
 }
 impl Encoder {
     pub(crate) fn new(level: i32) -> io::Result<Self> {
         Ok(Self {
+            #[cfg(not(miri))]
             inner: zstd::bulk::Compressor::new(level)?,
         })
     }
 
     pub(crate) fn encode(&mut self, data: &[u8], dst: &mut [u8]) -> io::Result<usize> {
-        self.inner.compress_to_buffer(data, dst)
+        cfg_if::cfg_if! { if #[cfg(not(miri))] {
+            self.inner.compress_to_buffer(data, dst)
+        } else {
+            dst.copy_from_slice(data);
+            Ok(data.len())
+        } }
     }
 
     pub(crate) fn encode_bound(&self, src_size: usize) -> usize {
-        zstd::zstd_safe::compress_bound(src_size)
+        cfg_if::cfg_if! { if #[cfg(not(miri))] {
+            zstd::zstd_safe::compress_bound(src_size)
+        } else {
+            src_size
+        } }
     }
 }
 pub struct ReadContext {
+    #[cfg(not(miri))]
     inner: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     tmp_buffers: TmpBufferPool,
 }
 impl ReadContext {
     pub(crate) fn new() -> io::Result<Self> {
         Ok(Self {
+            #[cfg(not(miri))]
             inner: UnsafeCell::new(zstd::bulk::Decompressor::new()?),
             tmp_buffers: TmpBufferPool::new(),
         })
     }
 
     pub(crate) fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> io::Result<usize> {
-        let inner = unsafe { &mut *self.inner.get() };
-        inner.decompress_to_buffer(cdata, dst)
+        cfg_if::cfg_if! { if #[cfg(not(miri))] {
+            let inner = unsafe { &mut *self.inner.get() };
+            inner.decompress_to_buffer(cdata, dst)
+        } else {
+            dst.copy_from_slice(cdata);
+            Ok(cdata.len())
+        } }
     }
 
     pub(crate) fn tmp_buf(&self, size: usize, alignment: Alignment) -> TmpBuf<'_> {
@@ -67,7 +85,7 @@ impl TmpBufferPool {
         let pool = unsafe { &mut *pool };
         let tmp_buf = pool
             .pop()
-            .unwrap_or_else(|| AlignedBytes::with_capacity(size, alignment as usize));
+            .unwrap_or_else(|| AlignedBytes::with_capacity(alignment as usize, size));
         let mut buf = TmpBuf {
             buf: tmp_buf,
             buffers: self,
