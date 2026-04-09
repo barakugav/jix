@@ -37,8 +37,12 @@ pub struct Array<S> {
 }
 
 impl<S: ArrayStorage> Array<S> {
-    pub(crate) fn new(storage: S) -> Self {
+    pub fn from_storage(storage: S) -> Self {
         Self { storage }
+    }
+
+    pub fn storage(&self) -> &S {
+        &self.storage
     }
 
     pub fn dtype(&self) -> &Dtype {

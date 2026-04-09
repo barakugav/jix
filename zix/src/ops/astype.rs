@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::io;
 use std::ops::Range;
 
@@ -8,7 +7,7 @@ use crate::codec::ReadContext;
 use crate::dtype::f16;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind};
 use crate::storage::{ArrayStorage, Ref};
-use crate::util::{AlignedBytes, DimArray};
+use crate::util::DimArray;
 
 impl<S> Array<S>
 where
@@ -20,8 +19,8 @@ where
     }
 
     pub fn try_astype(&self, dtype: Dtype) -> io::Result<Array<AsType<Ref<'_, S>>>> {
-        let a = Array::new(Ref(&self.storage));
-        Ok(Array::new(AsType::new(a, dtype)?))
+        let a = Array::from_storage(Ref(&self.storage));
+        Ok(Array::from_storage(AsType::new(a, dtype)?))
     }
 }
 pub struct AsType<S> {
@@ -30,8 +29,6 @@ pub struct AsType<S> {
     dtype: Dtype,
     shape: DimArray<usize>,
     blocks_layout: BlocksLayout,
-
-    tmp_buf: RefCell<AlignedBytes>,
 }
 impl<S> AsType<S> {
     pub(crate) fn new(a: Array<S>, dtype: Dtype) -> io::Result<Self>
@@ -50,7 +47,6 @@ impl<S> AsType<S> {
             dtype,
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
-            tmp_buf: RefCell::new(AlignedBytes::new(src_dtype.alignment() as usize)),
             a,
         })
     }
@@ -114,14 +110,12 @@ where
 
         let in_place = src_itemsize == dst_itemsize
             && buf.as_ptr() as usize % src_dtype.alignment() as usize == 0;
-        let mut tmp_buf = self.tmp_buf.borrow_mut();
+        let mut tmp_buf;
         let (tmp_buf, dst) = if in_place {
             let dst = buf.as_mut_ptr();
             (buf, dst)
         } else {
-            tmp_buf.clear();
-            tmp_buf.reserve(nitems * src_itemsize);
-            unsafe { tmp_buf.set_len(nitems * src_itemsize) };
+            tmp_buf = context.tmp_buf(nitems * src_itemsize, src_dtype.alignment());
             (tmp_buf.as_mut_slice(), buf.as_mut_ptr())
         };
         self.a.storage.read_data(index, tmp_buf, context)?;

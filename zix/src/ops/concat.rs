@@ -1,6 +1,5 @@
-use std::cell::RefCell;
 use std::io;
-use std::ops::Range;
+use std::ops::{Not, Range};
 
 use crate::array::{Array, BlocksLayout};
 use crate::codec::ReadContext;
@@ -8,7 +7,7 @@ use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::ArrayStorage;
-use crate::util::{AlignedBytes, ArraySequence, DimArray, default_strides, dim_arr};
+use crate::util::{ArraySequence, DimArray, default_strides, dim_arr};
 
 /// Join a sequence of arrays along an existing axis.
 ///
@@ -69,7 +68,7 @@ pub fn concatenate<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Concat<Arrays
 where
     ArraysT: ArraySequence,
 {
-    Array::new(Concat::new(arrays, axis).unwrap())
+    Array::from_storage(Concat::new(arrays, axis).unwrap())
 }
 
 /// Lazy storage type returned by [`concatenate`].
@@ -84,8 +83,6 @@ pub struct Concat<ArraysT> {
     dtype: Dtype,
     shape: DimArray<usize>,
     blocks_layout: BlocksLayout,
-
-    tmp_buf: RefCell<AlignedBytes>,
 }
 impl<ArraysT> Concat<ArraysT> {
     pub(crate) fn new(arrays: ArraysT, axis: usize) -> io::Result<Self>
@@ -145,7 +142,6 @@ impl<ArraysT> Concat<ArraysT> {
             dtype: dtype.clone(),
             shape: shape,
             blocks_layout: arrays.blocks_layout(0).clone(),
-            tmp_buf: RefCell::new(AlignedBytes::new(dtype.alignment() as usize)),
             arrays,
             concat_axis: axis,
             borders,
@@ -192,7 +188,6 @@ where
     ) -> io::Result<()> {
         const BINARY_SEARCH_THRESHOLD: usize = 16;
 
-        let mut tmp_buf = self.tmp_buf.borrow_mut();
         let itemsize = self.dtype.itemsize() as usize;
 
         let output_shape = dim_arr(index.len(), |d| index[d].len());
@@ -200,13 +195,19 @@ where
         let concat_stride = output_strides[self.concat_axis];
         // When all dims before concat_axis have size <=1 each array's data is contiguous in buf.
         let in_place = output_shape.iter().take(self.concat_axis).all(|&s| s <= 1);
+        let mut tmp_buf = in_place
+            .not()
+            .then(|| context.tmp_buf(0, self.dtype.alignment()));
 
         let req_start = index[self.concat_axis].start;
         let req_end = index[self.concat_axis].end;
 
         // Find the first sub-array whose end exceeds req_start (i.e. the first that may overlap).
         let first_arr = if self.borders.len() < BINARY_SEARCH_THRESHOLD {
-            self.borders.iter().position(|&b| b > req_start).unwrap_or(self.borders.len())
+            self.borders
+                .iter()
+                .position(|&b| b > req_start)
+                .unwrap_or(self.borders.len())
         } else {
             self.borders.partition_point(|&b| b <= req_start)
         };
@@ -237,22 +238,18 @@ where
             let sub_size_bytes = sub_shape.iter().product::<usize>() * itemsize;
             let buf_offset = buf_concat_offset * concat_stride;
 
-            if in_place {
+            let read_buf = if in_place {
                 // Data lands contiguously at the right offset — read directly into buf.
-                self.arrays.read_data(
-                    arr,
-                    &sub_index,
-                    &mut buf[buf_offset..buf_offset + sub_size_bytes],
-                    context,
-                )?;
+                &mut buf[buf_offset..buf_offset + sub_size_bytes]
             } else {
                 // Read into tmp_buf then scatter into buf using strided copy.
-                tmp_buf.clear();
-                tmp_buf.reserve(sub_size_bytes);
-                unsafe { tmp_buf.set_len(sub_size_bytes) };
-                self.arrays
-                    .read_data(arr, &sub_index, tmp_buf.as_mut_slice(), context)?;
+                let tmp_buf = tmp_buf.as_mut().unwrap();
+                tmp_buf.set_len(sub_size_bytes);
+                tmp_buf.as_mut_slice()
+            };
+            self.arrays.read_data(arr, &sub_index, read_buf, context)?;
 
+            if in_place {
                 // src: C-strides of sub_shape.
                 // dst: output_strides for dims before concat_axis (wider due to full output width),
                 //      sub_strides for dims at/after (sizes match the output there).
@@ -268,7 +265,7 @@ where
                 let mut iter = NdIter::new(
                     &sub_shape,
                     (
-                        NdIterExtStridesPtr::new(&sub_strides, tmp_buf.as_ptr()),
+                        NdIterExtStridesPtr::new(&sub_strides, read_buf.as_ptr()),
                         NdIterExtStridesPtrMut::new(&dst_strides, unsafe {
                             buf.as_mut_ptr().add(buf_offset)
                         }),
@@ -298,7 +295,10 @@ mod tests {
         let b = ndarray::array![4i32, 5, 6];
         let za = Array::from_ndarray(&a.view().into_dyn(), &[3]).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), &[3]).unwrap();
-        let actual = concatenate(vec![za, zb], 0).data().to_ndarray::<i32>().unwrap();
+        let actual = concatenate(vec![za, zb], 0)
+            .data()
+            .to_ndarray::<i32>()
+            .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -310,7 +310,10 @@ mod tests {
         let b = ndarray::array![3i32, 4, 5, 6];
         let za = Array::from_ndarray(&a.view().into_dyn(), &[2]).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), &[4]).unwrap();
-        let actual = concatenate(vec![za, zb], 0).data().to_ndarray::<i32>().unwrap();
+        let actual = concatenate(vec![za, zb], 0)
+            .data()
+            .to_ndarray::<i32>()
+            .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -324,8 +327,12 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), &[2]).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), &[3]).unwrap();
         let zc = Array::from_ndarray(&c.view().into_dyn(), &[1]).unwrap();
-        let actual = concatenate(vec![za, zb, zc], 0).data().to_ndarray::<i32>().unwrap();
-        let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
+        let actual = concatenate(vec![za, zb, zc], 0)
+            .data()
+            .to_ndarray::<i32>()
+            .unwrap();
+        let expected =
+            ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
 
@@ -336,7 +343,10 @@ mod tests {
         let b = ndarray::array![[7i32, 8, 9]];
         let za = Array::from_ndarray(&a.view().into_dyn(), &[2, 3]).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), &[1, 3]).unwrap();
-        let actual = concatenate(vec![za, zb], 0).data().to_ndarray::<i32>().unwrap();
+        let actual = concatenate(vec![za, zb], 0)
+            .data()
+            .to_ndarray::<i32>()
+            .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -348,7 +358,10 @@ mod tests {
         let b = ndarray::array![[7i32, 8, 9], [10, 11, 12], [13, 14, 15]];
         let za = Array::from_ndarray(&a.view().into_dyn(), &[3, 2]).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), &[3, 3]).unwrap();
-        let actual = concatenate(vec![za, zb], 1).data().to_ndarray::<i32>().unwrap();
+        let actual = concatenate(vec![za, zb], 1)
+            .data()
+            .to_ndarray::<i32>()
+            .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -362,8 +375,12 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), &[2, 1]).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), &[2, 3]).unwrap();
         let zc = Array::from_ndarray(&c.view().into_dyn(), &[2, 2]).unwrap();
-        let actual = concatenate(vec![za, zb, zc], 1).data().to_ndarray::<i32>().unwrap();
-        let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view(), c.view()]).unwrap();
+        let actual = concatenate(vec![za, zb, zc], 1)
+            .data()
+            .to_ndarray::<i32>()
+            .unwrap();
+        let expected =
+            ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
 
@@ -374,7 +391,10 @@ mod tests {
         let b = ndarray::array![4.0f32, 5.0];
         let za = Array::from_ndarray(&a.view().into_dyn(), &[3]).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), &[2]).unwrap();
-        let actual = concatenate(vec![za, zb], 0).data().to_ndarray::<f32>().unwrap();
+        let actual = concatenate(vec![za, zb], 0)
+            .data()
+            .to_ndarray::<f32>()
+            .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -386,7 +406,10 @@ mod tests {
         let b = ndarray::array![[5.0f32, 6.0, 7.0], [8.0, 9.0, 10.0]];
         let za = Array::from_ndarray(&a.view().into_dyn(), &[2, 2]).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), &[2, 3]).unwrap();
-        let actual = concatenate(vec![za, zb], 1).data().to_ndarray::<f32>().unwrap();
+        let actual = concatenate(vec![za, zb], 1)
+            .data()
+            .to_ndarray::<f32>()
+            .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -395,7 +418,8 @@ mod tests {
     #[should_panic]
     fn test_shape_mismatch_panics() {
         let a = Array::from_ndarray(&ndarray::array![1i32, 2].view().into_dyn(), &[2]).unwrap();
-        let b = Array::from_ndarray(&ndarray::array![[1i32, 2]].view().into_dyn(), &[1, 2]).unwrap();
+        let b =
+            Array::from_ndarray(&ndarray::array![[1i32, 2]].view().into_dyn(), &[1, 2]).unwrap();
         let _ = concatenate(vec![a, b], 0);
     }
 

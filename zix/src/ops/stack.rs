@@ -1,6 +1,5 @@
-use std::cell::RefCell;
 use std::io;
-use std::ops::Range;
+use std::ops::{Not, Range};
 
 use crate::array::{Array, BlocksLayout};
 use crate::codec::ReadContext;
@@ -8,7 +7,7 @@ use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::ArrayStorage;
-use crate::util::{AlignedBytes, ArraySequence, DimArray, default_strides, dim_arr};
+use crate::util::{ArraySequence, DimArray, default_strides, dim_arr};
 
 /// Join a sequence of arrays along a *new* axis.
 ///
@@ -73,7 +72,7 @@ pub fn stack<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Stack<ArraysT>>
 where
     ArraysT: ArraySequence,
 {
-    Array::new(Stack::new(arrays, axis).unwrap())
+    Array::from_storage(Stack::new(arrays, axis).unwrap())
 }
 
 /// Lazy storage type returned by [`stack`].
@@ -87,8 +86,6 @@ pub struct Stack<ArraysT> {
     dtype: Dtype,
     shape: DimArray<usize>,
     blocks_layout: BlocksLayout,
-
-    tmp_buf: RefCell<AlignedBytes>,
 }
 impl<ArraysT> Stack<ArraysT> {
     pub(crate) fn new(arrays: ArraysT, axis: usize) -> io::Result<Self>
@@ -148,7 +145,6 @@ impl<ArraysT> Stack<ArraysT> {
             dtype: dtype.clone(),
             shape: new_shape,
             blocks_layout: BlocksLayout::new(&block_shape),
-            tmp_buf: RefCell::new(AlignedBytes::new(dtype.alignment() as usize)),
             arrays,
             stack_axis: axis,
         })
@@ -176,8 +172,6 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()> {
-        let mut tmp_buf = self.tmp_buf.borrow_mut();
-
         let in_place = self.shape.iter().take(self.stack_axis).all(|&s| s <= 1);
         let arr_range = index
             .iter()
@@ -188,6 +182,9 @@ where
         let arr_range_shape = dim_arr(arr_range.len(), |dim| arr_range[dim].len());
         let itemsize = self.dtype.itemsize() as usize;
         let arr_size_bytes = arr_range.iter().map(|r| r.len()).product::<usize>() * itemsize;
+        let mut tmp_buf = in_place
+            .not()
+            .then(|| context.tmp_buf(arr_size_bytes, self.dtype.alignment()));
         // Stride of the stack axis in the output buffer (= size of one sub-array slice).
         let stack_axis_stride = arr_range[self.stack_axis..]
             .iter()
@@ -201,9 +198,8 @@ where
             let arr_buf = if in_place {
                 &mut buf[buf_offset..buf_offset + arr_size_bytes]
             } else {
-                tmp_buf.clear();
-                tmp_buf.reserve(arr_size_bytes);
-                unsafe { tmp_buf.set_len(arr_size_bytes) };
+                let tmp_buf = tmp_buf.as_mut().unwrap();
+                tmp_buf.set_len(arr_size_bytes);
                 tmp_buf.as_mut_slice()
             };
 

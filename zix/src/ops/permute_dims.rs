@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::io;
 use std::ops::Range;
 
@@ -8,7 +7,7 @@ use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::{ArrayStorage, Ref};
-use crate::util::{AlignedBytes, DimArray, default_strides, dim_arr};
+use crate::util::{DimArray, default_strides, dim_arr};
 
 impl<S> Array<S>
 where
@@ -57,7 +56,7 @@ where
     /// ```
     #[track_caller]
     pub fn permute_dims(&self, axes: &[usize]) -> Array<PermuteDims<Ref<'_, S>>> {
-        Array::new(PermuteDims::new(Ref(&self.storage), axes).unwrap())
+        Array::from_storage(PermuteDims::new(Ref(&self.storage), axes).unwrap())
     }
 }
 
@@ -75,8 +74,6 @@ pub struct PermuteDims<S> {
     dtype: Dtype,
     shape: DimArray<usize>,
     blocks_layout: BlocksLayout,
-
-    tmp_buf: RefCell<AlignedBytes>,
 }
 
 impl<S: ArrayStorage> PermuteDims<S> {
@@ -92,8 +89,9 @@ impl<S: ArrayStorage> PermuteDims<S> {
                 ),
             ));
         }
-        let mut seen = vec![false; ndim];
-        for &ax in axes {
+        let axes: DimArray<usize> = axes.try_into().unwrap();
+        let mut seen = dim_arr(ndim, |_| false);
+        for &ax in axes.iter() {
             if ax >= ndim {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -109,14 +107,12 @@ impl<S: ArrayStorage> PermuteDims<S> {
             seen[ax] = true;
         }
 
-        let input_shape = inner.shape();
-        let axes: DimArray<usize> = axes.try_into().unwrap();
-
-        let mut inv_axes = axes.clone();
+        let mut inv_axes = dim_arr(ndim, |_| 0);
         for (i, &ax) in axes.iter().enumerate() {
             inv_axes[ax] = i;
         }
 
+        let input_shape = inner.shape();
         let shape = dim_arr(ndim, |i| input_shape[axes[i]]);
 
         let input_block_shape = &inner.blocks_layout().block_shape;
@@ -124,7 +120,6 @@ impl<S: ArrayStorage> PermuteDims<S> {
 
         let dtype = inner.dtype().clone();
         Ok(Self {
-            tmp_buf: RefCell::new(AlignedBytes::new(dtype.alignment() as usize)),
             dtype,
             shape,
             blocks_layout: BlocksLayout::new(&block_shape),
@@ -167,12 +162,9 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         // tmp_buf is laid out C-contiguous over sub_shape_in (input dim order).
         let sub_shape_in = dim_arr(ndim, |d| input_index[d].len());
         let n_bytes = sub_shape_in.iter().product::<usize>() * itemsize;
-        let mut tmp_buf = self.tmp_buf.borrow_mut();
-        tmp_buf.clear();
-        tmp_buf.reserve(n_bytes);
-        unsafe { tmp_buf.set_len(n_bytes) };
-        self.inner
-            .read_data(&input_index, tmp_buf.as_mut_slice(), context)?;
+        let mut tmp_buf = context.tmp_buf(n_bytes, self.dtype.alignment());
+        let tmp_buf = tmp_buf.as_mut_slice();
+        self.inner.read_data(&input_index, tmp_buf, context)?;
 
         // Strides in tmp_buf (C-contiguous over input dims).
         let src_strides_in = default_strides(&sub_shape_in, itemsize);

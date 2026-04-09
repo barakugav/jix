@@ -14,8 +14,8 @@ where
 {
     #[track_caller]
     pub fn reshape_view(&self, new_shape: &[usize]) -> Array<Reshape<Ref<'_, S>>> {
-        let a = Array::new(Ref(&self.storage));
-        Array::new(Reshape::new(a, new_shape).unwrap())
+        let a = Array::from_storage(Ref(&self.storage));
+        Array::from_storage(Reshape::new(a, new_shape).unwrap())
     }
 }
 pub struct Reshape<S> {
@@ -349,7 +349,7 @@ mod tests {
     fn reshape_wrong_size_errors() {
         use crate::storage::Ref;
         let a = make1d(u8s(12), 12);
-        let a_ref = Array::new(Ref(&a.storage));
+        let a_ref = Array::from_storage(Ref(&a.storage));
         assert!(super::Reshape::new(a_ref, &[3, 5]).is_err());
     }
 

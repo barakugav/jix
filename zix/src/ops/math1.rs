@@ -190,9 +190,9 @@ macro_rules! define_core_op {
             type Output = Array<$Name<Ref<'a, S>>>;
             #[track_caller]
             fn $op(self) -> Array<$Name<Ref<'a, S>>> {
-                let a = Array::new(Ref(&self.storage));
+                let a = Array::from_storage(Ref(&self.storage));
                 let op = $Name::new(a).unwrap();
-                Array::new(op)
+                Array::from_storage(op)
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S> where S: ArrayStorage);
@@ -217,9 +217,9 @@ macro_rules! define_op {
             {
             #[track_caller]
             pub fn $op(&self) -> Array<$Name<Ref<'_, S>>> {
-                let a = Array::new(Ref(&self.storage));
+                let a = Array::from_storage(Ref(&self.storage));
                 let op = $Name::new(a).unwrap();
-                Array::new(op)
+                Array::from_storage(op)
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S> where S: ArrayStorage);

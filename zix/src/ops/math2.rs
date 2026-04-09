@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::io;
 use std::ops::Range;
 
@@ -6,7 +5,7 @@ use crate::array::{Array, BlocksLayout};
 use crate::codec::ReadContext;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
 use crate::storage::{ArrayStorage, Ref};
-use crate::util::{AlignedBytes, DimArray, cast_slice, cast_slice_mut};
+use crate::util::{DimArray, cast_slice, cast_slice_mut};
 
 pub(crate) trait MathOp2Kernel {
     fn apply_i8(&self, a: i8, b: i8) -> i8;
@@ -36,8 +35,6 @@ pub(crate) struct MathOp2<Op, S1, S2> {
     dtype: Dtype,
     shape: DimArray<usize>,
     blocks_layout: BlocksLayout,
-
-    tmp_buf: RefCell<AlignedBytes>,
 }
 impl<Op, S1, S2> MathOp2<Op, S1, S2> {
     pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> io::Result<Self>
@@ -69,7 +66,6 @@ impl<Op, S1, S2> MathOp2<Op, S1, S2> {
             dtype: a.dtype().clone(),
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
-            tmp_buf: RefCell::new(AlignedBytes::new(a.dtype().alignment() as usize)),
             a,
             b,
         })
@@ -99,13 +95,11 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> std::io::Result<()> {
-        let mut buf2 = self.tmp_buf.borrow_mut();
-        buf2.clear();
-        buf2.reserve(buf.len());
-        unsafe { buf2.set_len(buf.len()) };
+        let mut buf2 = context.tmp_buf(buf.len(), self.dtype.alignment());
+        let buf2 = buf2.as_mut_slice();
 
         self.a.storage.read_data(index, buf, context)?;
-        self.b.storage.read_data(index, &mut buf2, context)?;
+        self.b.storage.read_data(index, buf2, context)?;
 
         macro_rules! apply_loop {
             ($ty:ty, $apply:ident) => {
@@ -174,7 +168,7 @@ macro_rules! define_op {
     ($Name:ident, $NameKernel:ident, $op_trait:ident, $op_fn:ident, $op:tt) => {
         pub struct $Name<S1, S2>(MathOp2<$NameKernel, S1, S2>);
         impl<S1, S2> $Name<S1, S2> {
-            pub(crate) fn new(a: Array<S1>, b: Array<S2>) -> io::Result<Self>
+            pub fn new(a: Array<S1>, b: Array<S2>) -> io::Result<Self>
             where
                 S1: ArrayStorage,
                 S2: ArrayStorage,
@@ -190,10 +184,10 @@ macro_rules! define_op {
             type Output = Array<$Name<Ref<'a, S1>, Ref<'b, S2>>>;
             #[track_caller]
             fn $op_fn(self, b: &'b Array<S2>) -> Array<$Name<Ref<'a, S1>, Ref<'b, S2>>> {
-                let a = Array::new(Ref(&self.storage));
-                let b = Array::new(Ref(&b.storage));
+                let a = Array::from_storage(Ref(&self.storage));
+                let b = Array::from_storage(Ref(&b.storage));
                 let op = $Name::new(a, b).unwrap();
-                Array::new(op)
+                Array::from_storage(op)
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: ArrayStorage, S2: ArrayStorage);
