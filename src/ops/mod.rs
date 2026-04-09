@@ -8,4 +8,5 @@ pub use stack::stack;
 
 mod math1;
 mod math2;
+mod permute_dims;
 mod reshape;
