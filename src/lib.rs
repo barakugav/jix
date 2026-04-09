@@ -6,7 +6,7 @@ mod block;
 mod codec;
 pub mod dtype;
 mod iter;
-mod ops;
+pub mod ops;
 mod schema;
 mod storage;
 mod util;

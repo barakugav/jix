@@ -10,7 +10,7 @@ use crate::archive::{ArchiveReader, ArchiveWriter, Section};
 use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
-use crate::iter::strides::{NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut};
+use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::schema::ArchiveType;
 use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, Mmap, Owned};
 use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr};
@@ -113,8 +113,8 @@ impl Array<Owned> {
                 let mut iter = NdIter::new(
                     block_size,
                     (
-                        NdIterExtensionStridesPtr::new(&strides, initial_arr_ptr),
-                        NdIterExtensionStridesPtrMut::new(&tmp_block_strides, initial_block_ptr),
+                        NdIterExtStridesPtr::new(&strides, initial_arr_ptr),
+                        NdIterExtStridesPtrMut::new(&tmp_block_strides, initial_block_ptr),
                     ),
                 );
                 while let Some((_idx, (src, dst))) = iter.next() {
@@ -305,11 +305,8 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
                     let mut iter = NdIter::new(
                         block_size,
                         (
-                            NdIterExtensionStridesPtr::new(&src_strides, read_data_buf.as_ptr()),
-                            NdIterExtensionStridesPtrMut::new(
-                                output_block_strides,
-                                output_block_ptr,
-                            ),
+                            NdIterExtStridesPtr::new(&src_strides, read_data_buf.as_ptr()),
+                            NdIterExtStridesPtrMut::new(output_block_strides, output_block_ptr),
                         ),
                     );
                     while let Some((_idx, (src, dst))) = iter.next() {

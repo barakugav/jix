@@ -6,7 +6,7 @@ use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{
-    NdIterExtensionStridesPtr, NdIterExtensionStridesPtrMut, nd_iter_ext_logical_global_index,
+    NdIterExtStridesPtr, NdIterExtStridesPtrMut, nd_iter_ext_logical_global_index,
 };
 use crate::util::default_strides;
 use crate::util::{DimArray, dim_arr};
@@ -185,8 +185,8 @@ impl<S> ArrayBlockTableStorageBase<S> {
             let mut iter = NdIter::new(
                 &block_size,
                 (
-                    NdIterExtensionStridesPtr::new(&block_strides, src_ptr),
-                    NdIterExtensionStridesPtrMut::new(&out_strides, dst_ptr),
+                    NdIterExtStridesPtr::new(&block_strides, src_ptr),
+                    NdIterExtStridesPtrMut::new(&out_strides, dst_ptr),
                 ),
             );
             while let Some((_idx, (src, dst))) = iter.next() {

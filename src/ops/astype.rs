@@ -115,16 +115,17 @@ where
         let in_place = src_itemsize == dst_itemsize
             && buf.as_ptr() as usize % src_dtype.alignment() as usize == 0;
         let mut tmp_buf = self.tmp_buf.borrow_mut();
-        let (src, dst) = if in_place {
-            self.a.storage.read_data(index, buf, context)?;
-            (buf.as_ptr(), buf.as_mut_ptr())
+        let (tmp_buf, dst) = if in_place {
+            let dst = buf.as_mut_ptr();
+            (buf, dst)
         } else {
             tmp_buf.clear();
             tmp_buf.reserve(nitems * src_itemsize);
             unsafe { tmp_buf.set_len(nitems * src_itemsize) };
-            self.a.storage.read_data(index, &mut tmp_buf, context)?;
-            (tmp_buf.as_ptr(), buf.as_mut_ptr())
+            (tmp_buf.as_mut_slice(), buf.as_mut_ptr())
         };
+        self.a.storage.read_data(index, tmp_buf, context)?;
+        let src = tmp_buf.as_ptr();
 
         if src_dtype == dst_dtype {
             debug_assert!(in_place);
