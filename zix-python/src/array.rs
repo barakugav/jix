@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use numpy::npyffi::npy_intp;
-use numpy::{PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
+use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use zix_core::array::Array as ZixArray;
@@ -13,20 +14,41 @@ use crate::util::dim_arr;
 
 #[gen_stub_pyclass]
 #[pyclass]
-pub struct Array(ZixArray<DynStorage>);
+pub struct Array {
+    arr: ZixArray<DynStorage>,
+}
+impl Array {
+    pub(crate) fn from_storage(storage: DynStorage) -> Self {
+        Self {
+            arr: ZixArray::from_storage(storage),
+        }
+    }
+}
 
 #[gen_stub_pymethods]
 #[pymethods]
 impl Array {
+    pub fn ndim(&self) -> usize {
+        self.arr.shape().len()
+    }
+
+    pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
+        PyTuple::new(py, self.arr.shape().iter().map(|s| *s))
+    }
+
+    pub fn dtype_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
+        dtype_to_numpy(py, self.arr.dtype())
+    }
+
     /// Export the array as a NumPy array.
     ///
     /// Allocates a new C-contiguous NumPy array with the same shape and dtype, decodes all blocks
     /// into it, and returns it. The returned array is independent of this array — mutations to one
     /// do not affect the other.
     pub fn numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let dtype = self.0.dtype();
+        let dtype = self.arr.dtype();
         let dtype_np = dtype_to_numpy(py, dtype)?;
-        let shape = self.0.shape();
+        let shape = self.arr.shape();
         let ndim = shape.len();
         let shape = dim_arr(ndim, |dim| shape[dim] as npy_intp);
         let is_fortran = false;
@@ -48,38 +70,38 @@ impl Array {
 
         py.detach(|| {
             let range = dim_arr(ndim, |dim| 0..(shape[dim] as usize));
-            self.0.data().to_ndarray_buf(&range, np_arr_data)
+            self.arr.data().to_ndarray_buf(&range, np_arr_data)
         })?;
 
         Ok(np_arr)
     }
 
     pub fn __add__(&self, other: &Self) -> PyResult<Self> {
-        let a = ZixArray::from_storage(self.0.storage().clone());
-        let b = ZixArray::from_storage(other.0.storage().clone());
+        let a = ZixArray::from_storage(self.arr.storage().clone());
+        let b = ZixArray::from_storage(other.arr.storage().clone());
         let storage = DynStorage(Arc::new(zix_core::ops::Add::new(a, b)?));
-        Ok(Self(ZixArray::from_storage(storage)))
+        Ok(Self::from_storage(storage))
     }
 
     pub fn __sub__(&self, other: &Self) -> PyResult<Self> {
-        let a = ZixArray::from_storage(self.0.storage().clone());
-        let b = ZixArray::from_storage(other.0.storage().clone());
+        let a = ZixArray::from_storage(self.arr.storage().clone());
+        let b = ZixArray::from_storage(other.arr.storage().clone());
         let storage = DynStorage(Arc::new(zix_core::ops::Sub::new(a, b)?));
-        Ok(Self(ZixArray::from_storage(storage)))
+        Ok(Self::from_storage(storage))
     }
 
     pub fn __mul__(&self, other: &Self) -> PyResult<Self> {
-        let a = ZixArray::from_storage(self.0.storage().clone());
-        let b = ZixArray::from_storage(other.0.storage().clone());
+        let a = ZixArray::from_storage(self.arr.storage().clone());
+        let b = ZixArray::from_storage(other.arr.storage().clone());
         let storage = DynStorage(Arc::new(zix_core::ops::Mul::new(a, b)?));
-        Ok(Self(ZixArray::from_storage(storage)))
+        Ok(Self::from_storage(storage))
     }
 
     pub fn __truediv__(&self, other: &Self) -> PyResult<Self> {
-        let a = ZixArray::from_storage(self.0.storage().clone());
-        let b = ZixArray::from_storage(other.0.storage().clone());
+        let a = ZixArray::from_storage(self.arr.storage().clone());
+        let b = ZixArray::from_storage(other.arr.storage().clone());
         let storage = DynStorage(Arc::new(zix_core::ops::Div::new(a, b)?));
-        Ok(Self(ZixArray::from_storage(storage)))
+        Ok(Self::from_storage(storage))
     }
 }
 
@@ -100,7 +122,7 @@ mod tests {
         let block_shape: Vec<usize> = ndarray.shape().to_vec();
         let core = ZixArray::<Owned>::from_ndarray(ndarray, &block_shape).unwrap();
         let dyn_storage = DynStorage(Arc::new(core.into_storage()));
-        Array(ZixArray::from_storage(dyn_storage))
+        Array::from_storage(dyn_storage)
     }
 
     fn roundtrip<T>(original: &ArrayD<T>) -> ArrayD<T>
