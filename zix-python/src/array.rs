@@ -54,10 +54,31 @@ impl Array {
         Ok(np_arr)
     }
 
-    pub fn __add__(&self, _other: &Self) -> PyResult<Self> {
+    pub fn __add__(&self, other: &Self) -> PyResult<Self> {
         let a = ZixArray::from_storage(self.0.storage().clone());
-        let b = ZixArray::from_storage(self.0.storage().clone());
+        let b = ZixArray::from_storage(other.0.storage().clone());
         let storage = DynStorage(Arc::new(zix_core::ops::Add::new(a, b)?));
+        Ok(Self(ZixArray::from_storage(storage)))
+    }
+
+    pub fn __sub__(&self, other: &Self) -> PyResult<Self> {
+        let a = ZixArray::from_storage(self.0.storage().clone());
+        let b = ZixArray::from_storage(other.0.storage().clone());
+        let storage = DynStorage(Arc::new(zix_core::ops::Sub::new(a, b)?));
+        Ok(Self(ZixArray::from_storage(storage)))
+    }
+
+    pub fn __mul__(&self, other: &Self) -> PyResult<Self> {
+        let a = ZixArray::from_storage(self.0.storage().clone());
+        let b = ZixArray::from_storage(other.0.storage().clone());
+        let storage = DynStorage(Arc::new(zix_core::ops::Mul::new(a, b)?));
+        Ok(Self(ZixArray::from_storage(storage)))
+    }
+
+    pub fn __truediv__(&self, other: &Self) -> PyResult<Self> {
+        let a = ZixArray::from_storage(self.0.storage().clone());
+        let b = ZixArray::from_storage(other.0.storage().clone());
+        let storage = DynStorage(Arc::new(zix_core::ops::Div::new(a, b)?));
         Ok(Self(ZixArray::from_storage(storage)))
     }
 }
@@ -213,5 +234,99 @@ mod tests {
         let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
         let original: ArrayD<f32> = ndarray::Array::from_shape_vec(IxDyn(&[10, 10]), data).unwrap();
         assert_eq!(roundtrip(&original), original);
+    }
+
+    fn eval<T>(py_arr: Array) -> ArrayD<T>
+    where
+        T: Dtyped + numpy::Element + Copy,
+    {
+        Python::attach(|py| {
+            py_arr
+                .numpy(py)
+                .unwrap()
+                .cast_into::<PyArrayDyn<T>>()
+                .unwrap()
+                .to_owned_array()
+        })
+    }
+
+    #[test]
+    fn test_add_f32() {
+        let a: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
+        let b: ArrayD<f32> = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]].into_dyn();
+        let result = eval::<f32>(make_py_array(&a).__add__(&make_py_array(&b)).unwrap());
+        assert_eq!(result, a + b);
+    }
+
+    #[test]
+    fn test_sub_f32() {
+        let a: ArrayD<f32> = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]].into_dyn();
+        let b: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
+        let result = eval::<f32>(make_py_array(&a).__sub__(&make_py_array(&b)).unwrap());
+        assert_eq!(result, a - b);
+    }
+
+    #[test]
+    fn test_mul_f32() {
+        let a: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
+        let b: ArrayD<f32> = array![[2.0f32, 3.0, 4.0], [5.0, 6.0, 7.0]].into_dyn();
+        let result = eval::<f32>(make_py_array(&a).__mul__(&make_py_array(&b)).unwrap());
+        assert_eq!(result, a * b);
+    }
+
+    #[test]
+    fn test_div_f32() {
+        let a: ArrayD<f32> = array![[2.0f32, 6.0, 12.0], [20.0, 30.0, 42.0]].into_dyn();
+        let b: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
+        let result = eval::<f32>(make_py_array(&a).__truediv__(&make_py_array(&b)).unwrap());
+        assert_eq!(result, a / b);
+    }
+
+    #[test]
+    fn test_add_f64() {
+        let a: ArrayD<f64> = array![1.0f64, 2.0, 3.0].into_dyn();
+        let b: ArrayD<f64> = array![0.5f64, 1.5, 2.5].into_dyn();
+        let result = eval::<f64>(make_py_array(&a).__add__(&make_py_array(&b)).unwrap());
+        assert_eq!(result, a + b);
+    }
+
+    #[test]
+    fn test_add_i32() {
+        let a: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
+        let b: ArrayD<i32> = array![[10i32, 20], [30, 40]].into_dyn();
+        let result = eval::<i32>(make_py_array(&a).__add__(&make_py_array(&b)).unwrap());
+        assert_eq!(result, a + b);
+    }
+
+    #[test]
+    fn test_sub_i32() {
+        let a: ArrayD<i32> = array![[10i32, 20], [30, 40]].into_dyn();
+        let b: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
+        let result = eval::<i32>(make_py_array(&a).__sub__(&make_py_array(&b)).unwrap());
+        assert_eq!(result, a - b);
+    }
+
+    #[test]
+    fn test_mul_i32() {
+        let a: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
+        let b: ArrayD<i32> = array![[5i32, 6], [7, 8]].into_dyn();
+        let result = eval::<i32>(make_py_array(&a).__mul__(&make_py_array(&b)).unwrap());
+        assert_eq!(result, a * b);
+    }
+
+    #[test]
+    fn test_ops_chained() {
+        // (a + b) * c  computed both in zix and ndarray
+        let a: ArrayD<f32> = array![1.0f32, 2.0, 3.0, 4.0].into_dyn();
+        let b: ArrayD<f32> = array![4.0f32, 3.0, 2.0, 1.0].into_dyn();
+        let c: ArrayD<f32> = array![2.0f32, 2.0, 2.0, 2.0].into_dyn();
+        let zix_result = eval::<f32>(
+            make_py_array(&a)
+                .__add__(&make_py_array(&b))
+                .unwrap()
+                .__mul__(&make_py_array(&c))
+                .unwrap(),
+        );
+        assert_eq!(zix_result, (a + b) * c);
     }
 }
