@@ -10,6 +10,64 @@ use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::ArrayStorage;
 use crate::util::{AlignedBytes, ArraySequence, DimArray, default_strides, dim_arr};
 
+/// Join a sequence of arrays along a *new* axis.
+///
+/// All input arrays must have identical shapes and the same [`Dtype`].  A new axis is inserted at
+/// position `axis` in the output, whose size equals the number of input arrays.  The result is a
+/// lazy [`Array`] whose data is read on demand; no copy is made at construction time.
+///
+/// This is the array-axis analogue of NumPy's `numpy.stack`.  Unlike [`concatenate`], which joins
+/// along an *existing* axis, `stack` introduces a *new* dimension, so the output has one more
+/// dimension than the inputs.
+///
+/// [`concatenate`]: crate::ops::concatenate
+///
+/// # Arguments
+///
+/// * `arrays` — any [`ArraySequence`]: a `Vec`, a slice, or a tuple of up to ten arrays.
+///   All elements must have identical dtypes and identical shapes.
+/// * `axis` — the position in the output array at which the new axis is inserted.  Must be in the
+///   range `0..=ndim`, where `ndim` is the number of dimensions of the input arrays.
+///
+/// # Panics
+///
+/// Panics if any of the following conditions hold (the underlying [`Stack::new`] returns an error,
+/// which this function unwraps):
+///
+/// * `arrays` is empty.
+/// * `axis` is out of bounds (> number of dimensions of the input arrays).
+/// * Any two arrays differ in dtype.
+/// * Any two arrays differ in shape.
+/// * Inserting the new axis would exceed the maximum supported number of dimensions.
+///
+/// # Examples
+///
+/// ```
+/// use zix::array::Array;
+/// use zix::ops::stack;
+///
+/// // Stack two 1-D arrays along axis 0 — analogous to np.stack([a, b], axis=0)
+/// // Result shape: [2, N]
+/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), &[3]).unwrap();
+/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6].view().into_dyn(), &[3]).unwrap();
+/// let c = stack(vec![a, b], 0);
+/// assert_eq!(c.shape(), &[2, 3]);
+///
+/// // Stack two 1-D arrays along axis 1 — analogous to np.stack([a, b], axis=1)
+/// // Result shape: [N, 2]
+/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), &[3]).unwrap();
+/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6].view().into_dyn(), &[3]).unwrap();
+/// let c = stack(vec![a, b], 1);
+/// assert_eq!(c.shape(), &[3, 2]);
+///
+/// // Stack three 2-D arrays along a new leading axis
+/// // Result shape: [3, M, N]
+/// let a = Array::from_ndarray(&ndarray::array![[1i32, 2], [3, 4]].view().into_dyn(), &[2, 2]).unwrap();
+/// let b = Array::from_ndarray(&ndarray::array![[5i32, 6], [7, 8]].view().into_dyn(), &[2, 2]).unwrap();
+/// let c_arr = Array::from_ndarray(&ndarray::array![[9i32, 10], [11, 12]].view().into_dyn(), &[2, 2]).unwrap();
+/// let out = stack(vec![a, b, c_arr], 0);
+/// assert_eq!(out.shape(), &[3, 2, 2]);
+/// ```
 #[track_caller]
 pub fn stack<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Stack<ArraysT>>
 where
@@ -18,6 +76,10 @@ where
     Array::new(Stack::new(arrays, axis).unwrap())
 }
 
+/// Lazy storage type returned by [`stack`].
+///
+/// Holds the input arrays and the bookkeeping needed to serve arbitrary read requests.  See
+/// [`stack`] for the full description, accepted inputs, error conditions, and examples.
 pub struct Stack<ArraysT> {
     arrays: ArraysT,
     stack_axis: usize,
@@ -47,14 +109,14 @@ impl<ArraysT> Stack<ArraysT> {
             if shape_i != shape0 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("cannot stack arrays of different shapes: {shape0:?} != {shape_i:?}",),
+                    format!("cannot stack arrays of different shapes: {shape0:?} != {shape_i:?}"),
                 ));
             }
             let dtype_i = arrays.dtype(arr);
             if dtype_i != dtype {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("cannot stack arrays of different dtypes: {dtype:?} != {dtype_i:?}",),
+                    format!("cannot stack arrays of different dtypes: {dtype:?} != {dtype_i:?}"),
                 ));
             }
         }

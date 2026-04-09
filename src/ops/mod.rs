@@ -1,5 +1,8 @@
 mod astype;
 
+mod concat;
+pub use concat::concatenate;
+
 mod stack;
 pub use stack::stack;
 
