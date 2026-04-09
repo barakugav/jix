@@ -2,9 +2,9 @@ use std::io;
 use std::ops::Range;
 
 use crate::NDIM_MAX;
-use crate::array::{Array, BlocksLayout};
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
+use crate::array::{Array, BlockShapeTag, BlocksLayout};
+use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::dtype::{Dtype, Itemsize};
 use crate::storage::{ArrayStorage, Ref};
 use crate::util::{DimArray, default_strides, dim_arr};
 
@@ -13,7 +13,7 @@ where
     S: ArrayStorage,
 {
     #[track_caller]
-    pub fn reshape_view(&self, new_shape: &[usize]) -> Array<Reshape<Ref<'_, S>>> {
+    pub fn reshape_view(&self, new_shape: &[u64]) -> Array<Reshape<Ref<'_, S>>> {
         let a = Array::from_storage(Ref(&self.storage));
         Array::from_storage(Reshape::new(a, new_shape).unwrap())
     }
@@ -22,11 +22,11 @@ pub struct Reshape<S> {
     a: Array<S>,
 
     dtype: Dtype,
-    new_shape: DimArray<usize>,
+    new_shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 impl<S> Reshape<S> {
-    pub(crate) fn new(a: Array<S>, new_shape: &[usize]) -> io::Result<Self>
+    pub(crate) fn new(a: Array<S>, new_shape: &[u64]) -> io::Result<Self>
     where
         S: ArrayStorage,
     {
@@ -39,9 +39,9 @@ impl<S> Reshape<S> {
                 ),
             ));
         }
-        let orig_shape: DimArray<usize> = a.shape().try_into().unwrap();
-        let nitems = orig_shape.iter().product::<usize>();
-        let new_nitems = new_shape.iter().product::<usize>();
+        let orig_shape: DimArray<_> = a.shape().try_into().unwrap();
+        let nitems = orig_shape.iter().product::<u64>();
+        let new_nitems = new_shape.iter().product::<u64>();
         if nitems != new_nitems {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -52,11 +52,59 @@ impl<S> Reshape<S> {
             ));
         }
 
+        let orig_logical_strides = default_strides(&orig_shape, 1);
+        let new_logical_strides = default_strides(new_shape, 1);
+        let same_logical_stride = (0..new_shape.len())
+            .scan(0, |orig_dim_idx, new_dim_idx| {
+                Some(loop {
+                    if *orig_dim_idx >= orig_shape.len() {
+                        break None; // cant really happen, last dims always match, unless orig_shape.len()==0
+                    }
+                    if orig_logical_strides[*orig_dim_idx] == new_logical_strides[new_dim_idx] {
+                        break Some(*orig_dim_idx as u8);
+                    }
+                    *orig_dim_idx += 1;
+                })
+            })
+            .collect::<DimArray<_>>();
+
+        let mut b_layout = a.blocks_layout().clone();
+        let mut block_shape_hint = DimArray::new();
+        let mut block_shape_tag = DimArray::new();
+        let mut preferred_read_block_shape = DimArray::new();
+        // TODO: finalize the logic here, we can find a good heuristic
+        for dim in 0..new_shape.len() {
+            if let Some(orig_dim) = same_logical_stride[dim] {
+                let orig_dim = orig_dim as usize;
+                let same_dim_len = orig_shape[orig_dim] == new_shape[dim];
+                block_shape_hint.push(b_layout.block_shape_hint[orig_dim]);
+                preferred_read_block_shape.push(b_layout.preferred_read_block_shape[orig_dim]);
+                block_shape_tag.push(match b_layout.block_shape_tag[orig_dim] {
+                    BlockShapeTag::Fixed => {
+                        if same_dim_len {
+                            BlockShapeTag::Fixed
+                        } else {
+                            BlockShapeTag::MultipleOf
+                        }
+                    }
+                    BlockShapeTag::MultipleOf => BlockShapeTag::MultipleOf,
+                    BlockShapeTag::Any => BlockShapeTag::Any,
+                });
+            } else {
+                block_shape_hint.push(1);
+                preferred_read_block_shape.push(1);
+                block_shape_tag.push(BlockShapeTag::Any);
+            }
+        }
+        b_layout.block_shape_hint = block_shape_hint;
+        b_layout.block_shape_tag = block_shape_tag;
+        b_layout.preferred_read_block_shape = preferred_read_block_shape;
+
         let dtype = a.dtype();
         Ok(Self {
             dtype: dtype.clone(),
             new_shape: new_shape.try_into().unwrap(),
-            blocks_layout: a.blocks_layout().clone(),
+            blocks_layout: b_layout,
             a,
         })
     }
@@ -65,57 +113,52 @@ impl<S> ArrayStorage for Reshape<S>
 where
     S: ArrayStorage,
 {
+    fn shape(&self) -> &[u64] {
+        &self.new_shape
+    }
+
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
 
-    fn shape(&self) -> &[usize] {
-        &self.new_shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
-    }
-
     fn read_data(
         &self,
-        index: &[Range<usize>],
+        index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()> {
         assert_eq!(index.len(), self.new_shape.len());
         let ndim = self.new_shape.len();
-        let itemsize = self.dtype.itemsize() as usize;
 
         // 0-D: single element, forward directly
         if ndim == 0 {
             return self.a.storage.read_data(&[], buf, context);
         }
 
-        let new_strides = default_strides(&self.new_shape, 1usize);
+        let new_strides = default_strides(&self.new_shape, 1);
         let orig_shape = self.a.storage.shape();
-        let orig_strides = default_strides(orig_shape, 1usize);
+        let orig_strides = default_strides(orig_shape, 1);
 
         let lead_dims = ndim - 1;
         let last_dim = ndim - 1;
 
         // Pre-allocate dim_ranges for the original shape (reused across calls)
         let orig_ndim = orig_shape.len();
-        let mut dim_ranges: DimArray<Range<usize>> = dim_arr(orig_ndim, |_| 0..0);
+        let mut dim_ranges = dim_arr(orig_ndim, |_| 0..0);
 
         let mut write_pos = 0usize;
 
         // Iterate over all combinations of leading N-1 dimension indices
-        let mut lead_idx: DimArray<usize> = (0..lead_dims).map(|i| index[i].start).collect();
+        let mut lead_idx = dim_arr(lead_dims, |i| index[i].start);
 
         loop {
-            let flat_start: usize = lead_idx
-                .iter()
-                .enumerate()
-                .map(|(d, &i)| i * new_strides[d])
-                .sum::<usize>()
-                + index[last_dim].start;
-            let flat_len = index[last_dim].len();
+            let flat_start = index[last_dim].start
+                + lead_idx
+                    .iter()
+                    .enumerate()
+                    .map(|(d, &i)| i * new_strides[d])
+                    .sum::<u64>();
+            let flat_len = index[last_dim].end - index[last_dim].start;
 
             if flat_len > 0 {
                 read_flat_range(
@@ -125,7 +168,7 @@ where
                     &orig_strides,
                     0,
                     &mut dim_ranges,
-                    itemsize,
+                    self.dtype.itemsize(),
                     &self.a.storage,
                     buf,
                     &mut write_pos,
@@ -153,19 +196,28 @@ where
 
         Ok(())
     }
+
+    fn blocks_layout(&self) -> &BlocksLayout {
+        &self.blocks_layout
+    }
+
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+        self.a.storage.codec_params()
+    }
 }
 
 /// Recursively decomposes a flat element range `[flat_start, flat_start + flat_len)` (expressed
 /// in the original array's flat C-order) into at most 3 rectangular reads per dimension level,
 /// writing results sequentially into `buf` starting at `*write_pos`.
+#[allow(clippy::too_many_arguments)]
 fn read_flat_range<S: ArrayStorage>(
-    flat_start: usize,
-    flat_len: usize,
-    orig_shape: &[usize],
-    orig_strides: &[usize],
+    flat_start: u64,
+    flat_len: u64,
+    orig_shape: &[u64],
+    orig_strides: &[u64],
     dim: usize,
-    dim_ranges: &mut DimArray<Range<usize>>,
-    itemsize: usize,
+    dim_ranges: &mut DimArray<Range<u64>>,
+    itemsize: Itemsize,
     storage: &S,
     buf: &mut [u8],
     write_pos: &mut usize,
@@ -176,13 +228,13 @@ fn read_flat_range<S: ArrayStorage>(
     if dim == ndim - 1 {
         // Base case: last dimension — the flat range maps directly to a contiguous index range
         dim_ranges[dim] = flat_start..flat_start + flat_len;
-        let chunk_bytes = flat_len * itemsize;
+        let chunk_bytes = flat_len * itemsize as u64;
         storage.read_data(
             &dim_ranges[..ndim],
-            &mut buf[*write_pos..*write_pos + chunk_bytes],
+            &mut buf[*write_pos..*write_pos + chunk_bytes as usize],
             context,
         )?;
-        *write_pos += chunk_bytes;
+        *write_pos += chunk_bytes as usize;
         return Ok(());
     }
 
@@ -223,13 +275,13 @@ fn read_flat_range<S: ArrayStorage>(
         for d in dim + 1..ndim {
             dim_ranges[d] = 0..orig_shape[d];
         }
-        let chunk_bytes = complete_units * stride * itemsize;
+        let chunk_bytes = complete_units * stride * itemsize as u64;
         storage.read_data(
             &dim_ranges[..ndim],
-            &mut buf[*write_pos..*write_pos + chunk_bytes],
+            &mut buf[*write_pos..*write_pos + chunk_bytes as usize],
             context,
         )?;
-        *write_pos += chunk_bytes;
+        *write_pos += chunk_bytes as usize;
         pos += complete_units * stride;
         remaining -= complete_units * stride;
         if remaining == 0 {
@@ -262,6 +314,15 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::array::Array;
+    use crate::block::BlockSize;
+    use crate::storage::ArrayParams;
+
+    fn arr_params(block_shape: &[usize]) -> ArrayParams {
+        ArrayParams {
+            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
+            ..ArrayParams::default()
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -273,7 +334,7 @@ mod tests {
         block_size: usize,
     ) -> Array<crate::storage::Owned> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
-        Array::from_ndarray(&nd, &[block_size]).unwrap()
+        Array::from_ndarray(&nd, arr_params(&[block_size])).unwrap()
     }
 
     /// Create a 2-D Array<Owned>.
@@ -284,7 +345,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<crate::storage::Owned> {
         let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
-        Array::from_ndarray(&nd, block_shape).unwrap()
+        Array::from_ndarray(&nd, arr_params(block_shape)).unwrap()
     }
 
     /// Create a 3-D Array<Owned>.
@@ -296,7 +357,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<crate::storage::Owned> {
         let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
-        Array::from_ndarray(&nd, block_shape).unwrap()
+        Array::from_ndarray(&nd, arr_params(block_shape)).unwrap()
     }
 
     fn u8s(n: usize) -> Vec<u8> {

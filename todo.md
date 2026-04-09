@@ -1,1 +1,6 @@
 - overflow checks in shape.iter().product()
+- use u64 everywhere, array can be bigger than RAM
+- use u8 for DimArray len
+- scan, like cumsum
+- remove Borrowed
+- use u8 for dim index everywhere, like axes: DimArray<usize>, and concat_axis: usize

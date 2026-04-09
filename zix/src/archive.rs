@@ -5,7 +5,7 @@ use prost::Message;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::schema::{self, ArchiveType};
-use crate::util::ceil_to_multiple;
+use crate::util::Idx;
 
 const MAGIC: &[u8; 4] = b"ZIX1";
 
@@ -83,7 +83,7 @@ impl<W> ArchiveWriter<W> {
         W: Write + Seek,
     {
         let offset = self.stream_position()?;
-        let padded_offset = ceil_to_multiple(offset, alignment as u64);
+        let padded_offset = offset.ceil_to_multiple(alignment as u64);
         let padding = padded_offset - offset;
         if padding > 0 {
             self.tmp_buf.clear();
@@ -215,7 +215,10 @@ impl<R> ArchiveReader<R> {
     {
         self.tmp_buf.clear();
         self.tmp_buf.reserve(len);
-        unsafe { self.tmp_buf.set_len(len) };
+        #[allow(clippy::uninit_vec)]
+        unsafe {
+            self.tmp_buf.set_len(len)
+        };
         self.reader.read_exact(self.tmp_buf.as_mut_slice())?;
         Ok(self.tmp_buf.as_slice())
     }
@@ -237,7 +240,10 @@ impl<R> ArchiveReader<R> {
         R: Read + Seek,
     {
         let mut buf = Vec::with_capacity(section.size as usize);
-        unsafe { buf.set_len(section.size as usize) };
+        #[allow(clippy::uninit_vec)]
+        unsafe {
+            buf.set_len(section.size as usize)
+        };
         self.read_section_into(section, buf.as_mut_slice())?;
         Ok(buf)
     }

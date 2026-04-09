@@ -6,30 +6,223 @@ use std::mem::MaybeUninit;
 use std::ops::Range;
 use std::path::Path;
 
-use crate::archive::{ArchiveReader, ArchiveWriter, Section};
-use crate::dtype::{Dtype, Dtyped};
+use crate::archive::ArchiveWriter;
+use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
-use crate::schema::ArchiveType;
-use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, Mmap, Owned};
-use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr};
+use crate::storage::{ArrayBlockTableStorageBase, ArrayParams, ArrayStorage, Mmap, Owned};
+use crate::util::{AlignedBytes, DimArray, Idx, cast_slice_mut, dim_arr};
 use crate::util::{MaybeOwned, default_strides};
 
-use crate::block::{BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage};
-use crate::codec::{Encoder, ReadContext};
-use crate::util::ceil_to_multiple;
+use crate::block::{BlockSize, BlockTableBuilder};
+use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
 use crate::{NDIM_MAX, schema};
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum BlockShapeTag {
+    Fixed,
+    MultipleOf,
+    Any,
+}
 
 #[derive(Clone)]
 pub struct BlocksLayout {
-    pub(crate) block_shape: DimArray<usize>,
+    /// === how preferred read block shape is transformed by view ops ===
+    /// permute_axis - permute the block shape
+    /// insert_axis - insert a block dim of size 1
+    /// broadcast - broadcasted dims will be set to full dim size
+    /// reduce_axis - just remove the block dim, or set it to 1 if keepdims
+    /// reshape:
+    ///   - dims that kept the logical stride and length will keep the same block shape.
+    ///   - dims that kept the logical stride and reduced length will keep the same block shape.
+    ///   - dims that kept the logical stride and increased length will use the dim's block
+    ///     shape multiplied by some factor (see later).
+    ///   - other dims will use 1, and will be scaled up by some factor (see later).
+    ///   - After the initial block shape is determined, without the factors, the block shape is
+    ///     scaled to block_size_hint by scaling each dim by a factor, starting
+    ///     with the last dim, until the block size is at most block_size_hint.
+    pub(crate) block_shape_hint: DimArray<BlockSize>,
+    pub(crate) block_shape_tag: DimArray<BlockShapeTag>,
+    pub(crate) block_size_hint: u64, // in bytes units
+
+    /// === how preferred read block shape is transformed by view ops ===
+    /// permute_axis - permute the block shape
+    /// insert_axis - insert a block dim of size 1
+    /// broadcast - broadcasted dims will be set to full dim size
+    /// reduce_axis - just remove the block dim, or set it to 1 if keepdims
+    /// reshape:
+    ///   - dims that kept the logical stride and length will keep the same block shape.
+    ///   - dims that kept the logical stride and reduced length will keep the same block shape.
+    ///   - dims that kept the logical stride and increased length will use the dim's block
+    ///     shape multiplied by some factor (see later).
+    ///   - other dims will use 1, and will be scaled up by some factor (see later).
+    ///   - After the initial block shape is determined, without the factors, the block shape is
+    ///     scaled to preferred_read_block_size_hint by scaling each dim by a factor, starting
+    ///     with the last dim, until the block size is at most preferred_read_block_size_hint.
+    pub(crate) preferred_read_block_shape: DimArray<BlockSize>,
+    pub(crate) preferred_read_block_size_hint: u64, // in bytes units
 }
 
 impl BlocksLayout {
-    pub(crate) fn new(block_shape: &[usize]) -> Self {
-        let block_shape: DimArray<_> = block_shape.try_into().unwrap();
-        Self { block_shape }
+    pub(crate) fn new2(
+        block_shape: Option<DimArray<BlockSize>>,
+        block_shape_tag: Option<DimArray<BlockShapeTag>>,
+        mut block_size_hint: Option<u64>,
+        preferred_read_block_shape: Option<DimArray<BlockSize>>,
+        mut preferred_read_block_size_hint: Option<u64>,
+
+        shape: &[u64],
+        itemsize: Itemsize,
+    ) -> Self {
+        let ndim = shape.len();
+        assert!(ndim < NDIM_MAX);
+        let itemsize = itemsize as u64;
+
+        assert!(
+            block_shape_tag.is_none() || block_shape.is_some(),
+            "block_shape_tag is specified but block_shape is not specified"
+        );
+        let block_shape_tag =
+            block_shape_tag.unwrap_or_else(|| dim_arr(ndim, |_| BlockShapeTag::Fixed));
+        assert_eq!(ndim, block_shape_tag.len());
+        let fixed_block_shape = block_shape_tag
+            .iter()
+            .all(|&tag| tag == BlockShapeTag::Fixed);
+        // Compute block_size_hint if not specified, and if it cant be computed from block_shape
+        if block_size_hint.is_none() && (block_shape.is_none() || !fixed_block_shape) {
+            // TODO: make this adaptive based on L1 cache size
+            block_size_hint = Some(4 * 1024); // 4 KiB
+        }
+        // Compute block shape
+        let mut block_shape = block_shape.unwrap_or_else(|| {
+            Self::scale_block_shape(
+                &dim_arr(ndim, |_| 1),
+                &dim_arr(ndim, |_| true),
+                block_size_hint.unwrap() / itemsize,
+                shape,
+            )
+        });
+        // Scale block_shape up to block_size_hint
+        if !fixed_block_shape {
+            block_shape = Self::scale_block_shape(
+                &dim_arr(ndim, |dim| match block_shape_tag[dim] {
+                    BlockShapeTag::Fixed | BlockShapeTag::MultipleOf => block_shape[dim],
+                    BlockShapeTag::Any => 1,
+                }),
+                &dim_arr(ndim, |dim| block_shape_tag[dim] != BlockShapeTag::Fixed),
+                block_size_hint.unwrap() / itemsize,
+                shape,
+            );
+        }
+        // Update block_size_hint to block_shape.product() if it is not specified
+        let block_size_hint = block_size_hint
+            .unwrap_or_else(|| block_shape.iter().map(|&b| b as u64).product::<u64>() * itemsize);
+        // Compute preferred_read_block_size_hint if not specified, and if it cant be computed from preferred_read_block_shape
+        if preferred_read_block_size_hint.is_none() && preferred_read_block_shape.is_none() {
+            // TODO: make this adaptive based on L2/3 cache size
+            preferred_read_block_size_hint = Some(16 * 1024); // 16 KiB
+        }
+        // Compute preferred_read_block_shape
+        let preferred_read_block_shape = match preferred_read_block_shape {
+            Some(preferred_read_block_shape) => {
+                assert_eq!(ndim, preferred_read_block_shape.len());
+                dim_arr(ndim, |dim| {
+                    (preferred_read_block_shape[dim] as u64)
+                        .max(block_shape[dim] as u64)
+                        .min(shape[dim]) as BlockSize
+                })
+            }
+            None => Self::scale_block_shape(
+                &block_shape,
+                &dim_arr(ndim, |_| true),
+                preferred_read_block_size_hint.unwrap() / itemsize,
+                shape,
+            ),
+        };
+        // Update preferred_read_block_size_hint to preferred_read_block_shape.product() if it is not specified
+        let preferred_read_block_size_hint = preferred_read_block_size_hint.unwrap_or_else(|| {
+            preferred_read_block_shape
+                .iter()
+                .map(|&b| b as u64)
+                .product::<u64>()
+                * itemsize
+        });
+
+        BlocksLayout {
+            block_shape_hint: block_shape,
+            block_shape_tag,
+            block_size_hint,
+            preferred_read_block_shape,
+            preferred_read_block_size_hint,
+        }
+    }
+
+    fn scale_block_shape(
+        block_shape: &[BlockSize],
+        scale_dim: &[bool],
+        block_size_max: u64,
+        shape: &[u64],
+    ) -> DimArray<BlockSize> {
+        let ndim = shape.len();
+        let mut scaled_block_shape = (0..ndim)
+            .rev()
+            .scan(1, |inner_block_volume, dim| {
+                let mut block_len = block_shape[dim];
+                if scale_dim[dim] {
+                    block_len = Self::block_len_heuristic(
+                        block_len,
+                        shape[dim],
+                        block_size_max,
+                        *inner_block_volume,
+                    )
+                };
+                *inner_block_volume *= block_len as u64;
+                Some(block_len)
+            })
+            .collect::<DimArray<_>>();
+        scaled_block_shape.reverse();
+        scaled_block_shape
+    }
+
+    fn block_len_heuristic(
+        base_block_len: BlockSize,
+        dim_len: u64,
+        max_volume: u64,
+        inner_block_volume: u64,
+    ) -> BlockSize {
+        if dim_len <= 1 {
+            return 1;
+        }
+        let base_block_len = base_block_len as u64;
+        let max_block_len = (max_volume / inner_block_volume)
+            .min(dim_len)
+            .min(1 << 30)
+            .floor_to_multiple(base_block_len)
+            .max(1);
+        let base_block_len = base_block_len.max(1).min(max_block_len);
+        let block_len = if max_block_len == dim_len {
+            dim_len
+        } else {
+            // multiple_of should a power of 2, on the order of dim_len//8
+            let multiple_of = base_block_len
+                * ((dim_len / (16 * base_block_len)) + 1)
+                    .next_power_of_two()
+                    .min(1 << 20);
+
+            // Use the largest block length that is a multiple of multiple_of and require
+            // less than 12.5% padding
+            (1..=(max_block_len / multiple_of))
+                .rev()
+                .map(|m| m * multiple_of)
+                .find(|&block_len| {
+                    let padding = dim_len.ceil_to_multiple(block_len) - dim_len;
+                    padding <= dim_len / 8
+                })
+                .unwrap_or(multiple_of)
+        };
+        debug_assert!(1 <= block_len && block_len <= dim_len);
+        block_len as BlockSize
     }
 }
 pub struct Array<S> {
@@ -41,6 +234,28 @@ impl<S: ArrayStorage> Array<S> {
         Self { storage }
     }
 
+    pub fn shape(&self) -> &[u64] {
+        self.storage.shape()
+    }
+
+    pub fn ndim(&self) -> usize {
+        self.storage.shape().len()
+    }
+
+    pub fn dtype(&self) -> &Dtype {
+        self.storage.dtype()
+    }
+
+    pub fn data(&self) -> ArrayData<'_, S> {
+        let params = self.storage.codec_params().1;
+        let context = ReadContext::new(params).expect("failed to create read context");
+        ArrayData::new(self, MaybeOwned::Owned(context))
+    }
+
+    pub fn data_ctx<'a>(&'a self, context: &'a ReadContext) -> ArrayData<'a, S> {
+        ArrayData::new(self, MaybeOwned::Borrowed(context))
+    }
+
     pub fn storage(&self) -> &S {
         &self.storage
     }
@@ -49,36 +264,15 @@ impl<S: ArrayStorage> Array<S> {
         self.storage
     }
 
-    pub fn dtype(&self) -> &Dtype {
-        self.storage.dtype()
-    }
-
-    pub fn ndim(&self) -> usize {
-        self.storage.shape().len()
-    }
-
-    pub fn shape(&self) -> &[usize] {
-        self.storage.shape()
-    }
-
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
         self.storage.blocks_layout()
-    }
-
-    pub fn data(&self) -> ArrayData<'_, S> {
-        let context = ReadContext::new().expect("failed to create read context");
-        ArrayData::new(self, MaybeOwned::Owned(context))
-    }
-
-    pub fn data_ctx<'a>(&'a self, context: &'a ReadContext) -> ArrayData<'a, S> {
-        ArrayData::new(self, MaybeOwned::Borrowed(context))
     }
 }
 
 impl Array<Owned> {
     pub fn from_ndarray<S, T, D>(
         array: &ndarray::ArrayBase<S, D, T>,
-        block_shape: &[usize],
+        params: ArrayParams,
     ) -> io::Result<Self>
     where
         T: Dtyped,
@@ -87,42 +281,44 @@ impl Array<Owned> {
     {
         let ndim = array.ndim();
         assert!(ndim < NDIM_MAX);
-        assert_eq!(ndim, block_shape.len());
+        let shape = array
+            .shape()
+            .iter()
+            .map(|&s| s as u64)
+            .collect::<DimArray<_>>();
         let dtype = T::dtype();
         let itemsize = dtype.itemsize() as usize;
-        let shape: DimArray<_> = array.shape().try_into().unwrap();
 
-        let block_shape = dim_arr(ndim, |dim| block_shape[dim].min(shape[dim]));
-
-        let tmp_block_strides = default_strides(&block_shape, itemsize);
         let strides = array.strides();
         let strides = dim_arr(ndim, |dim| {
             usize::try_from(strides[dim]).unwrap() * size_of::<T>()
         });
 
-        Self::from_block_fn(
-            &shape,
-            &block_shape,
-            dtype,
-            |block_idx, block_inner_offset, block_size, out_buf| {
+        let builder = ArrayBuilder::new(&shape, dtype.clone(), params);
+        builder.build(
+            |builder, block_idx, block_inner_offset, block_size, out_buf| {
                 // TODO: fast path for contiguous data
+                let block_shape = builder.block_shape();
                 let initial_arr_offset = (0..ndim)
                     .map(|dim| {
-                        let idx = block_idx[dim] * block_shape[dim] + block_inner_offset[dim];
-                        idx * strides[dim]
+                        let idx =
+                            block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
+                        idx as usize * strides[dim]
                     })
                     .sum::<usize>();
                 let initial_arr_ptr =
                     unsafe { array.as_ptr().cast::<u8>().add(initial_arr_offset) };
                 let initial_block_offset = (0..ndim)
-                    .map(|dim| block_inner_offset[dim] * tmp_block_strides[dim])
+                    .map(|dim| {
+                        block_inner_offset[dim] as usize * builder.block_strides[dim] as usize
+                    })
                     .sum::<usize>();
                 let initial_block_ptr = unsafe { out_buf.as_mut_ptr().add(initial_block_offset) };
                 let mut iter = NdIter::new(
                     block_size,
                     (
                         NdIterExtStridesPtr::new(&strides, initial_arr_ptr),
-                        NdIterExtStridesPtrMut::new(&tmp_block_strides, initial_block_ptr),
+                        NdIterExtStridesPtrMut::new(&builder.block_strides, initial_block_ptr),
                     ),
                 );
                 while let Some((_idx, (src, dst))) = iter.next() {
@@ -132,42 +328,91 @@ impl Array<Owned> {
             },
         )
     }
+}
 
-    pub(crate) fn from_block_fn(
-        shape: &[usize],
-        block_shape: &[usize],
-        dtype: Dtype,
-        mut block_fn: impl FnMut(&[usize], &[usize], &[usize], &mut [u8]) -> io::Result<()>,
-    ) -> io::Result<Array<Owned>> {
+struct ArrayBuilder {
+    shape: DimArray<u64>,
+    dtype: Dtype,
+
+    blocks_layout: BlocksLayout,
+    encoder_params: EncoderParams,
+    decoder_params: DecoderParams,
+
+    block_strides: DimArray<BlockSize>,
+}
+impl ArrayBuilder {
+    fn new(shape: &[u64], dtype: Dtype, params: ArrayParams) -> Self {
+        let shape: DimArray<u64> = shape.try_into().unwrap();
+
         let ndim = shape.len();
         assert!(ndim < NDIM_MAX);
-        assert_eq!(ndim, block_shape.len());
-        let itemsize = dtype.itemsize() as usize;
-        let shape: DimArray<_> = shape.try_into().unwrap();
 
-        let block_shape = dim_arr(ndim, |dim| block_shape[dim].min(shape[dim]));
-        let grid_shape = dim_arr(shape.len(), |dim| shape[dim].div_ceil(block_shape[dim]));
-        let block_size = block_shape.iter().product::<usize>();
+        let b_layout = BlocksLayout::new2(
+            params.block_shape,
+            params.block_shape_tag,
+            params.block_size_hint,
+            params.preferred_read_block_shape,
+            params.preferred_read_block_size_hint,
+            shape.as_slice(),
+            dtype.itemsize() as _,
+        );
+
+        let block_strides = default_strides(&b_layout.block_shape_hint, dtype.itemsize() as _);
+
+        Self {
+            shape,
+            dtype,
+
+            blocks_layout: b_layout,
+            encoder_params: params.encoder_params.unwrap_or_default(),
+            decoder_params: params.decoder_params.unwrap_or_default(),
+
+            block_strides,
+        }
+    }
+
+    fn build(
+        self,
+        mut block_fn: impl FnMut(&Self, &[u64], &[u64], &[u64], &mut [u8]) -> io::Result<()>,
+    ) -> io::Result<Array<Owned>> {
+        let ndim = self.shape.len();
+        assert!(ndim < NDIM_MAX);
+        let block_shape = &self.blocks_layout.block_shape_hint;
+        assert_eq!(ndim, block_shape.len());
+
+        let grid_shape = dim_arr(ndim, |dim| {
+            self.shape[dim].div_ceil(block_shape[dim] as u64)
+        });
+        let block_size = block_shape.iter().map(|&s| s as u64).product::<u64>();
 
         let mut block_iter = NdIter::new(
             &grid_shape,
-            NdIterExtBlockOffsetSize::new(&shape, &dim_arr(ndim, |_| 0), &shape, &block_shape),
+            NdIterExtBlockOffsetSize::new(
+                &self.shape,
+                &dim_arr(ndim, |_| 0),
+                &self.shape,
+                &dim_arr(ndim, |dim| block_shape[dim] as u64),
+            ),
         );
 
-        let encoder = Encoder::new(3)?;
-        let block_capacity_bytes = block_size * itemsize;
-        let mut builder = BlockTableBuilder::new(dtype.clone(), block_size as BlockSize, encoder);
-        let mut tmp_block_data =
-            AlignedBytes::with_capacity(dtype.alignment() as usize, block_capacity_bytes);
+        let encoder = Encoder::new(&self.encoder_params)?;
+        let block_capacity_bytes = block_size * self.dtype.itemsize() as u64;
+        let mut builder =
+            BlockTableBuilder::new(self.dtype.clone(), block_size as BlockSize, encoder);
+        let mut tmp_block_data = AlignedBytes::with_capacity(
+            self.dtype.alignment() as usize,
+            block_capacity_bytes as usize,
+        );
         while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
             debug_assert!(block_inner_offset.iter().all(|&o| o == 0)); // TODO
 
             // Init chunk data to zeros.
             // The padding elements (if any) will not be written by the iter below, so they will stay zeros.
             tmp_block_data.clear();
-            tmp_block_data.resize(block_capacity_bytes, 0);
+            tmp_block_data.resize(block_capacity_bytes as usize, 0);
 
             block_fn(
+                &self,
                 block_idx,
                 block_inner_offset,
                 block_size,
@@ -179,13 +424,19 @@ impl Array<Owned> {
 
         let blocks = builder.finish();
 
-        Ok(Self {
+        Ok(Array {
             storage: Owned(ArrayBlockTableStorageBase::new(
                 blocks,
-                shape,
-                BlocksLayout { block_shape },
+                self.shape,
+                self.blocks_layout,
+                self.encoder_params,
+                self.decoder_params,
             )),
         })
+    }
+
+    fn block_shape(&self) -> &[BlockSize] {
+        &self.blocks_layout.block_shape_hint
     }
 }
 
@@ -204,16 +455,16 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         }
     }
 
-    pub fn dtype(&self) -> &Dtype {
-        self.array.dtype()
+    pub fn shape(&self) -> &[u64] {
+        self.array.shape()
     }
 
     pub fn ndim(&self) -> usize {
         self.array.ndim()
     }
 
-    pub fn shape(&self) -> &[usize] {
-        self.array.shape()
+    pub fn dtype(&self) -> &Dtype {
+        self.array.dtype()
     }
 
     fn check_type<T: Dtyped>(&self) -> io::Result<()> {
@@ -243,19 +494,22 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         T: Dtyped,
     {
         let shape = self.shape();
-        let full_range = dim_arr(shape.len(), |dim| 0..shape[dim]);
+        let full_range = dim_arr(shape.len(), |dim| 0u64..shape[dim]);
         self.to_ndarray_sub(&full_range)
     }
 
-    pub fn to_ndarray_sub<T>(&self, range: &[Range<usize>]) -> io::Result<ndarray::ArrayD<T>>
+    pub fn to_ndarray_sub<T>(&self, range: &[Range<u64>]) -> io::Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
     {
         self.check_type::<T>()?;
         let ndim = self.ndim();
         assert_eq!(ndim, range.len());
-        // Output is sized to the requested range, not the full array shape.
-        let out_shape = dim_arr(ndim, |dim| range[dim].end - range[dim].start);
+        let out_shape = dim_arr(ndim, |dim| {
+            let len = range[dim].end - range[dim].start;
+            let len: usize = len.try_into().unwrap();
+            len
+        });
         let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
         self.to_ndarray_buf(range, {
             unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) }
@@ -263,7 +517,7 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         Ok(unsafe { array.assume_init() })
     }
 
-    pub fn to_ndarray_buf(&self, range: &[Range<usize>], buf: &mut [u8]) -> io::Result<()> {
+    pub fn to_ndarray_buf(&self, range: &[Range<u64>], buf: &mut [u8]) -> io::Result<()> {
         // TODO: call read_data multiple times with smaller blocks
         self.array
             .storage
@@ -274,31 +528,38 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
     where
         S: ArrayStorage,
     {
+        self.copy_with(ArrayParams::default())
+    }
+
+    pub fn copy_with(&self, mut params: ArrayParams) -> io::Result<Array<Owned>>
+    where
+        S: ArrayStorage,
+    {
+        params.override_from_storage(&self.array.storage);
+
         let ndim = self.ndim();
-        let block_shape = &self.array.blocks_layout().block_shape;
         let dtype = self.dtype().clone();
         let itemsize = dtype.itemsize() as usize;
         let mut tmp_block_data = AlignedBytes::new(dtype.alignment() as usize);
-        let mut output_block_strides = None;
-        Array::from_block_fn(
-            self.shape(),
-            block_shape,
-            dtype,
-            |block_idx, block_inner_offset, block_size, output_block| {
+        let builder = ArrayBuilder::new(self.shape(), dtype, params);
+        builder.build(
+            |builder, block_idx, block_inner_offset, block_size, output_block| {
+                let block_shape = builder.block_shape();
                 let range = dim_arr(ndim, |dim| {
-                    let start = block_idx[dim] * block_shape[dim] + block_inner_offset[dim];
+                    let start = block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
                     let end = start + block_size[dim];
                     start..end
                 });
 
-                let full_block = (0..ndim)
-                    .all(|dim| block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim]);
+                let full_block = (0..ndim).all(|dim| {
+                    block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim] as u64
+                });
 
                 let output_block_ptr = output_block.as_mut_ptr();
                 let read_data_buf = if full_block {
                     output_block
                 } else {
-                    let b_size_bytes = block_size.iter().product::<usize>() * itemsize;
+                    let b_size_bytes = block_size.iter().product::<u64>() as usize * itemsize;
                     tmp_block_data.clear();
                     tmp_block_data.reserve(b_size_bytes);
                     unsafe { tmp_block_data.set_len(b_size_bytes) };
@@ -311,14 +572,13 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
 
                 if !full_block {
                     // Copy from temporary buffer to output block with correct strides.
-                    let src_strides = default_strides(block_size, itemsize);
-                    let output_block_strides = output_block_strides
-                        .get_or_insert_with(|| default_strides(block_shape, itemsize));
+                    let src_strides =
+                        default_strides(&dim_arr(ndim, |dim| block_size[dim] as usize), itemsize);
                     let mut iter = NdIter::new(
                         block_size,
                         (
                             NdIterExtStridesPtr::new(&src_strides, read_data_buf.as_ptr()),
-                            NdIterExtStridesPtrMut::new(output_block_strides, output_block_ptr),
+                            NdIterExtStridesPtrMut::new(&builder.block_strides, output_block_ptr),
                         ),
                     );
                     while let Some((_idx, (src, dst))) = iter.next() {
@@ -340,10 +600,11 @@ impl Array<Owned> {
         let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1)?;
 
         let header = schema::ArrayHeader {
-            shape: self.shape().iter().cloned().map(|s| s as u64).collect(),
+            shape: self.shape().to_vec(),
             block_shape: self
-                .blocks_layout()
-                .block_shape
+                .storage
+                .0
+                .block_shape()
                 .iter()
                 .cloned()
                 .map(|s| s as u64)
@@ -354,110 +615,48 @@ impl Array<Owned> {
         self.storage.0.blocks.write_content(&mut writer)
     }
 
-    pub fn read_from_reader<R>(reader: R, len: u64) -> io::Result<Self>
+    pub fn read_from_reader<R>(reader: R, len: u64, params: ArrayParams) -> io::Result<Self>
     where
         R: Read + Seek,
     {
-        let (blocks, shape, blocks_layout) =
-            Self::read_from_impl(reader, len, crate::block::Owned::read_from)?;
+        let storage = ArrayBlockTableStorageBase::read_from(
+            reader,
+            len,
+            crate::block::Owned::read_from,
+            params,
+        )?;
         Ok(Self {
-            storage: Owned(ArrayBlockTableStorageBase::new(
-                blocks,
-                shape,
-                blocks_layout,
-            )),
+            storage: Owned(storage),
         })
     }
 }
 impl Array<Mmap> {
-    pub unsafe fn read_from_file_mmap(path: &Path, offset: u64, len: u64) -> io::Result<Self> {
+    /// # Safety
+    ///
+    /// Same as `memmap2::Mmap::map`.
+    pub unsafe fn read_from_file_mmap(
+        path: &Path,
+        offset: u64,
+        len: u64,
+        params: ArrayParams,
+    ) -> io::Result<Self> {
         let file = File::open(path)?;
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         let mut reader = BufReader::new(file);
         reader.seek(io::SeekFrom::Start(offset))?;
 
-        let (blocks, shape, blocks_layout) = Self::read_from_impl(
+        let storage = ArrayBlockTableStorageBase::read_from(
             reader,
             len,
             |reader, cdata_section, block_offsets_section| {
                 crate::block::Mmap::read_from(reader, cdata_section, block_offsets_section, mmap)
             },
+            params,
         )?;
 
         Ok(Self {
-            storage: Mmap(ArrayBlockTableStorageBase::new(
-                blocks,
-                shape,
-                blocks_layout,
-            )),
+            storage: Mmap(storage),
         })
-    }
-}
-impl<S> Array<S> {
-    fn read_from_impl<R, BS>(
-        reader: R,
-        len: u64,
-        read_block_storage: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> io::Result<BS>,
-    ) -> io::Result<(BlockTable<BS>, DimArray<usize>, BlocksLayout)>
-    where
-        R: Read + Seek,
-        BS: BlockTableStorage,
-    {
-        let mut reader = ArchiveReader::new(reader, len)?;
-        let f_meta = reader.read_file_meta()?;
-        if f_meta.archive_type != schema::ArchiveType::ArrayV1 as i32 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "unexpected zix file type: expected {:?}, actual {:?}",
-                    schema::ArchiveType::ArrayV1,
-                    ArchiveType::try_from(f_meta.archive_type)
-                ),
-            ));
-        }
-
-        let header = reader.read_message::<schema::ArrayHeader>()?;
-        let ndim = header.shape.len();
-        if ndim > NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("array ndim {ndim} exceeds maximum supported ndim {NDIM_MAX}"),
-            ));
-        }
-        let shape = dim_arr(ndim, |dim| header.shape[dim] as usize);
-        if header.block_shape.len() != ndim {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "array block_shape has different ndim {} than shape {ndim}",
-                    header.block_shape.len(),
-                ),
-            ));
-        }
-        let block_shape = dim_arr(ndim, |dim| header.block_shape[dim] as usize);
-        let padded_shape = dim_arr(ndim, |dim| {
-            if shape[dim] == 0 {
-                0
-            } else {
-                ceil_to_multiple(shape[dim], block_shape[dim])
-            }
-        });
-
-        let blocks_layout = BlocksLayout::new(&block_shape);
-        let blocks = BlockTable::read_content(&mut reader, read_block_storage)?;
-        let expected_nitems = padded_shape.iter().product::<usize>();
-        if blocks.nitems() != expected_nitems {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "array blocks nitems {} does not match shape product {}",
-                    blocks.nitems(),
-                    expected_nitems
-                ),
-            ));
-        }
-
-        Ok((blocks, shape, blocks_layout))
     }
 }
 
@@ -467,11 +666,13 @@ mod tests {
 
     use ndarray::ArrayD;
 
+    use super::BlockShapeTag;
     use crate::array::{ArrayBlockTableStorageBase, BlocksLayout, Owned};
     use crate::block::{BlockSize, BlockTable};
-    use crate::codec::Encoder;
+    use crate::codec::{DecoderParams, Encoder, EncoderParams};
     use crate::dtype::Dtyped;
-    use crate::util::cast_slice;
+    use crate::storage::ArrayParams;
+    use crate::util::{DimArray, cast_slice, dim_arr};
 
     use super::Array;
 
@@ -479,13 +680,20 @@ mod tests {
     // from_ndarray roundtrip helper
     // -----------------------------------------------------------------------
 
+    fn arr_params(block_shape: &[usize]) -> ArrayParams {
+        ArrayParams {
+            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
+            ..ArrayParams::default()
+        }
+    }
+
     fn roundtrip<T, S, D>(src: &ndarray::ArrayBase<S, D>, block_shape: &[usize]) -> ArrayD<T>
     where
         T: Dtyped,
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension,
     {
-        let a = Array::from_ndarray(&src, block_shape).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(block_shape)).unwrap();
         a.data().to_ndarray().unwrap()
     }
 
@@ -499,16 +707,29 @@ mod tests {
             .iter()
             .flat_map(|b| unsafe { cast_slice::<T, u8>(b) }.iter().copied())
             .collect();
-        let encoder = Encoder::new(3).unwrap();
+        let encoder = Encoder::new(&EncoderParams::default()).unwrap();
         BlockTable::build_from_data(&data, T::dtype(), block_len, encoder).unwrap()
     }
 
     fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Owned> {
+        let shape: DimArray<u64> = shape.iter().map(|&x| x as u64).collect();
+        let ndim = block_shape.len();
+        let block_shape_hint: DimArray<BlockSize> =
+            block_shape.iter().map(|&x| x as BlockSize).collect();
+        let layout = BlocksLayout {
+            block_shape_hint: block_shape_hint.clone(),
+            block_shape_tag: dim_arr(ndim, |_| BlockShapeTag::Fixed),
+            block_size_hint: 0,
+            preferred_read_block_shape: block_shape_hint,
+            preferred_read_block_size_hint: 0,
+        };
         Array {
             storage: Owned(ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),
-                shape.try_into().unwrap(),
-                BlocksLayout::new(block_shape),
+                shape,
+                layout,
+                EncoderParams::default(),
+                DecoderParams::default(),
             )),
         }
     }
@@ -678,7 +899,7 @@ mod tests {
     fn from_ndarray_1d_with_padding() {
         // size 5, block 3 → padded to 6; shape reported as 5
         let src = ndarray::array![0u8, 1, 2, 3, 4];
-        let a = Array::from_ndarray(&src, &[3]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[3])).unwrap();
         assert_eq!(a.shape(), &[5]);
         let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
         assert_eq!(got, src.into_dyn());
@@ -700,7 +921,7 @@ mod tests {
     fn from_ndarray_block_larger_than_shape_is_clamped() {
         // block_shape [10] > array size [4]; should clamp to [4]
         let src = ndarray::array![0u8, 1, 2, 3];
-        let a = Array::from_ndarray(&src, &[10]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[10])).unwrap();
         assert_eq!(a.shape(), &[4]);
         assert_eq!(a.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
@@ -710,7 +931,7 @@ mod tests {
         // Step-2 slice of [0..10] → [0, 2, 4, 6, 8]
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let view = src.slice(ndarray::s![..;2]);
-        let a = Array::from_ndarray(&view, &[3]).unwrap();
+        let a = Array::from_ndarray(&view, arr_params(&[3])).unwrap();
         assert_eq!(a.shape(), &[5]);
         assert_eq!(
             a.data().to_ndarray::<u8>().unwrap(),
@@ -725,7 +946,7 @@ mod tests {
     #[test]
     fn from_ndarray_metadata() {
         let src = ndarray::array![0i32, 1, 2, 3, 4, 5];
-        let a = Array::from_ndarray(&src, &[3]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[3])).unwrap();
         assert_eq!(a.ndim(), 1);
         assert_eq!(a.shape(), &[6]);
         assert_eq!(a.dtype(), &i32::dtype());
@@ -756,7 +977,7 @@ mod tests {
             [5,     6,  7,  8,  9],
             [10,   11, 12, 13, 14],
         ];
-        let a = Array::from_ndarray(&src, &[2, 3]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[2, 3])).unwrap();
         assert_eq!(a.shape(), &[3, 5]);
         assert_eq!(a.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
@@ -779,7 +1000,7 @@ mod tests {
     #[test]
     fn from_ndarray_then_to_ndarray_sub_1d() {
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
-        let a = Array::from_ndarray(&src, &[3]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[3])).unwrap();
         let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..5]).unwrap();
         assert_eq!(got, ndarray::array![1u8, 2, 3, 4].into_dyn());
     }
@@ -793,7 +1014,7 @@ mod tests {
             [12,  13, 14, 15, 16, 17],
             [18,  19, 20, 21, 22, 23],
         ];
-        let a = Array::from_ndarray(&src, &[2, 3]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[2, 3])).unwrap();
         let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..3, 2..5]).unwrap();
         assert_eq!(got, ndarray::array![[8u8, 9, 10], [14, 15, 16]].into_dyn());
     }
@@ -811,12 +1032,12 @@ mod tests {
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension,
     {
-        let a = Array::from_ndarray(&src, block_shape).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(block_shape)).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
         a.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
         let len = bytes.len() as u64;
-        Array::read_from_reader(Cursor::new(bytes), len).unwrap()
+        Array::read_from_reader(Cursor::new(bytes), len, ArrayParams::default()).unwrap()
     }
 
     #[test]
@@ -895,7 +1116,7 @@ mod tests {
     #[test]
     fn write_read_file() {
         let src = ndarray::array![0u32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-        let a = Array::from_ndarray(&src, &[4]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[4])).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
         let path = tmp_file.path().to_path_buf();
@@ -903,7 +1124,7 @@ mod tests {
 
         let file = std::fs::File::open(&path).unwrap();
         let len = file.metadata().unwrap().len();
-        let a2 = Array::read_from_reader(file, len).unwrap();
+        let a2 = Array::read_from_reader(file, len, ArrayParams::default()).unwrap();
 
         assert_eq!(a2.shape(), &[12]);
         assert_eq!(a2.dtype(), &u32::dtype());
@@ -933,7 +1154,7 @@ mod tests {
         let mut buf = Cursor::new(Vec::<u8>::new());
 
         // arr 0
-        let a0 = Array::from_ndarray(&src0, &[4]).unwrap();
+        let a0 = Array::from_ndarray(&src0, arr_params(&[4])).unwrap();
         a0.write_to(&mut buf).unwrap();
         let len0 = buf.stream_position().unwrap();
         // pad
@@ -941,7 +1162,7 @@ mod tests {
         let off1 = buf.stream_position().unwrap();
 
         // arr 1
-        let a1 = Array::from_ndarray(&src1, &[2, 2]).unwrap();
+        let a1 = Array::from_ndarray(&src1, arr_params(&[2, 2])).unwrap();
         a1.write_to(&mut buf).unwrap();
         let len1 = buf.stream_position().unwrap() - off1;
         // pad
@@ -949,28 +1170,39 @@ mod tests {
         let off2 = buf.stream_position().unwrap();
 
         // arr 2
-        let a2 = Array::from_ndarray(&src2, &[1, 2, 3]).unwrap();
+        let a2 = Array::from_ndarray(&src2, arr_params(&[1, 2, 3])).unwrap();
         a2.write_to(&mut buf).unwrap();
         let len2 = buf.stream_position().unwrap() - off2;
 
         let bytes = buf.into_inner();
 
         // Read array 0 (at offset 0).
-        let r0 = Array::read_from_reader(Cursor::new(&bytes), len0).unwrap();
+        let r0 =
+            Array::read_from_reader(Cursor::new(&bytes), len0, ArrayParams::default()).unwrap();
         assert_eq!(r0.shape(), &[4]);
         assert_eq!(r0.ndim(), 1);
         assert_eq!(r0.dtype(), &u8::dtype());
         assert_eq!(r0.data().to_ndarray::<u8>().unwrap(), src0.into_dyn());
 
         // Read array 1 (padded offset, 2D).
-        let r1 = Array::read_from_reader(Cursor::new(&bytes[off1 as usize..]), len1).unwrap();
+        let r1 = Array::read_from_reader(
+            Cursor::new(&bytes[off1 as usize..]),
+            len1,
+            ArrayParams::default(),
+        )
+        .unwrap();
         assert_eq!(r1.shape(), &[3, 4]);
         assert_eq!(r1.ndim(), 2);
         assert_eq!(r1.dtype(), &i32::dtype());
         assert_eq!(r1.data().to_ndarray::<i32>().unwrap(), src1.into_dyn());
 
         // Read array 2 (padded offset, 3D).
-        let r2 = Array::read_from_reader(Cursor::new(&bytes[off2 as usize..]), len2).unwrap();
+        let r2 = Array::read_from_reader(
+            Cursor::new(&bytes[off2 as usize..]),
+            len2,
+            ArrayParams::default(),
+        )
+        .unwrap();
         assert_eq!(r2.shape(), &[2, 2, 3]);
         assert_eq!(r2.ndim(), 3);
         assert_eq!(r2.dtype(), &f32::dtype());
@@ -991,11 +1223,14 @@ mod tests {
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension,
     {
-        let a = Array::from_ndarray(&src, block_shape).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(block_shape)).unwrap();
         let path = tmp_file.path().to_path_buf();
         a.write_to(std::fs::File::create(&path).unwrap()).unwrap();
         let len = std::fs::metadata(&path).unwrap().len();
-        unsafe { super::Array::<super::Mmap>::read_from_file_mmap(&path, 0, len) }.unwrap()
+        unsafe {
+            super::Array::<super::Mmap>::read_from_file_mmap(&path, 0, len, ArrayParams::default())
+        }
+        .unwrap()
     }
 
     #[cfg(not(miri))]
@@ -1053,8 +1288,8 @@ mod tests {
         // Write two arrays back-to-back; read the second via its offset.
         let src1 = ndarray::array![0u8, 1, 2, 3];
         let src2 = ndarray::array![10u8, 11, 12, 13, 14, 15];
-        let a1 = Array::from_ndarray(&src1, &[4]).unwrap();
-        let a2_arr = Array::from_ndarray(&src2, &[3]).unwrap();
+        let a1 = Array::from_ndarray(&src1, arr_params(&[4])).unwrap();
+        let a2_arr = Array::from_ndarray(&src2, arr_params(&[3])).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
         let path = tmp_file.path().to_path_buf();
@@ -1066,8 +1301,15 @@ mod tests {
         drop(f);
 
         let len2 = total_len - offset;
-        let read = unsafe { super::Array::<super::Mmap>::read_from_file_mmap(&path, offset, len2) }
-            .unwrap();
+        let read = unsafe {
+            super::Array::<super::Mmap>::read_from_file_mmap(
+                &path,
+                offset,
+                len2,
+                ArrayParams::default(),
+            )
+        }
+        .unwrap();
         assert_eq!(read.shape(), &[6]);
         assert_eq!(read.data().to_ndarray::<u8>().unwrap(), src2.into_dyn());
         drop(tmp_file);
@@ -1119,7 +1361,7 @@ mod tests {
         assert_eq!(b.shape(), &[4]);
         assert_eq!(b.ndim(), 1);
         assert_eq!(b.dtype(), &u8::dtype());
-        assert_eq!(b.blocks_layout().block_shape[..], [4]);
+        assert_eq!(b.blocks_layout().block_shape_hint[..], [4]);
         assert_eq!(
             b.data().to_ndarray::<u8>().unwrap(),
             ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap()
@@ -1131,7 +1373,7 @@ mod tests {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[6]);
-        assert_eq!(b.blocks_layout().block_shape[..], [3]);
+        assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
         assert_eq!(
             b.data().to_ndarray::<u8>().unwrap(),
             ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
@@ -1142,10 +1384,10 @@ mod tests {
     fn copy_1d_with_padding() {
         // shape [5], block [3] → stored as 6 elements (padded)
         let src = ndarray::array![0u8, 1, 2, 3, 4];
-        let a = Array::from_ndarray(&src, &[3]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[3])).unwrap();
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[5]);
-        assert_eq!(b.blocks_layout().block_shape[..], [3]);
+        assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
         assert_eq!(b.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
@@ -1167,7 +1409,7 @@ mod tests {
         let a = array(&[&[0u8, 1, 2, 3, 4, 5]], &[2, 3], &[2, 3]);
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[2, 3]);
-        assert_eq!(b.blocks_layout().block_shape[..], [2, 3]);
+        assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(
             b.data().to_ndarray::<u8>().unwrap(),
             ArrayD::from_shape_vec(vec![2, 3], (0u8..6).collect()).unwrap()
@@ -1195,7 +1437,7 @@ mod tests {
         );
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[4, 6]);
-        assert_eq!(b.blocks_layout().block_shape[..], [2, 3]);
+        assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(
             b.data().to_ndarray::<u8>().unwrap(),
             ArrayD::from_shape_vec(vec![4, 6], (0u8..24).collect()).unwrap()
@@ -1216,7 +1458,7 @@ mod tests {
             [5,     6,  7,  8,  9],
             [10,   11, 12, 13, 14],
         ];
-        let a = Array::from_ndarray(&src, &[2, 3]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[2, 3])).unwrap();
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[3, 5]);
         assert_eq!(b.dtype(), &i32::dtype());
@@ -1230,11 +1472,11 @@ mod tests {
         // one dimension, and the single corner block [1,1,1] is partial in all three:
         //   size [1,1,2] vs block_shape [2,2,3].
         let src = ndarray::Array3::<u8>::from_shape_vec([3, 3, 5], (0u8..45).collect()).unwrap();
-        let a = Array::from_ndarray(&src, &[2, 2, 3]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[2, 2, 3])).unwrap();
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[3, 3, 5]);
         assert_eq!(b.dtype(), &u8::dtype());
-        assert_eq!(b.blocks_layout().block_shape[..], [2, 2, 3]);
+        assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 2, 3]);
         assert_eq!(b.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
@@ -1242,11 +1484,11 @@ mod tests {
     fn copy_preserves_block_shape() {
         // Verify the copied array has the same block layout as the source.
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-        let a = Array::from_ndarray(&src, &[4]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[4])).unwrap();
         let b = a.data().copy().unwrap();
         assert_eq!(
-            a.blocks_layout().block_shape[..],
-            b.blocks_layout().block_shape[..]
+            a.blocks_layout().block_shape_hint[..],
+            b.blocks_layout().block_shape_hint[..]
         );
     }
 
@@ -1256,7 +1498,7 @@ mod tests {
         // Since Array<Owned> doesn't expose mutation, we verify by round-tripping
         // both through write/read and checking values remain consistent.
         let src = ndarray::array![10u8, 20, 30, 40];
-        let a = Array::from_ndarray(&src, &[4]).unwrap();
+        let a = Array::from_ndarray(&src, arr_params(&[4])).unwrap();
         let b = a.data().copy().unwrap();
         // Both should read back the same data independently.
         assert_eq!(

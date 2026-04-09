@@ -523,8 +523,8 @@ mod tests {
         let base_a = a.as_mut_ptr();
         let base_b = b.as_mut_ptr();
         let ext = (
-            NdIterExtStridesPtrMut::new(&[3, 1], base_a),
-            NdIterExtStridesPtrMut::new(&[6, 2], base_b),
+            NdIterExtStridesPtrMut::new(&[3usize, 1], base_a),
+            NdIterExtStridesPtrMut::new(&[6usize, 2], base_b),
         );
         let mut iter: NdIter<usize, _> = NdIter::new(&[2usize, 3], ext);
         let mut flat = 0usize;
@@ -541,7 +541,7 @@ mod tests {
         let mut data = [0u8; 4];
         let base = data.as_mut_ptr();
         let ext = (
-            NdIterExtStridesPtrMut::new(&[1], base),
+            NdIterExtStridesPtrMut::new(&[1usize], base),
             ChangeLog::<usize>::new(),
         );
         let mut iter: NdIter<usize, _> = NdIter::new(&[4usize], ext);
@@ -562,9 +562,9 @@ mod tests {
         let mut b = [0u8; 4];
         let mut c = [0u8; 4];
         let ext = (
-            NdIterExtStridesPtrMut::new(&[1], a.as_mut_ptr()),
-            NdIterExtStridesPtrMut::new(&[1], b.as_mut_ptr()),
-            NdIterExtStridesPtrMut::new(&[1], c.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(&[1usize], a.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(&[1usize], b.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(&[1usize], c.as_mut_ptr()),
         );
         let mut iter: NdIter<usize, _> = NdIter::new(&[4usize], ext);
         let mut count = 0usize;

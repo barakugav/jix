@@ -2,7 +2,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::{Array, BlocksLayout};
-use crate::codec::ReadContext;
+use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 #[cfg(feature = "half")]
 use crate::dtype::f16;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind};
@@ -27,7 +27,7 @@ pub struct AsType<S> {
     a: Array<S>,
 
     dtype: Dtype,
-    shape: DimArray<usize>,
+    shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 impl<S> AsType<S> {
@@ -85,21 +85,17 @@ impl<S> ArrayStorage for AsType<S>
 where
     S: ArrayStorage,
 {
+    fn shape(&self) -> &[u64] {
+        &self.shape
+    }
+
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
 
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
-    }
-
     fn read_data(
         &self,
-        index: &[Range<usize>],
+        index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()> {
@@ -159,6 +155,7 @@ where
             ($src_type:ident, $dst_type:ident) => {
                 for i in 0..nitems {
                     unsafe {
+                        #![allow(clippy::redundant_locals)]
                         let value = src.cast::<$src_type>().add(i).read();
                         let value = cast_from!(value, $src_type);
                         let value = cast_to!(value, $dst_type);
@@ -252,14 +249,30 @@ where
 
         Ok(())
     }
+
+    fn blocks_layout(&self) -> &BlocksLayout {
+        &self.blocks_layout
+    }
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+        self.a.storage.codec_params()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::array::Array;
+    use crate::block::BlockSize;
     #[allow(unused_imports)]
     use crate::dtype::f16;
     use crate::dtype::{Complex, Dtyped};
+    use crate::storage::ArrayParams;
+
+    fn arr_params(block_shape: &[usize]) -> ArrayParams {
+        ArrayParams {
+            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
+            ..ArrayParams::default()
+        }
+    }
 
     // --- scalar sampling ---
     trait Scalar: Sized + Copy + 'static {
@@ -441,7 +454,7 @@ mod tests {
                 fn cast_1d() {
                     let mut rng = fastrand::Rng::with_seed(seed());
                     let a = rand_array::<$src>(&mut rng, &[8]);
-                    let za = Array::from_ndarray(&a, &[8]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[8])).unwrap();
                     let actual = za
                         .astype(<$dst>::dtype())
                         .data()
@@ -455,7 +468,7 @@ mod tests {
                 fn cast_1d_multi_block() {
                     let mut rng = fastrand::Rng::with_seed(seed() ^ 1);
                     let a = rand_array::<$src>(&mut rng, &[6]);
-                    let za = Array::from_ndarray(&a, &[2]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[2])).unwrap();
                     let actual = za
                         .astype(<$dst>::dtype())
                         .data()
@@ -469,7 +482,7 @@ mod tests {
                 fn cast_2d() {
                     let mut rng = fastrand::Rng::with_seed(seed() ^ 2);
                     let a = rand_array::<$src>(&mut rng, &[3, 4]);
-                    let za = Array::from_ndarray(&a, &[3, 4]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[3, 4])).unwrap();
                     let actual = za
                         .astype(<$dst>::dtype())
                         .data()
@@ -483,7 +496,7 @@ mod tests {
                 fn cast_2d_multi_block() {
                     let mut rng = fastrand::Rng::with_seed(seed() ^ 3);
                     let a = rand_array::<$src>(&mut rng, &[4, 4]);
-                    let za = Array::from_ndarray(&a, &[2, 2]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[2, 2])).unwrap();
                     let actual = za
                         .astype(<$dst>::dtype())
                         .data()
@@ -546,7 +559,7 @@ mod tests {
     fn cast_complex_to_real_fails() {
         let a = Array::from_ndarray(
             &ndarray::array![Complex { re: 1.0, im: 2.0 }].into_dyn(),
-            &[1],
+            arr_params(&[1]),
         )
         .unwrap();
         assert!(a.try_astype(f32::dtype()).is_err());
@@ -554,25 +567,37 @@ mod tests {
 
     #[test]
     fn cast_real_to_complex_fails() {
-        let a = Array::from_ndarray(&ndarray::array![1.0f32].into_dyn(), &[1]).unwrap();
+        let a = Array::from_ndarray(&ndarray::array![1.0f32].into_dyn(), arr_params(&[1])).unwrap();
         assert!(a.try_astype(Complex::<f32>::dtype()).is_err());
     }
 
     #[cfg(not(feature = "half"))]
     #[test]
     fn cast_f16_without_feature_fails() {
-        let a = Array::from_ndarray(&ndarray::array![1.0f32].into_dyn(), &[1]).unwrap();
+        let a = Array::from_ndarray(&ndarray::array![1.0f32].into_dyn(), arr_params(&[1])).unwrap();
         assert!(a.try_astype(f16::dtype()).is_err());
-        let a = Array::from_ndarray(&ndarray::array![f16::from_bits(17)].into_dyn(), &[1]).unwrap();
+        let a = Array::from_ndarray(
+            &ndarray::array![f16::from_bits(17)].into_dyn(),
+            arr_params(&[1]),
+        )
+        .unwrap();
         assert!(a.try_astype(f32::dtype()).is_err());
-        let a = Array::from_ndarray(&ndarray::array![f16::from_bits(17)].into_dyn(), &[1]).unwrap();
+        let a = Array::from_ndarray(
+            &ndarray::array![f16::from_bits(17)].into_dyn(),
+            arr_params(&[1]),
+        )
+        .unwrap();
         assert!(a.try_astype(f16::dtype()).is_ok());
     }
 
     #[test]
     fn cast_f16_to_f16() {
         // must work even without the "half" feature, since it's a no-op cast
-        let a = Array::from_ndarray(&ndarray::array![f16::from_bits(17)].into_dyn(), &[1]).unwrap();
+        let a = Array::from_ndarray(
+            &ndarray::array![f16::from_bits(17)].into_dyn(),
+            arr_params(&[1]),
+        )
+        .unwrap();
         assert!(a.try_astype(f16::dtype()).is_ok());
     }
 }

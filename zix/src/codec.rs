@@ -4,19 +4,37 @@ use std::io;
 use crate::dtype::Alignment;
 use crate::util::AlignedBytes;
 
-pub(crate) struct Encoder {
+#[derive(Clone, Debug)]
+pub struct EncoderParams {
+    level: i32,
+}
+impl Default for EncoderParams {
+    fn default() -> Self {
+        Self { level: 3 }
+    }
+}
+
+#[derive(Clone, Debug)]
+#[derive(Default)]
+pub struct DecoderParams {
+    //
+}
+
+pub struct Encoder {
+    params: EncoderParams,
     #[cfg(not(miri))]
     inner: zstd::bulk::Compressor<'static>,
 }
 impl Encoder {
-    pub(crate) fn new(level: i32) -> io::Result<Self> {
+    pub fn new(params: &EncoderParams) -> io::Result<Self> {
         Ok(Self {
             #[cfg(not(miri))]
-            inner: zstd::bulk::Compressor::new(level)?,
+            inner: zstd::bulk::Compressor::new(params.level)?,
+            params: params.clone(),
         })
     }
 
-    pub(crate) fn encode(&mut self, data: &[u8], dst: &mut [u8]) -> io::Result<usize> {
+    pub fn encode(&mut self, data: &[u8], dst: &mut [u8]) -> io::Result<usize> {
         cfg_if::cfg_if! { if #[cfg(not(miri))] {
             self.inner.compress_to_buffer(data, dst)
         } else {
@@ -25,13 +43,17 @@ impl Encoder {
         } }
     }
 
-    pub(crate) fn encode_bound(&self, src_size: usize) -> usize {
+    pub fn encode_bound(&self, src_size: usize) -> usize {
         cfg_if::cfg_if! { if #[cfg(not(miri))] {
             zstd::zstd_safe::compress_bound(src_size)
         } else {
             src_size
         } }
     }
+
+    // pub fn params(&self) -> &EncoderParams {
+    //     &self.params
+    // }
 }
 pub struct ReadContext {
     #[cfg(not(miri))]
@@ -39,7 +61,7 @@ pub struct ReadContext {
     tmp_buffers: TmpBufferPool,
 }
 impl ReadContext {
-    pub(crate) fn new() -> io::Result<Self> {
+    pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> io::Result<Self> {
         Ok(Self {
             #[cfg(not(miri))]
             inner: UnsafeCell::new(zstd::bulk::Decompressor::new()?),
@@ -47,7 +69,7 @@ impl ReadContext {
         })
     }
 
-    pub(crate) fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> io::Result<usize> {
+    pub fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> io::Result<usize> {
         cfg_if::cfg_if! { if #[cfg(not(miri))] {
             let inner = unsafe { &mut *self.inner.get() };
             inner.decompress_to_buffer(cdata, dst)
@@ -139,16 +161,6 @@ impl TmpBuf<'_> {
         self.buf.as_mut_slice()
     }
 }
-// impl AsRef<[u8]> for TmpBuf<'_> {
-//     fn as_ref(&self) -> &[u8] {
-//         self.buf.as_ref()
-//     }
-// }
-// impl AsMut<[u8]> for TmpBuf<'_> {
-//     fn as_mut(&mut self) -> &mut [u8] {
-//         self.buf.as_mut()
-//     }
-// }
 impl Drop for TmpBuf<'_> {
     fn drop(&mut self) {
         // take self.buf

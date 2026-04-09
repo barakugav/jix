@@ -1,4 +1,4 @@
-use crate::util::IxIterExt;
+use crate::util::{Idx, IxIterExt};
 use std::collections::HashSet;
 
 /// The type used to represent dtype alignment in bytes.
@@ -59,7 +59,8 @@ pub enum DtypeScalarKind {
     U32,
     /// [`u64`] dtype.
     U64,
-    /// [`f16`] dtype.
+    #[allow(rustdoc::redundant_explicit_links)]
+    /// [`f16`](crate::dtype::f16) dtype.
     F16,
     /// [`f32`] dtype.
     F32,
@@ -133,7 +134,7 @@ impl Dtype {
             let is_aligned = fields.iter().all({
                 |(_f_name, offset, dtype)| {
                     expected_offset =
-                        ceil_to_multiple(expected_offset, dtype.alignment() as Itemsize);
+                        expected_offset.ceil_to_multiple(dtype.alignment() as Itemsize);
                     let aligned = *offset == expected_offset;
                     expected_offset += dtype.itemsize();
                     aligned
@@ -145,7 +146,7 @@ impl Dtype {
                     .map(|(_name, _offset, dtype)| dtype.alignment())
                     .max()
                     .unwrap_or(1);
-                let itemsize = ceil_to_multiple(expected_offset, max_alignment as Itemsize);
+                let itemsize = expected_offset.ceil_to_multiple(max_alignment as Itemsize);
                 return Ok((itemsize, (max_alignment, true)));
             }
 
@@ -235,7 +236,7 @@ impl Dtype {
         let mut expected_offset = 0;
         let is_aligned = fields.iter().all({
             |(_name, offset, dtype)| {
-                expected_offset = ceil_to_multiple(expected_offset, dtype.alignment() as Itemsize);
+                expected_offset = expected_offset.ceil_to_multiple(dtype.alignment() as Itemsize);
                 let aligned = *offset == expected_offset;
                 expected_offset += dtype.itemsize();
                 aligned
@@ -245,7 +246,7 @@ impl Dtype {
             return false;
         }
 
-        let expected_itemsize = ceil_to_multiple(expected_offset, max_alignment as Itemsize);
+        let expected_itemsize = expected_offset.ceil_to_multiple(max_alignment as Itemsize);
         if expected_itemsize != itemsize {
             return false;
         }
@@ -501,8 +502,6 @@ pub unsafe trait Dtyped: Copy + 'static {
 // Re-export derive macro
 pub use zix_macros::Dtyped;
 
-use crate::util::ceil_to_multiple;
-
 macro_rules! impl_dtyped_scalar {
     ($ty:ty, $kind:ident) => {
         unsafe impl Dtyped for $ty {
@@ -543,7 +542,7 @@ unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
 cfg_if::cfg_if! { if #[cfg(feature = "half")] {
     pub use half::f16;
 } else {
-    /// A 16-bit floating point type implementing the IEEE 754-2008 standard [`binary16`] a.k.a "half"
+    /// A 16-bit floating point type implementing the IEEE 754-2008 standard `binary16` a.k.a "half"
     /// format.
     ///
     /// Doesn't provide any arithmetic operations, but can be converted to/from `u16`.

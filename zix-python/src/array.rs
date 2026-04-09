@@ -33,7 +33,7 @@ impl Array {
     }
 
     pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
-        PyTuple::new(py, self.arr.shape().iter().map(|s| *s))
+        PyTuple::new(py, self.arr.shape().iter().copied())
     }
 
     pub fn dtype_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
@@ -69,7 +69,7 @@ impl Array {
             unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
 
         py.detach(|| {
-            let range = dim_arr(ndim, |dim| 0..(shape[dim] as usize));
+            let range = dim_arr(ndim, |dim| 0..(shape[dim] as u64));
             self.arr.data().to_ndarray_buf(&range, np_arr_data)
         })?;
 
@@ -114,13 +114,13 @@ mod tests {
     use pyo3::Python;
     use zix_core::array::Array as ZixArray;
     use zix_core::dtype::Dtyped;
+    use zix_core::storage::ArrayParams;
     use zix_core::storage::Owned;
 
     use super::{Array, DynStorage};
 
     fn make_py_array<T: Dtyped>(ndarray: &ArrayD<T>) -> Array {
-        let block_shape: Vec<usize> = ndarray.shape().to_vec();
-        let core = ZixArray::<Owned>::from_ndarray(ndarray, &block_shape).unwrap();
+        let core = ZixArray::<Owned>::from_ndarray(ndarray, ArrayParams::default()).unwrap();
         let dyn_storage = DynStorage(Arc::new(core.into_storage()));
         Array::from_storage(dyn_storage)
     }

@@ -1,3 +1,5 @@
+#![allow(clippy::assertions_on_constants)]
+
 use crate::dtype::{Alignment, DTYPE_SHAPE_MAX_NDIM, Itemsize};
 use crate::schema;
 use crate::util::IxIterExt;

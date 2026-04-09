@@ -4,7 +4,7 @@ mod aligned_vec;
 pub(crate) use aligned_vec::AlignedBytes;
 
 mod arr_sequence;
-pub(crate) use arr_sequence::ArraySequence;
+pub use arr_sequence::ArraySequence;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
@@ -36,6 +36,16 @@ pub(crate) trait Idx:
 
     fn div_ceil(self, rhs: Self) -> Self;
     fn checked_mul(self, rhs: Self) -> Option<Self>;
+
+    fn ceil_to_multiple(self, m: Self) -> Self {
+        assert!(m > Self::ZERO);
+        self.div_ceil(m) * m
+    }
+
+    fn floor_to_multiple(self, m: Self) -> Self {
+        assert!(m > Self::ZERO);
+        (self / m) * m
+    }
 }
 macro_rules! impl_idx_for_primitive {
     ($t:ty) => {
@@ -92,11 +102,6 @@ where
     unsafe { std::slice::from_raw_parts_mut(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
 
-pub(crate) fn ceil_to_multiple<Ix: Idx>(x: Ix, m: Ix) -> Ix {
-    assert!(m > Ix::ZERO);
-    x.div_ceil(m) * m
-}
-
 pub(crate) trait IxIterExt: Iterator {
     fn try_product(self) -> Option<Self::Item>;
 }
@@ -105,10 +110,8 @@ where
     Ix: Idx,
     Iter: Iterator<Item = Ix>,
 {
-    fn try_product(self) -> Option<Self::Item> {
-        self.fold(Some(Ix::ONE), |acc, x| {
-            acc.and_then(|acc| acc.checked_mul(x))
-        })
+    fn try_product(mut self) -> Option<Self::Item> {
+        self.try_fold(Ix::ONE, |acc, x| acc.checked_mul(x))
     }
 }
 

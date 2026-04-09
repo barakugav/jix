@@ -25,7 +25,7 @@ pub(crate) type BlockSize = u32;
 /// - `nitems % block_size == 0`
 pub(crate) struct BlockTable<S> {
     pub(crate) dtype: Dtype,
-    pub(crate) nitems: usize,
+    pub(crate) nitems: u64,
 
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
     /// Note the units are items, not bytes.
@@ -34,19 +34,19 @@ pub(crate) struct BlockTable<S> {
     storage: S,
 }
 impl<S> BlockTable<S> {
-    pub(crate) fn new(storage: S, dtype: Dtype, nitems: usize, block_size: BlockSize) -> Self
+    pub(crate) fn new(storage: S, dtype: Dtype, nitems: u64, block_size: BlockSize) -> Self
     where
         S: BlockTableStorage,
     {
         assert!(block_size > 0);
-        assert!(nitems.is_multiple_of(block_size as usize));
-        let nblocks = nitems / block_size as usize;
+        assert!(nitems.is_multiple_of(block_size as u64));
+        let nblocks = nitems / block_size as u64;
         let cdata = storage.cdata();
         let block_offsets = storage.block_offsets();
         if nblocks == 0 {
             assert_eq!(block_offsets.len(), 0);
         } else {
-            assert_eq!(block_offsets.len(), nblocks + 1);
+            assert_eq!(block_offsets.len() as u64, nblocks + 1);
             debug_assert!(block_offsets.windows(2).all(|w| w[0] < w[1]));
             debug_assert!(*block_offsets.last().unwrap() <= cdata.len() as u64);
         }
@@ -64,7 +64,7 @@ impl<S> BlockTable<S> {
     }
 
     /// Get the total number of items in this storage.
-    pub(crate) fn nitems(&self) -> usize {
+    pub(crate) fn nitems(&self) -> u64 {
         self.nitems
     }
 
@@ -84,7 +84,7 @@ impl<S> BlockTable<S> {
     /// - `context`: a read context containing global configuration and reuseable buffers.
     pub(crate) fn read_block(
         &self,
-        block_idx: usize,
+        block_idx: u64,
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()>
@@ -100,8 +100,8 @@ impl<S> BlockTable<S> {
         }
 
         let block_offsets = self.storage.block_offsets();
-        let begin = block_offsets[block_idx] as usize;
-        let end = block_offsets[block_idx + 1] as usize;
+        let begin = block_offsets[block_idx as usize] as usize;
+        let end = block_offsets[block_idx as usize + 1] as usize;
         let b_cdata = &self.storage.cdata()[begin..end];
 
         let nbytes = context.decode(b_cdata, buf)?;
@@ -127,7 +127,7 @@ impl<S> BlockTable<S> {
         // Write header
         let header = schema::BlockTableHeader {
             dtype: Some(self.dtype.to_proto()),
-            nitems: self.nitems as u64,
+            nitems: self.nitems,
             block_size: self.block_size as u64,
             table_of_contents: vec![
                 schema::block_table_header::TableOfContents::BlockOffsets as i32,
@@ -226,7 +226,7 @@ impl<S> BlockTable<S> {
         Ok(Self::new(
             storage,
             Dtype::from_proto(header.dtype.as_ref().unwrap())?,
-            header.nitems as usize,
+            header.nitems,
             header.block_size as BlockSize,
         ))
     }
@@ -282,7 +282,10 @@ impl Owned {
             let block_offsets_len =
                 block_offsets_section.size as usize / std::mem::size_of::<u64>();
             let mut block_offsets = Vec::<u64>::with_capacity(block_offsets_len);
-            unsafe { block_offsets.set_len(block_offsets_len) };
+            #[allow(clippy::uninit_vec)]
+            unsafe {
+                block_offsets.set_len(block_offsets_len)
+            };
             reader.read_section_into(block_offsets_section, unsafe {
                 cast_slice_mut::<u64, u8>(block_offsets.as_mut_slice())
             })?;
@@ -400,7 +403,10 @@ impl BlockTableBuilder {
 
         let cdata_len = self.cdata.len();
         self.cdata.reserve(self.max_blk_cdata_len);
-        unsafe { self.cdata.set_len(cdata_len + self.max_blk_cdata_len) };
+        #[allow(clippy::uninit_vec)]
+        unsafe {
+            self.cdata.set_len(cdata_len + self.max_blk_cdata_len)
+        };
         let blk_buf = &mut self.cdata[cdata_len..];
 
         let blk_cdata_len = self.encoder.encode(block_data, blk_buf)?;
@@ -423,7 +429,7 @@ impl BlockTableBuilder {
                 block_offsets: self.block_offsets,
             },
             self.dtype,
-            nitems,
+            nitems as u64,
             self.block_size,
         )
     }
@@ -435,15 +441,15 @@ mod tests {
 
     use super::{BlockSize, BlockTable};
     use crate::block::{BlockTableStorage, Owned};
-    use crate::codec::{Encoder, ReadContext};
+    use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
     use crate::dtype::Dtyped;
     use crate::util::{AlignedBytes, cast_slice};
 
     fn make_encoder() -> Encoder {
-        Encoder::new(3).unwrap()
+        Encoder::new(&EncoderParams::default()).unwrap()
     }
     fn make_decoder() -> ReadContext {
-        ReadContext::new().unwrap()
+        ReadContext::new(&DecoderParams::default()).unwrap()
     }
 
     fn decode_block<S>(table: &BlockTable<S>, idx: usize, context: &mut ReadContext) -> Vec<u8>
@@ -452,7 +458,7 @@ mod tests {
     {
         let block_bytes = table.block_len() as usize * table.dtype().itemsize() as usize;
         let mut buf = vec![0u8; block_bytes];
-        table.read_block(idx, &mut buf, context).unwrap();
+        table.read_block(idx as u64, &mut buf, context).unwrap();
         buf
     }
 
@@ -602,7 +608,7 @@ mod tests {
     }
 
     fn make_storage<T: Dtyped>(items: &[T], block_len: BlockSize) -> BlockTable<Owned> {
-        let encoder = Encoder::new(3).unwrap();
+        let encoder = Encoder::new(&EncoderParams::default()).unwrap();
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
             T::dtype(),
@@ -617,11 +623,13 @@ mod tests {
         T: Dtyped,
         S: BlockTableStorage,
     {
-        let mut context = ReadContext::new().unwrap();
+        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
         let mut buf = AlignedBytes::with_capacity(T::dtype().alignment() as usize, block_bytes);
         unsafe { buf.set_len(block_bytes) };
-        storage.read_block(idx, &mut buf, &mut context).unwrap();
+        storage
+            .read_block(idx as u64, &mut buf, &mut context)
+            .unwrap();
         unsafe { cast_slice::<u8, T>(&buf) }.to_vec()
     }
 
@@ -661,7 +669,7 @@ mod tests {
         let items: Vec<u8> = (0..4).collect();
         let s = make_storage(&items, 4);
         let mut buf = vec![0u8; 3]; // one byte short
-        let mut context = ReadContext::new().unwrap();
+        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         assert!(s.read_block(0, &mut buf, &mut context).is_err());
     }
 }

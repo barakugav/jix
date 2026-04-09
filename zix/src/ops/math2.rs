@@ -2,7 +2,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::{Array, BlocksLayout};
-use crate::codec::ReadContext;
+use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
 use crate::storage::{ArrayStorage, Ref};
 use crate::util::{DimArray, cast_slice, cast_slice_mut};
@@ -33,7 +33,7 @@ pub(crate) struct MathOp2<Op, S1, S2> {
     b: Array<S2>,
 
     dtype: Dtype,
-    shape: DimArray<usize>,
+    shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 impl<Op, S1, S2> MathOp2<Op, S1, S2> {
@@ -77,21 +77,17 @@ where
     S1: ArrayStorage,
     S2: ArrayStorage,
 {
+    fn shape(&self) -> &[u64] {
+        &self.shape
+    }
+
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
 
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
-    }
-
     fn read_data(
         &self,
-        index: &[Range<usize>],
+        index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
     ) -> std::io::Result<()> {
@@ -162,6 +158,14 @@ where
             }
         }
         Ok(())
+    }
+
+    fn blocks_layout(&self) -> &BlocksLayout {
+        &self.blocks_layout
+    }
+
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+        self.a.storage.codec_params()
     }
 }
 
@@ -275,6 +279,15 @@ define_op!(Div, DivKernel, Div, div, /);
 
 #[cfg(test)]
 mod tests {
+    use crate::block::BlockSize;
+    use crate::storage::ArrayParams;
+
+    fn arr_params(block_shape: &[usize]) -> ArrayParams {
+        ArrayParams {
+            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
+            ..ArrayParams::default()
+        }
+    }
 
     // Generates 5 test functions per (op, dtype).
     // Each Scalar impl controls the sampling range for its type.
@@ -288,8 +301,8 @@ mod tests {
                     let mut rng = fastrand::Rng::with_seed(seed);
                     let b = super::rand_array::<$dtype>(&mut rng, &[4]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[4]) + &b;
-                    let za = Array::from_ndarray(&a, &[4]).unwrap();
-                    let zb = Array::from_ndarray(&b, &[4]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
+                    let zb = Array::from_ndarray(&b, arr_params(&[4])).unwrap();
                     let actual = (&za $op &zb).data().to_ndarray::<$dtype>().unwrap();
                     let expected = &a $op &b;
                     assert_eq!(actual, expected);
@@ -302,8 +315,8 @@ mod tests {
                     let mut rng = fastrand::Rng::with_seed(seed);
                     let b = super::rand_array::<$dtype>(&mut rng, &[6]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[6]) + &b;
-                    let za = Array::from_ndarray(&a, &[2]).unwrap();
-                    let zb = Array::from_ndarray(&b, &[2]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[2])).unwrap();
+                    let zb = Array::from_ndarray(&b, arr_params(&[2])).unwrap();
                     let actual = (&za $op &zb).data().to_ndarray::<$dtype>().unwrap();
                     let expected = &a $op &b;
                     assert_eq!(actual, expected);
@@ -316,8 +329,8 @@ mod tests {
                     let mut rng = fastrand::Rng::with_seed(seed);
                     let b = super::rand_array::<$dtype>(&mut rng, &[2, 3]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[2, 3]) + &b;
-                    let za = Array::from_ndarray(&a, &[2, 3]).unwrap();
-                    let zb = Array::from_ndarray(&b, &[2, 3]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[2, 3])).unwrap();
+                    let zb = Array::from_ndarray(&b, arr_params(&[2, 3])).unwrap();
                     let actual = (&za $op &zb).data().to_ndarray::<$dtype>().unwrap();
                     let expected = &a $op &b;
                     assert_eq!(actual, expected);
@@ -330,8 +343,8 @@ mod tests {
                     let mut rng = fastrand::Rng::with_seed(seed);
                     let b = super::rand_array::<$dtype>(&mut rng, &[4, 4]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[4, 4]) + &b;
-                    let za = Array::from_ndarray(&a, &[2, 2]).unwrap();
-                    let zb = Array::from_ndarray(&b, &[2, 2]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[2, 2])).unwrap();
+                    let zb = Array::from_ndarray(&b, arr_params(&[2, 2])).unwrap();
                     let actual = (&za $op &zb).data().to_ndarray::<$dtype>().unwrap();
                     let expected = &a $op &b;
                     assert_eq!(actual, expected);
@@ -349,9 +362,9 @@ mod tests {
                     let c = super::rand_array::<$dtype>(&mut rng, &[4]);
                     let b = super::rand_array::<$dtype>(&mut rng, &[4]);
                     let a = super::rand_array::<$dtype>(&mut rng, &[4]) + &b + &c;
-                    let za = Array::from_ndarray(&a, &[4]).unwrap();
-                    let zb = Array::from_ndarray(&b, &[4]).unwrap();
-                    let zc = Array::from_ndarray(&c, &[4]).unwrap();
+                    let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
+                    let zb = Array::from_ndarray(&b, arr_params(&[4])).unwrap();
+                    let zc = Array::from_ndarray(&c, arr_params(&[4])).unwrap();
                     let zab = &za $op &zb;
                     let actual = (&zab $op &zc).data().to_ndarray::<$dtype>().unwrap();
                     let expected = &(&a $op &b) $op &c;
@@ -367,6 +380,7 @@ mod tests {
         ($mod_name:ident, $op:tt, [$($dtype:ident),+] $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+])*) => {
             mod $mod_name {
                 // Import feature-gated type aliases defined in the parent tests module.
+                use super::arr_params;
                 $(#[cfg($cfg)] use super::{$($cfg_dtype),+};)*
                 $(test_op_dtype!($op, $dtype);)+
                 $($(

@@ -1,6 +1,7 @@
 #![allow(unused)]
+#![allow(clippy::unnecessary_cast)]
 
-//! https://github.com/sarah-quinones/aligned-vec
+//! <https://github.com/sarah-quinones/aligned-vec>
 
 use core::fmt::Debug;
 use core::mem::ManuallyDrop;

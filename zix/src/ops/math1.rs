@@ -2,7 +2,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::{Array, BlocksLayout};
-use crate::codec::ReadContext;
+use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
 use crate::storage::{ArrayStorage, Ref};
 use crate::util::{DimArray, cast_slice_mut};
@@ -61,7 +61,7 @@ pub(crate) struct MathOp1<Op, S> {
     a: Array<S>,
 
     dtype: Dtype,
-    shape: DimArray<usize>,
+    shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 impl<Op, S> MathOp1<Op, S> {
@@ -90,21 +90,17 @@ where
     Op: MathOp1Kernel,
     S: ArrayStorage,
 {
+    fn shape(&self) -> &[u64] {
+        &self.shape
+    }
+
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
 
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
-    }
-
     fn read_data(
         &self,
-        index: &[Range<usize>],
+        index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
     ) -> std::io::Result<()> {
@@ -170,6 +166,13 @@ where
             }
         }
         Ok(())
+    }
+
+    fn blocks_layout(&self) -> &BlocksLayout {
+        &self.blocks_layout
+    }
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+        self.a.storage.codec_params()
     }
 }
 

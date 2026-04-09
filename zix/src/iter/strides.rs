@@ -5,17 +5,21 @@ use crate::util::{DimArray, Idx, default_strides};
 ///
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
-pub(crate) struct NdIterExtStridesPtr(NdIterExtStridesPtrMut);
+pub(crate) struct NdIterExtStridesPtr<S>(NdIterExtStridesPtrMut<S>);
 
-impl NdIterExtStridesPtr {
+impl<S> NdIterExtStridesPtr<S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
-    pub fn new(strides: &[usize], initial_ptr: *const u8) -> Self {
+    pub fn new(strides: &[S], initial_ptr: *const u8) -> Self
+    where
+        S: Copy,
+    {
         Self(NdIterExtStridesPtrMut::new(strides, initial_ptr.cast_mut()))
     }
 }
-impl<Ix> NdIterExtension<Ix> for NdIterExtStridesPtr
+impl<Ix, S> NdIterExtension<Ix> for NdIterExtStridesPtr<S>
 where
     Ix: Idx,
+    S: Idx + 'static,
 {
     type Item<'a> = *const u8;
 
@@ -27,7 +31,7 @@ where
     }
 
     fn next(&self) -> *const u8 {
-        <NdIterExtStridesPtrMut as NdIterExtension<Ix>>::next(&self.0).cast_const()
+        <NdIterExtStridesPtrMut<S> as NdIterExtension<Ix>>::next(&self.0).cast_const()
     }
 }
 
@@ -35,33 +39,39 @@ where
 ///
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
-pub(crate) struct NdIterExtStridesPtrMut {
-    strides: DimArray<usize>,
+pub(crate) struct NdIterExtStridesPtrMut<S> {
+    strides: DimArray<S>,
     current_ptr: *mut u8,
 }
 
-impl NdIterExtStridesPtrMut {
+impl<S> NdIterExtStridesPtrMut<S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
-    pub fn new(strides: &[usize], initial_ptr: *mut u8) -> Self {
+    pub fn new(strides: &[S], initial_ptr: *mut u8) -> Self
+    where
+        S: Copy,
+    {
         Self {
             strides: strides.try_into().unwrap(),
             current_ptr: initial_ptr,
         }
     }
 }
-impl<Ix> NdIterExtension<Ix> for NdIterExtStridesPtrMut
+impl<Ix, S> NdIterExtension<Ix> for NdIterExtStridesPtrMut<S>
 where
     Ix: Idx,
+    S: Idx + 'static,
 {
     type Item<'a> = *mut u8;
 
     fn on_increase(&mut self, dim: usize, _before: Ix, _after: Ix, diff: Ix) {
         let diff: usize = diff.try_into().unwrap();
-        self.current_ptr = unsafe { self.current_ptr.add(diff * self.strides[dim]) };
+        let stride: usize = self.strides[dim].try_into().unwrap();
+        self.current_ptr = unsafe { self.current_ptr.add(diff * stride) };
     }
     fn on_decrease(&mut self, dim: usize, _before: Ix, _after: Ix, diff: Ix) {
         let diff: usize = diff.try_into().unwrap();
-        self.current_ptr = unsafe { self.current_ptr.sub(diff * self.strides[dim]) };
+        let stride: usize = self.strides[dim].try_into().unwrap();
+        self.current_ptr = unsafe { self.current_ptr.sub(diff * stride) };
     }
 
     fn next(&self) -> *mut u8 {
@@ -130,7 +140,7 @@ mod tests {
     fn strides_ptr_mut_1d_stride_1() {
         let mut data = [0u8; 8];
         let base = data.as_mut_ptr();
-        let ext = NdIterExtStridesPtrMut::new(&[1], base);
+        let ext = NdIterExtStridesPtrMut::new(&[1usize], base);
         let mut iter = NdIter::new(&[8usize], ext);
         let mut i = 0usize;
         while let Some((_, ptr)) = iter.next() {
@@ -201,7 +211,7 @@ mod tests {
         let mut data = vec![0u8; 16];
         let base = data.as_mut_ptr();
         let start = unsafe { base.add(1 * 4 + 1 * 1) };
-        let ext = NdIterExtStridesPtrMut::new(&[4, 1], start);
+        let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], start);
         let mut iter = NdIter::new_with_begin(&[1usize, 1], &[3, 3], ext);
         let expected: &[usize] = &[5, 6, 9, 10];
         let mut i = 0;
@@ -215,7 +225,7 @@ mod tests {
     #[test]
     fn strides_ptr_mut_empty_range_yields_no_pointers() {
         let mut data = [0u8; 16];
-        let ext = NdIterExtStridesPtrMut::new(&[4, 1], data.as_mut_ptr());
+        let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], data.as_mut_ptr());
         let mut iter = NdIter::new_with_begin(&[2usize, 2], &[2, 5], ext);
         assert!(iter.next().is_none());
     }
@@ -224,7 +234,7 @@ mod tests {
     fn strides_ptr_const_1d_matches_mut() {
         let data = [0u8; 8];
         let base = data.as_ptr();
-        let ext = NdIterExtStridesPtr::new(&[1], base);
+        let ext = NdIterExtStridesPtr::new(&[1usize], base);
         let mut iter = NdIter::new(&[8usize], ext);
         let mut i = 0usize;
         while let Some((_, ptr)) = iter.next() {

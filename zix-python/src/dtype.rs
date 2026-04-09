@@ -1,3 +1,5 @@
+#![allow(clippy::assertions_on_constants)]
+
 use numpy::{PyArrayDescr, PyArrayDescrMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -531,14 +533,12 @@ mod tests {
     // Shape containing a zero dimension
     #[test]
     fn test_from_numpy_zero_dim_shape_errors() {
-        Python::attach(|py| {
-            // numpy doesn't normally create dtypes with shape containing 0,
-            // but we can try to trigger the error path via set_shape
-            let mut dtype = ZixDtype::of_scalar(DtypeScalarKind::F32);
-            // set_shape rejects zero dimensions
-            assert!(dtype.set_shape(&[0]).is_err());
-            assert!(dtype.set_shape(&[3, 0, 2]).is_err());
-        });
+        // numpy doesn't normally create dtypes with shape containing 0,
+        // but we can try to trigger the error path via set_shape
+        let mut dtype = ZixDtype::of_scalar(DtypeScalarKind::F32);
+        // set_shape rejects zero dimensions
+        assert!(dtype.set_shape(&[0]).is_err());
+        assert!(dtype.set_shape(&[3, 0, 2]).is_err());
     }
 
     // ===== dtype_to_numpy: scalar dtypes =====
