@@ -23,7 +23,7 @@ fn main() {
 }
 
 fn find_files_recursively(dir: &Path, extension: &str) -> io::Result<Vec<PathBuf>> {
-    assert!(dir.is_dir());
+    assert!(dir.is_dir(), "Expected a directory: {}", dir.display());
     let mut files = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
