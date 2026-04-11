@@ -1,51 +1,52 @@
+use std::hint::assert_unchecked;
 use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
-use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
+use crate::dtype::{Complex, Dtype, DtypeScalarKind, Dtyped, f16};
 use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::{DimArray, cast_slice, cast_slice_mut};
 
 #[allow(unused_variables)]
-pub(crate) trait MathOp2Kernel {
-    fn apply_i8(&self, a: i8, b: i8) -> i8 {
+pub(crate) trait BoolOp2Kernel {
+    fn apply_i8(&self, a: i8, b: i8) -> bool {
         unimplemented!()
     }
-    fn apply_i16(&self, a: i16, b: i16) -> i16 {
+    fn apply_i16(&self, a: i16, b: i16) -> bool {
         unimplemented!()
     }
-    fn apply_i32(&self, a: i32, b: i32) -> i32 {
+    fn apply_i32(&self, a: i32, b: i32) -> bool {
         unimplemented!()
     }
-    fn apply_i64(&self, a: i64, b: i64) -> i64 {
+    fn apply_i64(&self, a: i64, b: i64) -> bool {
         unimplemented!()
     }
-    fn apply_u8(&self, a: u8, b: u8) -> u8 {
+    fn apply_u8(&self, a: u8, b: u8) -> bool {
         unimplemented!()
     }
-    fn apply_u16(&self, a: u16, b: u16) -> u16 {
+    fn apply_u16(&self, a: u16, b: u16) -> bool {
         unimplemented!()
     }
-    fn apply_u32(&self, a: u32, b: u32) -> u32 {
+    fn apply_u32(&self, a: u32, b: u32) -> bool {
         unimplemented!()
     }
-    fn apply_u64(&self, a: u64, b: u64) -> u64 {
+    fn apply_u64(&self, a: u64, b: u64) -> bool {
         unimplemented!()
     }
-    fn apply_f16(&self, a: f16, b: f16) -> f16 {
+    fn apply_f16(&self, a: f16, b: f16) -> bool {
         unimplemented!()
     }
-    fn apply_f32(&self, a: f32, b: f32) -> f32 {
+    fn apply_f32(&self, a: f32, b: f32) -> bool {
         unimplemented!()
     }
-    fn apply_f64(&self, a: f64, b: f64) -> f64 {
+    fn apply_f64(&self, a: f64, b: f64) -> bool {
         unimplemented!()
     }
-    fn apply_complex_f32(&self, a: Complex<f32>, b: Complex<f32>) -> Complex<f32> {
+    fn apply_complex_f32(&self, a: Complex<f32>, b: Complex<f32>) -> bool {
         unimplemented!()
     }
-    fn apply_complex_f64(&self, a: Complex<f64>, b: Complex<f64>) -> Complex<f64> {
+    fn apply_complex_f64(&self, a: Complex<f64>, b: Complex<f64>) -> bool {
         unimplemented!()
     }
     fn apply_bool(&self, a: bool, b: bool) -> bool {
@@ -55,7 +56,7 @@ pub(crate) trait MathOp2Kernel {
     fn is_support_dtype(&self, dtype: &Dtype) -> bool;
 }
 
-pub(crate) struct MathOp2<Op, S1, S2> {
+pub(crate) struct BoolOp2<Op, S1, S2> {
     op: Op,
 
     a: Array<S1>,
@@ -65,10 +66,10 @@ pub(crate) struct MathOp2<Op, S1, S2> {
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
-impl<Op, S1, S2> MathOp2<Op, S1, S2> {
+impl<Op, S1, S2> BoolOp2<Op, S1, S2> {
     pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> io::Result<Self>
     where
-        Op: MathOp2Kernel,
+        Op: BoolOp2Kernel,
         S1: ArrayStorage,
         S2: ArrayStorage,
     {
@@ -92,7 +93,7 @@ impl<Op, S1, S2> MathOp2<Op, S1, S2> {
         }
         Ok(Self {
             op,
-            dtype: a.dtype().clone(),
+            dtype: bool::dtype(),
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
             a,
@@ -100,9 +101,9 @@ impl<Op, S1, S2> MathOp2<Op, S1, S2> {
         })
     }
 }
-impl<Op, S1, S2> ArrayStorage for MathOp2<Op, S1, S2>
+impl<Op, S1, S2> ArrayStorage for BoolOp2<Op, S1, S2>
 where
-    Op: MathOp2Kernel,
+    Op: BoolOp2Kernel,
     S1: ArrayStorage,
     S2: ArrayStorage,
 {
@@ -111,6 +112,7 @@ where
     }
 
     fn dtype(&self) -> &Dtype {
+        unsafe { assert_unchecked(self.dtype == bool::dtype()) };
         &self.dtype
     }
 
@@ -120,18 +122,23 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> std::io::Result<()> {
-        let mut buf2 = context.tmp_buf(buf.len(), self.dtype.alignment());
+        let inner_dtype = self.a.dtype();
+        let inner_buf_size = buf.len() * inner_dtype.itemsize() as usize;
+        let mut buf1 = context.tmp_buf(inner_buf_size, inner_dtype.alignment());
+        let mut buf2 = context.tmp_buf(inner_buf_size, inner_dtype.alignment());
+        let buf1 = buf1.as_mut_slice();
         let buf2 = buf2.as_mut_slice();
 
-        self.a.storage.read_data(index, buf, context)?;
+        self.a.storage.read_data(index, buf1, context)?;
         self.b.storage.read_data(index, buf2, context)?;
 
         macro_rules! apply_loop {
             ($ty:ty, $apply:ident) => {
-                let buf1 = unsafe { cast_slice_mut::<u8, $ty>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, $ty>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a = self.op.$apply(*a, *b);
+                let buf1 = unsafe { cast_slice::<u8, $ty>(buf1) };
+                let buf2 = unsafe { cast_slice::<u8, $ty>(buf2) };
+                let buf = unsafe { cast_slice_mut::<u8, bool>(buf) };
+                for (o, (a, b)) in buf.iter_mut().zip(buf1.iter().zip(buf2)) {
+                    *o = self.op.$apply(*a, *b);
                 }
             };
         }
@@ -182,7 +189,7 @@ where
             None => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Unsupported,
-                    "only scalar dtypes are supported for MathOp2",
+                    "only scalar dtypes are supported for BoolOp2",
                 ));
             }
         }
@@ -199,27 +206,15 @@ where
 }
 
 macro_rules! define_op {
-    ($Name:ident, $NameKernel:ident, $op_trait:ident, $op_fn:ident, $op:tt, [$($scalar:tt),* $(,)?]) => {
-        pub struct $Name<S1, S2>(MathOp2<$NameKernel, S1, S2>);
+    ($Name:ident, $NameKernel:ident, $op:tt, [$($scalar:tt),* $(,)?]) => {
+        pub struct $Name<S1, S2>(BoolOp2<$NameKernel, S1, S2>);
         impl<S1, S2> $Name<S1, S2> {
             pub fn new(a: Array<S1>, b: Array<S2>) -> io::Result<Self>
             where
                 S1: ArrayStorage,
                 S2: ArrayStorage,
             {
-                Ok(Self(MathOp2::new($NameKernel, a, b)?))
-            }
-        }
-        impl<S1, S2> core::ops::$op_trait<Array<S2>> for Array<S1>
-        where
-            S1: ArrayStorage,
-            S2: ArrayStorage,
-        {
-            type Output = Array<$Name<S1, S2>>;
-            #[track_caller]
-            fn $op_fn(self, b: Array<S2>) -> Array<$Name<S1, S2>> {
-                let op = $Name::new(self, b).unwrap();
-                Array::from_storage(op)
+                Ok(Self(BoolOp2::new($NameKernel, a, b)?))
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: ArrayStorage, S2: ArrayStorage);
@@ -230,7 +225,7 @@ macro_rules! define_op {
 macro_rules! define_op_kernel {
     ($NameKernel:ident, $op:tt, [$($scalar:tt),* $(,)?]) => {
         struct $NameKernel;
-        impl MathOp2Kernel for $NameKernel {
+        impl BoolOp2Kernel for $NameKernel {
             $(define_op_kernel!(@apply $op, $scalar);)*
 
             fn is_support_dtype(&self, dtype: &crate::dtype::Dtype) -> bool {
@@ -244,18 +239,18 @@ macro_rules! define_op_kernel {
     };
 
     // --- apply arms ---
-    (@apply $op:tt, i8)  => { fn apply_i8(&self, a: i8, b: i8) -> i8 { a $op b } };
-    (@apply $op:tt, i16) => { fn apply_i16(&self, a: i16, b: i16) -> i16 { a $op b } };
-    (@apply $op:tt, i32) => { fn apply_i32(&self, a: i32, b: i32) -> i32 { a $op b } };
-    (@apply $op:tt, i64) => { fn apply_i64(&self, a: i64, b: i64) -> i64 { a $op b } };
-    (@apply $op:tt, u8)  => { fn apply_u8(&self, a: u8, b: u8) -> u8 { a $op b } };
-    (@apply $op:tt, u16) => { fn apply_u16(&self, a: u16, b: u16) -> u16 { a $op b } };
-    (@apply $op:tt, u32) => { fn apply_u32(&self, a: u32, b: u32) -> u32 { a $op b } };
-    (@apply $op:tt, u64) => { fn apply_u64(&self, a: u64, b: u64) -> u64 { a $op b } };
-    (@apply $op:tt, f32) => { fn apply_f32(&self, a: f32, b: f32) -> f32 { a $op b } };
-    (@apply $op:tt, f64) => { fn apply_f64(&self, a: f64, b: f64) -> f64 { a $op b } };
+    (@apply $op:tt, i8)  => { fn apply_i8(&self, a: i8, b: i8) -> bool { a $op b } };
+    (@apply $op:tt, i16) => { fn apply_i16(&self, a: i16, b: i16) -> bool { a $op b } };
+    (@apply $op:tt, i32) => { fn apply_i32(&self, a: i32, b: i32) -> bool { a $op b } };
+    (@apply $op:tt, i64) => { fn apply_i64(&self, a: i64, b: i64) -> bool { a $op b } };
+    (@apply $op:tt, u8)  => { fn apply_u8(&self, a: u8, b: u8) -> bool { a $op b } };
+    (@apply $op:tt, u16) => { fn apply_u16(&self, a: u16, b: u16) -> bool { a $op b } };
+    (@apply $op:tt, u32) => { fn apply_u32(&self, a: u32, b: u32) -> bool { a $op b } };
+    (@apply $op:tt, u64) => { fn apply_u64(&self, a: u64, b: u64) -> bool { a $op b } };
+    (@apply $op:tt, f32) => { fn apply_f32(&self, a: f32, b: f32) -> bool { a $op b } };
+    (@apply $op:tt, f64) => { fn apply_f64(&self, a: f64, b: f64) -> bool { a $op b } };
     (@apply $op:tt, f16) => {
-        fn apply_f16(&self, #[allow(unused_variables)] a: f16, #[allow(unused_variables)] b: f16) -> f16 {
+        fn apply_f16(&self, #[allow(unused_variables)] a: f16, #[allow(unused_variables)] b: f16) -> bool {
             cfg_if::cfg_if! { if #[cfg(feature = "half")] {
                 a $op b
             } else {
@@ -264,7 +259,7 @@ macro_rules! define_op_kernel {
         }
     };
     (@apply $op:tt, (Complex<f32>)) => {
-        fn apply_complex_f32(&self, #[allow(unused_variables)] a: Complex<f32>, #[allow(unused_variables)] b: Complex<f32>) -> Complex<f32> {
+        fn apply_complex_f32(&self, #[allow(unused_variables)] a: Complex<f32>, #[allow(unused_variables)] b: Complex<f32>) -> bool {
             cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
                 a $op b
             } else {
@@ -273,7 +268,7 @@ macro_rules! define_op_kernel {
         }
     };
     (@apply $op:tt, (Complex<f64>)) => {
-        fn apply_complex_f64(&self, #[allow(unused_variables)] a: Complex<f64>, #[allow(unused_variables)] b: Complex<f64>) -> Complex<f64> {
+        fn apply_complex_f64(&self, #[allow(unused_variables)] a: Complex<f64>, #[allow(unused_variables)] b: Complex<f64>) -> bool {
             cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
                 a $op b
             } else {
@@ -306,10 +301,40 @@ macro_rules! define_op_kernel {
     (@dtype_match $sk:ident, bool) => { $sk == DtypeScalarKind::Bool };
 }
 
-define_op!(Add, AddKernel, Add, add, +, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_op!(Sub, SubKernel, Sub, sub, -, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_op!(Mul, MulKernel, Mul, mul, *, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_op!(Div, DivKernel, Div, div, /, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_op!(Equal, EqualKernel, ==, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_op!(NotEqual, NotEqualKernel, !=, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_op!(Greater, GreaterKernel, >, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]);
+define_op!(GreaterEqual, GreaterEqualKernel, >=, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]);
+define_op!(Less, LessKernel, <, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]);
+define_op!(LessEqual, LessEqualKernel, <=, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]);
+
+macro_rules! define_array_op_methods {
+    ($($op:ident : $Name:ident),+ $(,)?) => {
+        impl<S> Array<S>
+        where
+            S: ArrayStorage,
+        {
+            $(
+                #[track_caller]
+                pub fn $op<S2>(self, other: Array<S2>) -> Array<$Name<S, S2>>
+                where
+                    S2: ArrayStorage,
+                {
+                    let op = $Name::new(self, other).unwrap();
+                    Array::from_storage(op)
+                }
+            )*
+        }
+    };
+}
+define_array_op_methods!(
+    equal: Equal,
+    not_equal: NotEqual,
+    greater: Greater,
+    greater_equal: GreaterEqual,
+    less: Less,
+    less_equal: LessEqual,
+);
 
 #[cfg(test)]
 mod tests {

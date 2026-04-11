@@ -5,19 +5,9 @@ use crate::NDIM_MAX;
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Itemsize};
-use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout, Ref};
+use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr};
 
-impl<S> Array<S>
-where
-    S: ArrayStorage,
-{
-    #[track_caller]
-    pub fn reshape_view(&self, new_shape: &[u64]) -> Array<Reshape<Ref<'_, S>>> {
-        let a = Array::from_storage(Ref(&self.storage));
-        Array::from_storage(Reshape::new(a, new_shape).unwrap())
-    }
-}
 pub struct Reshape<S> {
     a: Array<S>,
 
@@ -923,8 +913,8 @@ mod tests {
     fn flat_order_preserved_4x3_vs_3x4() {
         // Both reshape [12] → [4,3] and [3,4] must yield same flat sequence
         let a12 = make1d(u8s(12), 12);
-        let r43 = a12.reshape_view(&[4, 3]);
-        let r34 = a12.reshape_view(&[3, 4]);
+        let r43 = a12.reference().reshape_view(&[4, 3]);
+        let r34 = a12.reference().reshape_view(&[3, 4]);
 
         let flat_43: ArrayD<u8> = r43.reshape_view(&[12]).data().to_ndarray().unwrap();
         let flat_34: ArrayD<u8> = r34.reshape_view(&[12]).data().to_ndarray().unwrap();

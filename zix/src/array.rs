@@ -12,7 +12,7 @@ use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Mmap, Owned,
+    ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Mmap, Owned, Ref,
 };
 use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr};
 use crate::util::{MaybeOwned, default_strides};
@@ -98,6 +98,12 @@ impl<S: ArrayStorage> Array<S> {
 
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
         self.storage.blocks_layout()
+    }
+
+    pub fn reference(&self) -> Array<Ref<'_, S>> {
+        Array {
+            storage: Ref(self.storage()),
+        }
     }
 }
 

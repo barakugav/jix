@@ -6,7 +6,7 @@ use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext
 #[cfg(feature = "half")]
 use crate::dtype::f16;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind};
-use crate::storage::{ArrayStorage, BlocksLayout, Ref};
+use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::DimArray;
 
 impl<S> Array<S>
@@ -14,13 +14,12 @@ where
     S: ArrayStorage,
 {
     #[track_caller]
-    pub fn astype(&self, dtype: Dtype) -> Array<AsType<Ref<'_, S>>> {
+    pub fn astype(self, dtype: Dtype) -> Array<AsType<S>> {
         self.try_astype(dtype).unwrap()
     }
 
-    pub fn try_astype(&self, dtype: Dtype) -> io::Result<Array<AsType<Ref<'_, S>>>> {
-        let a = Array::from_storage(Ref(&self.storage));
-        Ok(Array::from_storage(AsType::new(a, dtype)?))
+    pub fn try_astype(self, dtype: Dtype) -> io::Result<Array<AsType<S>>> {
+        Ok(Array::from_storage(AsType::new(self, dtype)?))
     }
 }
 pub struct AsType<S> {

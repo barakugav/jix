@@ -1,6 +1,9 @@
 mod astype;
 pub use astype::*;
 
+mod shape_ops;
+pub use shape_ops::*;
+
 mod concat;
 pub use concat::*;
 
@@ -13,8 +16,8 @@ pub use math1::*;
 mod math2;
 pub use math2::*;
 
-mod permute_dims;
-pub use permute_dims::*;
+mod bool1;
+pub use bool1::*;
 
-mod reshape;
-pub use reshape::*;
+mod bool2;
+pub use bool2::*;
