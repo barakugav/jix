@@ -1,10 +1,10 @@
 use std::io;
 use std::ops::Range;
 
-use crate::array::{Array, BlocksLayout};
+use crate::array::Array;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
-use crate::storage::{ArrayStorage, Ref};
+use crate::storage::{ArrayStorage, BlocksLayout, Ref};
 use crate::util::{DimArray, cast_slice, cast_slice_mut};
 
 pub(crate) trait MathOp2Kernel {
@@ -279,8 +279,7 @@ define_op!(Div, DivKernel, Div, div, /);
 
 #[cfg(test)]
 mod tests {
-    use crate::block::BlockSize;
-    use crate::storage::ArrayParams;
+    use crate::{array::ArrayParams, block::BlockSize};
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

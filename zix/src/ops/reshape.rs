@@ -2,10 +2,10 @@ use std::io;
 use std::ops::Range;
 
 use crate::NDIM_MAX;
-use crate::array::{Array, BlockShapeTag, BlocksLayout};
+use crate::array::Array;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Itemsize};
-use crate::storage::{ArrayStorage, Ref};
+use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout, Ref};
 use crate::util::{DimArray, default_strides, dim_arr};
 
 impl<S> Array<S>
@@ -313,9 +313,8 @@ fn read_flat_range<S: ArrayStorage>(
 mod tests {
     use ndarray::ArrayD;
 
-    use crate::array::Array;
+    use crate::array::{Array, ArrayParams};
     use crate::block::BlockSize;
-    use crate::storage::ArrayParams;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

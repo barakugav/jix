@@ -3,8 +3,8 @@ use std::ops::Range;
 
 use crate::NDIM_MAX;
 use crate::archive::{ArchiveReader, Section};
-use crate::array::{BlockShapeTag, BlocksLayout};
-use crate::dtype::Dtype;
+use crate::array::ArrayParams;
+use crate::dtype::{Dtype, Itemsize};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
 use crate::iter::strides::{
@@ -16,6 +16,213 @@ use crate::util::{Idx, default_strides};
 
 use crate::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum BlockShapeTag {
+    Fixed,
+    MultipleOf,
+    Any,
+}
+
+#[derive(Clone)]
+pub struct BlocksLayout {
+    /// === how preferred read block shape is transformed by view ops ===
+    /// permute_axis - permute the block shape
+    /// insert_axis - insert a block dim of size 1
+    /// broadcast - broadcasted dims will be set to full dim size
+    /// reduce_axis - just remove the block dim, or set it to 1 if keepdims
+    /// reshape:
+    ///   - dims that kept the logical stride and length will keep the same block shape.
+    ///   - dims that kept the logical stride and reduced length will keep the same block shape.
+    ///   - dims that kept the logical stride and increased length will use the dim's block
+    ///     shape multiplied by some factor (see later).
+    ///   - other dims will use 1, and will be scaled up by some factor (see later).
+    ///   - After the initial block shape is determined, without the factors, the block shape is
+    ///     scaled to block_size_hint by scaling each dim by a factor, starting
+    ///     with the last dim, until the block size is at most block_size_hint.
+    pub(crate) block_shape_hint: DimArray<BlockSize>,
+    pub(crate) block_shape_tag: DimArray<BlockShapeTag>,
+    pub(crate) block_size_hint: u64, // in bytes units
+
+    /// === how preferred read block shape is transformed by view ops ===
+    /// permute_axis - permute the block shape
+    /// insert_axis - insert a block dim of size 1
+    /// broadcast - broadcasted dims will be set to full dim size
+    /// reduce_axis - just remove the block dim, or set it to 1 if keepdims
+    /// reshape:
+    ///   - dims that kept the logical stride and length will keep the same block shape.
+    ///   - dims that kept the logical stride and reduced length will keep the same block shape.
+    ///   - dims that kept the logical stride and increased length will use the dim's block
+    ///     shape multiplied by some factor (see later).
+    ///   - other dims will use 1, and will be scaled up by some factor (see later).
+    ///   - After the initial block shape is determined, without the factors, the block shape is
+    ///     scaled to preferred_read_block_size_hint by scaling each dim by a factor, starting
+    ///     with the last dim, until the block size is at most preferred_read_block_size_hint.
+    pub(crate) preferred_read_block_shape: DimArray<BlockSize>,
+    pub(crate) preferred_read_block_size_hint: u64, // in bytes units
+}
+
+impl BlocksLayout {
+    pub(crate) fn new(
+        block_shape: Option<DimArray<BlockSize>>,
+        block_shape_tag: Option<DimArray<BlockShapeTag>>,
+        mut block_size_hint: Option<u64>,
+        preferred_read_block_shape: Option<DimArray<BlockSize>>,
+        mut preferred_read_block_size_hint: Option<u64>,
+
+        shape: &[u64],
+        itemsize: Itemsize,
+    ) -> Self {
+        let ndim = shape.len();
+        assert!(ndim < NDIM_MAX);
+        let itemsize = itemsize as u64;
+
+        assert!(
+            block_shape_tag.is_none() || block_shape.is_some(),
+            "block_shape_tag is specified but block_shape is not specified"
+        );
+        let block_shape_tag =
+            block_shape_tag.unwrap_or_else(|| dim_arr(ndim, |_| BlockShapeTag::Fixed));
+        assert_eq!(ndim, block_shape_tag.len());
+        let fixed_block_shape = block_shape_tag
+            .iter()
+            .all(|&tag| tag == BlockShapeTag::Fixed);
+        // Compute block_size_hint if not specified, and if it cant be computed from block_shape
+        if block_size_hint.is_none() && (block_shape.is_none() || !fixed_block_shape) {
+            // TODO: make this adaptive based on L1 cache size
+            block_size_hint = Some(4 * 1024); // 4 KiB
+        }
+        // Compute block shape
+        let mut block_shape = block_shape.unwrap_or_else(|| {
+            Self::scale_block_shape(
+                &dim_arr(ndim, |_| 1),
+                &dim_arr(ndim, |_| true),
+                block_size_hint.unwrap() / itemsize,
+                shape,
+            )
+        });
+        // Scale block_shape up to block_size_hint
+        if !fixed_block_shape {
+            block_shape = Self::scale_block_shape(
+                &dim_arr(ndim, |dim| match block_shape_tag[dim] {
+                    BlockShapeTag::Fixed | BlockShapeTag::MultipleOf => block_shape[dim],
+                    BlockShapeTag::Any => 1,
+                }),
+                &dim_arr(ndim, |dim| block_shape_tag[dim] != BlockShapeTag::Fixed),
+                block_size_hint.unwrap() / itemsize,
+                shape,
+            );
+        }
+        // Update block_size_hint to block_shape.product() if it is not specified
+        let block_size_hint = block_size_hint
+            .unwrap_or_else(|| block_shape.iter().map(|&b| b as u64).product::<u64>() * itemsize);
+        // Compute preferred_read_block_size_hint if not specified, and if it cant be computed from preferred_read_block_shape
+        if preferred_read_block_size_hint.is_none() && preferred_read_block_shape.is_none() {
+            // TODO: make this adaptive based on L2/3 cache size
+            preferred_read_block_size_hint = Some(16 * 1024); // 16 KiB
+        }
+        // Compute preferred_read_block_shape
+        let preferred_read_block_shape = match preferred_read_block_shape {
+            Some(preferred_read_block_shape) => {
+                assert_eq!(ndim, preferred_read_block_shape.len());
+                dim_arr(ndim, |dim| {
+                    (preferred_read_block_shape[dim] as u64)
+                        .max(block_shape[dim] as u64)
+                        .min(shape[dim]) as BlockSize
+                })
+            }
+            None => Self::scale_block_shape(
+                &block_shape,
+                &dim_arr(ndim, |_| true),
+                preferred_read_block_size_hint.unwrap() / itemsize,
+                shape,
+            ),
+        };
+        // Update preferred_read_block_size_hint to preferred_read_block_shape.product() if it is not specified
+        let preferred_read_block_size_hint = preferred_read_block_size_hint.unwrap_or_else(|| {
+            preferred_read_block_shape
+                .iter()
+                .map(|&b| b as u64)
+                .product::<u64>()
+                * itemsize
+        });
+
+        BlocksLayout {
+            block_shape_hint: block_shape,
+            block_shape_tag,
+            block_size_hint,
+            preferred_read_block_shape,
+            preferred_read_block_size_hint,
+        }
+    }
+
+    fn scale_block_shape(
+        block_shape: &[BlockSize],
+        scale_dim: &[bool],
+        block_size_max: u64,
+        shape: &[u64],
+    ) -> DimArray<BlockSize> {
+        let ndim = shape.len();
+        let mut scaled_block_shape = (0..ndim)
+            .rev()
+            .scan(1, |inner_block_volume, dim| {
+                let mut block_len = block_shape[dim];
+                if scale_dim[dim] {
+                    block_len = Self::block_len_heuristic(
+                        block_len,
+                        shape[dim],
+                        block_size_max,
+                        *inner_block_volume,
+                    )
+                };
+                *inner_block_volume *= block_len as u64;
+                Some(block_len)
+            })
+            .collect::<DimArray<_>>();
+        scaled_block_shape.reverse();
+        scaled_block_shape
+    }
+
+    fn block_len_heuristic(
+        base_block_len: BlockSize,
+        dim_len: u64,
+        max_volume: u64,
+        inner_block_volume: u64,
+    ) -> BlockSize {
+        if dim_len <= 1 {
+            return 1;
+        }
+        let base_block_len = base_block_len as u64;
+        let max_block_len = (max_volume / inner_block_volume)
+            .min(dim_len)
+            .min(1 << 30)
+            .floor_to_multiple(base_block_len)
+            .max(1);
+        let base_block_len = base_block_len.max(1).min(max_block_len);
+        let block_len = if max_block_len == dim_len {
+            dim_len
+        } else {
+            // multiple_of should a power of 2, on the order of dim_len//8
+            let multiple_of = base_block_len
+                * ((dim_len / (16 * base_block_len)) + 1)
+                    .next_power_of_two()
+                    .min(1 << 20);
+
+            // Use the largest block length that is a multiple of multiple_of and require
+            // less than 12.5% padding
+            (1..=(max_block_len / multiple_of))
+                .rev()
+                .map(|m| m * multiple_of)
+                .find(|&block_len| {
+                    let padding = dim_len.ceil_to_multiple(block_len) - dim_len;
+                    padding <= dim_len / 8
+                })
+                .unwrap_or(multiple_of)
+        };
+        debug_assert!(1 <= block_len && block_len <= dim_len);
+        block_len as BlockSize
+    }
+}
 
 pub trait ArrayStorage {
     fn shape(&self) -> &[u64];
@@ -77,42 +284,6 @@ macro_rules! impl_array_storage {
 impl_array_storage!(Owned);
 impl_array_storage!(Borrowed<'_>);
 impl_array_storage!(Mmap);
-
-#[derive(Clone, Default, Debug)]
-pub struct ArrayParams {
-    pub(crate) block_shape: Option<DimArray<BlockSize>>,
-    pub(crate) block_shape_tag: Option<DimArray<BlockShapeTag>>,
-    pub(crate) block_size_hint: Option<u64>,
-    pub(crate) preferred_read_block_shape: Option<DimArray<BlockSize>>,
-    pub(crate) preferred_read_block_size_hint: Option<u64>,
-    pub(crate) encoder_params: Option<EncoderParams>,
-    pub(crate) decoder_params: Option<DecoderParams>,
-}
-impl ArrayParams {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn override_from_storage(&mut self, storage: &impl ArrayStorage) {
-        let (s_encoder_params, s_decoder_params) = storage.codec_params();
-        self.encoder_params
-            .get_or_insert_with(|| s_encoder_params.clone());
-        self.decoder_params
-            .get_or_insert_with(|| s_decoder_params.clone());
-
-        let blocks_layout = storage.blocks_layout();
-        self.block_shape
-            .get_or_insert_with(|| blocks_layout.block_shape_hint.clone());
-        self.block_shape_tag
-            .get_or_insert_with(|| blocks_layout.block_shape_tag.clone());
-        self.block_size_hint
-            .get_or_insert(blocks_layout.block_size_hint);
-        self.preferred_read_block_shape
-            .get_or_insert_with(|| blocks_layout.preferred_read_block_shape.clone());
-        self.preferred_read_block_size_hint
-            .get_or_insert(blocks_layout.preferred_read_block_size_hint);
-    }
-}
 
 pub(crate) struct ArrayBlockTableStorageBase<S> {
     pub(crate) blocks: BlockTable<S>,
@@ -329,7 +500,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
             ));
         }
 
-        let b_layout = BlocksLayout::new2(
+        let b_layout = BlocksLayout::new(
             Some(block_shape),
             params.block_shape_tag,
             params.block_size_hint,
@@ -372,7 +543,7 @@ macro_rules! impl_array_storage_forward {
             ) -> io::Result<()> {
                 self.0.read_data(index, buf, context)
             }
-            fn blocks_layout(&self) -> &crate::array::BlocksLayout {
+            fn blocks_layout(&self) -> &crate::storage::BlocksLayout {
                 self.0.blocks_layout()
             }
             fn codec_params(&self) -> (&crate::codec::EncoderParams, &crate::codec::DecoderParams) {

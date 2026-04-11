@@ -1,6 +1,6 @@
 #![allow(clippy::assertions_on_constants)]
 
-use crate::dtype::{Alignment, DTYPE_SHAPE_MAX_NDIM, Itemsize};
+use crate::dtype::{Alignment, DTYPE_MAX_NDIM, Itemsize};
 use crate::schema;
 use crate::util::IxIterExt;
 use std::io;
@@ -19,7 +19,7 @@ impl crate::dtype::Dtype {
                 "dtype itemsize exceeds maximum supported itemsize",
             )
         })?;
-        if dtype.shape.len() > DTYPE_SHAPE_MAX_NDIM {
+        if dtype.shape.len() > DTYPE_MAX_NDIM {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "dtype shape has too many dimensions",

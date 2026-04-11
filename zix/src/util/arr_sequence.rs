@@ -1,10 +1,10 @@
 use std::io;
 use std::ops::Range;
 
-use crate::array::{Array, BlocksLayout};
+use crate::array::Array;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
-use crate::storage::ArrayStorage;
+use crate::storage::{ArrayStorage, BlocksLayout};
 
 pub(crate) trait ArraySequenceItemImpl {
     type __Storage: ArrayStorage;

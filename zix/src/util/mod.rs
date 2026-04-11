@@ -4,7 +4,7 @@ mod aligned_vec;
 pub(crate) use aligned_vec::AlignedBytes;
 
 mod arr_sequence;
-pub use arr_sequence::ArraySequence;
+pub use arr_sequence::{ArraySequence, ArraySequenceItem};
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {

@@ -4,9 +4,7 @@ use numpy::{PyArrayDescr, PyArrayDescrMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
-use zix_core::dtype::{
-    Alignment, DTYPE_SHAPE_MAX_NDIM, Dtype as ZixDtype, DtypeScalarKind, Itemsize,
-};
+use zix_core::dtype::{Alignment, DTYPE_MAX_NDIM, Dtype as ZixDtype, DtypeScalarKind, Itemsize};
 
 use crate::util::DimArray;
 
@@ -90,7 +88,7 @@ pub(crate) fn dtype_to_numpy<'py>(
 
 pub(crate) fn dtype_from_numpy(numpy_dtype: Bound<PyArrayDescr>) -> PyResult<ZixDtype> {
     let shape = numpy_dtype.shape();
-    if shape.len() > DTYPE_SHAPE_MAX_NDIM {
+    if shape.len() > DTYPE_MAX_NDIM {
         return Err(PyValueError::new_err(format!(
             "Unsupported dtype: too many dimensions: {}",
             shape.len()

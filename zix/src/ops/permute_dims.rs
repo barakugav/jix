@@ -1,12 +1,12 @@
 use std::io;
 use std::ops::Range;
 
-use crate::array::{Array, BlocksLayout};
+use crate::array::Array;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
-use crate::storage::{ArrayStorage, Ref};
+use crate::storage::{ArrayStorage, BlocksLayout, Ref};
 use crate::util::{DimArray, default_strides, dim_arr};
 
 impl<S> Array<S>
@@ -203,9 +203,8 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::Array;
+    use crate::array::{Array, ArrayParams};
     use crate::block::BlockSize;
-    use crate::storage::ArrayParams;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

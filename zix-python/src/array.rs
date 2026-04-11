@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use zix_core::array::Array as ZixArray;
+use zix_core::Array as ZixArray;
 
 use crate::dtype::dtype_to_numpy;
 use crate::storage::DynStorage;
@@ -112,10 +112,9 @@ mod tests {
     use ndarray::{ArrayD, IxDyn, array};
     use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
     use pyo3::Python;
-    use zix_core::array::Array as ZixArray;
     use zix_core::dtype::Dtyped;
-    use zix_core::storage::ArrayParams;
     use zix_core::storage::Owned;
+    use zix_core::{Array as ZixArray, ArrayParams};
 
     use super::{Array, DynStorage};
 

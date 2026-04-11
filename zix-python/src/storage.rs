@@ -1,10 +1,9 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use zix_core::array::BlocksLayout;
 use zix_core::codec::{DecoderParams, EncoderParams, ReadContext};
 use zix_core::dtype::Dtype;
-use zix_core::storage::ArrayStorage;
+use zix_core::storage::{ArrayStorage, BlocksLayout};
 
 #[derive(Clone)]
 pub(crate) struct DynStorage(pub(crate) Arc<dyn ArrayStorage + Send + Sync>);

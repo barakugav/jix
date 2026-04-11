@@ -1,10 +1,10 @@
 use std::io;
 use std::ops::Range;
 
-use crate::array::{Array, BlocksLayout};
+use crate::array::Array;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
-use crate::storage::{ArrayStorage, Ref};
+use crate::storage::{ArrayStorage, BlocksLayout, Ref};
 use crate::util::{DimArray, cast_slice_mut};
 
 #[allow(unused_variables)]

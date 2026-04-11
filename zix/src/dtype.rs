@@ -12,8 +12,8 @@ pub type Itemsize = u16;
 /// The maximum number of dimensions allowed in a dtype shape.
 ///
 /// Note this is not the shape of the array, but rather the inner shape of the dtype.
-pub const DTYPE_SHAPE_MAX_NDIM: usize = 4;
-pub(crate) type DtypeShape = arrayvec::ArrayVec<Itemsize, DTYPE_SHAPE_MAX_NDIM>;
+pub const DTYPE_MAX_NDIM: usize = 4;
+pub(crate) type DtypeShape = arrayvec::ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 
 /// Description of a type layout and inner fields.
 #[derive(Debug, Clone, PartialEq, Eq)]

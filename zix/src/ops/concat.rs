@@ -1,12 +1,12 @@
 use std::io;
 use std::ops::{Not, Range};
 
-use crate::array::{Array, BlocksLayout};
+use crate::array::Array;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
-use crate::storage::ArrayStorage;
+use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::{ArraySequence, DimArray, default_strides, dim_arr};
 
 /// Join a sequence of arrays along an existing axis.
@@ -292,10 +292,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::array::Array;
+    use crate::array::{Array, ArrayParams};
     use crate::block::BlockSize;
     use crate::ops::concat::concatenate;
-    use crate::storage::ArrayParams;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

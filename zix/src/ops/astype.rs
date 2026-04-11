@@ -1,12 +1,12 @@
 use std::io;
 use std::ops::Range;
 
-use crate::array::{Array, BlocksLayout};
+use crate::array::Array;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 #[cfg(feature = "half")]
 use crate::dtype::f16;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind};
-use crate::storage::{ArrayStorage, Ref};
+use crate::storage::{ArrayStorage, BlocksLayout, Ref};
 use crate::util::DimArray;
 
 impl<S> Array<S>
@@ -260,12 +260,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::array::Array;
+    use crate::array::{Array, ArrayParams};
     use crate::block::BlockSize;
     #[allow(unused_imports)]
     use crate::dtype::f16;
     use crate::dtype::{Complex, Dtyped};
-    use crate::storage::ArrayParams;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {
