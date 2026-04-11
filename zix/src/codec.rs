@@ -1,82 +1,236 @@
 use std::cell::UnsafeCell;
 use std::io;
 
-use crate::dtype::Alignment;
-use crate::util::AlignedBytes;
+use crate::dtype::{Alignment, Dtype};
+use crate::util::{AlignedBytes, AlternatingBuffers};
+
+#[derive(Clone, Debug)]
+pub enum Codec {
+    Zstd,
+}
 
 #[derive(Clone, Debug)]
 pub struct EncoderParams {
-    level: i32,
+    codec: Codec,
+    level: u8,
+    filters: arrayvec::ArrayVec<Filter, 4>,
 }
 impl Default for EncoderParams {
     fn default() -> Self {
-        Self { level: 3 }
+        Self {
+            codec: Codec::Zstd,
+            level: 3,
+            filters: ([Filter::ByteShuffle].as_slice()).try_into().unwrap(),
+        }
+    }
+}
+impl EncoderParams {
+    pub fn get_filters(&self) -> &[Filter] {
+        &self.filters
+    }
+}
+
+pub(crate) struct Encoder {
+    pub(crate) dtype: Dtype,
+    pub(crate) filters: Vec<Filter>,
+    pub(crate) compressor: Compressor,
+    tmp_buf1: AlignedBytes,
+    tmp_buf2: AlignedBytes,
+}
+pub(crate) enum Compressor {
+    #[cfg(not(miri))]
+    Zstd(zstd::bulk::Compressor<'static>),
+    #[cfg(miri)]
+    Zstd(()),
+}
+impl Encoder {
+    pub(crate) fn new(params: &EncoderParams, dtype: Dtype) -> io::Result<Self> {
+        let tmp_buf1 = AlignedBytes::new(dtype.alignment() as usize);
+        let tmp_buf2 = tmp_buf1.clone();
+        Ok(Self {
+            dtype,
+            filters: params.filters.to_vec(),
+            tmp_buf1,
+            tmp_buf2,
+            compressor: match params.codec {
+                Codec::Zstd => Compressor::Zstd({
+                    cfg_if::cfg_if! { if #[cfg(not(miri))] {
+                        zstd::bulk::Compressor::new(params.level as _)?
+                    } else {
+                        ()
+                    }}
+                }),
+            },
+        })
+    }
+
+    pub(crate) fn encode(&mut self, data: &[u8], dst: &mut [u8]) -> io::Result<usize> {
+        let itemsize = self.dtype.itemsize() as usize;
+
+        let mut buffers =
+            AlternatingBuffers::with_const_src(data, &mut self.tmp_buf1, &mut self.tmp_buf2);
+        for filter in &self.filters {
+            match filter {
+                Filter::ByteShuffle => {
+                    let (data, buf) = buffers.edit();
+                    buf.clear();
+                    buf.reserve(data.len());
+                    unsafe { buf.set_len(data.len()) };
+
+                    assert!(data.len().is_multiple_of(itemsize));
+                    let n = data.len() / itemsize;
+                    for i in 0..n {
+                        for b in 0..itemsize {
+                            buf[b * n + i] = data[i * itemsize + b];
+                        }
+                    }
+                }
+            }
+        }
+        let data = buffers.data();
+
+        match &mut self.compressor {
+            Compressor::Zstd(compressor) => {
+                cfg_if::cfg_if! { if #[cfg(not(miri))] {
+                    compressor.compress_to_buffer(data, dst)
+                } else {
+                    dst.copy_from_slice(data);
+                    Ok(data.len())
+                } }
+            }
+        }
+    }
+
+    pub(crate) fn encode_bound(&self, src_size: usize) -> usize {
+        match &self.compressor {
+            Compressor::Zstd(_) => {
+                cfg_if::cfg_if! { if #[cfg(not(miri))] {
+                    zstd::zstd_safe::compress_bound(src_size)
+                } else {
+                    src_size
+                } }
+            }
+        }
     }
 }
 
 #[derive(Clone, Debug)]
-#[derive(Default)]
-pub struct DecoderParams {
-    //
+pub enum Filter {
+    ByteShuffle,
 }
 
-pub struct Encoder {
-    params: EncoderParams,
-    #[cfg(not(miri))]
-    inner: zstd::bulk::Compressor<'static>,
+#[derive(Clone, Debug, Default)]
+pub struct DecoderParams {}
+#[derive(Clone, Debug)]
+pub struct DecoderCodecConfig {
+    pub(crate) codec: Codec,
+    pub(crate) filters: Vec<Filter>,
+    pub(crate) dtype: Dtype,
 }
-impl Encoder {
-    pub fn new(params: &EncoderParams) -> io::Result<Self> {
-        Ok(Self {
-            #[cfg(not(miri))]
-            inner: zstd::bulk::Compressor::new(params.level)?,
-            params: params.clone(),
-        })
-    }
 
-    pub fn encode(&mut self, data: &[u8], dst: &mut [u8]) -> io::Result<usize> {
-        cfg_if::cfg_if! { if #[cfg(not(miri))] {
-            self.inner.compress_to_buffer(data, dst)
-        } else {
-            dst.copy_from_slice(data);
-            Ok(data.len())
-        } }
-    }
-
-    pub fn encode_bound(&self, src_size: usize) -> usize {
-        cfg_if::cfg_if! { if #[cfg(not(miri))] {
-            zstd::zstd_safe::compress_bound(src_size)
-        } else {
-            src_size
-        } }
-    }
-
-    // pub fn params(&self) -> &EncoderParams {
-    //     &self.params
-    // }
-}
-pub struct ReadContext {
+pub(crate) struct Decoder<'a> {
     #[cfg(not(miri))]
     inner: UnsafeCell<zstd::bulk::Decompressor<'static>>,
+    context: &'a ReadContext,
+
+    dtype: &'a Dtype,
+    filters: &'a [Filter],
+}
+impl<'a> Decoder<'a> {
+    pub(crate) fn new(context: &'a ReadContext, config: &'a DecoderCodecConfig) -> Self {
+        Self {
+            #[cfg(not(miri))]
+            inner: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
+            context,
+            dtype: &config.dtype,
+            filters: &config.filters,
+        }
+    }
+
+    pub(crate) fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> io::Result<usize> {
+        let dst_len = dst.len();
+        let dst_ptr = dst.as_mut_ptr();
+
+        let tmp_buf1 = unsafe { &mut *self.context.tmp_buf1.get() };
+        let tmp_buf2 = unsafe { &mut *self.context.tmp_buf2.get() };
+        let mut buffers = AlternatingBuffers::new(tmp_buf1, tmp_buf2);
+        let decompress_out = if self.filters.is_empty() {
+            dst
+        } else {
+            let (_, tmp_buf) = buffers.edit();
+            tmp_buf.clear();
+            tmp_buf.reserve(dst.len());
+            unsafe {
+                #[allow(clippy::uninit_vec)]
+                tmp_buf.set_len(dst.len())
+            };
+            tmp_buf.as_mut_slice()
+        };
+
+        cfg_if::cfg_if! { if #[cfg(not(miri))] {
+            let inner = unsafe { &mut *self.inner.get() };
+            let nbytes = inner.decompress_to_buffer(cdata, decompress_out)?;
+        } else {
+            decompress_out.copy_from_slice(cdata);
+            let nbytes = cdata.len();
+        } }
+
+        // Apply filters in reverse order
+        for (f_idx, filter) in self.filters.iter().enumerate().rev() {
+            match filter {
+                Filter::ByteShuffle => {
+                    let (data, buf) = buffers.edit();
+                    let buf = if f_idx > 0 {
+                        buf.clear();
+                        buf.reserve(data.len());
+                        unsafe {
+                            #[allow(clippy::uninit_vec)]
+                            buf.set_len(data.len())
+                        };
+                        buf.as_mut_slice()
+                    } else {
+                        unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) }
+                    };
+
+                    let itemsize = self.dtype.itemsize() as usize;
+                    if !data.len().is_multiple_of(itemsize) {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Data length is not a multiple of item size, cant apply byte shuffle filter",
+                        ));
+                    }
+                    let n = data.len() / itemsize;
+                    for i in 0..n {
+                        for b in 0..itemsize {
+                            buf[i * itemsize + b] = data[b * n + i];
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(nbytes)
+    }
+}
+
+pub struct ReadContext {
     tmp_buffers: TmpBufferPool,
+    tmp_buf1: UnsafeCell<AlignedBytes>,
+    tmp_buf2: UnsafeCell<AlignedBytes>,
 }
 impl ReadContext {
     pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> io::Result<Self> {
+        let tmp_buf1 = AlignedBytes::new(8);
+        let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {
-            #[cfg(not(miri))]
-            inner: UnsafeCell::new(zstd::bulk::Decompressor::new()?),
             tmp_buffers: TmpBufferPool::new(),
+            tmp_buf1: UnsafeCell::new(tmp_buf1),
+            tmp_buf2: UnsafeCell::new(tmp_buf2),
         })
     }
 
-    pub fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> io::Result<usize> {
-        cfg_if::cfg_if! { if #[cfg(not(miri))] {
-            let inner = unsafe { &mut *self.inner.get() };
-            inner.decompress_to_buffer(cdata, dst)
-        } else {
-            dst.copy_from_slice(cdata);
-            Ok(cdata.len())
-        } }
+    pub(crate) fn decoder<'a>(&'a self, config: &'a DecoderCodecConfig) -> Decoder<'a> {
+        Decoder::new(self, config)
     }
 
     pub(crate) fn tmp_buf(&self, size: usize, alignment: Alignment) -> TmpBuf<'_> {

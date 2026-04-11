@@ -41,7 +41,7 @@ impl ArrayParams {
     }
 
     pub(crate) fn override_from_storage(&mut self, storage: &impl ArrayStorage) {
-        let (s_encoder_params, s_decoder_params) = storage.codec_params();
+        let (s_encoder_params, s_decoder_params, _) = storage.codec_params();
         self.encoder_params
             .get_or_insert_with(|| s_encoder_params.clone());
         self.decoder_params
@@ -227,7 +227,7 @@ impl ArrayBuilder {
             ),
         );
 
-        let encoder = Encoder::new(&self.encoder_params)?;
+        let encoder = Encoder::new(&self.encoder_params, self.dtype.clone())?;
         let block_capacity_bytes = block_size * self.dtype.itemsize() as u64;
         let mut builder =
             BlockTableBuilder::new(self.dtype.clone(), block_size as BlockSize, encoder);
@@ -538,7 +538,7 @@ mod tests {
             .iter()
             .flat_map(|b| unsafe { cast_slice::<T, u8>(b) }.iter().copied())
             .collect();
-        let encoder = Encoder::new(&EncoderParams::default()).unwrap();
+        let encoder = Encoder::new(&EncoderParams::default(), T::dtype()).unwrap();
         BlockTable::build_from_data(&data, T::dtype(), block_len, encoder).unwrap()
     }
 

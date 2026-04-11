@@ -2,12 +2,16 @@ syntax = "proto3";
 
 package zix.v1;
 
+import "zix/v1/codec.proto";
 import "zix/v1/dtype.proto";
 
 message BlockTableHeader {
   Dtype dtype = 1;
   uint64 nitems = 2;
   uint64 block_size = 3;
+
+  Codec codec = 4;
+  repeated Filter filters = 5;
 
   // The sections that exist in the table of contents of the block table.
   //
@@ -16,7 +20,7 @@ message BlockTableHeader {
   // The table_of_contents field specifies which sections exist in the table of contents, like a tag per row.
   // The TOC is encoded in this way instead of repeated protobuf messages so it will have a fixed
   // size and we can override it in-place after writing the file body.
-  repeated TableOfContents table_of_contents = 4;
+  repeated TableOfContents table_of_contents = 6;
   enum TableOfContents {
     TABLE_OF_CONTENTS_UNSPECIFIED = 0;
     TABLE_OF_CONTENTS_CDATA = 1;

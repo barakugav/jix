@@ -3,7 +3,7 @@ use std::io::{self, Read, Seek, Write};
 use zerocopy::{FromBytes, IntoBytes};
 
 use crate::archive::{ArchiveReader, ArchiveWriter, Section};
-use crate::codec::{Encoder, ReadContext};
+use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, Filter, ReadContext};
 use crate::dtype::Dtype;
 use crate::schema::{self, ArchiveType};
 use crate::util::{cast_slice, cast_slice_mut};
@@ -24,17 +24,22 @@ pub(crate) type BlockSize = u32;
 /// - `block_size > 0`
 /// - `nitems % block_size == 0`
 pub(crate) struct BlockTable<S> {
-    pub(crate) dtype: Dtype,
+    storage: S,
     pub(crate) nitems: u64,
 
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
     /// Note the units are items, not bytes.
     pub(crate) block_size: BlockSize,
 
-    storage: S,
+    pub(crate) decoder_config: DecoderCodecConfig,
 }
 impl<S> BlockTable<S> {
-    pub(crate) fn new(storage: S, dtype: Dtype, nitems: u64, block_size: BlockSize) -> Self
+    pub(crate) fn new(
+        storage: S,
+        nitems: u64,
+        block_size: BlockSize,
+        decoder_config: DecoderCodecConfig,
+    ) -> Self
     where
         S: BlockTableStorage,
     {
@@ -52,15 +57,15 @@ impl<S> BlockTable<S> {
         }
         Self {
             storage,
-            dtype,
             nitems,
             block_size,
+            decoder_config,
         }
     }
 
     /// Get the dtype of items in this storage.
     pub(crate) fn dtype(&self) -> &Dtype {
-        &self.dtype
+        &self.decoder_config.dtype
     }
 
     /// Get the total number of items in this storage.
@@ -91,11 +96,11 @@ impl<S> BlockTable<S> {
     where
         S: BlockTableStorage,
     {
-        let b_size_bytes = self.block_len() as usize * self.dtype.itemsize() as usize;
-        if buf.len() < b_size_bytes {
+        let b_size_bytes = self.block_len() as usize * self.dtype().itemsize() as usize;
+        if buf.len() != b_size_bytes {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Buffer too small",
+                "Buffer size does not match block size",
             ));
         }
 
@@ -104,7 +109,8 @@ impl<S> BlockTable<S> {
         let end = block_offsets[block_idx as usize + 1] as usize;
         let b_cdata = &self.storage.cdata()[begin..end];
 
-        let nbytes = context.decode(b_cdata, buf)?;
+        let decoder = context.decoder(&self.decoder_config);
+        let nbytes = decoder.decode(b_cdata, buf)?;
         debug_assert_eq!(nbytes, b_size_bytes);
         Ok(())
     }
@@ -126,9 +132,24 @@ impl<S> BlockTable<S> {
     {
         // Write header
         let header = schema::BlockTableHeader {
-            dtype: Some(self.dtype.to_proto()),
+            dtype: Some(self.dtype().to_proto()),
             nitems: self.nitems,
             block_size: self.block_size as u64,
+            codec: Some(schema::Codec {
+                kind: Some(match self.decoder_config.codec {
+                    Codec::Zstd => schema::codec::Kind::Zstd(()),
+                }),
+            }),
+            filters: self
+                .decoder_config
+                .filters
+                .iter()
+                .map(|f| schema::Filter {
+                    kind: Some(match f {
+                        Filter::ByteShuffle => schema::filter::Kind::ByteShuffle(()),
+                    }),
+                })
+                .collect(),
             table_of_contents: vec![
                 schema::block_table_header::TableOfContents::BlockOffsets as i32,
                 schema::block_table_header::TableOfContents::Cdata as i32,
@@ -190,6 +211,30 @@ impl<S> BlockTable<S> {
         S: BlockTableStorage,
     {
         let header = reader.read_message::<schema::BlockTableHeader>()?;
+        let codec = header.codec.and_then(|c| c.kind).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown or missing codec in header",
+            )
+        })?;
+        let codec = match codec {
+            schema::codec::Kind::Zstd(()) => Codec::Zstd,
+        };
+        let filters = header
+            .filters
+            .iter()
+            .map(|f| {
+                Ok(match f.kind {
+                    Some(schema::filter::Kind::ByteShuffle(())) => Filter::ByteShuffle,
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "unknown filter in header",
+                        ));
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         if header.table_of_contents.len() != 2 {
             return Err(io::Error::new(
@@ -223,11 +268,17 @@ impl<S> BlockTable<S> {
         // Read body data sections
         let storage = read_storage(reader, cdata_section, block_offsets_section)?;
 
+        let decoder_config = DecoderCodecConfig {
+            codec,
+            filters,
+            dtype: Dtype::from_proto(header.dtype.as_ref().unwrap()).unwrap(),
+        };
+
         Ok(Self::new(
             storage,
-            Dtype::from_proto(header.dtype.as_ref().unwrap())?,
             header.nitems,
             header.block_size as BlockSize,
+            decoder_config,
         ))
     }
 }
@@ -423,14 +474,21 @@ impl BlockTableBuilder {
     pub(crate) fn finish(self) -> BlockTable<Owned> {
         let nblocks = self.block_offsets.len().saturating_sub(1);
         let nitems = nblocks * self.block_size as usize;
+        let decoder_config = DecoderCodecConfig {
+            codec: match &self.encoder.compressor {
+                Compressor::Zstd(_) => Codec::Zstd,
+            },
+            filters: self.encoder.filters.clone(),
+            dtype: self.dtype.clone(),
+        };
         BlockTable::new(
             Owned {
                 cdata: self.cdata,
                 block_offsets: self.block_offsets,
             },
-            self.dtype,
             nitems as u64,
             self.block_size,
+            decoder_config,
         )
     }
 }
@@ -442,14 +500,11 @@ mod tests {
     use super::{BlockSize, BlockTable};
     use crate::block::{BlockTableStorage, Owned};
     use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
-    use crate::dtype::Dtyped;
+    use crate::dtype::{Dtype, Dtyped};
     use crate::util::{AlignedBytes, cast_slice};
 
-    fn make_encoder() -> Encoder {
-        Encoder::new(&EncoderParams::default()).unwrap()
-    }
-    fn make_decoder() -> ReadContext {
-        ReadContext::new(&DecoderParams::default()).unwrap()
+    fn make_encoder(dtype: Dtype, params: &EncoderParams) -> Encoder {
+        Encoder::new(params, dtype).unwrap()
     }
 
     fn decode_block<S>(table: &BlockTable<S>, idx: usize, context: &mut ReadContext) -> Vec<u8>
@@ -481,32 +536,36 @@ mod tests {
     #[test]
     fn build_single_block() {
         let items: Vec<u8> = (0u8..8).collect();
-        let encoder = make_encoder();
+        let encoder_params = EncoderParams::default();
+        let encoder = make_encoder(u8::dtype(), &encoder_params);
         let table = build_from_items(&items, 8, encoder).unwrap();
         assert_eq!(table.storage.block_offsets.len(), 2);
         assert_eq!(table.nitems, 8);
-        assert_eq!(decode_block(&table, 0, &mut make_decoder()), items);
+        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        assert_eq!(decode_block(&table, 0, &mut context), items);
     }
 
     #[test]
     fn build_multiple_blocks_exact_divisor() {
         // 12 items, block_size=4 → 3 full blocks
         let items: Vec<u8> = (0u8..12).collect();
-        let encoder = make_encoder();
+        let encoder_params = EncoderParams::default();
+        let encoder = make_encoder(u8::dtype(), &encoder_params);
         let table = build_from_items(&items, 4, encoder).unwrap();
         assert_eq!(table.storage.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
-        let mut decoder = make_decoder();
-        assert_eq!(decode_block(&table, 0, &mut decoder), items[0..4]);
-        assert_eq!(decode_block(&table, 1, &mut decoder), items[4..8]);
-        assert_eq!(decode_block(&table, 2, &mut decoder), items[8..12]);
+        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        assert_eq!(decode_block(&table, 0, &mut context), items[0..4]);
+        assert_eq!(decode_block(&table, 1, &mut context), items[4..8]);
+        assert_eq!(decode_block(&table, 2, &mut context), items[8..12]);
     }
 
     #[test]
     fn build_multiple_blocks_non_divisible_panics() {
         // 10 items, block_size=4 → not divisible, should panic
         let items: Vec<u8> = (0u8..10).collect();
-        let encoder = make_encoder();
+        let encoder_params = EncoderParams::default();
+        let encoder = make_encoder(u8::dtype(), &encoder_params);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             build_from_items(&items, 4, encoder).unwrap();
         }));
@@ -517,15 +576,16 @@ mod tests {
     fn build_with_itemsize_greater_than_one() {
         // 4 u32 values, block_size=2
         let items: Vec<u32> = vec![10, 20, 30, 40];
-        let encoder = make_encoder();
+        let encoder_params = EncoderParams::default();
+        let encoder = make_encoder(u32::dtype(), &encoder_params);
         let table = build_from_items(&items, 2, encoder).unwrap();
         assert_eq!(table.storage.block_offsets.len(), 3);
         assert_eq!(table.nitems, 4);
-        let mut decoder = make_decoder();
-        assert_eq!(decode_block(&table, 0, &mut decoder), unsafe {
+        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        assert_eq!(decode_block(&table, 0, &mut context), unsafe {
             cast_slice::<u32, u8>(&items[0..2])
         });
-        assert_eq!(decode_block(&table, 1, &mut decoder), unsafe {
+        assert_eq!(decode_block(&table, 1, &mut context), unsafe {
             cast_slice::<u32, u8>(&items[2..4])
         });
     }
@@ -535,7 +595,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<Owned> {
-        let encoder = make_encoder();
+        let encoder_params = EncoderParams::default();
+        let encoder = make_encoder(T::dtype(), &encoder_params);
         let table = build_from_items(items, block_size, encoder).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
         table.write_to(&mut buf).unwrap();
@@ -551,8 +612,9 @@ mod tests {
         assert_eq!(table2.storage.block_offsets.len(), 2);
         assert_eq!(table2.nitems, 8);
         assert_eq!(table2.block_size, 8);
-        assert_eq!(table2.dtype, u8::dtype());
-        assert_eq!(decode_block(&table2, 0, &mut make_decoder()), items);
+        assert_eq!(*table2.dtype(), u8::dtype());
+        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        assert_eq!(decode_block(&table2, 0, &mut context), items);
     }
 
     #[test]
@@ -561,9 +623,9 @@ mod tests {
         let table = round_trip(&items, 4);
         assert_eq!(table.storage.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
-        let mut decoder = make_decoder();
+        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         let recovered: Vec<u8> = (0..table.storage.block_offsets.len() - 1)
-            .flat_map(|i| decode_block(&table, i, &mut decoder))
+            .flat_map(|i| decode_block(&table, i, &mut context))
             .collect();
         assert_eq!(recovered, items);
     }
@@ -584,7 +646,8 @@ mod tests {
     #[test]
     fn round_trip_file() {
         let items: Vec<u32> = (0u32..18).collect();
-        let encoder = make_encoder();
+        let encoder_params = EncoderParams::default();
+        let encoder = make_encoder(u32::dtype(), &encoder_params);
         let table = build_from_items(&items, 3, encoder).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
@@ -600,20 +663,23 @@ mod tests {
 
         assert_eq!(table2.storage.block_offsets.len(), 7);
         assert_eq!(table2.nitems, 18);
-        let mut decoder = make_decoder();
+        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         let recovered: Vec<u8> = (0..table2.storage.block_offsets.len() - 1)
-            .flat_map(|i| decode_block(&table2, i, &mut decoder))
+            .flat_map(|i| decode_block(&table2, i, &mut context))
             .collect();
         assert_eq!(recovered, unsafe { cast_slice::<u32, u8>(&items) });
     }
 
-    fn make_storage<T: Dtyped>(items: &[T], block_len: BlockSize) -> BlockTable<Owned> {
-        let encoder = Encoder::new(&EncoderParams::default()).unwrap();
+    fn make_storage<T: Dtyped>(
+        items: &[T],
+        block_len: BlockSize,
+        params: &EncoderParams,
+    ) -> BlockTable<Owned> {
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
             T::dtype(),
             block_len,
-            encoder,
+            make_encoder(T::dtype(), params),
         )
         .unwrap()
     }
@@ -636,7 +702,8 @@ mod tests {
     #[test]
     fn single_block_u8_round_trips() {
         let items: Vec<u8> = (0..8).collect();
-        let s = make_storage(&items, 8);
+        let encoder_params = EncoderParams::default();
+        let s = make_storage(&items, 8, &encoder_params);
         assert_eq!(s.nitems(), 8);
         assert_eq!(s.block_len(), 8);
         assert_eq!(s.dtype(), &u8::dtype());
@@ -646,7 +713,8 @@ mod tests {
     #[test]
     fn two_blocks_i32_round_trips() {
         let items: Vec<i32> = (0..8).collect();
-        let s = make_storage(&items, 4);
+        let encoder_params = EncoderParams::default();
+        let s = make_storage(&items, 4, &encoder_params);
         assert_eq!(s.nitems(), 8);
         assert_eq!(s.block_len(), 4);
         assert_eq!(read_block_items::<i32, _>(&s, 0), items[..4]);
@@ -656,7 +724,8 @@ mod tests {
     #[test]
     fn multiple_blocks_f32_round_trips() {
         let items: Vec<f32> = (0..12).map(|x| x as f32 * 0.5).collect();
-        let s = make_storage(&items, 4);
+        let encoder_params = EncoderParams::default();
+        let s = make_storage(&items, 4, &encoder_params);
         assert_eq!(s.nitems(), 12);
         assert_eq!(s.block_len(), 4);
         for b in 0..3 {
@@ -667,7 +736,8 @@ mod tests {
     #[test]
     fn buffer_too_small_returns_error() {
         let items: Vec<u8> = (0..4).collect();
-        let s = make_storage(&items, 4);
+        let encoder_params = EncoderParams::default();
+        let s = make_storage(&items, 4, &encoder_params);
         let mut buf = vec![0u8; 3]; // one byte short
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         assert!(s.read_block(0, &mut buf, &mut context).is_err());

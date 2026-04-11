@@ -2,7 +2,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
 use crate::storage::{ArrayStorage, BlocksLayout, Ref};
 use crate::util::{DimArray, cast_slice_mut};
@@ -171,7 +171,7 @@ where
     fn blocks_layout(&self) -> &BlocksLayout {
         &self.blocks_layout
     }
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.a.storage.codec_params()
     }
 }

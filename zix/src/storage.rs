@@ -1,9 +1,9 @@
 use std::io::{self, Read, Seek};
 use std::ops::Range;
 
+use crate::ArrayParams;
 use crate::NDIM_MAX;
 use crate::archive::{ArchiveReader, Section};
-use crate::array::ArrayParams;
 use crate::dtype::{Dtype, Itemsize};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
@@ -15,7 +15,7 @@ use crate::util::{DimArray, dim_arr};
 use crate::util::{Idx, default_strides};
 
 use crate::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BlockShapeTag {
@@ -250,7 +250,7 @@ pub trait ArrayStorage {
 
     fn blocks_layout(&self) -> &BlocksLayout;
 
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams);
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig);
 }
 pub struct Owned(pub(crate) ArrayBlockTableStorageBase<crate::block::Owned>);
 pub struct Borrowed<'a>(pub(crate) ArrayBlockTableStorageBase<crate::block::Borrowed<'a>>);
@@ -275,8 +275,12 @@ macro_rules! impl_array_storage {
             fn blocks_layout(&self) -> &BlocksLayout {
                 &self.0.blocks_layout
             }
-            fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
-                (&self.0.encoder_params, &self.0.decoder_params)
+            fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
+                (
+                    &self.0.encoder_params,
+                    &self.0.decoder_params,
+                    &self.0.blocks.decoder_config,
+                )
             }
         }
     };
@@ -546,7 +550,7 @@ macro_rules! impl_array_storage_forward {
             fn blocks_layout(&self) -> &crate::storage::BlocksLayout {
                 self.0.blocks_layout()
             }
-            fn codec_params(&self) -> (&crate::codec::EncoderParams, &crate::codec::DecoderParams) {
+            fn codec_params(&self) -> (&crate::codec::EncoderParams, &crate::codec::DecoderParams, &crate::codec::DecoderCodecConfig) {
                 self.0.codec_params()
             }
         }

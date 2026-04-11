@@ -2,7 +2,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
@@ -38,8 +38,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use zix::array::Array;
-    /// use zix::storage::ArrayParams;
+    /// use zix::{Array, ArrayParams};
     ///
     /// // 2-D transpose — equivalent to np.permute_dims(a, [1, 0])
     /// let a = Array::from_ndarray(&ndarray::array![[1i32, 2, 3], [4, 5, 6]].view().into_dyn(), ArrayParams::default()).unwrap();
@@ -196,7 +195,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         &self.blocks_layout
     }
 
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.inner.codec_params()
     }
 }

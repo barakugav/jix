@@ -2,7 +2,7 @@ use std::io;
 use std::ops::{Not, Range};
 
 use crate::array::Array;
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
@@ -42,9 +42,8 @@ use crate::util::{ArraySequence, DimArray, default_strides, dim_arr};
 /// # Examples
 ///
 /// ```
-/// use zix::array::Array;
+/// use zix::{ArrayParams, Array};
 /// use zix::ops::stack;
-/// use zix::storage::ArrayParams;
 ///
 /// // Stack two 1-D arrays along axis 0 — analogous to np.stack([a, b], axis=0)
 /// // Result shape: [2, N]
@@ -242,7 +241,7 @@ where
         &self.blocks_layout
     }
 
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.arrays.codec_params(0)
     }
 }

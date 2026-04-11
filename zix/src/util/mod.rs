@@ -149,9 +149,122 @@ impl<'a, T> AsRef<T> for MaybeOwned<'a, T> {
 //     }
 // }
 
+/// A state machine for applying a pipeline of in-place byte transformations using two
+/// pre-allocated scratch buffers, alternating between them at each step.
+///
+/// This avoids per-step heap allocations. The two variants are:
+///
+/// - [`Init`](Self::Init): no transformation applied yet; holds a reference to the
+///   original source data alongside the two reusable scratch buffers.
+/// - [`Alternating`](Self::Alternating): at least one transformation has been applied;
+///   `main_buf` holds the most recently written output and `secondary_buf` is the next
+///   write target.
+///
+/// # Usage
+///
+/// Call [`edit`](Self::edit) to obtain `(src, dst)` for each step and write the
+/// transformed bytes into `dst`. After all steps, call [`data`](Self::data) to read
+/// the final result.
+pub(crate) enum AlternatingBuffers<'a> {
+    Init {
+        original_data: &'a [u8],
+        tmp_buf1: &'a mut AlignedBytes,
+        tmp_buf2: &'a mut AlignedBytes,
+    },
+    Alternating {
+        main_buf: &'a mut AlignedBytes,
+        secondary_buf: &'a mut AlignedBytes,
+    },
+}
+impl<'a> AlternatingBuffers<'a> {
+    /// Creates a new `AlternatingBuffers` in the [`Init`](Self::Init) state.
+    ///
+    /// `data` is the original source slice. `tmp_buf1` and `tmp_buf2` are the two
+    /// scratch buffers that will be alternated between during transformation steps.
+    pub(crate) fn with_const_src(
+        data: &'a [u8],
+        tmp_buf1: &'a mut AlignedBytes,
+        tmp_buf2: &'a mut AlignedBytes,
+    ) -> Self {
+        Self::Init {
+            original_data: data,
+            tmp_buf1,
+            tmp_buf2,
+        }
+    }
+
+    pub(crate) fn new(main_buf: &'a mut AlignedBytes, secondary_buf: &'a mut AlignedBytes) -> Self {
+        Self::Alternating {
+            main_buf,
+            secondary_buf,
+        }
+    }
+
+    /// Returns the current data.
+    ///
+    /// - In [`Init`](Self::Init): the original source slice (no transformation applied yet).
+    /// - In [`Alternating`](Self::Alternating): the contents of `main_buf`, i.e. the output
+    ///   of the most recently completed transformation step.
+    pub(crate) fn data(&self) -> &[u8] {
+        match self {
+            Self::Init {
+                original_data,
+                tmp_buf1: _,
+                tmp_buf2: _,
+            } => original_data,
+            Self::Alternating {
+                main_buf,
+                secondary_buf: _,
+            } => main_buf.as_slice(),
+        }
+    }
+
+    /// Returns `(src, dst)` for the next transformation step, advancing internal state.
+    ///
+    /// - In [`Init`](Self::Init): transitions `self` to [`Alternating`](Self::Alternating)
+    ///   with `tmp_buf1` as `main_buf`, then returns `(original_data, tmp_buf1)`. After
+    ///   writing the transformed output into `dst`, [`data`](Self::data) will return its
+    ///   contents with no further state change.
+    /// - In [`Alternating`](Self::Alternating): swaps `main_buf` ↔ `secondary_buf`, then
+    ///   returns `(old_main_data, old_secondary_buf)`. The caller writes transformed output
+    ///   into `dst` (which is the new `main_buf`), and [`data`](Self::data) will immediately
+    ///   reflect the new contents.
+    pub(crate) fn edit(&mut self) -> (&[u8], &mut AlignedBytes) {
+        match self {
+            Self::Init {
+                original_data,
+                tmp_buf1,
+                tmp_buf2,
+            } => {
+                let data = *original_data;
+                let main_buf = *tmp_buf1 as *mut AlignedBytes;
+                let secondary_buf = *tmp_buf2 as *mut AlignedBytes;
+                *self = Self::Alternating {
+                    main_buf: unsafe { &mut *main_buf },
+                    secondary_buf: unsafe { &mut *secondary_buf },
+                };
+                let buf = match self {
+                    Self::Alternating { main_buf, .. } => main_buf,
+                    _ => unreachable!(),
+                };
+                (data, buf)
+            }
+            Self::Alternating {
+                main_buf,
+                secondary_buf,
+            } => {
+                std::mem::swap(main_buf, secondary_buf);
+                let prev_main_buf = secondary_buf;
+                let prev_secondary_buf = main_buf;
+                (prev_main_buf.as_slice(), prev_secondary_buf)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::default_strides;
+    use super::{AlignedBytes, AlternatingBuffers, default_strides};
 
     #[test]
     fn test_default_strides() {
@@ -161,5 +274,102 @@ mod tests {
         assert_eq!(s(&[3, 4], 4), &[16, 4]); // 2-d, itemsize 4
         assert_eq!(s(&[2, 3, 4], 1), &[12, 4, 1]); // 3-d, itemsize 1
         assert_eq!(s(&[2, 3, 4], 8), &[96, 32, 8]); // 3-d, itemsize 8
+    }
+
+    // --- AlternatingBuffers ---
+
+    fn empty_buf() -> AlignedBytes {
+        AlignedBytes::new(1)
+    }
+
+    /// data() on a freshly created Init state returns the original slice.
+    #[test]
+    fn alternating_buffers_init_data() {
+        let data = [1u8, 2, 3, 4];
+        let mut buf1 = empty_buf();
+        let mut buf2 = empty_buf();
+        let ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
+        assert_eq!(ab.data(), &[1u8, 2, 3, 4]);
+    }
+
+    /// The first edit() call transitions from Init to Alternating, returning
+    /// (original_data, tmp_buf1). After writing to dst, data() reflects the result.
+    #[test]
+    fn alternating_buffers_first_edit_transitions() {
+        let data = [1u8, 2, 3, 4];
+        let mut buf1 = empty_buf();
+        let mut buf2 = empty_buf();
+        let mut ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
+
+        {
+            let (src, dst) = ab.edit();
+            assert_eq!(src, &[1u8, 2, 3, 4]);
+            dst.extend_from_slice(&[10, 20, 30, 40]);
+        }
+
+        assert!(matches!(ab, AlternatingBuffers::Alternating { .. }));
+        assert_eq!(ab.data(), &[10u8, 20, 30, 40]);
+    }
+
+    /// A second edit() call reads the output of the first and writes a new result.
+    #[test]
+    fn alternating_buffers_two_edits() {
+        let data = [1u8, 2, 3];
+        let mut buf1 = empty_buf();
+        let mut buf2 = empty_buf();
+        let mut ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
+
+        {
+            let (src, dst) = ab.edit();
+            assert_eq!(src, &[1u8, 2, 3]);
+            for &b in src {
+                dst.push(b + 10);
+            }
+        }
+        assert_eq!(ab.data(), &[11u8, 12, 13]);
+
+        {
+            let (src, dst) = ab.edit();
+            assert_eq!(src, &[11u8, 12, 13]);
+            for &b in src {
+                dst.push(b + 10);
+            }
+        }
+        assert_eq!(ab.data(), &[21u8, 22, 23]);
+    }
+
+    /// Three or more edits continue to alternate correctly.
+    #[test]
+    fn alternating_buffers_pipeline() {
+        let data = [0u8];
+        let mut buf1 = empty_buf();
+        let mut buf2 = empty_buf();
+        let mut ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
+
+        for step in 1u8..=5 {
+            let (src, dst) = ab.edit();
+            let prev = src[0];
+            dst.clear();
+            dst.push(prev + step);
+        }
+        // 0 + 1 + 2 + 3 + 4 + 5 = 15
+        assert_eq!(ab.data(), &[15u8]);
+    }
+
+    /// edit() src correctly mirrors data() from the previous step.
+    #[test]
+    fn alternating_buffers_src_matches_previous_data() {
+        let data = [42u8];
+        let mut buf1 = empty_buf();
+        let mut buf2 = empty_buf();
+        let mut ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
+
+        for _ in 0..4 {
+            let current = ab.data().to_vec();
+            let (src, dst) = ab.edit();
+            assert_eq!(src, current.as_slice());
+            dst.clear();
+            dst.push(src[0].wrapping_add(1));
+        }
     }
 }

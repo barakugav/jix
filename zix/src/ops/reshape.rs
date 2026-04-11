@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::NDIM_MAX;
 use crate::array::Array;
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Itemsize};
 use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout, Ref};
 use crate::util::{DimArray, default_strides, dim_arr};
@@ -201,7 +201,7 @@ where
         &self.blocks_layout
     }
 
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.a.storage.codec_params()
     }
 }

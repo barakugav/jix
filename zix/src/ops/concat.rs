@@ -2,7 +2,7 @@ use std::io;
 use std::ops::{Not, Range};
 
 use crate::array::Array;
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
@@ -42,9 +42,8 @@ use crate::util::{ArraySequence, DimArray, default_strides, dim_arr};
 /// # Examples
 ///
 /// ```
-/// use zix::array::Array;
+/// use zix::{Array, ArrayParams};
 /// use zix::ops::concatenate;
-/// use zix::storage::ArrayParams;
 ///
 /// // 1-D concatenation — analogous to np.concatenate([a, b])
 /// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), ArrayParams::default()).unwrap();
@@ -285,7 +284,7 @@ where
     fn blocks_layout(&self) -> &BlocksLayout {
         &self.blocks_layout
     }
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.arrays.codec_params(0)
     }
 }

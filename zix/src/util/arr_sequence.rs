@@ -2,7 +2,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::storage::{ArrayStorage, BlocksLayout};
 
@@ -41,7 +41,7 @@ pub(crate) trait ArraySequenceImpl {
         context: &ReadContext,
     ) -> io::Result<()>;
     fn blocks_layout(&self, arr: usize) -> &BlocksLayout;
-    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams);
+    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig);
 }
 
 #[allow(private_bounds)]
@@ -77,7 +77,7 @@ where
         self[arr].__storage().blocks_layout()
     }
 
-    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self[arr].__storage().codec_params()
     }
 }
@@ -113,7 +113,7 @@ where
         self[arr].__storage().blocks_layout()
     }
 
-    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self[arr].__storage().codec_params()
     }
 }
@@ -149,7 +149,7 @@ where
         self[arr].__storage().blocks_layout()
     }
 
-    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self[arr].__storage().codec_params()
     }
 }
@@ -203,7 +203,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 }
             }
 
-            fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams) {
+            fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
                 match arr {
                     $($idx => ArraySequenceItemImpl::__storage(&self.$idx).codec_params(),)+
                     _ => out_of_bounds_array_index(arr),

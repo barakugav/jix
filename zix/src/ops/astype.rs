@@ -2,7 +2,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 #[cfg(feature = "half")]
 use crate::dtype::f16;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind};
@@ -253,7 +253,7 @@ where
     fn blocks_layout(&self) -> &BlocksLayout {
         &self.blocks_layout
     }
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.a.storage.codec_params()
     }
 }

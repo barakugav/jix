@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use zix_core::codec::{DecoderParams, EncoderParams, ReadContext};
+use zix_core::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use zix_core::dtype::Dtype;
 use zix_core::storage::{ArrayStorage, BlocksLayout};
 
@@ -29,7 +29,7 @@ impl ArrayStorage for DynStorage {
         self.0.blocks_layout()
     }
 
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams) {
+    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.0.codec_params()
     }
 }
