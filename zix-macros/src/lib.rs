@@ -1,6 +1,7 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
+use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Fields, Meta, parse_macro_input};
 
 /// Derive macro generating an impl of the trait `Dtyped`.
@@ -74,56 +75,104 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
             };
 
             field_types = fields.named.iter().map(|f| &f.ty).collect::<Vec<_>>();
-            let field_names = fields.named.iter().map(|f| f.ident.clone());
-            let n_fields = field_types.len();
+            let field_names = fields
+                .named
+                .iter()
+                .map(|f| f.ident.clone())
+                .collect::<Vec<_>>();
+            let var_field_dtype = field_names
+                .iter()
+                .enumerate()
+                .map(|(i, f_name)| {
+                    let f_name = f_name.as_ref().unwrap();
+                    let var_name = format!("field_{i}_{}_dtype", f_name);
+                    syn::Ident::new(&var_name.to_uppercase(), input.span())
+                })
+                .collect::<Vec<_>>();
+            let var_field_offset = field_names
+                .iter()
+                .enumerate()
+                .map(|(i, f_name)| {
+                    let f_name = f_name.as_ref().unwrap();
+                    let var_name = format!("field_{i}_{}_offset", f_name);
+                    syn::Ident::new(&var_name.to_uppercase(), input.span())
+                })
+                .collect::<Vec<_>>();
+            let var_field_end_offset = field_names
+                .iter()
+                .enumerate()
+                .map(|(i, f_name)| {
+                    let f_name = f_name.as_ref().unwrap();
+                    let var_name = format!("field_{i}_{}_end_offset", f_name);
+                    syn::Ident::new(&var_name.to_uppercase(), input.span())
+                })
+                .collect::<Vec<_>>();
+            let var_prev_field_offset = [syn::Ident::new("BASE_OFFSET", input.span())]
+                .into_iter()
+                .chain(
+                    var_field_end_offset
+                        .iter()
+                        .cloned()
+                        .take(var_field_end_offset.len().saturating_sub(1)),
+                )
+                .collect::<Vec<_>>();
+            let last_field_end_offset = var_field_end_offset
+                .last()
+                .cloned()
+                .unwrap_or_else(|| syn::Ident::new("BASE_OFFSET", input.span()));
 
             quote::quote! {
-                unsafe impl #impl_generics #zix_crate::dtype::Dtyped for #struct_name #ty_generics
-                where
-                    #(#field_types: #zix_crate::dtype::Dtyped,)*
-                    #where_clause
-                {
-                    fn dtype() -> #zix_crate::dtype::Dtype {
-                        let mut total_size: #zix_crate::dtype::Itemsize = 0;
-                        let mut fields = Vec::with_capacity(#n_fields);
-                        let mut alignment: #zix_crate::dtype::Alignment = 1;
+                const BASE_OFFSET: #zix_crate::dtype::Itemsize = 0;
 
-                        fn ceil_to_multiple(x: #zix_crate::dtype::Itemsize, m: #zix_crate::dtype::Itemsize) -> #zix_crate::dtype::Itemsize {
-                            assert!(m > 0);
-                            x.div_ceil(m) * m
-                        }
-
-                        #({
-                            let field_dtype = <#field_types as #zix_crate::dtype::Dtyped>::dtype();
-                            let field_size = field_dtype.itemsize();
-
-                            if ! #is_packed {
-                                let field_alignment = field_dtype.alignment();
-                                alignment = alignment.max(field_alignment);
-                                total_size = ceil_to_multiple(total_size, field_alignment as #zix_crate::dtype::Itemsize);
-                            }
-
-                            let offset = total_size;
-                            total_size += field_size;
-                            fields.push((stringify!(#field_names).to_string(), offset, field_dtype));
-                        })*
-                        if ! #is_packed {
-                            total_size = ceil_to_multiple(total_size, alignment as #zix_crate::dtype::Itemsize);
-                        }
-
-
-                        let dtype = #zix_crate::dtype::Dtype {
-                            kind: #zix_crate::dtype::DtypeKind::Struct { fields: fields.into_boxed_slice() },
-                            shape: Default::default(),
-                            itemsize: total_size,
-                            alignment: (alignment, !#is_packed),
-                        };
-
-                        debug_assert_eq!(dtype.itemsize() as usize, std::mem::size_of::<Self>());
-                        debug_assert_eq!(dtype.alignment() as usize, std::mem::align_of::<Self>());
-                        dtype
-                    }
+                const fn ceil_to_multiple(x: #zix_crate::dtype::Itemsize, m: #zix_crate::dtype::Itemsize) -> #zix_crate::dtype::Itemsize {
+                    assert!(m > 0);
+                    x.div_ceil(m) * m
                 }
+
+                #(
+                    const #var_field_dtype: #zix_crate::dtype::Dtype = <#field_types as #zix_crate::dtype::Dtyped>::DTYPE;
+
+                    const #var_field_offset: #zix_crate::dtype::Itemsize = {
+                        let mut offset = #var_prev_field_offset;
+                        if ! #is_packed {
+                            offset = ceil_to_multiple(offset, align_of::<#field_types>() as #zix_crate::dtype::Itemsize);
+                        }
+                        offset
+                    };
+
+                    const #var_field_end_offset: #zix_crate::dtype::Itemsize = #var_field_offset + size_of::<#field_types>()  as #zix_crate::dtype::Itemsize;
+                )*
+
+                const FIELDS: &'static [(std::borrow::Cow<'static, str>, #zix_crate::dtype::Itemsize, #zix_crate::dtype::Dtype)] = &[
+                    #(
+                        (std::borrow::Cow::Borrowed(stringify!(#field_names)), #var_field_offset, #var_field_dtype)
+                    ),*
+                ];
+
+                let mut alignment = 1;
+                let mut total_size = #last_field_end_offset;
+                if !#is_packed {
+                    #( {
+                        let field_alignment = align_of::<#field_types>() as #zix_crate::dtype::Itemsize;
+                        if field_alignment > alignment {
+                            alignment = field_alignment;
+                        }
+                    } )*
+
+                    total_size = ceil_to_multiple(total_size, alignment as #zix_crate::dtype::Itemsize);
+                }
+                let alignment = alignment as #zix_crate::dtype::Alignment;
+
+                let dtype = unsafe { #zix_crate::dtype::Dtype::new_struct_borrowed_unchecked(
+                    FIELDS,
+                    total_size,
+                    alignment,
+                    #is_packed,
+                ) };
+
+                assert!(dtype.itemsize() as usize == size_of::<Self>());
+                assert!(dtype.alignment() as usize == align_of::<Self>());
+                dtype
             }
         }
         Fields::Unnamed(fields) => {
@@ -145,18 +194,9 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
             field_types = vec![field_type];
 
             quote::quote! {
-                unsafe impl #impl_generics #zix_crate::dtype::Dtyped for #struct_name #ty_generics
-                where
-                    #(#field_types: #zix_crate::dtype::Dtyped,)*
-                    #where_clause
-                {
-                    fn dtype() -> #zix_crate::dtype::Dtype {
-                        let dtype = <#field_type as #zix_crate::dtype::Dtyped>::dtype();
-                        debug_assert_eq!(dtype.itemsize() as usize, std::mem::size_of::<Self>());
-                        debug_assert_eq!(dtype.alignment() as usize, std::mem::align_of::<Self>());
-                        dtype
-                    }
-                }
+                assert!(size_of::<#field_type>() == size_of::<Self>());
+                assert!(align_of::<#field_type>() == align_of::<Self>());
+                <#field_type as #zix_crate::dtype::Dtyped>::DTYPE
             }
         }
         Fields::Unit => {
@@ -164,6 +204,16 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                 input,
                 "Dtyped can not be derived for unit structs.",
             ));
+        }
+    };
+
+    let tokens = quote::quote! {
+        unsafe impl #impl_generics #zix_crate::dtype::Dtyped for #struct_name #ty_generics
+        where
+            #(#field_types: #zix_crate::dtype::Dtyped,)*
+            #where_clause
+        {
+            const DTYPE: #zix_crate::dtype::Dtype = { #tokens };
         }
     };
 

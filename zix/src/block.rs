@@ -527,7 +527,7 @@ mod tests {
     {
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
-            T::dtype(),
+            T::DTYPE,
             block_size,
             encoder,
         )
@@ -537,7 +537,7 @@ mod tests {
     fn build_single_block() {
         let items: Vec<u8> = (0u8..8).collect();
         let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u8::dtype(), &encoder_params);
+        let encoder = make_encoder(u8::DTYPE, &encoder_params);
         let table = build_from_items(&items, 8, encoder).unwrap();
         assert_eq!(table.storage.block_offsets.len(), 2);
         assert_eq!(table.nitems, 8);
@@ -550,7 +550,7 @@ mod tests {
         // 12 items, block_size=4 → 3 full blocks
         let items: Vec<u8> = (0u8..12).collect();
         let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u8::dtype(), &encoder_params);
+        let encoder = make_encoder(u8::DTYPE, &encoder_params);
         let table = build_from_items(&items, 4, encoder).unwrap();
         assert_eq!(table.storage.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
@@ -565,7 +565,7 @@ mod tests {
         // 10 items, block_size=4 → not divisible, should panic
         let items: Vec<u8> = (0u8..10).collect();
         let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u8::dtype(), &encoder_params);
+        let encoder = make_encoder(u8::DTYPE, &encoder_params);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             build_from_items(&items, 4, encoder).unwrap();
         }));
@@ -577,7 +577,7 @@ mod tests {
         // 4 u32 values, block_size=2
         let items: Vec<u32> = vec![10, 20, 30, 40];
         let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u32::dtype(), &encoder_params);
+        let encoder = make_encoder(u32::DTYPE, &encoder_params);
         let table = build_from_items(&items, 2, encoder).unwrap();
         assert_eq!(table.storage.block_offsets.len(), 3);
         assert_eq!(table.nitems, 4);
@@ -596,7 +596,7 @@ mod tests {
 
     fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<Owned> {
         let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(T::dtype(), &encoder_params);
+        let encoder = make_encoder(T::DTYPE, &encoder_params);
         let table = build_from_items(items, block_size, encoder).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
         table.write_to(&mut buf).unwrap();
@@ -612,7 +612,7 @@ mod tests {
         assert_eq!(table2.storage.block_offsets.len(), 2);
         assert_eq!(table2.nitems, 8);
         assert_eq!(table2.block_size, 8);
-        assert_eq!(*table2.dtype(), u8::dtype());
+        assert_eq!(*table2.dtype(), u8::DTYPE);
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         assert_eq!(decode_block(&table2, 0, &mut context), items);
     }
@@ -647,7 +647,7 @@ mod tests {
     fn round_trip_file() {
         let items: Vec<u32> = (0u32..18).collect();
         let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u32::dtype(), &encoder_params);
+        let encoder = make_encoder(u32::DTYPE, &encoder_params);
         let table = build_from_items(&items, 3, encoder).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
@@ -677,9 +677,9 @@ mod tests {
     ) -> BlockTable<Owned> {
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
-            T::dtype(),
+            T::DTYPE,
             block_len,
-            make_encoder(T::dtype(), params),
+            make_encoder(T::DTYPE, params),
         )
         .unwrap()
     }
@@ -691,7 +691,7 @@ mod tests {
     {
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
-        let mut buf = AlignedBytes::with_capacity(T::dtype().alignment() as usize, block_bytes);
+        let mut buf = AlignedBytes::with_capacity(T::DTYPE.alignment() as usize, block_bytes);
         unsafe { buf.set_len(block_bytes) };
         storage
             .read_block(idx as u64, &mut buf, &mut context)
@@ -706,7 +706,7 @@ mod tests {
         let s = make_storage(&items, 8, &encoder_params);
         assert_eq!(s.nitems(), 8);
         assert_eq!(s.block_len(), 8);
-        assert_eq!(s.dtype(), &u8::dtype());
+        assert_eq!(s.dtype(), &u8::DTYPE);
         assert_eq!(read_block_items::<u8, _>(&s, 0), items);
     }
 

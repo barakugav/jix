@@ -454,7 +454,7 @@ mod tests {
                     let a = rand_array::<$src>(&mut rng, &[8]);
                     let za = Array::from_ndarray(&a, arr_params(&[8])).unwrap();
                     let actual = za
-                        .astype(<$dst>::dtype())
+                        .astype(<$dst>::DTYPE)
                         .data()
                         .to_ndarray::<$dst>()
                         .unwrap();
@@ -468,7 +468,7 @@ mod tests {
                     let a = rand_array::<$src>(&mut rng, &[6]);
                     let za = Array::from_ndarray(&a, arr_params(&[2])).unwrap();
                     let actual = za
-                        .astype(<$dst>::dtype())
+                        .astype(<$dst>::DTYPE)
                         .data()
                         .to_ndarray::<$dst>()
                         .unwrap();
@@ -482,7 +482,7 @@ mod tests {
                     let a = rand_array::<$src>(&mut rng, &[3, 4]);
                     let za = Array::from_ndarray(&a, arr_params(&[3, 4])).unwrap();
                     let actual = za
-                        .astype(<$dst>::dtype())
+                        .astype(<$dst>::DTYPE)
                         .data()
                         .to_ndarray::<$dst>()
                         .unwrap();
@@ -496,7 +496,7 @@ mod tests {
                     let a = rand_array::<$src>(&mut rng, &[4, 4]);
                     let za = Array::from_ndarray(&a, arr_params(&[2, 2])).unwrap();
                     let actual = za
-                        .astype(<$dst>::dtype())
+                        .astype(<$dst>::DTYPE)
                         .data()
                         .to_ndarray::<$dst>()
                         .unwrap();
@@ -560,32 +560,32 @@ mod tests {
             arr_params(&[1]),
         )
         .unwrap();
-        assert!(a.try_astype(f32::dtype()).is_err());
+        assert!(a.try_astype(f32::DTYPE).is_err());
     }
 
     #[test]
     fn cast_real_to_complex_fails() {
         let a = Array::from_ndarray(&ndarray::array![1.0f32].into_dyn(), arr_params(&[1])).unwrap();
-        assert!(a.try_astype(Complex::<f32>::dtype()).is_err());
+        assert!(a.try_astype(Complex::<f32>::DTYPE).is_err());
     }
 
     #[cfg(not(feature = "half"))]
     #[test]
     fn cast_f16_without_feature_fails() {
         let a = Array::from_ndarray(&ndarray::array![1.0f32].into_dyn(), arr_params(&[1])).unwrap();
-        assert!(a.try_astype(f16::dtype()).is_err());
+        assert!(a.try_astype(f16::DTYPE).is_err());
         let a = Array::from_ndarray(
             &ndarray::array![f16::from_bits(17)].into_dyn(),
             arr_params(&[1]),
         )
         .unwrap();
-        assert!(a.try_astype(f32::dtype()).is_err());
+        assert!(a.try_astype(f32::DTYPE).is_err());
         let a = Array::from_ndarray(
             &ndarray::array![f16::from_bits(17)].into_dyn(),
             arr_params(&[1]),
         )
         .unwrap();
-        assert!(a.try_astype(f16::dtype()).is_ok());
+        assert!(a.try_astype(f16::DTYPE).is_ok());
     }
 
     #[test]
@@ -596,6 +596,6 @@ mod tests {
             arr_params(&[1]),
         )
         .unwrap();
-        assert!(a.try_astype(f16::dtype()).is_ok());
+        assert!(a.try_astype(f16::DTYPE).is_ok());
     }
 }

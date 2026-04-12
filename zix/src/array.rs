@@ -100,7 +100,7 @@ impl<S: ArrayStorage> Array<S> {
         self.storage.blocks_layout()
     }
 
-    pub fn reference(&self) -> Array<Ref<'_, S>> {
+    pub fn as_ref(&self) -> Array<Ref<'_, S>> {
         Array {
             storage: Ref(self.storage()),
         }
@@ -124,7 +124,7 @@ impl Array<Owned> {
             .iter()
             .map(|&s| s as u64)
             .collect::<DimArray<_>>();
-        let dtype = T::dtype();
+        let dtype = T::DTYPE;
         let itemsize = dtype.itemsize() as usize;
 
         let strides = array.strides();
@@ -311,7 +311,7 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
             return Ok(());
         }
 
-        let dtype = T::dtype();
+        let dtype = T::DTYPE;
         if self.dtype() != &dtype {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -544,8 +544,8 @@ mod tests {
             .iter()
             .flat_map(|b| unsafe { cast_slice::<T, u8>(b) }.iter().copied())
             .collect();
-        let encoder = Encoder::new(&EncoderParams::default(), T::dtype()).unwrap();
-        BlockTable::build_from_data(&data, T::dtype(), block_len, encoder).unwrap()
+        let encoder = Encoder::new(&EncoderParams::default(), T::DTYPE).unwrap();
+        BlockTable::build_from_data(&data, T::DTYPE, block_len, encoder).unwrap()
     }
 
     fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Owned> {
@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn dtype_shape_ndim() {
         let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
-        assert_eq!(a.dtype(), &u8::dtype());
+        assert_eq!(a.dtype(), &u8::DTYPE);
         assert_eq!(a.shape(), &[4]);
         assert_eq!(a.ndim(), 1);
     }
@@ -786,7 +786,7 @@ mod tests {
         let a = Array::from_ndarray(&src, arr_params(&[3])).unwrap();
         assert_eq!(a.ndim(), 1);
         assert_eq!(a.shape(), &[6]);
-        assert_eq!(a.dtype(), &i32::dtype());
+        assert_eq!(a.dtype(), &i32::DTYPE);
     }
 
     // -----------------------------------------------------------------------
@@ -883,7 +883,7 @@ mod tests {
         let a2 = array_round_trip::<u8, _, _>(&src, &[4]);
         assert_eq!(a2.shape(), &[4]);
         assert_eq!(a2.ndim(), 1);
-        assert_eq!(a2.dtype(), &u8::dtype());
+        assert_eq!(a2.dtype(), &u8::DTYPE);
         assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
@@ -908,7 +908,7 @@ mod tests {
     fn write_read_1d_i32() {
         let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
         let a2 = array_round_trip::<i32, _, _>(&src, &[4]);
-        assert_eq!(a2.dtype(), &i32::dtype());
+        assert_eq!(a2.dtype(), &i32::DTYPE);
         assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
@@ -916,7 +916,7 @@ mod tests {
     fn write_read_1d_f32() {
         let src = ndarray::array![0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5];
         let a2 = array_round_trip::<f32, _, _>(&src, &[3]);
-        assert_eq!(a2.dtype(), &f32::dtype());
+        assert_eq!(a2.dtype(), &f32::DTYPE);
         assert_eq!(a2.data().to_ndarray::<f32>().unwrap(), src.into_dyn());
     }
 
@@ -964,7 +964,7 @@ mod tests {
         let a2 = Array::read_from_reader(file, len, ArrayParams::default()).unwrap();
 
         assert_eq!(a2.shape(), &[12]);
-        assert_eq!(a2.dtype(), &u32::dtype());
+        assert_eq!(a2.dtype(), &u32::DTYPE);
         assert_eq!(a2.data().to_ndarray::<u32>().unwrap(), src.into_dyn());
     }
 
@@ -1018,7 +1018,7 @@ mod tests {
             Array::read_from_reader(Cursor::new(&bytes), len0, ArrayParams::default()).unwrap();
         assert_eq!(r0.shape(), &[4]);
         assert_eq!(r0.ndim(), 1);
-        assert_eq!(r0.dtype(), &u8::dtype());
+        assert_eq!(r0.dtype(), &u8::DTYPE);
         assert_eq!(r0.data().to_ndarray::<u8>().unwrap(), src0.into_dyn());
 
         // Read array 1 (padded offset, 2D).
@@ -1030,7 +1030,7 @@ mod tests {
         .unwrap();
         assert_eq!(r1.shape(), &[3, 4]);
         assert_eq!(r1.ndim(), 2);
-        assert_eq!(r1.dtype(), &i32::dtype());
+        assert_eq!(r1.dtype(), &i32::DTYPE);
         assert_eq!(r1.data().to_ndarray::<i32>().unwrap(), src1.into_dyn());
 
         // Read array 2 (padded offset, 3D).
@@ -1042,7 +1042,7 @@ mod tests {
         .unwrap();
         assert_eq!(r2.shape(), &[2, 2, 3]);
         assert_eq!(r2.ndim(), 3);
-        assert_eq!(r2.dtype(), &f32::dtype());
+        assert_eq!(r2.dtype(), &f32::DTYPE);
         assert_eq!(r2.data().to_ndarray::<f32>().unwrap(), src2.into_dyn());
     }
 
@@ -1078,7 +1078,7 @@ mod tests {
         let a2 = array_mmap_round_trip::<u8, _, _>(&src, &[4], &tmp);
         assert_eq!(a2.shape(), &[4]);
         assert_eq!(a2.ndim(), 1);
-        assert_eq!(a2.dtype(), &u8::dtype());
+        assert_eq!(a2.dtype(), &u8::DTYPE);
         assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
@@ -1098,7 +1098,7 @@ mod tests {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
         let a2 = array_mmap_round_trip::<i32, _, _>(&src, &[4], &tmp);
-        assert_eq!(a2.dtype(), &i32::dtype());
+        assert_eq!(a2.dtype(), &i32::DTYPE);
         assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
@@ -1197,7 +1197,7 @@ mod tests {
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[4]);
         assert_eq!(b.ndim(), 1);
-        assert_eq!(b.dtype(), &u8::dtype());
+        assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [4]);
         assert_eq!(
             b.data().to_ndarray::<u8>().unwrap(),
@@ -1233,7 +1233,7 @@ mod tests {
         let a = array(&[&[10i32, 20, 30, 40], &[50, 60, 70, 80]], &[8], &[4]);
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[8]);
-        assert_eq!(b.dtype(), &i32::dtype());
+        assert_eq!(b.dtype(), &i32::DTYPE);
         assert_eq!(
             b.data().to_ndarray::<i32>().unwrap(),
             ArrayD::from_shape_vec(vec![8], vec![10i32, 20, 30, 40, 50, 60, 70, 80]).unwrap()
@@ -1298,7 +1298,7 @@ mod tests {
         let a = Array::from_ndarray(&src, arr_params(&[2, 3])).unwrap();
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[3, 5]);
-        assert_eq!(b.dtype(), &i32::dtype());
+        assert_eq!(b.dtype(), &i32::DTYPE);
         assert_eq!(b.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
@@ -1312,7 +1312,7 @@ mod tests {
         let a = Array::from_ndarray(&src, arr_params(&[2, 2, 3])).unwrap();
         let b = a.data().copy().unwrap();
         assert_eq!(b.shape(), &[3, 3, 5]);
-        assert_eq!(b.dtype(), &u8::dtype());
+        assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 2, 3]);
         assert_eq!(b.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
     }

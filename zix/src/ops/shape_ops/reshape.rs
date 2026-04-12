@@ -392,7 +392,7 @@ mod tests {
         use crate::dtype::Dtyped;
         let a = make1d(i32s(6), 6);
         let r = a.reshape_view(&[2, 3]);
-        assert_eq!(r.dtype(), &i32::dtype());
+        assert_eq!(r.dtype(), &i32::DTYPE);
     }
 
     #[test]
@@ -913,8 +913,8 @@ mod tests {
     fn flat_order_preserved_4x3_vs_3x4() {
         // Both reshape [12] → [4,3] and [3,4] must yield same flat sequence
         let a12 = make1d(u8s(12), 12);
-        let r43 = a12.reference().reshape_view(&[4, 3]);
-        let r34 = a12.reference().reshape_view(&[3, 4]);
+        let r43 = a12.as_ref().reshape_view(&[4, 3]);
+        let r34 = a12.as_ref().reshape_view(&[3, 4]);
 
         let flat_43: ArrayD<u8> = r43.reshape_view(&[12]).data().to_ndarray().unwrap();
         let flat_34: ArrayD<u8> = r34.reshape_view(&[12]).data().to_ndarray().unwrap();

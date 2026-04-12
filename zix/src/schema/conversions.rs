@@ -2,7 +2,7 @@
 
 use crate::dtype::{Alignment, DTYPE_MAX_NDIM, Itemsize};
 use crate::schema;
-use crate::util::IxIterExt;
+use crate::util::{DimArray, IxIterExt};
 use std::io;
 
 impl crate::dtype::Dtype {
@@ -29,7 +29,7 @@ impl crate::dtype::Dtype {
             .shape
             .iter()
             .map(|&d| d.try_into())
-            .collect::<Result<crate::dtype::DtypeShape, _>>()
+            .collect::<Result<DimArray<_>, _>>()
             .map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -179,7 +179,7 @@ impl crate::dtype::Dtype {
             let fields = fields
                 .iter()
                 .map(|(name, offset, dtype)| schema::dtype_struct::Field {
-                    name: name.clone(),
+                    name: name.to_string(),
                     offset: *offset as u32,
                     dtype: Some(dtype.to_proto()),
                 })
@@ -222,21 +222,21 @@ mod tests {
 
     #[test]
     fn roundtrip_scalar_i32() {
-        let original = i32::dtype();
+        let original = i32::DTYPE;
         let roundtripped = Dtype::from_proto(&original.to_proto()).unwrap();
         assert_eq!(original, roundtripped);
     }
 
     #[test]
     fn roundtrip_scalar_f64() {
-        let original = f64::dtype();
+        let original = f64::DTYPE;
         let roundtripped = Dtype::from_proto(&original.to_proto()).unwrap();
         assert_eq!(original, roundtripped);
     }
 
     #[test]
     fn roundtrip_scalar_with_shape() {
-        let mut original = f32::dtype();
+        let mut original = f32::DTYPE;
         original.set_shape(&[3, 2]).unwrap();
         let roundtripped = Dtype::from_proto(&original.to_proto()).unwrap();
         assert_eq!(original, roundtripped);
@@ -247,8 +247,8 @@ mod tests {
     #[test]
     fn roundtrip_struct() {
         let original = Dtype::from_fields(vec![
-            ("x".to_string(), 0, u8::dtype()),
-            ("y".to_string(), 8, f64::dtype()),
+            ("x".to_string(), 0, u8::DTYPE),
+            ("y".to_string(), 8, f64::DTYPE),
         ])
         .unwrap();
         let roundtripped = Dtype::from_proto(&original.to_proto()).unwrap();
@@ -258,13 +258,13 @@ mod tests {
     #[test]
     fn roundtrip_nested_struct() {
         let inner = Dtype::from_fields(vec![
-            ("a".to_string(), 0, i32::dtype()),
-            ("b".to_string(), 4, i32::dtype()),
+            ("a".to_string(), 0, i32::DTYPE),
+            ("b".to_string(), 4, i32::DTYPE),
         ])
         .unwrap();
         let outer = Dtype::from_fields(vec![
             ("inner".to_string(), 0, inner),
-            ("c".to_string(), 8, u8::dtype()),
+            ("c".to_string(), 8, u8::DTYPE),
         ])
         .unwrap();
         let roundtripped = Dtype::from_proto(&outer.to_proto()).unwrap();
@@ -328,7 +328,7 @@ mod tests {
             schema::DtypeScalarKind::U8,
             1,
             1,
-            vec![1, 1, 1, 1, 1], // 5 dims > DTYPE_SHAPE_MAX_NDIM=4
+            vec![1, 1, 1, 1, 1], // 5 dims > DTYPE_MAX_NDIM=4
         );
         assert!(Dtype::from_proto(&proto).is_err());
     }
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn to_proto_scalar_kind_and_endianness() {
-        let proto = i32::dtype().to_proto();
+        let proto = i32::DTYPE.to_proto();
         match proto.kind.unwrap() {
             schema::dtype::Kind::Scalar(s) => {
                 assert_eq!(s.kind(), schema::DtypeScalarKind::I32);
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn to_proto_shape_is_serialized() {
-        let mut d = u8::dtype();
+        let mut d = u8::DTYPE;
         d.set_shape(&[5, 3]).unwrap();
         let proto = d.to_proto();
         assert_eq!(proto.shape, vec![5, 3]);
@@ -379,8 +379,8 @@ mod tests {
     #[test]
     fn to_proto_struct_fields_are_serialized() {
         let dtype = Dtype::from_fields(vec![
-            ("a".to_string(), 0, u8::dtype()),
-            ("b".to_string(), 1, u8::dtype()),
+            ("a".to_string(), 0, u8::DTYPE),
+            ("b".to_string(), 1, u8::DTYPE),
         ])
         .unwrap();
         let proto = dtype.to_proto();

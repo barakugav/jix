@@ -351,7 +351,7 @@ mod tests {
         });
     }
 
-    // Too many dimensions (> DTYPE_SHAPE_MAX_NDIM = 4)
+    // Too many dimensions (> DTYPE_MAX_NDIM = 4)
     #[test]
     fn test_from_numpy_scalar_shape_too_many_dims() {
         Python::attach(|py| {

@@ -78,7 +78,7 @@ impl<Op, S> BoolOp1<Op, S> {
         }
         Ok(Self {
             op,
-            dtype: bool::dtype(),
+            dtype: bool::DTYPE,
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
             a,

@@ -398,7 +398,7 @@ mod tests {
                     let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
                     let zb = Array::from_ndarray(&b, arr_params(&[4])).unwrap();
                     let zc = Array::from_ndarray(&c, arr_params(&[4])).unwrap();
-                    let zab = za $op zb.reference();
+                    let zab = za $op zb.as_ref();
                     let actual = (zab $op zc).data().to_ndarray::<$dtype>().unwrap();
                     let expected = &(&a $op &b) $op &c;
                     assert_eq!(actual, expected);
