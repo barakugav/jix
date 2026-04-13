@@ -16,11 +16,11 @@ pub use math1::*;
 mod math2;
 pub use math2::*;
 
-mod bool1;
-pub use bool1::*;
+mod logical1;
+pub use logical1::*;
 
-mod bool2;
-pub use bool2::*;
+mod logical2;
+pub use logical2::*;
 
 mod bitwise;
 pub use bitwise::*;

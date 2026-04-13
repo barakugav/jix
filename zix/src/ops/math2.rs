@@ -330,7 +330,6 @@ define_math2_op!(
     |a, b| MinimumTrait::minimum(a, b),
     [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );
-// bitwise (integers + bools) and, or, xor, not, rsh, lsh, popcount, count_ones, count_zeros, leading_zeros, trailing_zeros
 
 trait MaximumTrait {
     fn maximum(self, other: Self) -> Self;

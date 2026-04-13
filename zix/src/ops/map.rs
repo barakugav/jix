@@ -37,30 +37,30 @@ where
 /// written as `R`. No allocation beyond the read buffer occurs.
 ///
 /// Construct via [`Array::map`]; use [`Map::new`] for fallible construction.
-pub struct Map<S, T, R, F> {
+pub struct Map<S, I, O, F> {
     a: Array<S>,
 
     map_fn: F,
     dtype: Dtype,
-    _phantom: std::marker::PhantomData<(T, R)>,
+    _phantom: std::marker::PhantomData<(I, O)>,
 
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
-impl<S, T, R, F> Map<S, T, R, F> {
+impl<S, I, O, F> Map<S, I, O, F> {
     pub fn new(a: Array<S>, map_fn: F) -> io::Result<Self>
     where
         S: ArrayStorage,
-        T: Dtyped,
-        R: Dtyped,
-        F: Fn(T) -> R,
+        I: Dtyped,
+        O: Dtyped,
+        F: Fn(I) -> O,
     {
-        let src_dtype = T::DTYPE;
+        let src_dtype = I::DTYPE;
         if src_dtype != *a.dtype() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "map input dtype mismatch: array has {:?} but T is {:?}",
+                    "map input dtype mismatch: array has {:?} but input generic (I) is {:?}",
                     a.dtype(),
                     src_dtype
                 ),
@@ -69,7 +69,7 @@ impl<S, T, R, F> Map<S, T, R, F> {
 
         Ok(Self {
             map_fn,
-            dtype: R::DTYPE,
+            dtype: O::DTYPE,
             _phantom: std::marker::PhantomData,
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
@@ -77,12 +77,12 @@ impl<S, T, R, F> Map<S, T, R, F> {
         })
     }
 }
-impl<S, T, R, F> ArrayStorage for Map<S, T, R, F>
+impl<S, I, O, F> ArrayStorage for Map<S, I, O, F>
 where
     S: ArrayStorage,
-    T: Dtyped,
-    R: Dtyped,
-    F: Fn(T) -> R,
+    I: Dtyped,
+    O: Dtyped,
+    F: Fn(I) -> O,
 {
     fn shape(&self) -> &[u64] {
         &self.shape
@@ -98,7 +98,7 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()> {
-        let (src_dtype, dst_dtype) = (self.a.dtype(), &self.dtype);
+        let (src_dtype, dst_dtype) = (self.a.dtype(), O::DTYPE);
         let (src_itemsize, dst_itemsize) =
             (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
         let nitems = buf.len() / dst_itemsize;
@@ -120,12 +120,11 @@ where
 
         for i in 0..nitems {
             unsafe {
-                let value = src.cast::<T>().add(i).read();
+                let value = src.cast::<I>().add(i).read();
                 let value = (self.map_fn)(value);
-                dst.cast::<R>().add(i).write(value);
+                dst.cast::<O>().add(i).write(value);
             }
         }
-
         Ok(())
     }
 

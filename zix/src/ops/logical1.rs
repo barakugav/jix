@@ -6,70 +6,71 @@ use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, Dtyped, f16};
 use crate::ops::common::define_array_op1_method;
 use crate::storage::{ArrayStorage, BlocksLayout};
-use crate::util::{DimArray, cast_slice, cast_slice_mut};
+use crate::util::DimArray;
 
 #[allow(unused_variables)]
-pub(crate) trait BoolOp1Kernel {
-    fn apply_i8(&self, a: i8) -> bool {
+pub(crate) trait LogicalOp1Kernel<O> {
+    fn apply_i8(&self, a: i8) -> O {
         unimplemented!()
     }
-    fn apply_i16(&self, a: i16) -> bool {
+    fn apply_i16(&self, a: i16) -> O {
         unimplemented!()
     }
-    fn apply_i32(&self, a: i32) -> bool {
+    fn apply_i32(&self, a: i32) -> O {
         unimplemented!()
     }
-    fn apply_i64(&self, a: i64) -> bool {
+    fn apply_i64(&self, a: i64) -> O {
         unimplemented!()
     }
-    fn apply_u8(&self, a: u8) -> bool {
+    fn apply_u8(&self, a: u8) -> O {
         unimplemented!()
     }
-    fn apply_u16(&self, a: u16) -> bool {
+    fn apply_u16(&self, a: u16) -> O {
         unimplemented!()
     }
-    fn apply_u32(&self, a: u32) -> bool {
+    fn apply_u32(&self, a: u32) -> O {
         unimplemented!()
     }
-    fn apply_u64(&self, a: u64) -> bool {
+    fn apply_u64(&self, a: u64) -> O {
         unimplemented!()
     }
-    fn apply_f16(&self, a: f16) -> bool {
+    fn apply_f16(&self, a: f16) -> O {
         unimplemented!()
     }
-    fn apply_f32(&self, a: f32) -> bool {
+    fn apply_f32(&self, a: f32) -> O {
         unimplemented!()
     }
-    fn apply_f64(&self, a: f64) -> bool {
+    fn apply_f64(&self, a: f64) -> O {
         unimplemented!()
     }
-    fn apply_complex_f32(&self, a: Complex<f32>) -> bool {
+    fn apply_complex_f32(&self, a: Complex<f32>) -> O {
         unimplemented!()
     }
-    fn apply_complex_f64(&self, a: Complex<f64>) -> bool {
+    fn apply_complex_f64(&self, a: Complex<f64>) -> O {
         unimplemented!()
     }
-    fn apply_bool(&self, a: bool) -> bool {
+    fn apply_bool(&self, a: bool) -> O {
         unimplemented!()
     }
 
     fn is_support_dtype(&self, dtype: &Dtype) -> bool;
 }
 
-pub(crate) struct BoolOp1<Op, S> {
+pub(crate) struct LogicalOp1<Op, S, O> {
     op: Op,
-
     a: Array<S>,
-
     dtype: Dtype,
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
+    _phantom: std::marker::PhantomData<O>,
 }
-impl<Op, S> BoolOp1<Op, S> {
+
+impl<Op, S, O> LogicalOp1<Op, S, O> {
     pub(crate) fn new(op: Op, a: Array<S>) -> io::Result<Self>
     where
-        Op: BoolOp1Kernel,
+        Op: LogicalOp1Kernel<O>,
         S: ArrayStorage,
+        O: Dtyped,
     {
         if !op.is_support_dtype(a.dtype()) {
             return Err(io::Error::new(
@@ -79,17 +80,20 @@ impl<Op, S> BoolOp1<Op, S> {
         }
         Ok(Self {
             op,
-            dtype: bool::DTYPE,
+            dtype: O::DTYPE,
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
+            _phantom: std::marker::PhantomData,
             a,
         })
     }
 }
-impl<Op, S> ArrayStorage for BoolOp1<Op, S>
+
+impl<Op, S, O> ArrayStorage for LogicalOp1<Op, S, O>
 where
-    Op: BoolOp1Kernel,
+    Op: LogicalOp1Kernel<O>,
     S: ArrayStorage,
+    O: Dtyped,
 {
     fn shape(&self) -> &[u64] {
         &self.shape
@@ -105,23 +109,39 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> std::io::Result<()> {
-        let inner_dtype = self.a.dtype();
-        let inner_buf_size = buf.len() * inner_dtype.itemsize() as usize;
-        let mut tmp_buf = context.tmp_buf(inner_buf_size, inner_dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.a.storage.read_data(index, tmp_buf, context)?;
+        let (src_dtype, dst_dtype) = (self.a.dtype(), O::DTYPE);
+        let (src_itemsize, dst_itemsize) =
+            (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
+        let nitems = buf.len() / dst_itemsize;
+
+        let in_place = src_itemsize == dst_itemsize
+            && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment() as usize);
+        let mut tmp_buf;
+        let (read_buf, dst) = if in_place {
+            let ptr = buf.as_mut_ptr();
+            ((ptr, buf.len()), ptr)
+        } else {
+            tmp_buf = context.tmp_buf(nitems * src_itemsize, src_dtype.alignment());
+            let tmp_buf = tmp_buf.as_mut_slice();
+            ((tmp_buf.as_mut_ptr(), tmp_buf.len()), buf.as_mut_ptr())
+        };
+        let read_buf = unsafe { std::slice::from_raw_parts_mut(read_buf.0, read_buf.1) };
+        self.a.storage.read_data(index, read_buf, context)?;
+        let src = read_buf.as_ptr();
 
         macro_rules! apply_loop {
-            ($ty:ty, $apply:ident) => {
-                let src = unsafe { cast_slice::<u8, $ty>(tmp_buf) };
-                let dst = unsafe { cast_slice_mut::<u8, bool>(buf) };
-                for (a, b) in dst.iter_mut().zip(src) {
-                    *a = self.op.$apply(*b);
+            ($src_ty:ty, $apply:ident) => {
+                for i in 0..nitems {
+                    unsafe {
+                        let value = src.cast::<$src_ty>().add(i).read();
+                        let value = self.op.$apply(value);
+                        dst.cast::<O>().add(i).write(value);
+                    }
                 }
             };
         }
 
-        match inner_dtype.try_to_scalar() {
+        match src_dtype.try_to_scalar() {
             Some(DtypeScalarKind::I8) => {
                 apply_loop!(i8, apply_i8);
             }
@@ -167,7 +187,7 @@ where
             None => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Unsupported,
-                    "only scalar dtypes are supported for BoolOp1",
+                    "only scalar dtypes are supported for LogicalOp1",
                 ));
             }
         }
@@ -177,56 +197,57 @@ where
     fn blocks_layout(&self) -> &BlocksLayout {
         &self.blocks_layout
     }
+
     fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.a.storage.codec_params()
     }
 }
 
-macro_rules! define_op {
-    ($Name:ident, $NameKernel:ident, |$arg:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
-        pub struct $Name<S>(BoolOp1<$NameKernel, S>);
+macro_rules! define_logical1_op {
+    ($Name:ident, $NameKernel:ident, |$arg:ident| -> $O:ty $body:block, [$($scalar:tt),* $(,)?]) => {
+        pub struct $Name<S>(crate::ops::logical1::LogicalOp1<$NameKernel, S, $O>);
         impl<S> $Name<S> {
-            pub fn new(a: Array<S>) -> io::Result<Self>
+            pub(crate) fn new(a: crate::Array<S>) -> std::io::Result<Self>
             where
-                S: ArrayStorage,
+                S: crate::storage::ArrayStorage,
             {
-                Ok(Self(BoolOp1::new($NameKernel, a)?))
+                Ok(Self(crate::ops::logical1::LogicalOp1::new($NameKernel, a)?))
             }
         }
-        crate::storage::impl_array_storage_forward!($Name<S> where S: ArrayStorage);
+        crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
 
-        define_op_kernel!($NameKernel, |$arg| $body, [$($scalar),*]);
+        crate::ops::logical1::define_logical1_op_kernel!($NameKernel, |$arg| -> $O $body, [$($scalar),*]);
     };
 }
-macro_rules! define_op_kernel {
-    ($NameKernel:ident, |$arg:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
+macro_rules! define_logical1_op_kernel {
+    ($NameKernel:ident, |$arg:ident| -> $O:ty $body:block, [$($scalar:tt),* $(,)?]) => {
         struct $NameKernel;
-        impl BoolOp1Kernel for $NameKernel {
-            $(define_op_kernel!(@apply |$arg| $body, $scalar);)*
+        impl crate::ops::logical1::LogicalOp1Kernel<$O> for $NameKernel {
+            $(crate::ops::logical1::define_logical1_op_kernel!(@apply |$arg| -> $O $body, $scalar);)*
 
             fn is_support_dtype(&self, dtype: &crate::dtype::Dtype) -> bool {
                 use crate::dtype::DtypeScalarKind;
                 let Some(scalar_kind) = dtype.try_to_scalar() else {
                     return false;
                 };
-                false $(|| define_op_kernel!(@dtype_match scalar_kind, $scalar))*
+                false $(|| crate::ops::logical1::define_logical1_op_kernel!(@dtype_match scalar_kind, $scalar))*
             }
         }
     };
 
     // --- apply arms ---
-    (@apply |$arg:ident| $body:expr, i8)  => { fn apply_i8(&self, $arg: i8) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, i16) => { fn apply_i16(&self, $arg: i16) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, i32) => { fn apply_i32(&self, $arg: i32) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, i64) => { fn apply_i64(&self, $arg: i64) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, u8)  => { fn apply_u8(&self, $arg: u8) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, u16) => { fn apply_u16(&self, $arg: u16) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, u32) => { fn apply_u32(&self, $arg: u32) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, u64) => { fn apply_u64(&self, $arg: u64) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, f32) => { fn apply_f32(&self, $arg: f32) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, f64) => { fn apply_f64(&self, $arg: f64) -> bool { $body } };
-    (@apply |$arg:ident| $body:expr, f16) => {
-        fn apply_f16(&self, #[allow(unused_variables)] $arg: f16) -> bool {
+    (@apply |$arg:ident| -> $O:ty $body:block, i8)  => { fn apply_i8(&self, $arg: i8) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, i16) => { fn apply_i16(&self, $arg: i16) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, i32) => { fn apply_i32(&self, $arg: i32) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, i64) => { fn apply_i64(&self, $arg: i64) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, u8)  => { fn apply_u8(&self, $arg: u8) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, u16) => { fn apply_u16(&self, $arg: u16) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, u32) => { fn apply_u32(&self, $arg: u32) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, u64) => { fn apply_u64(&self, $arg: u64) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, f32) => { fn apply_f32(&self, $arg: f32) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, f64) => { fn apply_f64(&self, $arg: f64) -> $O $body };
+    (@apply |$arg:ident| -> $O:ty $body:block, f16) => {
+        fn apply_f16(&self, #[allow(unused_variables)] $arg: f16) -> $O {
             cfg_if::cfg_if! { if #[cfg(feature = "half")] {
                 $body
             } else {
@@ -234,8 +255,8 @@ macro_rules! define_op_kernel {
             } }
         }
     };
-    (@apply |$arg:ident| $body:expr, (Complex<f32>)) => {
-        fn apply_complex_f32(&self, #[allow(unused_variables)] $arg: Complex<f32>) -> bool {
+    (@apply |$arg:ident| -> $O:ty $body:block, (Complex<f32>)) => {
+        fn apply_complex_f32(&self, #[allow(unused_variables)] $arg: Complex<f32>) -> $O {
             cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
                 $body
             } else {
@@ -243,8 +264,8 @@ macro_rules! define_op_kernel {
             } }
         }
     };
-    (@apply |$arg:ident| $body:expr, (Complex<f64>)) => {
-        fn apply_complex_f64(&self, #[allow(unused_variables)] $arg: Complex<f64>) -> bool {
+    (@apply |$arg:ident| -> $O:ty $body:block, (Complex<f64>)) => {
+        fn apply_complex_f64(&self, #[allow(unused_variables)] $arg: Complex<f64>) -> $O {
             cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
                 $body
             } else {
@@ -252,7 +273,7 @@ macro_rules! define_op_kernel {
             } }
         }
     };
-    (@apply |$arg:ident| $body:expr, bool) => { fn apply_bool(&self, $arg: bool) -> bool { $body } };
+    (@apply |$arg:ident| -> $O:ty $body:block, bool) => { fn apply_bool(&self, $arg: bool) -> $O $body };
 
     // --- dtype match arms ---
     (@dtype_match $sk:ident, i8)  => { $sk == DtypeScalarKind::I8 };
@@ -276,13 +297,24 @@ macro_rules! define_op_kernel {
     };
     (@dtype_match $sk:ident, bool) => { $sk == DtypeScalarKind::Bool };
 }
+pub(crate) use {define_logical1_op, define_logical1_op_kernel};
 
-define_op!(IsNan, IsNanKernel, |a| a.is_nan(), [f16, f32, f64]);
-define_op!(IsFinite, IsFiniteKernel, |a| a.is_finite(), [f16, f32, f64]);
-define_op!(
+define_logical1_op!(
+    IsNan,
+    IsNanKernel,
+    |a| -> bool { a.is_nan() },
+    [f16, f32, f64]
+);
+define_logical1_op!(
+    IsFinite,
+    IsFiniteKernel,
+    |a| -> bool { a.is_finite() },
+    [f16, f32, f64]
+);
+define_logical1_op!(
     IsInfinite,
     IsInfiniteKernel,
-    |a| a.is_infinite(),
+    |a| -> bool { a.is_infinite() },
     [f16, f32, f64]
 );
 
