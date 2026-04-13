@@ -25,7 +25,7 @@ pub struct PermuteDims<S> {
 }
 
 impl<S: ArrayStorage> PermuteDims<S> {
-    pub(crate) fn new(inner: S, axes: &[usize]) -> io::Result<Self> {
+    pub fn new(inner: S, axes: &[usize]) -> io::Result<Self> {
         let ndim = inner.shape().len();
         if axes.len() != ndim {
             return Err(io::Error::new(

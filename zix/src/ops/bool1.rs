@@ -186,7 +186,7 @@ macro_rules! define_op {
     ($Name:ident, $NameKernel:ident, |$arg:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
         pub struct $Name<S>(BoolOp1<$NameKernel, S>);
         impl<S> $Name<S> {
-            pub(crate) fn new(a: Array<S>) -> io::Result<Self>
+            pub fn new(a: Array<S>) -> io::Result<Self>
             where
                 S: ArrayStorage,
             {

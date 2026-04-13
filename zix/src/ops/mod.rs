@@ -25,4 +25,7 @@ pub use bool2::*;
 mod bitwise;
 pub use bitwise::*;
 
+mod map;
+pub use map::*;
+
 mod common;

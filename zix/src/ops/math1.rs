@@ -181,7 +181,7 @@ macro_rules! define_math1_op {
     ($Name:ident, $NameKernel:ident, |$arg:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
         pub struct $Name<S>(crate::ops::math1::MathOp1<$NameKernel, S>);
         impl<S> $Name<S> {
-            pub(crate) fn new(a: crate::Array<S>) -> std::io::Result<Self>
+            pub fn new(a: crate::Array<S>) -> std::io::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
             {

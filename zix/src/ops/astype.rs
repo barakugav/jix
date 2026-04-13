@@ -30,7 +30,7 @@ pub struct AsType<S> {
     blocks_layout: BlocksLayout,
 }
 impl<S> AsType<S> {
-    pub(crate) fn new(a: Array<S>, dtype: Dtype) -> io::Result<Self>
+    pub fn new(a: Array<S>, dtype: Dtype) -> io::Result<Self>
     where
         S: ArrayStorage,
     {

@@ -16,7 +16,7 @@ pub struct Reshape<S> {
     blocks_layout: BlocksLayout,
 }
 impl<S> Reshape<S> {
-    pub(crate) fn new(a: Array<S>, new_shape: &[u64]) -> io::Result<Self>
+    pub fn new(a: Array<S>, new_shape: &[u64]) -> io::Result<Self>
     where
         S: ArrayStorage,
     {
