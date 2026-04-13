@@ -529,7 +529,7 @@ impl_array_storage_forward!(Ref<'a, S> where S: ArrayStorage);
 
 macro_rules! impl_array_storage_forward {
     ($wrapper:ident $(<$($gen:tt),*>)? $(where $($wh:tt)*)?) => {
-        impl $(<$($gen),*>)? ArrayStorage for $wrapper $(<$($gen),*>)?
+        impl $(<$($gen),*>)? crate::storage::ArrayStorage for $wrapper $(<$($gen),*>)?
         where
             $($($wh)*)?
         {
@@ -544,7 +544,7 @@ macro_rules! impl_array_storage_forward {
                 index: &[core::ops::Range<u64>],
                 buf: &mut [u8],
                 context: &crate::codec::ReadContext,
-            ) -> io::Result<()> {
+            ) -> std::io::Result<()> {
                 self.0.read_data(index, buf, context)
             }
             fn blocks_layout(&self) -> &crate::storage::BlocksLayout {

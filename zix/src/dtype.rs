@@ -192,7 +192,7 @@ impl Dtype {
         itemsize: Itemsize,
         alignment: Alignment,
     ) -> Result<Self, DtypeError> {
-        let shape = DtypeShape::try_from_slice(shape).ok_or_else(|| DtypeError::InvalidShape)?;
+        let shape = DtypeShape::try_from_slice(shape).ok_or(DtypeError::InvalidShape)?;
         let shape_prod = shape
             .iter()
             .try_fold(1 as Itemsize, |acc, &dim| acc.checked_mul(dim))
@@ -330,9 +330,9 @@ impl Dtype {
     /// Empty shape means a single element of the dtype.
     pub fn shape(&self) -> &[Itemsize] {
         match &self.0 {
-            DtypeInner::Scalar { shape, .. } => &shape,
-            DtypeInner::StructOwned { shape, .. } => &shape,
-            DtypeInner::StructBorrowed { shape, .. } => &shape,
+            DtypeInner::Scalar { shape, .. } => shape,
+            DtypeInner::StructOwned { shape, .. } => shape,
+            DtypeInner::StructBorrowed { shape, .. } => shape,
         }
     }
 
@@ -402,7 +402,7 @@ impl Dtype {
     ///
     /// The itemsize will be updated to `itemsize *= new_shape.product() / old_shape.product()`.
     pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<(), DtypeError> {
-        let shape = DtypeShape::try_from_slice(shape).ok_or_else(|| DtypeError::InvalidShape)?; // too many dims
+        let shape = DtypeShape::try_from_slice(shape).ok_or(DtypeError::InvalidShape)?; // too many dims
         let shape_prod = shape
             .iter()
             .cloned()

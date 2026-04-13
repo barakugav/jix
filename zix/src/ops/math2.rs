@@ -4,6 +4,7 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
+use crate::ops::common::define_array_op2_method;
 use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::{DimArray, cast_slice, cast_slice_mut};
 
@@ -198,18 +199,26 @@ where
     }
 }
 
-macro_rules! define_op {
-    ($Name:ident, $NameKernel:ident, $op_trait:ident, $op_fn:ident, $op:tt, [$($scalar:tt),* $(,)?]) => {
-        pub struct $Name<S1, S2>(MathOp2<$NameKernel, S1, S2>);
+macro_rules! define_math2_op {
+    ($Name:ident, $NameKernel:ident, |$a:ident, $b:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
+        pub struct $Name<S1, S2>(crate::ops::math2::MathOp2<$NameKernel, S1, S2>);
         impl<S1, S2> $Name<S1, S2> {
-            pub fn new(a: Array<S1>, b: Array<S2>) -> io::Result<Self>
+            pub fn new(a: crate::Array<S1>, b: crate::Array<S2>) -> std::io::Result<Self>
             where
-                S1: ArrayStorage,
-                S2: ArrayStorage,
+                S1: crate::storage::ArrayStorage,
+                S2: crate::storage::ArrayStorage,
             {
-                Ok(Self(MathOp2::new($NameKernel, a, b)?))
+                Ok(Self(crate::ops::math2::MathOp2::new($NameKernel, a, b)?))
             }
         }
+        crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: crate::storage::ArrayStorage, S2: crate::storage::ArrayStorage);
+
+        crate::ops::math2::define_math2_op_kernel!($NameKernel, |$a, $b| $body, [$($scalar),*]);
+    };
+}
+macro_rules! define_math2_core_op {
+    ($Name:ident, $NameKernel:ident, $op_trait:ident, $op_fn:ident, |$a:ident, $b:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
+        define_math2_op!($Name, $NameKernel, |$a, $b| $body, [$($scalar),*]);
         impl<S1, S2> core::ops::$op_trait<Array<S2>> for Array<S1>
         where
             S1: ArrayStorage,
@@ -222,66 +231,63 @@ macro_rules! define_op {
                 Array::from_storage(op)
             }
         }
-        crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: ArrayStorage, S2: ArrayStorage);
-
-        define_op_kernel!($NameKernel, $op, [$($scalar),*]);
     };
 }
-macro_rules! define_op_kernel {
-    ($NameKernel:ident, $op:tt, [$($scalar:tt),* $(,)?]) => {
+macro_rules! define_math2_op_kernel {
+    ($NameKernel:ident, |$a:ident, $b:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
         struct $NameKernel;
-        impl MathOp2Kernel for $NameKernel {
-            $(define_op_kernel!(@apply $op, $scalar);)*
+        impl crate::ops::math2::MathOp2Kernel for $NameKernel {
+            $(crate::ops::math2::define_math2_op_kernel!(@apply |$a, $b| $body, $scalar);)*
 
             fn is_support_dtype(&self, dtype: &crate::dtype::Dtype) -> bool {
                 use crate::dtype::DtypeScalarKind;
                 let Some(scalar_kind) = dtype.try_to_scalar() else {
                     return false;
                 };
-                false $(|| define_op_kernel!(@dtype_match scalar_kind, $scalar))*
+                false $(|| crate::ops::math2::define_math2_op_kernel!(@dtype_match scalar_kind, $scalar))*
             }
         }
     };
 
     // --- apply arms ---
-    (@apply $op:tt, i8)  => { fn apply_i8(&self, a: i8, b: i8) -> i8 { a $op b } };
-    (@apply $op:tt, i16) => { fn apply_i16(&self, a: i16, b: i16) -> i16 { a $op b } };
-    (@apply $op:tt, i32) => { fn apply_i32(&self, a: i32, b: i32) -> i32 { a $op b } };
-    (@apply $op:tt, i64) => { fn apply_i64(&self, a: i64, b: i64) -> i64 { a $op b } };
-    (@apply $op:tt, u8)  => { fn apply_u8(&self, a: u8, b: u8) -> u8 { a $op b } };
-    (@apply $op:tt, u16) => { fn apply_u16(&self, a: u16, b: u16) -> u16 { a $op b } };
-    (@apply $op:tt, u32) => { fn apply_u32(&self, a: u32, b: u32) -> u32 { a $op b } };
-    (@apply $op:tt, u64) => { fn apply_u64(&self, a: u64, b: u64) -> u64 { a $op b } };
-    (@apply $op:tt, f32) => { fn apply_f32(&self, a: f32, b: f32) -> f32 { a $op b } };
-    (@apply $op:tt, f64) => { fn apply_f64(&self, a: f64, b: f64) -> f64 { a $op b } };
-    (@apply $op:tt, f16) => {
-        fn apply_f16(&self, #[allow(unused_variables)] a: f16, #[allow(unused_variables)] b: f16) -> f16 {
+    (@apply |$a:ident, $b:ident| $body:expr, i8)  => { fn apply_i8(&self, $a: i8, $b: i8) -> i8 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, i16) => { fn apply_i16(&self, $a: i16, $b: i16) -> i16 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, i32) => { fn apply_i32(&self, $a: i32, $b: i32) -> i32 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, i64) => { fn apply_i64(&self, $a: i64, $b: i64) -> i64 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, u8)  => { fn apply_u8(&self, $a: u8, $b: u8) -> u8 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, u16) => { fn apply_u16(&self, $a: u16, $b: u16) -> u16 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, u32) => { fn apply_u32(&self, $a: u32, $b: u32) -> u32 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, u64) => { fn apply_u64(&self, $a: u64, $b: u64) -> u64 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, f32) => { fn apply_f32(&self, $a: f32, $b: f32) -> f32 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, f64) => { fn apply_f64(&self, $a: f64, $b: f64) -> f64 { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, f16) => {
+        fn apply_f16(&self, #[allow(unused_variables)] $a: f16, #[allow(unused_variables)] $b: f16) -> f16 {
             cfg_if::cfg_if! { if #[cfg(feature = "half")] {
-                a $op b
+                $body
             } else {
                 unimplemented!()
             } }
         }
     };
-    (@apply $op:tt, (Complex<f32>)) => {
-        fn apply_complex_f32(&self, #[allow(unused_variables)] a: Complex<f32>, #[allow(unused_variables)] b: Complex<f32>) -> Complex<f32> {
+    (@apply |$a:ident, $b:ident| $body:expr, (Complex<f32>)) => {
+        fn apply_complex_f32(&self, #[allow(unused_variables)] $a: Complex<f32>, #[allow(unused_variables)] $b: Complex<f32>) -> Complex<f32> {
             cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
-                a $op b
+                $body
             } else {
                 unimplemented!()
             } }
         }
     };
-    (@apply $op:tt, (Complex<f64>)) => {
-        fn apply_complex_f64(&self, #[allow(unused_variables)] a: Complex<f64>, #[allow(unused_variables)] b: Complex<f64>) -> Complex<f64> {
+    (@apply |$a:ident, $b:ident| $body:expr, (Complex<f64>)) => {
+        fn apply_complex_f64(&self, #[allow(unused_variables)] $a: Complex<f64>, #[allow(unused_variables)] $b: Complex<f64>) -> Complex<f64> {
             cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
-                a $op b
+                $body
             } else {
                 unimplemented!()
             } }
         }
     };
-    (@apply $op:tt, bool) => { fn apply_bool(&self, a: bool, b: bool) -> bool { a $op b } };
+    (@apply |$a:ident, $b:ident| $body:expr, bool) => { fn apply_bool(&self, $a: bool, $b: bool) -> bool { $body } };
 
     // --- dtype match arms ---
     (@dtype_match $sk:ident, i8)  => { $sk == DtypeScalarKind::I8 };
@@ -306,10 +312,93 @@ macro_rules! define_op_kernel {
     (@dtype_match $sk:ident, bool) => { $sk == DtypeScalarKind::Bool };
 }
 
-define_op!(Add, AddKernel, Add, add, +, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_op!(Sub, SubKernel, Sub, sub, -, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_op!(Mul, MulKernel, Mul, mul, *, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_op!(Div, DivKernel, Div, div, /, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+pub(crate) use {define_math2_op, define_math2_op_kernel};
+
+define_math2_core_op!(Add, AddKernel, Add, add, |a, b| a + b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_math2_core_op!(Sub, SubKernel, Sub, sub, |a, b| a - b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_math2_core_op!(Mul, MulKernel, Mul, mul, |a, b| a * b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_math2_core_op!(Div, DivKernel, Div, div, |a, b| a / b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_math2_op!(
+    Maximum,
+    MaximumKernel,
+    |a, b| MaximumTrait::maximum(a, b),
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+);
+define_math2_op!(
+    Minimum,
+    MinimumKernel,
+    |a, b| MinimumTrait::minimum(a, b),
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+);
+// bitwise (integers + bools) and, or, xor, not, rsh, lsh, popcount, count_ones, count_zeros, leading_zeros, trailing_zeros
+
+trait MaximumTrait {
+    fn maximum(self, other: Self) -> Self;
+}
+macro_rules! impl_integer_maximum {
+    ($($t:ty),* $(,)?) => {
+        $(impl MaximumTrait for $t {
+            fn maximum(self, other: Self) -> Self {
+                std::cmp::max(self, other)
+            }
+        })*
+    };
+}
+macro_rules! impl_float_maximum {
+    ($($t:ty),* $(,)?) => {
+        $(impl MaximumTrait for $t {
+            fn maximum(self, other: Self) -> Self {
+                if self.is_nan() | other.is_nan() {
+                    Self::NAN
+                } else {
+                    self.max(other)
+                }
+            }
+        })*
+    };
+}
+impl_integer_maximum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
+impl_float_maximum!(f32, f64);
+#[cfg(feature = "half")]
+impl_float_maximum!(f16);
+
+trait MinimumTrait {
+    fn minimum(self, other: Self) -> Self;
+}
+macro_rules! impl_integer_minimum {
+    ($($t:ty),* $(,)?) => {
+        $(impl MinimumTrait for $t {
+            fn minimum(self, other: Self) -> Self {
+                std::cmp::min(self, other)
+            }
+        })*
+    };
+}
+macro_rules! impl_float_minimum {
+    ($($t:ty),* $(,)?) => {
+        $(impl MinimumTrait for $t {
+            fn minimum(self, other: Self) -> Self {
+                if self.is_nan() | other.is_nan() {
+                    Self::NAN
+                } else {
+                    self.min(other)
+                }
+            }
+        })*
+    };
+}
+impl_integer_minimum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
+impl_float_minimum!(f32, f64);
+#[cfg(feature = "half")]
+impl_float_minimum!(f16);
+
+impl<S> crate::Array<S>
+where
+    S: crate::storage::ArrayStorage,
+{
+    define_array_op2_method!(maximum: Maximum);
+    define_array_op2_method!(minimum: Minimum);
+}
 
 #[cfg(test)]
 mod tests {

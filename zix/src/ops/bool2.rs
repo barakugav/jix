@@ -5,6 +5,7 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, Dtyped, f16};
+use crate::ops::common::define_array_op2_method;
 use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::{DimArray, cast_slice, cast_slice_mut};
 
@@ -206,7 +207,7 @@ where
 }
 
 macro_rules! define_op {
-    ($Name:ident, $NameKernel:ident, $op:tt, [$($scalar:tt),* $(,)?]) => {
+    ($Name:ident, $NameKernel:ident, |$a:ident, $b:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
         pub struct $Name<S1, S2>(BoolOp2<$NameKernel, S1, S2>);
         impl<S1, S2> $Name<S1, S2> {
             pub fn new(a: Array<S1>, b: Array<S2>) -> io::Result<Self>
@@ -219,14 +220,14 @@ macro_rules! define_op {
         }
         crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: ArrayStorage, S2: ArrayStorage);
 
-        define_op_kernel!($NameKernel, $op, [$($scalar),*]);
+        define_op_kernel!($NameKernel, |$a, $b| $body, [$($scalar),*]);
     };
 }
 macro_rules! define_op_kernel {
-    ($NameKernel:ident, $op:tt, [$($scalar:tt),* $(,)?]) => {
+    ($NameKernel:ident, |$a:ident, $b:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
         struct $NameKernel;
         impl BoolOp2Kernel for $NameKernel {
-            $(define_op_kernel!(@apply $op, $scalar);)*
+            $(define_op_kernel!(@apply |$a, $b| $body, $scalar);)*
 
             fn is_support_dtype(&self, dtype: &crate::dtype::Dtype) -> bool {
                 use crate::dtype::DtypeScalarKind;
@@ -239,44 +240,44 @@ macro_rules! define_op_kernel {
     };
 
     // --- apply arms ---
-    (@apply $op:tt, i8)  => { fn apply_i8(&self, a: i8, b: i8) -> bool { a $op b } };
-    (@apply $op:tt, i16) => { fn apply_i16(&self, a: i16, b: i16) -> bool { a $op b } };
-    (@apply $op:tt, i32) => { fn apply_i32(&self, a: i32, b: i32) -> bool { a $op b } };
-    (@apply $op:tt, i64) => { fn apply_i64(&self, a: i64, b: i64) -> bool { a $op b } };
-    (@apply $op:tt, u8)  => { fn apply_u8(&self, a: u8, b: u8) -> bool { a $op b } };
-    (@apply $op:tt, u16) => { fn apply_u16(&self, a: u16, b: u16) -> bool { a $op b } };
-    (@apply $op:tt, u32) => { fn apply_u32(&self, a: u32, b: u32) -> bool { a $op b } };
-    (@apply $op:tt, u64) => { fn apply_u64(&self, a: u64, b: u64) -> bool { a $op b } };
-    (@apply $op:tt, f32) => { fn apply_f32(&self, a: f32, b: f32) -> bool { a $op b } };
-    (@apply $op:tt, f64) => { fn apply_f64(&self, a: f64, b: f64) -> bool { a $op b } };
-    (@apply $op:tt, f16) => {
-        fn apply_f16(&self, #[allow(unused_variables)] a: f16, #[allow(unused_variables)] b: f16) -> bool {
+    (@apply |$a:ident, $b:ident| $body:expr, i8)  => { fn apply_i8(&self, $a: i8, $b: i8) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, i16) => { fn apply_i16(&self, $a: i16, $b: i16) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, i32) => { fn apply_i32(&self, $a: i32, $b: i32) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, i64) => { fn apply_i64(&self, $a: i64, $b: i64) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, u8)  => { fn apply_u8(&self, $a: u8, $b: u8) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, u16) => { fn apply_u16(&self, $a: u16, $b: u16) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, u32) => { fn apply_u32(&self, $a: u32, $b: u32) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, u64) => { fn apply_u64(&self, $a: u64, $b: u64) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, f32) => { fn apply_f32(&self, $a: f32, $b: f32) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, f64) => { fn apply_f64(&self, $a: f64, $b: f64) -> bool { $body } };
+    (@apply |$a:ident, $b:ident| $body:expr, f16) => {
+        fn apply_f16(&self, #[allow(unused_variables)] $a: f16, #[allow(unused_variables)] $b: f16) -> bool {
             cfg_if::cfg_if! { if #[cfg(feature = "half")] {
-                a $op b
+                $body
             } else {
                 unimplemented!()
             } }
         }
     };
-    (@apply $op:tt, (Complex<f32>)) => {
-        fn apply_complex_f32(&self, #[allow(unused_variables)] a: Complex<f32>, #[allow(unused_variables)] b: Complex<f32>) -> bool {
+    (@apply |$a:ident, $b:ident| $body:expr, (Complex<f32>)) => {
+        fn apply_complex_f32(&self, #[allow(unused_variables)] $a: Complex<f32>, #[allow(unused_variables)] $b: Complex<f32>) -> bool {
             cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
-                a $op b
+                $body
             } else {
                 unimplemented!()
             } }
         }
     };
-    (@apply $op:tt, (Complex<f64>)) => {
-        fn apply_complex_f64(&self, #[allow(unused_variables)] a: Complex<f64>, #[allow(unused_variables)] b: Complex<f64>) -> bool {
+    (@apply |$a:ident, $b:ident| $body:expr, (Complex<f64>)) => {
+        fn apply_complex_f64(&self, #[allow(unused_variables)] $a: Complex<f64>, #[allow(unused_variables)] $b: Complex<f64>) -> bool {
             cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
-                a $op b
+                $body
             } else {
                 unimplemented!()
             } }
         }
     };
-    (@apply $op:tt, bool) => { fn apply_bool(&self, a: bool, b: bool) -> bool { a $op b } };
+    (@apply |$a:ident, $b:ident| $body:expr, bool) => { fn apply_bool(&self, $a: bool, $b: bool) -> bool { $body } };
 
     // --- dtype match arms ---
     (@dtype_match $sk:ident, i8)  => { $sk == DtypeScalarKind::I8 };
@@ -301,37 +302,41 @@ macro_rules! define_op_kernel {
     (@dtype_match $sk:ident, bool) => { $sk == DtypeScalarKind::Bool };
 }
 
-define_op!(Equal, EqualKernel, ==, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_op!(NotEqual, NotEqualKernel, !=, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_op!(Greater, GreaterKernel, >, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]);
-define_op!(GreaterEqual, GreaterEqualKernel, >=, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]);
-define_op!(Less, LessKernel, <, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]);
-define_op!(LessEqual, LessEqualKernel, <=, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]);
-
-macro_rules! define_array_op_methods {
-    ($($op:ident : $Name:ident),+ $(,)?) => {
-        impl<S> Array<S>
-        where
-            S: ArrayStorage,
-        {
-            $(
-                #[track_caller]
-                pub fn $op<S2>(self, other: Array<S2>) -> Array<$Name<S, S2>>
-                where
-                    S2: ArrayStorage,
-                {
-                    let op = $Name::new(self, other).unwrap();
-                    Array::from_storage(op)
-                }
-            )*
-        }
-    };
-}
-define_array_op_methods!(
-    equal: Equal,
-    not_equal: NotEqual,
-    greater: Greater,
-    greater_equal: GreaterEqual,
-    less: Less,
-    less_equal: LessEqual,
+define_op!(Equal,        EqualKernel,        |a, b| a == b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_op!(NotEqual,     NotEqualKernel,     |a, b| a != b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_op!(
+    Greater,
+    GreaterKernel,
+    |a, b| a > b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
 );
+define_op!(
+    GreaterEqual,
+    GreaterEqualKernel,
+    |a, b| a >= b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
+);
+define_op!(
+    Less,
+    LessKernel,
+    |a, b| a < b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
+);
+define_op!(
+    LessEqual,
+    LessEqualKernel,
+    |a, b| a <= b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
+);
+
+impl<S> crate::Array<S>
+where
+    S: crate::storage::ArrayStorage,
+{
+    define_array_op2_method!(equal: Equal);
+    define_array_op2_method!(not_equal: NotEqual);
+    define_array_op2_method!(greater: Greater);
+    define_array_op2_method!(greater_equal: GreaterEqual);
+    define_array_op2_method!(less: Less);
+    define_array_op2_method!(less_equal: LessEqual);
+}
