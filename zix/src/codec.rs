@@ -239,18 +239,12 @@ impl ReadContext {
 }
 
 struct TmpBufferPool {
-    align1: UnsafeCell<Vec<AlignedBytes>>,
-    align2: UnsafeCell<Vec<AlignedBytes>>,
-    align4: UnsafeCell<Vec<AlignedBytes>>,
     align8: UnsafeCell<Vec<AlignedBytes>>,
     align_other: UnsafeCell<Vec<(Alignment, Vec<AlignedBytes>)>>,
 }
 impl TmpBufferPool {
     fn new() -> Self {
         Self {
-            align1: UnsafeCell::new(Vec::new()),
-            align2: UnsafeCell::new(Vec::new()),
-            align4: UnsafeCell::new(Vec::new()),
             align8: UnsafeCell::new(Vec::new()),
             align_other: UnsafeCell::new(Vec::new()),
         }
@@ -279,10 +273,7 @@ impl TmpBufferPool {
 
     fn get_pool(&self, alignment: Alignment) -> *mut Vec<AlignedBytes> {
         match alignment {
-            1 => self.align1.get(),
-            2 => self.align2.get(),
-            4 => self.align4.get(),
-            8 => self.align8.get(),
+            1 | 2 | 4 | 8 => self.align8.get(),
             _ => {
                 let align_other = unsafe { &mut *self.align_other.get() };
                 let pool = align_other

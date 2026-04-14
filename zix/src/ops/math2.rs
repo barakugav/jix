@@ -4,7 +4,6 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
-use crate::ops::common::define_array_op2_method;
 use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::{DimArray, cast_slice, cast_slice_mut};
 
@@ -225,6 +224,7 @@ macro_rules! define_math2_core_op {
             S2: ArrayStorage,
         {
             type Output = Array<$Name<S1, S2>>;
+            #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
             #[track_caller]
             fn $op_fn(self, b: Array<S2>) -> Array<$Name<S1, S2>> {
                 let op = $Name::new(self, b).unwrap();
@@ -318,86 +318,6 @@ define_math2_core_op!(Add, AddKernel, Add, add, |a, b| a + b, [i8, i16, i32, i64
 define_math2_core_op!(Sub, SubKernel, Sub, sub, |a, b| a - b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
 define_math2_core_op!(Mul, MulKernel, Mul, mul, |a, b| a * b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
 define_math2_core_op!(Div, DivKernel, Div, div, |a, b| a / b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
-define_math2_op!(
-    Maximum,
-    MaximumKernel,
-    |a, b| MaximumTrait::maximum(a, b),
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
-);
-define_math2_op!(
-    Minimum,
-    MinimumKernel,
-    |a, b| MinimumTrait::minimum(a, b),
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
-);
-
-trait MaximumTrait {
-    fn maximum(self, other: Self) -> Self;
-}
-macro_rules! impl_integer_maximum {
-    ($($t:ty),* $(,)?) => {
-        $(impl MaximumTrait for $t {
-            fn maximum(self, other: Self) -> Self {
-                std::cmp::max(self, other)
-            }
-        })*
-    };
-}
-macro_rules! impl_float_maximum {
-    ($($t:ty),* $(,)?) => {
-        $(impl MaximumTrait for $t {
-            fn maximum(self, other: Self) -> Self {
-                if self.is_nan() | other.is_nan() {
-                    Self::NAN
-                } else {
-                    self.max(other)
-                }
-            }
-        })*
-    };
-}
-impl_integer_maximum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
-impl_float_maximum!(f32, f64);
-#[cfg(feature = "half")]
-impl_float_maximum!(f16);
-
-trait MinimumTrait {
-    fn minimum(self, other: Self) -> Self;
-}
-macro_rules! impl_integer_minimum {
-    ($($t:ty),* $(,)?) => {
-        $(impl MinimumTrait for $t {
-            fn minimum(self, other: Self) -> Self {
-                std::cmp::min(self, other)
-            }
-        })*
-    };
-}
-macro_rules! impl_float_minimum {
-    ($($t:ty),* $(,)?) => {
-        $(impl MinimumTrait for $t {
-            fn minimum(self, other: Self) -> Self {
-                if self.is_nan() | other.is_nan() {
-                    Self::NAN
-                } else {
-                    self.min(other)
-                }
-            }
-        })*
-    };
-}
-impl_integer_minimum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
-impl_float_minimum!(f32, f64);
-#[cfg(feature = "half")]
-impl_float_minimum!(f16);
-
-impl<S> crate::Array<S>
-where
-    S: crate::storage::ArrayStorage,
-{
-    define_array_op2_method!(maximum: Maximum);
-    define_array_op2_method!(minimum: Minimum);
-}
 
 #[cfg(test)]
 mod tests {

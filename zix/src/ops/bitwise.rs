@@ -1,8 +1,9 @@
 use crate::dtype::{Complex, f16};
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
+use crate::ops::define_logical1_op;
+use crate::ops::logical2::define_logical2_op;
 use crate::ops::math1::{define_math1_op, define_math1_op_kernel};
 use crate::ops::math2::define_math2_op;
-use crate::ops::{define_logical1_op, define_logical2_op};
 
 define_logical2_op!(
     LogicalAnd,

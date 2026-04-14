@@ -20,7 +20,10 @@ mod logical1;
 pub use logical1::*;
 
 mod logical2;
-pub use logical2::*;
+// pub use logical2::*;
+
+mod cmp;
+pub use cmp::*;
 
 mod bitwise;
 pub use bitwise::*;

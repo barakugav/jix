@@ -1,4 +1,6 @@
 use crate::NDIM_MAX;
+use crate::iter::NdIter;
+use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 
 mod aligned_vec;
 pub(crate) use aligned_vec::AlignedBytes;
@@ -258,6 +260,33 @@ impl<'a> AlternatingBuffers<'a> {
                 let prev_secondary_buf = main_buf;
                 (prev_main_buf.as_slice(), prev_secondary_buf)
             }
+        }
+    }
+}
+
+pub(crate) unsafe fn nd_copy<S1, S2, S3>(
+    src: *const u8,
+    dst: *mut u8,
+    shape: &[S1],
+    src_strides: &[S2],
+    dst_strides: &[S3],
+    itemsize: usize,
+) where
+    S1: Idx + 'static,
+    S2: Idx + 'static,
+    S3: Idx + 'static,
+{
+    // TODO: copy more then itemsize if last dim(s) are contiguous
+    let mut iter = NdIter::new(
+        shape,
+        (
+            NdIterExtStridesPtr::new(src_strides, src),
+            NdIterExtStridesPtrMut::new(dst_strides, dst),
+        ),
+    );
+    while let Some((_, (src_ptr, dst_ptr))) = iter.next() {
+        unsafe {
+            std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize);
         }
     }
 }

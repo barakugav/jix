@@ -4,3 +4,10 @@
 - scan, like cumsum
 - remove Borrowed
 - use u8 for dim index everywhere, like axes: DimArray<usize>, and concat_axis: usize
+- ops
+    - slice
+    - slice dtype ( complex re,)
+    - clip
+    - insert_axis
+    - broadcast_to
+

@@ -14,7 +14,7 @@ use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Mmap, Owned, Ref,
 };
-use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr};
+use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr, nd_copy};
 use crate::util::{MaybeOwned, default_strides};
 
 use crate::block::{BlockSize, BlockTableBuilder};
@@ -412,16 +412,17 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
                     // Copy from temporary buffer to output block with correct strides.
                     let src_strides =
                         default_strides(&dim_arr(ndim, |dim| block_size[dim] as usize), itemsize);
-                    let mut iter = NdIter::new(
-                        block_size,
-                        (
-                            NdIterExtStridesPtr::new(&src_strides, read_data_buf.as_ptr()),
-                            NdIterExtStridesPtrMut::new(&builder.block_strides, output_block_ptr),
-                        ),
-                    );
-                    while let Some((_idx, (src, dst))) = iter.next() {
-                        unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
-                    }
+                    unsafe {
+                        nd_copy(
+                            // TODO use in other place
+                            read_data_buf.as_ptr(),
+                            output_block_ptr,
+                            block_size,
+                            &src_strides,
+                            &builder.block_strides,
+                            itemsize,
+                        )
+                    };
                 }
 
                 Ok(())

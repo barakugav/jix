@@ -4,9 +4,10 @@ use std::ops::Range;
 use crate::NDIM_MAX;
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
-use crate::dtype::{Dtype, Itemsize};
+use crate::dtype::Dtype;
+use crate::iter::NdIter;
 use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
-use crate::util::{DimArray, default_strides, dim_arr};
+use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
 pub struct Reshape<S> {
     a: Array<S>,
@@ -117,71 +118,212 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()> {
-        assert_eq!(index.len(), self.new_shape.len());
-        let ndim = self.new_shape.len();
+        // -----------------------------------------------------------------------
+        // Core concept
+        // -----------------------------------------------------------------------
+        // A reshape does not move any data — it only reinterprets the flat,
+        // C-order (row-major) element sequence under a new shape.  Element `k`
+        // in the flattened array is the same physical byte regardless of whether
+        // the array is shaped [A, B] or [C, D] (as long as A*B == C*D).
+        //
+        // When a caller asks for a sub-region of the *new* shape we must figure
+        // out which ranges in the *original* shape cover exactly those elements,
+        // then forward one or more reads to the underlying storage and assemble
+        // the results into `buf`.
+        //
+        // -----------------------------------------------------------------------
+        // Dimension matching: "same logical stride"
+        // -----------------------------------------------------------------------
+        // Two shapes share a "dimension boundary" when a particular stride value
+        // appears in both stride arrays.  "Logical stride" here means the number
+        // of *elements* between successive steps along a dimension (i.e. strides
+        // computed with itemsize = 1).
+        //
+        // For example:
+        //   orig [6, 4]  → logical strides [4, 1]
+        //   new  [2, 3, 4] → logical strides [12, 4, 1]
+        //
+        // New dim 1 (stride 4) == orig dim 0 (stride 4), so they are "matched".
+        // New dim 2 (stride 1) == orig dim 1 (stride 1), so they are matched too.
+        // New dim 0 (stride 12) has no counterpart in orig → unmatched.
+        //
+        // When a new dim is matched to an orig dim it means that consecutive
+        // steps along the new dim correspond to exactly the same memory layout as
+        // consecutive steps along the orig dim.  The requested index range for
+        // that new dim can therefore be forwarded verbatim as the read range for
+        // the corresponding orig dim.
+        //
+        // The matching scan (`same_logical_stride`) advances through orig dims
+        // monotonically: for each new dim (left to right) it looks for the next
+        // orig dim with the same stride.  This preserves the ordering invariant
+        // that matched pairs always respect the nesting of C-order dimensions.
+        //
+        // -----------------------------------------------------------------------
+        // Reading strategy
+        // -----------------------------------------------------------------------
+        // We split all new dims into two groups:
+        //
+        //   MATCHED dims   – new dim j is paired with orig dim i.
+        //                    Their index ranges are forwarded directly.  A single
+        //                    call to the underlying storage can cover the full
+        //                    requested range along all matched dims at once.
+        //
+        //   UNMATCHED dims – new dim j crosses an original dimension boundary
+        //                    (e.g. in [6]→[2,3] neither new dim aligns with the
+        //                    single orig dim).  We cannot express an arbitrary
+        //                    sub-region of an unmatched dim as a contiguous range
+        //                    in the original shape, so we handle them by iterating
+        //                    over every index along those dims one step at a time.
+        //
+        // `iteration_shape` is shaped like the new dims but with size 1 for every
+        // matched dim and the actual requested size for every unmatched dim.
+        // `NdIter` over this shape visits every combination of unmatched-dim
+        // positions exactly once.
+        //
+        // For each iteration step `idx`:
+        //
+        //   1. BUILD `read_range` for the underlying storage (length orig_ndim):
+        //      - Matched orig dim i  → forward index[matched_new_dim].
+        //      - Unmatched orig dim i → convert the current unmatched-dim position
+        //        to a flat element index and decompose it back into orig coords:
+        //
+        //          flat = Σ_{unmatched new dim d} (index[d].start + idx[d])
+        //                                         * new_logical_strides[d]
+        //
+        //          orig_coord[i] = (flat / orig_logical_strides[i]) % orig_shape[i]
+        //          read_range[i] = orig_coord[i]..(orig_coord[i] + 1)
+        //
+        //        This is safe because the set of unmatched new dims covers the set
+        //        of unmatched orig dims in the flat index space, so `flat`
+        //        decomposes cleanly using the original strides.
+        //
+        //   2. READ into `tmp_buf` from the underlying storage using `read_range`.
+        //      `tmp_buf` is sized for the matched-dims block only (one element per
+        //      unmatched orig dim, full range for matched dims).
+        //
+        //   3. COPY from `tmp_buf` into the correct position in `buf` using
+        //      `nd_copy`.  The source shape is `new_read_shape` (the matched dims'
+        //      requested sizes, 1 elsewhere).  The destination pointer is offset
+        //      by the byte contribution of the unmatched dims' current position:
+        //
+        //          dst_byte_offset = Σ_{unmatched new dim d} idx[d] * dst_strides[d]
+        //
+        //      `nd_copy` then iterates over the matched dims internally, so each
+        //      element ends up exactly where it belongs in `buf`.
+        // -----------------------------------------------------------------------
 
-        // 0-D: single element, forward directly
-        if ndim == 0 {
-            return self.a.storage.read_data(&[], buf, context);
+        let orig_shape = self.a.shape();
+        let new_shape = &self.new_shape;
+        let ndim = new_shape.len();
+        let orig_ndim = orig_shape.len();
+        assert_eq!(index.len(), ndim);
+        if index.iter().any(|r| r.start >= r.end) {
+            return Ok(());
         }
 
-        let new_strides = default_strides(&self.new_shape, 1);
-        let orig_shape = self.a.storage.shape();
-        let orig_strides = default_strides(orig_shape, 1);
-
-        let lead_dims = ndim - 1;
-        let last_dim = ndim - 1;
-
-        // Pre-allocate dim_ranges for the original shape (reused across calls)
-        let orig_ndim = orig_shape.len();
-        let mut dim_ranges = dim_arr(orig_ndim, |_| 0..0);
-
-        let mut write_pos = 0usize;
-
-        // Iterate over all combinations of leading N-1 dimension indices
-        let mut lead_idx = dim_arr(lead_dims, |i| index[i].start);
-
-        loop {
-            let flat_start = index[last_dim].start
-                + lead_idx
-                    .iter()
-                    .enumerate()
-                    .map(|(d, &i)| i * new_strides[d])
-                    .sum::<u64>();
-            let flat_len = index[last_dim].end - index[last_dim].start;
-
-            if flat_len > 0 {
-                read_flat_range(
-                    flat_start,
-                    flat_len,
-                    orig_shape,
-                    &orig_strides,
-                    0,
-                    &mut dim_ranges,
-                    self.dtype.itemsize(),
-                    &self.a.storage,
-                    buf,
-                    &mut write_pos,
-                    context,
-                )?;
-            }
-
-            // Advance leading index counter (odometer-style)
-            if lead_dims == 0 {
-                break;
-            }
-            let mut carry = true;
-            for d in (0..lead_dims).rev() {
-                lead_idx[d] += 1;
-                if lead_idx[d] < index[d].end {
-                    carry = false;
-                    break;
+        let orig_logical_strides = default_strides(&orig_shape, 1);
+        let new_logical_strides = default_strides(new_shape, 1);
+        let same_logical_stride = (0..new_shape.len())
+            .scan(0, |orig_dim_idx, new_dim_idx| {
+                Some(loop {
+                    if *orig_dim_idx >= orig_shape.len() {
+                        break None; // cant really happen, last dims always match, unless orig_shape.len()==0
+                    }
+                    if orig_logical_strides[*orig_dim_idx] == new_logical_strides[new_dim_idx]
+                        && new_shape[new_dim_idx] >= 1
+                        && orig_shape[*orig_dim_idx] >= new_shape[new_dim_idx]
+                    // TODO: its possible to remove the dim length conditions
+                    {
+                        break Some(*orig_dim_idx as u8);
+                    }
+                    *orig_dim_idx += 1;
+                })
+            })
+            .collect::<DimArray<_>>();
+        let same_logical_stride_inv = {
+            let mut inv = dim_arr(orig_ndim, |_| None);
+            for (new_dim, &orig_dim) in same_logical_stride.iter().enumerate() {
+                if let Some(orig_dim) = orig_dim {
+                    inv[orig_dim as usize] = Some(new_dim as u8);
                 }
-                lead_idx[d] = index[d].start;
             }
-            if carry {
-                break;
+            inv
+        };
+        debug_assert_eq!(
+            same_logical_stride.iter().filter(|d| d.is_some()).count(),
+            same_logical_stride_inv
+                .iter()
+                .filter(|d| d.is_some())
+                .count()
+        );
+
+        // dims that have the same logical stride in the original and new shape can be read directly,
+        // the rest we need to read one entry at a time and copy into the output buffer.
+        let orig_read_shape = dim_arr(orig_ndim, |dim| {
+            if let Some(new_dim) = same_logical_stride_inv[dim] {
+                index[new_dim as usize].end - index[new_dim as usize].start
+            } else {
+                1
             }
+        });
+        let new_read_shape = dim_arr(ndim, |dim| {
+            if same_logical_stride[dim].is_some() {
+                index[dim].end - index[dim].start
+            } else {
+                1
+            }
+        });
+
+        let mut tmp_buf = context.tmp_buf(
+            orig_read_shape.iter().product::<u64>() as usize * self.a.dtype().itemsize() as usize,
+            self.a.dtype().alignment(),
+        );
+        let tmp_buf_strides = default_strides(&new_read_shape, self.a.dtype().itemsize() as _);
+        let out_buf_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let dst_strides = default_strides(&out_buf_shape, self.a.dtype().itemsize() as _);
+
+        // We use an nd-iter over the dims that DO NOT match any original dim.
+        let iteration_shape = dim_arr(ndim, |dim| {
+            if same_logical_stride[dim].is_some() {
+                1
+            } else {
+                index[dim].end - index[dim].start
+            }
+        });
+        let mut iter = NdIter::new(&iteration_shape, ());
+        while let Some((idx, ())) = iter.next() {
+            let read_range = dim_arr(orig_ndim, |dim| {
+                if let Some(new_dim) = same_logical_stride_inv[dim] {
+                    debug_assert_eq!(idx[new_dim as usize], 0);
+                    index[new_dim as usize].clone()
+                } else {
+                    let flat: u64 = (0..ndim)
+                        .filter(|&d| same_logical_stride[d].is_none())
+                        .map(|d| (index[d].start + idx[d]) * new_logical_strides[d])
+                        .sum();
+                    let orig_coord = (flat / orig_logical_strides[dim]) % orig_shape[dim];
+                    orig_coord..(orig_coord + 1)
+                }
+            });
+
+            let tmp_buf = tmp_buf.as_mut_slice();
+            self.a.storage.read_data(&read_range, tmp_buf, context)?;
+
+            let dst_byte_offset: usize = (0..ndim)
+                .filter(|&d| same_logical_stride[d].is_none())
+                .map(|d| idx[d] as usize * dst_strides[d] as usize)
+                .sum();
+            let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
+            unsafe {
+                nd_copy(
+                    tmp_buf.as_ptr(),
+                    dst_ptr,
+                    &new_read_shape,
+                    &tmp_buf_strides,
+                    &dst_strides,
+                    self.a.dtype().itemsize() as _,
+                )
+            };
         }
 
         Ok(())
@@ -194,109 +336,6 @@ where
     fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
         self.a.storage.codec_params()
     }
-}
-
-/// Recursively decomposes a flat element range `[flat_start, flat_start + flat_len)` (expressed
-/// in the original array's flat C-order) into at most 3 rectangular reads per dimension level,
-/// writing results sequentially into `buf` starting at `*write_pos`.
-#[allow(clippy::too_many_arguments)]
-fn read_flat_range<S: ArrayStorage>(
-    flat_start: u64,
-    flat_len: u64,
-    orig_shape: &[u64],
-    orig_strides: &[u64],
-    dim: usize,
-    dim_ranges: &mut DimArray<Range<u64>>,
-    itemsize: Itemsize,
-    storage: &S,
-    buf: &mut [u8],
-    write_pos: &mut usize,
-    context: &ReadContext,
-) -> io::Result<()> {
-    let ndim = orig_shape.len();
-
-    if dim == ndim - 1 {
-        // Base case: last dimension — the flat range maps directly to a contiguous index range
-        dim_ranges[dim] = flat_start..flat_start + flat_len;
-        let chunk_bytes = flat_len * itemsize as u64;
-        storage.read_data(
-            &dim_ranges[..ndim],
-            &mut buf[*write_pos..*write_pos + chunk_bytes as usize],
-            context,
-        )?;
-        *write_pos += chunk_bytes as usize;
-        return Ok(());
-    }
-
-    let stride = orig_strides[dim]; // number of elements per unit of `dim`
-    let mut pos = flat_start;
-    let mut remaining = flat_len;
-
-    // Partial first unit: handle the tail of the unit that `pos` falls into
-    let start_offset = pos % stride;
-    if start_offset != 0 {
-        let first_len = remaining.min(stride - start_offset);
-        dim_ranges[dim] = (pos / stride)..(pos / stride) + 1;
-        read_flat_range(
-            start_offset,
-            first_len,
-            orig_shape,
-            orig_strides,
-            dim + 1,
-            dim_ranges,
-            itemsize,
-            storage,
-            buf,
-            write_pos,
-            context,
-        )?;
-        pos += first_len;
-        remaining -= first_len;
-        if remaining == 0 {
-            return Ok(());
-        }
-    }
-
-    // Complete units: `pos` is now stride-aligned; batch as many full units as possible
-    let complete_units = remaining / stride;
-    if complete_units > 0 {
-        let start_major = pos / stride;
-        dim_ranges[dim] = start_major..start_major + complete_units;
-        for d in dim + 1..ndim {
-            dim_ranges[d] = 0..orig_shape[d];
-        }
-        let chunk_bytes = complete_units * stride * itemsize as u64;
-        storage.read_data(
-            &dim_ranges[..ndim],
-            &mut buf[*write_pos..*write_pos + chunk_bytes as usize],
-            context,
-        )?;
-        *write_pos += chunk_bytes as usize;
-        pos += complete_units * stride;
-        remaining -= complete_units * stride;
-        if remaining == 0 {
-            return Ok(());
-        }
-    }
-
-    // Partial last unit: the remaining elements start at the beginning of a new unit
-    let start_major = pos / stride;
-    dim_ranges[dim] = start_major..start_major + 1;
-    read_flat_range(
-        0,
-        remaining,
-        orig_shape,
-        orig_strides,
-        dim + 1,
-        dim_ranges,
-        itemsize,
-        storage,
-        buf,
-        write_pos,
-        context,
-    )?;
-
-    Ok(())
 }
 
 #[cfg(test)]

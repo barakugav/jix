@@ -4,7 +4,6 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Complex, Dtype, DtypeScalarKind, Dtyped, f16};
-use crate::ops::common::define_array_op2_method;
 use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::{DimArray, cast_slice, cast_slice_mut};
 
@@ -305,52 +304,3 @@ macro_rules! define_logical2_op_kernel {
     (@dtype_match $sk:ident, bool) => { $sk == DtypeScalarKind::Bool };
 }
 pub(crate) use {define_logical2_op, define_logical2_op_kernel};
-
-define_logical2_op!(
-    Equal,
-    EqualKernel,
-    |a, b| -> bool { a == b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]
-);
-define_logical2_op!(
-    NotEqual,
-    NotEqualKernel,
-    |a, b| -> bool { a != b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]
-);
-define_logical2_op!(
-    Greater,
-    GreaterKernel,
-    |a, b| -> bool { a > b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
-);
-define_logical2_op!(
-    GreaterEqual,
-    GreaterEqualKernel,
-    |a, b| -> bool { a >= b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
-);
-define_logical2_op!(
-    Less,
-    LessKernel,
-    |a, b| -> bool { a < b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
-);
-define_logical2_op!(
-    LessEqual,
-    LessEqualKernel,
-    |a, b| -> bool { a <= b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
-);
-
-impl<S> crate::Array<S>
-where
-    S: crate::storage::ArrayStorage,
-{
-    define_array_op2_method!(equal: Equal);
-    define_array_op2_method!(not_equal: NotEqual);
-    define_array_op2_method!(greater: Greater);
-    define_array_op2_method!(greater_equal: GreaterEqual);
-    define_array_op2_method!(less: Less);
-    define_array_op2_method!(less_equal: LessEqual);
-}
