@@ -304,7 +304,6 @@ macro_rules! define_logical2_op_kernel {
     };
     (@dtype_match $sk:ident, bool) => { $sk == DtypeScalarKind::Bool };
 }
-#[allow(unused_imports)]
 pub(crate) use {define_logical2_op, define_logical2_op_kernel};
 
 define_logical2_op!(

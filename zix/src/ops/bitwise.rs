@@ -1,7 +1,41 @@
+use crate::dtype::{Complex, f16};
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
-use crate::ops::define_logical1_op;
 use crate::ops::math1::{define_math1_op, define_math1_op_kernel};
 use crate::ops::math2::define_math2_op;
+use crate::ops::{define_logical1_op, define_logical2_op};
+
+define_logical2_op!(
+    LogicalAnd,
+    LogicalAndKernel,
+    |a, b| -> bool {
+        crate::ops::astype::cast::<_, bool>(a) && crate::ops::astype::cast::<_, bool>(b)
+    },
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+);
+define_logical2_op!(
+    LogicalOr,
+    LogicalOrKernel,
+    |a, b| -> bool {
+        crate::ops::astype::cast::<_, bool>(a) || crate::ops::astype::cast::<_, bool>(b)
+    },
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+);
+define_logical2_op!(
+    LogicalXor,
+    LogicalXorKernel,
+    |a, b| -> bool {
+        crate::ops::astype::cast::<_, bool>(a) ^ crate::ops::astype::cast::<_, bool>(b)
+    },
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+);
+define_logical1_op!(
+    LogicalNot,
+    LogicalNotKernel,
+    |a| -> bool {
+        !crate::ops::astype::cast::<_, bool>(a)
+    },
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+);
 
 define_math2_op!(
     BitwiseAnd,
@@ -81,6 +115,10 @@ impl<S> crate::Array<S>
 where
     S: crate::storage::ArrayStorage,
 {
+    define_array_op2_method!(logical_and: LogicalAnd);
+    define_array_op2_method!(logical_or: LogicalOr);
+    define_array_op2_method!(logical_xor: LogicalXor);
+    define_array_op1_method!(logical_not: LogicalNot);
     define_array_op2_method!(bitwise_and: BitwiseAnd);
     define_array_op2_method!(bitwise_or: BitwiseOr);
     define_array_op2_method!(bitwise_xor: BitwiseXor);

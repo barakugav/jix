@@ -3,7 +3,6 @@ use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
-#[cfg(feature = "half")]
 use crate::dtype::f16;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind};
 use crate::storage::{ArrayStorage, BlocksLayout};
@@ -128,36 +127,12 @@ where
         );
 
         let mut supported = true;
-        macro_rules! cast_from {
-            ($value:expr, bool) => {
-                ($value) as i8
-            };
-            ($value:expr, f16) => {
-                ($value).to_f32()
-            };
-            ($value:expr, $type:ident) => {
-                $value
-            };
-        }
-        macro_rules! cast_to {
-            ($value:expr, bool) => {
-                ($value) != (0 as _)
-            };
-            ($value:expr, f16) => {
-                f16::from_f32(($value) as f32)
-            };
-            ($value:expr, $type:ident) => {
-                ($value) as $type
-            };
-        }
         macro_rules! cast_loop {
             ($src_type:ident, $dst_type:ident) => {
                 for i in 0..nitems {
                     unsafe {
-                        #![allow(clippy::redundant_locals)]
                         let value = src.cast::<$src_type>().add(i).read();
-                        let value = cast_from!(value, $src_type);
-                        let value = cast_to!(value, $dst_type);
+                        let value = crate::ops::astype::cast::<$src_type, $dst_type>(value);
                         dst.cast::<$dst_type>().add(i).write(value);
                     }
                 }
@@ -212,10 +187,9 @@ where
                     for i in 0..nitems {
                         unsafe {
                             let value = src.cast::<Complex<f32>>().add(i).read();
-                            dst.cast::<Complex<f64>>().add(i).write(Complex {
-                                re: value.re as f64,
-                                im: value.im as f64,
-                            });
+                            let value =
+                                crate::ops::astype::cast::<Complex<f32>, Complex<f64>>(value);
+                            dst.cast::<Complex<f64>>().add(i).write(value);
                         }
                     }
                 }
@@ -226,10 +200,9 @@ where
                     for i in 0..nitems {
                         unsafe {
                             let value = src.cast::<Complex<f64>>().add(i).read();
-                            dst.cast::<Complex<f32>>().add(i).write(Complex {
-                                re: value.re as f32,
-                                im: value.im as f32,
-                            });
+                            let value =
+                                crate::ops::astype::cast::<Complex<f64>, Complex<f32>>(value);
+                            dst.cast::<Complex<f32>>().add(i).write(value);
                         }
                     }
                 }
@@ -256,6 +229,129 @@ where
         self.a.storage.codec_params()
     }
 }
+
+pub(crate) fn cast<S, D>(value: S) -> D
+where
+    S: Cast<D>,
+{
+    value.cast()
+}
+pub(crate) trait Cast<D> {
+    fn cast(self) -> D;
+}
+
+macro_rules! cast_from {
+    ($value:expr, bool) => {
+        ($value) as i8
+    };
+    ($value:expr, f16) => {
+        ($value).to_f32()
+    };
+    ($value:expr, $type:ident) => {
+        $value
+    };
+}
+macro_rules! cast_to {
+    ($value:expr, bool) => {
+        ($value) != (0 as _)
+    };
+    ($value:expr, f16) => {
+        f16::from_f32(($value) as f32)
+    };
+    ($value:expr, $type:ident) => {
+        ($value) as $type
+    };
+}
+macro_rules! impl_cast {
+    ($src_type:ident => $dst_type:ident) => {
+        impl Cast<$dst_type> for $src_type {
+            fn cast(self) -> $dst_type {
+                #![allow(clippy::redundant_locals)]
+                let value = self;
+                let value = cast_from!(value, $src_type);
+                let value = cast_to!(value, $dst_type);
+                value
+            }
+        }
+    };
+}
+
+macro_rules! impl_cast_num {
+    ($src_type:ident) => {
+        impl_cast!($src_type => i8);
+        impl_cast!($src_type => i16);
+        impl_cast!($src_type => i32);
+        impl_cast!($src_type => i64);
+        impl_cast!($src_type => u8);
+        impl_cast!($src_type => u16);
+        impl_cast!($src_type => u32);
+        impl_cast!($src_type => u64);
+        #[cfg(feature = "half")]
+        impl_cast!($src_type => f16);
+        impl_cast!($src_type => f32);
+        impl_cast!($src_type => f64);
+        impl_cast!($src_type => bool);
+    }
+}
+impl_cast_num!(i8);
+impl_cast_num!(i16);
+impl_cast_num!(i32);
+impl_cast_num!(i64);
+impl_cast_num!(u8);
+impl_cast_num!(u16);
+impl_cast_num!(u32);
+impl_cast_num!(u64);
+#[cfg(feature = "half")]
+impl_cast_num!(f16);
+impl_cast_num!(f32);
+impl_cast_num!(f64);
+impl_cast_num!(bool);
+
+#[cfg(not(feature = "half"))]
+impl Cast<f16> for f16 {
+    fn cast(self) -> f16 {
+        self
+    }
+}
+
+macro_rules! impl_cast_complex_to_complex {
+    ($src_type:ident, $dst_type:ident) => {
+        impl Cast<Complex<$dst_type>> for Complex<$src_type> {
+            fn cast(self) -> Complex<$dst_type> {
+                Complex {
+                    re: crate::ops::astype::cast::<$src_type, $dst_type>(self.re),
+                    im: crate::ops::astype::cast::<$src_type, $dst_type>(self.im),
+                }
+            }
+        }
+    };
+}
+macro_rules! impl_cast_complex {
+    ($src_type:ident) => {
+        #[cfg(feature = "half")]
+        impl_cast_complex_to_complex!($src_type, f16);
+        impl_cast_complex_to_complex!($src_type, f32);
+        impl_cast_complex_to_complex!($src_type, f64);
+
+        impl Cast<Complex<$src_type>> for bool {
+            fn cast(self) -> Complex<$src_type> {
+                Complex {
+                    re: cast::<bool, $src_type>(self),
+                    im: cast::<f32, $src_type>(0.0),
+                }
+            }
+        }
+        impl Cast<bool> for Complex<$src_type> {
+            fn cast(self) -> bool {
+                self != (cast::<bool, Self>(false))
+            }
+        }
+    };
+}
+#[cfg(feature = "half")]
+impl_cast_complex!(f16);
+impl_cast_complex!(f32);
+impl_cast_complex!(f64);
 
 #[cfg(test)]
 mod tests {

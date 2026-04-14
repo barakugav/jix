@@ -314,10 +314,10 @@ macro_rules! define_math2_op_kernel {
 
 pub(crate) use {define_math2_op, define_math2_op_kernel};
 
-define_math2_core_op!(Add, AddKernel, Add, add, |a, b| a + b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_math2_core_op!(Sub, SubKernel, Sub, sub, |a, b| a - b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_math2_core_op!(Mul, MulKernel, Mul, mul, |a, b| a * b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
-define_math2_core_op!(Div, DivKernel, Div, div, |a, b| a / b, [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]);
+define_math2_core_op!(Add, AddKernel, Add, add, |a, b| a + b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
+define_math2_core_op!(Sub, SubKernel, Sub, sub, |a, b| a - b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
+define_math2_core_op!(Mul, MulKernel, Mul, mul, |a, b| a * b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
+define_math2_core_op!(Div, DivKernel, Div, div, |a, b| a / b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
 define_math2_op!(
     Maximum,
     MaximumKernel,
