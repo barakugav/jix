@@ -5,6 +5,7 @@ use crate::util::{DimArray, Idx, default_strides};
 ///
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
+#[derive(Clone)]
 pub(crate) struct NdIterExtStridesPtr<S>(NdIterExtStridesPtrMut<S>);
 
 impl<S> NdIterExtStridesPtr<S> {
@@ -33,12 +34,17 @@ where
     fn next(&self) -> *const u8 {
         <NdIterExtStridesPtrMut<S> as NdIterExtension<Ix>>::next(&self.0).cast_const()
     }
+
+    fn assert_ndim(&self, ndim: usize) {
+        <NdIterExtStridesPtrMut<S> as NdIterExtension<Ix>>::assert_ndim(&self.0, ndim);
+    }
 }
 
 /// An nd-iterator extension that tracks a `*mut u8` pointer into a strided buffer.
 ///
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
+#[derive(Clone)]
 pub(crate) struct NdIterExtStridesPtrMut<S> {
     strides: DimArray<S>,
     current_ptr: *mut u8,
@@ -76,6 +82,10 @@ where
 
     fn next(&self) -> *mut u8 {
         self.current_ptr
+    }
+
+    fn assert_ndim(&self, ndim: usize) {
+        assert_eq!(self.strides.len(), ndim);
     }
 }
 
@@ -116,6 +126,10 @@ where
 
     fn next(&self) -> Ix {
         self.offset
+    }
+
+    fn assert_ndim(&self, ndim: usize) {
+        assert_eq!(self.strides.len(), ndim);
     }
 }
 

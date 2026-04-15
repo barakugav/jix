@@ -108,57 +108,29 @@ where
         self.a.storage.read_data(index, buf, context)?;
 
         macro_rules! apply_loop {
-            ($ty:ty, $apply:ident) => {
+            ($ty:ty, $apply_fn:ident) => {{
                 let buf = unsafe { cast_slice_mut::<u8, $ty>(buf) };
                 for a in buf.iter_mut() {
-                    *a = self.op.$apply(*a);
+                    *a = self.op.$apply_fn(*a);
                 }
-            };
+            }};
         }
 
         match self.dtype.try_to_scalar() {
-            Some(DtypeScalarKind::I8) => {
-                apply_loop!(i8, apply_i8);
-            }
-            Some(DtypeScalarKind::I16) => {
-                apply_loop!(i16, apply_i16);
-            }
-            Some(DtypeScalarKind::I32) => {
-                apply_loop!(i32, apply_i32);
-            }
-            Some(DtypeScalarKind::I64) => {
-                apply_loop!(i64, apply_i64);
-            }
-            Some(DtypeScalarKind::U8) => {
-                apply_loop!(u8, apply_u8);
-            }
-            Some(DtypeScalarKind::U16) => {
-                apply_loop!(u16, apply_u16);
-            }
-            Some(DtypeScalarKind::U32) => {
-                apply_loop!(u32, apply_u32);
-            }
-            Some(DtypeScalarKind::U64) => {
-                apply_loop!(u64, apply_u64);
-            }
-            Some(DtypeScalarKind::F16) => {
-                apply_loop!(f16, apply_f16);
-            }
-            Some(DtypeScalarKind::F32) => {
-                apply_loop!(f32, apply_f32);
-            }
-            Some(DtypeScalarKind::F64) => {
-                apply_loop!(f64, apply_f64);
-            }
-            Some(DtypeScalarKind::ComplexF32) => {
-                apply_loop!(Complex<f32>, apply_complex_f32);
-            }
-            Some(DtypeScalarKind::ComplexF64) => {
-                apply_loop!(Complex<f64>, apply_complex_f64);
-            }
-            Some(DtypeScalarKind::Bool) => {
-                apply_loop!(bool, apply_bool);
-            }
+            Some(DtypeScalarKind::I8) => apply_loop!(i8, apply_i8),
+            Some(DtypeScalarKind::I16) => apply_loop!(i16, apply_i16),
+            Some(DtypeScalarKind::I32) => apply_loop!(i32, apply_i32),
+            Some(DtypeScalarKind::I64) => apply_loop!(i64, apply_i64),
+            Some(DtypeScalarKind::U8) => apply_loop!(u8, apply_u8),
+            Some(DtypeScalarKind::U16) => apply_loop!(u16, apply_u16),
+            Some(DtypeScalarKind::U32) => apply_loop!(u32, apply_u32),
+            Some(DtypeScalarKind::U64) => apply_loop!(u64, apply_u64),
+            Some(DtypeScalarKind::F16) => apply_loop!(f16, apply_f16),
+            Some(DtypeScalarKind::F32) => apply_loop!(f32, apply_f32),
+            Some(DtypeScalarKind::F64) => apply_loop!(f64, apply_f64),
+            Some(DtypeScalarKind::ComplexF32) => apply_loop!(Complex<f32>, apply_complex_f32),
+            Some(DtypeScalarKind::ComplexF64) => apply_loop!(Complex<f64>, apply_complex_f64),
+            Some(DtypeScalarKind::Bool) => apply_loop!(bool, apply_bool),
             None => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Unsupported,
@@ -304,9 +276,9 @@ define_math1_op!(Acos, AcosKernel, |a| a.acos(), [f32, f64]);
 define_math1_op!(Atan, AtanKernel, |a| a.atan(), [f32, f64]);
 define_math1_op!(Signum, SignumKernel, |a| a.signum(), [f16, f32, f64]);
 
-impl<S> crate::Array<S>
+impl<S> Array<S>
 where
-    S: crate::storage::ArrayStorage,
+    S: ArrayStorage,
 {
     define_array_op1_method!(floor: Floor);
     define_array_op1_method!(ceil: Ceil);

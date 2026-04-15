@@ -6,7 +6,10 @@
     ],
     "rust-analyzer.cargo.features": "all",
     "cSpell.words": [
+        "Dtyped",
         "itemsize",
+        "keepdims",
+        "ndim",
         "nitems",
         "strided"
     ]

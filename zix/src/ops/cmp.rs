@@ -1,7 +1,9 @@
+use crate::Array;
 use crate::dtype::{Complex, f16};
 use crate::ops::common::define_array_op2_method;
 use crate::ops::define_math2_op;
 use crate::ops::logical2::define_logical2_op;
+use crate::storage::ArrayStorage;
 
 define_logical2_op!(
     Equal,
@@ -113,9 +115,9 @@ impl_float_minimum!(f32, f64);
 #[cfg(feature = "half")]
 impl_float_minimum!(f16);
 
-impl<S> crate::Array<S>
+impl<S> Array<S>
 where
-    S: crate::storage::ArrayStorage,
+    S: ArrayStorage,
 {
     define_array_op2_method!(equal: Equal);
     define_array_op2_method!(not_equal: NotEqual);

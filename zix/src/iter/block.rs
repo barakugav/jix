@@ -123,6 +123,13 @@ where
     fn next(&self) -> Self::Item<'_> {
         (&self.inner_offset, &self.current_block_size)
     }
+
+    fn assert_ndim(&self, ndim: usize) {
+        assert_eq!(self.block_shape.len(), ndim);
+        assert_eq!(self.borders.len(), ndim);
+        assert_eq!(self.inner_offset.len(), ndim);
+        assert_eq!(self.current_block_size.len(), ndim);
+    }
 }
 
 #[cfg(test)]

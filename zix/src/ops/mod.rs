@@ -28,6 +28,9 @@ pub use cmp::*;
 mod bitwise;
 pub use bitwise::*;
 
+mod reduction;
+pub use reduction::*;
+
 mod map;
 pub use map::*;
 

@@ -4,7 +4,7 @@
 - remove Borrowed
 - use u8 for dim index everywhere, like axes: DimArray<usize>, and concat_axis: usize
 - ops
-    - slice
     - slice dtype ( complex re,)
     - clip
-
+    - abs
+- consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.

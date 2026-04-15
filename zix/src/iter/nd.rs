@@ -5,6 +5,7 @@ use crate::util::{DimArray, Idx, dim_arr};
 /// Extensions are supported via the generic parameter `E`, see [`NdIterExtension`].
 /// The iterator notifies the extension on each index change, allowing extensions to track derived
 /// state (e.g. a pointer into a strided buffer) without recomputing it from scratch.
+#[derive(Clone)]
 pub(crate) struct NdIter<Ix, E> {
     begin: DimArray<Ix>,
     end: DimArray<Ix>,
@@ -14,6 +15,7 @@ pub(crate) struct NdIter<Ix, E> {
 }
 
 /// Tracks whether iteration has begun or is finished.
+#[derive(Clone)]
 enum IterStatus {
     /// `next` has never been called; `current_idx` sits at `begin`.
     NotStarted,
@@ -38,7 +40,10 @@ where
     pub(crate) fn new_with_begin(begin: &[Ix], end: &[Ix], extensions: E) -> Self {
         let begin: DimArray<_> = begin.try_into().unwrap();
         let end: DimArray<_> = end.try_into().unwrap();
-        assert_eq!(begin.len(), end.len());
+        let ndim = begin.len();
+        assert_eq!(begin.len(), ndim);
+        assert_eq!(end.len(), ndim);
+        extensions.assert_ndim(ndim);
         assert!(begin.iter().zip(end.iter()).all(|(&b, &e)| b <= e));
         let current_idx = begin.clone();
         let status = if begin.iter().zip(&end).any(|(&b, &e)| (e - b) == Ix::ZERO) {
@@ -97,6 +102,16 @@ where
             IterStatus::Exhausted => None,
         }
     }
+
+    pub(crate) fn map<T>(
+        mut self,
+        mut f: impl FnMut((&[Ix], E::Item<'_>)) -> T + Clone,
+    ) -> impl Iterator<Item = T> + Clone
+    where
+        Self: Clone,
+    {
+        std::iter::from_fn(move || self.next().map(|(idx, ext)| f((idx, ext))))
+    }
 }
 
 /// An extension trait for [`NdIter`] that tracks derived state alongside the current index.
@@ -120,6 +135,8 @@ pub(crate) trait NdIterExtension<Ix> {
 
     /// Returns the current derived value after all index changes have been applied.
     fn next<'a>(&'a self) -> Self::Item<'a>;
+
+    fn assert_ndim(&self, ndim: usize);
 }
 
 /// A plain index-only iterator; a thin wrapper around [`NdIter`] with a `()` extension.
@@ -149,6 +166,7 @@ impl<Ix> NdIterExtension<Ix> for () {
     fn on_increase(&mut self, _dim: usize, _before: Ix, _after: Ix, _diff: Ix) {}
     fn on_decrease(&mut self, _dim: usize, _before: Ix, _after: Ix, _diff: Ix) {}
     fn next(&self) {}
+    fn assert_ndim(&self, _ndim: usize) {}
 }
 impl<Ix, T1> NdIterExtension<Ix> for (T1,)
 where
@@ -166,6 +184,9 @@ where
     }
     fn next<'a>(&'a self) -> (T1::Item<'a>,) {
         (self.0.next(),)
+    }
+    fn assert_ndim(&self, ndim: usize) {
+        self.0.assert_ndim(ndim);
     }
 }
 impl<Ix, T1, T2> NdIterExtension<Ix> for (T1, T2)
@@ -189,6 +210,10 @@ where
     }
     fn next<'a>(&'a self) -> (T1::Item<'a>, T2::Item<'a>) {
         (self.0.next(), self.1.next())
+    }
+    fn assert_ndim(&self, ndim: usize) {
+        self.0.assert_ndim(ndim);
+        self.1.assert_ndim(ndim);
     }
 }
 impl<Ix, T1, T2, T3> NdIterExtension<Ix> for (T1, T2, T3)
@@ -216,6 +241,11 @@ where
     }
     fn next<'a>(&'a self) -> (T1::Item<'a>, T2::Item<'a>, T3::Item<'a>) {
         (self.0.next(), self.1.next(), self.2.next())
+    }
+    fn assert_ndim(&self, ndim: usize) {
+        self.0.assert_ndim(ndim);
+        self.1.assert_ndim(ndim);
+        self.2.assert_ndim(ndim);
     }
 }
 
@@ -261,6 +291,7 @@ mod tests {
         fn next(&self) -> usize {
             self.log.len()
         }
+        fn assert_ndim(&self, _ndim: usize) {}
     }
 
     // ---------------------------------------------------------------------------

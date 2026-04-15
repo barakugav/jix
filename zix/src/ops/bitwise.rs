@@ -1,9 +1,11 @@
+use crate::Array;
 use crate::dtype::{Complex, f16};
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
 use crate::ops::define_logical1_op;
 use crate::ops::logical2::define_logical2_op;
 use crate::ops::math1::{define_math1_op, define_math1_op_kernel};
 use crate::ops::math2::define_math2_op;
+use crate::storage::ArrayStorage;
 
 define_logical2_op!(
     LogicalAnd,
@@ -112,9 +114,9 @@ define_math1_op!(
     [i8, i16, i32, i64, u8, u16, u32, u64]
 );
 
-impl<S> crate::Array<S>
+impl<S> Array<S>
 where
-    S: crate::storage::ArrayStorage,
+    S: ArrayStorage,
 {
     define_array_op2_method!(logical_and: LogicalAnd);
     define_array_op2_method!(logical_or: LogicalOr);

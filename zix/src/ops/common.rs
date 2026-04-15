@@ -21,4 +21,53 @@ macro_rules! define_array_op2_method {
         }
     };
 }
-pub(crate) use {define_array_op1_method, define_array_op2_method};
+
+macro_rules! scalar_kind {
+    (i8) => {
+        crate::dtype::DtypeScalarKind::I8
+    };
+    (i16) => {
+        crate::dtype::DtypeScalarKind::I16
+    };
+    (i32) => {
+        crate::dtype::DtypeScalarKind::I32
+    };
+    (i64) => {
+        crate::dtype::DtypeScalarKind::I64
+    };
+    (u8) => {
+        crate::dtype::DtypeScalarKind::U8
+    };
+    (u16) => {
+        crate::dtype::DtypeScalarKind::U16
+    };
+    (u32) => {
+        crate::dtype::DtypeScalarKind::U32
+    };
+    (u64) => {
+        crate::dtype::DtypeScalarKind::U64
+    };
+    (f16) => {
+        crate::dtype::DtypeScalarKind::F16
+    };
+    (f32) => {
+        crate::dtype::DtypeScalarKind::F32
+    };
+    (f64) => {
+        crate::dtype::DtypeScalarKind::F64
+    };
+    (Complex<f32>) => {
+        crate::dtype::DtypeScalarKind::ComplexF32
+    };
+    (Complex<f64>) => {
+        crate::dtype::DtypeScalarKind::ComplexF64
+    };
+    (bool) => {
+        crate::dtype::DtypeScalarKind::Bool
+    };
+    ($ty:ty) => {
+        compile_error!(concat!("Unsupported scalar type: ", stringify!($ty)));
+    };
+}
+
+pub(crate) use {define_array_op1_method, define_array_op2_method, scalar_kind};
