@@ -6,10 +6,7 @@ use crate::dtype::Dtype;
 use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
-/// Lazy storage type returned by [`permute_dims`](Array::permute_dims).
-///
-/// Reads the underlying array with permuted axis order. See [`Array::permute_dims`] for the full
-/// description.
+/// Lazy storage type returned by [`Array::permute_dims`](crate::Array::permute_dims).
 pub struct PermuteDims<S> {
     inner: S,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.

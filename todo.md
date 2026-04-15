@@ -7,5 +7,4 @@
     - slice
     - slice dtype ( complex re,)
     - clip
-    - broadcast_to
 

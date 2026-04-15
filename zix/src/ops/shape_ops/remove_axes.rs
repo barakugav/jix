@@ -6,7 +6,7 @@ use crate::dtype::Dtype;
 use crate::storage::{ArrayStorage, BlocksLayout};
 use crate::util::DimArray;
 
-/// Lazy storage type returned by [`Array::remove_axes`].
+/// Lazy storage type returned by [`Array::remove_axes`](crate::Array::remove_axes).
 ///
 /// Presents the underlying array with the specified dimensions removed, without copying any data.
 ///
@@ -325,10 +325,7 @@ mod tests {
             .data()
             .to_ndarray_sub(&[2..5])
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3], vec![2, 3, 4]).unwrap()
-        );
+        assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![2, 3, 4]).unwrap());
     }
 
     #[test]

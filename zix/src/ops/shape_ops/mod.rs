@@ -1,3 +1,6 @@
+mod broadcast;
+pub use broadcast::*;
+
 mod insert_axes;
 pub use insert_axes::*;
 
@@ -11,12 +14,17 @@ mod reshape;
 pub use reshape::*;
 
 use crate::Array;
-use crate::storage::ArrayStorage;
+use crate::storage::{ArrayStorage, Owned};
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
+    #[track_caller]
+    pub fn reshape(self, new_shape: &[u64]) -> Array<Owned> {
+        self.reshape_view(new_shape).data().copy().unwrap()
+    }
+
     #[track_caller]
     pub fn reshape_view(self, new_shape: &[u64]) -> Array<Reshape<S>> {
         let a = Array::from_storage(self.storage);
@@ -28,7 +36,7 @@ where
     /// The i-th axis of the returned array corresponds to the axis numbered `axes[i]` of the
     /// input — identical to the convention used by NumPy's `numpy.permute_dims` (also known as
     /// `numpy.transpose`).  No data is copied at construction time; elements are read and
-    /// rearranged on demand when the result is materialised.
+    /// rearranged on demand when the result is materialized.
     ///
     /// # Arguments
     ///
@@ -67,6 +75,39 @@ where
     #[track_caller]
     pub fn permute_dims(self, axes: &[usize]) -> Array<PermuteDims<S>> {
         Array::from_storage(PermuteDims::new(self.storage, axes).unwrap())
+    }
+
+    /// Expand the array to `new_shape` and return a fully materialized copy.
+    ///
+    /// Equivalent to calling [`broadcast_view`](Self::broadcast_view) and then copying the result
+    /// into a new owned array.  Use `broadcast_view` instead when you only need a lazy view
+    /// without allocating.
+    ///
+    /// # Panics
+    ///
+    /// See [`broadcast_view`](Self::broadcast_view) for the validity rules on `new_shape`.
+    #[track_caller]
+    pub fn broadcast(self, new_shape: &[u64]) -> Array<Owned> {
+        self.broadcast_view(new_shape).data().copy().unwrap()
+    }
+
+    /// Return a lazy view of the array expanded to `new_shape` by repeating elements along
+    /// dimensions that have length 1.
+    ///
+    /// `new_shape` must have the same number of dimensions as the array.  For each dimension:
+    /// either it stays the same (`new_shape[d] == self.shape()[d]`), or it is broadcast from
+    /// length 1 to `new_shape[d]`.  Attempting to change the size of a dimension that is not
+    /// length 1 panics.  No data is copied at construction time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `new_shape` is invalid:
+    ///
+    /// * `new_shape.len() != self.ndim()`
+    /// * any dimension with `input_shape[d] != new_shape[d]` has `input_shape[d] != 1`
+    #[track_caller]
+    pub fn broadcast_view(self, new_shape: &[u64]) -> Array<Broadcast<S>> {
+        Array::from_storage(Broadcast::new(self.storage, new_shape).unwrap())
     }
 
     /// Return a lazy view of the array with the specified dimensions removed.

@@ -7,7 +7,7 @@ use crate::dtype::Dtype;
 use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
 use crate::util::DimArray;
 
-/// Lazy storage type returned by [`Array::insert_axes`].
+/// Lazy storage type returned by [`Array::insert_axes`](crate::Array::insert_axes).
 ///
 /// Presents the underlying array with additional length-1 dimensions inserted at specified gap
 /// positions, without copying any data.
