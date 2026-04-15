@@ -7,11 +7,9 @@ use crate::archive::{ArchiveReader, Section};
 use crate::dtype::{Dtype, Itemsize};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
-use crate::iter::strides::{
-    NdIterExtStridesPtr, NdIterExtStridesPtrMut, nd_iter_ext_logical_global_index,
-};
+use crate::iter::strides::nd_iter_ext_logical_global_index;
 use crate::schema::{self, ArchiveType};
-use crate::util::{DimArray, dim_arr};
+use crate::util::{DimArray, dim_arr, nd_copy};
 use crate::util::{Idx, default_strides};
 
 use crate::block::{BlockSize, BlockTable, BlockTableStorage};
@@ -425,17 +423,16 @@ impl<S> ArrayBlockTableStorageBase<S> {
                 .sum::<usize>();
             let dst_ptr = unsafe { buf.as_mut_ptr().add(out_start) };
 
-            // TODO: fast path for full blocks, where we can copy the entire block buffer in a single memcpy
-            let mut iter = NdIter::new(
-                block_size,
-                (
-                    NdIterExtStridesPtr::new(&block_strides, src_ptr),
-                    NdIterExtStridesPtrMut::new(&out_strides, dst_ptr),
-                ),
-            );
-            while let Some((_idx, (src, dst))) = iter.next() {
-                unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
-            }
+            unsafe {
+                nd_copy(
+                    src_ptr,
+                    dst_ptr,
+                    &block_size,
+                    &block_strides,
+                    &out_strides,
+                    itemsize,
+                )
+            };
         }
 
         Ok(())

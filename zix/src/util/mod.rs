@@ -276,7 +276,34 @@ pub(crate) unsafe fn nd_copy<S1, S2, S3>(
     S2: Idx + 'static,
     S3: Idx + 'static,
 {
-    // TODO: copy more then itemsize if last dim(s) are contiguous
+    let ndim = shape.len();
+    assert_eq!(ndim, src_strides.len());
+    assert_eq!(ndim, dst_strides.len());
+
+    // copy more then itemsize if last dim(s) are contiguous
+    let n_continuous_dims = (0..ndim)
+        .rev()
+        .scan(itemsize, |expected_stride, dim| {
+            let src_stride: usize = src_strides[dim].try_into().unwrap();
+            let dst_stride: usize = dst_strides[dim].try_into().unwrap();
+            let is_contiguous = src_stride == *expected_stride && dst_stride == *expected_stride;
+            *expected_stride *= shape[dim].try_into().unwrap();
+            Some(is_contiguous)
+        })
+        .take_while(|&is_contiguous| is_contiguous)
+        .count();
+    let itemsize = itemsize
+        * shape[ndim - n_continuous_dims..]
+            .iter()
+            .map(|&d_len| {
+                let d_len: usize = d_len.try_into().unwrap();
+                d_len
+            })
+            .product::<usize>();
+    let shape = &shape[..ndim - n_continuous_dims];
+    let src_strides = &src_strides[..ndim - n_continuous_dims];
+    let dst_strides = &dst_strides[..ndim - n_continuous_dims];
+
     let mut iter = NdIter::new(
         shape,
         (

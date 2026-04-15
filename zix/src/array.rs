@@ -10,7 +10,6 @@ use crate::archive::ArchiveWriter;
 use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::block::NdIterExtBlockOffsetSize;
-use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Mmap, Owned, Ref,
 };
@@ -152,16 +151,16 @@ impl Array<Owned> {
                     })
                     .sum::<usize>();
                 let initial_block_ptr = unsafe { out_buf.as_mut_ptr().add(initial_block_offset) };
-                let mut iter = NdIter::new(
-                    block_size,
-                    (
-                        NdIterExtStridesPtr::new(&strides, initial_arr_ptr),
-                        NdIterExtStridesPtrMut::new(&builder.block_strides, initial_block_ptr),
-                    ),
-                );
-                while let Some((_idx, (src, dst))) = iter.next() {
-                    unsafe { std::ptr::copy_nonoverlapping(src, dst, itemsize) };
-                }
+                unsafe {
+                    nd_copy(
+                        initial_arr_ptr,
+                        initial_block_ptr,
+                        block_size,
+                        &strides,
+                        &builder.block_strides,
+                        itemsize,
+                    )
+                };
                 Ok(())
             },
         )

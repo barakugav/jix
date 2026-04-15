@@ -4,10 +4,8 @@ use std::ops::{Not, Range};
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
-use crate::iter::NdIter;
-use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
-use crate::util::{ArraySequence, DimArray, default_strides, dim_arr};
+use crate::util::{ArraySequence, DimArray, default_strides, dim_arr, nd_copy};
 
 /// Join a sequence of arrays along a *new* axis.
 ///
@@ -217,20 +215,16 @@ where
 
             // copy arr_buf into the correct position in buf, as both buffers have different strides
             if let Some((arr_strides, out_strides)) = &out_of_place_strides {
-                let mut iter = NdIter::new(
-                    &arr_range_shape,
-                    (
-                        NdIterExtStridesPtr::new(arr_strides, arr_buf.as_ptr()),
-                        NdIterExtStridesPtrMut::new(out_strides, unsafe {
-                            buf.as_mut_ptr().add(buf_offset)
-                        }),
-                    ),
-                );
-                while let Some((_idx, (src_ptr, dst_ptr))) = iter.next() {
-                    unsafe {
-                        std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize);
-                    }
-                }
+                unsafe {
+                    nd_copy(
+                        arr_buf.as_ptr(),
+                        buf.as_mut_ptr().add(buf_offset),
+                        &arr_range_shape,
+                        arr_strides,
+                        out_strides,
+                        itemsize,
+                    )
+                };
             }
         }
 

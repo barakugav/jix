@@ -4,10 +4,8 @@ use std::ops::{Not, Range};
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
-use crate::iter::NdIter;
-use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::{ArrayStorage, BlocksLayout};
-use crate::util::{ArraySequence, DimArray, default_strides, dim_arr};
+use crate::util::{ArraySequence, DimArray, default_strides, dim_arr, nd_copy};
 
 /// Join a sequence of arrays along an existing axis.
 ///
@@ -260,21 +258,16 @@ where
                     }
                 });
 
-                let src_base = read_buf.as_ptr();
-                let mut iter = NdIter::new(
-                    &sub_shape,
-                    (
-                        NdIterExtStridesPtr::new(&sub_strides, src_base),
-                        NdIterExtStridesPtrMut::new(&dst_strides, unsafe {
-                            buf.as_mut_ptr().add(buf_offset)
-                        }),
-                    ),
-                );
-                while let Some((_, (src_ptr, dst_ptr))) = iter.next() {
-                    unsafe {
-                        std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize);
-                    }
-                }
+                unsafe {
+                    nd_copy(
+                        read_buf.as_ptr(),
+                        buf.as_mut_ptr().add(buf_offset),
+                        &sub_shape,
+                        &sub_strides,
+                        &dst_strides,
+                        itemsize,
+                    )
+                };
             }
         }
 

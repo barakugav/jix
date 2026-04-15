@@ -3,10 +3,8 @@ use std::ops::Range;
 
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
-use crate::iter::NdIter;
-use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::{ArrayStorage, BlocksLayout};
-use crate::util::{DimArray, default_strides, dim_arr};
+use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
 /// Lazy storage type returned by [`permute_dims`](Array::permute_dims).
 ///
@@ -124,18 +122,16 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
         let src_strides_out = dim_arr(ndim, |i| src_strides_in[self.axes[i]]);
 
-        let mut iter = NdIter::new(
-            &sub_shape_out,
-            (
-                NdIterExtStridesPtr::new(&src_strides_out, tmp_buf.as_ptr()),
-                NdIterExtStridesPtrMut::new(&dst_strides, buf.as_mut_ptr()),
-            ),
-        );
-        while let Some((_, (src_ptr, dst_ptr))) = iter.next() {
-            unsafe {
-                std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize);
-            }
-        }
+        unsafe {
+            nd_copy(
+                tmp_buf.as_ptr(),
+                buf.as_mut_ptr(),
+                &sub_shape_out,
+                &src_strides_out,
+                &dst_strides,
+                itemsize,
+            )
+        };
         Ok(())
     }
 
