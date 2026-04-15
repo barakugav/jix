@@ -9,7 +9,7 @@ use crate::util::DimArray;
 
 /// Lazy storage type returned by [`Array::insert_axes`].
 ///
-/// Presents the underlying array with additional size-1 dimensions inserted at specified gap
+/// Presents the underlying array with additional length-1 dimensions inserted at specified gap
 /// positions, without copying any data.
 ///
 /// # Gap-index convention
@@ -26,10 +26,10 @@ use crate::util::DimArray;
 /// * Gap `k`          — between input dimensions `k-1` and `k`.
 /// * Gap `orig_ndim`  — after the last input dimension.
 ///
-/// Each occurrence of a gap index in `axes` inserts **one** size-1 dimension at that position.
-/// Duplicate gap indices are allowed and each one adds another size-1 dimension at the same
-/// gap.  The order of values in `axes` does not matter — only the multiset of gap indices
-/// matters; they are sorted internally before the output shape is assembled.
+/// Each occurrence of a gap index in `axes` inserts **one** new dimension (of length 1) at that
+/// position.  Duplicate gap indices are allowed and each one adds another dimension at the same
+/// gap.  The order of values in `axes` does not matter — only the multiset of gap indices matters;
+/// they are sorted internally before the output shape is assembled.
 ///
 /// Valid gap indices are `0..=orig_ndim`.  Passing a value outside this range is an error.
 ///
@@ -74,14 +74,14 @@ use crate::util::DimArray;
 ///
 /// # Read behaviour
 ///
-/// Because all inserted dimensions have size 1, the flat C-order element sequence is identical
+/// Because all inserted dimensions have length 1, the flat C-order element sequence is identical
 /// to that of the inner array.  Reads strip the inserted dimensions from the requested index
 /// ranges and delegate directly to the inner storage — no temporary buffer or data rearrangement
 /// is required.
 pub struct InsertAxes<S> {
     inner: S,
     /// `is_inserted[output_dim]` is `true` for every output dimension that was inserted
-    /// (size 1, no corresponding input dimension).
+    /// (length 1, no corresponding input dimension).
     is_inserted: DimArray<bool>,
 
     dtype: Dtype,
@@ -109,7 +109,7 @@ impl<S: ArrayStorage> InsertAxes<S> {
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
         // the last input dim".  Duplicates are allowed — each occurrence inserts one additional
-        // size-1 dim at that gap.  Valid range: 0..=orig_ndim.
+        // dim at that gap.  Valid range: 0..=orig_ndim.
         for &ax in axes {
             if ax > orig_ndim {
                 return Err(io::Error::new(

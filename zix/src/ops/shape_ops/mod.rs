@@ -1,6 +1,9 @@
 mod insert_axes;
 pub use insert_axes::*;
 
+mod remove_axes;
+pub use remove_axes::*;
+
 mod permute_dims;
 pub use permute_dims::*;
 
@@ -66,14 +69,32 @@ where
         Array::from_storage(PermuteDims::new(self.storage, axes).unwrap())
     }
 
-    /// Return a lazy view of the array with new size-1 dimensions inserted at the given gap
+    /// Return a lazy view of the array with the specified dimensions removed.
+    ///
+    /// Each value in `axes` names an axis of the input array (0-based index). That axis must
+    /// have length exactly 1; attempting to remove a dimension with length > 1 panics. Duplicate
+    /// axis indices are not allowed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `axes` is invalid:
+    ///
+    /// * any axis value is ≥ `self.ndim()`
+    /// * any axis value is duplicated
+    /// * any named axis has length != 1
+    #[track_caller]
+    pub fn remove_axes(self, axes: &[usize]) -> Array<RemoveAxes<S>> {
+        Array::from_storage(RemoveAxes::new(self.storage, axes).unwrap())
+    }
+
+    /// Return a lazy view of the array with new length-1 dimensions inserted at the given gap
     /// positions.
     ///
     /// Each value in `axes` is a **gap index in the input shape**: `0` means "before input dim 0",
     /// `1` means "between input dims 0 and 1", ..., `ndim` means "after the last input dim".
-    /// Duplicate values are allowed — each occurrence inserts one additional size-1 dimension at
-    /// that gap.  The order of values in `axes` does not matter; only the multiset of gap indices
-    /// matters.  No data is copied at construction time or at read time.
+    /// Duplicate values are allowed — each occurrence inserts one additional dimension at that gap.
+    /// The order of values in `axes` does not matter; only the multiset of gap indices matters.
+    /// No data is copied at construction time or at read time.
     ///
     /// # Panics
     ///

@@ -1,5 +1,4 @@
 - overflow checks in shape.iter().product()
-- use u64 everywhere, array can be bigger than RAM
 - use u8 for DimArray len
 - scan, like cumsum
 - remove Borrowed
@@ -8,6 +7,5 @@
     - slice
     - slice dtype ( complex re,)
     - clip
-    - insert_axis
     - broadcast_to
 
