@@ -1,3 +1,6 @@
+mod insert_axes;
+pub use insert_axes::*;
+
 mod permute_dims;
 pub use permute_dims::*;
 
@@ -11,6 +14,12 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
+    #[track_caller]
+    pub fn reshape_view(self, new_shape: &[u64]) -> Array<Reshape<S>> {
+        let a = Array::from_storage(self.storage);
+        Array::from_storage(Reshape::new(a, new_shape).unwrap())
+    }
+
     /// Return a lazy view of the array with its axes reordered.
     ///
     /// The i-th axis of the returned array corresponds to the axis numbered `axes[i]` of the
@@ -57,9 +66,23 @@ where
         Array::from_storage(PermuteDims::new(self.storage, axes).unwrap())
     }
 
+    /// Return a lazy view of the array with new size-1 dimensions inserted at the given gap
+    /// positions.
+    ///
+    /// Each value in `axes` is a **gap index in the input shape**: `0` means "before input dim 0",
+    /// `1` means "between input dims 0 and 1", ..., `ndim` means "after the last input dim".
+    /// Duplicate values are allowed — each occurrence inserts one additional size-1 dimension at
+    /// that gap.  The order of values in `axes` does not matter; only the multiset of gap indices
+    /// matters.  No data is copied at construction time or at read time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `axes` is invalid:
+    ///
+    /// * any axis value is > `self.ndim()` (valid gap indices are `0..=self.ndim()`)
+    /// * the resulting ndim would exceed the maximum allowed ndim
     #[track_caller]
-    pub fn reshape_view(self, new_shape: &[u64]) -> Array<Reshape<S>> {
-        let a = Array::from_storage(self.storage);
-        Array::from_storage(Reshape::new(a, new_shape).unwrap())
+    pub fn insert_axes(self, axes: &[usize]) -> Array<InsertAxes<S>> {
+        Array::from_storage(InsertAxes::new(self.storage, axes).unwrap())
     }
 }
