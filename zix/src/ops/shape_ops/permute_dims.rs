@@ -1,6 +1,7 @@
 use std::io;
 use std::ops::Range;
 
+use crate::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::storage::{ArrayStorage, BlocksLayout};
@@ -8,7 +9,7 @@ use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
 /// Lazy storage type returned by [`Array::permute_dims`](crate::Array::permute_dims).
 pub struct PermuteDims<S> {
-    inner: S,
+    array: Array<S>,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.
     axes: DimArray<usize>,
     /// `inv_axes[d]` = index of the output dimension that maps from input dimension `d`.
@@ -20,8 +21,8 @@ pub struct PermuteDims<S> {
 }
 
 impl<S: ArrayStorage> PermuteDims<S> {
-    pub fn new(inner: S, axes: &[usize]) -> io::Result<Self> {
-        let ndim = inner.shape().len();
+    pub fn new(array: Array<S>, axes: &[usize]) -> io::Result<Self> {
+        let ndim = array.shape().len();
         if axes.len() != ndim {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -55,21 +56,21 @@ impl<S: ArrayStorage> PermuteDims<S> {
             inv_axes[ax] = i;
         }
 
-        let input_shape = inner.shape();
+        let input_shape = array.shape();
         let shape = dim_arr(ndim, |i| input_shape[axes[i]]);
 
-        let mut b_layout = inner.blocks_layout().clone();
+        let mut b_layout = array.blocks_layout().clone();
         b_layout.block_shape_hint = dim_arr(ndim, |i| b_layout.block_shape_hint[axes[i]]);
         b_layout.block_shape_tag = dim_arr(ndim, |i| b_layout.block_shape_tag[axes[i]]);
         b_layout.preferred_read_block_shape =
             dim_arr(ndim, |i| b_layout.preferred_read_block_shape[axes[i]]);
 
-        let dtype = inner.dtype().clone();
+        let dtype = array.dtype().clone();
         Ok(Self {
             dtype,
             shape,
             blocks_layout: b_layout,
-            inner,
+            array,
             axes,
             inv_axes,
         })
@@ -107,7 +108,9 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         let n_bytes = sub_shape_in.iter().product::<usize>() * itemsize;
         let mut tmp_buf = context.tmp_buf(n_bytes, self.dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
-        self.inner.read_data(&input_index, tmp_buf, context)?;
+        self.array
+            .storage
+            .read_data(&input_index, tmp_buf, context)?;
 
         // Strides in tmp_buf (C-contiguous over input dims).
         let src_strides_in = default_strides(&sub_shape_in, itemsize);
@@ -137,7 +140,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
     }
 
     fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.inner.codec_params()
+        self.array.storage.codec_params()
     }
 }
 

@@ -1,6 +1,7 @@
 use std::io;
 use std::ops::Range;
 
+use crate::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::storage::{ArrayStorage, BlocksLayout};
@@ -54,7 +55,7 @@ use crate::util::DimArray;
 /// that of the inner array.  Reads re-insert the stripped dimensions (as `0..1` ranges) and
 /// delegate directly to the inner storage — no temporary buffer or data rearrangement is required.
 pub struct RemoveAxes<S> {
-    inner: S,
+    array: Array<S>,
     /// `is_removed[input_dim]` is `true` for every input dimension that was removed.
     is_removed: DimArray<bool>,
 
@@ -64,8 +65,8 @@ pub struct RemoveAxes<S> {
 }
 
 impl<S: ArrayStorage> RemoveAxes<S> {
-    pub fn new(inner: S, axes: &[usize]) -> io::Result<Self> {
-        let input_ndim = inner.shape().len();
+    pub fn new(array: Array<S>, axes: &[usize]) -> io::Result<Self> {
+        let input_ndim = array.shape().len();
 
         // Validate axis indices and check for duplicates.
         let mut seen = DimArray::<bool>::from_iter(std::iter::repeat(false).take(input_ndim));
@@ -87,12 +88,12 @@ impl<S: ArrayStorage> RemoveAxes<S> {
             }
             seen[ax] = true;
 
-            if inner.shape()[ax] != 1 {
+            if array.shape()[ax] != 1 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
                         "cannot remove axis {ax} with size {} (only size-1 axes can be removed)",
-                        inner.shape()[ax]
+                        array.shape()[ax]
                     ),
                 ));
             }
@@ -102,7 +103,7 @@ impl<S: ArrayStorage> RemoveAxes<S> {
         let mut is_removed = DimArray::new();
         let mut shape = DimArray::new();
 
-        let inner_layout = inner.blocks_layout();
+        let inner_layout = array.blocks_layout();
         let mut hint = DimArray::new();
         let mut tag = DimArray::new();
         let mut preferred = DimArray::new();
@@ -111,7 +112,7 @@ impl<S: ArrayStorage> RemoveAxes<S> {
             let removed = seen[input_dim];
             is_removed.push(removed);
             if !removed {
-                shape.push(inner.shape()[input_dim]);
+                shape.push(array.shape()[input_dim]);
                 hint.push(inner_layout.block_shape_hint[input_dim]);
                 tag.push(inner_layout.block_shape_tag[input_dim]);
                 preferred.push(inner_layout.preferred_read_block_shape[input_dim]);
@@ -123,9 +124,9 @@ impl<S: ArrayStorage> RemoveAxes<S> {
         b_layout.block_shape_tag = tag;
         b_layout.preferred_read_block_shape = preferred;
 
-        let dtype = inner.dtype().clone();
+        let dtype = array.dtype().clone();
         Ok(Self {
-            inner,
+            array,
             is_removed,
             dtype,
             shape,
@@ -165,7 +166,7 @@ impl<S: ArrayStorage> ArrayStorage for RemoveAxes<S> {
                 }
             })
             .collect();
-        self.inner.read_data(&inner_index, buf, context)
+        self.array.storage.read_data(&inner_index, buf, context)
     }
 
     fn blocks_layout(&self) -> &BlocksLayout {
@@ -173,7 +174,7 @@ impl<S: ArrayStorage> ArrayStorage for RemoveAxes<S> {
     }
 
     fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.inner.codec_params()
+        self.array.storage.codec_params()
     }
 }
 
@@ -350,25 +351,22 @@ mod tests {
 
     #[test]
     fn error_axis_out_of_bounds() {
-        use crate::storage::Ref;
         let a = make2d(seq(4), 2, 2);
         // ndim=2, valid axes are 0..2; axis 3 is out of bounds
-        assert!(super::RemoveAxes::new(Ref(&a.storage), &[3]).is_err());
+        assert!(super::RemoveAxes::new(a, &[3]).is_err());
     }
 
     #[test]
     fn error_axis_not_size_one() {
-        use crate::storage::Ref;
         let a = make2d(seq(12), 3, 4);
         // axis 0 has size 3, cannot remove
-        assert!(super::RemoveAxes::new(Ref(&a.storage), &[0]).is_err());
+        assert!(super::RemoveAxes::new(a, &[0]).is_err());
     }
 
     #[test]
     fn error_duplicate_axis() {
-        use crate::storage::Ref;
         let a = make3d(seq(6), 1, 2, 3);
         // axis 0 appears twice
-        assert!(super::RemoveAxes::new(Ref(&a.storage), &[0, 0]).is_err());
+        assert!(super::RemoveAxes::new(a, &[0, 0]).is_err());
     }
 }

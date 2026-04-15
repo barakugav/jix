@@ -1,6 +1,7 @@
 use std::io;
 use std::ops::Range;
 
+use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
@@ -53,7 +54,7 @@ use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 /// output buffer using zero strides (advancing along a broadcast output axis always re-reads the
 /// same inner element).  No data is copied at construction time.
 pub struct Broadcast<S> {
-    inner: S,
+    array: Array<S>,
     /// `is_broadcast[d]` is `true` when output dim `d` was expanded from length 1.
     is_broadcast: DimArray<bool>,
     /// `true` when `new_shape == input_shape` — no dimension was actually broadcast.
@@ -66,8 +67,8 @@ pub struct Broadcast<S> {
 }
 
 impl<S: ArrayStorage> Broadcast<S> {
-    pub fn new(inner: S, new_shape: &[u64]) -> io::Result<Self> {
-        let input_shape = inner.shape();
+    pub fn new(array: Array<S>, new_shape: &[u64]) -> io::Result<Self> {
+        let input_shape = array.shape();
         let ndim = input_shape.len();
 
         if new_shape.len() != ndim {
@@ -103,7 +104,7 @@ impl<S: ArrayStorage> Broadcast<S> {
 
         // For broadcast dims: Any tag, hint=1, preferred=new size (full extent reads are free).
         // For unchanged dims: inherit from inner.
-        let mut b_layout = inner.blocks_layout().clone();
+        let mut b_layout = array.blocks_layout().clone();
         b_layout.block_shape_hint = dim_arr(ndim, |d| {
             if is_broadcast[d] {
                 1
@@ -126,9 +127,9 @@ impl<S: ArrayStorage> Broadcast<S> {
             }
         });
 
-        let dtype = inner.dtype().clone();
+        let dtype = array.dtype().clone();
         Ok(Self {
-            inner,
+            array,
             is_broadcast,
             is_identity,
             dtype,
@@ -155,7 +156,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     ) -> io::Result<()> {
         // Fast path: no dimension was actually broadcast — forward directly.
         if self.is_identity {
-            return self.inner.read_data(index, buf, context);
+            return self.array.storage.read_data(index, buf, context);
         }
 
         let ndim = self.is_broadcast.len();
@@ -176,7 +177,9 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         let n_bytes = inner_read_shape.iter().product::<usize>() * itemsize;
         let mut tmp_buf = context.tmp_buf(n_bytes, self.dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
-        self.inner.read_data(&inner_index, tmp_buf, context)?;
+        self.array
+            .storage
+            .read_data(&inner_index, tmp_buf, context)?;
 
         // Source strides over tmp_buf, with broadcast dims set to 0.
         // A zero stride means advancing along that output axis always reads the same src byte,
@@ -210,7 +213,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     }
 
     fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.inner.codec_params()
+        self.array.storage.codec_params()
     }
 }
 
@@ -392,17 +395,15 @@ mod tests {
 
     #[test]
     fn identity_flag_set_when_no_broadcast() {
-        use crate::storage::Ref;
         let a = make(seq(12), &[3, 4]);
-        let b = super::Broadcast::new(Ref(&a.storage), &[3, 4]).unwrap();
+        let b = super::Broadcast::new(a.as_ref(), &[3, 4]).unwrap();
         assert!(b.is_identity);
     }
 
     #[test]
     fn identity_flag_not_set_when_broadcast() {
-        use crate::storage::Ref;
         let a = make(seq(4), &[1, 4]);
-        let b = super::Broadcast::new(Ref(&a.storage), &[3, 4]).unwrap();
+        let b = super::Broadcast::new(a.as_ref(), &[3, 4]).unwrap();
         assert!(!b.is_identity);
     }
 
@@ -436,16 +437,14 @@ mod tests {
 
     #[test]
     fn error_ndim_mismatch() {
-        use crate::storage::Ref;
         let a = make(seq(6), &[2, 3]);
-        assert!(super::Broadcast::new(Ref(&a.storage), &[2, 3, 1]).is_err());
+        assert!(super::Broadcast::new(a.as_ref(), &[2, 3, 1]).is_err());
     }
 
     #[test]
     fn error_non_unit_dim_broadcast() {
-        use crate::storage::Ref;
         let a = make(seq(6), &[2, 3]);
         // axis 0 has length 2, cannot broadcast to 5
-        assert!(super::Broadcast::new(Ref(&a.storage), &[5, 3]).is_err());
+        assert!(super::Broadcast::new(a.as_ref(), &[5, 3]).is_err());
     }
 }

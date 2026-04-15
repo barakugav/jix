@@ -1,6 +1,9 @@
 mod broadcast;
 pub use broadcast::*;
 
+mod slice;
+pub use slice::*;
+
 mod insert_axes;
 pub use insert_axes::*;
 
@@ -25,10 +28,49 @@ where
         self.reshape_view(new_shape).data().copy().unwrap()
     }
 
+    /// Return a lazy view of a sub-region of the array.
+    ///
+    /// `slice` accepts anything that converts to [`SliceSpec`].  The most ergonomic form is a
+    /// tuple — one item per dimension — where each item can be a standard Rust range or a
+    /// [`SliceItem`]:
+    ///
+    /// ```text
+    /// array.slice((.., 1..4))              // axis 0: all, axis 1: indices 1, 2, 3
+    /// array.slice((2.., ..3))              // axis 0: from 2, axis 1: up to (not including) 3
+    /// array.slice((1..=3, ..))             // axis 0: indices 1, 2, 3 (inclusive end)
+    /// array.slice((.., SliceItem::new(None, None, 2)))   // axis 1: every other element
+    /// ```
+    ///
+    /// **Negative indices** (Python-style) — use negative integer range literals:
+    ///
+    /// ```text
+    /// array.slice(((-2..), ..))            // axis 0: last 2 elements  (start = len - 2)
+    /// array.slice((.., ..-1))              // axis 1: all but the last (end   = len - 1)
+    /// array.slice((.., -4..-1))            // axis 1: four-from-end up to one-from-end
+    /// ```
+    ///
+    /// When a step is also needed, use [`SliceItem`] directly (range syntax has no step):
+    ///
+    /// ```text
+    /// array.slice((SliceItem::new(Some(-6), None, 2), ..))  // last-6 to end, every 2nd
+    /// ```
+    ///
+    /// No data is copied at construction time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `slice` is invalid:
+    ///
+    /// * number of items != `self.ndim()`
+    /// * any `step < 1` (for anow)
+    #[track_caller]
+    pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
+        Array::from_storage(Slice::new(self, slice.into()).unwrap())
+    }
+
     #[track_caller]
     pub fn reshape_view(self, new_shape: &[u64]) -> Array<Reshape<S>> {
-        let a = Array::from_storage(self.storage);
-        Array::from_storage(Reshape::new(a, new_shape).unwrap())
+        Array::from_storage(Reshape::new(self, new_shape).unwrap())
     }
 
     /// Return a lazy view of the array with its axes reordered.
@@ -74,7 +116,7 @@ where
     /// ```
     #[track_caller]
     pub fn permute_dims(self, axes: &[usize]) -> Array<PermuteDims<S>> {
-        Array::from_storage(PermuteDims::new(self.storage, axes).unwrap())
+        Array::from_storage(PermuteDims::new(self, axes).unwrap())
     }
 
     /// Expand the array to `new_shape` and return a fully materialized copy.
@@ -107,7 +149,7 @@ where
     /// * any dimension with `input_shape[d] != new_shape[d]` has `input_shape[d] != 1`
     #[track_caller]
     pub fn broadcast_view(self, new_shape: &[u64]) -> Array<Broadcast<S>> {
-        Array::from_storage(Broadcast::new(self.storage, new_shape).unwrap())
+        Array::from_storage(Broadcast::new(self, new_shape).unwrap())
     }
 
     /// Return a lazy view of the array with the specified dimensions removed.
@@ -125,7 +167,7 @@ where
     /// * any named axis has length != 1
     #[track_caller]
     pub fn remove_axes(self, axes: &[usize]) -> Array<RemoveAxes<S>> {
-        Array::from_storage(RemoveAxes::new(self.storage, axes).unwrap())
+        Array::from_storage(RemoveAxes::new(self, axes).unwrap())
     }
 
     /// Return a lazy view of the array with new length-1 dimensions inserted at the given gap
@@ -145,6 +187,6 @@ where
     /// * the resulting ndim would exceed the maximum allowed ndim
     #[track_caller]
     pub fn insert_axes(self, axes: &[usize]) -> Array<InsertAxes<S>> {
-        Array::from_storage(InsertAxes::new(self.storage, axes).unwrap())
+        Array::from_storage(InsertAxes::new(self, axes).unwrap())
     }
 }

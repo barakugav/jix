@@ -1,11 +1,11 @@
 use std::io;
 use std::ops::Range;
 
-use crate::NDIM_MAX;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
 use crate::util::DimArray;
+use crate::{Array, NDIM_MAX};
 
 /// Lazy storage type returned by [`Array::insert_axes`](crate::Array::insert_axes).
 ///
@@ -79,7 +79,7 @@ use crate::util::DimArray;
 /// ranges and delegate directly to the inner storage — no temporary buffer or data rearrangement
 /// is required.
 pub struct InsertAxes<S> {
-    inner: S,
+    array: Array<S>,
     /// `is_inserted[output_dim]` is `true` for every output dimension that was inserted
     /// (length 1, no corresponding input dimension).
     is_inserted: DimArray<bool>,
@@ -90,8 +90,8 @@ pub struct InsertAxes<S> {
 }
 
 impl<S: ArrayStorage> InsertAxes<S> {
-    pub fn new(inner: S, axes: &[usize]) -> io::Result<Self> {
-        let orig_ndim = inner.shape().len();
+    pub fn new(array: Array<S>, axes: &[usize]) -> io::Result<Self> {
+        let orig_ndim = array.shape().len();
         let new_ndim = orig_ndim + axes.len();
 
         if new_ndim > NDIM_MAX {
@@ -140,7 +140,7 @@ impl<S: ArrayStorage> InsertAxes<S> {
                 sorted_axes.next();
             }
             is_inserted.push(false);
-            shape.push(inner.shape()[input_dim]);
+            shape.push(array.shape()[input_dim]);
         }
         // Remaining axes sit at gap orig_ndim (after the last input dim).
         for _ in sorted_axes {
@@ -150,7 +150,7 @@ impl<S: ArrayStorage> InsertAxes<S> {
 
         // Build blocks_layout: inserted dims get block_shape = 1 (Any); non-inserted dims
         // inherit the corresponding input dim's layout unchanged.
-        let inner_layout = inner.blocks_layout();
+        let inner_layout = array.blocks_layout();
         let mut hint = DimArray::new();
         let mut tag = DimArray::new();
         let mut preferred = DimArray::new();
@@ -172,9 +172,9 @@ impl<S: ArrayStorage> InsertAxes<S> {
         b_layout.block_shape_tag = tag;
         b_layout.preferred_read_block_shape = preferred;
 
-        let dtype = inner.dtype().clone();
+        let dtype = array.dtype().clone();
         Ok(Self {
-            inner,
+            array,
             is_inserted,
             dtype,
             shape,
@@ -220,7 +220,7 @@ impl<S: ArrayStorage> ArrayStorage for InsertAxes<S> {
                 }
             })
             .collect();
-        self.inner.read_data(&inner_index, buf, context)
+        self.array.storage.read_data(&inner_index, buf, context)
     }
 
     fn blocks_layout(&self) -> &BlocksLayout {
@@ -228,7 +228,7 @@ impl<S: ArrayStorage> ArrayStorage for InsertAxes<S> {
     }
 
     fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.inner.codec_params()
+        self.array.storage.codec_params()
     }
 }
 
@@ -432,9 +432,8 @@ mod tests {
 
     #[test]
     fn error_axis_out_of_bounds() {
-        use crate::storage::Ref;
         let a = make1d(seq(4), 4);
         // orig_ndim=1, valid gaps are 0..=1; axis 2 is out of bounds
-        assert!(super::InsertAxes::new(Ref(&a.storage), &[2]).is_err());
+        assert!(super::InsertAxes::new(a, &[2]).is_err());
     }
 }

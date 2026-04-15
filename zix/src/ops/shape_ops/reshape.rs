@@ -436,10 +436,8 @@ mod tests {
 
     #[test]
     fn reshape_wrong_size_errors() {
-        use crate::storage::Ref;
         let a = make1d(u8s(12), 12);
-        let a_ref = Array::from_storage(Ref(&a.storage));
-        assert!(super::Reshape::new(a_ref, &[3, 5]).is_err());
+        assert!(super::Reshape::new(a, &[3, 5]).is_err());
     }
 
     // -----------------------------------------------------------------------
