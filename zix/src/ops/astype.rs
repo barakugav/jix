@@ -236,6 +236,12 @@ where
 {
     value.cast()
 }
+pub(crate) fn cast_as<S, D>(value: S, #[allow(unused_variables)] like: &D) -> D
+where
+    S: Cast<D>,
+{
+    value.cast()
+}
 pub(crate) trait Cast<D> {
     fn cast(self) -> D;
 }
