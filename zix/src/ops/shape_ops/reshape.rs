@@ -221,7 +221,7 @@ where
             return Ok(());
         }
 
-        let orig_logical_strides = default_strides(&orig_shape, 1);
+        let orig_logical_strides = default_strides(orig_shape, 1);
         let new_logical_strides = default_strides(new_shape, 1);
         let same_logical_stride = (0..new_shape.len())
             .scan(0, |orig_dim_idx, new_dim_idx| {

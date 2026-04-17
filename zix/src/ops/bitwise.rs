@@ -62,7 +62,8 @@ define_math1_op!(
     BitwiseNot,
     BitwiseNotKernel,
     |a| !a,
-    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+    output_type = "same"
 );
 
 define_math2_op!(
@@ -105,13 +106,15 @@ define_math1_op!(
     SwapBytes,
     SwapBytesKernel,
     |a| a.swap_bytes(),
-    [i16, i32, i64, u16, u32, u64]
+    [i16, i32, i64, u16, u32, u64],
+    output_type = "same"
 );
 define_math1_op!(
     ReverseBits,
     ReverseBitsKernel,
     |a| a.reverse_bits(),
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = "same"
 );
 
 impl<S> Array<S>

@@ -59,7 +59,13 @@ macro_rules! scalar_kind {
     (Complex<f32>) => {
         crate::dtype::DtypeScalarKind::ComplexF32
     };
+    ((Complex<f32>)) => {
+        crate::dtype::DtypeScalarKind::ComplexF32
+    };
     (Complex<f64>) => {
+        crate::dtype::DtypeScalarKind::ComplexF64
+    };
+    ((Complex<f64>)) => {
         crate::dtype::DtypeScalarKind::ComplexF64
     };
     (bool) => {

@@ -251,11 +251,11 @@ impl TmpBufferPool {
     }
 
     fn get(&self, size: usize, alignment: Alignment) -> TmpBuf<'_> {
-        let pool = self.get_pool(alignment);
+        let (pool, pool_align) = self.get_pool(alignment);
         let pool = unsafe { &mut *pool };
         let tmp_buf = pool
             .pop()
-            .unwrap_or_else(|| AlignedBytes::with_capacity(alignment as usize, size));
+            .unwrap_or_else(|| AlignedBytes::with_capacity(pool_align as usize, size));
         let mut buf = TmpBuf {
             buf: tmp_buf,
             buffers: self,
@@ -266,27 +266,28 @@ impl TmpBufferPool {
 
     fn return_buf(&self, mut buf: AlignedBytes) {
         buf.clear();
-        let pool = self.get_pool(buf.alignment() as Alignment);
+        let (pool, _) = self.get_pool(buf.alignment() as Alignment);
         let pool = unsafe { &mut *pool };
         pool.push(buf);
     }
 
-    fn get_pool(&self, alignment: Alignment) -> *mut Vec<AlignedBytes> {
+    fn get_pool(&self, alignment: Alignment) -> (*mut Vec<AlignedBytes>, Alignment) {
         match alignment {
-            1 | 2 | 4 | 8 => self.align8.get(),
+            1 | 2 | 4 | 8 => (self.align8.get(), 8),
             _ => {
                 let align_other = unsafe { &mut *self.align_other.get() };
                 let pool = align_other
                     .iter_mut()
                     .find(|(align, _)| *align == alignment)
                     .map(|(_, pool)| pool);
-                match pool {
+                let pool = match pool {
                     Some(pool) => pool,
                     None => {
                         align_other.push((alignment, Vec::new()));
                         &mut align_other.last_mut().unwrap().1
                     }
-                }
+                };
+                (pool, alignment)
             }
         }
     }

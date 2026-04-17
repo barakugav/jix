@@ -3,9 +3,9 @@ use std::ops::Range;
 
 use crate::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::dtype::Dtype;
 #[allow(unused_imports)]
 use crate::dtype::{Complex, f16};
-use crate::dtype::{Dtype, Dtyped};
 use crate::iter::NdIter;
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::storage::{ArrayStorage, BlocksLayout};
@@ -240,7 +240,7 @@ macro_rules! define_reduction_op {
         $Name:ident,
         $NameKernel:ident,
         |$arg_acc:ident, $arg_x:ident| $body:expr,
-        [$(($($scalar:tt)*) => ($($reduction_type:tt)*)),* $(,)?]
+        [$($scalar:tt => $reduction_type:tt),* $(,)?]
     ) => {
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
@@ -253,7 +253,7 @@ macro_rules! define_reduction_op {
         }
         crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
 
-        define_reduction_op_kernel!($NameKernel, |$arg_acc, $arg_x| $body, [$(($($scalar)*) => ($($reduction_type)*)),*]);
+        define_reduction_op_kernel!($NameKernel, |$arg_acc, $arg_x| $body, [$($scalar => $reduction_type),*]);
     };
 }
 
@@ -261,7 +261,7 @@ macro_rules! define_reduction_op_kernel {
     (
         $NameKernel:ident,
         |$arg_acc:ident, $arg_x:ident| $body:expr,
-        [$(($($scalar:tt)*) => ($($reduction_type:tt)*)),* $(,)?]
+        [$($scalar:tt => $reduction_type:tt),* $(,)?]
     ) => {
         struct $NameKernel;
         impl crate::ops::reduction::ReductionOpKernel for $NameKernel {
@@ -290,11 +290,11 @@ macro_rules! define_reduction_op_kernel {
                         #[cfg(feature = "half")]
                         apply_loop_impl!(f16, $reduction_type2)
                     };
-                    (Complex<f32>, $reduction_type2:ty) => {
+                    ((Complex<f32>), $reduction_type2:ty) => {
                         #[cfg(feature = "num-complex")]
                         apply_loop_impl!(Complex<f32>, $reduction_type2)
                     };
-                    (Complex<f64>, $reduction_type2:ty) => {
+                    ((Complex<f64>), $reduction_type2:ty) => {
                         #[cfg(feature = "num-complex")]
                         apply_loop_impl!(Complex<f64>, $reduction_type2)
                     };
@@ -302,9 +302,10 @@ macro_rules! define_reduction_op_kernel {
                         apply_loop_impl!($scalar2, $reduction_type2)
                     };
                 }
+                #[allow(unused_parens)]
                 match input_dtype.try_to_scalar() {
-                    $(Some(crate::ops::common::scalar_kind!($($scalar)*)) => {
-                        apply_loop!($($scalar)*, $($reduction_type)*)
+                    $(Some(crate::ops::common::scalar_kind!($scalar)) => {
+                        apply_loop!($scalar, $reduction_type)
                     },)*
                     _ => {}
                 }
@@ -315,16 +316,17 @@ macro_rules! define_reduction_op_kernel {
             }
 
             fn output_dtype(&self, input_dtype: &crate::dtype::Dtype) -> std::io::Result<crate::dtype::Dtype> {
+                #[allow(unused_parens)]
                 match input_dtype.try_to_scalar() {
-                    $(Some(crate::ops::common::scalar_kind!($($scalar)*)) => {
-                        return Ok($($reduction_type)*::DTYPE);
+                    $(Some(crate::ops::common::scalar_kind!($scalar)) => {
+                        return Ok(<$reduction_type as crate::dtype::Dtyped>::DTYPE);
                     },)*
                     _ => {},
 
                 };
                 Err(io::Error::new(
                     io::ErrorKind::Unsupported,
-                    format!("Max reduction not supported for dtype {input_dtype:#?}"),
+                    format!("Reduction op not supported for dtype {input_dtype:#?}"),
                 ))
             }
         }
@@ -337,18 +339,18 @@ define_reduction_op!(
     MaxKernel,
     |m, x| m.max(x),
     [
-        (i8) => (i8),
-        (i16) => (i16),
-        (i32) => (i32),
-        (i64) => (i64),
-        (u8) => (u8),
-        (u16) => (u16),
-        (u32) => (u32),
-        (u64) => (u64),
-        (f16) => (f16),
-        (f32) => (f32),
-        (f64) => (f64),
-        (bool) => (bool),
+        i8 => i8,
+        i16 => i16,
+        i32 => i32,
+        i64 => i64,
+        u8 => u8,
+        u16 => u16,
+        u32 => u32,
+        u64 => u64,
+        f16 => f16,
+        f32 => f32,
+        f64 => f64,
+        bool => bool,
     ]
 );
 define_reduction_op!(
@@ -356,18 +358,18 @@ define_reduction_op!(
     MinKernel,
     |m, x| m.min(x),
     [
-        (i8) => (i8),
-        (i16) => (i16),
-        (i32) => (i32),
-        (i64) => (i64),
-        (u8) => (u8),
-        (u16) => (u16),
-        (u32) => (u32),
-        (u64) => (u64),
-        (f16) => (f16),
-        (f32) => (f32),
-        (f64) => (f64),
-        (bool) => (bool),
+        i8 => i8,
+        i16 => i16,
+        i32 => i32,
+        i64 => i64,
+        u8 => u8,
+        u16 => u16,
+        u32 => u32,
+        u64 => u64,
+        f16 => f16,
+        f32 => f32,
+        f64 => f64,
+        bool => bool,
     ]
 );
 define_reduction_op!(
@@ -375,20 +377,20 @@ define_reduction_op!(
     SumKernel,
     |m, x| m + crate::ops::astype::cast_as(x, &m),
     [
-        (i8) => (i64),
-        (i16) => (i64),
-        (i32) => (i64),
-        (i64) => (i64),
-        (u8) => (u64),
-        (u16) => (u64),
-        (u32) => (u64),
-        (u64) => (u64),
-        (f16) => (f64),
-        (f32) => (f64),
-        (f64) => (f64),
+        i8 => i64,
+        i16 => i64,
+        i32 => i64,
+        i64 => i64,
+        u8 => u64,
+        u16 => u64,
+        u32 => u64,
+        u64 => u64,
+        f16 => f64,
+        f32 => f64,
+        f64 => f64,
         (Complex<f32>) => (Complex::<f64>),
         (Complex<f64>) => (Complex::<f64>),
-        (bool) => (u64),
+        bool => u64,
     ]
 );
 define_reduction_op!(
@@ -396,20 +398,20 @@ define_reduction_op!(
     ProductKernel,
     |m, x| m * crate::ops::astype::cast_as(x, &m),
     [
-        (i8) => (i64),
-        (i16) => (i64),
-        (i32) => (i64),
-        (i64) => (i64),
-        (u8) => (u64),
-        (u16) => (u64),
-        (u32) => (u64),
-        (u64) => (u64),
-        (f16) => (f64),
-        (f32) => (f64),
-        (f64) => (f64),
+        i8 => i64,
+        i16 => i64,
+        i32 => i64,
+        i64 => i64,
+        u8 => u64,
+        u16 => u64,
+        u32 => u64,
+        u64 => u64,
+        f16 => f64,
+        f32 => f64,
+        f64 => f64,
         (Complex<f32>) => (Complex::<f64>),
         (Complex<f64>) => (Complex::<f64>),
-        (bool) => (u64),
+        bool => u64,
     ]
 );
 define_reduction_op!(
@@ -417,20 +419,20 @@ define_reduction_op!(
     AllKernel,
     |m, x| m && crate::ops::astype::cast::<_, bool>(x),
     [
-        (i8) => (bool),
-        (i16) => (bool),
-        (i32) => (bool),
-        (i64) => (bool),
-        (u8) => (bool),
-        (u16) => (bool),
-        (u32) => (bool),
-        (u64) => (bool),
-        (f16) => (bool),
-        (f32) => (bool),
-        (f64) => (bool),
-        (Complex<f32>) => (bool),
-        (Complex<f64>) => (bool),
-        (bool) => (bool),
+        i8 => bool,
+        i16 => bool,
+        i32 => bool,
+        i64 => bool,
+        u8 => bool,
+        u16 => bool,
+        u32 => bool,
+        u64 => bool,
+        f16 => bool,
+        f32 => bool,
+        f64 => bool,
+        (Complex<f32>) => bool,
+        (Complex<f64>) => bool,
+        bool => bool,
     ]
 );
 define_reduction_op!(
@@ -438,20 +440,20 @@ define_reduction_op!(
     AnyKernel,
     |m, x| m || crate::ops::astype::cast::<_, bool>(x),
     [
-        (i8) => (bool),
-        (i16) => (bool),
-        (i32) => (bool),
-        (i64) => (bool),
-        (u8) => (bool),
-        (u16) => (bool),
-        (u32) => (bool),
-        (u64) => (bool),
-        (f16) => (bool),
-        (f32) => (bool),
-        (f64) => (bool),
-        (Complex<f32>) => (bool),
-        (Complex<f64>) => (bool),
-        (bool) => (bool),
+        i8 => bool,
+        i16 => bool,
+        i32 => bool,
+        i64 => bool,
+        u8 => bool,
+        u16 => bool,
+        u32 => bool,
+        u64 => bool,
+        f16 => bool,
+        f32 => bool,
+        f64 => bool,
+        (Complex<f32>) => bool,
+        (Complex<f64>) => bool,
+        bool => bool,
     ]
 );
 

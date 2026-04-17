@@ -69,7 +69,7 @@ impl<S: ArrayStorage> RemoveAxes<S> {
         let input_ndim = array.shape().len();
 
         // Validate axis indices and check for duplicates.
-        let mut seen = DimArray::<bool>::from_iter(std::iter::repeat(false).take(input_ndim));
+        let mut seen = DimArray::<bool>::from_iter(std::iter::repeat_n(false, input_ndim));
         for &ax in axes {
             if ax >= input_ndim {
                 return Err(io::Error::new(

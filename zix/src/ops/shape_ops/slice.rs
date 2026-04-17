@@ -379,7 +379,7 @@ impl DimSlice {
         if self.start >= self.end {
             0
         } else {
-            (self.end - self.start + self.step - 1) / self.step
+            (self.end - self.start).div_ceil(self.step)
         }
     }
 

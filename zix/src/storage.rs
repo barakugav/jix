@@ -427,7 +427,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    &block_size,
+                    block_size,
                     &block_strides,
                     &out_strides,
                     itemsize,
