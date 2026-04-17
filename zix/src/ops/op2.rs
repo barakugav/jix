@@ -3,59 +3,21 @@ use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
-use crate::dtype::{Complex, Dtype, DtypeScalarKind, f16};
+use crate::dtype::{Complex, Dtype, f16};
 use crate::storage::{ArrayStorage, BlocksLayout};
-use crate::util::{DimArray, cast_slice, cast_slice_mut};
+use crate::util::DimArray;
 
-#[allow(unused_variables)]
-pub(crate) trait MathOp2Kernel {
-    fn apply_i8(&self, a: i8, b: i8) -> i8 {
-        unimplemented!()
-    }
-    fn apply_i16(&self, a: i16, b: i16) -> i16 {
-        unimplemented!()
-    }
-    fn apply_i32(&self, a: i32, b: i32) -> i32 {
-        unimplemented!()
-    }
-    fn apply_i64(&self, a: i64, b: i64) -> i64 {
-        unimplemented!()
-    }
-    fn apply_u8(&self, a: u8, b: u8) -> u8 {
-        unimplemented!()
-    }
-    fn apply_u16(&self, a: u16, b: u16) -> u16 {
-        unimplemented!()
-    }
-    fn apply_u32(&self, a: u32, b: u32) -> u32 {
-        unimplemented!()
-    }
-    fn apply_u64(&self, a: u64, b: u64) -> u64 {
-        unimplemented!()
-    }
-    fn apply_f16(&self, a: f16, b: f16) -> f16 {
-        unimplemented!()
-    }
-    fn apply_f32(&self, a: f32, b: f32) -> f32 {
-        unimplemented!()
-    }
-    fn apply_f64(&self, a: f64, b: f64) -> f64 {
-        unimplemented!()
-    }
-    fn apply_complex_f32(&self, a: Complex<f32>, b: Complex<f32>) -> Complex<f32> {
-        unimplemented!()
-    }
-    fn apply_complex_f64(&self, a: Complex<f64>, b: Complex<f64>) -> Complex<f64> {
-        unimplemented!()
-    }
-    fn apply_bool(&self, a: bool, b: bool) -> bool {
-        unimplemented!()
-    }
+pub(crate) trait Op2Kernel {
+    fn apply<'a>(
+        &self,
+        data: impl Iterator<Item = ((&'a [u8], &'a [u8]), &'a mut [u8])>,
+        input_dtypes: (&Dtype, &Dtype),
+    ) -> io::Result<()>;
 
-    fn is_support_dtype(&self, dtype: &Dtype) -> bool;
+    fn output_dtype(&self, input_dtypes: (&Dtype, &Dtype)) -> io::Result<Dtype>;
 }
 
-pub(crate) struct MathOp2<Op, S1, S2> {
+pub(crate) struct Op2<Op, S1, S2> {
     op: Op,
 
     a: Array<S1>,
@@ -65,34 +27,23 @@ pub(crate) struct MathOp2<Op, S1, S2> {
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
-impl<Op, S1, S2> MathOp2<Op, S1, S2> {
+impl<Op, S1, S2> Op2<Op, S1, S2> {
     pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> io::Result<Self>
     where
-        Op: MathOp2Kernel,
+        Op: Op2Kernel,
         S1: ArrayStorage,
         S2: ArrayStorage,
     {
-        if a.dtype() != b.dtype() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "dtype mismatch",
-            ));
-        }
+        let output_dtype = op.output_dtype((a.dtype(), b.dtype()))?;
         if a.shape() != b.shape() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "shape mismatch",
             ));
         }
-        if !op.is_support_dtype(a.dtype()) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("unsupported dtype for operation: {:#?}", a.dtype()),
-            ));
-        }
         Ok(Self {
             op,
-            dtype: a.dtype().clone(),
+            dtype: output_dtype,
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
             a,
@@ -100,9 +51,9 @@ impl<Op, S1, S2> MathOp2<Op, S1, S2> {
         })
     }
 }
-impl<Op, S1, S2> ArrayStorage for MathOp2<Op, S1, S2>
+impl<Op, S1, S2> ArrayStorage for Op2<Op, S1, S2>
 where
-    Op: MathOp2Kernel,
+    Op: Op2Kernel,
     S1: ArrayStorage,
     S2: ArrayStorage,
 {
@@ -120,45 +71,23 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> std::io::Result<()> {
-        let mut buf2 = context.tmp_buf(buf.len(), self.dtype.alignment());
-        let buf2 = buf2.as_mut_slice();
+        let a_dtype = self.a.dtype();
+        let b_dtype = self.b.dtype();
+        let output_dtype = self.dtype();
+        let nitems = buf.len() / output_dtype.itemsize() as usize;
+        let mut a_buf = context.tmp_buf(nitems * a_dtype.itemsize() as usize, a_dtype.alignment());
+        let mut b_buf = context.tmp_buf(nitems * b_dtype.itemsize() as usize, b_dtype.alignment());
+        let a_buf = a_buf.as_mut_slice();
+        let b_buf = b_buf.as_mut_slice();
 
-        self.a.storage.read_data(index, buf, context)?;
-        self.b.storage.read_data(index, buf2, context)?;
+        self.a.storage.read_data(index, a_buf, context)?;
+        self.b.storage.read_data(index, b_buf, context)?;
 
-        macro_rules! apply_loop {
-            ($ty:ty, $apply_fn:ident) => {{
-                let buf1 = unsafe { cast_slice_mut::<u8, $ty>(buf) };
-                let buf2 = unsafe { cast_slice::<u8, $ty>(&buf2) };
-                for (a, b) in buf1.iter_mut().zip(buf2) {
-                    *a = self.op.$apply_fn(*a, *b);
-                }
-            }};
-        }
-
-        match self.dtype.try_to_scalar() {
-            Some(DtypeScalarKind::I8) => apply_loop!(i8, apply_i8),
-            Some(DtypeScalarKind::I16) => apply_loop!(i16, apply_i16),
-            Some(DtypeScalarKind::I32) => apply_loop!(i32, apply_i32),
-            Some(DtypeScalarKind::I64) => apply_loop!(i64, apply_i64),
-            Some(DtypeScalarKind::U8) => apply_loop!(u8, apply_u8),
-            Some(DtypeScalarKind::U16) => apply_loop!(u16, apply_u16),
-            Some(DtypeScalarKind::U32) => apply_loop!(u32, apply_u32),
-            Some(DtypeScalarKind::U64) => apply_loop!(u64, apply_u64),
-            Some(DtypeScalarKind::F16) => apply_loop!(f16, apply_f16),
-            Some(DtypeScalarKind::F32) => apply_loop!(f32, apply_f32),
-            Some(DtypeScalarKind::F64) => apply_loop!(f64, apply_f64),
-            Some(DtypeScalarKind::ComplexF32) => apply_loop!(Complex<f32>, apply_complex_f32),
-            Some(DtypeScalarKind::ComplexF64) => apply_loop!(Complex<f64>, apply_complex_f64),
-            Some(DtypeScalarKind::Bool) => apply_loop!(bool, apply_bool),
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "only scalar dtypes are supported for MathOp2",
-                ));
-            }
-        }
-        Ok(())
+        let a_iter = a_buf.chunks_exact(a_dtype.itemsize() as usize);
+        let b_iter = b_buf.chunks_exact(b_dtype.itemsize() as usize);
+        let out_iter = buf.chunks_exact_mut(output_dtype.itemsize() as usize);
+        self.op
+            .apply(a_iter.zip(b_iter).zip(out_iter), (a_dtype, b_dtype))
     }
 
     fn blocks_layout(&self) -> &BlocksLayout {
@@ -170,26 +99,14 @@ where
     }
 }
 
-macro_rules! define_math2_op {
-    ($Name:ident, $NameKernel:ident, |$a:ident, $b:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
-        pub struct $Name<S1, S2>(crate::ops::math2::MathOp2<$NameKernel, S1, S2>);
-        impl<S1, S2> $Name<S1, S2> {
-            pub fn new(a: crate::Array<S1>, b: crate::Array<S2>) -> std::io::Result<Self>
-            where
-                S1: crate::storage::ArrayStorage,
-                S2: crate::storage::ArrayStorage,
-            {
-                Ok(Self(crate::ops::math2::MathOp2::new($NameKernel, a, b)?))
-            }
-        }
-        crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: crate::storage::ArrayStorage, S2: crate::storage::ArrayStorage);
-
-        crate::ops::math2::define_math2_op_kernel!($NameKernel, |$a, $b| $body, [$($scalar),*]);
-    };
-}
-macro_rules! define_math2_core_op {
-    ($Name:ident, $NameKernel:ident, $op_trait:ident, $op_fn:ident, |$a:ident, $b:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
-        define_math2_op!($Name, $NameKernel, |$a, $b| $body, [$($scalar),*]);
+macro_rules! define_op2 {
+    (
+        $Name:ident,
+        $NameKernel:ident,
+        core_op = ($op_trait:ident, $op_fn:ident),
+        $($kernel_args:tt)*
+    ) => {
+        define_op2!($Name, $NameKernel, $($kernel_args)*);
         impl<S1, S2> core::ops::$op_trait<Array<S2>> for Array<S1>
         where
             S1: ArrayStorage,
@@ -204,92 +121,179 @@ macro_rules! define_math2_core_op {
             }
         }
     };
-}
-macro_rules! define_math2_op_kernel {
-    ($NameKernel:ident, |$a:ident, $b:ident| $body:expr, [$($scalar:tt),* $(,)?]) => {
-        struct $NameKernel;
-        impl crate::ops::math2::MathOp2Kernel for $NameKernel {
-            $(crate::ops::math2::define_math2_op_kernel!(@apply |$a, $b| $body, $scalar);)*
 
-            fn is_support_dtype(&self, dtype: &crate::dtype::Dtype) -> bool {
-                use crate::dtype::DtypeScalarKind;
-                let Some(scalar_kind) = dtype.try_to_scalar() else {
-                    return false;
+    (
+        $Name:ident,
+        $NameKernel:ident,
+        $($kernel_args:tt)*
+    ) => {
+        pub struct $Name<S1, S2>(crate::ops::op2::Op2<$NameKernel, S1, S2>);
+        impl<S1, S2> $Name<S1, S2> {
+            pub fn new(a: crate::Array<S1>, b: crate::Array<S2>) -> std::io::Result<Self>
+            where
+                S1: crate::storage::ArrayStorage,
+                S2: crate::storage::ArrayStorage,
+            {
+                Ok(Self(crate::ops::op2::Op2::new($NameKernel, a, b)?))
+            }
+        }
+        crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: crate::storage::ArrayStorage, S2: crate::storage::ArrayStorage);
+
+        crate::ops::op2::define_op2_kernel!($NameKernel, $($kernel_args)*);
+    };
+}
+macro_rules! define_op2_kernel {
+    (
+        $NameKernel:ident,
+        |$a:ident, $b:ident| $body:expr,
+        [$($scalar:tt),* $(,)?],
+        output_type = "same"
+    ) => {
+        crate::ops::op2::define_op2_kernel!(
+            $NameKernel,
+            |$a, $b| $body,
+            [$($scalar => $scalar),*]
+        );
+    };
+
+    (
+        $NameKernel:ident,
+        |$a:ident, $b:ident| $body:expr,
+        [$($scalar:tt),* $(,)?],
+        output_type = $output_type:tt
+    ) => {
+        crate::ops::op2::define_op2_kernel!(
+            $NameKernel,
+            |$a, $b| $body,
+            [$($scalar => $output_type),*]
+        );
+    };
+
+    (
+        $NameKernel:ident,
+        |$a:ident, $b:ident| $body:expr,
+        [$($input_type:tt => $output_type:tt),* $(,)?]
+    ) => {
+        struct $NameKernel;
+        impl crate::ops::op2::Op2Kernel for $NameKernel {
+            fn apply<'a>(
+                &self,
+                data: impl Iterator<Item = ((&'a [u8], &'a [u8]), &'a mut [u8])>,
+                input_dtypes: (&crate::dtype::Dtype, &crate::dtype::Dtype),
+            ) -> std::io::Result<()> {
+                macro_rules! apply_loop_impl {
+                    ($input_type2:ty, $output_type2:ty) => {{
+                        let data = data.map(|((a_src, b_src), dst)| {
+                            let a_src = unsafe { a_src.as_ptr().cast::<$input_type2>().read() };
+                            let b_src = unsafe { b_src.as_ptr().cast::<$input_type2>().read() };
+                            let dst = unsafe { &mut *dst.as_mut_ptr().cast::<$output_type2>() };
+                            (a_src, b_src, dst)
+                        });
+                        for (a_src, b_src, dst) in data {
+                            let $a = a_src;
+                            let $b = b_src;
+                            *dst = $body;
+                        }
+                        return Ok(())
+                    }};
+                }
+                macro_rules! apply_loop {
+                    (f16, $output_type2:ty) => {
+                        #[cfg(feature = "half")]
+                        apply_loop_impl!(f16, $output_type2)
+                    };
+                    ((Complex<f32>), $output_type2:ty) => {
+                        #[cfg(feature = "num-complex")]
+                        apply_loop_impl!(crate::dtype::Complex<f32>, $output_type2)
+                    };
+                    ((Complex<f64>), $output_type2:ty) => {
+                        #[cfg(feature = "num-complex")]
+                        apply_loop_impl!(crate::dtype::Complex<f64>, $output_type2)
+                    };
+                    ($input_type2:ty, $output_type2:ty) => {
+                        apply_loop_impl!($input_type2, $output_type2)
+                    };
+                }
+
+                debug_assert_eq!(input_dtypes.0, input_dtypes.1);
+                let input_dtype = input_dtypes.0;
+
+                #[allow(unused_parens)]
+                match input_dtype.try_to_scalar() {
+                    $(Some(crate::ops::common::scalar_kind!($input_type)) => {
+                        apply_loop!($input_type, $output_type)
+                    },)*
+                    _ => {}
+                }
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    format!("op not supported for dtype {input_dtype:#?}"),
+                ))
+            }
+
+            fn output_dtype(
+                &self,
+                input_dtypes: (&crate::dtype::Dtype, &crate::dtype::Dtype),
+            ) -> std::io::Result<crate::dtype::Dtype> {
+                let (a_dtype, b_dtype) = input_dtypes;
+                if a_dtype != b_dtype {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "dtype mismatch",
+                    ));
+                }
+                let input_dtype = a_dtype;
+
+                #[allow(unused_parens)]
+                match input_dtype.try_to_scalar() {
+                    $(Some(crate::ops::common::scalar_kind!($input_type)) => {
+                        return Ok(<$output_type as crate::dtype::Dtyped>::DTYPE);
+                    },)*
+                    _ => {},
+
                 };
-                false $(|| crate::ops::math2::define_math2_op_kernel!(@dtype_match scalar_kind, $scalar))*
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    format!("op not supported for dtype {input_dtype:#?}"),
+                ))
             }
         }
     };
-
-    // --- apply arms ---
-    (@apply |$a:ident, $b:ident| $body:expr, i8)  => { fn apply_i8(&self, $a: i8, $b: i8) -> i8 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, i16) => { fn apply_i16(&self, $a: i16, $b: i16) -> i16 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, i32) => { fn apply_i32(&self, $a: i32, $b: i32) -> i32 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, i64) => { fn apply_i64(&self, $a: i64, $b: i64) -> i64 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, u8)  => { fn apply_u8(&self, $a: u8, $b: u8) -> u8 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, u16) => { fn apply_u16(&self, $a: u16, $b: u16) -> u16 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, u32) => { fn apply_u32(&self, $a: u32, $b: u32) -> u32 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, u64) => { fn apply_u64(&self, $a: u64, $b: u64) -> u64 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, f32) => { fn apply_f32(&self, $a: f32, $b: f32) -> f32 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, f64) => { fn apply_f64(&self, $a: f64, $b: f64) -> f64 { $body } };
-    (@apply |$a:ident, $b:ident| $body:expr, f16) => {
-        fn apply_f16(&self, #[allow(unused_variables)] $a: f16, #[allow(unused_variables)] $b: f16) -> f16 {
-            cfg_if::cfg_if! { if #[cfg(feature = "half")] {
-                $body
-            } else {
-                unimplemented!()
-            } }
-        }
-    };
-    (@apply |$a:ident, $b:ident| $body:expr, (Complex<f32>)) => {
-        fn apply_complex_f32(&self, #[allow(unused_variables)] $a: Complex<f32>, #[allow(unused_variables)] $b: Complex<f32>) -> Complex<f32> {
-            cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
-                $body
-            } else {
-                unimplemented!()
-            } }
-        }
-    };
-    (@apply |$a:ident, $b:ident| $body:expr, (Complex<f64>)) => {
-        fn apply_complex_f64(&self, #[allow(unused_variables)] $a: Complex<f64>, #[allow(unused_variables)] $b: Complex<f64>) -> Complex<f64> {
-            cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
-                $body
-            } else {
-                unimplemented!()
-            } }
-        }
-    };
-    (@apply |$a:ident, $b:ident| $body:expr, bool) => { fn apply_bool(&self, $a: bool, $b: bool) -> bool { $body } };
-
-    // --- dtype match arms ---
-    (@dtype_match $sk:ident, i8)  => { $sk == DtypeScalarKind::I8 };
-    (@dtype_match $sk:ident, i16) => { $sk == DtypeScalarKind::I16 };
-    (@dtype_match $sk:ident, i32) => { $sk == DtypeScalarKind::I32 };
-    (@dtype_match $sk:ident, i64) => { $sk == DtypeScalarKind::I64 };
-    (@dtype_match $sk:ident, u8)  => { $sk == DtypeScalarKind::U8 };
-    (@dtype_match $sk:ident, u16) => { $sk == DtypeScalarKind::U16 };
-    (@dtype_match $sk:ident, u32) => { $sk == DtypeScalarKind::U32 };
-    (@dtype_match $sk:ident, u64) => { $sk == DtypeScalarKind::U64 };
-    (@dtype_match $sk:ident, f32) => { $sk == DtypeScalarKind::F32 };
-    (@dtype_match $sk:ident, f64) => { $sk == DtypeScalarKind::F64 };
-    (@dtype_match $sk:ident, f16) => {
-        (cfg!(feature = "half") && $sk == DtypeScalarKind::F16)
-    };
-    (@dtype_match $sk:ident, (Complex<f32>)) => {
-        (cfg!(feature = "num-complex") && $sk == DtypeScalarKind::ComplexF32)
-    };
-    (@dtype_match $sk:ident, (Complex<f64>)) => {
-        (cfg!(feature = "num-complex") && $sk == DtypeScalarKind::ComplexF64)
-    };
-    (@dtype_match $sk:ident, bool) => { $sk == DtypeScalarKind::Bool };
 }
 
-pub(crate) use {define_math2_op, define_math2_op_kernel};
-
-define_math2_core_op!(Add, AddKernel, Add, add, |a, b| a + b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
-define_math2_core_op!(Sub, SubKernel, Sub, sub, |a, b| a - b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
-define_math2_core_op!(Mul, MulKernel, Mul, mul, |a, b| a * b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
-define_math2_core_op!(Div, DivKernel, Div, div, |a, b| a / b, [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]);
+pub(crate) use {define_op2, define_op2_kernel};
+define_op2!(
+    Add,
+    AddKernel,
+    core_op = (Add, add),
+    |a, b| a + b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = "same"
+);
+define_op2!(
+    Sub,
+    SubKernel,
+    core_op = (Sub, sub),
+    |a, b| a - b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = "same"
+);
+define_op2!(
+    Mul,
+    MulKernel,
+    core_op = (Mul, mul),
+    |a, b| a * b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = "same"
+);
+define_op2!(
+    Div,
+    DivKernel,
+    core_op = (Div, div),
+    |a, b| a / b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = "same"
+);
 
 #[cfg(test)]
 mod tests {

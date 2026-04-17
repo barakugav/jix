@@ -1,58 +1,65 @@
 use crate::Array;
-use crate::dtype::{Complex, f16};
+use crate::dtype::f16;
 use crate::ops::common::define_array_op2_method;
-use crate::ops::define_math2_op;
-use crate::ops::logical2::define_logical2_op;
+use crate::ops::define_op2;
 use crate::storage::ArrayStorage;
 
-define_logical2_op!(
+define_op2!(
     Equal,
     EqualKernel,
-    |a, b| -> bool { a == b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]
+    |a, b| a == b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)],
+    output_type = bool
 );
-define_logical2_op!(
+define_op2!(
     NotEqual,
     NotEqualKernel,
-    |a, b| -> bool { a != b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)]
+    |a, b| a != b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16, (Complex<f32>), (Complex<f64>)],
+    output_type = bool
 );
-define_logical2_op!(
+define_op2!(
     Greater,
     GreaterKernel,
-    |a, b| -> bool { a > b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
+    |a, b| a > b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16],
+    output_type = bool
 );
-define_logical2_op!(
+define_op2!(
     GreaterEqual,
     GreaterEqualKernel,
-    |a, b| -> bool { a >= b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
+    |a, b| a >= b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16],
+    output_type = bool
 );
-define_logical2_op!(
+define_op2!(
     Less,
     LessKernel,
-    |a, b| -> bool { a < b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
+    |a, b| a < b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16],
+    output_type = bool
 );
-define_logical2_op!(
+define_op2!(
     LessEqual,
     LessEqualKernel,
-    |a, b| -> bool { a <= b },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16]
+    |a, b| a <= b,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, f16],
+    output_type = bool
 );
 
-define_math2_op!(
+define_op2!(
     Maximum,
     MaximumKernel,
     |a, b| MaximumTrait::maximum(a, b),
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
+    output_type = "same"
 );
-define_math2_op!(
+define_op2!(
     Minimum,
     MinimumKernel,
     |a, b| MinimumTrait::minimum(a, b),
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
+    output_type = "same"
 );
 
 trait MaximumTrait {

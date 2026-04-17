@@ -1,64 +1,62 @@
 use crate::Array;
-use crate::dtype::{Complex, f16};
+#[allow(unused_imports)]
+use crate::dtype::f16;
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
-use crate::ops::define_logical1_op;
-use crate::ops::logical2::define_logical2_op;
-use crate::ops::math1::{define_math1_op, define_math1_op_kernel};
-use crate::ops::math2::define_math2_op;
+use crate::ops::op1::define_op1;
+use crate::ops::op2::define_op2;
 use crate::storage::ArrayStorage;
 
-define_logical2_op!(
+define_op2!(
     LogicalAnd,
     LogicalAndKernel,
-    |a, b| -> bool {
-        crate::ops::astype::cast::<_, bool>(a) && crate::ops::astype::cast::<_, bool>(b)
-    },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    |a, b| crate::ops::astype::cast::<_, bool>(a) && crate::ops::astype::cast::<_, bool>(b),
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = bool
 );
-define_logical2_op!(
+define_op2!(
     LogicalOr,
     LogicalOrKernel,
-    |a, b| -> bool {
-        crate::ops::astype::cast::<_, bool>(a) || crate::ops::astype::cast::<_, bool>(b)
-    },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    |a, b| crate::ops::astype::cast::<_, bool>(a) || crate::ops::astype::cast::<_, bool>(b),
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = bool
 );
-define_logical2_op!(
+define_op2!(
     LogicalXor,
     LogicalXorKernel,
-    |a, b| -> bool {
-        crate::ops::astype::cast::<_, bool>(a) ^ crate::ops::astype::cast::<_, bool>(b)
-    },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    |a, b| crate::ops::astype::cast::<_, bool>(a) ^ crate::ops::astype::cast::<_, bool>(b),
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = bool
 );
-define_logical1_op!(
+define_op1!(
     LogicalNot,
     LogicalNotKernel,
-    |a| -> bool {
-        !crate::ops::astype::cast::<_, bool>(a)
-    },
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    |a| !crate::ops::astype::cast::<_, bool>(a),
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = bool
 );
 
-define_math2_op!(
+define_op2!(
     BitwiseAnd,
     BitwiseAndKernel,
     |a, b| a & b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+    output_type = "same"
 );
-define_math2_op!(
+define_op2!(
     BitwiseOr,
     BitwiseOrKernel,
     |a, b| a | b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+    output_type = "same"
 );
-define_math2_op!(
+define_op2!(
     BitwiseXor,
     BitwiseXorKernel,
     |a, b| a ^ b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+    output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     BitwiseNot,
     BitwiseNotKernel,
     |a| !a,
@@ -66,50 +64,56 @@ define_math1_op!(
     output_type = "same"
 );
 
-define_math2_op!(
+define_op2!(
     BitwiseShiftLeft,
     BitwiseShiftLeftKernel,
     |a, b| a << b,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = "same"
 );
-define_math2_op!(
+define_op2!(
     BitwiseShiftRight,
     BitwiseShiftRightKernel,
     |a, b| a >> b,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = "same"
 );
-define_logical1_op!(
+define_op1!(
     CountOnes,
     CountOnesKernel,
-    |a| -> u32 { a.count_ones() },
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    |a| a.count_ones(),
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = u32
 );
-define_logical1_op!(
+define_op1!(
     CountZeros,
     CountZerosKernel,
-    |a| -> u32 { a.count_zeros() },
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    |a| a.count_zeros(),
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = u32
 );
-define_logical1_op!(
+define_op1!(
     LeadingZeros,
     LeadingZerosKernel,
-    |a| -> u32 { a.leading_zeros() },
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    |a| a.leading_zeros(),
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = u32
 );
-define_logical1_op!(
+define_op1!(
     TrailingZeros,
     TrailingZerosKernel,
-    |a| -> u32 { a.trailing_zeros() },
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    |a| a.trailing_zeros(),
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = u32
 );
-define_math1_op!(
+define_op1!(
     SwapBytes,
     SwapBytesKernel,
     |a| a.swap_bytes(),
     [i16, i32, i64, u16, u32, u64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     ReverseBits,
     ReverseBitsKernel,
     |a| a.reverse_bits(),

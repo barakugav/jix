@@ -18,16 +18,16 @@ pub(crate) trait Op1Kernel {
     fn output_dtype(&self, input_dtype: &Dtype) -> io::Result<Dtype>;
 }
 
-pub(crate) struct MathOp1<Op, S> {
+pub(crate) struct Op1<Op, S> {
     op: Op,
 
     array: Array<S>,
 
-    dtype: Dtype,
+    output_dtype: Dtype,
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
-impl<Op, S> MathOp1<Op, S> {
+impl<Op, S> Op1<Op, S> {
     pub(crate) fn new(op: Op, array: Array<S>) -> io::Result<Self>
     where
         Op: Op1Kernel,
@@ -36,14 +36,14 @@ impl<Op, S> MathOp1<Op, S> {
         let output_dtype = op.output_dtype(array.dtype())?;
         Ok(Self {
             op,
-            dtype: output_dtype,
+            output_dtype,
             shape: array.shape().try_into().unwrap(),
             blocks_layout: array.blocks_layout().clone(),
             array,
         })
     }
 }
-impl<Op, S> ArrayStorage for MathOp1<Op, S>
+impl<Op, S> ArrayStorage for Op1<Op, S>
 where
     Op: Op1Kernel,
     S: ArrayStorage,
@@ -53,7 +53,7 @@ where
     }
 
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        &self.output_dtype
     }
 
     fn read_data(
@@ -62,18 +62,19 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> std::io::Result<()> {
-        let dtype = self.dtype();
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
+        let input_dtype = self.array.dtype();
+        let output_dtype = self.dtype();
+        let nitems = buf.len() / output_dtype.itemsize() as usize;
         let mut tmp_buf = context.tmp_buf(
-            nitems as usize * dtype.itemsize() as usize,
-            dtype.alignment(),
+            nitems * input_dtype.itemsize() as usize,
+            input_dtype.alignment(),
         );
         let tmp_buf = tmp_buf.as_mut_slice();
         self.array.storage.read_data(index, tmp_buf, context)?;
 
-        let data_iter = tmp_buf.chunks_exact(dtype.itemsize() as usize);
-        let out_iter = buf.chunks_exact_mut(dtype.itemsize() as usize);
-        self.op.apply(data_iter.zip(out_iter), dtype)
+        let data_iter = tmp_buf.chunks_exact(input_dtype.itemsize() as usize);
+        let out_iter = buf.chunks_exact_mut(output_dtype.itemsize() as usize);
+        self.op.apply(data_iter.zip(out_iter), input_dtype)
     }
 
     fn blocks_layout(&self) -> &BlocksLayout {
@@ -84,9 +85,9 @@ where
     }
 }
 
-macro_rules! define_math1_op {
+macro_rules! define_op1 {
     ($Name:ident, $NameKernel:ident, core_op = ($op_trait:ident, $op_fn:ident), $($kernel_args:tt)*) => {
-        define_math1_op!($Name, $NameKernel, $($kernel_args)*);
+        define_op1!($Name, $NameKernel, $($kernel_args)*);
 
         impl<S> core::ops::$op_trait for crate::Array<S>
         where
@@ -102,28 +103,28 @@ macro_rules! define_math1_op {
     };
 
     ($Name:ident, $NameKernel:ident, $($kernel_args:tt)*) => {
-        pub struct $Name<S>(crate::ops::math1::MathOp1<$NameKernel, S>);
+        pub struct $Name<S>(crate::ops::op1::Op1<$NameKernel, S>);
         impl<S> $Name<S> {
             pub fn new(array: crate::Array<S>) -> std::io::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
             {
-                Ok(Self(crate::ops::math1::MathOp1::new($NameKernel, array)?))
+                Ok(Self(crate::ops::op1::Op1::new($NameKernel, array)?))
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
 
-        define_math1_op_kernel!($NameKernel, $($kernel_args)*);
+        crate::ops::op1::define_op1_kernel!($NameKernel, $($kernel_args)*);
     };
 }
-macro_rules! define_math1_op_kernel {
+macro_rules! define_op1_kernel {
     (
         $NameKernel:ident,
         |$arg:ident| $body:expr,
         [$($scalar:tt),* $(,)?],
         output_type = "same"
     ) => {
-        define_math1_op_kernel! {
+        crate::ops::op1::define_op1_kernel! {
             $NameKernel,
             |$arg| $body,
             [$($scalar => $scalar),*]
@@ -133,10 +134,23 @@ macro_rules! define_math1_op_kernel {
     (
         $NameKernel:ident,
         |$arg:ident| $body:expr,
+        [$($scalar:tt),* $(,)?],
+        output_type = $output_type:tt
+    ) => {
+        crate::ops::op1::define_op1_kernel! {
+            $NameKernel,
+            |$arg| $body,
+            [$($scalar => $output_type),*]
+        }
+    };
+
+    (
+        $NameKernel:ident,
+        |$arg:ident| $body:expr,
         [$($input_type:tt => $output_type:tt),* $(,)?]
     ) => {
         struct $NameKernel;
-        impl crate::ops::math1::Op1Kernel for $NameKernel {
+        impl crate::ops::op1::Op1Kernel for $NameKernel {
             fn apply<'a>(
                 &self,
                 data: impl Iterator<Item = (&'a [u8], &'a mut [u8])>,
@@ -163,11 +177,11 @@ macro_rules! define_math1_op_kernel {
                     };
                     ((Complex<f32>), $output_type2:ty) => {
                         #[cfg(feature = "num-complex")]
-                        apply_loop_impl!(Complex<f32>, $output_type2)
+                        apply_loop_impl!(crate::dtype::Complex<f32>, $output_type2)
                     };
                     ((Complex<f64>), $output_type2:ty) => {
                         #[cfg(feature = "num-complex")]
-                        apply_loop_impl!(Complex<f64>, $output_type2)
+                        apply_loop_impl!(crate::dtype::Complex<f64>, $output_type2)
                     };
                     ($input_type2:ty, $output_type2:ty) => {
                         apply_loop_impl!($input_type2, $output_type2)
@@ -182,7 +196,7 @@ macro_rules! define_math1_op_kernel {
                 }
                 Err(std::io::Error::new(
                     std::io::ErrorKind::Unsupported,
-                    format!("Reduction op not supported for dtype {input_dtype:#?}"),
+                    format!("op not supported for dtype {input_dtype:#?}"),
                 ))
             }
 
@@ -203,9 +217,9 @@ macro_rules! define_math1_op_kernel {
         }
     };
 }
-pub(crate) use {define_math1_op, define_math1_op_kernel};
+pub(crate) use {define_op1, define_op1_kernel};
 
-define_math1_op!(
+define_op1!(
     Neg,
     NegKernel,
     core_op = (Neg, neg),
@@ -214,92 +228,92 @@ define_math1_op!(
     output_type = "same"
 );
 // TODO f16
-define_math1_op!(
+define_op1!(
     Floor,
     FloorKernel,
     |a| a.floor(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Ceil,
     CeilKernel,
     |a| a.ceil(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Round,
     RoundKernel,
     |a| a.round(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Sqrt,
     SqrtKernel,
     |a| a.sqrt(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Exp,
     ExpKernel,
     |a| a.exp(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(Log, LogKernel, |a| a.ln(), [f32, f64], output_type = "same");
-define_math1_op!(
+define_op1!(Log, LogKernel, |a| a.ln(), [f32, f64], output_type = "same");
+define_op1!(
     Sin,
     SinKernel,
     |a| a.sin(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Cos,
     CosKernel,
     |a| a.cos(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Tan,
     TanKernel,
     |a| a.tan(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Asin,
     AsinKernel,
     |a| a.asin(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Acos,
     AcosKernel,
     |a| a.acos(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Atan,
     AtanKernel,
     |a| a.atan(),
     [f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Signum,
     SignumKernel,
     |a| a.signum(),
     [f16, f32, f64],
     output_type = "same"
 );
-define_math1_op!(
+define_op1!(
     Abs,
     AbsKernel,
     |a| a.abs(),

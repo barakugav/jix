@@ -10,17 +10,14 @@ pub use concat::*;
 mod stack;
 pub use stack::*;
 
-mod math1;
-pub use math1::*;
+mod op1;
+pub use op1::*;
 
-mod math2;
-pub use math2::*;
+mod op2;
+pub use op2::*;
 
 mod logical1;
 pub use logical1::*;
-
-mod logical2;
-// pub use logical2::*;
 
 mod cmp;
 pub use cmp::*;
