@@ -1,5 +1,5 @@
 use std::io;
-use std::ops::{Not, Range};
+use std::ops::Range;
 
 use crate::Array;
 use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
@@ -59,30 +59,47 @@ impl<Op, S> ReductionOp<Op, S> {
             is_reduced[ax] = true;
         }
 
-        let shape: DimArray<u64> = array
+        let shape = array
             .shape()
             .iter()
             .enumerate()
-            .filter_map(|(i, &s)| if !is_reduced[i] { Some(s) } else { None })
-            .collect();
+            .filter_map(|(i, &s)| {
+                if is_reduced[i] {
+                    keepdims.then_some(1)
+                } else {
+                    Some(s)
+                }
+            })
+            .collect::<DimArray<_>>();
 
-        let inner_layout = array.blocks_layout();
-        let hint: DimArray<_> = (0..input_ndim)
-            .filter(|&d| !is_reduced[d])
-            .map(|d| inner_layout.block_shape_hint[d])
+        let mut b_layout = array.blocks_layout().clone();
+        b_layout.block_shape_hint = (0..input_ndim)
+            .filter_map(|d| {
+                if is_reduced[d] {
+                    keepdims.then_some(1)
+                } else {
+                    Some(b_layout.block_shape_hint[d])
+                }
+            })
             .collect();
-        let tag: DimArray<_> = (0..input_ndim)
-            .filter(|&d| !is_reduced[d])
-            .map(|d| inner_layout.block_shape_tag[d])
+        b_layout.block_shape_tag = (0..input_ndim)
+            .filter_map(|d| {
+                if is_reduced[d] {
+                    keepdims.then_some(crate::storage::BlockShapeTag::Any)
+                } else {
+                    Some(b_layout.block_shape_tag[d])
+                }
+            })
             .collect();
-        let preferred: DimArray<_> = (0..input_ndim)
-            .filter(|&d| !is_reduced[d])
-            .map(|d| inner_layout.preferred_read_block_shape[d])
+        b_layout.preferred_read_block_shape = (0..input_ndim)
+            .filter_map(|d| {
+                if is_reduced[d] {
+                    keepdims.then_some(1)
+                } else {
+                    Some(b_layout.preferred_read_block_shape[d])
+                }
+            })
             .collect();
-        let mut b_layout = inner_layout.clone();
-        b_layout.block_shape_hint = hint;
-        b_layout.block_shape_tag = tag;
-        b_layout.preferred_read_block_shape = preferred;
 
         Ok(Self {
             op,
@@ -114,18 +131,24 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()> {
-        assert!(!self.keepdims); // TODO
-
         let orig_shape = self.array.shape();
         assert_eq!(index.len(), self.shape().len());
         let orig_ndim = orig_shape.len();
 
         // Build inner_index: reduced dims span the full original range,
         // non-reduced dims forward the requested output range.
+        //
+        // With keepdims=false the output has fewer dims than the input, so we
+        // use `out_dim` to step through `index`.  With keepdims=true the output
+        // has the same number of dims (reduced ones are size-1), so `index[d]`
+        // maps directly to input dim `d`.
         let mut out_dim = 0usize;
-        let inner_index: DimArray<Range<u64>> = (0..orig_ndim)
+        let inner_index = (0..orig_ndim)
             .map(|in_d| {
                 if self.is_reduced[in_d] {
+                    if self.keepdims {
+                        out_dim += 1; // skip the size-1 keepdim slot
+                    }
                     0..orig_shape[in_d]
                 } else {
                     let r = index[out_dim].clone();
@@ -133,18 +156,21 @@ where
                     r
                 }
             })
-            .collect();
+            .collect::<DimArray<_>>();
 
         let src_dtype = self.array.dtype();
         let dst_dtype = self.dtype();
 
-        let inner_read_shape: DimArray<usize> = inner_index
+        let inner_read_shape = inner_index
             .iter()
             .map(|r| (r.end - r.start) as usize)
-            .collect();
+            .collect::<DimArray<_>>();
         let n_inner: usize = inner_read_shape.iter().product();
 
-        let out_shape: DimArray<usize> = index.iter().map(|r| (r.end - r.start) as usize).collect();
+        let out_shape = index
+            .iter()
+            .map(|r| (r.end - r.start) as usize)
+            .collect::<DimArray<_>>();
 
         // Read the full inner block into a temp buffer.
         let tmp_buf_size = n_inner * src_dtype.itemsize() as usize;
@@ -158,17 +184,26 @@ where
         let inner_strides = default_strides(&inner_read_shape, src_dtype.itemsize() as usize);
         let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as usize);
 
+        // Strides used by out_iter to advance the `base_ptr` into tmp_buf.
+        // For reduced dims the outer loop visits exactly one position (size 1
+        // when keepdims=true, or the dim is absent when keepdims=false), so
+        // their stride contribution to base_ptr is 0.
+        let tmp_buf_strides = inner_strides
+            .iter()
+            .zip(&self.is_reduced)
+            .filter_map(|(&s, &reduced)| {
+                if reduced {
+                    self.keepdims.then_some(0)
+                } else {
+                    Some(s)
+                }
+            })
+            .collect::<DimArray<_>>();
+
         let mut out_iter = NdIter::new(
             &out_shape,
             (
-                NdIterExtStridesPtr::new(
-                    &inner_strides
-                        .iter()
-                        .zip(&self.is_reduced)
-                        .filter_map(|(stride, is_reduced)| is_reduced.not().then_some(*stride))
-                        .collect::<DimArray<_>>(),
-                    tmp_buf.as_ptr(),
-                ),
+                NdIterExtStridesPtr::new(&tmp_buf_strides, tmp_buf.as_ptr()),
                 NdIterExtStridesPtrMut::new(&out_strides, buf.as_mut_ptr()),
             ),
         );
@@ -532,6 +567,83 @@ mod tests {
             assert_eq!(a.max(&[1], false).shape(), &[2, 4]);
         }
 
+        // keepdims shape tests
+        #[test]
+        fn keepdims_shape_axis0() {
+            assert_eq!(make(seq(12), &[3, 4]).max(&[0], true).shape(), &[1, 4]);
+        }
+
+        #[test]
+        fn keepdims_shape_axis1() {
+            assert_eq!(make(seq(12), &[3, 4]).max(&[1], true).shape(), &[3, 1]);
+        }
+
+        #[test]
+        fn keepdims_shape_both_axes() {
+            assert_eq!(make(seq(12), &[3, 4]).max(&[0, 1], true).shape(), &[1, 1]);
+        }
+
+        #[test]
+        fn keepdims_shape_middle_3d() {
+            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
+            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            assert_eq!(a.max(&[1], true).shape(), &[2, 1, 4]);
+        }
+
+        // keepdims value tests
+        #[test]
+        fn keepdims_read_axis0_i32() {
+            // [[0..3],[4..7],[8..11]] → max per col = [[8,9,10,11]] shape [1,4]
+            let got: ArrayD<i32> = make(seq(12), &[3, 4])
+                .max(&[0], true)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![1, 4], vec![8, 9, 10, 11]).unwrap()
+            );
+        }
+
+        #[test]
+        fn keepdims_read_axis1_i32() {
+            // max per row = [[3],[7],[11]] shape [3,1]
+            let got: ArrayD<i32> = make(seq(12), &[3, 4])
+                .max(&[1], true)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![3, 1], vec![3, 7, 11]).unwrap()
+            );
+        }
+
+        #[test]
+        fn keepdims_read_both_axes_i32() {
+            let got: ArrayD<i32> = make(seq(12), &[3, 4])
+                .max(&[0, 1], true)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(got, ArrayD::from_shape_vec(vec![1, 1], vec![11]).unwrap());
+        }
+
+        #[test]
+        fn keepdims_read_3d_middle_axis() {
+            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
+            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let got: ArrayD<i32> = a.max(&[1], true).data().to_ndarray().unwrap();
+            // same values as no-keepdims but shape [2,1,4]
+            let expected: Vec<i32> = (0..2)
+                .flat_map(|i| (0..4).map(move |k| i * 12 + 8 + k))
+                .collect();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![2, 1, 4], expected).unwrap()
+            );
+        }
+
         #[test]
         fn read_axis0_i32() {
             // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → max per col
@@ -761,6 +873,48 @@ mod tests {
             );
         }
 
+        #[test]
+        fn keepdims_read_axis0_i32() {
+            // [[0,1,2],[3,4,5]] sum over rows with keepdims → [[3,5,7]] shape [1,3]
+            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
+                .sum(&[0], true)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![1, 3], vec![3i64, 5, 7]).unwrap()
+            );
+        }
+
+        #[test]
+        fn keepdims_read_axis1_i32() {
+            // [[0,1,2],[3,4,5]] sum over cols with keepdims → [[3],[12]] shape [2,1]
+            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
+                .sum(&[1], true)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![2, 1], vec![3i64, 12]).unwrap()
+            );
+        }
+
+        #[test]
+        fn keepdims_read_both_axes_i32() {
+            // sum of 0..6 = 15, shape [1,1]
+            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
+                .sum(&[0, 1], true)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![1, 1], vec![15i64]).unwrap()
+            );
+        }
+
         // dtype coverage: rows [[1,2],[3,4]] → sum [4,6]
         // signed integers widen to i64
         test_reduce_axis0!(i8,  sum, in = i8,  out = i64, rows: [[1i8,  2i8 ], [3i8,  4i8 ]], expected: [4i64, 6i64]);
@@ -944,6 +1098,34 @@ mod tests {
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![false]).unwrap());
+        }
+
+        #[test]
+        fn keepdims_read_axis0_i32() {
+            // [[1,0,1],[1,1,1]] all over rows with keepdims → [[true,false,true]] shape [1,3]
+            let got: ArrayD<bool> = make(vec![1i32, 0, 1, 1, 1, 1], &[2, 3])
+                .all(&[0], true)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![1, 3], vec![true, false, true]).unwrap()
+            );
+        }
+
+        #[test]
+        fn keepdims_read_axis1_i32() {
+            // [[1,1,1],[0,1,1]] all over cols with keepdims → [[true],[false]] shape [2,1]
+            let got: ArrayD<bool> = make(vec![1i32, 1, 1, 0, 1, 1], &[2, 3])
+                .all(&[1], true)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![2, 1], vec![true, false]).unwrap()
+            );
         }
 
         // dtype coverage: rows [[1,0],[1,1]] → all [true,false]
