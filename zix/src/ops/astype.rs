@@ -246,39 +246,36 @@ pub(crate) trait Cast<D> {
     fn cast(self) -> D;
 }
 
-macro_rules! cast_from {
-    ($value:expr, bool) => {
-        ($value) as i8
-    };
-    ($value:expr, f16) => {
-        ($value).to_f32()
-    };
-    ($value:expr, $type:ident) => {
-        $value
-    };
-}
-macro_rules! cast_to {
-    ($value:expr, bool) => {
-        ($value) != (0 as _)
-    };
-    ($value:expr, f16) => {
-        f16::from_f32(($value) as f32)
-    };
-    ($value:expr, $type:ident) => {
-        ($value) as $type
-    };
-}
 macro_rules! impl_cast {
     ($src_type:ident => $dst_type:ident) => {
         impl Cast<$dst_type> for $src_type {
             fn cast(self) -> $dst_type {
                 #![allow(clippy::redundant_locals)]
                 let value = self;
-                let value = cast_from!(value, $src_type);
-                let value = cast_to!(value, $dst_type);
+                let value = impl_cast!(@from $src_type, value);
+                let value = impl_cast!(@to $dst_type, value);
                 value
             }
         }
+    };
+    (@from bool, $value:expr) => {
+        ($value) as i8
+    };
+    (@from f16, $value:expr) => {
+        ($value).to_f32()
+    };
+    (@from $type:ident, $value:expr) => {
+        $value
+    };
+
+    (@to bool, $value:expr) => {
+        ($value) != (0 as _)
+    };
+    (@to f16, $value:expr) => {
+        f16::from_f32(($value) as f32)
+    };
+    (@to $type:ident, $value:expr) => {
+        ($value) as $type
     };
 }
 
@@ -297,7 +294,22 @@ macro_rules! impl_cast_num {
         impl_cast!($src_type => f32);
         impl_cast!($src_type => f64);
         impl_cast!($src_type => bool);
-    }
+        #[cfg(feature = "half")]
+        impl_cast_num!(@impl_to_complex, $src_type, Complex<f16>);
+        impl_cast_num!(@impl_to_complex, $src_type, Complex<f32>);
+        impl_cast_num!(@impl_to_complex, $src_type, Complex<f64>);
+    };
+
+    (@impl_to_complex, $src_type:ident, Complex<$dst_type:ident>) => {
+        impl Cast<Complex<$dst_type>> for $src_type {
+            fn cast(self) -> Complex<$dst_type> {
+                Complex {
+                    re: crate::ops::astype::cast(self),
+                    im: crate::ops::astype::cast(0.0),
+                }
+            }
+        }
+    };
 }
 impl_cast_num!(i8);
 impl_cast_num!(i16);
@@ -339,14 +351,6 @@ macro_rules! impl_cast_complex {
         impl_cast_complex_to_complex!($src_type, f32);
         impl_cast_complex_to_complex!($src_type, f64);
 
-        impl Cast<Complex<$src_type>> for bool {
-            fn cast(self) -> Complex<$src_type> {
-                Complex {
-                    re: cast::<bool, $src_type>(self),
-                    im: cast::<f32, $src_type>(0.0),
-                }
-            }
-        }
         impl Cast<bool> for Complex<$src_type> {
             fn cast(self) -> bool {
                 self != (cast::<bool, Self>(false))

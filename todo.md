@@ -6,9 +6,7 @@
 - ops
     - slice dtype ( complex re,)
     - clip
-    - abs
     - mean
     - std
     - var
-    - argmin/argmax
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
