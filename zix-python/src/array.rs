@@ -5,6 +5,7 @@ use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMet
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+use zix_core::storage::ArrayStorage;
 use zix_core::Array as ZixArray;
 
 use crate::dtype::dtype_to_numpy;
@@ -14,13 +15,21 @@ use crate::util::{dim_arr, IntoPyResult};
 #[gen_stub_pyclass]
 #[pyclass]
 pub struct Array {
-    arr: ZixArray<DynStorage>,
+    pub(crate) arr: ZixArray<DynStorage>,
 }
 impl Array {
     pub(crate) fn from_storage(storage: DynStorage) -> Self {
         Self {
             arr: ZixArray::from_storage(storage),
         }
+    }
+
+    pub(crate) fn from_core_storage(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
+        Self::from_storage(DynStorage(Arc::new(storage)))
+    }
+
+    pub(crate) fn to_core_array(&self) -> ZixArray<DynStorage> {
+        ZixArray::from_storage(self.arr.storage().clone())
     }
 }
 
@@ -78,32 +87,36 @@ impl Array {
         Ok(np_arr)
     }
 
-    pub fn __add__(&self, other: &Self) -> PyResult<Self> {
-        let a = ZixArray::from_storage(self.arr.storage().clone());
-        let b = ZixArray::from_storage(other.arr.storage().clone());
-        let storage = DynStorage(Arc::new(zix_core::ops::Add::new(a, b).into_py_result()?));
-        Ok(Self::from_storage(storage))
+    pub fn __add__<'py>(
+        slf: &Bound<'py, Self>,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Self> {
+        crate::ops::add(py, slf, other)
     }
 
-    pub fn __sub__(&self, other: &Self) -> PyResult<Self> {
-        let a = ZixArray::from_storage(self.arr.storage().clone());
-        let b = ZixArray::from_storage(other.arr.storage().clone());
-        let storage = DynStorage(Arc::new(zix_core::ops::Sub::new(a, b).into_py_result()?));
-        Ok(Self::from_storage(storage))
+    pub fn __sub__<'py>(
+        slf: &Bound<'py, Self>,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Self> {
+        crate::ops::sub(py, slf, other)
     }
 
-    pub fn __mul__(&self, other: &Self) -> PyResult<Self> {
-        let a = ZixArray::from_storage(self.arr.storage().clone());
-        let b = ZixArray::from_storage(other.arr.storage().clone());
-        let storage = DynStorage(Arc::new(zix_core::ops::Mul::new(a, b).into_py_result()?));
-        Ok(Self::from_storage(storage))
+    pub fn __mul__<'py>(
+        slf: &Bound<'py, Self>,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Self> {
+        crate::ops::mul(py, slf, other)
     }
 
-    pub fn __truediv__(&self, other: &Self) -> PyResult<Self> {
-        let a = ZixArray::from_storage(self.arr.storage().clone());
-        let b = ZixArray::from_storage(other.arr.storage().clone());
-        let storage = DynStorage(Arc::new(zix_core::ops::Div::new(a, b).into_py_result()?));
-        Ok(Self::from_storage(storage))
+    pub fn __truediv__<'py>(
+        slf: &Bound<'py, Self>,
+        py: Python<'py>,
+        other: &Bound<'py, PyAny>,
+    ) -> PyResult<Self> {
+        crate::ops::div(py, slf, other)
     }
 }
 
@@ -113,17 +126,17 @@ mod tests {
 
     use ndarray::{array, ArrayD, IxDyn};
     use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
-    use pyo3::Python;
+    use pyo3::{Bound, Python};
     use zix_core::dtype::Dtyped;
     use zix_core::storage::Owned;
     use zix_core::{Array as ZixArray, ArrayParams};
 
     use super::{Array, DynStorage};
 
-    fn make_py_array<T: Dtyped>(ndarray: &ArrayD<T>) -> Array {
+    fn make_py_array<'py, T: Dtyped>(py: Python<'py>, ndarray: &ArrayD<T>) -> Bound<'py, Array> {
         let core = ZixArray::<Owned>::from_ndarray(ndarray, ArrayParams::default()).unwrap();
         let dyn_storage = DynStorage(Arc::new(core.into_storage()));
-        Array::from_storage(dyn_storage)
+        Bound::new(py, Array::from_storage(dyn_storage)).unwrap()
     }
 
     fn roundtrip<T>(original: &ArrayD<T>) -> ArrayD<T>
@@ -132,8 +145,8 @@ mod tests {
     {
         // ndarray::Array -> zix_core::Array -> zix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
-            let py_arr = make_py_array(&original);
-            let np = py_arr.numpy(py).unwrap();
+            let py_arr = make_py_array(py, &original);
+            let np = py_arr.borrow().numpy(py).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array()
         })
@@ -216,8 +229,8 @@ mod tests {
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).map(|x| x as f32).collect())
                 .unwrap();
         Python::attach(|py| {
-            let py_arr = make_py_array(&original);
-            let np = py_arr.numpy(py).unwrap();
+            let py_arr = make_py_array(py, &original);
+            let np = py_arr.borrow().numpy(py).unwrap();
             assert_eq!(np.shape(), &[2usize, 3, 4]);
         });
     }
@@ -227,8 +240,8 @@ mod tests {
         use numpy::PyArrayDescrMethods;
         let original: ArrayD<f32> = array![1.0f32, 2.0].into_dyn();
         Python::attach(|py| {
-            let py_arr = make_py_array(&original);
-            let np = py_arr.numpy(py).unwrap();
+            let py_arr = make_py_array(py, &original);
+            let np = py_arr.borrow().numpy(py).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'f');
         });
@@ -239,8 +252,8 @@ mod tests {
         use numpy::PyArrayDescrMethods;
         let original: ArrayD<i32> = array![1i32, 2, 3].into_dyn();
         Python::attach(|py| {
-            let py_arr = make_py_array(&original);
-            let np = py_arr.numpy(py).unwrap();
+            let py_arr = make_py_array(py, &original);
+            let np = py_arr.borrow().numpy(py).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'i');
         });
@@ -277,7 +290,11 @@ mod tests {
     fn test_add_f32() {
         let a: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
         let b: ArrayD<f32> = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]].into_dyn();
-        let result = eval::<f32>(make_py_array(&a).__add__(&make_py_array(&b)).unwrap());
+        let result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            eval::<f32>(Array::__add__(&a, py, &b).unwrap())
+        });
         assert_eq!(result, a + b);
     }
 
@@ -285,7 +302,11 @@ mod tests {
     fn test_sub_f32() {
         let a: ArrayD<f32> = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]].into_dyn();
         let b: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
-        let result = eval::<f32>(make_py_array(&a).__sub__(&make_py_array(&b)).unwrap());
+        let result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            eval::<f32>(Array::__sub__(&a, py, &b).unwrap())
+        });
         assert_eq!(result, a - b);
     }
 
@@ -293,7 +314,11 @@ mod tests {
     fn test_mul_f32() {
         let a: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
         let b: ArrayD<f32> = array![[2.0f32, 3.0, 4.0], [5.0, 6.0, 7.0]].into_dyn();
-        let result = eval::<f32>(make_py_array(&a).__mul__(&make_py_array(&b)).unwrap());
+        let result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            eval::<f32>(Array::__mul__(&a, py, &b).unwrap())
+        });
         assert_eq!(result, a * b);
     }
 
@@ -301,7 +326,11 @@ mod tests {
     fn test_div_f32() {
         let a: ArrayD<f32> = array![[2.0f32, 6.0, 12.0], [20.0, 30.0, 42.0]].into_dyn();
         let b: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
-        let result = eval::<f32>(make_py_array(&a).__truediv__(&make_py_array(&b)).unwrap());
+        let result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            eval::<f32>(Array::__truediv__(&a, py, &b).unwrap())
+        });
         assert_eq!(result, a / b);
     }
 
@@ -309,7 +338,11 @@ mod tests {
     fn test_add_f64() {
         let a: ArrayD<f64> = array![1.0f64, 2.0, 3.0].into_dyn();
         let b: ArrayD<f64> = array![0.5f64, 1.5, 2.5].into_dyn();
-        let result = eval::<f64>(make_py_array(&a).__add__(&make_py_array(&b)).unwrap());
+        let result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            eval::<f64>(Array::__add__(&a, py, &b).unwrap())
+        });
         assert_eq!(result, a + b);
     }
 
@@ -317,7 +350,11 @@ mod tests {
     fn test_add_i32() {
         let a: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
         let b: ArrayD<i32> = array![[10i32, 20], [30, 40]].into_dyn();
-        let result = eval::<i32>(make_py_array(&a).__add__(&make_py_array(&b)).unwrap());
+        let result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            eval::<i32>(Array::__add__(&a, py, &b).unwrap())
+        });
         assert_eq!(result, a + b);
     }
 
@@ -325,7 +362,11 @@ mod tests {
     fn test_sub_i32() {
         let a: ArrayD<i32> = array![[10i32, 20], [30, 40]].into_dyn();
         let b: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
-        let result = eval::<i32>(make_py_array(&a).__sub__(&make_py_array(&b)).unwrap());
+        let result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            eval::<i32>(Array::__sub__(&a, py, &b).unwrap())
+        });
         assert_eq!(result, a - b);
     }
 
@@ -333,7 +374,11 @@ mod tests {
     fn test_mul_i32() {
         let a: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
         let b: ArrayD<i32> = array![[5i32, 6], [7, 8]].into_dyn();
-        let result = eval::<i32>(make_py_array(&a).__mul__(&make_py_array(&b)).unwrap());
+        let result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            eval::<i32>(Array::__mul__(&a, py, &b).unwrap())
+        });
         assert_eq!(result, a * b);
     }
 
@@ -343,13 +388,19 @@ mod tests {
         let a: ArrayD<f32> = array![1.0f32, 2.0, 3.0, 4.0].into_dyn();
         let b: ArrayD<f32> = array![4.0f32, 3.0, 2.0, 1.0].into_dyn();
         let c: ArrayD<f32> = array![2.0f32, 2.0, 2.0, 2.0].into_dyn();
-        let zix_result = eval::<f32>(
-            make_py_array(&a)
-                .__add__(&make_py_array(&b))
-                .unwrap()
-                .__mul__(&make_py_array(&c))
+        let zix_result = Python::attach(|py| {
+            let a = make_py_array(py, &a);
+            let b = make_py_array(py, &b);
+            let c = make_py_array(py, &c);
+            eval::<f32>(
+                Array::__mul__(
+                    &Bound::new(py, Array::__add__(&a, py, &b).unwrap()).unwrap(),
+                    py,
+                    &c,
+                )
                 .unwrap(),
-        );
+            )
+        });
         assert_eq!(zix_result, (a + b) * c);
     }
 }

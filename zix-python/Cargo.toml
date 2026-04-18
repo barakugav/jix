@@ -12,7 +12,10 @@ crate-type = [
 
 [dependencies]
 pyo3 = "0.28"
-zix_core = { package = "zix", path = "../zix" }
+zix_core = { package = "zix", path = "../zix", features = [
+    "half",
+    "num-complex",
+] }
 numpy = "0.28"
 pyo3-stub-gen = "0.21"
 arrayvec = "0.7"

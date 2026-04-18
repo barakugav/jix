@@ -550,7 +550,7 @@ impl Endianness {
 /// This trait is very unsafe, and the caller should implement it carefully, matching the type size,
 /// alignment and inner fields of the type. Types implementing this should most likely be annotated with `#[repr(C)]`
 /// or `#[repr(C, packed)]`, for aligned and packed fields respectively.
-pub unsafe trait Dtyped: Copy + 'static {
+pub unsafe trait Dtyped: Copy + Send + Sync + 'static {
     /// Get the dtype representing the type layout and inner fields.
     const DTYPE: Dtype;
 }

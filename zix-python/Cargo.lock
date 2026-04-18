@@ -231,6 +231,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "half"
+version = "2.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
+dependencies = [
+ "cfg-if",
+ "crunchy",
+ "zerocopy",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1521,8 +1532,10 @@ version = "0.0.0"
 dependencies = [
  "arrayvec",
  "cfg-if",
+ "half",
  "memmap2",
  "ndarray",
+ "num-complex",
  "prost",
  "prost-build",
  "zerocopy",

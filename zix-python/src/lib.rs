@@ -2,7 +2,10 @@ use pyo3::prelude::*;
 use pyo3_stub_gen::define_stub_info_gatherer;
 
 mod array;
+use array::Array;
+
 mod dtype;
+mod ops;
 mod storage;
 mod util;
 
@@ -10,9 +13,9 @@ mod util;
 fn zix(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
-    m.add_class::<array::Array>()?;
+    m.add_class::<Array>()?;
 
-    // m.add_function(wrap_pyfunction!(ndarray::read_ndarray, m)?)?;
+    m.add_function(wrap_pyfunction!(ops::asarray, m)?)?;
 
     // pyo3_log::Logger::new(m.py(), pyo3_log::Caching::Nothing)
     //     .unwrap()

@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::util::{default_strides, dim_arr, nd_copy, DimArray, SendSyncPtr};
 use crate::Array;
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
@@ -33,7 +33,7 @@ pub struct Plain<S> {
     #[allow(unused)]
     storage: S,
 
-    data: *const u8,
+    data: SendSyncPtr<u8>,
     shape: DimArray<u64>,
     strides: DimArray<usize>, // in bytes
     dtype: Dtype,
@@ -110,7 +110,7 @@ impl<S> Plain<S> {
 
         Ok(Self {
             storage,
-            data,
+            data: SendSyncPtr(data),
             shape,
             strides,
             dtype,
@@ -144,7 +144,7 @@ impl<T> Array<Plain<Vec<T>>> {
         let strides = arr
             .strides()
             .iter()
-            .map(|&s| s as usize * std::mem::size_of::<T>())
+            .map(|&s| usize::try_from(s).unwrap() * std::mem::size_of::<T>())
             .collect::<DimArray<_>>();
 
         let (allocation, allocation_offset) = arr.into_raw_vec_and_offset();
@@ -222,7 +222,7 @@ impl<S> ArrayStorage for Plain<S> {
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])
             .sum::<usize>();
-        let src_ptr = unsafe { self.data.add(in_offset) };
+        let src_ptr = unsafe { self.data.0.add(in_offset) };
         let dst_ptr = buf.as_mut_ptr();
 
         unsafe {

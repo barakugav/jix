@@ -6,6 +6,15 @@ pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
     (0..ndim).map(f).collect()
 }
+pub(crate) fn check_ndim(ndim: usize) -> PyResult<()> {
+    if ndim > NDIM_MAX {
+        Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
+        )))
+    } else {
+        Ok(())
+    }
+}
 
 pub(crate) trait IntoPyResult<T> {
     fn into_py_result(self) -> PyResult<T>;

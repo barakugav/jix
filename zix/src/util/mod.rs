@@ -321,6 +321,10 @@ pub(crate) unsafe fn nd_copy<S1, S2, S3>(
     }
 }
 
+pub(crate) struct SendSyncPtr<T>(pub(crate) *const T);
+unsafe impl<T> Send for SendSyncPtr<T> {}
+unsafe impl<T> Sync for SendSyncPtr<T> {}
+
 #[cfg(test)]
 mod tests {
     use super::{default_strides, AlignedBytes, AlternatingBuffers};
