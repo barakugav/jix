@@ -6,7 +6,7 @@ use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter};
 use crate::dtype::Dtype;
-use crate::error::{Error, ErrorKind, Result, bail, ensure};
+use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage, Mmap, Owned};
 use crate::util::{cast_slice, cast_slice_mut};
 

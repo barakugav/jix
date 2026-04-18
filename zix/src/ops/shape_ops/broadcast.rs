@@ -3,9 +3,9 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{Result, bail, check_get_buffer_size, check_get_range, ensure};
+use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
-use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
+use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 
 /// Lazy storage type returned by [`Array::broadcast_view`](crate::Array::broadcast_view).
 ///

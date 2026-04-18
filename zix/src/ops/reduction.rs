@@ -1,15 +1,15 @@
 use std::ops::Range;
 
-use crate::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 #[allow(unused_imports)]
-use crate::dtype::{Complex, f16};
-use crate::error::{Result, bail, check_get_buffer_size, check_get_range, ensure};
+use crate::dtype::{f16, Complex};
+use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
-use crate::util::iter::NdIter;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
-use crate::util::{DimArray, default_strides, dim_arr};
+use crate::util::iter::NdIter;
+use crate::util::{default_strides, dim_arr, DimArray};
+use crate::Array;
 
 pub(crate) trait ReductionOpKernel {
     fn reduce<'a>(
@@ -191,7 +191,11 @@ where
             ),
         );
         let reduction_shape = dim_arr(orig_ndim, |d| {
-            if self.is_reduced[d] { orig_shape[d] } else { 1 }
+            if self.is_reduced[d] {
+                orig_shape[d]
+            } else {
+                1
+            }
         });
 
         let slice_iter = out_iter.map(|(_out_idx, (base_ptr, out_ptr))| {
@@ -515,10 +519,10 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::array::{Array, ArrayParams};
-    #[cfg(feature = "num-complex")]
-    use crate::dtype::Complex;
     #[cfg(feature = "half")]
     use crate::dtype::f16;
+    #[cfg(feature = "num-complex")]
+    use crate::dtype::Complex;
     use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {

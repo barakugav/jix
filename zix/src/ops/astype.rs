@@ -2,9 +2,8 @@ use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
-use crate::dtype::f16;
-use crate::dtype::{Complex, Dtype, DtypeScalarKind};
-use crate::error::{Result, bail, check_get_buffer_size, check_get_range, ensure};
+use crate::dtype::{f16, Complex, Dtype, DtypeScalarKind};
+use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 

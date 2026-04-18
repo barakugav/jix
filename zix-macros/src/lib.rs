@@ -2,7 +2,7 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use syn::spanned::Spanned;
-use syn::{Data, DeriveInput, Fields, Meta, parse_macro_input};
+use syn::{parse_macro_input, Data, DeriveInput, Fields, Meta};
 
 /// Derive macro generating an impl of the trait `Dtyped`.
 #[proc_macro_derive(Dtyped)]

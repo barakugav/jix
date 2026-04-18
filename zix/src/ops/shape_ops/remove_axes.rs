@@ -1,13 +1,11 @@
 use std::ops::Range;
 
-use crate::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{
-    Result, check_get_range, ensure,
-};
+use crate::error::{check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
+use crate::Array;
 
 /// Lazy storage type returned by [`Array::remove_axes`](crate::Array::remove_axes).
 ///

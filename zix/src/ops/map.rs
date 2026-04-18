@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{Result, check_get_buffer_size, check_get_range, ensure};
+use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 

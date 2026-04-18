@@ -5,7 +5,7 @@ use prost::Message;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::archive::schema::{self, ArchiveType};
-use crate::error::{Error, Result, ensure};
+use crate::error::{ensure, Error, Result};
 use crate::util::Idx;
 
 const MAGIC: &[u8; 4] = b"ZIX1";

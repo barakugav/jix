@@ -6,6 +6,7 @@
 use core::fmt::Debug;
 use core::mem::ManuallyDrop;
 use core::ops::{Deref, DerefMut};
+
 use raw::RawAlignedBytes;
 
 mod raw;
@@ -439,8 +440,9 @@ unsafe impl Send for AlignedBytes {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use core::iter::repeat;
+
+    use super::*;
 
     #[test]
     fn new() {

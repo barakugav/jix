@@ -6,9 +6,10 @@ pub use arr_sequence::{ArraySequence, ArraySequenceItem};
 
 pub(crate) mod iter;
 
-use crate::NDIM_MAX;
-use iter::NdIter;
 use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
+use iter::NdIter;
+
+use crate::NDIM_MAX;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
@@ -322,7 +323,7 @@ pub(crate) unsafe fn nd_copy<S1, S2, S3>(
 
 #[cfg(test)]
 mod tests {
-    use super::{AlignedBytes, AlternatingBuffers, default_strides};
+    use super::{default_strides, AlignedBytes, AlternatingBuffers};
 
     #[test]
     fn test_default_strides() {

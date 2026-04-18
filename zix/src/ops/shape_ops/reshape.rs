@@ -1,13 +1,13 @@
 use std::ops::Range;
 
-use crate::NDIM_MAX;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{Result, check_get_buffer_size, check_get_range, ensure};
+use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
-use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
+use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::NDIM_MAX;
 
 pub struct Reshape<S> {
     array: Array<S>,

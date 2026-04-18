@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
 
-use crate::error::{Error, ErrorKind, Result, bail, ensure};
+use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::util::{Idx, IxIterExt};
 
 /// The type used to represent dtype alignment in bytes.
@@ -928,15 +928,13 @@ mod tests {
     #[test]
     fn new_struct_too_many_dims_errors() {
         // DTYPE_MAX_NDIM = 4; five dimensions must be rejected.
-        assert!(
-            Dtype::new_struct(
-                vec![("a".to_string(), 0, u8::DTYPE)],
-                &[1, 1, 1, 1, 1],
-                1,
-                1,
-            )
-            .is_err()
-        );
+        assert!(Dtype::new_struct(
+            vec![("a".to_string(), 0, u8::DTYPE)],
+            &[1, 1, 1, 1, 1],
+            1,
+            1,
+        )
+        .is_err());
     }
 
     #[test]
@@ -969,36 +967,32 @@ mod tests {
     #[test]
     fn new_struct_packed_wrong_offset_errors() {
         // Packed struct (alignment=1): b must be at offset 4, not 5.
-        assert!(
-            Dtype::new_struct(
-                vec![
-                    ("a".to_string(), 0, i32::DTYPE),
-                    ("b".to_string(), 5, u8::DTYPE),
-                ],
-                &[],
-                6,
-                1,
-            )
-            .is_err()
-        );
+        assert!(Dtype::new_struct(
+            vec![
+                ("a".to_string(), 0, i32::DTYPE),
+                ("b".to_string(), 5, u8::DTYPE),
+            ],
+            &[],
+            6,
+            1,
+        )
+        .is_err());
     }
 
     #[test]
     fn new_struct_itemsize_too_small_errors() {
         // Packed i32+u8 must be exactly 5; declaring 4 is rejected as invalid offsets
         // (is_packed_struct checks itemsize as part of offset validation).
-        assert!(
-            Dtype::new_struct(
-                vec![
-                    ("a".to_string(), 0, i32::DTYPE),
-                    ("b".to_string(), 4, u8::DTYPE),
-                ],
-                &[],
-                4,
-                1,
-            )
-            .is_err()
-        );
+        assert!(Dtype::new_struct(
+            vec![
+                ("a".to_string(), 0, i32::DTYPE),
+                ("b".to_string(), 4, u8::DTYPE),
+            ],
+            &[],
+            4,
+            1,
+        )
+        .is_err());
     }
 
     // ---- Derive macro ----

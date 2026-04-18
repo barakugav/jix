@@ -1,4 +1,4 @@
-use crate::util::{DimArray, Idx, dim_arr};
+use crate::util::{dim_arr, DimArray, Idx};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
 ///
@@ -252,9 +252,8 @@ where
 #[cfg(test)]
 mod tests {
 
-    use crate::util::iter::strides::NdIterExtStridesPtrMut;
-
     use super::*;
+    use crate::util::iter::strides::NdIterExtStridesPtrMut;
 
     // ---------------------------------------------------------------------------
     // Helpers

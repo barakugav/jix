@@ -1,5 +1,5 @@
-use core::ptr::{NonNull, null_mut};
-use std::alloc::{Layout, alloc, alloc_zeroed, dealloc, handle_alloc_error, realloc};
+use core::ptr::{null_mut, NonNull};
+use std::alloc::{alloc, alloc_zeroed, dealloc, handle_alloc_error, realloc, Layout};
 
 use crate::util::aligned_vec::RuntimeAlign;
 

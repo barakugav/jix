@@ -3,9 +3,9 @@ use std::ops::{Not, Range};
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{Result, bail, check_get_buffer_size, check_get_range, ensure};
+use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
-use crate::util::{ArraySequence, DimArray, default_strides, dim_arr, nd_copy};
+use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 
 /// Join a sequence of arrays along an existing axis.
 ///

@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use crate::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{Result, check_get_buffer_size, check_get_range, check_ndim};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
-use crate::util::{DimArray, cast_slice_mut, dim_arr};
+use crate::util::{cast_slice_mut, dim_arr, DimArray};
+use crate::Array;
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///

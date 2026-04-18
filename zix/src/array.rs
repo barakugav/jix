@@ -5,15 +5,16 @@ use std::ops::Range;
 
 use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{Result, check_get_range, check_ndim, ensure};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::{BlockSize, BlockTableBuilder};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Owned, Ref,
 };
-use crate::util::iter::NdIter;
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
-use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr, nd_copy};
-use crate::util::{MaybeOwned, default_strides};
+use crate::util::iter::NdIter;
+use crate::util::{
+    cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray, MaybeOwned,
+};
 
 #[derive(Clone)]
 pub struct Array<S> {
@@ -397,14 +398,13 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
 mod tests {
     use ndarray::ArrayD;
 
+    use super::Array;
     use crate::array::{ArrayBlockTableStorageBase, ArrayParams, Owned};
     use crate::codec::{DecoderParams, Encoder, EncoderParams};
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::{BlockShapeTag, BlocksLayout};
-    use crate::util::{DimArray, cast_slice, dim_arr};
-
-    use super::Array;
+    use crate::util::{cast_slice, dim_arr, DimArray};
 
     // -----------------------------------------------------------------------
     // from_ndarray roundtrip helper

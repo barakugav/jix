@@ -2,10 +2,9 @@ use std::ops::Range;
 
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Itemsize};
-use crate::error::{Result, check_ndim, ensure};
+use crate::error::{check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::util::Idx;
-use crate::util::{DimArray, dim_arr};
+use crate::util::{dim_arr, DimArray, Idx};
 
 mod compressed;
 pub use compressed::*;

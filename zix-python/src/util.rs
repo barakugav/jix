@@ -1,6 +1,5 @@
-use zix_core::NDIM_MAX;
-
 use pyo3::prelude::*;
+use zix_core::NDIM_MAX;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 

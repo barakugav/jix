@@ -16,8 +16,8 @@ pub use permute_dims::*;
 mod reshape;
 pub use reshape::*;
 
-use crate::Array;
 use crate::storage::{ArrayStorage, Owned};
+use crate::Array;
 
 impl<S> Array<S>
 where

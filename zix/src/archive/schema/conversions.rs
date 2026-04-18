@@ -2,7 +2,7 @@
 
 use crate::archive::schema;
 use crate::dtype::{Alignment, Itemsize};
-use crate::error::{Error, ErrorKind, Result, bail, check_ndim, ensure};
+use crate::error::{bail, check_ndim, ensure, Error, ErrorKind, Result};
 use crate::util::{DimArray, IxIterExt};
 
 impl crate::dtype::Dtype {

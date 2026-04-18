@@ -1,10 +1,10 @@
-use crate::Array;
 #[allow(unused_imports)]
 use crate::dtype::f16;
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
 use crate::ops::op1::define_op1;
 use crate::ops::op2::define_op2;
 use crate::storage::ArrayStorage;
+use crate::Array;
 
 define_op2!(
     LogicalAnd,

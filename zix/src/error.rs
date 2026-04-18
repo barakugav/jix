@@ -2,8 +2,8 @@ use core::fmt;
 use std::borrow::Cow;
 use std::ops::Range;
 
-use crate::NDIM_MAX;
 use crate::dtype::Dtype;
+use crate::NDIM_MAX;
 
 pub struct Error(Box<ErrorRepr>);
 struct ErrorRepr {

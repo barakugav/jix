@@ -1,7 +1,7 @@
 use std::cell::UnsafeCell;
 
 use crate::dtype::{Alignment, Dtype};
-use crate::error::{Error, ErrorKind, Result, ensure};
+use crate::error::{ensure, Error, ErrorKind, Result};
 use crate::util::{AlignedBytes, AlternatingBuffers};
 
 #[derive(Clone, Debug)]

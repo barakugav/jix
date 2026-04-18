@@ -1,0 +1,7 @@
+style_edition = "2021"
+max_width = 100
+use_field_init_shorthand = true
+
+# unstable_features = true
+# imports_granularity = "Module"
+# group_imports = "StdExternalCrate"

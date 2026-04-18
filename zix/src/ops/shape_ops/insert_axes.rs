@@ -2,9 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{
-    Result, check_get_range, check_ndim, ensure,
-};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::DimArray;
 use crate::Array;

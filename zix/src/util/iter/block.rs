@@ -1,5 +1,5 @@
 use crate::util::iter::NdIterExtension;
-use crate::util::{DimArray, Idx, dim_arr};
+use crate::util::{dim_arr, DimArray, Idx};
 
 /// [`NdIterExtension`] that tracks the per-block inner offset and active size for each dimension
 /// as a block-space index advances through an N-dimensional sub-range.

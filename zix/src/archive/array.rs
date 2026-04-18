@@ -4,10 +4,10 @@ use std::path::Path;
 
 use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
-use crate::error::{Error, Result, check_ndim, ensure};
+use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Mmap, Owned};
-use crate::util::{DimArray, Idx, dim_arr};
+use crate::util::{dim_arr, DimArray, Idx};
 use crate::{Array, ArrayParams};
 
 impl Array<Owned> {
@@ -123,7 +123,11 @@ impl<S> ArrayBlockTableStorageBase<S> {
             .map(|dim| {
                 let s = shape[dim];
                 let b = block_shape[dim] as u64;
-                if s == 0 { 0 } else { s.ceil_to_multiple(b) }
+                if s == 0 {
+                    0
+                } else {
+                    s.ceil_to_multiple(b)
+                }
             })
             .product::<u64>();
 
@@ -161,8 +165,8 @@ mod tests {
     use std::io::{Cursor, Seek, Write};
 
     use crate::dtype::Dtyped;
-    use crate::storage::Owned;
     use crate::storage::block::BlockSize;
+    use crate::storage::Owned;
     use crate::{Array, ArrayParams};
 
     // -----------------------------------------------------------------------

@@ -1,13 +1,12 @@
 use std::marker::PhantomData;
 use std::ops::Range;
 
-use crate::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{Result, check_get_buffer_size, check_get_range, check_ndim, ensure};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
-use crate::util::default_strides;
-use crate::util::{DimArray, dim_arr, nd_copy};
+use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::Array;
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -258,7 +257,7 @@ impl<S> ArrayStorage for Plain<S> {
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{ArrayD, IxDyn, s};
+    use ndarray::{s, ArrayD, IxDyn};
 
     use crate::Array;
 

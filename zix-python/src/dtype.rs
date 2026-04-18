@@ -4,7 +4,7 @@ use numpy::{PyArrayDescr, PyArrayDescrMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
-use zix_core::dtype::{Alignment, DTYPE_MAX_NDIM, Dtype as ZixDtype, DtypeScalarKind, Itemsize};
+use zix_core::dtype::{Alignment, Dtype as ZixDtype, DtypeScalarKind, Itemsize, DTYPE_MAX_NDIM};
 
 use crate::util::DimArray;
 
@@ -188,10 +188,11 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: Bound<PyArrayDescr>) -> PyResult<Zix
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use numpy::PyArrayDescrMethods;
     use pyo3::Python;
     use zix_core::dtype::{Dtype as ZixDtype, DtypeScalarKind};
+
+    use super::*;
 
     fn from_str(py: Python<'_>, s: &str) -> PyResult<ZixDtype> {
         dtype_from_numpy(PyArrayDescr::new(py, s)?)

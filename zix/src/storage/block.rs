@@ -1,6 +1,6 @@
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::Dtype;
-use crate::error::{Result, ensure};
+use crate::error::{ensure, Result};
 
 const _: () = const {
     assert!(
@@ -282,7 +282,7 @@ mod tests {
     use crate::dtype::{Dtype, Dtyped};
     use crate::error::Result;
     use crate::storage::block::{BlockTableStorage, Owned};
-    use crate::util::{AlignedBytes, cast_slice};
+    use crate::util::{cast_slice, AlignedBytes};
 
     fn make_encoder(dtype: Dtype, params: &EncoderParams) -> Encoder {
         Encoder::new(params, dtype).unwrap()

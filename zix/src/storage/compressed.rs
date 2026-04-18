@@ -2,14 +2,13 @@ use std::ops::Range;
 
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
-use crate::error::{Result, check_get_buffer_size, check_get_range};
+use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
-use crate::util::default_strides;
-use crate::util::iter::NdIter;
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
-use crate::util::{DimArray, dim_arr, nd_copy};
+use crate::util::iter::NdIter;
+use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 
 pub struct Owned(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned>);
 pub struct Borrowed<'a>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>>);

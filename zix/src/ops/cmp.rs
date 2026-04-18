@@ -1,8 +1,8 @@
-use crate::Array;
 use crate::dtype::f16;
 use crate::ops::common::define_array_op2_method;
 use crate::ops::define_op2;
 use crate::storage::ArrayStorage;
+use crate::Array;
 
 define_op2!(
     Equal,

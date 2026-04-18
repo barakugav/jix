@@ -5,12 +5,11 @@ use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMet
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
-
 use zix_core::Array as ZixArray;
 
 use crate::dtype::dtype_to_numpy;
 use crate::storage::DynStorage;
-use crate::util::{IntoPyResult, dim_arr};
+use crate::util::{dim_arr, IntoPyResult};
 
 #[gen_stub_pyclass]
 #[pyclass]
@@ -112,7 +111,7 @@ impl Array {
 mod tests {
     use std::sync::Arc;
 
-    use ndarray::{ArrayD, IxDyn, array};
+    use ndarray::{array, ArrayD, IxDyn};
     use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
     use pyo3::Python;
     use zix_core::dtype::Dtyped;
