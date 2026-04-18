@@ -2,11 +2,11 @@ use std::io;
 use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 
 use crate::array::Array;
-use crate::block::BlockSize;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::iter::NdIter;
-use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
+use crate::util::iter::NdIter;
+use crate::storage::block::BlockSize;
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
 /// Lazy storage type returned by [`Array::slice`](crate::Array::slice).
@@ -100,14 +100,6 @@ impl<S: ArrayStorage> Slice<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for Slice<S> {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -224,12 +216,17 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         Ok(())
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.array.storage.codec_params()
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.storage.spec()
+        }
     }
 }
 
@@ -394,7 +391,7 @@ mod tests {
 
     use super::SliceItem;
     use crate::array::{Array, ArrayParams};
-    use crate::block::BlockSize;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

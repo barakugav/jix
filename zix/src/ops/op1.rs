@@ -2,10 +2,10 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::{Complex, Dtype, f16};
 use crate::ops::common::define_array_op1_method;
-use crate::storage::{ArrayStorage, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
 pub(crate) trait Op1Kernel {
@@ -48,14 +48,6 @@ where
     Op: Op1Kernel,
     S: ArrayStorage,
 {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.output_dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -77,11 +69,17 @@ where
         self.op.apply(data_iter.zip(out_iter), input_dtype)
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.array.storage.codec_params()
+    fn dtype(&self) -> &Dtype {
+        &self.output_dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.storage.spec()
+        }
     }
 }
 

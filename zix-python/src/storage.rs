@@ -1,21 +1,13 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use zix_core::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use zix_core::codec::ReadContext;
 use zix_core::dtype::Dtype;
-use zix_core::storage::{ArrayStorage, BlocksLayout};
+use zix_core::storage::{ArrayStorage, ArrayStorageSpec};
 
 #[derive(Clone)]
 pub(crate) struct DynStorage(pub(crate) Arc<dyn ArrayStorage + Send + Sync>);
 impl ArrayStorage for DynStorage {
-    fn shape(&self) -> &[u64] {
-        self.0.shape()
-    }
-
-    fn dtype(&self) -> &Dtype {
-        self.0.dtype()
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -25,11 +17,15 @@ impl ArrayStorage for DynStorage {
         self.0.read_data(index, buf, context)
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        self.0.blocks_layout()
+    fn shape(&self) -> &[u64] {
+        self.0.shape()
     }
 
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.0.codec_params()
+    fn dtype(&self) -> &Dtype {
+        self.0.dtype()
+    }
+
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        self.0.spec()
     }
 }

@@ -1,24 +1,20 @@
 use std::any::TypeId;
 use std::cell::Cell;
-use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, Write};
+use std::io;
 use std::mem::MaybeUninit;
 use std::ops::Range;
-use std::path::Path;
 
-use crate::archive::ArchiveWriter;
+use crate::NDIM_MAX;
+use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::iter::NdIter;
-use crate::iter::block::NdIterExtBlockOffsetSize;
+use crate::storage::block::{BlockSize, BlockTableBuilder};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Mmap, Owned, Ref,
+    ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Owned, Ref,
 };
+use crate::util::iter::NdIter;
+use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr, nd_copy};
 use crate::util::{MaybeOwned, default_strides};
-
-use crate::block::{BlockSize, BlockTableBuilder};
-use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
-use crate::{NDIM_MAX, schema};
 
 pub struct Array<S> {
     pub(crate) storage: S,
@@ -40,13 +36,13 @@ impl ArrayParams {
     }
 
     pub(crate) fn override_from_storage(&mut self, storage: &impl ArrayStorage) {
-        let (s_encoder_params, s_decoder_params, _) = storage.codec_params();
+        let spec = storage.spec();
         self.encoder_params
-            .get_or_insert_with(|| s_encoder_params.clone());
+            .get_or_insert_with(|| spec.encoder_params.cloned().unwrap_or_default());
         self.decoder_params
-            .get_or_insert_with(|| s_decoder_params.clone());
+            .get_or_insert_with(|| spec.decoder_params.cloned().unwrap_or_default());
 
-        let blocks_layout = storage.blocks_layout();
+        let blocks_layout = spec.blocks_layout;
         self.block_shape
             .get_or_insert_with(|| blocks_layout.block_shape_hint.clone());
         self.block_shape_tag
@@ -78,8 +74,12 @@ impl<S: ArrayStorage> Array<S> {
     }
 
     pub fn data(&self) -> ArrayData<'_, S> {
-        let params = self.storage.codec_params().1;
-        let context = ReadContext::new(params).expect("failed to create read context");
+        let params = self.storage.spec().decoder_params;
+        let context = match params {
+            Some(params) => ReadContext::new(params),
+            None => ReadContext::new(&DecoderParams::default()),
+        };
+        let context = context.expect("failed to create read context");
         ArrayData::new(self, MaybeOwned::Owned(context))
     }
 
@@ -96,7 +96,7 @@ impl<S: ArrayStorage> Array<S> {
     }
 
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
-        self.storage.blocks_layout()
+        self.storage.spec().blocks_layout
     }
 
     pub fn as_ref(&self) -> Array<Ref<'_, S>> {
@@ -430,84 +430,14 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
     }
 }
 
-impl Array<Owned> {
-    pub fn write_to<W>(&self, writer: W) -> io::Result<()>
-    where
-        W: Write + Seek,
-    {
-        let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1)?;
-
-        let header = schema::ArrayHeader {
-            shape: self.shape().to_vec(),
-            block_shape: self
-                .storage
-                .0
-                .block_shape()
-                .iter()
-                .cloned()
-                .map(|s| s as u64)
-                .collect(),
-        };
-        writer.write_message(&header)?;
-
-        self.storage.0.blocks.write_content(&mut writer)
-    }
-
-    pub fn read_from_reader<R>(reader: R, len: u64, params: ArrayParams) -> io::Result<Self>
-    where
-        R: Read + Seek,
-    {
-        let storage = ArrayBlockTableStorageBase::read_from(
-            reader,
-            len,
-            crate::block::Owned::read_from,
-            params,
-        )?;
-        Ok(Self {
-            storage: Owned(storage),
-        })
-    }
-}
-impl Array<Mmap> {
-    /// # Safety
-    ///
-    /// Same as `memmap2::Mmap::map`.
-    pub unsafe fn read_from_file_mmap(
-        path: &Path,
-        offset: u64,
-        len: u64,
-        params: ArrayParams,
-    ) -> io::Result<Self> {
-        let file = File::open(path)?;
-        let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        let mut reader = BufReader::new(file);
-        reader.seek(io::SeekFrom::Start(offset))?;
-
-        let storage = ArrayBlockTableStorageBase::read_from(
-            reader,
-            len,
-            |reader, cdata_section, block_offsets_section| {
-                crate::block::Mmap::read_from(reader, cdata_section, block_offsets_section, mmap)
-            },
-            params,
-        )?;
-
-        Ok(Self {
-            storage: Mmap(storage),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, Seek, Write};
-
     use ndarray::ArrayD;
 
     use crate::array::{ArrayBlockTableStorageBase, ArrayParams, Owned};
-    use crate::block::{BlockSize, BlockTable};
     use crate::codec::{DecoderParams, Encoder, EncoderParams};
     use crate::dtype::Dtyped;
+    use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::{BlockShapeTag, BlocksLayout};
     use crate::util::{DimArray, cast_slice, dim_arr};
 
@@ -538,7 +468,7 @@ mod tests {
     // Helper: build a BlockTable from pre-arranged typed blocks
     // -----------------------------------------------------------------------
 
-    fn make_block_table<T: Dtyped>(blocks: &[&[T]]) -> BlockTable<crate::block::Owned> {
+    fn make_block_table<T: Dtyped>(blocks: &[&[T]]) -> BlockTable<crate::storage::block::Owned> {
         let block_len = blocks[0].len() as BlockSize;
         let data: Vec<u8> = blocks
             .iter()
@@ -854,302 +784,6 @@ mod tests {
         let a = Array::from_ndarray(&src, arr_params(&[2, 3])).unwrap();
         let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..3, 2..5]).unwrap();
         assert_eq!(got, ndarray::array![[8u8, 9, 10], [14, 15, 16]].into_dyn());
-    }
-
-    // -----------------------------------------------------------------------
-    // write_to / read_from round-trip
-    // -----------------------------------------------------------------------
-
-    fn array_round_trip<T, S, D>(
-        src: &ndarray::ArrayBase<S, D>,
-        block_shape: &[usize],
-    ) -> Array<Owned>
-    where
-        T: Dtyped,
-        S: ndarray::Data<Elem = T>,
-        D: ndarray::Dimension,
-    {
-        let a = Array::from_ndarray(&src, arr_params(block_shape)).unwrap();
-        let mut buf = Cursor::new(Vec::<u8>::new());
-        a.write_to(&mut buf).unwrap();
-        let bytes = buf.into_inner();
-        let len = bytes.len() as u64;
-        Array::read_from_reader(Cursor::new(bytes), len, ArrayParams::default()).unwrap()
-    }
-
-    #[test]
-    fn write_read_1d_single_block() {
-        let src = ndarray::array![0u8, 1, 2, 3];
-        let a2 = array_round_trip::<u8, _, _>(&src, &[4]);
-        assert_eq!(a2.shape(), &[4]);
-        assert_eq!(a2.ndim(), 1);
-        assert_eq!(a2.dtype(), &u8::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
-    }
-
-    #[test]
-    fn write_read_1d_multi_block() {
-        let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
-        let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
-        assert_eq!(a2.shape(), &[6]);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
-    }
-
-    #[test]
-    fn write_read_1d_with_padding() {
-        // size 5, block 3 → padded to 6; shape is preserved as 5
-        let src = ndarray::array![0u8, 1, 2, 3, 4];
-        let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
-        assert_eq!(a2.shape(), &[5]);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
-    }
-
-    #[test]
-    fn write_read_1d_i32() {
-        let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
-        let a2 = array_round_trip::<i32, _, _>(&src, &[4]);
-        assert_eq!(a2.dtype(), &i32::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
-    }
-
-    #[test]
-    fn write_read_1d_f32() {
-        let src = ndarray::array![0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5];
-        let a2 = array_round_trip::<f32, _, _>(&src, &[3]);
-        assert_eq!(a2.dtype(), &f32::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<f32>().unwrap(), src.into_dyn());
-    }
-
-    #[test]
-    fn write_read_2d() {
-        #[rustfmt::skip]
-        let src = ndarray::array![
-            [0u8,  1,  2,  3,  4,  5],
-            [6,    7,  8,  9, 10, 11],
-            [12,  13, 14, 15, 16, 17],
-            [18,  19, 20, 21, 22, 23],
-        ];
-        let a2 = array_round_trip::<u8, _, _>(&src, &[2, 3]);
-        assert_eq!(a2.shape(), &[4, 6]);
-        assert_eq!(a2.ndim(), 2);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
-    }
-
-    #[test]
-    fn write_read_2d_with_padding() {
-        // shape [3,5], block [2,3] → padded to [4,6]; shape preserved as [3,5]
-        #[rustfmt::skip]
-        let src = ndarray::array![
-            [0i32,  1,  2,  3,  4],
-            [5,     6,  7,  8,  9],
-            [10,   11, 12, 13, 14],
-        ];
-        let a2 = array_round_trip::<i32, _, _>(&src, &[2, 3]);
-        assert_eq!(a2.shape(), &[3, 5]);
-        assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn write_read_file() {
-        let src = ndarray::array![0u32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-        let a = Array::from_ndarray(&src, arr_params(&[4])).unwrap();
-
-        let tmp_file = tempfile::NamedTempFile::new().unwrap();
-        let path = tmp_file.path().to_path_buf();
-        a.write_to(std::fs::File::create(&path).unwrap()).unwrap();
-
-        let file = std::fs::File::open(&path).unwrap();
-        let len = file.metadata().unwrap().len();
-        let a2 = Array::read_from_reader(file, len, ArrayParams::default()).unwrap();
-
-        assert_eq!(a2.shape(), &[12]);
-        assert_eq!(a2.dtype(), &u32::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<u32>().unwrap(), src.into_dyn());
-    }
-
-    #[test]
-    fn write_read_nonzero_offset() {
-        // Write three arrays with padding between them; read each back by seeking to its recorded offset.
-        const PAD: usize = 177;
-        // src0: 1D u8
-        let src0 = ndarray::array![0u8, 1, 2, 3];
-        // src1: 2D i32, shape [3, 4]
-        #[rustfmt::skip]
-        let src1 = ndarray::array![
-            [10i32, 20, 30, 40],
-            [50,    60, 70, 80],
-            [90,   100, 110, 120],
-        ];
-        // src2: 3D f32, shape [2, 2, 3]
-        let src2 = ndarray::Array3::<f32>::from_shape_vec(
-            [2, 2, 3],
-            (0..12).map(|i| i as f32 * 0.5).collect(),
-        )
-        .unwrap();
-
-        let mut buf = Cursor::new(Vec::<u8>::new());
-
-        // arr 0
-        let a0 = Array::from_ndarray(&src0, arr_params(&[4])).unwrap();
-        a0.write_to(&mut buf).unwrap();
-        let len0 = buf.stream_position().unwrap();
-        // pad
-        buf.write_all(vec![0u8; PAD].as_slice()).unwrap();
-        let off1 = buf.stream_position().unwrap();
-
-        // arr 1
-        let a1 = Array::from_ndarray(&src1, arr_params(&[2, 2])).unwrap();
-        a1.write_to(&mut buf).unwrap();
-        let len1 = buf.stream_position().unwrap() - off1;
-        // pad
-        buf.write_all(vec![0u8; PAD].as_slice()).unwrap();
-        let off2 = buf.stream_position().unwrap();
-
-        // arr 2
-        let a2 = Array::from_ndarray(&src2, arr_params(&[1, 2, 3])).unwrap();
-        a2.write_to(&mut buf).unwrap();
-        let len2 = buf.stream_position().unwrap() - off2;
-
-        let bytes = buf.into_inner();
-
-        // Read array 0 (at offset 0).
-        let r0 =
-            Array::read_from_reader(Cursor::new(&bytes), len0, ArrayParams::default()).unwrap();
-        assert_eq!(r0.shape(), &[4]);
-        assert_eq!(r0.ndim(), 1);
-        assert_eq!(r0.dtype(), &u8::DTYPE);
-        assert_eq!(r0.data().to_ndarray::<u8>().unwrap(), src0.into_dyn());
-
-        // Read array 1 (padded offset, 2D).
-        let r1 = Array::read_from_reader(
-            Cursor::new(&bytes[off1 as usize..]),
-            len1,
-            ArrayParams::default(),
-        )
-        .unwrap();
-        assert_eq!(r1.shape(), &[3, 4]);
-        assert_eq!(r1.ndim(), 2);
-        assert_eq!(r1.dtype(), &i32::DTYPE);
-        assert_eq!(r1.data().to_ndarray::<i32>().unwrap(), src1.into_dyn());
-
-        // Read array 2 (padded offset, 3D).
-        let r2 = Array::read_from_reader(
-            Cursor::new(&bytes[off2 as usize..]),
-            len2,
-            ArrayParams::default(),
-        )
-        .unwrap();
-        assert_eq!(r2.shape(), &[2, 2, 3]);
-        assert_eq!(r2.ndim(), 3);
-        assert_eq!(r2.dtype(), &f32::DTYPE);
-        assert_eq!(r2.data().to_ndarray::<f32>().unwrap(), src2.into_dyn());
-    }
-
-    // -----------------------------------------------------------------------
-    // read_from_file_mmap round-trip
-    // -----------------------------------------------------------------------
-
-    fn array_mmap_round_trip<T, S, D>(
-        src: &ndarray::ArrayBase<S, D>,
-        block_shape: &[usize],
-        tmp_file: &tempfile::NamedTempFile,
-    ) -> super::Array<super::Mmap>
-    where
-        T: Dtyped,
-        S: ndarray::Data<Elem = T>,
-        D: ndarray::Dimension,
-    {
-        let a = Array::from_ndarray(&src, arr_params(block_shape)).unwrap();
-        let path = tmp_file.path().to_path_buf();
-        a.write_to(std::fs::File::create(&path).unwrap()).unwrap();
-        let len = std::fs::metadata(&path).unwrap().len();
-        unsafe {
-            super::Array::<super::Mmap>::read_from_file_mmap(&path, 0, len, ArrayParams::default())
-        }
-        .unwrap()
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn mmap_read_1d_single_block() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let src = ndarray::array![0u8, 1, 2, 3];
-        let a2 = array_mmap_round_trip::<u8, _, _>(&src, &[4], &tmp);
-        assert_eq!(a2.shape(), &[4]);
-        assert_eq!(a2.ndim(), 1);
-        assert_eq!(a2.dtype(), &u8::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn mmap_read_1d_multi_block() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
-        let a2 = array_mmap_round_trip::<u8, _, _>(&src, &[3], &tmp);
-        assert_eq!(a2.shape(), &[6]);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn mmap_read_1d_i32() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
-        let a2 = array_mmap_round_trip::<i32, _, _>(&src, &[4], &tmp);
-        assert_eq!(a2.dtype(), &i32::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn mmap_read_2d() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        #[rustfmt::skip]
-        let src = ndarray::array![
-            [0u8,  1,  2,  3,  4,  5],
-            [6,    7,  8,  9, 10, 11],
-            [12,  13, 14, 15, 16, 17],
-            [18,  19, 20, 21, 22, 23],
-        ];
-        let a2 = array_mmap_round_trip::<u8, _, _>(&src, &[2, 3], &tmp);
-        assert_eq!(a2.shape(), &[4, 6]);
-        assert_eq!(a2.ndim(), 2);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn mmap_read_nonzero_offset() {
-        // Write two arrays back-to-back; read the second via its offset.
-        let src1 = ndarray::array![0u8, 1, 2, 3];
-        let src2 = ndarray::array![10u8, 11, 12, 13, 14, 15];
-        let a1 = Array::from_ndarray(&src1, arr_params(&[4])).unwrap();
-        let a2_arr = Array::from_ndarray(&src2, arr_params(&[3])).unwrap();
-
-        let tmp_file = tempfile::NamedTempFile::new().unwrap();
-        let path = tmp_file.path().to_path_buf();
-        let mut f = std::fs::File::create(&path).unwrap();
-        a1.write_to(&mut f).unwrap();
-        let offset = f.metadata().unwrap().len();
-        a2_arr.write_to(&mut f).unwrap();
-        let total_len = f.metadata().unwrap().len();
-        drop(f);
-
-        let len2 = total_len - offset;
-        let read = unsafe {
-            super::Array::<super::Mmap>::read_from_file_mmap(
-                &path,
-                offset,
-                len2,
-                ArrayParams::default(),
-            )
-        }
-        .unwrap();
-        assert_eq!(read.shape(), &[6]);
-        assert_eq!(read.data().to_ndarray::<u8>().unwrap(), src2.into_dyn());
-        drop(tmp_file);
     }
 
     // -----------------------------------------------------------------------

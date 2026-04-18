@@ -2,13 +2,13 @@ use std::io;
 use std::ops::Range;
 
 use crate::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 #[allow(unused_imports)]
 use crate::dtype::{Complex, f16};
-use crate::iter::NdIter;
-use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
-use crate::storage::{ArrayStorage, BlocksLayout};
+use crate::util::iter::NdIter;
+use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr};
 
 pub(crate) trait ReductionOpKernel {
@@ -116,14 +116,6 @@ where
     Op: ReductionOpKernel,
     S: ArrayStorage,
 {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -225,12 +217,17 @@ where
         self.op.reduce(slice_iter, src_dtype)
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.array.storage.codec_params()
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.storage.spec()
+        }
     }
 }
 
@@ -532,7 +529,7 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::array::{Array, ArrayParams};
-    use crate::block::BlockSize;
+    use crate::storage::block::BlockSize;
     #[cfg(feature = "num-complex")]
     use crate::dtype::Complex;
     #[cfg(feature = "half")]
@@ -1345,7 +1342,10 @@ mod tests {
         fn output_dtype_is_u64() {
             use crate::dtype::DtypeScalarKind;
             assert_eq!(
-                make(seq(6), &[2, 3]).argmax(0, false).dtype().try_to_scalar(),
+                make(seq(6), &[2, 3])
+                    .argmax(0, false)
+                    .dtype()
+                    .try_to_scalar(),
                 Some(DtypeScalarKind::U64)
             );
         }
@@ -1360,7 +1360,10 @@ mod tests {
                 .data()
                 .to_ndarray()
                 .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![4], vec![2u64, 2, 2, 2]).unwrap());
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![4], vec![2u64, 2, 2, 2]).unwrap()
+            );
         }
 
         #[test]
@@ -1371,7 +1374,10 @@ mod tests {
                 .data()
                 .to_ndarray()
                 .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![3u64, 3, 3]).unwrap());
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![3], vec![3u64, 3, 3]).unwrap()
+            );
         }
 
         #[test]
@@ -1540,7 +1546,12 @@ mod tests {
         #[test]
         fn dtype_f16() {
             let got: ArrayD<u64> = make(
-                vec![f16::from_f32(1.0), f16::from_f32(4.0), f16::from_f32(3.0), f16::from_f32(2.0)],
+                vec![
+                    f16::from_f32(1.0),
+                    f16::from_f32(4.0),
+                    f16::from_f32(3.0),
+                    f16::from_f32(2.0),
+                ],
                 &[2, 2],
             )
             .argmax(0, false)
@@ -1594,7 +1605,10 @@ mod tests {
         fn output_dtype_is_u64() {
             use crate::dtype::DtypeScalarKind;
             assert_eq!(
-                make(seq(6), &[2, 3]).argmin(0, false).dtype().try_to_scalar(),
+                make(seq(6), &[2, 3])
+                    .argmin(0, false)
+                    .dtype()
+                    .try_to_scalar(),
                 Some(DtypeScalarKind::U64)
             );
         }
@@ -1609,7 +1623,10 @@ mod tests {
                 .data()
                 .to_ndarray()
                 .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![4], vec![0u64, 0, 0, 0]).unwrap());
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![4], vec![0u64, 0, 0, 0]).unwrap()
+            );
         }
 
         #[test]
@@ -1620,7 +1637,10 @@ mod tests {
                 .data()
                 .to_ndarray()
                 .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![0u64, 0, 0]).unwrap());
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![3], vec![0u64, 0, 0]).unwrap()
+            );
         }
 
         #[test]
@@ -1759,7 +1779,12 @@ mod tests {
         #[test]
         fn dtype_f16() {
             let got: ArrayD<u64> = make(
-                vec![f16::from_f32(1.0), f16::from_f32(4.0), f16::from_f32(3.0), f16::from_f32(2.0)],
+                vec![
+                    f16::from_f32(1.0),
+                    f16::from_f32(4.0),
+                    f16::from_f32(3.0),
+                    f16::from_f32(2.0),
+                ],
                 &[2, 2],
             )
             .argmin(0, false)

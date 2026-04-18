@@ -1,12 +1,14 @@
-use crate::NDIM_MAX;
-use crate::iter::NdIter;
-use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
-
 mod aligned_vec;
 pub(crate) use aligned_vec::AlignedBytes;
 
 mod arr_sequence;
 pub use arr_sequence::{ArraySequence, ArraySequenceItem};
+
+pub(crate) mod iter;
+
+use crate::NDIM_MAX;
+use iter::NdIter;
+use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {

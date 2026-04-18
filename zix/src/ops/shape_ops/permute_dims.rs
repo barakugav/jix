@@ -2,9 +2,9 @@ use std::io;
 use std::ops::Range;
 
 use crate::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::storage::{ArrayStorage, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
 /// Lazy storage type returned by [`Array::permute_dims`](crate::Array::permute_dims).
@@ -78,14 +78,6 @@ impl<S: ArrayStorage> PermuteDims<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -135,19 +127,24 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         Ok(())
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.array.storage.codec_params()
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.storage.spec()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, ArrayParams};
-    use crate::block::BlockSize;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use prost::Message;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
-use crate::schema::{self, ArchiveType};
+use crate::archive::schema::{self, ArchiveType};
 use crate::util::Idx;
 
 const MAGIC: &[u8; 4] = b"ZIX1";

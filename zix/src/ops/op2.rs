@@ -2,9 +2,9 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::{Complex, Dtype, f16};
-use crate::storage::{ArrayStorage, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
 pub(crate) trait Op2Kernel {
@@ -57,14 +57,6 @@ where
     S1: ArrayStorage,
     S2: ArrayStorage,
 {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -90,12 +82,17 @@ where
             .apply(a_iter.zip(b_iter).zip(out_iter), (a_dtype, b_dtype))
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.a.storage.codec_params()
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.a.storage.spec()
+        }
     }
 }
 
@@ -297,7 +294,8 @@ define_op2!(
 
 #[cfg(test)]
 mod tests {
-    use crate::{array::ArrayParams, block::BlockSize};
+    use crate::array::ArrayParams;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

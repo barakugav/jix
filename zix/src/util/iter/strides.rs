@@ -1,4 +1,4 @@
-use crate::iter::NdIterExtension;
+use crate::util::iter::NdIterExtension;
 use crate::util::{DimArray, Idx, default_strides};
 
 /// An nd-iterator extension that tracks a `*const u8` pointer into a strided buffer.
@@ -146,7 +146,7 @@ pub(crate) fn nd_iter_ext_logical_global_index<Ix: Idx>(
 
 #[cfg(test)]
 mod tests {
-    use crate::iter::NdIter;
+    use crate::util::iter::NdIter;
 
     use super::*;
 

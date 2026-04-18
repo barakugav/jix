@@ -2,9 +2,9 @@ use std::io;
 use std::ops::{Not, Range};
 
 use crate::array::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::storage::{ArrayStorage, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{ArraySequence, DimArray, default_strides, dim_arr, nd_copy};
 
 /// Join a sequence of arrays along an existing axis.
@@ -139,7 +139,7 @@ impl<ArraysT> Concat<ArraysT> {
         Ok(Self {
             dtype: dtype.clone(),
             shape,
-            blocks_layout: arrays.blocks_layout(0).clone(),
+            blocks_layout: arrays.spec(0).blocks_layout.clone(),
             arrays,
             concat_axis: axis,
             borders,
@@ -150,14 +150,6 @@ impl<ArraysT> ArrayStorage for Concat<ArraysT>
 where
     ArraysT: ArraySequence,
 {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     /// Fills `buf` with a C-order slice of the concatenated array described by `index`.
     ///
     /// `borders` stores the cumulative end positions of each sub-array along `concat_axis`, so
@@ -274,18 +266,24 @@ where
         Ok(())
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.arrays.codec_params(0)
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.arrays.spec(0)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, ArrayParams};
-    use crate::block::BlockSize;
+    use crate::storage::block::BlockSize;
     use crate::ops::concat::concatenate;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {

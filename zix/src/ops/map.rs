@@ -2,9 +2,9 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::storage::{ArrayStorage, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
 impl<S> Array<S>
@@ -38,7 +38,7 @@ where
 ///
 /// Construct via [`Array::map`]; use [`Map::new`] for fallible construction.
 pub struct Map<S, I, O, F> {
-    a: Array<S>,
+    array: Array<S>,
 
     map_fn: F,
     dtype: Dtype,
@@ -48,7 +48,7 @@ pub struct Map<S, I, O, F> {
     blocks_layout: BlocksLayout,
 }
 impl<S, I, O, F> Map<S, I, O, F> {
-    pub fn new(a: Array<S>, map_fn: F) -> io::Result<Self>
+    pub fn new(array: Array<S>, map_fn: F) -> io::Result<Self>
     where
         S: ArrayStorage,
         I: Dtyped,
@@ -56,12 +56,12 @@ impl<S, I, O, F> Map<S, I, O, F> {
         F: Fn(I) -> O,
     {
         let src_dtype = I::DTYPE;
-        if src_dtype != *a.dtype() {
+        if src_dtype != *array.dtype() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
                     "map input dtype mismatch: array has {:?} but input generic (I) is {:?}",
-                    a.dtype(),
+                    array.dtype(),
                     src_dtype
                 ),
             ));
@@ -71,9 +71,9 @@ impl<S, I, O, F> Map<S, I, O, F> {
             map_fn,
             dtype: O::DTYPE,
             _phantom: std::marker::PhantomData,
-            shape: a.shape().try_into().unwrap(),
-            blocks_layout: a.blocks_layout().clone(),
-            a,
+            shape: array.shape().try_into().unwrap(),
+            blocks_layout: array.blocks_layout().clone(),
+            array,
         })
     }
 }
@@ -84,21 +84,13 @@ where
     O: Dtyped,
     F: Fn(I) -> O,
 {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()> {
-        let (src_dtype, dst_dtype) = (self.a.dtype(), O::DTYPE);
+        let (src_dtype, dst_dtype) = (self.array.dtype(), O::DTYPE);
         let (src_itemsize, dst_itemsize) =
             (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
         let nitems = buf.len() / dst_itemsize;
@@ -115,7 +107,7 @@ where
             ((tmp_buf.as_mut_ptr(), tmp_buf.len()), buf.as_mut_ptr())
         };
         let read_buf = unsafe { std::slice::from_raw_parts_mut(read_buf.0, read_buf.1) };
-        self.a.storage.read_data(index, read_buf, context)?;
+        self.array.storage.read_data(index, read_buf, context)?;
         let src = read_buf.as_ptr();
 
         for i in 0..nitems {
@@ -128,18 +120,24 @@ where
         Ok(())
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.a.storage.codec_params()
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.storage.spec()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, ArrayParams};
-    use crate::block::BlockSize;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

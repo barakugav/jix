@@ -252,7 +252,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use crate::iter::strides::NdIterExtStridesPtrMut;
+    use crate::util::iter::strides::NdIterExtStridesPtrMut;
 
     use super::*;
 

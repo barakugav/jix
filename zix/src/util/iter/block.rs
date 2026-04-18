@@ -1,4 +1,4 @@
-use crate::iter::NdIterExtension;
+use crate::util::iter::NdIterExtension;
 use crate::util::{DimArray, Idx, dim_arr};
 
 /// [`NdIterExtension`] that tracks the per-block inner offset and active size for each dimension
@@ -135,7 +135,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::iter::NdIter;
+    use crate::util::iter::NdIter;
     use crate::util::Idx;
 
     fn make_iter<Ix: Idx>(

@@ -2,9 +2,9 @@ use std::io;
 use std::ops::{Not, Range};
 
 use crate::array::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{ArraySequence, DimArray, default_strides, dim_arr, nd_copy};
 
 /// Join a sequence of arrays along a *new* axis.
@@ -136,7 +136,7 @@ impl<ArraysT> Stack<ArraysT> {
         let mut new_shape: DimArray<_> = shape0.try_into().unwrap();
         new_shape.insert(axis, narrays as u64);
 
-        let mut b_layout = arrays.blocks_layout(0).clone();
+        let mut b_layout = arrays.spec(0).blocks_layout.clone();
         b_layout.block_shape_hint.insert(axis, 1);
         b_layout.block_shape_tag.insert(axis, BlockShapeTag::Any);
         b_layout.preferred_read_block_shape.insert(axis, 1);
@@ -154,14 +154,6 @@ impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
     ArraysT: ArraySequence,
 {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -231,19 +223,24 @@ where
         Ok(())
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.arrays.codec_params(0)
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.arrays.spec(0)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, ArrayParams};
-    use crate::block::BlockSize;
+    use crate::storage::block::BlockSize;
     use crate::ops::stack;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {

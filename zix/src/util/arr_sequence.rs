@@ -2,9 +2,9 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::storage::{ArrayStorage, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec};
 
 pub(crate) trait ArraySequenceItemImpl {
     type __Storage: ArrayStorage;
@@ -31,8 +31,6 @@ impl<S: ArrayStorage> ArraySequenceItem for &Array<S> {}
 
 pub(crate) trait ArraySequenceImpl {
     fn narrays(&self) -> usize;
-    fn shape(&self, arr: usize) -> &[u64];
-    fn dtype(&self, arr: usize) -> &Dtype;
     fn read_data(
         &self,
         arr: usize,
@@ -40,8 +38,9 @@ pub(crate) trait ArraySequenceImpl {
         buf: &mut [u8],
         context: &ReadContext,
     ) -> io::Result<()>;
-    fn blocks_layout(&self, arr: usize) -> &BlocksLayout;
-    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig);
+    fn shape(&self, arr: usize) -> &[u64];
+    fn dtype(&self, arr: usize) -> &Dtype;
+    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_>;
 }
 
 #[allow(private_bounds)]
@@ -55,14 +54,6 @@ where
         self.len()
     }
 
-    fn shape(&self, arr: usize) -> &[u64] {
-        self[arr].__storage().shape()
-    }
-
-    fn dtype(&self, arr: usize) -> &Dtype {
-        self[arr].__storage().dtype()
-    }
-
     fn read_data(
         &self,
         arr: usize,
@@ -73,12 +64,16 @@ where
         self[arr].__storage().read_data(index, buf, context)
     }
 
-    fn blocks_layout(&self, arr: usize) -> &BlocksLayout {
-        self[arr].__storage().blocks_layout()
+    fn shape(&self, arr: usize) -> &[u64] {
+        self[arr].__storage().shape()
     }
 
-    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self[arr].__storage().codec_params()
+    fn dtype(&self, arr: usize) -> &Dtype {
+        self[arr].__storage().dtype()
+    }
+
+    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].__storage().spec()
     }
 }
 impl<A, const N: usize> ArraySequence for [A; N] where A: ArraySequenceItem {}
@@ -91,14 +86,6 @@ where
         self.len()
     }
 
-    fn shape(&self, arr: usize) -> &[u64] {
-        self[arr].__storage().shape()
-    }
-
-    fn dtype(&self, arr: usize) -> &Dtype {
-        self[arr].__storage().dtype()
-    }
-
     fn read_data(
         &self,
         arr: usize,
@@ -109,12 +96,16 @@ where
         self[arr].__storage().read_data(index, buf, context)
     }
 
-    fn blocks_layout(&self, arr: usize) -> &BlocksLayout {
-        self[arr].__storage().blocks_layout()
+    fn shape(&self, arr: usize) -> &[u64] {
+        self[arr].__storage().shape()
     }
 
-    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self[arr].__storage().codec_params()
+    fn dtype(&self, arr: usize) -> &Dtype {
+        self[arr].__storage().dtype()
+    }
+
+    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].__storage().spec()
     }
 }
 impl<A: ArraySequenceItem> ArraySequence for Vec<A> {}
@@ -127,14 +118,6 @@ where
         self.len()
     }
 
-    fn shape(&self, arr: usize) -> &[u64] {
-        self[arr].__storage().shape()
-    }
-
-    fn dtype(&self, arr: usize) -> &Dtype {
-        self[arr].__storage().dtype()
-    }
-
     fn read_data(
         &self,
         arr: usize,
@@ -145,12 +128,16 @@ where
         self[arr].__storage().read_data(index, buf, context)
     }
 
-    fn blocks_layout(&self, arr: usize) -> &BlocksLayout {
-        self[arr].__storage().blocks_layout()
+    fn shape(&self, arr: usize) -> &[u64] {
+        self[arr].__storage().shape()
     }
 
-    fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self[arr].__storage().codec_params()
+    fn dtype(&self, arr: usize) -> &Dtype {
+        self[arr].__storage().dtype()
+    }
+
+    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].__storage().spec()
     }
 }
 impl<A: ArraySequenceItem> ArraySequence for &[A] {}
@@ -169,6 +156,19 @@ macro_rules! impl_array_sequence_for_tuple {
                 impl_array_sequence_for_tuple!(@count $($idx)+)
             }
 
+            fn read_data(
+                &self,
+                arr: usize,
+                index: &[Range<u64>],
+                buf: &mut [u8],
+                context: &ReadContext,
+            ) -> io::Result<()> {
+                match arr {
+                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).read_data(index, buf, context),)+
+                    _ => out_of_bounds_array_index(arr),
+                }
+            }
+
             fn shape(&self, arr: usize) -> &[u64] {
                 match arr {
                     $($idx => ArraySequenceItemImpl::__storage(&self.$idx).shape(),)+
@@ -183,29 +183,9 @@ macro_rules! impl_array_sequence_for_tuple {
                 }
             }
 
-            fn read_data(
-                &self,
-                arr: usize,
-                index: &[Range<u64>],
-                buf: &mut [u8],
-                context: &ReadContext,
-            ) -> io::Result<()> {
+            fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
                 match arr {
-                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).read_data(index, buf, context),)+
-                    _ => out_of_bounds_array_index(arr),
-                }
-            }
-
-            fn blocks_layout(&self, arr: usize) -> &BlocksLayout {
-                match arr {
-                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).blocks_layout(),)+
-                    _ => out_of_bounds_array_index(arr),
-                }
-            }
-
-            fn codec_params(&self, arr: usize) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-                match arr {
-                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).codec_params(),)+
+                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).spec(),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }

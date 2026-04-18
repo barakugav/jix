@@ -3,21 +3,21 @@ use std::ops::Range;
 
 use crate::NDIM_MAX;
 use crate::array::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::iter::NdIter;
-use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::util::iter::NdIter;
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
 pub struct Reshape<S> {
-    a: Array<S>,
+    array: Array<S>,
 
     dtype: Dtype,
     new_shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 impl<S> Reshape<S> {
-    pub fn new(a: Array<S>, new_shape: &[u64]) -> io::Result<Self>
+    pub fn new(array: Array<S>, new_shape: &[u64]) -> io::Result<Self>
     where
         S: ArrayStorage,
     {
@@ -30,7 +30,7 @@ impl<S> Reshape<S> {
                 ),
             ));
         }
-        let orig_shape: DimArray<_> = a.shape().try_into().unwrap();
+        let orig_shape: DimArray<_> = array.shape().try_into().unwrap();
         let nitems = orig_shape.iter().product::<u64>();
         let new_nitems = new_shape.iter().product::<u64>();
         if nitems != new_nitems {
@@ -59,7 +59,7 @@ impl<S> Reshape<S> {
             })
             .collect::<DimArray<_>>();
 
-        let mut b_layout = a.blocks_layout().clone();
+        let mut b_layout = array.blocks_layout().clone();
         let mut block_shape_hint = DimArray::new();
         let mut block_shape_tag = DimArray::new();
         let mut preferred_read_block_shape = DimArray::new();
@@ -91,12 +91,12 @@ impl<S> Reshape<S> {
         b_layout.block_shape_tag = block_shape_tag;
         b_layout.preferred_read_block_shape = preferred_read_block_shape;
 
-        let dtype = a.dtype();
+        let dtype = array.dtype();
         Ok(Self {
             dtype: dtype.clone(),
             new_shape: new_shape.try_into().unwrap(),
             blocks_layout: b_layout,
-            a,
+            array,
         })
     }
 }
@@ -104,14 +104,6 @@ impl<S> ArrayStorage for Reshape<S>
 where
     S: ArrayStorage,
 {
-    fn shape(&self) -> &[u64] {
-        &self.new_shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -212,7 +204,7 @@ where
         //      element ends up exactly where it belongs in `buf`.
         // -----------------------------------------------------------------------
 
-        let orig_shape = self.a.shape();
+        let orig_shape = self.array.shape();
         let new_shape = &self.new_shape;
         let ndim = new_shape.len();
         let orig_ndim = orig_shape.len();
@@ -275,12 +267,13 @@ where
         });
 
         let mut tmp_buf = context.tmp_buf(
-            orig_read_shape.iter().product::<u64>() as usize * self.a.dtype().itemsize() as usize,
-            self.a.dtype().alignment(),
+            orig_read_shape.iter().product::<u64>() as usize
+                * self.array.dtype().itemsize() as usize,
+            self.array.dtype().alignment(),
         );
-        let tmp_buf_strides = default_strides(&new_read_shape, self.a.dtype().itemsize() as _);
+        let tmp_buf_strides = default_strides(&new_read_shape, self.array.dtype().itemsize() as _);
         let out_buf_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(&out_buf_shape, self.a.dtype().itemsize() as _);
+        let dst_strides = default_strides(&out_buf_shape, self.array.dtype().itemsize() as _);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
         let iteration_shape = dim_arr(ndim, |dim| {
@@ -307,7 +300,9 @@ where
             });
 
             let tmp_buf = tmp_buf.as_mut_slice();
-            self.a.storage.read_data(&read_range, tmp_buf, context)?;
+            self.array
+                .storage
+                .read_data(&read_range, tmp_buf, context)?;
 
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&d| same_logical_stride[d].is_none())
@@ -321,7 +316,7 @@ where
                     &new_read_shape,
                     &tmp_buf_strides,
                     &dst_strides,
-                    self.a.dtype().itemsize() as _,
+                    self.array.dtype().itemsize() as _,
                 )
             };
         }
@@ -329,12 +324,17 @@ where
         Ok(())
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.new_shape
     }
-
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.a.storage.codec_params()
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.storage.spec()
+        }
     }
 }
 
@@ -343,7 +343,7 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::array::{Array, ArrayParams};
-    use crate::block::BlockSize;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

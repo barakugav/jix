@@ -1,7 +1,7 @@
 #![allow(clippy::assertions_on_constants)]
 
+use crate::archive::schema;
 use crate::dtype::{Alignment, DTYPE_MAX_NDIM, Itemsize};
-use crate::schema;
 use crate::util::{DimArray, IxIterExt};
 use std::io;
 

@@ -2,9 +2,9 @@ use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
-use crate::codec::{DecoderCodecConfig, DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
 /// Lazy storage type returned by [`Array::broadcast_view`](crate::Array::broadcast_view).
@@ -140,14 +140,6 @@ impl<S: ArrayStorage> Broadcast<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
-    fn shape(&self) -> &[u64] {
-        &self.shape
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.dtype
-    }
-
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -208,12 +200,17 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         Ok(())
     }
 
-    fn blocks_layout(&self) -> &BlocksLayout {
-        &self.blocks_layout
+    fn shape(&self) -> &[u64] {
+        &self.shape
     }
-
-    fn codec_params(&self) -> (&EncoderParams, &DecoderParams, &DecoderCodecConfig) {
-        self.array.storage.codec_params()
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.storage.spec()
+        }
     }
 }
 
@@ -222,7 +219,7 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::array::{Array, ArrayParams};
-    use crate::block::BlockSize;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {
