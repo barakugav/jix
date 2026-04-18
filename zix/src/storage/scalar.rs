@@ -1,11 +1,11 @@
-use std::io;
 use std::ops::Range;
 
+use crate::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
+use crate::error::{Result, check_get_buffer_size, check_get_range, check_ndim};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{DimArray, cast_slice_mut, dim_arr};
-use crate::{Array, NDIM_MAX};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -31,17 +31,12 @@ impl<T> Scalar<T> {
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
     /// of dimensions.
-    pub fn new(data: T, shape: &[u64]) -> io::Result<Self>
+    pub fn new(data: T, shape: &[u64]) -> Result<Self>
     where
         T: Dtyped,
     {
         let ndim = shape.len();
-        if ndim > NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("array ndim {ndim} exceeds maximum supported ndim {NDIM_MAX}"),
-            ));
-        }
+        check_ndim(ndim)?;
         let shape: DimArray<_> = shape.try_into().unwrap();
 
         let dtype = T::DTYPE;
@@ -54,7 +49,7 @@ impl<T> Scalar<T> {
             None,
             &shape,
             dtype.itemsize(),
-        );
+        )?;
 
         Ok(Self {
             data,
@@ -70,11 +65,7 @@ impl<T> Array<Scalar<T>> {
     ///
     /// The resulting array has an empty shape (`[]`) and its single element is
     /// `value`.  No heap allocation is made for the element data.
-    ///
-    /// # Errors
-    ///
-    /// Currently infallible, but returns `io::Result` for API consistency.
-    pub fn from_scalar(value: T) -> io::Result<Self>
+    pub fn from_scalar(value: T) -> Result<Self>
     where
         T: Dtyped,
     {
@@ -90,7 +81,7 @@ impl<T> Array<Scalar<T>> {
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
     /// of dimensions.
-    pub fn from_scalar_broadcast(value: T, shape: &[u64]) -> io::Result<Self>
+    pub fn from_scalar_broadcast(value: T, shape: &[u64]) -> Result<Self>
     where
         T: Dtyped,
     {
@@ -107,27 +98,13 @@ where
         index: &[Range<u64>],
         buf: &mut [u8],
         _context: &ReadContext,
-    ) -> io::Result<()> {
-        let ndim = self.shape.len();
-        assert_eq!(index.len(), ndim);
-        let itemsize = self.dtype.itemsize() as usize;
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let nitems = out_shape.iter().product::<usize>();
-        if buf.len() != nitems * itemsize {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "output buffer has incorrect size: expected {} bytes, actual {} bytes",
-                    nitems * itemsize,
-                    buf.len()
-                ),
-            ));
-        }
+    ) -> Result<()> {
+        check_get_range(self.shape(), index)?;
+        check_get_buffer_size(index, self.dtype(), buf)?;
         let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
         for item in buf.iter_mut() {
             *item = self.data;
         }
-
         Ok(())
     }
 

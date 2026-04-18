@@ -1,20 +1,22 @@
 use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
+use crate::error::{Error, Result, check_ndim, ensure};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Mmap, Owned};
 use crate::util::{DimArray, Idx, dim_arr};
-use crate::{Array, ArrayParams, NDIM_MAX};
+use crate::{Array, ArrayParams};
 
 impl Array<Owned> {
-    pub fn write_to<W>(&self, writer: W) -> io::Result<()>
+    pub fn write_to<W>(&self, writer: W) -> Result<()>
     where
         W: Write + Seek,
     {
-        let mut writer = ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1)?;
+        let mut writer =
+            ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1).map_err(Error::io)?;
 
         let header = schema::ArrayHeader {
             shape: self.shape().to_vec(),
@@ -27,12 +29,12 @@ impl Array<Owned> {
                 .map(|s| s as u64)
                 .collect(),
         };
-        writer.write_message(&header)?;
+        writer.write_message(&header).map_err(Error::io)?;
 
         self.storage.0.blocks.write_content(&mut writer)
     }
 
-    pub fn read_from_reader<R>(reader: R, len: u64, params: ArrayParams) -> io::Result<Self>
+    pub fn read_from_reader<R>(reader: R, len: u64, params: ArrayParams) -> Result<Self>
     where
         R: Read + Seek,
     {
@@ -56,11 +58,11 @@ impl Array<Mmap> {
         offset: u64,
         len: u64,
         params: ArrayParams,
-    ) -> io::Result<Self> {
-        let file = File::open(path)?;
-        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+    ) -> Result<Self> {
+        let file = File::open(path).map_err(Error::io)?;
+        let mmap = unsafe { memmap2::Mmap::map(&file).map_err(Error::io)? };
         let mut reader = BufReader::new(file);
-        reader.seek(io::SeekFrom::Start(offset))?;
+        reader.seek(SeekFrom::Start(offset)).map_err(Error::io)?;
 
         let storage = ArrayBlockTableStorageBase::read_from(
             reader,
@@ -86,44 +88,35 @@ impl<S> ArrayBlockTableStorageBase<S> {
     pub(crate) fn read_from<R>(
         reader: R,
         len: u64,
-        read_block_storage: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> io::Result<S>,
+        read_block_storage: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> Result<S>,
         params: ArrayParams,
-    ) -> io::Result<Self>
+    ) -> Result<Self>
     where
         R: Read + Seek,
         S: BlockTableStorage,
     {
         let mut reader = ArchiveReader::new(reader, len)?;
-        let f_meta = reader.read_file_meta()?;
-        if f_meta.archive_type != schema::ArchiveType::ArrayV1 as i32 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "unexpected zix file type: expected {:?}, actual {:?}",
-                    schema::ArchiveType::ArrayV1,
-                    schema::ArchiveType::try_from(f_meta.archive_type)
-                ),
-            ));
-        }
+        let f_meta = reader.read_file_meta().map_err(Error::io)?;
+        ensure!(
+            f_meta.archive_type == schema::ArchiveType::ArrayV1 as i32,
+            InvalidArchive,
+            "unexpected zix file type: expected {:?}, actual {:?}",
+            schema::ArchiveType::ArrayV1,
+            schema::ArchiveType::try_from(f_meta.archive_type)
+        );
 
-        let header = reader.read_message::<schema::ArrayHeader>()?;
+        let header = reader
+            .read_message::<schema::ArrayHeader>()
+            .map_err(Error::io)?;
         let ndim = header.shape.len();
-        if ndim > NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("array ndim {ndim} exceeds maximum supported ndim {NDIM_MAX}"),
-            ));
-        }
+        check_ndim(ndim)?;
         let shape: DimArray<_> = header.shape.as_slice().try_into().unwrap();
-        if header.block_shape.len() != ndim {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "array block_shape has different ndim {} than shape {ndim}",
-                    header.block_shape.len(),
-                ),
-            ));
-        }
+        ensure!(
+            header.block_shape.len() == ndim,
+            InvalidArchive,
+            "array block_shape has different ndim {} than shape {ndim}",
+            header.block_shape.len(),
+        );
         let block_shape = dim_arr(ndim, |dim| header.block_shape[dim] as BlockSize);
         // Compute padded shape in usize for nitems validation.
         let expected_nitems = (0..ndim)
@@ -135,16 +128,13 @@ impl<S> ArrayBlockTableStorageBase<S> {
             .product::<u64>();
 
         let blocks = BlockTable::read_content(&mut reader, read_block_storage)?;
-        if blocks.nitems() != expected_nitems {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "array blocks nitems {} does not match shape product {}",
-                    blocks.nitems(),
-                    expected_nitems
-                ),
-            ));
-        }
+        ensure!(
+            blocks.nitems() == expected_nitems,
+            InvalidArchive,
+            "array blocks nitems {} does not match shape product {}",
+            blocks.nitems(),
+            expected_nitems
+        );
 
         let b_layout = BlocksLayout::new(
             Some(block_shape),
@@ -154,7 +144,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
             params.preferred_read_block_size_hint,
             &shape,
             blocks.dtype().itemsize(),
-        );
+        )?;
 
         Ok(Self::new(
             blocks,

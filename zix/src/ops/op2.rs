@@ -1,9 +1,9 @@
-use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Complex, Dtype, f16};
+use crate::error::{Result, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
@@ -12,9 +12,9 @@ pub(crate) trait Op2Kernel {
         &self,
         data: impl Iterator<Item = ((&'a [u8], &'a [u8]), &'a mut [u8])>,
         input_dtypes: (&Dtype, &Dtype),
-    ) -> io::Result<()>;
+    ) -> Result<()>;
 
-    fn output_dtype(&self, input_dtypes: (&Dtype, &Dtype)) -> io::Result<Dtype>;
+    fn output_dtype(&self, input_dtypes: (&Dtype, &Dtype)) -> Result<Dtype>;
 }
 
 pub(crate) struct Op2<Op, S1, S2> {
@@ -28,19 +28,20 @@ pub(crate) struct Op2<Op, S1, S2> {
     blocks_layout: BlocksLayout,
 }
 impl<Op, S1, S2> Op2<Op, S1, S2> {
-    pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> io::Result<Self>
+    pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> Result<Self>
     where
         Op: Op2Kernel,
         S1: ArrayStorage,
         S2: ArrayStorage,
     {
         let output_dtype = op.output_dtype((a.dtype(), b.dtype()))?;
-        if a.shape() != b.shape() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "shape mismatch",
-            ));
-        }
+        ensure!(
+            a.shape() == b.shape(),
+            InvalidArgument,
+            "shape mismatch between a {:?} and b {:?} in Op2",
+            a.shape(),
+            b.shape()
+        );
         Ok(Self {
             op,
             dtype: output_dtype,
@@ -57,16 +58,13 @@ where
     S1: ArrayStorage,
     S2: ArrayStorage,
 {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> std::io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(&self.shape, index)?;
+        let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
+
         let a_dtype = self.a.dtype();
         let b_dtype = self.b.dtype();
         let output_dtype = self.dtype();
-        let nitems = buf.len() / output_dtype.itemsize() as usize;
         // TODO: if the itemsize (and alignment) of one of the inputs and output dtype are the same,
         // we can read directly into the output buffer, and perform the op in-place, avoiding the
         // memcopy from temporary buffer. Need to change the op::apply signature.
@@ -145,7 +143,7 @@ macro_rules! define_op2 {
     ) => {
         pub struct $Name<S1, S2>(crate::ops::op2::Op2<$NameKernel, S1, S2>);
         impl<S1, S2> $Name<S1, S2> {
-            pub fn new(a: crate::Array<S1>, b: crate::Array<S2>) -> std::io::Result<Self>
+            pub fn new(a: crate::Array<S1>, b: crate::Array<S2>) -> crate::error::Result<Self>
             where
                 S1: crate::storage::ArrayStorage,
                 S2: crate::storage::ArrayStorage,
@@ -196,7 +194,7 @@ macro_rules! define_op2_kernel {
                 &self,
                 data: impl Iterator<Item = ((&'a [u8], &'a [u8]), &'a mut [u8])>,
                 input_dtypes: (&crate::dtype::Dtype, &crate::dtype::Dtype),
-            ) -> std::io::Result<()> {
+            ) -> crate::error::Result<()> {
                 macro_rules! apply_loop_impl {
                     ($input_type2:ty, $output_type2:ty) => {{
                         let data = data.map(|((a_src, b_src), dst)| {
@@ -241,23 +239,16 @@ macro_rules! define_op2_kernel {
                     },)*
                     _ => {}
                 }
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    format!("op not supported for dtype {input_dtype:#?}"),
-                ))
+                crate::error::bail!(UnsupportedDtype, "op not supported for dtype {input_dtype:#?}");
             }
 
             fn output_dtype(
                 &self,
                 input_dtypes: (&crate::dtype::Dtype, &crate::dtype::Dtype),
-            ) -> std::io::Result<crate::dtype::Dtype> {
+            ) -> crate::error::Result<crate::dtype::Dtype> {
                 let (a_dtype, b_dtype) = input_dtypes;
-                if a_dtype != b_dtype {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "dtype mismatch",
-                    ));
-                }
+                crate::error::ensure!(a_dtype == b_dtype, UnsupportedDtype, "dtype mismatch");
+
                 let input_dtype = a_dtype;
 
                 #[allow(unused_parens)]
@@ -268,10 +259,7 @@ macro_rules! define_op2_kernel {
                     _ => {},
 
                 };
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    format!("op not supported for dtype {input_dtype:#?}"),
-                ))
+                crate::error::bail!(UnsupportedDtype, "op not supported for dtype {input_dtype:#?}");
             }
         }
     };

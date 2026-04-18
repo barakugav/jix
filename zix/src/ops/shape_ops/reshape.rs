@@ -1,10 +1,10 @@
-use std::io;
 use std::ops::Range;
 
 use crate::NDIM_MAX;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
+use crate::error::{Result, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
@@ -17,31 +17,24 @@ pub struct Reshape<S> {
     blocks_layout: BlocksLayout,
 }
 impl<S> Reshape<S> {
-    pub fn new(array: Array<S>, new_shape: &[u64]) -> io::Result<Self>
+    pub fn new(array: Array<S>, new_shape: &[u64]) -> Result<Self>
     where
         S: ArrayStorage,
     {
-        if new_shape.len() > NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "cannot reshape array to have {} dimensions (max {NDIM_MAX})",
-                    new_shape.len()
-                ),
-            ));
-        }
+        ensure!(
+            new_shape.len() <= NDIM_MAX,
+            InvalidShapeOperation,
+            "cannot reshape array to have {} dimensions (max {NDIM_MAX})",
+            new_shape.len()
+        );
         let orig_shape: DimArray<_> = array.shape().try_into().unwrap();
         let nitems = orig_shape.iter().product::<u64>();
         let new_nitems = new_shape.iter().product::<u64>();
-        if nitems != new_nitems {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "cannot reshape array of shape {:?} into shape {:?}",
-                    orig_shape, new_shape
-                ),
-            ));
-        }
+        ensure!(
+            nitems == new_nitems,
+            InvalidShapeOperation,
+            "cannot reshape array of shape {orig_shape:?} into shape {new_shape:?}"
+        );
 
         let orig_logical_strides = default_strides(&orig_shape, 1);
         let new_logical_strides = default_strides(new_shape, 1);
@@ -104,12 +97,7 @@ impl<S> ArrayStorage for Reshape<S>
 where
     S: ArrayStorage,
 {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         // -----------------------------------------------------------------------
         // Core concept
         // -----------------------------------------------------------------------
@@ -203,12 +191,13 @@ where
         //      `nd_copy` then iterates over the matched dims internally, so each
         //      element ends up exactly where it belongs in `buf`.
         // -----------------------------------------------------------------------
+        check_get_range(self.shape(), index)?;
+        check_get_buffer_size(index, &self.dtype, buf)?;
 
         let orig_shape = self.array.shape();
         let new_shape = &self.new_shape;
         let ndim = new_shape.len();
         let orig_ndim = orig_shape.len();
-        assert_eq!(index.len(), ndim);
         if index.iter().any(|r| r.start >= r.end) {
             return Ok(());
         }
@@ -267,13 +256,12 @@ where
         });
 
         let mut tmp_buf = context.tmp_buf(
-            orig_read_shape.iter().product::<u64>() as usize
-                * self.array.dtype().itemsize() as usize,
-            self.array.dtype().alignment(),
+            orig_read_shape.iter().product::<u64>() as usize * self.dtype.itemsize() as usize,
+            self.dtype.alignment(),
         );
-        let tmp_buf_strides = default_strides(&new_read_shape, self.array.dtype().itemsize() as _);
+        let tmp_buf_strides = default_strides(&new_read_shape, self.dtype.itemsize() as _);
         let out_buf_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(&out_buf_shape, self.array.dtype().itemsize() as _);
+        let dst_strides = default_strides(&out_buf_shape, self.dtype.itemsize() as _);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
         let iteration_shape = dim_arr(ndim, |dim| {
@@ -316,7 +304,7 @@ where
                     &new_read_shape,
                     &tmp_buf_strides,
                     &dst_strides,
-                    self.array.dtype().itemsize() as _,
+                    self.dtype.itemsize() as _,
                 )
             };
         }

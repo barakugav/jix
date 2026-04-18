@@ -1,11 +1,13 @@
-use std::io;
 use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
+use crate::error::{
+    Result, check_get_range, check_ndim, ensure,
+};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::DimArray;
-use crate::{Array, NDIM_MAX};
+use crate::Array;
 
 /// Lazy storage type returned by [`Array::insert_axes`](crate::Array::insert_axes).
 ///
@@ -90,40 +92,27 @@ pub struct InsertAxes<S> {
 }
 
 impl<S: ArrayStorage> InsertAxes<S> {
-    pub fn new(array: Array<S>, axes: &[usize]) -> io::Result<Self> {
+    pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
         let orig_ndim = array.shape().len();
         let new_ndim = orig_ndim + axes.len();
 
-        if new_ndim > NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "inserting {} axes into array of ndim {} would exceed maximum ndim {}",
-                    axes.len(),
-                    orig_ndim,
-                    NDIM_MAX
-                ),
-            ));
-        }
+        check_ndim(new_ndim)?;
 
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
         // the last input dim".  Duplicates are allowed — each occurrence inserts one additional
         // dim at that gap.  Valid range: 0..=orig_ndim.
         for &ax in axes {
-            if ax > orig_ndim {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "axis {ax} out of bounds for array of ndim {orig_ndim} \
-                         (gap indices must be in 0..={orig_ndim})"
-                    ),
-                ));
-            }
+            ensure!(
+                ax <= orig_ndim,
+                InvalidShapeOperation,
+                "axis {ax} out of bounds for array of ndim {orig_ndim} \
+                     (gap indices must be in 0..={orig_ndim})"
+            );
         }
 
         // Sort a local copy so we can walk input dims and inserted gaps together in one pass.
-        let mut sorted_axes: DimArray<usize> = axes.try_into().unwrap();
+        let mut sorted_axes: DimArray<_> = axes.try_into().unwrap();
         sorted_axes.sort_unstable();
         let mut sorted_axes = sorted_axes.iter().peekable();
 
@@ -184,12 +173,9 @@ impl<S: ArrayStorage> InsertAxes<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for InsertAxes<S> {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(self.shape(), index)?;
+
         // Inserted dimensions have size 1 and do not affect the element sequence.
         // Because the output is always C-contiguous, a size-1 dimension is a no-op
         // in the memory layout: its stride equals the stride of the next dimension,
@@ -199,19 +185,17 @@ impl<S: ArrayStorage> ArrayStorage for InsertAxes<S> {
         // Therefore we simply strip all inserted dims from `index` and forward the
         // remaining ranges to the inner storage unchanged.  No temporary buffer or
         // element rearrangement is needed.
-        let inner_index: DimArray<_> = self
-            .is_inserted
-            .iter()
-            .zip(index.iter())
-            .filter_map(|(&inserted, range)| {
-                if !inserted {
-                    Some(range.clone())
-                } else {
-                    assert_eq!(*range, 0..1);
-                    None
+        let mut inner_index = DimArray::new();
+        for dim in 0..self.shape().len() {
+            if !self.is_inserted[dim] {
+                inner_index.push(index[dim].clone());
+            } else {
+                if index[dim].start == index[dim].end {
+                    return Ok(()); // empty read
                 }
-            })
-            .collect();
+                debug_assert_eq!(index[dim], 0..1);
+            }
+        }
         self.array.storage.read_data(&inner_index, buf, context)
     }
 

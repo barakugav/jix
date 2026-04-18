@@ -1,12 +1,11 @@
 use std::any::TypeId;
 use std::cell::Cell;
-use std::io;
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
-use crate::NDIM_MAX;
 use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
+use crate::error::{Result, check_get_range, check_ndim, ensure};
 use crate::storage::block::{BlockSize, BlockTableBuilder};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Owned, Ref,
@@ -25,7 +24,7 @@ impl Array<Owned> {
     pub fn from_ndarray<S, T, D>(
         array: &ndarray::ArrayBase<S, D, T>,
         mut params: ArrayParams,
-    ) -> io::Result<Self>
+    ) -> Result<Self>
     where
         T: Dtyped,
         D: ndarray::Dimension,
@@ -41,7 +40,7 @@ impl Array<Owned> {
             params.preferred_read_block_size_hint,
             array.shape(),
             array.dtype().itemsize() as _,
-        );
+        )?;
         params.block_shape = Some(b_layout.block_shape_hint);
         params.block_shape_tag = Some(b_layout.block_shape_tag);
         params.block_size_hint = Some(b_layout.block_size_hint);
@@ -148,11 +147,9 @@ struct ArrayBuilder {
     block_strides: DimArray<BlockSize>,
 }
 impl ArrayBuilder {
-    fn new(shape: &[u64], dtype: Dtype, params: ArrayParams) -> Self {
-        let shape: DimArray<u64> = shape.try_into().unwrap();
-
-        let ndim = shape.len();
-        assert!(ndim < NDIM_MAX);
+    fn new(shape: &[u64], dtype: Dtype, params: ArrayParams) -> Result<Self> {
+        check_ndim(shape.len())?;
+        let shape: DimArray<_> = shape.try_into().unwrap();
 
         let b_layout = BlocksLayout::new(
             params.block_shape,
@@ -162,11 +159,11 @@ impl ArrayBuilder {
             params.preferred_read_block_size_hint,
             shape.as_slice(),
             dtype.itemsize() as _,
-        );
+        )?;
 
         let block_strides = default_strides(&b_layout.block_shape_hint, dtype.itemsize() as _);
 
-        Self {
+        Ok(Self {
             shape,
             dtype,
 
@@ -175,15 +172,14 @@ impl ArrayBuilder {
             decoder_params: params.decoder_params.unwrap_or_default(),
 
             block_strides,
-        }
+        })
     }
 
     fn build(
         self,
-        mut block_fn: impl FnMut(&Self, &[u64], &[u64], &[u64], &mut [u8]) -> io::Result<()>,
-    ) -> io::Result<Array<Owned>> {
+        mut block_fn: impl FnMut(&Self, &[u64], &[u64], &[u64], &mut [u8]) -> Result<()>,
+    ) -> Result<Array<Owned>> {
         let ndim = self.shape.len();
-        assert!(ndim < NDIM_MAX);
         let block_shape = &self.blocks_layout.block_shape_hint;
         assert_eq!(ndim, block_shape.len());
 
@@ -205,7 +201,7 @@ impl ArrayBuilder {
         let encoder = Encoder::new(&self.encoder_params, self.dtype.clone())?;
         let block_capacity_bytes = block_size * self.dtype.itemsize() as u64;
         let mut builder =
-            BlockTableBuilder::new(self.dtype.clone(), block_size as BlockSize, encoder);
+            BlockTableBuilder::new(self.dtype.clone(), block_size as BlockSize, encoder)?;
         let mut tmp_block_data = AlignedBytes::with_capacity(
             self.dtype.alignment() as usize,
             block_capacity_bytes as usize,
@@ -229,7 +225,7 @@ impl ArrayBuilder {
             builder.add_block(&tmp_block_data)?;
         }
 
-        let blocks = builder.finish();
+        let blocks = builder.finish()?;
 
         Ok(Array {
             storage: Owned(ArrayBlockTableStorageBase::new(
@@ -274,29 +270,26 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         self.array.dtype()
     }
 
-    fn check_type<T: Dtyped>(&self) -> io::Result<()> {
+    fn check_type<T: Dtyped>(&self) -> Result<()> {
         let type_id = TypeId::of::<T>();
         if self.type_id_cache.get() == Some(type_id) {
             return Ok(());
         }
 
         let dtype = T::DTYPE;
-        if self.dtype() != &dtype {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "requested type {:?} does not match array dtype {:?}",
-                    dtype,
-                    self.dtype()
-                ),
-            ));
-        }
+        ensure!(
+            self.dtype() == &dtype,
+            UnsupportedDtype,
+            "requested type {:?} does not match array dtype {:?}",
+            dtype,
+            self.dtype()
+        );
 
         self.type_id_cache.set(Some(type_id));
         Ok(())
     }
 
-    pub fn to_ndarray<T>(&self) -> io::Result<ndarray::ArrayD<T>>
+    pub fn to_ndarray<T>(&self) -> Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
     {
@@ -305,13 +298,13 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         self.to_ndarray_sub(&full_range)
     }
 
-    pub fn to_ndarray_sub<T>(&self, range: &[Range<u64>]) -> io::Result<ndarray::ArrayD<T>>
+    pub fn to_ndarray_sub<T>(&self, range: &[Range<u64>]) -> Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
     {
         self.check_type::<T>()?;
+        check_get_range(self.shape(), range)?;
         let ndim = self.ndim();
-        assert_eq!(ndim, range.len());
         let out_shape = dim_arr(ndim, |dim| {
             let len = range[dim].end - range[dim].start;
             let len: usize = len.try_into().unwrap();
@@ -324,21 +317,21 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         Ok(unsafe { array.assume_init() })
     }
 
-    pub fn to_ndarray_buf(&self, range: &[Range<u64>], buf: &mut [u8]) -> io::Result<()> {
+    pub fn to_ndarray_buf(&self, range: &[Range<u64>], buf: &mut [u8]) -> Result<()> {
         // TODO: call read_data multiple times with smaller blocks
         self.array
             .storage
             .read_data(range, buf, self.context.as_ref())
     }
 
-    pub fn copy(&self) -> io::Result<Array<Owned>>
+    pub fn copy(&self) -> Result<Array<Owned>>
     where
         S: ArrayStorage,
     {
         self.copy_with(ArrayParams::default())
     }
 
-    pub fn copy_with(&self, mut params: ArrayParams) -> io::Result<Array<Owned>>
+    pub fn copy_with(&self, mut params: ArrayParams) -> Result<Array<Owned>>
     where
         S: ArrayStorage,
     {
@@ -348,7 +341,7 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         let dtype = self.dtype().clone();
         let itemsize = dtype.itemsize() as usize;
         let mut tmp_block_data = AlignedBytes::new(dtype.alignment() as usize);
-        let builder = ArrayBuilder::new(self.shape(), dtype, params);
+        let builder = ArrayBuilder::new(self.shape(), dtype, params)?;
         builder.build(
             |builder, block_idx, block_inner_offset, block_size, output_block| {
                 let block_shape = builder.block_shape();

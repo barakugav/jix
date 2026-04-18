@@ -1,7 +1,7 @@
 use std::cell::UnsafeCell;
-use std::io;
 
 use crate::dtype::{Alignment, Dtype};
+use crate::error::{Error, ErrorKind, Result, ensure};
 use crate::util::{AlignedBytes, AlternatingBuffers};
 
 #[derive(Clone, Debug)]
@@ -44,7 +44,7 @@ pub(crate) enum Compressor {
     Zstd(()),
 }
 impl Encoder {
-    pub(crate) fn new(params: &EncoderParams, dtype: Dtype) -> io::Result<Self> {
+    pub(crate) fn new(params: &EncoderParams, dtype: Dtype) -> Result<Self> {
         let tmp_buf1 = AlignedBytes::new(dtype.alignment() as usize);
         let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {
@@ -55,7 +55,12 @@ impl Encoder {
             compressor: match params.codec {
                 Codec::Zstd => Compressor::Zstd({
                     cfg_if::cfg_if! { if #[cfg(not(miri))] {
-                        zstd::bulk::Compressor::new(params.level as _)?
+                        zstd::bulk::Compressor::new(params.level as _).map_err(|e| {
+                            Error::new(
+                                ErrorKind::CodecError,
+                                format!("Failed to create Zstd compressor: {e}"),
+                            )
+                        })?
                     } else {
                         ()
                     }}
@@ -64,8 +69,13 @@ impl Encoder {
         })
     }
 
-    pub(crate) fn encode(&mut self, data: &[u8], dst: &mut [u8]) -> io::Result<usize> {
+    pub(crate) fn encode(&mut self, data: &[u8], dst: &mut [u8]) -> Result<usize> {
         let itemsize = self.dtype.itemsize() as usize;
+        ensure!(
+            data.len().is_multiple_of(itemsize),
+            InvalidArgument,
+            "Data length is not a multiple of item size"
+        );
 
         let mut buffers =
             AlternatingBuffers::with_const_src(data, &mut self.tmp_buf1, &mut self.tmp_buf2);
@@ -77,7 +87,6 @@ impl Encoder {
                     buf.reserve(data.len());
                     unsafe { buf.set_len(data.len()) };
 
-                    assert!(data.len().is_multiple_of(itemsize));
                     let n = data.len() / itemsize;
                     for i in 0..n {
                         for b in 0..itemsize {
@@ -92,7 +101,12 @@ impl Encoder {
         match &mut self.compressor {
             Compressor::Zstd(compressor) => {
                 cfg_if::cfg_if! { if #[cfg(not(miri))] {
-                    compressor.compress_to_buffer(data, dst)
+                    compressor.compress_to_buffer(data, dst).map_err(|e| {
+                        Error::new(
+                            ErrorKind::CodecError,
+                            format!("Failed to compress data with Zstd: {e}"),
+                        )
+                    })
                 } else {
                     dst.copy_from_slice(data);
                     Ok(data.len())
@@ -147,7 +161,7 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub(crate) fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> io::Result<usize> {
+    pub(crate) fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> Result<usize> {
         let dst_len = dst.len();
         let dst_ptr = dst.as_mut_ptr();
 
@@ -169,7 +183,12 @@ impl<'a> Decoder<'a> {
 
         cfg_if::cfg_if! { if #[cfg(not(miri))] {
             let inner = unsafe { &mut *self.inner.get() };
-            let nbytes = inner.decompress_to_buffer(cdata, decompress_out)?;
+            let nbytes = inner.decompress_to_buffer(cdata, decompress_out).map_err(|e| {
+                Error::new(
+                    ErrorKind::CodecError,
+                    format!("Failed to decompress data with Zstd: {e}"),
+                )
+            })?;
         } else {
             decompress_out.copy_from_slice(cdata);
             let nbytes = cdata.len();
@@ -193,12 +212,11 @@ impl<'a> Decoder<'a> {
                     };
 
                     let itemsize = self.dtype.itemsize() as usize;
-                    if !data.len().is_multiple_of(itemsize) {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Data length is not a multiple of item size, cant apply byte shuffle filter",
-                        ));
-                    }
+                    ensure!(
+                        data.len().is_multiple_of(itemsize),
+                        InvalidArgument,
+                        "Data length is not a multiple of item size, cant apply byte shuffle filter"
+                    );
                     let n = data.len() / itemsize;
                     for i in 0..n {
                         for b in 0..itemsize {
@@ -219,7 +237,7 @@ pub struct ReadContext {
     tmp_buf2: UnsafeCell<AlignedBytes>,
 }
 impl ReadContext {
-    pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> io::Result<Self> {
+    pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         let tmp_buf1 = AlignedBytes::new(8);
         let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {

@@ -1,8 +1,10 @@
-use crate::util::{Idx, IxIterExt};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
+
+use crate::error::{Error, ErrorKind, Result, bail, ensure};
+use crate::util::{Idx, IxIterExt};
 
 /// The type used to represent dtype alignment in bytes.
 pub type Alignment = u8;
@@ -117,11 +119,14 @@ impl Dtype {
     /// The fields should be either in packed or aligned offsets, custom offsets are not supported.
     /// There are some cases in which it is ambiguous whether the offsets are packed or aligned, and it may affect the
     /// computed total itemsize of the struct. In these cases, consider using the explicit [`Self::new_struct`].
-    pub fn from_fields(fields: Vec<(String, Itemsize, Dtype)>) -> Result<Self, DtypeError> {
+    pub fn from_fields(fields: Vec<(String, Itemsize, Dtype)>) -> Result<Self> {
         let mut seen_names = HashSet::new();
         for (name, _offset, _dtype) in &fields {
             if !seen_names.insert(name) {
-                return Err(DtypeError::InvalidNames);
+                bail!(
+                    InvalidArgument,
+                    "duplicate field name `{name}` in struct dtype"
+                );
             }
         }
 
@@ -130,7 +135,7 @@ impl Dtype {
 
         fn determine_itemsize_and_alignment(
             fields: &[(String, Itemsize, Dtype)],
-        ) -> Result<(Itemsize, (Alignment, bool)), DtypeError> {
+        ) -> Result<(Itemsize, (Alignment, bool))> {
             let mut expected_offset = 0;
             let is_aligned = fields.iter().all({
                 |(_f_name, offset, dtype)| {
@@ -164,7 +169,10 @@ impl Dtype {
                 return Ok((itemsize, (1, false)));
             }
 
-            Err(DtypeError::InvalidOffsets)
+            bail!(
+                InvalidArgument,
+                "field offsets are not in a valid packed or aligned layout"
+            );
         }
 
         let (itemsize, (alignment, is_aligned)) = determine_itemsize_and_alignment(&fields)?;
@@ -191,18 +199,22 @@ impl Dtype {
         shape: &[Itemsize],
         itemsize: Itemsize,
         alignment: Alignment,
-    ) -> Result<Self, DtypeError> {
-        let shape = DtypeShape::try_from_slice(shape).ok_or(DtypeError::InvalidShape)?;
+    ) -> Result<Self> {
+        let shape = DtypeShape::try_from_slice(shape)?;
         let shape_prod = shape
             .iter()
             .try_fold(1 as Itemsize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or(DtypeError::InvalidShape)?; // overflow
-        if shape_prod == 0 {
-            return Err(DtypeError::InvalidShape);
-        }
-        if !itemsize.is_multiple_of(shape_prod) {
-            return Err(DtypeError::InvalidItemsize);
-        }
+            .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "Dtype shape overflow"))?;
+        ensure!(
+            shape_prod != 0,
+            InvalidArgument,
+            "Dtype shape has zero elements"
+        );
+        ensure!(
+            itemsize.is_multiple_of(shape_prod),
+            InvalidArgument,
+            "Dtype itemsize is not a multiple of the shape product"
+        );
         let element_itemsize = itemsize / shape_prod;
 
         let is_aligned;
@@ -211,7 +223,10 @@ impl Dtype {
         } else if Self::is_packed_struct(&fields, element_itemsize, alignment) {
             is_aligned = false;
         } else {
-            return Err(DtypeError::InvalidOffsets);
+            bail!(
+                InvalidArgument,
+                "field offsets are not in a valid packed or aligned layout"
+            );
         }
 
         let fields = fields
@@ -401,22 +416,24 @@ impl Dtype {
     /// The product of the shape dimensions must not exceed [`Itemsize::MAX`].
     ///
     /// The itemsize will be updated to `itemsize *= new_shape.product() / old_shape.product()`.
-    pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<(), DtypeError> {
-        let shape = DtypeShape::try_from_slice(shape).ok_or(DtypeError::InvalidShape)?; // too many dims
+    pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<()> {
+        let shape = DtypeShape::try_from_slice(shape)?; // too many dims
         let shape_prod = shape
             .iter()
             .cloned()
             .try_product()
-            .ok_or(DtypeError::InvalidShape)?; // overflow
-        if shape_prod == 0 {
-            return Err(DtypeError::InvalidShape);
-        }
+            .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "Dtype shape overflow"))?;
+        ensure!(
+            shape_prod != 0,
+            InvalidArgument,
+            "Dtype shape has zero elements"
+        );
         let current_shape_size = self.shape().iter().cloned().product::<Itemsize>();
         assert!(self.itemsize().is_multiple_of(current_shape_size));
         let base_itemsize = self.itemsize() / current_shape_size;
         *self.itemsize_mut() = base_itemsize
             .checked_mul(shape_prod)
-            .ok_or(DtypeError::InvalidShape)?; // overflow
+            .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "Dtype shape overflow"))?;
         *self.shape_mut() = shape;
         Ok(())
     }
@@ -450,52 +467,6 @@ impl PartialEq for Dtype {
         }
     }
 }
-
-/// Error that can happen when creating a new [`Dtype`]
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum DtypeError {
-    /// Invalid field names.
-    ///
-    /// For example non-unique field names.
-    InvalidNames,
-    /// Invalid field offsets.
-    ///
-    /// Structs should be either in fully packed or fully aligned offsets (like C structs), custom offsets are not
-    /// supported.
-    InvalidOffsets,
-    /// Invalid itemsize.
-    ///
-    /// For scalar dtypes, the itemsize must match the scalar definition. For struct dtypes, the itemsize must be the
-    /// total size of the struct, including any padding between fields and at the end of the struct.
-    /// Zero sized types are not supported.
-    InvalidItemsize,
-    /// Invalid alignment.
-    ///
-    /// - If the dtype is a scalar, the alignment must match the scalar definition.
-    ///   See [`DtypeScalarKind::alignment`] for details.
-    /// - If the dtype is a struct with packed fields, the alignment must be 1.
-    /// - If the dtype is a struct with aligned fields, the alignment must be the maximum alignment of any field.
-    InvalidAlignment,
-    /// Invalid shape.
-    ///
-    /// - Shape with zero dimension is not allowed.
-    /// - Shapes with more than 4 dimensions are not allowed.
-    /// - Shapes with total size (product of dimensions) that exceeds `Itemsize::MAX` are not allowed.
-    InvalidShape,
-}
-impl std::fmt::Display for DtypeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidNames => write!(f, "Invalid field names"),
-            Self::InvalidOffsets => write!(f, "Invalid field offsets"),
-            Self::InvalidItemsize => write!(f, "Invalid itemsize"),
-            Self::InvalidAlignment => write!(f, "Invalid alignment"),
-            Self::InvalidShape => write!(f, "Invalid shape"),
-        }
-    }
-}
-impl std::error::Error for DtypeError {}
 
 impl DtypeScalarKind {
     /// Get the size of the scalar in bytes.
@@ -708,14 +679,16 @@ impl DtypeShape {
         unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const Itemsize, self.len()) }
     }
 
-    pub fn try_from_slice(data: &[Itemsize]) -> Option<Self> {
-        if DTYPE_MAX_NDIM < data.len() {
-            return None;
-        }
+    pub fn try_from_slice(data: &[Itemsize]) -> Result<Self> {
+        ensure!(
+            data.len() <= DTYPE_MAX_NDIM,
+            InvalidArgument,
+            "Dtype shape length exceeds the maximum supported dim number"
+        );
         let mut array = Self::new();
         array.data[..data.len()].write_copy_of_slice(data);
         array.len = data.len() as _;
-        Some(array)
+        Ok(array)
     }
 }
 
@@ -885,7 +858,7 @@ mod tests {
             ("x".to_string(), 0, i32::DTYPE),
             ("x".to_string(), 4, i32::DTYPE),
         ]);
-        assert_eq!(result, Err(DtypeError::InvalidNames));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -895,7 +868,7 @@ mod tests {
             ("a".to_string(), 0, u8::DTYPE),
             ("b".to_string(), 3, f64::DTYPE),
         ]);
-        assert_eq!(result, Err(DtypeError::InvalidOffsets));
+        assert!(result.is_err());
     }
 
     // ---- new_struct ----
@@ -949,23 +922,20 @@ mod tests {
 
     #[test]
     fn new_struct_shape_zero_errors() {
-        assert_eq!(
-            Dtype::new_struct(vec![("a".to_string(), 0, u8::DTYPE)], &[0], 0, 1),
-            Err(DtypeError::InvalidShape),
-        );
+        assert!(Dtype::new_struct(vec![("a".to_string(), 0, u8::DTYPE)], &[0], 0, 1).is_err());
     }
 
     #[test]
     fn new_struct_too_many_dims_errors() {
         // DTYPE_MAX_NDIM = 4; five dimensions must be rejected.
-        assert_eq!(
+        assert!(
             Dtype::new_struct(
                 vec![("a".to_string(), 0, u8::DTYPE)],
                 &[1, 1, 1, 1, 1],
                 1,
                 1,
-            ),
-            Err(DtypeError::InvalidShape),
+            )
+            .is_err()
         );
     }
 
@@ -986,26 +956,20 @@ mod tests {
     #[test]
     fn new_struct_itemsize_not_multiple_of_shape_errors() {
         // shape=[3], element must be 4 bytes (i32), total must be 12; 10 is not valid.
-        assert_eq!(
-            Dtype::new_struct(vec![("a".to_string(), 0, i32::DTYPE)], &[3], 10, 4),
-            Err(DtypeError::InvalidItemsize),
-        );
+        assert!(Dtype::new_struct(vec![("a".to_string(), 0, i32::DTYPE)], &[3], 10, 4).is_err());
     }
 
     #[test]
     fn new_struct_wrong_alignment_errors() {
         // f64 field requires alignment 8; declaring alignment 4 is rejected as invalid offsets
         // (alignment 4 matches neither packed=1 nor aligned=8 layout).
-        assert_eq!(
-            Dtype::new_struct(vec![("a".to_string(), 0, f64::DTYPE)], &[], 8, 4),
-            Err(DtypeError::InvalidOffsets),
-        );
+        assert!(Dtype::new_struct(vec![("a".to_string(), 0, f64::DTYPE)], &[], 8, 4).is_err());
     }
 
     #[test]
     fn new_struct_packed_wrong_offset_errors() {
         // Packed struct (alignment=1): b must be at offset 4, not 5.
-        assert_eq!(
+        assert!(
             Dtype::new_struct(
                 vec![
                     ("a".to_string(), 0, i32::DTYPE),
@@ -1014,8 +978,8 @@ mod tests {
                 &[],
                 6,
                 1,
-            ),
-            Err(DtypeError::InvalidOffsets),
+            )
+            .is_err()
         );
     }
 
@@ -1023,7 +987,7 @@ mod tests {
     fn new_struct_itemsize_too_small_errors() {
         // Packed i32+u8 must be exactly 5; declaring 4 is rejected as invalid offsets
         // (is_packed_struct checks itemsize as part of offset validation).
-        assert_eq!(
+        assert!(
             Dtype::new_struct(
                 vec![
                     ("a".to_string(), 0, i32::DTYPE),
@@ -1032,25 +996,9 @@ mod tests {
                 &[],
                 4,
                 1,
-            ),
-            Err(DtypeError::InvalidOffsets),
+            )
+            .is_err()
         );
-    }
-
-    #[test]
-    fn dtype_error_display_is_non_empty() {
-        for e in [
-            DtypeError::InvalidNames,
-            DtypeError::InvalidOffsets,
-            DtypeError::InvalidItemsize,
-            DtypeError::InvalidAlignment,
-            DtypeError::InvalidShape,
-        ] {
-            assert!(
-                !e.to_string().is_empty(),
-                "{e:?} Display should not be empty"
-            );
-        }
     }
 
     // ---- Derive macro ----
@@ -1243,14 +1191,14 @@ mod tests {
     #[test]
     fn set_shape_zero_dimension_errors() {
         let mut d = i32::DTYPE;
-        assert_eq!(d.set_shape(&[0]), Err(DtypeError::InvalidShape));
-        assert_eq!(d.set_shape(&[3, 0, 1]), Err(DtypeError::InvalidShape));
+        assert!(d.set_shape(&[0]).is_err());
+        assert!(d.set_shape(&[3, 0, 1]).is_err());
     }
 
     #[test]
     fn set_shape_too_many_dims_errors() {
         let mut d = u8::DTYPE;
-        assert_eq!(d.set_shape(&[1, 1, 1, 1, 1]), Err(DtypeError::InvalidShape));
+        assert!(d.set_shape(&[1, 1, 1, 1, 1]).is_err());
     }
 
     #[test]
@@ -1264,9 +1212,6 @@ mod tests {
     #[test]
     fn set_shape_overflow_errors() {
         let mut d = u8::DTYPE;
-        assert_eq!(
-            d.set_shape(&[Itemsize::MAX, Itemsize::MAX]),
-            Err(DtypeError::InvalidShape)
-        );
+        assert!(d.set_shape(&[Itemsize::MAX, Itemsize::MAX]).is_err());
     }
 }

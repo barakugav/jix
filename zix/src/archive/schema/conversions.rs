@@ -1,44 +1,46 @@
 #![allow(clippy::assertions_on_constants)]
 
 use crate::archive::schema;
-use crate::dtype::{Alignment, DTYPE_MAX_NDIM, Itemsize};
+use crate::dtype::{Alignment, Itemsize};
+use crate::error::{Error, ErrorKind, Result, bail, check_ndim, ensure};
 use crate::util::{DimArray, IxIterExt};
-use std::io;
 
 impl crate::dtype::Dtype {
-    pub(crate) fn from_proto(dtype: &schema::Dtype) -> io::Result<Self> {
+    pub(crate) fn from_proto(dtype: &schema::Dtype) -> Result<Self> {
         let alignment: Alignment = dtype.alignment.try_into().map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "dtype alignment exceeds maximum supported alignment",
+            Error::new(
+                ErrorKind::InvalidArchive,
+                format!(
+                    "dtype alignment exceeds maximum supported alignment: {}",
+                    dtype.alignment
+                ),
             )
         })?;
         let itemsize: Itemsize = dtype.itemsize.try_into().map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "dtype itemsize exceeds maximum supported itemsize",
+            Error::new(
+                ErrorKind::InvalidArchive,
+                format!(
+                    "dtype itemsize exceeds maximum supported itemsize: {}",
+                    dtype.itemsize
+                ),
             )
         })?;
-        if dtype.shape.len() > DTYPE_MAX_NDIM {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "dtype shape has too many dimensions",
-            ));
-        }
+        check_ndim(dtype.shape.len())?;
         let shape = dtype
             .shape
             .iter()
-            .map(|&d| d.try_into())
-            .collect::<Result<DimArray<_>, _>>()
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "dtype shape dimension size exceeds maximum supported size",
-                )
-            })?;
+            .map(|&d| {
+                d.try_into().map_err(|_| {
+                    Error::new(
+                        ErrorKind::InvalidArchive,
+                        "dtype shape has too many elements (size overflow)",
+                    )
+                })
+            })
+            .collect::<Result<DimArray<_>>>()?;
         let shape_size = shape.iter().cloned().try_product().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
+            Error::new(
+                ErrorKind::InvalidArchive,
                 "dtype shape has too many elements (size overflow)",
             )
         })?;
@@ -65,51 +67,46 @@ impl crate::dtype::Dtype {
                     }
                     schema::DtypeScalarKind::Bool => crate::dtype::DtypeScalarKind::Bool,
                     schema::DtypeScalarKind::Unspecified => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "unknown dtype scalar kind (unspecified)",
-                        ));
+                        bail!(InvalidArchive, "unknown dtype scalar kind (unspecified)");
                     }
                 };
 
                 match scalar.endianness() {
                     schema::Endianness::Little => {}
                     schema::Endianness::Big => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "big-endian dtypes are not supported",
-                        ));
+                        bail!(InvalidArchive, "big-endian dtypes are not supported");
                     }
                     schema::Endianness::Unspecified => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "unknown dtype endianness (not little or big)",
-                        ));
+                        bail!(
+                            InvalidArchive,
+                            "unknown dtype endianness (not little or big)"
+                        );
                     }
                 }
 
-                if alignment != scalar_kind.alignment() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "dtype alignment does not match expected alignment for scalar kind",
-                    ));
-                }
-                if dtype.itemsize as u64 != scalar_kind.itemsize() as u64 * shape_size as u64 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "dtype itemsize does not match expected itemsize for scalar kind",
-                    ));
-                }
+                ensure!(
+                    alignment == scalar_kind.alignment(),
+                    InvalidArchive,
+                    "dtype alignment {alignment} does not match expected alignment {} for scalar kind {scalar_kind:?}",
+                    scalar_kind.alignment()
+                );
+                ensure!(
+                    dtype.itemsize as u64 == scalar_kind.itemsize() as u64 * shape_size as u64,
+                    InvalidArchive,
+                    "dtype itemsize {} does not match expected itemsize {} for scalar kind {scalar_kind:?} with shape size {shape_size}",
+                    dtype.itemsize,
+                    scalar_kind.itemsize() as u64 * shape_size as u64
+                );
 
                 Self::of_scalar(scalar_kind)
             }
             Some(schema::dtype::Kind::Struct(schema::DtypeStruct { fields })) => {
                 let fields = fields
                     .iter()
-                    .map::<io::Result<_>, _>(|f| {
+                    .map::<Result<_>, _>(|f| {
                         let offset: Itemsize = f.offset.try_into().map_err(|_| {
-                            io::Error::new(
-                                io::ErrorKind::InvalidData,
+                            Error::new(
+                                ErrorKind::InvalidArchive,
                                 "dtype struct field offset exceeds maximum supported offset",
                             )
                         })?;
@@ -117,30 +114,30 @@ impl crate::dtype::Dtype {
                             .dtype
                             .as_ref()
                             .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::InvalidData,
+                                Error::new(
+                                    ErrorKind::InvalidArchive,
                                     "dtype struct field is missing dtype",
                                 )
                             })
                             .and_then(Self::from_proto)?;
                         Ok((f.name.clone(), offset, f_dtype))
                     })
-                    .collect::<io::Result<Vec<_>>>()?;
+                    .collect::<Result<Vec<_>>>()?;
                 Self::new_struct(fields, &shape, itemsize, alignment).map_err(|e| {
-                    io::Error::new(io::ErrorKind::InvalidData, format!("invalid dtype: {e}"))
+                    Error::new(ErrorKind::InvalidArchive, format!("invalid dtype: {e}"))
                 })?
             }
             None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "unknown dtype kind (not a scalar or struct)",
-                ));
+                bail!(
+                    InvalidArchive,
+                    "dtype kind is missing (not a scalar or struct)"
+                );
             }
         };
 
         dtype.set_shape(&shape).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
+            Error::new(
+                ErrorKind::InvalidArchive,
                 format!("invalid dtype shape: {e}"),
             )
         })?;

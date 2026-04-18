@@ -10,7 +10,7 @@ use zix_core::Array as ZixArray;
 
 use crate::dtype::dtype_to_numpy;
 use crate::storage::DynStorage;
-use crate::util::dim_arr;
+use crate::util::{IntoPyResult, dim_arr};
 
 #[gen_stub_pyclass]
 #[pyclass]
@@ -70,7 +70,10 @@ impl Array {
 
         py.detach(|| {
             let range = dim_arr(ndim, |dim| 0..(shape[dim] as u64));
-            self.arr.data().to_ndarray_buf(&range, np_arr_data)
+            self.arr
+                .data()
+                .to_ndarray_buf(&range, np_arr_data)
+                .into_py_result()
         })?;
 
         Ok(np_arr)
@@ -79,28 +82,28 @@ impl Array {
     pub fn __add__(&self, other: &Self) -> PyResult<Self> {
         let a = ZixArray::from_storage(self.arr.storage().clone());
         let b = ZixArray::from_storage(other.arr.storage().clone());
-        let storage = DynStorage(Arc::new(zix_core::ops::Add::new(a, b)?));
+        let storage = DynStorage(Arc::new(zix_core::ops::Add::new(a, b).into_py_result()?));
         Ok(Self::from_storage(storage))
     }
 
     pub fn __sub__(&self, other: &Self) -> PyResult<Self> {
         let a = ZixArray::from_storage(self.arr.storage().clone());
         let b = ZixArray::from_storage(other.arr.storage().clone());
-        let storage = DynStorage(Arc::new(zix_core::ops::Sub::new(a, b)?));
+        let storage = DynStorage(Arc::new(zix_core::ops::Sub::new(a, b).into_py_result()?));
         Ok(Self::from_storage(storage))
     }
 
     pub fn __mul__(&self, other: &Self) -> PyResult<Self> {
         let a = ZixArray::from_storage(self.arr.storage().clone());
         let b = ZixArray::from_storage(other.arr.storage().clone());
-        let storage = DynStorage(Arc::new(zix_core::ops::Mul::new(a, b)?));
+        let storage = DynStorage(Arc::new(zix_core::ops::Mul::new(a, b).into_py_result()?));
         Ok(Self::from_storage(storage))
     }
 
     pub fn __truediv__(&self, other: &Self) -> PyResult<Self> {
         let a = ZixArray::from_storage(self.arr.storage().clone());
         let b = ZixArray::from_storage(other.arr.storage().clone());
-        let storage = DynStorage(Arc::new(zix_core::ops::Div::new(a, b)?));
+        let storage = DynStorage(Arc::new(zix_core::ops::Div::new(a, b).into_py_result()?));
         Ok(Self::from_storage(storage))
     }
 }

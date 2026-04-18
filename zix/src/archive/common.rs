@@ -5,6 +5,7 @@ use prost::Message;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::archive::schema::{self, ArchiveType};
+use crate::error::{Error, Result, ensure};
 use crate::util::Idx;
 
 const MAGIC: &[u8; 4] = b"ZIX1";
@@ -120,23 +121,25 @@ pub(crate) struct ArchiveReader<R> {
     tmp_buf: Vec<u8>,
 }
 impl<R> ArchiveReader<R> {
-    pub(crate) fn new(mut reader: R, length: u64) -> io::Result<Self>
+    pub(crate) fn new(mut reader: R, length: u64) -> Result<Self>
     where
         R: Read + Seek,
     {
-        if length < size_of::<Header>() as u64 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "zix file too short",
-            ));
-        }
+        ensure!(
+            length >= size_of::<Header>() as u64,
+            InvalidArchive,
+            "zix file too short: length={length}"
+        );
 
-        let base_offset = reader.stream_position()?;
+        let base_offset = reader.stream_position().map_err(Error::io)?;
 
-        let header = Header::read_from_io(&mut reader)?;
-        if &header.magic != MAGIC {
-            return Err(io::Error::other("invalid zix file: invalid header magic"));
-        }
+        let header = Header::read_from_io(&mut reader).map_err(Error::io)?;
+        ensure!(
+            &header.magic == MAGIC,
+            InvalidArchive,
+            "invalid zix file: invalid header magic {:?}",
+            header.magic
+        );
 
         Ok(Self {
             reader,

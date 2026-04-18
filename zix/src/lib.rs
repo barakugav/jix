@@ -9,6 +9,7 @@ pub mod ops;
 pub mod storage;
 mod util;
 pub use util::{ArraySequence, ArraySequenceItem};
+pub mod error;
 
 mod archive;
 

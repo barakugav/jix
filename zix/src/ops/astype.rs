@@ -1,10 +1,10 @@
-use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::f16;
 use crate::dtype::{Complex, Dtype, DtypeScalarKind};
+use crate::error::{Result, bail, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
@@ -17,32 +17,31 @@ where
         self.try_astype(dtype).unwrap()
     }
 
-    pub fn try_astype(self, dtype: Dtype) -> io::Result<Array<AsType<S>>> {
+    pub fn try_astype(self, dtype: Dtype) -> Result<Array<AsType<S>>> {
         Ok(Array::from_storage(AsType::new(self, dtype)?))
     }
 }
 pub struct AsType<S> {
     array: Array<S>,
 
-    dtype: Dtype,
+    dst_dtype: Dtype,
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 impl<S> AsType<S> {
-    pub fn new(array: Array<S>, dtype: Dtype) -> io::Result<Self>
+    pub fn new(array: Array<S>, dtype: Dtype) -> Result<Self>
     where
         S: ArrayStorage,
     {
         let src_dtype = array.dtype();
-        if !Self::is_cast_supported(src_dtype, &dtype) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("unsupported cast from {src_dtype:?} to {dtype:?}"),
-            ));
-        }
+        ensure!(
+            Self::is_cast_supported(src_dtype, &dtype),
+            UnsupportedDtype,
+            "unsupported cast from {src_dtype:?} to {dtype:?}"
+        );
 
         Ok(Self {
-            dtype,
+            dst_dtype: dtype,
             shape: array.shape().try_into().unwrap(),
             blocks_layout: array.blocks_layout().clone(),
             array,
@@ -83,16 +82,13 @@ impl<S> ArrayStorage for AsType<S>
 where
     S: ArrayStorage,
 {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
-        let (src_dtype, dst_dtype) = (self.array.dtype(), &self.dtype);
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(&self.shape, index)?;
+        let nitems = check_get_buffer_size(index, &self.dst_dtype, buf)?;
+
+        let (src_dtype, dst_dtype) = (self.array.dtype(), &self.dst_dtype);
         let (src_itemsize, dst_itemsize) =
             (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
-        let nitems = buf.len() / dst_itemsize;
 
         let in_place = src_itemsize == dst_itemsize
             && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment() as usize);
@@ -205,12 +201,11 @@ where
         };
 
         if !supported {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("unsupported cast from {src_scalar:?} to {dst_scalar:?}"),
-            ));
+            bail!(
+                UnsupportedDtype,
+                "unsupported cast from {src_scalar:?} to {dst_scalar:?}"
+            );
         }
-
         Ok(())
     }
 
@@ -218,7 +213,7 @@ where
         &self.shape
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        &self.dst_dtype
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -364,10 +359,10 @@ impl_cast_complex!(f64);
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, ArrayParams};
-    use crate::storage::block::BlockSize;
     #[allow(unused_imports)]
     use crate::dtype::f16;
     use crate::dtype::{Complex, Dtyped};
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

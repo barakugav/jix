@@ -1,12 +1,12 @@
-use std::io;
 use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::util::iter::NdIter;
+use crate::error::{Result, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::block::BlockSize;
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::util::iter::NdIter;
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
 /// Lazy storage type returned by [`Array::slice`](crate::Array::slice).
@@ -49,20 +49,17 @@ pub struct Slice<S> {
 }
 
 impl<S: ArrayStorage> Slice<S> {
-    pub fn new(array: Array<S>, slice: SliceSpec) -> io::Result<Self> {
+    pub fn new(array: Array<S>, slice: SliceSpec) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
 
-        if slice.slice.len() != ndim {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "slice has {} items but array has {} dims",
-                    slice.slice.len(),
-                    ndim
-                ),
-            ));
-        }
+        ensure!(
+            slice.slice.len() == ndim,
+            InvalidIndex,
+            "slice has {} items but array has {} dims",
+            slice.slice.len(),
+            ndim
+        );
 
         let slice = {
             let mut resolved = DimArray::new();
@@ -100,12 +97,9 @@ impl<S: ArrayStorage> Slice<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for Slice<S> {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(self.shape(), index)?;
+
         // -----------------------------------------------------------------------
         // Fast path: all dims have step == 1.
         //
@@ -158,6 +152,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // strided).  The single step on strided dims is handled by dst_byte_offset
         // already placing us at the right row/column; nd_copy takes care of the rest.
         // -----------------------------------------------------------------------
+        check_get_buffer_size(index, &self.dtype, buf)?;
         let ndim = self.slice.len();
         let itemsize = self.dtype.itemsize() as usize;
         let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
@@ -349,13 +344,13 @@ struct DimSlice {
 }
 
 impl DimSlice {
-    fn resolve(item: &SliceItem, dim_len: u64) -> io::Result<Self> {
-        if item.step < 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("slice step {} is not supported (must be ≥ 1)", item.step),
-            ));
-        }
+    fn resolve(item: &SliceItem, dim_len: u64) -> Result<Self> {
+        ensure!(
+            item.step >= 1,
+            InvalidIndex,
+            "slice step {} is not supported (must be >= 1)",
+            item.step
+        );
         let step = item.step as u64;
 
         let resolve_index = |idx: i64| -> u64 {

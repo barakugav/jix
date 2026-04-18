@@ -1,9 +1,20 @@
 use zix_core::NDIM_MAX;
 
+use pyo3::prelude::*;
+
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
     (0..ndim).map(f).collect()
+}
+
+pub(crate) trait IntoPyResult<T> {
+    fn into_py_result(self) -> PyResult<T>;
+}
+impl<T> IntoPyResult<T> for zix_core::error::Result<T> {
+    fn into_py_result(self) -> PyResult<T> {
+        self.map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))
+    }
 }
 
 #[cfg(test)]

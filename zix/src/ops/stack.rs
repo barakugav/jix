@@ -1,9 +1,9 @@
-use std::io;
 use std::ops::{Not, Range};
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
+use crate::error::{Result, check_get_buffer_size, check_get_range, check_ndim, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{ArraySequence, DimArray, default_strides, dim_arr, nd_copy};
 
@@ -86,53 +86,40 @@ pub struct Stack<ArraysT> {
     blocks_layout: BlocksLayout,
 }
 impl<ArraysT> Stack<ArraysT> {
-    pub fn new(arrays: ArraysT, axis: usize) -> io::Result<Self>
+    pub fn new(arrays: ArraysT, axis: usize) -> Result<Self>
     where
         ArraysT: ArraySequence,
     {
         let narrays = arrays.narrays();
-        if narrays == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "cannot stack zero arrays",
-            ));
-        }
+        ensure!(
+            narrays > 0,
+            InvalidShapeOperation,
+            "cannot stack zero arrays"
+        );
+
         let shape0 = arrays.shape(0);
         let dtype = arrays.dtype(0);
         for arr in 1..narrays {
             let shape_i = arrays.shape(arr);
-            if shape_i != shape0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("cannot stack arrays of different shapes: {shape0:?} != {shape_i:?}"),
-                ));
-            }
+            ensure!(
+                shape_i == shape0,
+                InvalidShapeOperation,
+                "cannot stack arrays of different shapes: {shape0:?} != {shape_i:?}"
+            );
             let dtype_i = arrays.dtype(arr);
-            if dtype_i != dtype {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("cannot stack arrays of different dtypes: {dtype:?} != {dtype_i:?}"),
-                ));
-            }
+            ensure!(
+                dtype_i == dtype,
+                UnsupportedDtype,
+                "cannot stack arrays of different dtypes: {dtype:?} != {dtype_i:?}"
+            );
         }
-        if axis > shape0.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "axis out of bounds: axis {axis} >= array ndim {}",
-                    shape0.len()
-                ),
-            ));
-        }
-        if shape0.len() + 1 > crate::NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "stacking arrays would result in too many dimensions: {}",
-                    shape0.len() + 1
-                ),
-            ));
-        }
+        ensure!(
+            axis <= shape0.len(),
+            InvalidShapeOperation,
+            "axis out of bounds: axis {axis} >= array ndim {}",
+            shape0.len()
+        );
+        check_ndim(shape0.len() + 1)?;
         let mut new_shape: DimArray<_> = shape0.try_into().unwrap();
         new_shape.insert(axis, narrays as u64);
 
@@ -154,13 +141,10 @@ impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
     ArraysT: ArraySequence,
 {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
-        assert_eq!(index.len(), self.shape.len());
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(&self.shape, index)?;
+        check_get_buffer_size(index, &self.dtype, buf)?;
+
         let in_place = self.shape.iter().take(self.stack_axis).all(|&s| s <= 1);
         let arr_range = index[..self.stack_axis]
             .iter()
@@ -240,8 +224,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, ArrayParams};
-    use crate::storage::block::BlockSize;
     use crate::ops::stack;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

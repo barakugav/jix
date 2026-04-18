@@ -1,9 +1,9 @@
-use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
+use crate::error::{Result, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
@@ -41,14 +41,14 @@ pub struct Map<S, I, O, F> {
     array: Array<S>,
 
     map_fn: F,
-    dtype: Dtype,
+    output_dtype: Dtype,
     _phantom: std::marker::PhantomData<(I, O)>,
 
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 impl<S, I, O, F> Map<S, I, O, F> {
-    pub fn new(array: Array<S>, map_fn: F) -> io::Result<Self>
+    pub fn new(array: Array<S>, map_fn: F) -> Result<Self>
     where
         S: ArrayStorage,
         I: Dtyped,
@@ -56,20 +56,17 @@ impl<S, I, O, F> Map<S, I, O, F> {
         F: Fn(I) -> O,
     {
         let src_dtype = I::DTYPE;
-        if src_dtype != *array.dtype() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "map input dtype mismatch: array has {:?} but input generic (I) is {:?}",
-                    array.dtype(),
-                    src_dtype
-                ),
-            ));
-        }
+        ensure!(
+            src_dtype == *array.dtype(),
+            UnsupportedDtype,
+            "map input dtype mismatch: array has {:?} but input generic (I) is {:?}",
+            array.dtype(),
+            src_dtype
+        );
 
         Ok(Self {
             map_fn,
-            dtype: O::DTYPE,
+            output_dtype: O::DTYPE,
             _phantom: std::marker::PhantomData,
             shape: array.shape().try_into().unwrap(),
             blocks_layout: array.blocks_layout().clone(),
@@ -84,16 +81,13 @@ where
     O: Dtyped,
     F: Fn(I) -> O,
 {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(&self.shape, index)?;
         let (src_dtype, dst_dtype) = (self.array.dtype(), O::DTYPE);
+        let nitems = check_get_buffer_size(index, &dst_dtype, buf)?;
+
         let (src_itemsize, dst_itemsize) =
             (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
-        let nitems = buf.len() / dst_itemsize;
 
         let in_place = src_itemsize == dst_itemsize
             && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment() as usize);
@@ -124,7 +118,7 @@ where
         &self.shape
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        &self.output_dtype
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {

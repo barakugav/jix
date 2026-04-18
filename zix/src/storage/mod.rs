@@ -1,9 +1,8 @@
-use std::io::{self};
 use std::ops::Range;
 
-use crate::NDIM_MAX;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Itemsize};
+use crate::error::{Result, check_ndim, ensure};
 use crate::storage::block::BlockSize;
 use crate::util::Idx;
 use crate::util::{DimArray, dim_arr};
@@ -33,12 +32,7 @@ pub trait ArrayStorage {
     ///   Elements should be laid out in row-major order (C-style contiguous) in the buffer.
     /// - `context`: A context object that may be used for caching or other purposes during the
     ///   read operation. See `ReadContext` for more details.
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()>;
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>;
 
     fn shape(&self) -> &[u64];
     fn dtype(&self) -> &Dtype;
@@ -107,18 +101,23 @@ impl BlocksLayout {
 
         shape: &[u64],
         itemsize: Itemsize,
-    ) -> Self {
+    ) -> Result<Self> {
         let ndim = shape.len();
-        assert!(ndim < NDIM_MAX);
+        check_ndim(ndim)?;
         let itemsize = itemsize as u64;
 
-        assert!(
+        ensure!(
             block_shape_tag.is_none() || block_shape.is_some(),
+            InvalidArgument,
             "block_shape_tag is specified but block_shape is not specified"
         );
         let block_shape_tag =
             block_shape_tag.unwrap_or_else(|| dim_arr(ndim, |_| BlockShapeTag::Fixed));
-        assert_eq!(ndim, block_shape_tag.len());
+        ensure!(
+            ndim == block_shape_tag.len(),
+            InvalidArgument,
+            "ndim does not match block_shape_tag length"
+        );
         let fixed_block_shape = block_shape_tag
             .iter()
             .all(|&tag| tag == BlockShapeTag::Fixed);
@@ -159,7 +158,11 @@ impl BlocksLayout {
         // Compute preferred_read_block_shape
         let preferred_read_block_shape = match preferred_read_block_shape {
             Some(preferred_read_block_shape) => {
-                assert_eq!(ndim, preferred_read_block_shape.len());
+                ensure!(
+                    ndim == preferred_read_block_shape.len(),
+                    InvalidArgument,
+                    "ndim does not match preferred_read_block_shape length"
+                );
                 dim_arr(ndim, |dim| {
                     (preferred_read_block_shape[dim] as u64)
                         .max(block_shape[dim] as u64)
@@ -182,13 +185,13 @@ impl BlocksLayout {
                 * itemsize
         });
 
-        BlocksLayout {
+        Ok(BlocksLayout {
             block_shape_hint: block_shape,
             block_shape_tag,
             block_size_hint,
             preferred_read_block_shape,
             preferred_read_block_size_hint,
-        }
+        })
     }
 
     fn scale_block_shape(
@@ -273,7 +276,7 @@ macro_rules! impl_array_storage_forward {
                 index: &[core::ops::Range<u64>],
                 buf: &mut [u8],
                 context: &crate::codec::ReadContext,
-            ) -> std::io::Result<()> {
+            ) -> crate::error::Result<()> {
                 self.0.read_data(index, buf, context)
             }
             fn shape(&self) -> &[u64] {

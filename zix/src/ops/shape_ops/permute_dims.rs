@@ -1,9 +1,9 @@
-use std::io;
 use std::ops::Range;
 
 use crate::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
+use crate::error::{Result, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
@@ -21,33 +21,27 @@ pub struct PermuteDims<S> {
 }
 
 impl<S: ArrayStorage> PermuteDims<S> {
-    pub fn new(array: Array<S>, axes: &[usize]) -> io::Result<Self> {
+    pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
         let ndim = array.shape().len();
-        if axes.len() != ndim {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "axes length {} does not match array ndim {}",
-                    axes.len(),
-                    ndim
-                ),
-            ));
-        }
+        ensure!(
+            axes.len() == ndim,
+            InvalidShapeOperation,
+            "axes length {} does not match array ndim {ndim}",
+            axes.len()
+        );
         let axes: DimArray<_> = axes.try_into().unwrap();
         let mut seen = dim_arr(ndim, |_| false);
         for &ax in axes.iter() {
-            if ax >= ndim {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("axis {ax} out of bounds for array of ndim {ndim}"),
-                ));
-            }
-            if seen[ax] {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("duplicate axis {ax}"),
-                ));
-            }
+            ensure!(
+                ax < ndim,
+                InvalidShapeOperation,
+                "axis {ax} out of bounds for array of ndim {ndim}"
+            );
+            ensure!(
+                !seen[ax],
+                InvalidShapeOperation,
+                "duplicate axis {ax} in axes {axes:?}"
+            );
             seen[ax] = true;
         }
 
@@ -78,12 +72,10 @@ impl<S: ArrayStorage> PermuteDims<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(self.shape(), index)?;
+        let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
+
         let ndim = self.axes.len();
         let itemsize = self.dtype.itemsize() as usize;
 
@@ -97,7 +89,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
         let sub_shape_in = dim_arr(ndim, |d| {
             (input_index[d].end - input_index[d].start) as usize
         });
-        let n_bytes = sub_shape_in.iter().product::<usize>() * itemsize;
+        let n_bytes = nitems * itemsize;
         let mut tmp_buf = context.tmp_buf(n_bytes, self.dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
         self.array

@@ -1,9 +1,9 @@
-use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
+use crate::error::Result;
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
 
 pub(crate) trait ArraySequenceItemImpl {
@@ -37,7 +37,7 @@ pub(crate) trait ArraySequenceImpl {
         index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> io::Result<()>;
+    ) -> Result<()>;
     fn shape(&self, arr: usize) -> &[u64];
     fn dtype(&self, arr: usize) -> &Dtype;
     fn spec(&self, arr: usize) -> ArrayStorageSpec<'_>;
@@ -60,7 +60,7 @@ where
         index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         self[arr].__storage().read_data(index, buf, context)
     }
 
@@ -92,7 +92,7 @@ where
         index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         self[arr].__storage().read_data(index, buf, context)
     }
 
@@ -124,7 +124,7 @@ where
         index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         self[arr].__storage().read_data(index, buf, context)
     }
 
@@ -162,7 +162,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 index: &[Range<u64>],
                 buf: &mut [u8],
                 context: &ReadContext,
-            ) -> io::Result<()> {
+            ) -> Result<()> {
                 match arr {
                     $($idx => ArraySequenceItemImpl::__storage(&self.$idx).read_data(index, buf, context),)+
                     _ => out_of_bounds_array_index(arr),

@@ -1,8 +1,8 @@
-use std::io::{self};
 use std::ops::Range;
 
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
+use crate::error::{Result, check_get_buffer_size, check_get_range};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::default_strides;
@@ -22,7 +22,7 @@ macro_rules! impl_array_storage {
                 index: &[Range<u64>],
                 buf: &mut [u8],
                 context: &ReadContext,
-            ) -> io::Result<()> {
+            ) -> Result<()> {
                 self.0.read_data(index, buf, context)
             }
             fn shape(&self) -> &[u64] {
@@ -84,17 +84,14 @@ impl<S> ArrayBlockTableStorageBase<S> {
         &self.blocks_layout.block_shape_hint
     }
 
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()>
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>
     where
         S: BlockTableStorage,
     {
+        check_get_range(&self.shape, index)?;
+        let _nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
+
         let ndim = self.shape.len();
-        assert_eq!(index.len(), ndim);
         let block_shape = self.block_shape();
 
         let mut b_range = DimArray::default();
@@ -119,17 +116,6 @@ impl<S> ArrayBlockTableStorageBase<S> {
         let dtype = self.blocks.dtype();
         let itemsize = dtype.itemsize() as usize;
         let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_size = out_shape.iter().product::<usize>();
-        if buf.len() != out_size * itemsize {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "output buffer has incorrect size: expected {} bytes, actual {} bytes",
-                    out_size * itemsize,
-                    buf.len()
-                ),
-            ));
-        }
         let out_strides = default_strides(&out_shape, itemsize);
         let block_strides = default_strides(block_shape, itemsize as BlockSize); // TODO: precomute me
 

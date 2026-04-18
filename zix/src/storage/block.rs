@@ -1,7 +1,6 @@
-use std::io::{self};
-
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::Dtype;
+use crate::error::{Result, ensure};
 
 const _: () = const {
     assert!(
@@ -34,28 +33,34 @@ impl<S> BlockTable<S> {
         nitems: u64,
         block_size: BlockSize,
         decoder_config: DecoderCodecConfig,
-    ) -> Self
+    ) -> Result<Self>
     where
         S: BlockTableStorage,
     {
-        assert!(block_size > 0);
-        assert!(nitems.is_multiple_of(block_size as u64));
+        ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
+        ensure!(
+            nitems.is_multiple_of(block_size as u64),
+            InvalidArgument,
+            "nitems must be a multiple of block_size"
+        );
         let nblocks = nitems / block_size as u64;
         let cdata = storage.cdata();
         let block_offsets = storage.block_offsets();
-        if nblocks == 0 {
-            assert_eq!(block_offsets.len(), 0);
-        } else {
-            assert_eq!(block_offsets.len() as u64, nblocks + 1);
+        ensure!(
+            block_offsets.len() as u64 == if nblocks == 0 { 0 } else { nblocks + 1 },
+            InvalidArgument,
+            "block_offsets length mismatch"
+        );
+        if nblocks > 0 {
             debug_assert!(block_offsets.windows(2).all(|w| w[0] < w[1]));
             debug_assert!(*block_offsets.last().unwrap() <= cdata.len() as u64);
         }
-        Self {
+        Ok(Self {
             storage,
             nitems,
             block_size,
             decoder_config,
-        }
+        })
     }
 
     /// Get the dtype of items in this storage.
@@ -87,17 +92,17 @@ impl<S> BlockTable<S> {
         block_idx: u64,
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> io::Result<()>
+    ) -> Result<()>
     where
         S: BlockTableStorage,
     {
         let b_size_bytes = self.block_len() as usize * self.dtype().itemsize() as usize;
-        if buf.len() != b_size_bytes {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Buffer size does not match block size",
-            ));
-        }
+        ensure!(
+            buf.len() == b_size_bytes,
+            InvalidBufferSize,
+            "Buffer size does not match block size: got {}, expected {b_size_bytes}",
+            buf.len()
+        );
 
         let block_offsets = self.storage.block_offsets();
         let begin = block_offsets[block_idx as usize] as usize;
@@ -118,20 +123,28 @@ impl BlockTable<Owned> {
         dtype: Dtype,
         block_size: BlockSize,
         encoder: Encoder,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         let itemsize = dtype.itemsize();
-        assert!(itemsize > 0);
-        assert!(block_size > 0);
-        assert!(data.len().is_multiple_of(itemsize as usize));
+        ensure!(itemsize > 0, InvalidArgument, "itemsize must be > 0");
+        ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
+        ensure!(
+            data.len().is_multiple_of(itemsize as usize),
+            InvalidArgument,
+            "data length must be a multiple of itemsize"
+        );
         let nitems = data.len() / itemsize as usize;
-        assert!(nitems.is_multiple_of(block_size as usize));
+        ensure!(
+            nitems.is_multiple_of(block_size as usize),
+            InvalidArgument,
+            "nitems must be a multiple of block_size"
+        );
 
         let b_size_bytes = block_size as usize * itemsize as usize;
-        let mut builder = BlockTableBuilder::new(dtype, block_size, encoder);
+        let mut builder = BlockTableBuilder::new(dtype, block_size, encoder)?;
         for b_data in data.chunks(b_size_bytes) {
             builder.add_block(b_data)?;
         }
-        Ok(builder.finish())
+        builder.finish()
     }
 }
 
@@ -191,24 +204,33 @@ pub(crate) struct BlockTableBuilder {
     max_blk_cdata_len: usize,
 }
 impl BlockTableBuilder {
-    pub(crate) fn new(dtype: Dtype, block_size: BlockSize, encoder: Encoder) -> Self {
-        assert!(dtype.itemsize() > 0);
-        assert!(block_size > 0);
+    pub(crate) fn new(dtype: Dtype, block_size: BlockSize, encoder: Encoder) -> Result<Self> {
+        ensure!(
+            dtype.itemsize() > 0,
+            InvalidArgument,
+            "itemsize must be > 0"
+        );
+        ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
         let b_size_bytes = block_size as usize * dtype.itemsize() as usize;
         let max_blk_cdata_len = encoder.encode_bound(b_size_bytes);
-        Self {
+        Ok(Self {
             dtype,
             block_size,
             encoder,
             cdata: Vec::new(),
             block_offsets: Vec::new(),
             max_blk_cdata_len,
-        }
+        })
     }
 
-    pub(crate) fn add_block(&mut self, block_data: &[u8]) -> io::Result<()> {
+    pub(crate) fn add_block(&mut self, block_data: &[u8]) -> Result<()> {
         let b_size_bytes = self.block_size as usize * self.dtype.itemsize() as usize;
-        assert_eq!(block_data.len(), b_size_bytes);
+        ensure!(
+            block_data.len() == b_size_bytes,
+            InvalidArgument,
+            "Block data size does not match block size: got {}, expected {b_size_bytes}",
+            block_data.len()
+        );
 
         let cdata_len = self.cdata.len();
         self.cdata.reserve(self.max_blk_cdata_len);
@@ -229,7 +251,7 @@ impl BlockTableBuilder {
         Ok(())
     }
 
-    pub(crate) fn finish(self) -> BlockTable<Owned> {
+    pub(crate) fn finish(self) -> Result<BlockTable<Owned>> {
         let nblocks = self.block_offsets.len().saturating_sub(1);
         let nitems = nblocks * self.block_size as usize;
         let decoder_config = DecoderCodecConfig {
@@ -253,11 +275,12 @@ impl BlockTableBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, Cursor};
+    use std::io::Cursor;
 
     use super::{BlockSize, BlockTable};
     use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
     use crate::dtype::{Dtype, Dtyped};
+    use crate::error::Result;
     use crate::storage::block::{BlockTableStorage, Owned};
     use crate::util::{AlignedBytes, cast_slice};
 
@@ -279,7 +302,7 @@ mod tests {
         items: &[T],
         block_size: BlockSize,
         encoder: Encoder,
-    ) -> io::Result<BlockTable<Owned>>
+    ) -> Result<BlockTable<Owned>>
     where
         T: Dtyped,
     {

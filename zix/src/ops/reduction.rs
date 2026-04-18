@@ -1,4 +1,3 @@
-use std::io;
 use std::ops::Range;
 
 use crate::Array;
@@ -6,6 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 #[allow(unused_imports)]
 use crate::dtype::{Complex, f16};
+use crate::error::{Result, bail, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::iter::NdIter;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
@@ -16,9 +16,9 @@ pub(crate) trait ReductionOpKernel {
         &self,
         slice_iter: impl Iterator<Item = (impl Iterator<Item = &'a [u8]> + Clone, &'a mut [u8])>,
         input_dtype: &Dtype,
-    ) -> std::io::Result<()>;
+    ) -> Result<()>;
 
-    fn output_dtype(&self, input_dtype: &Dtype) -> io::Result<Dtype>;
+    fn output_dtype(&self, input_dtype: &Dtype) -> Result<Dtype>;
 }
 
 pub(crate) struct ReductionOp<Op, S> {
@@ -33,7 +33,7 @@ pub(crate) struct ReductionOp<Op, S> {
     blocks_layout: BlocksLayout,
 }
 impl<Op, S> ReductionOp<Op, S> {
-    pub(crate) fn new(op: Op, array: Array<S>, axes: &[usize], keepdims: bool) -> io::Result<Self>
+    pub(crate) fn new(op: Op, array: Array<S>, axes: &[usize], keepdims: bool) -> Result<Self>
     where
         Op: ReductionOpKernel,
         S: ArrayStorage,
@@ -43,18 +43,13 @@ impl<Op, S> ReductionOp<Op, S> {
         let input_ndim = array.shape().len();
         let mut is_reduced = dim_arr(input_ndim, |_| false);
         for &ax in axes {
-            if ax >= input_ndim {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("axis {ax} out of bounds for array of ndim {input_ndim}"),
-                ));
-            }
-            if is_reduced[ax] {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("duplicate axis {ax}"),
-                ));
-            }
+            ensure!(
+                ax < input_ndim,
+                InvalidArgument,
+                "axis {ax} out of bounds for array of ndim {input_ndim}"
+            );
+
+            ensure!(!is_reduced[ax], InvalidArgument, "duplicate axis {ax}");
             is_reduced[ax] = true;
         }
 
@@ -116,14 +111,11 @@ where
     Op: ReductionOpKernel,
     S: ArrayStorage,
 {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(self.shape(), index)?;
+        check_get_buffer_size(index, &self.dtype, buf)?;
+
         let orig_shape = self.array.shape();
-        assert_eq!(index.len(), self.shape().len());
         let orig_ndim = orig_shape.len();
 
         // Build inner_index: reduced dims span the full original range,
@@ -241,7 +233,7 @@ macro_rules! define_reduction_op {
     ) => {
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
-            pub fn new(array: crate::Array<S>, axis: usize, keepdims: bool) -> std::io::Result<Self>
+            pub fn new(array: crate::Array<S>, axis: usize, keepdims: bool) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
             {
@@ -265,7 +257,7 @@ macro_rules! define_reduction_op {
     ) => {
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
-            pub fn new(array: crate::Array<S>, axes: &[usize], keepdims: bool) -> std::io::Result<Self>
+            pub fn new(array: crate::Array<S>, axes: &[usize], keepdims: bool) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
             {
@@ -336,7 +328,7 @@ macro_rules! define_reduction_op_kernel {
                 &self,
                 slice_iter: impl Iterator<Item = (impl Iterator<Item = &'a [u8]> + Clone, &'a mut [u8])>,
                 input_dtype: &Dtype,
-            ) -> std::io::Result<()> {
+            ) -> crate::error::Result<()> {
                 macro_rules! apply_loop_impl {
                     ($scalar2:ty, $reduction_type2:ty) => {{
                         for (slice, out) in slice_iter {
@@ -374,13 +366,10 @@ macro_rules! define_reduction_op_kernel {
                     },)*
                     _ => {}
                 }
-                Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    format!("Reduction op not supported for dtype {input_dtype:#?}"),
-                ))
+                bail!(UnsupportedDtype, "Reduction op not supported for dtype {input_dtype:#?}");
             }
 
-            fn output_dtype(&self, input_dtype: &crate::dtype::Dtype) -> std::io::Result<crate::dtype::Dtype> {
+            fn output_dtype(&self, input_dtype: &crate::dtype::Dtype) -> crate::error::Result<crate::dtype::Dtype> {
                 #[allow(unused_parens)]
                 match input_dtype.try_to_scalar() {
                     $(Some(crate::ops::common::scalar_kind!($scalar)) => {
@@ -389,10 +378,7 @@ macro_rules! define_reduction_op_kernel {
                     _ => {},
 
                 };
-                Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    format!("Reduction op not supported for dtype {input_dtype:#?}"),
-                ))
+                bail!(UnsupportedDtype, "Reduction op not supported for dtype {input_dtype:#?}");
             }
         }
     };

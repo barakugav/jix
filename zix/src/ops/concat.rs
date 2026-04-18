@@ -1,9 +1,9 @@
-use std::io;
 use std::ops::{Not, Range};
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
+use crate::error::{Result, bail, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{ArraySequence, DimArray, default_strides, dim_arr, nd_copy};
 
@@ -83,29 +83,25 @@ pub struct Concat<ArraysT> {
     blocks_layout: BlocksLayout,
 }
 impl<ArraysT> Concat<ArraysT> {
-    pub fn new(arrays: ArraysT, axis: usize) -> io::Result<Self>
+    pub fn new(arrays: ArraysT, axis: usize) -> Result<Self>
     where
         ArraysT: ArraySequence,
     {
         let narrays = arrays.narrays();
-        if narrays == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "cannot concatenate zero arrays",
-            ));
-        }
+        ensure!(
+            narrays > 0,
+            InvalidShapeOperation,
+            "cannot concatenate zero arrays"
+        );
 
         let shape0 = arrays.shape(0);
         let mut shape: DimArray<_> = shape0.try_into().unwrap();
-        if axis >= shape.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "axis out of bounds: axis {axis} >= array ndim {}",
-                    shape.len()
-                ),
-            ));
-        }
+        ensure!(
+            axis < shape.len(),
+            InvalidShapeOperation,
+            "concat axis {axis} out of bounds for arrays with ndim {}",
+            shape.len()
+        );
         shape[axis] = 0;
 
         let mut borders = Vec::with_capacity(narrays);
@@ -119,18 +115,17 @@ impl<ArraysT> Concat<ArraysT> {
                     .enumerate()
                     .any(|(dim, (&s0, &s_i))| dim != axis && s0 != s_i)
             {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("cannot stack arrays of different shapes: {shape0:?} != {shape_i:?}"),
-                ));
+                bail!(
+                    InvalidShapeOperation,
+                    "cannot stack arrays of different shapes: {shape0:?} != {shape_i:?}"
+                );
             }
             let dtype_i = arrays.dtype(arr);
-            if dtype_i != dtype {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("cannot stack arrays of different dtypes: {dtype:?} != {dtype_i:?}"),
-                ));
-            }
+            ensure!(
+                dtype_i == dtype,
+                UnsupportedDtype,
+                "cannot stack arrays of different dtypes: {dtype:?} != {dtype_i:?}"
+            );
 
             shape[axis] += shape_i[axis];
             borders.push(shape[axis]);
@@ -166,13 +161,11 @@ where
     /// Otherwise each sub-array is read into a temporary buffer and scattered into `buf` with
     /// `NdIter`, using the full output strides for dimensions before `concat_axis` and the
     /// sub-array strides for dimensions at and after it.
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
-        const BINARY_SEARCH_THRESHOLD: usize = 16;
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(&self.shape, index)?;
+        check_get_buffer_size(index, &self.dtype, buf)?;
+
+        const BINARY_SEARCH_THRESHOLD: usize = 32;
 
         let itemsize = self.dtype.itemsize() as usize;
 
@@ -283,8 +276,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, ArrayParams};
-    use crate::storage::block::BlockSize;
     use crate::ops::concat::concatenate;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

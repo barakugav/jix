@@ -1,9 +1,11 @@
-use std::io;
 use std::ops::Range;
 
 use crate::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
+use crate::error::{
+    Result, check_get_range, ensure,
+};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
@@ -65,38 +67,27 @@ pub struct RemoveAxes<S> {
 }
 
 impl<S: ArrayStorage> RemoveAxes<S> {
-    pub fn new(array: Array<S>, axes: &[usize]) -> io::Result<Self> {
+    pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
         let input_ndim = array.shape().len();
 
         // Validate axis indices and check for duplicates.
         let mut seen = DimArray::<bool>::from_iter(std::iter::repeat_n(false, input_ndim));
         for &ax in axes {
-            if ax >= input_ndim {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "axis {ax} out of bounds for array of ndim {input_ndim} \
-                         (axis indices must be in 0..{input_ndim})"
-                    ),
-                ));
-            }
-            if seen[ax] {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("duplicate axis {ax}"),
-                ));
-            }
+            ensure!(
+                ax < input_ndim,
+                InvalidShapeOperation,
+                "axis {ax} out of bounds for array of ndim {input_ndim} \
+                 (axis indices must be in 0..{input_ndim})"
+            );
+            ensure!(!seen[ax], InvalidShapeOperation, "duplicate axis {ax}");
             seen[ax] = true;
 
-            if array.shape()[ax] != 1 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "cannot remove axis {ax} with size {} (only size-1 axes can be removed)",
-                        array.shape()[ax]
-                    ),
-                ));
-            }
+            ensure!(
+                array.shape()[ax] == 1,
+                InvalidShapeOperation,
+                "cannot remove axis {ax} with size {} (only size-1 axes can be removed)",
+                array.shape()[ax]
+            );
         }
 
         // Build is_removed, shape, and blocks_layout by walking input dims.
@@ -136,12 +127,9 @@ impl<S: ArrayStorage> RemoveAxes<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for RemoveAxes<S> {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(self.shape(), index)?;
+
         // Removed dimensions have size 1 and do not affect the element sequence.
         // Re-insert them as `0..1` ranges and forward the full index to the inner storage.
         let mut output_dim = 0usize;

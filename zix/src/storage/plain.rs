@@ -1,13 +1,13 @@
-use std::io::{self};
 use std::marker::PhantomData;
 use std::ops::Range;
 
+use crate::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
+use crate::error::{Result, check_get_buffer_size, check_get_range, check_ndim, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::default_strides;
 use crate::util::{DimArray, dim_arr, nd_copy};
-use crate::{Array, NDIM_MAX};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -79,38 +79,25 @@ impl<S> Plain<S> {
         shape: &[u64],
         strides: &[usize], // in bytes
         dtype: Dtype,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         let ndim = shape.len();
-        if ndim > NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("array ndim {ndim} exceeds maximum supported ndim {NDIM_MAX}"),
-            ));
-        }
+        check_ndim(ndim)?;
         let shape: DimArray<_> = shape.try_into().unwrap();
 
-        if strides.len() != ndim {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "strides has different ndim {} than shape {}",
-                    strides.len(),
-                    ndim
-                ),
-            ));
-        }
+        ensure!(
+            strides.len() == ndim,
+            InvalidArgument,
+            "Strides length {} does not match number of dimensions {ndim}",
+            strides.len()
+        );
         let strides: DimArray<_> = strides.try_into().unwrap();
 
         let alignment = dtype.alignment() as usize;
-        if (data as usize % alignment != 0) || (strides.iter().any(|&s| s % alignment != 0)) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "data pointer and strides must be aligned to dtype alignment {}",
-                    alignment
-                ),
-            ));
-        }
+        ensure!(
+            data as usize % alignment == 0 && strides.iter().all(|&s| s % alignment == 0),
+            InvalidArgument,
+            "Data pointer or strides are not aligned to required alignment {alignment}"
+        );
 
         let blocks_layout = BlocksLayout::new(
             Some(dim_arr(ndim, |_| 1)),
@@ -120,7 +107,7 @@ impl<S> Plain<S> {
             None,
             &shape,
             dtype.itemsize(),
-        );
+        )?;
 
         Ok(Self {
             storage,
@@ -145,22 +132,13 @@ impl<T> Array<Plain<Vec<T>>> {
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim.
-    pub fn from_ndarray_plain<D>(arr: ndarray::Array<T, D>) -> io::Result<Self>
+    pub fn from_ndarray_plain<D>(arr: ndarray::Array<T, D>) -> Result<Self>
     where
         T: Dtyped,
         D: ndarray::Dimension,
     {
         let shape = arr.shape();
-        if shape.len() > NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "array ndim {} exceeds maximum supported ndim {}",
-                    shape.len(),
-                    NDIM_MAX
-                ),
-            ));
-        }
+        check_ndim(shape.len())?;
         let ndim = shape.len();
         let shape = dim_arr(ndim, |dim| shape[dim] as u64);
 
@@ -202,23 +180,14 @@ impl<'a, T> Array<Plain<PlainRef<'a, T>>> {
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim.
-    pub fn from_ndarray_view_plain<S, D>(arr: &ndarray::ArrayBase<S, D>) -> io::Result<Self>
+    pub fn from_ndarray_view_plain<S, D>(arr: &ndarray::ArrayBase<S, D>) -> Result<Self>
     where
         T: Dtyped,
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension,
     {
         let shape = arr.shape();
-        if shape.len() > NDIM_MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "array ndim {} exceeds maximum supported ndim {}",
-                    shape.len(),
-                    NDIM_MAX
-                ),
-            ));
-        }
+        check_ndim(shape.len())?;
         let ndim = shape.len();
         let shape = dim_arr(ndim, |dim| shape[dim] as u64);
 
@@ -242,22 +211,13 @@ impl<S> ArrayStorage for Plain<S> {
         index: &[Range<u64>],
         buf: &mut [u8],
         _context: &ReadContext,
-    ) -> io::Result<()> {
-        let ndim = self.shape.len();
-        assert_eq!(index.len(), ndim);
+    ) -> Result<()> {
         let itemsize = self.dtype.itemsize() as usize;
+        check_get_range(self.shape(), index)?;
+        check_get_buffer_size(index, &self.dtype, buf)?;
+
+        let ndim = self.shape.len();
         let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_size = out_shape.iter().product::<usize>();
-        if buf.len() != out_size * itemsize {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "output buffer has incorrect size: expected {} bytes, actual {} bytes",
-                    out_size * itemsize,
-                    buf.len()
-                ),
-            ));
-        }
         let out_strides = default_strides(&out_shape, itemsize);
 
         let in_offset = (0..ndim)

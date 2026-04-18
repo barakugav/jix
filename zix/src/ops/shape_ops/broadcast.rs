@@ -1,9 +1,9 @@
-use std::io;
 use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
+use crate::error::{Result, bail, check_get_buffer_size, check_get_range, ensure};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr, nd_copy};
 
@@ -62,25 +62,21 @@ pub struct Broadcast<S> {
     is_identity: bool,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
+    new_shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 
 impl<S: ArrayStorage> Broadcast<S> {
-    pub fn new(array: Array<S>, new_shape: &[u64]) -> io::Result<Self> {
+    pub fn new(array: Array<S>, new_shape: &[u64]) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
 
-        if new_shape.len() != ndim {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "broadcast new_shape has {} dims but array has {} dims",
-                    new_shape.len(),
-                    ndim
-                ),
-            ));
-        }
+        ensure!(
+            new_shape.len() == ndim,
+            InvalidShapeOperation,
+            "broadcast new_shape has {} dims but array has {ndim} dims",
+            new_shape.len()
+        );
 
         let mut is_broadcast = DimArray::new();
         for d in 0..ndim {
@@ -89,18 +85,17 @@ impl<S: ArrayStorage> Broadcast<S> {
             } else if input_shape[d] == 1 {
                 is_broadcast.push(true);
             } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "cannot broadcast dim {d} from length {} to length {}",
-                        input_shape[d], new_shape[d]
-                    ),
-                ));
+                bail!(
+                    InvalidShapeOperation,
+                    "cannot broadcast dim {d} from length {} to length {}",
+                    input_shape[d],
+                    new_shape[d]
+                );
             }
         }
         let is_identity = is_broadcast.iter().all(|&b| !b);
 
-        let shape: DimArray<u64> = new_shape.try_into().unwrap();
+        let new_shape: DimArray<_> = new_shape.try_into().unwrap();
 
         // For broadcast dims: Any tag, hint=1, preferred=new size (full extent reads are free).
         // For unchanged dims: inherit from inner.
@@ -121,7 +116,7 @@ impl<S: ArrayStorage> Broadcast<S> {
         });
         b_layout.preferred_read_block_shape = dim_arr(ndim, |d| {
             if is_broadcast[d] {
-                shape[d] as u32
+                new_shape[d] as u32
             } else {
                 b_layout.preferred_read_block_shape[d]
             }
@@ -133,23 +128,21 @@ impl<S: ArrayStorage> Broadcast<S> {
             is_broadcast,
             is_identity,
             dtype,
-            shape,
+            new_shape,
             blocks_layout: b_layout,
         })
     }
 }
 
 impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
-    fn read_data(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> io::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         // Fast path: no dimension was actually broadcast — forward directly.
         if self.is_identity {
             return self.array.storage.read_data(index, buf, context);
         }
+
+        check_get_range(&self.new_shape, index)?;
+        check_get_buffer_size(index, &self.dtype, buf)?;
 
         let ndim = self.is_broadcast.len();
         let itemsize = self.dtype.itemsize() as usize;
@@ -201,7 +194,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        &self.new_shape
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype
