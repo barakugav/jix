@@ -16,8 +16,40 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::{AlignedBytes, DimArray, cast_slice_mut, dim_arr, nd_copy};
 use crate::util::{MaybeOwned, default_strides};
 
+#[derive(Clone)]
 pub struct Array<S> {
     pub(crate) storage: S,
+}
+
+impl Array<Owned> {
+    pub fn from_ndarray<S, T, D>(
+        array: &ndarray::ArrayBase<S, D, T>,
+        mut params: ArrayParams,
+    ) -> io::Result<Self>
+    where
+        T: Dtyped,
+        D: ndarray::Dimension,
+        S: ndarray::Data<Elem = T>,
+    {
+        let array = Array::from_ndarray_view_plain(array)?;
+
+        let b_layout = BlocksLayout::new(
+            params.block_shape,
+            params.block_shape_tag,
+            params.block_size_hint,
+            params.preferred_read_block_shape,
+            params.preferred_read_block_size_hint,
+            array.shape(),
+            array.dtype().itemsize() as _,
+        );
+        params.block_shape = Some(b_layout.block_shape_hint);
+        params.block_shape_tag = Some(b_layout.block_shape_tag);
+        params.block_size_hint = Some(b_layout.block_size_hint);
+        params.preferred_read_block_shape = Some(b_layout.preferred_read_block_shape);
+        params.preferred_read_block_size_hint = Some(b_layout.preferred_read_block_size_hint);
+
+        array.data().copy_with(params)
+    }
 }
 
 #[derive(Clone, Default, Debug)]
@@ -57,10 +89,6 @@ impl ArrayParams {
 }
 
 impl<S: ArrayStorage> Array<S> {
-    pub fn from_storage(storage: S) -> Self {
-        Self { storage }
-    }
-
     pub fn shape(&self) -> &[u64] {
         self.storage.shape()
     }
@@ -87,6 +115,15 @@ impl<S: ArrayStorage> Array<S> {
         ArrayData::new(self, MaybeOwned::Borrowed(context))
     }
 
+    pub fn as_ref(&self) -> Array<Ref<'_, S>> {
+        Array {
+            storage: Ref(self.storage()),
+        }
+    }
+    pub fn from_storage(storage: S) -> Self {
+        Self { storage }
+    }
+
     pub fn storage(&self) -> &S {
         &self.storage
     }
@@ -97,73 +134,6 @@ impl<S: ArrayStorage> Array<S> {
 
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
         self.storage.spec().blocks_layout
-    }
-
-    pub fn as_ref(&self) -> Array<Ref<'_, S>> {
-        Array {
-            storage: Ref(self.storage()),
-        }
-    }
-}
-
-impl Array<Owned> {
-    pub fn from_ndarray<S, T, D>(
-        array: &ndarray::ArrayBase<S, D, T>,
-        params: ArrayParams,
-    ) -> io::Result<Self>
-    where
-        T: Dtyped,
-        D: ndarray::Dimension,
-        S: ndarray::RawData<Elem = T>,
-    {
-        let ndim = array.ndim();
-        assert!(ndim < NDIM_MAX);
-        let shape = array
-            .shape()
-            .iter()
-            .map(|&s| s as u64)
-            .collect::<DimArray<_>>();
-        let dtype = T::DTYPE;
-        let itemsize = dtype.itemsize() as usize;
-
-        let strides = array.strides();
-        let strides = dim_arr(ndim, |dim| {
-            usize::try_from(strides[dim]).unwrap() * size_of::<T>()
-        });
-
-        let builder = ArrayBuilder::new(&shape, dtype.clone(), params);
-        builder.build(
-            |builder, block_idx, block_inner_offset, block_size, out_buf| {
-                // TODO: fast path for contiguous data
-                let block_shape = builder.block_shape();
-                let initial_arr_offset = (0..ndim)
-                    .map(|dim| {
-                        let idx =
-                            block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
-                        idx as usize * strides[dim]
-                    })
-                    .sum::<usize>();
-                let initial_arr_ptr =
-                    unsafe { array.as_ptr().cast::<u8>().add(initial_arr_offset) };
-                let initial_block_offset = (0..ndim)
-                    .map(|dim| {
-                        block_inner_offset[dim] as usize * builder.block_strides[dim] as usize
-                    })
-                    .sum::<usize>();
-                let initial_block_ptr = unsafe { out_buf.as_mut_ptr().add(initial_block_offset) };
-                unsafe {
-                    nd_copy(
-                        initial_arr_ptr,
-                        initial_block_ptr,
-                        block_size,
-                        &strides,
-                        &builder.block_strides,
-                        itemsize,
-                    )
-                };
-                Ok(())
-            },
-        )
     }
 }
 

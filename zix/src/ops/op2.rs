@@ -67,6 +67,9 @@ where
         let b_dtype = self.b.dtype();
         let output_dtype = self.dtype();
         let nitems = buf.len() / output_dtype.itemsize() as usize;
+        // TODO: if the itemsize (and alignment) of one of the inputs and output dtype are the same,
+        // we can read directly into the output buffer, and perform the op in-place, avoiding the
+        // memcopy from temporary buffer. Need to change the op::apply signature.
         let mut a_buf = context.tmp_buf(nitems * a_dtype.itemsize() as usize, a_dtype.alignment());
         let mut b_buf = context.tmp_buf(nitems * b_dtype.itemsize() as usize, b_dtype.alignment());
         let a_buf = a_buf.as_mut_slice();
@@ -104,6 +107,7 @@ macro_rules! define_op2 {
         $($kernel_args:tt)*
     ) => {
         define_op2!($Name, $NameKernel, $($kernel_args)*);
+
         impl<S1, S2> core::ops::$op_trait<Array<S2>> for Array<S1>
         where
             S1: ArrayStorage,
@@ -113,6 +117,21 @@ macro_rules! define_op2 {
             #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
             #[track_caller]
             fn $op_fn(self, b: Array<S2>) -> Array<$Name<S1, S2>> {
+                let op = $Name::new(self, b).unwrap();
+                Array::from_storage(op)
+            }
+        }
+
+        impl<S, T> core::ops::$op_trait<T> for Array<S>
+        where
+            S: ArrayStorage,
+            T: crate::dtype::Dtyped,
+        {
+            type Output = Array<$Name<S, crate::storage::Scalar<T>>>;
+            #[doc = concat!("Applies the [`", stringify!($Name), "`] operation by broadcasting the scalar, see the op struct docs for details.")]
+            #[track_caller]
+            fn $op_fn(self, b: T) -> Array<$Name<S, crate::storage::Scalar<T>>> {
+                let b = Array::from_scalar_broadcast(b, self.shape()).unwrap();
                 let op = $Name::new(self, b).unwrap();
                 Array::from_storage(op)
             }
@@ -476,5 +495,21 @@ mod tests {
 
     fn rand_array<T: Scalar>(rng: &mut fastrand::Rng, shape: &[usize]) -> ndarray::ArrayD<T> {
         ndarray::Array::from_shape_fn(ndarray::IxDyn(shape), |_| T::sample(rng))
+    }
+
+    #[test]
+    fn test_add_mul_scalar() {
+        use crate::array::Array;
+        let seed = "test_add_mul_large"
+            .as_bytes()
+            .iter()
+            .fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
+        let mut rng = fastrand::Rng::with_seed(seed);
+        let a = rand_array::<f32>(&mut rng, &[1000, 1000]);
+        let za = Array::from_ndarray(&a, arr_params(&[1000, 1000])).unwrap();
+        let zb = za * 2.0f32 + 1.0f32;
+        let actual = zb.data().to_ndarray::<f32>().unwrap();
+        let expected = &a * 2.0 + 1.0;
+        assert_eq!(actual, expected);
     }
 }

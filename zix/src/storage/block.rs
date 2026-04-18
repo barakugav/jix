@@ -1,6 +1,5 @@
 use std::io::{self};
 
-
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::Dtype;
 

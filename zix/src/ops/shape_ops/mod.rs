@@ -28,6 +28,11 @@ where
         self.reshape_view(new_shape).data().copy().unwrap()
     }
 
+    #[track_caller]
+    pub fn reshape_view(self, new_shape: &[u64]) -> Array<Reshape<S>> {
+        Array::from_storage(Reshape::new(self, new_shape).unwrap())
+    }
+
     /// Return a lazy view of a sub-region of the array.
     ///
     /// `slice` accepts anything that converts to [`SliceSpec`].  The most ergonomic form is a
@@ -66,11 +71,6 @@ where
     #[track_caller]
     pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
         Array::from_storage(Slice::new(self, slice.into()).unwrap())
-    }
-
-    #[track_caller]
-    pub fn reshape_view(self, new_shape: &[u64]) -> Array<Reshape<S>> {
-        Array::from_storage(Reshape::new(self, new_shape).unwrap())
     }
 
     /// Return a lazy view of the array with its axes reordered.

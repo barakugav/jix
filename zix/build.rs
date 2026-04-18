@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::{env, fs, io};
 
 fn main() {
+    // TODO: publish the generated protobuf code, generate in a standalone script
+
     let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
 
     // Generate protobuf types

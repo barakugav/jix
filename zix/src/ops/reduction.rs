@@ -6,9 +6,9 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 #[allow(unused_imports)]
 use crate::dtype::{Complex, f16};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::iter::NdIter;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{DimArray, default_strides, dim_arr};
 
 pub(crate) trait ReductionOpKernel {
@@ -529,11 +529,11 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::array::{Array, ArrayParams};
-    use crate::storage::block::BlockSize;
     #[cfg(feature = "num-complex")]
     use crate::dtype::Complex;
     #[cfg(feature = "half")]
     use crate::dtype::f16;
+    use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
         ArrayParams {

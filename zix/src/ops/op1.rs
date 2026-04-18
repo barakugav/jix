@@ -57,6 +57,9 @@ where
         let input_dtype = self.array.dtype();
         let output_dtype = self.dtype();
         let nitems = buf.len() / output_dtype.itemsize() as usize;
+        // TODO: if the itemsize (and alignment) of the input and output dtype are the same,
+        // we can read directly into the output buffer, and perform the op in-place, avoiding the
+        // memcopy from temporary buffer. Need to change the op::apply signature.
         let mut tmp_buf = context.tmp_buf(
             nitems * input_dtype.itemsize() as usize,
             input_dtype.alignment(),
