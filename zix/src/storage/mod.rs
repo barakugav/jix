@@ -8,9 +8,16 @@ use crate::storage::block::BlockSize;
 use crate::util::Idx;
 use crate::util::{DimArray, dim_arr};
 
-pub(crate) mod block;
 mod compressed;
 pub use compressed::*;
+
+mod plain;
+pub use plain::*;
+
+mod scalar;
+pub use scalar::*;
+
+pub(crate) mod block;
 
 pub trait ArrayStorage {
     /// Read the specified slice of the array into the provided buffer.
