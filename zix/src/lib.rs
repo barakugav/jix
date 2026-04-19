@@ -1,5 +1,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// This crate is a Rust port and independent evolution of ideas and
+//
+// See the `NOTICE` file in the repository root for full attribution and license text.
+
 mod array;
 pub use array::{Array, ArrayData, ArrayParams};
 

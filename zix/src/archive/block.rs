@@ -44,6 +44,7 @@ impl<S> BlockTable<S> {
                 .map(|f| schema::Filter {
                     kind: Some(match f {
                         Filter::ByteShuffle => schema::filter::Kind::ByteShuffle(()),
+                        Filter::BitShuffle => schema::filter::Kind::BitShuffle(()),
                     }),
                 })
                 .collect(),
@@ -130,6 +131,7 @@ impl<S> BlockTable<S> {
             .map(|f| {
                 Ok(match f.kind {
                     Some(schema::filter::Kind::ByteShuffle(())) => Filter::ByteShuffle,
+                    Some(schema::filter::Kind::BitShuffle(())) => Filter::BitShuffle,
                     None => {
                         return Err(Error::new(
                             ErrorKind::InvalidArchive,

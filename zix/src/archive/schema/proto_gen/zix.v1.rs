@@ -210,7 +210,7 @@ pub mod codec {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Filter {
-    #[prost(oneof = "filter::Kind", tags = "1")]
+    #[prost(oneof = "filter::Kind", tags = "1, 2")]
     pub kind: ::core::option::Option<filter::Kind>,
 }
 /// Nested message and enum types in `Filter`.
@@ -219,6 +219,8 @@ pub mod filter {
     pub enum Kind {
         #[prost(message, tag = "1")]
         ByteShuffle(()),
+        #[prost(message, tag = "2")]
+        BitShuffle(()),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -1,4 +1,8 @@
+mod filter;
+pub use filter::*;
+
 use std::cell::UnsafeCell;
+use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype};
 use crate::error::{ensure, Error, ErrorKind, Result};
@@ -36,6 +40,7 @@ pub(crate) struct Encoder {
     pub(crate) compressor: Compressor,
     tmp_buf1: AlignedBytes,
     tmp_buf2: AlignedBytes,
+    tmp_buffers: TmpBufferPool,
 }
 pub(crate) enum Compressor {
     #[cfg(not(miri))]
@@ -52,6 +57,7 @@ impl Encoder {
             filters: params.filters.to_vec(),
             tmp_buf1,
             tmp_buf2,
+            tmp_buffers: TmpBufferPool::new(),
             compressor: match params.codec {
                 Codec::Zstd => Compressor::Zstd({
                     cfg_if::cfg_if! { if #[cfg(not(miri))] {
@@ -80,21 +86,11 @@ impl Encoder {
         let mut buffers =
             AlternatingBuffers::with_const_src(data, &mut self.tmp_buf1, &mut self.tmp_buf2);
         for filter in &self.filters {
-            match filter {
-                Filter::ByteShuffle => {
-                    let (data, buf) = buffers.edit();
-                    buf.clear();
-                    buf.reserve(data.len());
-                    unsafe { buf.set_len(data.len()) };
-
-                    let n = data.len() / itemsize;
-                    for i in 0..n {
-                        for b in 0..itemsize {
-                            buf[b * n + i] = data[i * itemsize + b];
-                        }
-                    }
-                }
-            }
+            let (data, buf) = buffers.edit();
+            buf.clear();
+            buf.reserve(data.len());
+            unsafe { buf.set_len(data.len()) };
+            filter.encode(data, buf, &self.dtype, &self.tmp_buffers);
         }
         let data = buffers.data();
 
@@ -128,13 +124,10 @@ impl Encoder {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum Filter {
-    ByteShuffle,
-}
-
 #[derive(Clone, Debug, Default)]
-pub struct DecoderParams {}
+pub struct DecoderParams {
+    _phantom: PhantomData<()>,
+}
 #[derive(Clone, Debug)]
 pub struct DecoderCodecConfig {
     pub(crate) codec: Codec,
@@ -144,7 +137,7 @@ pub struct DecoderCodecConfig {
 
 pub(crate) struct Decoder<'a> {
     #[cfg(not(miri))]
-    inner: UnsafeCell<zstd::bulk::Decompressor<'static>>,
+    inner: &'a UnsafeCell<zstd::bulk::Decompressor<'static>>,
     context: &'a ReadContext,
 
     dtype: &'a Dtype,
@@ -154,7 +147,7 @@ impl<'a> Decoder<'a> {
     pub(crate) fn new(context: &'a ReadContext, config: &'a DecoderCodecConfig) -> Self {
         Self {
             #[cfg(not(miri))]
-            inner: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
+            inner: &context.decompressor,
             context,
             dtype: &config.dtype,
             filters: &config.filters,
@@ -196,35 +189,19 @@ impl<'a> Decoder<'a> {
 
         // Apply filters in reverse order
         for (f_idx, filter) in self.filters.iter().enumerate().rev() {
-            match filter {
-                Filter::ByteShuffle => {
-                    let (data, buf) = buffers.edit();
-                    let buf = if f_idx > 0 {
-                        buf.clear();
-                        buf.reserve(data.len());
-                        unsafe {
-                            #[allow(clippy::uninit_vec)]
-                            buf.set_len(data.len())
-                        };
-                        buf.as_mut_slice()
-                    } else {
-                        unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) }
-                    };
-
-                    let itemsize = self.dtype.itemsize() as usize;
-                    ensure!(
-                        data.len().is_multiple_of(itemsize),
-                        InvalidArgument,
-                        "Data length is not a multiple of item size, cant apply byte shuffle filter"
-                    );
-                    let n = data.len() / itemsize;
-                    for i in 0..n {
-                        for b in 0..itemsize {
-                            buf[i * itemsize + b] = data[b * n + i];
-                        }
-                    }
-                }
-            }
+            let (data, buf) = buffers.edit();
+            let buf = if f_idx > 0 {
+                buf.clear();
+                buf.reserve(data.len());
+                unsafe {
+                    #[allow(clippy::uninit_vec)]
+                    buf.set_len(data.len())
+                };
+                buf.as_mut_slice()
+            } else {
+                unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) }
+            };
+            filter.decode(data, buf, self.dtype, &self.context.tmp_buffers);
         }
 
         Ok(nbytes)
@@ -235,6 +212,8 @@ pub struct ReadContext {
     tmp_buffers: TmpBufferPool,
     tmp_buf1: UnsafeCell<AlignedBytes>,
     tmp_buf2: UnsafeCell<AlignedBytes>,
+    #[cfg(not(miri))]
+    decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
 }
 impl ReadContext {
     pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
@@ -244,6 +223,8 @@ impl ReadContext {
             tmp_buffers: TmpBufferPool::new(),
             tmp_buf1: UnsafeCell::new(tmp_buf1),
             tmp_buf2: UnsafeCell::new(tmp_buf2),
+            #[cfg(not(miri))]
+            decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
         })
     }
 
@@ -256,7 +237,7 @@ impl ReadContext {
     }
 }
 
-struct TmpBufferPool {
+pub(crate) struct TmpBufferPool {
     align8: UnsafeCell<Vec<AlignedBytes>>,
     align_other: UnsafeCell<Vec<(Alignment, Vec<AlignedBytes>)>>,
 }
@@ -291,20 +272,27 @@ impl TmpBufferPool {
 
     fn get_pool(&self, alignment: Alignment) -> (*mut Vec<AlignedBytes>, Alignment) {
         match alignment {
-            1 | 2 | 4 | 8 => (self.align8.get(), 8),
+            1 | 2 | 4 | 8 | 16 => (self.align8.get(), 16),
             _ => {
                 let align_other = unsafe { &mut *self.align_other.get() };
-                let pool = align_other
-                    .iter_mut()
-                    .find(|(align, _)| *align == alignment)
-                    .map(|(_, pool)| pool);
-                let pool = match pool {
-                    Some(pool) => pool,
-                    None => {
-                        align_other.push((alignment, Vec::new()));
-                        &mut align_other.last_mut().unwrap().1
-                    }
-                };
+                debug_assert!(align_other
+                    .iter()
+                    .zip(align_other.iter().skip(1))
+                    .all(|((align1, _pool1), (align2, _pool2))| align1 < align2));
+
+                let (idx, exists) = align_other
+                    .iter()
+                    .map(|(align, _pool)| *align)
+                    .enumerate()
+                    .filter(|(_idx, align)| *align >= alignment)
+                    .next()
+                    .map(|(idx, align)| (idx, align == alignment))
+                    .unwrap_or((align_other.len(), false));
+
+                if !exists {
+                    align_other.insert(idx, (alignment, Vec::new()));
+                }
+                let pool = &mut align_other[idx].1;
                 (pool, alignment)
             }
         }

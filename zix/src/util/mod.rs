@@ -89,9 +89,9 @@ where
     T: Copy + Sized,
     U: Copy + Sized,
 {
-    let (ptr, len) = (slice.as_ptr(), slice.len());
+    let (ptr, len) = (slice.as_ptr().cast::<U>(), slice.len());
     let len_bytes = len * size_of::<T>();
-    assert!((ptr as usize).is_multiple_of(align_of::<U>()));
+    assert!(ptr.is_aligned());
     assert!(size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
     unsafe { std::slice::from_raw_parts(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
@@ -100,9 +100,9 @@ where
     T: Copy + Sized,
     U: Copy + Sized,
 {
-    let (ptr, len) = (slice.as_mut_ptr(), slice.len());
+    let (ptr, len) = (slice.as_mut_ptr().cast::<U>(), slice.len());
     let len_bytes = len * size_of::<T>();
-    assert!((ptr as usize).is_multiple_of(align_of::<U>()));
+    assert!(ptr.is_aligned());
     assert!(size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
     unsafe { std::slice::from_raw_parts_mut(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
@@ -436,3 +436,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod test_util;
+#[cfg(test)]
+pub(crate) use test_util::*;

@@ -1,7 +1,9 @@
 #![allow(unused)]
 #![allow(clippy::unnecessary_cast)]
 
-//! <https://github.com/sarah-quinones/aligned-vec>
+// Derived from the aligned-vec crate by Sarah Quinones (MIT,
+// https://github.com/sarah-quinones/aligned-vec). Copied and modified.
+// See the top-level NOTICE file for full attribution and license text.
 
 use core::fmt::Debug;
 use core::mem::ManuallyDrop;
