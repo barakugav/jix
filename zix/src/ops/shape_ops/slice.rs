@@ -56,9 +56,8 @@ impl<S: ArrayStorage> Slice<S> {
         ensure!(
             slice.slice.len() == ndim,
             InvalidIndex,
-            "slice has {} items but array has {} dims",
-            slice.slice.len(),
-            ndim
+            "slice has {} items but array has {ndim} dims",
+            slice.slice.len()
         );
 
         let slice = {

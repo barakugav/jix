@@ -186,6 +186,10 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: Bound<PyArrayDescr>) -> PyResult<Zix
     Ok(dtype)
 }
 
+pub(crate) fn dtype_from_any(py: Python, dtype: &Bound<PyAny>) -> PyResult<ZixDtype> {
+    dtype_from_numpy(PyArrayDescr::new(py, dtype)?)
+}
+
 #[cfg(test)]
 mod tests {
     use numpy::PyArrayDescrMethods;

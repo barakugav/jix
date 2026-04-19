@@ -44,6 +44,25 @@ impl Array {
         PyTuple::new(py, self.arr.shape().iter().copied())
     }
 
+    #[pyo3(signature = (axis=None))]
+    pub fn size(&self, axis: Option<usize>) -> PyResult<usize> {
+        let shape = self.arr.shape();
+        match axis {
+            Some(axis) => {
+                if axis >= shape.len() {
+                    Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "axis {} is out of bounds for array with ndim {}",
+                        axis,
+                        shape.len()
+                    )))
+                } else {
+                    Ok(shape[axis] as usize)
+                }
+            }
+            None => Ok(shape.iter().map(|&s| s as usize).product()),
+        }
+    }
+
     pub fn dtype_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
         dtype_to_numpy(py, self.arr.dtype())
     }
@@ -100,7 +119,7 @@ impl Array {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Self> {
-        crate::ops::sub(py, slf, other)
+        crate::ops::subtract(py, slf, other)
     }
 
     pub fn __mul__<'py>(
@@ -108,7 +127,7 @@ impl Array {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Self> {
-        crate::ops::mul(py, slf, other)
+        crate::ops::multiply(py, slf, other)
     }
 
     pub fn __truediv__<'py>(
@@ -116,7 +135,7 @@ impl Array {
         py: Python<'py>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Self> {
-        crate::ops::div(py, slf, other)
+        crate::ops::divide(py, slf, other)
     }
 }
 

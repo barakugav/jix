@@ -7,8 +7,8 @@ use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::Array;
 
-/// Lazy storage type returned by [`Array::permute_dims`](crate::Array::permute_dims).
-pub struct PermuteDims<S> {
+/// Lazy storage type returned by [`Array::permute_axes`](crate::Array::permute_axes).
+pub struct PermuteAxes<S> {
     array: Array<S>,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.
     axes: DimArray<usize>,
@@ -20,7 +20,7 @@ pub struct PermuteDims<S> {
     blocks_layout: BlocksLayout,
 }
 
-impl<S: ArrayStorage> PermuteDims<S> {
+impl<S: ArrayStorage> PermuteAxes<S> {
     pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
         let ndim = array.shape().len();
         ensure!(
@@ -71,7 +71,7 @@ impl<S: ArrayStorage> PermuteDims<S> {
     }
 }
 
-impl<S: ArrayStorage> ArrayStorage for PermuteDims<S> {
+impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(self.shape(), index)?;
         let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
@@ -150,7 +150,7 @@ mod tests {
     fn test_i32_2d_transpose() {
         let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3])).unwrap();
-        let actual = za.permute_dims(&[1, 0]).data().to_ndarray::<i32>().unwrap();
+        let actual = za.permute_axes(&[1, 0]).data().to_ndarray::<i32>().unwrap();
         let expected = a
             .view()
             .permuted_axes([1, 0])
@@ -165,7 +165,7 @@ mod tests {
     fn test_f32_2d_transpose() {
         let a = ndarray::array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3, 2])).unwrap();
-        let actual = za.permute_dims(&[1, 0]).data().to_ndarray::<f32>().unwrap();
+        let actual = za.permute_axes(&[1, 0]).data().to_ndarray::<f32>().unwrap();
         let expected = a
             .view()
             .permuted_axes([1, 0])
@@ -181,7 +181,7 @@ mod tests {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
         let actual = za
-            .permute_dims(&[2, 0, 1])
+            .permute_axes(&[2, 0, 1])
             .data()
             .to_ndarray::<i32>()
             .unwrap();
@@ -200,7 +200,7 @@ mod tests {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
         let actual = za
-            .permute_dims(&[0, 2, 1])
+            .permute_axes(&[0, 2, 1])
             .data()
             .to_ndarray::<i32>()
             .unwrap();
@@ -219,7 +219,7 @@ mod tests {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
         let actual = za
-            .permute_dims(&[0, 1, 2])
+            .permute_axes(&[0, 1, 2])
             .data()
             .to_ndarray::<i32>()
             .unwrap();
@@ -232,7 +232,7 @@ mod tests {
     fn test_wrong_axes_length_panics() {
         let a = ndarray::array![[1i32, 2], [3, 4]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 2])).unwrap();
-        let _ = za.permute_dims(&[0, 1, 2]);
+        let _ = za.permute_axes(&[0, 1, 2]);
     }
 
     // Panic: axis out of bounds
@@ -241,7 +241,7 @@ mod tests {
     fn test_axis_out_of_bounds_panics() {
         let a = ndarray::array![[1i32, 2], [3, 4]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 2])).unwrap();
-        let _ = za.permute_dims(&[0, 5]);
+        let _ = za.permute_axes(&[0, 5]);
     }
 
     // Panic: duplicate axis
@@ -250,6 +250,6 @@ mod tests {
     fn test_duplicate_axis_panics() {
         let a = ndarray::array![[1i32, 2], [3, 4]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 2])).unwrap();
-        let _ = za.permute_dims(&[0, 0]);
+        let _ = za.permute_axes(&[0, 0]);
     }
 }

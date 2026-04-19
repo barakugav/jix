@@ -17,9 +17,9 @@ zix_core = { package = "zix", path = "../zix", features = [
     "num-complex",
 ] }
 numpy = "0.28"
-pyo3-stub-gen = "0.21"
+pyo3-stub-gen = "0.22"
 arrayvec = "0.7"
 ndarray = "0.17.0"
 
 [dev-dependencies]
-ctor = "0.8"
+ctor = "0.10"

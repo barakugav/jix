@@ -9,4 +9,5 @@
     - mean
     - std
     - var
+    - split
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.

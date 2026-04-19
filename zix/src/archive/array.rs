@@ -135,9 +135,8 @@ impl<S> ArrayBlockTableStorageBase<S> {
         ensure!(
             blocks.nitems() == expected_nitems,
             InvalidArchive,
-            "array blocks nitems {} does not match shape product {}",
-            blocks.nitems(),
-            expected_nitems
+            "array blocks nitems {} does not match shape product {expected_nitems}",
+            blocks.nitems()
         );
 
         let b_layout = BlocksLayout::new(

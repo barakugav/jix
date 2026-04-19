@@ -2,28 +2,56 @@ use pyo3::prelude::*;
 use pyo3_stub_gen::define_stub_info_gatherer;
 
 mod array;
-use array::Array;
+pub use array::Array;
 
 mod dtype;
-mod ops;
+pub mod ops;
 mod storage;
 mod util;
 
 #[pymodule]
-fn zix(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+mod zix {
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    const __version__: &str = env!("CARGO_PKG_VERSION");
 
-    m.add_class::<Array>()?;
+    #[pymodule_export]
+    use crate::Array;
 
-    m.add_function(wrap_pyfunction!(ops::asarray, m)?)?;
+    #[pymodule_export]
+    use crate::ops::{asarray, astype};
 
-    // pyo3_log::Logger::new(m.py(), pyo3_log::Caching::Nothing)
-    //     .unwrap()
-    //     .filter(log::LevelFilter::Trace)
-    //     .install()
-    //     .unwrap();
+    #[pymodule_export]
+    use crate::ops::{add, divide, multiply, subtract};
 
-    Ok(())
+    #[pymodule_export]
+    use crate::ops::{
+        bitwise_and, bitwise_not, bitwise_or, bitwise_shift_left, bitwise_shift_right, bitwise_xor,
+        count_ones, leading_zeros, logical_and, logical_not, logical_or, logical_xor, reverse_bits,
+        swap_bytes, trailing_zeros,
+    };
+
+    #[pymodule_export]
+    use crate::ops::{
+        equal, greater, greater_equal, less, less_equal, maximum, minimum, not_equal,
+    };
+
+    #[pymodule_export]
+    use crate::ops::{
+        broadcast, concatenate, insert_axes, permute_axes, remove_axes, reshape, stack,
+    };
+
+    #[pymodule_export]
+    use crate::ops::{
+        absolute, acos, asin, atan, ceil, cos, exp, floor, log, negative, round, signum, sin, sqrt,
+        tan,
+    };
+
+    #[pymodule_export]
+    use crate::ops::{is_finite, is_infinite, is_nan};
+
+    #[pymodule_export]
+    use crate::ops::{all, any, argmax, argmin, max, min, product};
 }
 
 define_stub_info_gatherer!(gen_pyi);

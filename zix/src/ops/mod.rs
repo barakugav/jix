@@ -4,12 +4,6 @@ pub use astype::*;
 mod shape_ops;
 pub use shape_ops::*;
 
-mod concat;
-pub use concat::*;
-
-mod stack;
-pub use stack::*;
-
 mod op1;
 pub use op1::*;
 

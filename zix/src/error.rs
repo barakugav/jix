@@ -38,7 +38,7 @@ pub enum ErrorKind {
     InvalidBufferSize,
     /// Number of dimensions exceeds max, see [`NDIM_MAX`]
     TooManyDimensions,
-    /// Shape operation (e.g. reshape, permute_dims, concat) is invalid for the given shape and arguments
+    /// Shape operation (e.g. reshape, permute_axes, concat) is invalid for the given shape and arguments
     InvalidShapeOperation,
     /// Unsupported dtype by operation, or incorrect dtype when accessing array data, etc
     UnsupportedDtype,
@@ -133,9 +133,8 @@ pub(crate) fn check_get_buffer_size(
     ensure!(
         (buf.as_ptr() as usize) % dtype.alignment() as usize == 0,
         InvalidArgument,
-        "Buffer pointer is not aligned to required alignment {} for dtype {:?}",
+        "Buffer pointer is not aligned to required alignment {} for dtype {dtype:?}",
         dtype.alignment(),
-        dtype
     );
     Ok(nitems)
 }

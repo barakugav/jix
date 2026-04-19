@@ -281,8 +281,7 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         ensure!(
             self.dtype() == &dtype,
             UnsupportedDtype,
-            "requested type {:?} does not match array dtype {:?}",
-            dtype,
+            "requested type {dtype:?} does not match array dtype {:?}",
             self.dtype()
         );
 

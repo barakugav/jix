@@ -29,7 +29,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 ///
 /// # Panics
 ///
-/// Panics if any of the following conditions hold (the underlying [`Concat::new`] returns an
+/// Panics if any of the following conditions hold (the underlying [`Concatenate::new`] returns an
 /// error, which this function unwraps):
 ///
 /// * `arrays` is empty.
@@ -62,18 +62,18 @@ use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 /// assert_eq!(c.shape(), &[2, 5]);
 /// ```
 #[track_caller]
-pub fn concatenate<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Concat<ArraysT>>
+pub fn concatenate<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Concatenate<ArraysT>>
 where
     ArraysT: ArraySequence,
 {
-    Array::from_storage(Concat::new(arrays, axis).unwrap())
+    Array::from_storage(Concatenate::new(arrays, axis).unwrap())
 }
 
 /// Lazy storage type returned by [`concatenate`].
 ///
 /// Holds the input arrays and the bookkeeping needed to serve arbitrary read requests.  See
 /// [`concatenate`] for the full description, accepted inputs, error conditions, and examples.
-pub struct Concat<ArraysT> {
+pub struct Concatenate<ArraysT> {
     arrays: ArraysT,
     concat_axis: usize,
     borders: Vec<u64>,
@@ -82,7 +82,7 @@ pub struct Concat<ArraysT> {
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
-impl<ArraysT> Concat<ArraysT> {
+impl<ArraysT> Concatenate<ArraysT> {
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self>
     where
         ArraysT: ArraySequence,
@@ -141,7 +141,7 @@ impl<ArraysT> Concat<ArraysT> {
         })
     }
 }
-impl<ArraysT> ArrayStorage for Concat<ArraysT>
+impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where
     ArraysT: ArraySequence,
 {
@@ -276,7 +276,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, ArrayParams};
-    use crate::ops::concat::concatenate;
+    use crate::ops::concatenate;
     use crate::storage::block::BlockSize;
 
     fn arr_params(block_shape: &[usize]) -> ArrayParams {
