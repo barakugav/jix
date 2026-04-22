@@ -301,96 +301,115 @@ define_op2!(
 
 #[cfg(test)]
 mod tests {
-    use crate::array::ArrayParams;
-    use crate::storage::block::BlockSize;
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
-
     // Generates 5 test functions per (op, dtype).
-    // Each Scalar impl controls the sampling range for its type.
+    // op_safe_strategy() controls the sampling range per type to avoid overflow.
     macro_rules! test_op_dtype {
         ($op:tt, $dtype:ident) => {
             paste::paste! {
-                #[test]
-                fn [<test_ $dtype _1d>]() {
-                    use crate::array::Array;
-                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = fastrand::Rng::with_seed(seed);
-                    let b = super::rand_array::<$dtype>(&mut rng, &[4]);
-                    let a = super::rand_array::<$dtype>(&mut rng, &[4]) + &b;
-                    let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
-                    let zb = Array::from_ndarray(&b, arr_params(&[4])).unwrap();
-                    let actual = (za $op zb).data().to_ndarray::<$dtype>().unwrap();
-                    let expected = &a $op &b;
-                    assert_eq!(actual, expected);
+                proptest::proptest! {
+                    #[test]
+                    fn [<test_ $dtype _1d>](
+                        b_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
+                        ),
+                        a_extra_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
+                        ),
+                    ) {
+                        use crate::array::Array;
+                        let b = ndarray::ArrayD::from_shape_vec(vec![4], b_vals).unwrap();
+                        let a = ndarray::ArrayD::from_shape_vec(vec![4], a_extra_vals).unwrap() + &b;
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[4])).unwrap();
+                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[4])).unwrap();
+                        let actual = (za $op zb).data().to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(actual, &a $op &b);
+                    }
+
+                    #[test]
+                    fn [<test_ $dtype _1d_multi_block>](
+                        b_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize
+                        ),
+                        a_extra_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize
+                        ),
+                    ) {
+                        use crate::array::Array;
+                        let b = ndarray::ArrayD::from_shape_vec(vec![6], b_vals).unwrap();
+                        let a = ndarray::ArrayD::from_shape_vec(vec![6], a_extra_vals).unwrap() + &b;
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[2])).unwrap();
+                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[2])).unwrap();
+                        let actual = (za $op zb).data().to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(actual, &a $op &b);
+                    }
+
+                    #[test]
+                    fn [<test_ $dtype _2d>](
+                        b_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize
+                        ),
+                        a_extra_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize
+                        ),
+                    ) {
+                        use crate::array::Array;
+                        let b = ndarray::ArrayD::from_shape_vec(vec![2, 3], b_vals).unwrap();
+                        let a = ndarray::ArrayD::from_shape_vec(vec![2, 3], a_extra_vals).unwrap() + &b;
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[2, 3])).unwrap();
+                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[2, 3])).unwrap();
+                        let actual = (za $op zb).data().to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(actual, &a $op &b);
+                    }
+
+                    #[test]
+                    fn [<test_ $dtype _2d_multi_block>](
+                        b_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 16usize
+                        ),
+                        a_extra_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 16usize
+                        ),
+                    ) {
+                        use crate::array::Array;
+                        let b = ndarray::ArrayD::from_shape_vec(vec![4, 4], b_vals).unwrap();
+                        let a = ndarray::ArrayD::from_shape_vec(vec![4, 4], a_extra_vals).unwrap() + &b;
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[2, 2])).unwrap();
+                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[2, 2])).unwrap();
+                        let actual = (za $op zb).data().to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(actual, &a $op &b);
+                    }
                 }
 
-                #[test]
-                fn [<test_ $dtype _1d_multi_block>]() {
-                    use crate::array::Array;
-                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = fastrand::Rng::with_seed(seed);
-                    let b = super::rand_array::<$dtype>(&mut rng, &[6]);
-                    let a = super::rand_array::<$dtype>(&mut rng, &[6]) + &b;
-                    let za = Array::from_ndarray(&a, arr_params(&[2])).unwrap();
-                    let zb = Array::from_ndarray(&b, arr_params(&[2])).unwrap();
-                    let actual = (za $op zb).data().to_ndarray::<$dtype>().unwrap();
-                    let expected = &a $op &b;
-                    assert_eq!(actual, expected);
-                }
-
-                #[test]
-                fn [<test_ $dtype _2d>]() {
-                    use crate::array::Array;
-                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = fastrand::Rng::with_seed(seed);
-                    let b = super::rand_array::<$dtype>(&mut rng, &[2, 3]);
-                    let a = super::rand_array::<$dtype>(&mut rng, &[2, 3]) + &b;
-                    let za = Array::from_ndarray(&a, arr_params(&[2, 3])).unwrap();
-                    let zb = Array::from_ndarray(&b, arr_params(&[2, 3])).unwrap();
-                    let actual = (za $op zb).data().to_ndarray::<$dtype>().unwrap();
-                    let expected = &a $op &b;
-                    assert_eq!(actual, expected);
-                }
-
-                #[test]
-                fn [<test_ $dtype _2d_multi_block>]() {
-                    use crate::array::Array;
-                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = fastrand::Rng::with_seed(seed);
-                    let b = super::rand_array::<$dtype>(&mut rng, &[4, 4]);
-                    let a = super::rand_array::<$dtype>(&mut rng, &[4, 4]) + &b;
-                    let za = Array::from_ndarray(&a, arr_params(&[2, 2])).unwrap();
-                    let zb = Array::from_ndarray(&b, arr_params(&[2, 2])).unwrap();
-                    let actual = (za $op zb).data().to_ndarray::<$dtype>().unwrap();
-                    let expected = &a $op &b;
-                    assert_eq!(actual, expected);
-                }
-
+                // three_arrays: `a = a_extra + b + c` ensures a >= b+c for sub/div.
+                // Skipped for size_of < 2 because chaining e.g. mul on i8 overflows:
+                // max of (a*b)*c = (a_extra+b+c)*b*c can exceed i8::MAX even with small ranges.
                 #[test]
                 fn [<test_ $dtype _three_arrays>]() {
                     if size_of::<$dtype>() < 2 {
-                        // Skip this test for small types to avoid overflow in ops.
                         return;
                     }
-                    use crate::array::Array;
-                    let seed = stringify!($dtype).as_bytes().iter().chain(stringify!($op).as_bytes()).fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-                    let mut rng = fastrand::Rng::with_seed(seed);
-                    let c = super::rand_array::<$dtype>(&mut rng, &[4]);
-                    let b = super::rand_array::<$dtype>(&mut rng, &[4]);
-                    let a = super::rand_array::<$dtype>(&mut rng, &[4]) + &b + &c;
-                    let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
-                    let zb = Array::from_ndarray(&b, arr_params(&[4])).unwrap();
-                    let zc = Array::from_ndarray(&c, arr_params(&[4])).unwrap();
-                    let zab = za $op zb.as_ref();
-                    let actual = (zab $op zc).data().to_ndarray::<$dtype>().unwrap();
-                    let expected = &(&a $op &b) $op &c;
-                    assert_eq!(actual, expected);
+                    proptest::proptest!(|(
+                        c_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
+                        ),
+                        b_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
+                        ),
+                        a_extra_vals in proptest::collection::vec(
+                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
+                        ),
+                    )| {
+                        use crate::array::Array;
+                        let c = ndarray::ArrayD::from_shape_vec(vec![4], c_vals).unwrap();
+                        let b = ndarray::ArrayD::from_shape_vec(vec![4], b_vals).unwrap();
+                        let a = ndarray::ArrayD::from_shape_vec(vec![4], a_extra_vals).unwrap() + &b + &c;
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[4])).unwrap();
+                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[4])).unwrap();
+                        let zc = Array::from_ndarray(&c, crate::util::arr_params(&[4])).unwrap();
+                        let zab = za $op zb.as_ref();
+                        let actual = (zab $op zc).data().to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(actual, (&(&a $op &b) $op &c));
+                    });
                 }
             }
         };
@@ -402,7 +421,6 @@ mod tests {
         ($mod_name:ident, $op:tt, [$($dtype:ident),+] $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+])*) => {
             mod $mod_name {
                 // Import feature-gated type aliases defined in the parent tests module.
-                use super::arr_params;
                 $(#[cfg($cfg)] use super::{$($cfg_dtype),+};)*
                 $(test_op_dtype!($op, $dtype);)+
                 $($(
@@ -444,60 +462,18 @@ mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::dtype::Complex<f64>;
 
-    trait Scalar: Sized {
-        fn sample(rng: &mut fastrand::Rng) -> Self;
-    }
-    macro_rules! impl_test_val {
-        ($range:expr, $($t:ty),+) => {
-            $(impl Scalar for $t {
-                fn sample(rng: &mut fastrand::Rng) -> Self {
-                    rng.u8($range) as Self
-                }
-            })+
-        };
-    }
-    // [1,4]:  max cube 4³=64  < i8::MAX (127)
-    // [1,30]: max cube 30³=27k < i16::MAX (32767)
-    // [1,100]: safe for i32/i64/f32/f64
-    impl_test_val!(1..=4, i8, u8);
-    impl_test_val!(1..=30, i16, u16, u32, u64);
-    impl_test_val!(1..=100, i32, i64, f32, f64);
-    #[cfg(feature = "half")]
-    impl Scalar for f16 {
-        fn sample(rng: &mut fastrand::Rng) -> Self {
-            Self::from_f32(rng.u8(1..=15) as f32)
+    proptest::proptest! {
+        #[test]
+        fn test_add_mul_scalar(
+            vals in proptest::collection::vec(<f32 as crate::util::ScalarStrategy>::op_safe_strategy(), 100usize)
+        ) {
+            use crate::array::Array;
+            let a = ndarray::ArrayD::from_shape_vec(vec![10, 10], vals).unwrap();
+            let za = Array::from_ndarray(&a, crate::util::arr_params(&[10, 10])).unwrap();
+            let zb = za * 2.0f32 + 1.0f32;
+            let actual = zb.data().to_ndarray::<f32>().unwrap();
+            let expected = &a * 2.0 + 1.0;
+            proptest::prop_assert_eq!(actual, expected);
         }
-    }
-    #[cfg(feature = "num-complex")]
-    impl Scalar for complex_f32 {
-        fn sample(rng: &mut fastrand::Rng) -> Self {
-            Self::new(rng.u8(1..=15) as f32, 0.0)
-        }
-    }
-    #[cfg(feature = "num-complex")]
-    impl Scalar for complex_f64 {
-        fn sample(rng: &mut fastrand::Rng) -> Self {
-            Self::new(rng.u8(1..=15) as f64, 0.0)
-        }
-    }
-
-    fn rand_array<T: Scalar>(rng: &mut fastrand::Rng, shape: &[usize]) -> ndarray::ArrayD<T> {
-        ndarray::Array::from_shape_fn(ndarray::IxDyn(shape), |_| T::sample(rng))
-    }
-
-    #[test]
-    fn test_add_mul_scalar() {
-        use crate::array::Array;
-        let seed = "test_add_mul_large"
-            .as_bytes()
-            .iter()
-            .fold(0xdeadbeef_cafe1234u64, |acc, b| acc + *b as u64);
-        let mut rng = fastrand::Rng::with_seed(seed);
-        let a = rand_array::<f32>(&mut rng, &[1000, 1000]);
-        let za = Array::from_ndarray(&a, arr_params(&[1000, 1000])).unwrap();
-        let zb = za * 2.0f32 + 1.0f32;
-        let actual = zb.data().to_ndarray::<f32>().unwrap();
-        let expected = &a * 2.0 + 1.0;
-        assert_eq!(actual, expected);
     }
 }

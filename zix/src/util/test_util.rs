@@ -1,118 +1,182 @@
-pub(crate) fn test_rng(file: &str, test_name: &str) -> fastrand::Rng {
-    let seed = [file, test_name]
-        .join(" ")
-        .as_bytes()
-        .iter()
-        .fold(1337, |acc: u64, b| {
-            acc.wrapping_mul(31).wrapping_add(*b as u64)
-        });
-    fastrand::Rng::with_seed(seed)
-}
-
-pub(crate) fn test_lengths(rand: &mut fastrand::Rng) -> Vec<usize> {
-    let mut lengths = Vec::new();
-    lengths.extend(0..=10); // always test small lengths
-    for _ in 0..20 {
-        lengths.push(rand.usize(..1000));
-    }
-    lengths
-}
-
+use crate::array::ArrayParams;
 use crate::dtype::Dtyped;
+use crate::storage::block::BlockSize;
 use crate::util::AlignedBytes;
 
-/// Trait for types that can be randomly sampled for use in tests.
-pub(crate) trait Sampleable: Dtyped {
-    fn sample(rng: &mut fastrand::Rng) -> Self;
+// ---------------------------------------------------------------------------
+// arr_params — shared test helper (previously duplicated in every test module)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn arr_params(block_shape: &[usize]) -> ArrayParams {
+    ArrayParams {
+        block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
+        ..ArrayParams::default()
+    }
 }
 
-impl Sampleable for u8 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.u8(..)
+// ---------------------------------------------------------------------------
+// gen_data_bytes_from_slice — convert a typed slice to aligned bytes
+// ---------------------------------------------------------------------------
+
+/// Convert a slice of typed values to aligned bytes.
+/// Used by codec filter roundtrip tests that receive values from proptest strategies.
+pub(crate) fn gen_data_bytes_from_slice<T: Dtyped>(items: &[T]) -> AlignedBytes {
+    let bytes = unsafe { crate::util::cast_slice::<T, u8>(items) };
+    AlignedBytes::from_slice(T::DTYPE.alignment() as usize, bytes)
+}
+
+// ---------------------------------------------------------------------------
+// ScalarStrategy — proptest strategies for scalar types
+// ---------------------------------------------------------------------------
+
+use proptest::strategy::BoxedStrategy;
+
+/// Proptest strategies for scalar types used across test modules.
+///
+/// - `any_strategy()`: full domain (used for codec roundtrip tests).
+/// - `op_safe_strategy()`: bounded range that avoids overflow when values are
+///   combined arithmetically (used for op2, astype tests). For integer types,
+///   values are small and positive so that e.g. `a = a_extra + b` still fits
+///   in the type. Floats default to `any_strategy()`.
+pub(crate) trait ScalarStrategy: Dtyped + core::fmt::Debug + Clone + 'static {
+    fn any_strategy() -> BoxedStrategy<Self>;
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        Self::any_strategy()
     }
 }
-impl Sampleable for u16 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.u16(..)
+
+use proptest::prelude::*;
+
+impl ScalarStrategy for u8 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<u8>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1u8..=4).boxed()
     }
 }
-impl Sampleable for u32 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.u32(..)
+impl ScalarStrategy for u16 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<u16>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        // three_arrays test does (a*b)*c where a=a_extra+b+c ≤ 3r.
+        // max (3r)·r·r = 3r³ ≤ u16::MAX=65535 → r ≤ 27.
+        (1u16..=27).boxed()
     }
 }
-impl Sampleable for u64 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.u64(..)
+impl ScalarStrategy for u32 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<u32>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1u32..=30).boxed()
     }
 }
-impl Sampleable for i8 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.i8(..)
+impl ScalarStrategy for u64 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<u64>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1u64..=30).boxed()
     }
 }
-impl Sampleable for i16 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.i16(..)
+impl ScalarStrategy for i8 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<i8>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1i8..=4).boxed()
     }
 }
-impl Sampleable for i32 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.i32(..)
+impl ScalarStrategy for i16 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<i16>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        // three_arrays test does (a*b)*c where a=a_extra+b+c ≤ 3r.
+        // max (3r)·r·r = 3r³ ≤ i16::MAX=32767 → r ≤ 22.
+        (1i16..=22).boxed()
     }
 }
-impl Sampleable for i64 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.i64(..)
+impl ScalarStrategy for i32 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<i32>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1i32..=100).boxed()
     }
 }
-impl Sampleable for f32 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.f32()
+impl ScalarStrategy for i64 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<i64>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1i64..=100).boxed()
     }
 }
-impl Sampleable for f64 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.f64()
+impl ScalarStrategy for f32 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<f32>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1u8..=100).prop_map(|x| x as f32).boxed()
     }
 }
-impl Sampleable for bool {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        rng.bool()
+impl ScalarStrategy for f64 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<f64>().boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1u8..=100).prop_map(|x| x as f64).boxed()
+    }
+}
+impl ScalarStrategy for bool {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<bool>().boxed()
     }
 }
 
 #[cfg(feature = "half")]
-impl Sampleable for crate::dtype::f16 {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        crate::dtype::f16::from_f32(rng.f32())
+impl ScalarStrategy for crate::dtype::f16 {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        any::<f32>().prop_map(crate::dtype::f16::from_f32).boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1u8..=15)
+            .prop_map(|x| crate::dtype::f16::from_f32(x as f32))
+            .boxed()
     }
 }
 
-impl Sampleable for crate::dtype::Complex<f32> {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        crate::dtype::Complex {
-            re: rng.f32(),
-            im: rng.f32(),
-        }
+impl ScalarStrategy for crate::dtype::Complex<f32> {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        (any::<f32>(), any::<f32>())
+            .prop_map(|(re, im)| crate::dtype::Complex { re, im })
+            .boxed()
+    }
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1u8..=15)
+            .prop_map(|x| crate::dtype::Complex {
+                re: x as f32,
+                im: 0.0,
+            })
+            .boxed()
     }
 }
 
-impl Sampleable for crate::dtype::Complex<f64> {
-    fn sample(rng: &mut fastrand::Rng) -> Self {
-        crate::dtype::Complex {
-            re: rng.f64(),
-            im: rng.f64(),
-        }
+impl ScalarStrategy for crate::dtype::Complex<f64> {
+    fn any_strategy() -> BoxedStrategy<Self> {
+        (any::<f64>(), any::<f64>())
+            .prop_map(|(re, im)| crate::dtype::Complex { re, im })
+            .boxed()
     }
-}
-
-pub(crate) fn gen_data<T: Sampleable>(len: usize, rand: &mut fastrand::Rng) -> Vec<T> {
-    (0..len).map(|_| T::sample(rand)).collect()
-}
-
-pub(crate) fn gen_data_bytes<T: Sampleable>(len: usize, rand: &mut fastrand::Rng) -> AlignedBytes {
-    let items = gen_data(len, rand);
-    let bytes = unsafe { crate::util::cast_slice::<T, u8>(&items) };
-    AlignedBytes::from_slice(T::DTYPE.alignment() as usize, bytes)
+    fn op_safe_strategy() -> BoxedStrategy<Self> {
+        (1u8..=15)
+            .prop_map(|x| crate::dtype::Complex {
+                re: x as f64,
+                im: 0.0,
+            })
+            .boxed()
+    }
 }

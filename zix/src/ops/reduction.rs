@@ -518,19 +518,12 @@ where
 mod tests {
     use ndarray::ArrayD;
 
-    use crate::array::{Array, ArrayParams};
+    use crate::array::Array;
     #[cfg(feature = "half")]
     use crate::dtype::f16;
     #[cfg(feature = "num-complex")]
     use crate::dtype::Complex;
-    use crate::storage::block::BlockSize;
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
+    use crate::util::arr_params;
 
     fn make<T>(vals: Vec<T>, shape: &[usize]) -> Array<crate::storage::Owned>
     where
@@ -561,7 +554,7 @@ mod tests {
                 let n = row0.len();
                 let input: Vec<$in_ty> = row0.into_iter().chain(row1).collect();
                 let nd = ArrayD::<$in_ty>::from_shape_vec(vec![2, n], input).unwrap();
-                let a = Array::from_ndarray(&nd, arr_params(&[2, n])).unwrap();
+                let a = Array::from_ndarray(&nd, crate::util::arr_params(&[2, n])).unwrap();
                 let got: ArrayD<$out_ty> = a.$method(&[0], false).data().to_ndarray().unwrap();
                 assert_eq!(
                     got,
@@ -576,6 +569,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     mod max {
+        use crate::util::arr_params;
+
         use super::*;
 
         #[test]
@@ -765,6 +760,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     mod min {
+        use crate::util::arr_params;
+
         use super::*;
 
         #[test]

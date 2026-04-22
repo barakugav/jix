@@ -83,6 +83,10 @@ Protocol Buffers (via `prost`) define the archive format under `zix/proto/zix/v1
 
 PyO3 + `numpy` crate. The Python `Array` class wraps a type-erased `AnyArray` enum. Operations return new `Array` objects. `pyo3-stub-gen` generates `.pyi` stubs via the `gen_pyi` binary. The Python source lives in `zix-python/python/`.
 
+## Developer Guides
+
+- [Testing guide](docs/dev/tests.md) — test crates, shared utilities, when to use proptest, macros, and how to test a new op
+
 ## Key Constraints
 
 - **Little-endian only** — enforced by a compile-time assertion

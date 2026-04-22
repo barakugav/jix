@@ -350,16 +350,16 @@ fn transpose8x8(x: [u8; 8]) -> [u8; 8] {
 mod tests {
     use super::BitShuffleFilter;
     use crate::dtype::Complex;
+    use crate::util::ScalarStrategy;
 
     macro_rules! test_roundtrip {
         ($ty:ty, $fn_name:ident) => {
-            #[test]
-            fn $fn_name() {
-                let mut rng = crate::util::test_rng(file!(), stringify!($fn_name));
-                for len in crate::util::test_lengths(&mut rng) {
-                    crate::codec::filter::tests::test_roundtrip::<BitShuffleFilter, $ty>(
-                        len, &mut rng,
-                    );
+            proptest::proptest! {
+                #[test]
+                fn $fn_name(data in proptest::collection::vec(
+                    <$ty as ScalarStrategy>::any_strategy(), 0..=1000usize
+                )) {
+                    crate::codec::filter::tests::test_roundtrip::<BitShuffleFilter, $ty>(&data);
                 }
             }
         };
@@ -381,35 +381,28 @@ mod tests {
     test_roundtrip!(Complex<f64>, complex_f64_roundtrip);
     test_roundtrip!(bool, bool_roundtrip);
 
-    #[test]
-    fn transpose8x8() {
-        let mut rng = crate::util::test_rng(file!(), stringify!(transpose8x8));
-
-        // Reference: bit i (LSB) of byte k ↔ bit k (LSB) of byte i.
-        // This matches the TRANS_BIT_8X8 / little-endian u64 convention used by Blosc.
-        fn transpose8x8_reference(x: [u8; 8]) -> [u8; 8] {
-            let mut y = [0u8; 8];
-            for i in 0..8u32 {
-                for k in 0..8u32 {
-                    let bit = (x[i as usize] >> k) & 1;
-                    y[k as usize] |= bit << i;
-                }
+    // Reference: bit i (LSB) of byte k ↔ bit k (LSB) of byte i.
+    // This matches the TRANS_BIT_8X8 / little-endian u64 convention used by Blosc.
+    fn transpose8x8_reference(x: [u8; 8]) -> [u8; 8] {
+        let mut y = [0u8; 8];
+        for i in 0..8u32 {
+            for k in 0..8u32 {
+                let bit = (x[i as usize] >> k) & 1;
+                y[k as usize] |= bit << i;
             }
-            y
         }
-
-        for _ in 0..100 {
-            let x = std::array::from_fn(|_| rng.u8(..));
-            assert_eq!(super::transpose8x8(x), transpose8x8_reference(x));
-        }
+        y
     }
 
-    #[test]
-    fn transpose8x8_is_self_inverse() {
-        let mut rng = crate::util::test_rng(file!(), stringify!(transpose8x8_is_self_inverse));
-        for _ in 0..100 {
-            let x = std::array::from_fn(|_| rng.u8(..));
-            assert_eq!(super::transpose8x8(super::transpose8x8(x)), x);
+    proptest::proptest! {
+        #[test]
+        fn transpose8x8(x: [u8; 8]) {
+            proptest::prop_assert_eq!(super::transpose8x8(x), transpose8x8_reference(x));
+        }
+
+        #[test]
+        fn transpose8x8_is_self_inverse(x: [u8; 8]) {
+            proptest::prop_assert_eq!(super::transpose8x8(super::transpose8x8(x)), x);
         }
     }
 }

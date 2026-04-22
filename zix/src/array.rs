@@ -398,23 +398,16 @@ mod tests {
     use ndarray::ArrayD;
 
     use super::Array;
-    use crate::array::{ArrayBlockTableStorageBase, ArrayParams, Owned};
+    use crate::array::{ArrayBlockTableStorageBase, Owned};
     use crate::codec::{DecoderParams, Encoder, EncoderParams};
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::{BlockShapeTag, BlocksLayout};
-    use crate::util::{cast_slice, dim_arr, DimArray};
+    use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
 
     // -----------------------------------------------------------------------
     // from_ndarray roundtrip helper
     // -----------------------------------------------------------------------
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
 
     fn roundtrip<T, S, D>(src: &ndarray::ArrayBase<S, D>, block_shape: &[usize]) -> ArrayD<T>
     where

@@ -330,15 +330,8 @@ where
 mod tests {
     use ndarray::ArrayD;
 
-    use crate::array::{Array, ArrayParams};
-    use crate::storage::block::BlockSize;
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
+    use crate::array::Array;
+    use crate::util::arr_params;
 
     // -----------------------------------------------------------------------
     // Helpers

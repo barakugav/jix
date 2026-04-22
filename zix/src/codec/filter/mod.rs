@@ -48,14 +48,15 @@ trait FilterImpl {
 mod tests {
     use crate::codec::filter::FilterImpl;
     use crate::codec::TmpBufferPool;
-    use crate::util::{gen_data_bytes, Sampleable};
+    use crate::dtype::Dtyped;
+    use crate::util::gen_data_bytes_from_slice;
 
-    pub(crate) fn test_roundtrip<F, T>(len: usize, rand: &mut fastrand::Rng)
+    pub(crate) fn test_roundtrip<F, T>(items: &[T])
     where
         F: FilterImpl + Default,
-        T: Sampleable,
+        T: Dtyped,
     {
-        let data = gen_data_bytes::<T>(len, rand);
+        let data = gen_data_bytes_from_slice::<T>(items);
         let src = data.as_slice();
         let dtype = T::DTYPE;
         let tmp_buffers = TmpBufferPool::new();

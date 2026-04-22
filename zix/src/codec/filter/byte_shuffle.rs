@@ -34,16 +34,16 @@ impl FilterImpl for ByteShuffleFilter {
 mod tests {
     use super::ByteShuffleFilter;
     use crate::dtype::Complex;
+    use crate::util::ScalarStrategy;
 
     macro_rules! test_roundtrip {
         ($ty:ty, $fn_name:ident) => {
-            #[test]
-            fn $fn_name() {
-                let mut rng = crate::util::test_rng(file!(), stringify!($fn_name));
-                for len in crate::util::test_lengths(&mut rng) {
-                    crate::codec::filter::tests::test_roundtrip::<ByteShuffleFilter, $ty>(
-                        len, &mut rng,
-                    );
+            proptest::proptest! {
+                #[test]
+                fn $fn_name(data in proptest::collection::vec(
+                    <$ty as ScalarStrategy>::any_strategy(), 0..=1000usize
+                )) {
+                    crate::codec::filter::tests::test_roundtrip::<ByteShuffleFilter, $ty>(&data);
                 }
             }
         };

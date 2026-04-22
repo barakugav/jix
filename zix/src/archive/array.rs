@@ -164,20 +164,13 @@ mod tests {
     use std::io::{Cursor, Seek, Write};
 
     use crate::dtype::Dtyped;
-    use crate::storage::block::BlockSize;
     use crate::storage::Owned;
+    use crate::util::arr_params;
     use crate::{Array, ArrayParams};
 
     // -----------------------------------------------------------------------
     // from_ndarray roundtrip helper
     // -----------------------------------------------------------------------
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
 
     // -----------------------------------------------------------------------
     // write_to / read_from round-trip

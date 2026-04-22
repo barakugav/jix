@@ -211,15 +211,8 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 mod tests {
     use ndarray::ArrayD;
 
-    use crate::array::{Array, ArrayParams};
-    use crate::storage::block::BlockSize;
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
+    use crate::array::Array;
+    use crate::util::arr_params;
 
     fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Owned> {
         let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();

@@ -135,15 +135,8 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, ArrayParams};
-    use crate::storage::block::BlockSize;
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
+    use crate::array::Array;
+    use crate::util::arr_params;
 
     // 2D i32: transpose (axes=[1,0])
     #[test]

@@ -275,16 +275,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, ArrayParams};
+    use crate::array::Array;
     use crate::ops::concatenate;
-    use crate::storage::block::BlockSize;
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
+    use crate::util::arr_params;
 
     // 1D i32: concatenate two arrays of equal size along axis 0 (in-place path)
     #[test]

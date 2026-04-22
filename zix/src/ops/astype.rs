@@ -357,42 +357,11 @@ impl_cast_complex!(f64);
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, ArrayParams};
+    use crate::array::Array;
     #[allow(unused_imports)]
     use crate::dtype::f16;
     use crate::dtype::{Complex, Dtyped};
-    use crate::storage::block::BlockSize;
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
-
-    // --- scalar sampling ---
-    trait Scalar: Sized + Copy + 'static {
-        fn sample(rng: &mut fastrand::Rng) -> Self;
-    }
-    macro_rules! impl_scalar {
-        ($($t:ty),+) => {
-            $(impl Scalar for $t {
-                fn sample(rng: &mut fastrand::Rng) -> Self {
-                    (rng.f64() * 9.0 + 1.0) as Self
-                }
-            })+
-        };
-    }
-    impl_scalar!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
-    impl Scalar for bool {
-        fn sample(rng: &mut fastrand::Rng) -> Self {
-            rng.bool()
-        }
-    }
-
-    fn rand_array<T: Scalar>(rng: &mut fastrand::Rng, shape: &[usize]) -> ndarray::ArrayD<T> {
-        ndarray::Array::from_shape_fn(ndarray::IxDyn(shape), |_| T::sample(rng))
-    }
+    use crate::util::arr_params;
 
     // --- element-wise conversion for expected values ---
     trait CastTo<D>: Copy {
@@ -448,11 +417,6 @@ mod tests {
     #[cfg(feature = "half")]
     mod f16_impls {
         use super::*;
-        impl Scalar for f16 {
-            fn sample(rng: &mut fastrand::Rng) -> Self {
-                f16::from_f32(rng.f32() * 9.0 + 1.0)
-            }
-        }
         // f16 cannot use `as` for conversions; go through f32
         macro_rules! impl_cast_to_f16 {
         ($($src:ty),+) => {
@@ -487,22 +451,6 @@ mod tests {
         }
     }
 
-    impl Scalar for Complex<f32> {
-        fn sample(rng: &mut fastrand::Rng) -> Self {
-            Self {
-                re: rng.f32() * 9.0 + 1.0,
-                im: rng.f32() * 9.0 + 1.0,
-            }
-        }
-    }
-    impl Scalar for Complex<f64> {
-        fn sample(rng: &mut fastrand::Rng) -> Self {
-            Self {
-                re: rng.f64() * 9.0 + 1.0,
-                im: rng.f64() * 9.0 + 1.0,
-            }
-        }
-    }
     impl CastTo<Complex<f64>> for Complex<f32> {
         fn cast_to(self) -> Complex<f64> {
             Complex {
@@ -531,75 +479,65 @@ mod tests {
     }
 
     // --- test generation macro ---
-    // Generates 4 test functions for a (src → dst) cast pair.
+    // Generates 4 proptest functions for a (src → dst) cast pair.
     macro_rules! test_cast_pair {
         ($mod_name:ident, $src:ty, $dst:ty) => {
             mod $mod_name {
                 use super::*;
                 use crate::dtype::Dtyped;
 
-                fn seed() -> u64 {
-                    stringify!($mod_name)
-                        .as_bytes()
-                        .iter()
-                        .fold(0xdeadbeef_cafe1234u64, |acc, b| acc.wrapping_add(*b as u64))
-                        .swap_bytes()
-                }
+                proptest::proptest! {
+                    #[test]
+                    fn cast_1d(
+                        vals in proptest::collection::vec(
+                            <$src as crate::util::ScalarStrategy>::any_strategy(), 8usize
+                        )
+                    ) {
+                        let a = ndarray::ArrayD::from_shape_vec(vec![8], vals).unwrap();
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[8])).unwrap();
+                        let actual = za.astype(<$dst>::DTYPE).data().to_ndarray::<$dst>().unwrap();
+                        let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
+                        proptest::prop_assert_eq!(actual, expected);
+                    }
 
-                #[test]
-                fn cast_1d() {
-                    let mut rng = fastrand::Rng::with_seed(seed());
-                    let a = rand_array::<$src>(&mut rng, &[8]);
-                    let za = Array::from_ndarray(&a, arr_params(&[8])).unwrap();
-                    let actual = za
-                        .astype(<$dst>::DTYPE)
-                        .data()
-                        .to_ndarray::<$dst>()
-                        .unwrap();
-                    let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
-                    assert_eq!(actual, expected);
-                }
+                    #[test]
+                    fn cast_1d_multi_block(
+                        vals in proptest::collection::vec(
+                            <$src as crate::util::ScalarStrategy>::any_strategy(), 6usize
+                        )
+                    ) {
+                        let a = ndarray::ArrayD::from_shape_vec(vec![6], vals).unwrap();
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[2])).unwrap();
+                        let actual = za.astype(<$dst>::DTYPE).data().to_ndarray::<$dst>().unwrap();
+                        let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
+                        proptest::prop_assert_eq!(actual, expected);
+                    }
 
-                #[test]
-                fn cast_1d_multi_block() {
-                    let mut rng = fastrand::Rng::with_seed(seed() ^ 1);
-                    let a = rand_array::<$src>(&mut rng, &[6]);
-                    let za = Array::from_ndarray(&a, arr_params(&[2])).unwrap();
-                    let actual = za
-                        .astype(<$dst>::DTYPE)
-                        .data()
-                        .to_ndarray::<$dst>()
-                        .unwrap();
-                    let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
-                    assert_eq!(actual, expected);
-                }
+                    #[test]
+                    fn cast_2d(
+                        vals in proptest::collection::vec(
+                            <$src as crate::util::ScalarStrategy>::any_strategy(), 12usize
+                        )
+                    ) {
+                        let a = ndarray::ArrayD::from_shape_vec(vec![3, 4], vals).unwrap();
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[3, 4])).unwrap();
+                        let actual = za.astype(<$dst>::DTYPE).data().to_ndarray::<$dst>().unwrap();
+                        let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
+                        proptest::prop_assert_eq!(actual, expected);
+                    }
 
-                #[test]
-                fn cast_2d() {
-                    let mut rng = fastrand::Rng::with_seed(seed() ^ 2);
-                    let a = rand_array::<$src>(&mut rng, &[3, 4]);
-                    let za = Array::from_ndarray(&a, arr_params(&[3, 4])).unwrap();
-                    let actual = za
-                        .astype(<$dst>::DTYPE)
-                        .data()
-                        .to_ndarray::<$dst>()
-                        .unwrap();
-                    let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
-                    assert_eq!(actual, expected);
-                }
-
-                #[test]
-                fn cast_2d_multi_block() {
-                    let mut rng = fastrand::Rng::with_seed(seed() ^ 3);
-                    let a = rand_array::<$src>(&mut rng, &[4, 4]);
-                    let za = Array::from_ndarray(&a, arr_params(&[2, 2])).unwrap();
-                    let actual = za
-                        .astype(<$dst>::DTYPE)
-                        .data()
-                        .to_ndarray::<$dst>()
-                        .unwrap();
-                    let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
-                    assert_eq!(actual, expected);
+                    #[test]
+                    fn cast_2d_multi_block(
+                        vals in proptest::collection::vec(
+                            <$src as crate::util::ScalarStrategy>::any_strategy(), 16usize
+                        )
+                    ) {
+                        let a = ndarray::ArrayD::from_shape_vec(vec![4, 4], vals).unwrap();
+                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[2, 2])).unwrap();
+                        let actual = za.astype(<$dst>::DTYPE).data().to_ndarray::<$dst>().unwrap();
+                        let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
+                        proptest::prop_assert_eq!(actual, expected);
+                    }
                 }
             }
         };

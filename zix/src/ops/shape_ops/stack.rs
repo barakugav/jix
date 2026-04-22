@@ -223,16 +223,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, ArrayParams};
+    use crate::array::Array;
     use crate::ops::stack;
-    use crate::storage::block::BlockSize;
-
-    fn arr_params(block_shape: &[usize]) -> ArrayParams {
-        ArrayParams {
-            block_shape: Some(block_shape.iter().map(|&x| x as BlockSize).collect()),
-            ..ArrayParams::default()
-        }
-    }
+    use crate::util::arr_params;
 
     // stack two 1D i32 arrays along axis 0 → shape [2, N]
     #[test]
