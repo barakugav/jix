@@ -105,6 +105,8 @@ impl BlocksLayout {
         check_ndim(ndim)?;
         let itemsize = itemsize as u64;
 
+        let cache_sizes = crate::util::cache_size::cache_sizes();
+
         ensure!(
             block_shape_tag.is_none() || block_shape.is_some(),
             InvalidArgument,
@@ -122,8 +124,7 @@ impl BlocksLayout {
             .all(|&tag| tag == BlockShapeTag::Fixed);
         // Compute block_size_hint if not specified, and if it cant be computed from block_shape
         if block_size_hint.is_none() && (block_shape.is_none() || !fixed_block_shape) {
-            // TODO: make this adaptive based on L1 cache size
-            block_size_hint = Some(4 * 1024); // 4 KiB
+            block_size_hint = Some(cache_sizes.l1_data as u64);
         }
         // Compute block shape
         let mut block_shape = block_shape.unwrap_or_else(|| {
@@ -151,8 +152,7 @@ impl BlocksLayout {
             .unwrap_or_else(|| block_shape.iter().map(|&b| b as u64).product::<u64>() * itemsize);
         // Compute preferred_read_block_size_hint if not specified, and if it cant be computed from preferred_read_block_shape
         if preferred_read_block_size_hint.is_none() && preferred_read_block_shape.is_none() {
-            // TODO: make this adaptive based on L2/3 cache size
-            preferred_read_block_size_hint = Some(16 * 1024); // 16 KiB
+            preferred_read_block_size_hint = Some(cache_sizes.l2 as u64);
         }
         // Compute preferred_read_block_shape
         let preferred_read_block_shape = match preferred_read_block_shape {
