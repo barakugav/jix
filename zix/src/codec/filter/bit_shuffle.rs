@@ -405,4 +405,104 @@ mod tests {
             proptest::prop_assert_eq!(super::transpose8x8(super::transpose8x8(x)), x);
         }
     }
+
+    /// Trivial reference implementation of bitshuffle, for tests.
+    ///
+    /// This file intentionally has no passes, no intermediate buffers, and no
+    /// bit-matrix tricks. It works directly from the mathematical definition
+    ///
+    /// ```text
+    ///   out_bit[b, i, g, k] = in_bit[g*8 + k, b, i]
+    /// ```
+    ///
+    /// where `b ∈ 0..B` is the byte-plane, `i ∈ 0..8` is the bit-plane, `g ∈ 0..G`
+    /// is the 8-element group, `k ∈ 0..8` is the element within the group, and
+    /// `G = N/8`. Concretely, the encoded byte at offset `b*8*G + i*G + g` packs
+    /// bit `i` of byte `b` of the 8 elements `g*8 .. g*8+8`, with element `k`'s
+    /// bit landing in bit-position `k` of the packed byte.
+    ///
+    /// Tail handling matches the three-pass implementation: the last `N mod 8`
+    /// elements don't fill a group and are copied through verbatim.
+    ///
+    /// It is O(N · B · 8) with poor constants and no SIMD — strictly a test
+    /// oracle, never called on the hot path.
+    fn bit_shuffle_trivial(src: &[u8], dst: &mut [u8], typesize: usize) {
+        assert_eq!(src.len(), dst.len());
+        assert_eq!(src.len() % typesize, 0);
+
+        let n = src.len() / typesize;
+        let n_full = (n / 8) * 8;
+        let g = n_full / 8;
+        let full_bytes = n_full * typesize;
+
+        // We'll OR bits into the destination, so start from zero.
+        dst[..full_bytes].fill(0);
+
+        // For every input bit in the "full" region, compute its destination byte
+        // and bit-position and OR it in. This is the encoding definition,
+        // transcribed.
+        for element in 0..n_full {
+            let group = element / 8;
+            let k = element % 8;
+            for b in 0..typesize {
+                let byte = src[element * typesize + b];
+                for i in 0..8 {
+                    let bit = (byte >> i) & 1;
+                    let dst_idx = b * 8 * g + i * g + group;
+                    dst[dst_idx] |= bit << k;
+                }
+            }
+        }
+
+        // Tail: copy the trailing `N mod 8` elements verbatim.
+        dst[full_bytes..].copy_from_slice(&src[full_bytes..]);
+    }
+
+    fn test_agrees_with_trivial<T: crate::dtype::Dtyped>(items: &[T]) {
+        use crate::codec::filter::FilterImpl;
+        use crate::util::gen_data_bytes_from_slice;
+
+        let data = gen_data_bytes_from_slice::<T>(items);
+        let src = data.as_slice();
+        let typesize = T::DTYPE.itemsize() as usize;
+        let dtype = T::DTYPE;
+        let tmp_buffers = crate::codec::TmpBufferPool::new();
+
+        let mut optimized_out = vec![0u8; src.len()];
+        BitShuffleFilter::default().encode(src, &mut optimized_out, &dtype, &tmp_buffers);
+
+        let mut trivial_out = vec![0u8; src.len()];
+        bit_shuffle_trivial(src, &mut trivial_out, typesize);
+
+        assert_eq!(optimized_out, trivial_out);
+    }
+
+    macro_rules! test_agrees_with_trivial {
+        ($ty:ty, $fn_name:ident) => {
+            proptest::proptest! {
+                #[test]
+                fn $fn_name(data in proptest::collection::vec(
+                    <$ty as ScalarStrategy>::any_strategy(), 0..=1000usize
+                )) {
+                    test_agrees_with_trivial::<$ty>(&data);
+                }
+            }
+        };
+    }
+
+    test_agrees_with_trivial!(u8, u8_agrees_with_trivial);
+    test_agrees_with_trivial!(u16, u16_agrees_with_trivial);
+    test_agrees_with_trivial!(u32, u32_agrees_with_trivial);
+    test_agrees_with_trivial!(u64, u64_agrees_with_trivial);
+    test_agrees_with_trivial!(i8, i8_agrees_with_trivial);
+    test_agrees_with_trivial!(i16, i16_agrees_with_trivial);
+    test_agrees_with_trivial!(i32, i32_agrees_with_trivial);
+    test_agrees_with_trivial!(i64, i64_agrees_with_trivial);
+    #[cfg(feature = "half")]
+    test_agrees_with_trivial!(crate::dtype::f16, f16_agrees_with_trivial);
+    test_agrees_with_trivial!(f32, f32_agrees_with_trivial);
+    test_agrees_with_trivial!(f64, f64_agrees_with_trivial);
+    test_agrees_with_trivial!(Complex<f32>, complex_f32_agrees_with_trivial);
+    test_agrees_with_trivial!(Complex<f64>, complex_f64_agrees_with_trivial);
+    test_agrees_with_trivial!(bool, bool_agrees_with_trivial);
 }
