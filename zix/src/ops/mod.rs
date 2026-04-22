@@ -25,4 +25,7 @@ pub use reduction::*;
 mod map;
 pub use map::*;
 
+mod sub_dtype;
+pub use sub_dtype::*;
+
 mod common;
