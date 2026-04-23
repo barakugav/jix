@@ -1,3 +1,6 @@
+use std::marker::PhantomData;
+use std::sync::Arc;
+
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::Dtype;
 use crate::error::{ensure, Result};
@@ -17,8 +20,14 @@ pub(crate) type BlockSize = u32;
 /// At all times the storage holds the invariants:
 /// - `block_size > 0`
 /// - `nitems % block_size == 0`
-pub(crate) struct BlockTable<S> {
-    pub(crate) storage: S,
+pub(crate) struct BlockTable<S>
+where
+    S: BlockTableStorage,
+{
+    // pub(crate) storage: S,
+    pub(crate) cdata: S::Data<u8>,
+    pub(crate) block_offsets: S::Data<u64>,
+
     pub(crate) nitems: u64,
 
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
@@ -27,16 +36,17 @@ pub(crate) struct BlockTable<S> {
 
     pub(crate) decoder_config: DecoderCodecConfig,
 }
-impl<S> BlockTable<S> {
+impl<S> BlockTable<S>
+where
+    S: BlockTableStorage,
+{
     pub(crate) fn new(
-        storage: S,
+        cdata: S::Data<u8>,
+        block_offsets: S::Data<u64>,
         nitems: u64,
         block_size: BlockSize,
         decoder_config: DecoderCodecConfig,
-    ) -> Result<Self>
-    where
-        S: BlockTableStorage,
-    {
+    ) -> Result<Self> {
         ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
         ensure!(
             nitems.is_multiple_of(block_size as u64),
@@ -44,19 +54,18 @@ impl<S> BlockTable<S> {
             "nitems must be a multiple of block_size"
         );
         let nblocks = nitems / block_size as u64;
-        let cdata = storage.cdata();
-        let block_offsets = storage.block_offsets();
         ensure!(
-            block_offsets.len() as u64 == if nblocks == 0 { 0 } else { nblocks + 1 },
+            block_offsets.as_ref().len() as u64 == if nblocks == 0 { 0 } else { nblocks + 1 },
             InvalidArgument,
             "block_offsets length mismatch"
         );
         if nblocks > 0 {
-            debug_assert!(block_offsets.windows(2).all(|w| w[0] < w[1]));
-            debug_assert!(*block_offsets.last().unwrap() <= cdata.len() as u64);
+            debug_assert!(block_offsets.as_ref().windows(2).all(|w| w[0] < w[1]));
+            debug_assert!(*block_offsets.as_ref().last().unwrap() <= cdata.as_ref().len() as u64);
         }
         Ok(Self {
-            storage,
+            cdata,
+            block_offsets,
             nitems,
             block_size,
             decoder_config,
@@ -92,10 +101,7 @@ impl<S> BlockTable<S> {
         block_idx: u64,
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> Result<()>
-    where
-        S: BlockTableStorage,
-    {
+    ) -> Result<()> {
         let b_size_bytes = self.block_len() as usize * self.dtype().itemsize() as usize;
         ensure!(
             buf.len() == b_size_bytes,
@@ -104,10 +110,10 @@ impl<S> BlockTable<S> {
             buf.len()
         );
 
-        let block_offsets = self.storage.block_offsets();
+        let block_offsets = self.block_offsets.as_ref();
         let begin = block_offsets[block_idx as usize] as usize;
         let end = block_offsets[block_idx as usize + 1] as usize;
-        let b_cdata = &self.storage.cdata()[begin..end];
+        let b_cdata = &self.cdata.as_ref()[begin..end];
 
         let decoder = context.decoder(&self.decoder_config);
         let nbytes = decoder.decode(b_cdata, buf)?;
@@ -148,51 +154,34 @@ impl BlockTable<Owned> {
     }
 }
 
-#[doc(hidden)]
 pub trait BlockTableStorage {
-    fn cdata(&self) -> &[u8];
-    fn block_offsets(&self) -> &[u64];
+    type Data<T: 'static>: AsRef<[T]>;
 }
+
 #[doc(hidden)]
-pub struct Owned {
-    pub(crate) cdata: Vec<u8>,
-    pub(crate) block_offsets: Vec<u64>,
-}
+pub struct Owned(pub(crate) PhantomData<()>);
 #[doc(hidden)]
-pub struct Borrowed<'a> {
-    pub(crate) cdata: &'a [u8],
-    pub(crate) block_offsets: &'a [u64],
-}
+pub struct Borrowed<'a>(pub(crate) PhantomData<&'a ()>);
 #[doc(hidden)]
-pub struct Mmap {
-    pub(crate) cdata: &'static [u8],
-    pub(crate) block_offsets: &'static [u64],
-    #[allow(unused)] // keep the mmap alive
-    pub(crate) mmap: memmap2::Mmap,
-}
+pub struct Mmap(pub(crate) Arc<memmap2::Mmap>);
 impl BlockTableStorage for Owned {
-    fn cdata(&self) -> &[u8] {
-        &self.cdata
-    }
-    fn block_offsets(&self) -> &[u64] {
-        &self.block_offsets
-    }
+    type Data<T: 'static> = Vec<T>;
 }
 impl<'a> BlockTableStorage for Borrowed<'a> {
-    fn cdata(&self) -> &[u8] {
-        self.cdata
-    }
-    fn block_offsets(&self) -> &[u64] {
-        self.block_offsets
+    type Data<T: 'static> = &'a [T];
+}
+pub struct MmapData<T: 'static> {
+    #[allow(unused)]
+    pub(crate) mmap: Arc<memmap2::Mmap>,
+    pub(crate) data: (*const T, usize),
+}
+impl<T: 'static> AsRef<[T]> for MmapData<T> {
+    fn as_ref(&self) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.data.0, self.data.1) }
     }
 }
 impl BlockTableStorage for Mmap {
-    fn cdata(&self) -> &[u8] {
-        self.cdata
-    }
-    fn block_offsets(&self) -> &[u64] {
-        self.block_offsets
-    }
+    type Data<T: 'static> = MmapData<T>;
 }
 
 pub(crate) struct BlockTableBuilder {
@@ -262,10 +251,8 @@ impl BlockTableBuilder {
             dtype: self.dtype.clone(),
         };
         BlockTable::new(
-            Owned {
-                cdata: self.cdata,
-                block_offsets: self.block_offsets,
-            },
+            self.cdata,
+            self.block_offsets,
             nitems as u64,
             self.block_size,
             decoder_config,
@@ -320,7 +307,7 @@ mod tests {
         let encoder_params = EncoderParams::default();
         let encoder = make_encoder(u8::DTYPE, &encoder_params);
         let table = build_from_items(&items, 8, encoder).unwrap();
-        assert_eq!(table.storage.block_offsets.len(), 2);
+        assert_eq!(table.block_offsets.len(), 2);
         assert_eq!(table.nitems, 8);
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         assert_eq!(decode_block(&table, 0, &mut context), items);
@@ -333,7 +320,7 @@ mod tests {
         let encoder_params = EncoderParams::default();
         let encoder = make_encoder(u8::DTYPE, &encoder_params);
         let table = build_from_items(&items, 4, encoder).unwrap();
-        assert_eq!(table.storage.block_offsets.len(), 4);
+        assert_eq!(table.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         assert_eq!(decode_block(&table, 0, &mut context), items[0..4]);
@@ -360,7 +347,7 @@ mod tests {
         let encoder_params = EncoderParams::default();
         let encoder = make_encoder(u32::DTYPE, &encoder_params);
         let table = build_from_items(&items, 2, encoder).unwrap();
-        assert_eq!(table.storage.block_offsets.len(), 3);
+        assert_eq!(table.block_offsets.len(), 3);
         assert_eq!(table.nitems, 4);
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         assert_eq!(decode_block(&table, 0, &mut context), unsafe {
@@ -390,7 +377,7 @@ mod tests {
     fn round_trip_single_block() {
         let items: Vec<u8> = (0u8..8).collect();
         let table2 = round_trip(&items, 8);
-        assert_eq!(table2.storage.block_offsets.len(), 2);
+        assert_eq!(table2.block_offsets.len(), 2);
         assert_eq!(table2.nitems, 8);
         assert_eq!(table2.block_size, 8);
         assert_eq!(*table2.dtype(), u8::DTYPE);
@@ -402,10 +389,10 @@ mod tests {
     fn round_trip_multiple_blocks() {
         let items: Vec<u8> = (0u8..12).collect();
         let table = round_trip(&items, 4);
-        assert_eq!(table.storage.block_offsets.len(), 4);
+        assert_eq!(table.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
-        let recovered: Vec<u8> = (0..table.storage.block_offsets.len() - 1)
+        let recovered: Vec<u8> = (0..table.block_offsets.len() - 1)
             .flat_map(|i| decode_block(&table, i, &mut context))
             .collect();
         assert_eq!(recovered, items);
@@ -415,7 +402,7 @@ mod tests {
     fn round_trip_preserves_block_offsets_ordering() {
         let items: Vec<u8> = (0u8..12).collect();
         let table2 = round_trip(&items, 3);
-        let offs = table2.storage.block_offsets();
+        let offs = table2.block_offsets;
         assert!(offs.windows(2).all(|w| w[0] < w[1]));
     }
 
@@ -442,10 +429,10 @@ mod tests {
         let table2 = BlockTable::read_from(file, reader_len).unwrap();
         std::fs::remove_file(&path).unwrap();
 
-        assert_eq!(table2.storage.block_offsets.len(), 7);
+        assert_eq!(table2.block_offsets.len(), 7);
         assert_eq!(table2.nitems, 18);
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
-        let recovered: Vec<u8> = (0..table2.storage.block_offsets.len() - 1)
+        let recovered: Vec<u8> = (0..table2.block_offsets.len() - 1)
             .flat_map(|i| decode_block(&table2, i, &mut context))
             .collect();
         assert_eq!(recovered, unsafe { cast_slice::<u32, u8>(&items) });

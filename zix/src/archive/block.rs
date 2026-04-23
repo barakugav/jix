@@ -1,4 +1,5 @@
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::marker::PhantomData;
 
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -7,15 +8,28 @@ use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter};
 use crate::dtype::Dtype;
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
-use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage, Mmap, Owned};
+use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned};
 use crate::util::{cast_slice, cast_slice_mut};
 
-impl<S> BlockTable<S> {
+pub trait BlockTableStorageRead: BlockTableStorage {
+    fn read_content<T, R>(
+        &self,
+        reader: &mut ArchiveReader<R>,
+        section: Section,
+    ) -> Result<Self::Data<T>>
+    where
+        T: Copy + 'static,
+        R: Read + Seek;
+}
+
+impl<S> BlockTable<S>
+where
+    S: BlockTableStorage,
+{
     #[allow(unused)]
     pub(crate) fn write_to<W>(&self, writer: W) -> Result<()>
     where
         W: Write + Seek,
-        S: BlockTableStorage,
     {
         let mut writer =
             ArchiveWriter::new(writer, schema::ArchiveType::BlockTable).map_err(Error::io)?;
@@ -25,7 +39,6 @@ impl<S> BlockTable<S> {
     pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> Result<()>
     where
         W: Write + Seek,
-        S: BlockTableStorage,
     {
         // Write header
         let header = schema::BlockTableHeader {
@@ -62,11 +75,11 @@ impl<S> BlockTable<S> {
 
         // Write body data sections
         let cdata = writer
-            .write_section(self.storage.cdata(), align_of::<u8>())
+            .write_section(self.cdata.as_ref(), align_of::<u8>())
             .map_err(Error::io)?;
         let block_offsets = writer
             .write_section(
-                unsafe { cast_slice::<u64, u8>(self.storage.block_offsets()) },
+                unsafe { cast_slice::<u64, u8>(self.block_offsets.as_ref()) },
                 align_of::<u64>(),
             )
             .map_err(Error::io)?;
@@ -100,18 +113,18 @@ impl BlockTable<Owned> {
             schema::ArchiveType::BlockTable,
             schema::ArchiveType::try_from(f_meta.archive_type)
         );
-        Self::read_content(&mut reader, Owned::read_from)
+        Self::read_content(&mut reader, Owned(PhantomData))
     }
 }
 
-impl<S> BlockTable<S> {
-    pub(crate) fn read_content<R>(
-        reader: &mut ArchiveReader<R>,
-        read_storage: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> Result<S>,
-    ) -> Result<Self>
+impl<S> BlockTable<S>
+where
+    S: BlockTableStorage,
+{
+    pub(crate) fn read_content<R>(reader: &mut ArchiveReader<R>, storage: S) -> Result<Self>
     where
         R: Read + Seek,
-        S: BlockTableStorage,
+        S: BlockTableStorageRead,
     {
         let header = reader
             .read_message::<schema::BlockTableHeader>()
@@ -170,7 +183,8 @@ impl<S> BlockTable<S> {
         };
 
         // Read body data sections
-        let storage = read_storage(reader, cdata_section, block_offsets_section)?;
+        let cdata = storage.read_content(reader, cdata_section)?;
+        let block_offsets = storage.read_content(reader, block_offsets_section)?;
 
         let decoder_config = DecoderCodecConfig {
             codec,
@@ -179,7 +193,8 @@ impl<S> BlockTable<S> {
         };
 
         Self::new(
-            storage,
+            cdata,
+            block_offsets,
             header.nitems,
             header.block_size as BlockSize,
             decoder_config,
@@ -187,76 +202,64 @@ impl<S> BlockTable<S> {
     }
 }
 
-impl Owned {
-    pub(crate) fn read_from<R>(
+impl BlockTableStorageRead for Owned {
+    fn read_content<T, R>(
+        &self,
         reader: &mut ArchiveReader<R>,
-        cdata_section: Section,
-        block_offsets_section: Section,
-    ) -> Result<Owned>
+        section: Section,
+    ) -> Result<Self::Data<T>>
     where
+        T: Copy + 'static,
         R: Read + Seek,
     {
-        let cdata = reader.read_section(&cdata_section).map_err(Error::io)?;
-
-        let block_offsets = {
-            let block_offsets_section = &block_offsets_section;
-            let block_offsets_len =
-                block_offsets_section.size as usize / std::mem::size_of::<u64>();
-            let mut block_offsets = Vec::<u64>::with_capacity(block_offsets_len);
-            #[allow(clippy::uninit_vec)]
-            unsafe {
-                block_offsets.set_len(block_offsets_len)
-            };
-            reader
-                .read_section_into(block_offsets_section, unsafe {
-                    cast_slice_mut::<u64, u8>(block_offsets.as_mut_slice())
-                })
-                .map_err(Error::io)?;
-            block_offsets
+        ensure!(
+            section.size.is_multiple_of(size_of::<T>() as u64),
+            InvalidArchive,
+            "section size is not a multiple of item size"
+        );
+        let len = section.size as usize / std::mem::size_of::<T>();
+        let mut data = Vec::<T>::with_capacity(len);
+        #[allow(clippy::uninit_vec)]
+        unsafe {
+            data.set_len(len)
         };
-
-        Ok(Owned {
-            cdata,
-            block_offsets,
-        })
+        reader
+            .read_section_into(&section, unsafe {
+                cast_slice_mut::<T, u8>(data.as_mut_slice())
+            })
+            .map_err(Error::io)?;
+        Ok(data)
     }
 }
 
-impl Mmap {
-    pub(crate) fn new(mmap: memmap2::Mmap, cdata: Section, block_offsets: Section) -> Self {
-        let cdata = {
-            let offset = cdata.offset as usize;
-            let size = cdata.size as usize;
-            let slice = &mmap[offset..offset + size];
-            // SAFETY: We require that the mmap outlives the returned slice, and that the caller does not mutate the slice.
-            unsafe { std::mem::transmute::<&[u8], &'static [u8]>(slice) }
-        };
-        let block_offsets = {
-            let offset = block_offsets.offset as usize;
-            let size = block_offsets.size as usize;
-            let buf = &mmap[offset..offset + size];
-            let slice = unsafe { cast_slice::<u8, u64>(buf) };
-            unsafe { std::mem::transmute::<&[u64], &'static [u64]>(slice) }
-        };
-        Self {
-            cdata,
-            block_offsets,
-            mmap,
-        }
-    }
-
-    pub(crate) fn read_from<R>(
+impl BlockTableStorageRead for Mmap {
+    fn read_content<T, R>(
+        &self,
         reader: &mut ArchiveReader<R>,
-        mut cdata_section: Section,
-        mut block_offsets_section: Section,
-        mmap: memmap2::Mmap,
-    ) -> Result<Mmap>
+        section: Section,
+    ) -> Result<Self::Data<T>>
     where
+        T: Copy + 'static,
         R: Read + Seek,
     {
-        let base_offset = reader.base_offset() as i64;
-        cdata_section.offset += base_offset;
-        block_offsets_section.offset += base_offset;
-        Ok(Mmap::new(mmap, cdata_section, block_offsets_section))
+        ensure!(
+            section.size.is_multiple_of(size_of::<T>() as u64),
+            InvalidArchive,
+            "section size is not a multiple of item size"
+        );
+        let len = section.size as usize / std::mem::size_of::<T>();
+        let offset = reader.base_offset() as i64 + section.offset;
+        let offset = offset as usize;
+        let data = self.0[offset..].as_ptr().cast::<T>();
+        ensure!(
+            data.is_aligned(),
+            InvalidArchive,
+            "data offset is not properly aligned"
+        );
+
+        Ok(MmapData {
+            mmap: self.0.clone(),
+            data: (data, len),
+        })
     }
 }

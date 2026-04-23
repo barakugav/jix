@@ -1,8 +1,11 @@
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Arc;
 
-use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
+use crate::archive::block::BlockTableStorageRead;
+use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
@@ -41,7 +44,7 @@ impl Array<Owned> {
         let storage = ArrayBlockTableStorageBase::read_from(
             reader,
             len,
-            crate::storage::block::Owned::read_from,
+            crate::storage::block::Owned(PhantomData),
             params,
         )?;
         Ok(Self {
@@ -67,14 +70,7 @@ impl Array<Mmap> {
         let storage = ArrayBlockTableStorageBase::read_from(
             reader,
             len,
-            |reader, cdata_section, block_offsets_section| {
-                crate::storage::block::Mmap::read_from(
-                    reader,
-                    cdata_section,
-                    block_offsets_section,
-                    mmap,
-                )
-            },
+            crate::storage::block::Mmap(Arc::new(mmap)),
             params,
         )?;
 
@@ -84,16 +80,14 @@ impl Array<Mmap> {
     }
 }
 
-impl<S> ArrayBlockTableStorageBase<S> {
-    pub(crate) fn read_from<R>(
-        reader: R,
-        len: u64,
-        read_block_storage: impl FnOnce(&mut ArchiveReader<R>, Section, Section) -> Result<S>,
-        params: ArrayParams,
-    ) -> Result<Self>
+impl<S> ArrayBlockTableStorageBase<S>
+where
+    S: BlockTableStorage,
+{
+    pub(crate) fn read_from<R>(reader: R, len: u64, storage: S, params: ArrayParams) -> Result<Self>
     where
         R: Read + Seek,
-        S: BlockTableStorage,
+        S: BlockTableStorageRead,
     {
         let mut reader = ArchiveReader::new(reader, len)?;
         let f_meta = reader.read_file_meta().map_err(Error::io)?;
@@ -131,7 +125,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
             })
             .product::<u64>();
 
-        let blocks = BlockTable::read_content(&mut reader, read_block_storage)?;
+        let blocks = BlockTable::read_content(&mut reader, storage)?;
         ensure!(
             blocks.nitems() == expected_nitems,
             InvalidArchive,

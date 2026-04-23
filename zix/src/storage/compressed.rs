@@ -45,7 +45,10 @@ impl_array_storage!(Owned);
 impl_array_storage!(Borrowed<'_>);
 impl_array_storage!(Mmap);
 
-pub(crate) struct ArrayBlockTableStorageBase<S> {
+pub(crate) struct ArrayBlockTableStorageBase<S>
+where
+    S: BlockTableStorage,
+{
     pub(crate) blocks: BlockTable<S>,
     shape: DimArray<u64>,
 
@@ -55,7 +58,10 @@ pub(crate) struct ArrayBlockTableStorageBase<S> {
     encoder_params: EncoderParams,
     decoder_params: DecoderParams,
 }
-impl<S> ArrayBlockTableStorageBase<S> {
+impl<S> ArrayBlockTableStorageBase<S>
+where
+    S: BlockTableStorage,
+{
     pub(crate) fn new(
         blocks: BlockTable<S>,
         shape: DimArray<u64>,
@@ -83,10 +89,7 @@ impl<S> ArrayBlockTableStorageBase<S> {
         &self.blocks_layout.block_shape_hint
     }
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>
-    where
-        S: BlockTableStorage,
-    {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(&self.shape, index)?;
         let _nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
 
