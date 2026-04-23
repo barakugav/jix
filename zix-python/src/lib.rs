@@ -51,7 +51,7 @@ mod zix {
     use crate::ops::{is_finite, is_infinite, is_nan};
 
     #[pymodule_export]
-    use crate::ops::{all, any, argmax, argmin, max, min, product};
+    use crate::ops::{all, any, argmax, argmin, max, mean, min, product, std, sum, var};
 }
 
 define_stub_info_gatherer!(gen_pyi);

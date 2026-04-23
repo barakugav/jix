@@ -284,7 +284,7 @@ pub(crate) unsafe fn nd_copy<S1, S2, S3>(
     assert_eq!(ndim, src_strides.len());
     assert_eq!(ndim, dst_strides.len());
 
-    // copy more then itemsize if last dim(s) are contiguous
+    // copy more then itemsize if the last dim(s) is contiguous
     let n_continuous_dims = (0..ndim)
         .rev()
         .scan(itemsize, |expected_stride, dim| {

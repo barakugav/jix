@@ -53,7 +53,7 @@ define_op1!(is_infinite, IsInfinite);
 
 // reduction
 macro_rules! define_reduction_op {
-    ($(#[$meta:meta])* $name:ident, $core_op:ident) => {
+    ($(#[$meta:meta])* $name:ident, $core_op:ident $(, extra_args = ($($extra_arg:ident : $extra_ty:ty = $extra_default:expr),+))?) => {
         $(#[$meta])*
         #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
@@ -61,16 +61,18 @@ macro_rules! define_reduction_op {
             array,
             axes=None,
             keepdims=false,
+            $($($extra_arg=$extra_default,)+)?
         ))]
         pub fn $name<'py>(
             py: pyo3::Python<'py>,
             array: &pyo3::Bound<'py, pyo3::PyAny>,
             axes: Option<Vec<usize>>,
             keepdims: bool,
+            $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
             let array = crate::ops::as_array::as_core_array(py, array)?;
             let axes = axes.unwrap_or_else(|| (0..array.ndim()).collect());
-            let res = zix_core::ops::$core_op::new(array, &axes, keepdims);
+            let res = zix_core::ops::$core_op::new(array, &axes, keepdims $($(, $extra_arg)+)?);
             let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
             Ok(crate::Array::from_core_storage(ret))
         }
@@ -112,7 +114,11 @@ define_reduction_op!(max, Max);
 define_reduction_op!(min, Min);
 define_reduction_op!(argmax, ArgMax, single_axis = "true");
 define_reduction_op!(argmin, ArgMin, single_axis = "true");
+define_reduction_op!(sum, Sum);
 define_reduction_op!(product, Product);
+define_reduction_op!(mean, Mean);
+define_reduction_op!(var, Variance, extra_args = (ddof: f64 = 0.0));
+define_reduction_op!(std, StandardDeviation, extra_args = (ddof: f64 = 0.0));
 define_reduction_op!(all, All);
 define_reduction_op!(any, Any);
 

@@ -68,11 +68,13 @@ pub fn cache_sizes() -> &'static CacheSizes {
 fn detect() -> CacheSizes {
     let mut sizes = CacheSizes::DEFAULT;
 
-    #[cfg(target_os = "linux")]
-    linux::fill(&mut sizes);
+    if cfg!(not(miri)) {
+        #[cfg(target_os = "linux")]
+        linux::fill(&mut sizes);
 
-    #[cfg(target_os = "macos")]
-    macos::fill(&mut sizes);
+        #[cfg(target_os = "macos")]
+        macos::fill(&mut sizes);
+    }
 
     // Enforce l1_data <= l2 <= l3. Handles (a) Apple Silicon, which has no
     // L3, so the L3 default of 1 MiB would otherwise be smaller than a

@@ -132,6 +132,7 @@ where
                     if self.keepdims {
                         out_dim += 1; // skip the size-1 keepdim slot
                     }
+                    // TODO: we could read it in chunks
                     0..orig_shape[in_d]
                 } else {
                     let r = index[out_dim].clone();
@@ -231,24 +232,25 @@ macro_rules! define_reduction_op {
     (
         $Name:ident,
         $NameKernel:ident,
-        |$arg_items:ident| { $body:expr },
+        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = $types:tt,
         single_axis = "true"
     ) => {
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
-            pub fn new(array: crate::Array<S>, axis: usize, keepdims: bool) -> crate::error::Result<Self>
+            pub fn new(array: crate::Array<S>, axis: usize, keepdims: bool $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
             {
-                Ok(Self(crate::ops::reduction::ReductionOp::new($NameKernel, array, &[axis], keepdims)?))
+                let kernel = $NameKernel { $($extra_arg),* };
+                Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, &[axis], keepdims)?))
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
 
         define_reduction_op_kernel!(
             $NameKernel,
-            |$arg_items| { $body },
+            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = $types
         );
     };
@@ -256,23 +258,24 @@ macro_rules! define_reduction_op {
     (
         $Name:ident,
         $NameKernel:ident,
-        |$arg_items:ident| { $body:expr },
+        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = $types:tt
     ) => {
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
-            pub fn new(array: crate::Array<S>, axes: &[usize], keepdims: bool) -> crate::error::Result<Self>
+            pub fn new(array: crate::Array<S>, axes: &[usize], keepdims: bool $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
             {
-                Ok(Self(crate::ops::reduction::ReductionOp::new($NameKernel, array, axes, keepdims)?))
+                let kernel = $NameKernel { $($extra_arg),* };
+                Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, axes, keepdims)?))
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
 
         define_reduction_op_kernel!(
             $NameKernel,
-            |$arg_items| { $body },
+            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = $types
         );
     };
@@ -281,7 +284,7 @@ macro_rules! define_reduction_op {
 macro_rules! define_reduction_op_kernel {
     (
         $NameKernel:ident,
-        |$arg_items:ident| { $body:expr },
+        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = {
             input = [$($scalar:tt),* $(,)?],
             output = "same"
@@ -289,14 +292,14 @@ macro_rules! define_reduction_op_kernel {
     ) => {
         define_reduction_op_kernel!(
             $NameKernel,
-            |$arg_items| { $body },
+            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = {$($scalar => $scalar),*}
         );
     };
 
     (
         $NameKernel:ident,
-        |$arg_items:ident| { $body:expr },
+        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = {
             input = [$($scalar:tt),* $(,)?],
             output = $output_type:tt
@@ -304,29 +307,29 @@ macro_rules! define_reduction_op_kernel {
     ) => {
         define_reduction_op_kernel!(
             $NameKernel,
-            |$arg_items| { $body },
+            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = {$($scalar => $output_type),*}
         );
     };
 
     (
         $NameKernel:ident,
-        |$arg_items:ident| { $body:expr },
+        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = {$([$($scalar:tt),*] => $output_type:tt),* $(,)?}
     ) => {
         define_reduction_op_kernel!(
             $NameKernel,
-            |$arg_items| { $body },
+            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = {$($($scalar => $output_type),*),*}
         );
     };
 
     (
         $NameKernel:ident,
-        |$arg_items:ident| { $body:expr },
+        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = {$($scalar:tt => $reduction_type:tt),* $(,)?}
     ) => {
-        struct $NameKernel;
+        struct $NameKernel { $($extra_arg: $extra_ty,)* }
         impl crate::ops::reduction::ReductionOpKernel for $NameKernel {
             fn reduce<'a>(
                 &self,
@@ -338,8 +341,11 @@ macro_rules! define_reduction_op_kernel {
                         for (slice, out) in slice_iter {
                             let items = slice.map(|x| unsafe { x.as_ptr().cast::<$scalar2>().read() });
                             let result: $reduction_type2 = {
+                                #[allow(unused)]
+                                type ReductionType = $reduction_type2;
+                                $(let $extra_arg = self.$extra_arg;)*
                                 let $arg_items = items;
-                                $body
+                                { $body }
                             };
                             unsafe { out.as_mut_ptr().cast::<$reduction_type2>().write(result) };
                         }
@@ -462,6 +468,116 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
+    Mean,
+    MeanKernel,
+    |items| {{
+        let (size, size_high) = items.size_hint();
+        assert_eq!(Some(size), size_high);
+        assert!(size > 0);
+        let sum = items.fold(crate::ops::astype::cast::<_, ReductionType>(0), |m, x| m + crate::ops::astype::cast_as(x, &m));
+        sum / size as f64
+     }},
+    types = {
+        [i8, i16, i32, i64] => f64,
+        [u8, u16, u32, u64] => f64,
+        [f16, f32, f64] => f64,
+        [(Complex<f32>), (Complex<f64>)] => (Complex::<f64>),
+        [bool] => f64,
+    }
+);
+define_reduction_op!(
+    Variance,
+    VarianceKernel,
+    |items, ddof: f64| { variance_impl(items, ddof) },
+    types = {
+        [i8, i16, i32, i64] => f64,
+        [u8, u16, u32, u64] => f64,
+        [f16, f32, f64] => f64,
+        [(Complex<f32>), (Complex<f64>)] => f64,
+    }
+);
+define_reduction_op!(
+    StandardDeviation,
+    StandardDeviationKernel,
+    |items, ddof: f64| { variance_impl(items, ddof).sqrt() },
+    types = {
+        [i8, i16, i32, i64] => f64,
+        [u8, u16, u32, u64] => f64,
+        [f16, f32, f64] => f64,
+        [(Complex<f32>), (Complex<f64>)] => f64,
+    }
+);
+fn variance_impl<T>(items: impl Iterator<Item = T>, ddof: f64) -> f64
+where
+    T: VarianceImpl,
+    i32: crate::ops::astype::Cast<T::MeanType>,
+    T: crate::ops::astype::Cast<T::MeanType>,
+    T::MeanType: core::ops::Sub<T::MeanType, Output = T::MeanType>
+        + core::ops::Div<f64, Output = T::MeanType>
+        + core::ops::AddAssign<T::MeanType>
+        + Copy,
+{
+    let mut mean: T::MeanType = crate::ops::astype::cast(0);
+    let mut m2 = 0.0_f64;
+    let mut n = 0_u64;
+
+    for x in items {
+        let x: T::MeanType = crate::ops::astype::cast(x);
+        n += 1;
+        let delta = x - mean;
+        mean += delta / n as f64;
+        let delta2 = x - mean;
+        m2 += T::update_m2(delta, delta2);
+    }
+
+    let denom = n as f64 - ddof;
+    if denom <= 0.0 {
+        f64::NAN
+    } else {
+        m2 / denom
+    }
+}
+trait VarianceImpl {
+    type MeanType;
+    fn update_m2(delta: Self::MeanType, delta2: Self::MeanType) -> f64;
+}
+macro_rules! impl_num_variance_impl {
+    ($ty:ty) => {
+        impl VarianceImpl for $ty {
+            type MeanType = f64;
+            fn update_m2(delta: f64, delta2: f64) -> f64 {
+                delta * delta2
+            }
+        }
+    };
+}
+macro_rules! impl_complex_variance_impl {
+    ($f_ty:ty) => {
+        impl VarianceImpl for Complex<$f_ty> {
+            type MeanType = Complex<f64>;
+            fn update_m2(delta: Complex<f64>, delta2: Complex<f64>) -> f64 {
+                delta.re * delta2.re + delta.im * delta2.im
+            }
+        }
+    };
+}
+impl_num_variance_impl!(i8);
+impl_num_variance_impl!(i16);
+impl_num_variance_impl!(i32);
+impl_num_variance_impl!(i64);
+impl_num_variance_impl!(u8);
+impl_num_variance_impl!(u16);
+impl_num_variance_impl!(u32);
+impl_num_variance_impl!(u64);
+#[cfg(feature = "half")]
+impl_num_variance_impl!(f16);
+impl_num_variance_impl!(f32);
+impl_num_variance_impl!(f64);
+impl_complex_variance_impl!(f32);
+impl_complex_variance_impl!(f64);
+impl_num_variance_impl!(bool);
+
+define_reduction_op!(
     All,
     AllKernel,
     |items| { items.fold(true, |m, x| m && crate::ops::astype::cast::<_, bool>(x)) },
@@ -481,20 +597,20 @@ define_reduction_op!(
 );
 
 macro_rules! define_array_reduction_method {
-    ($op:ident : $Name:ident, single_axis = "true") => {
+    ($op:ident : $Name:ident, single_axis = "true" $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
         #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op(self, axis: usize, keepdims: bool) -> crate::Array<$Name<S>> {
-            let op = $Name::new(self, axis, keepdims).unwrap();
+        pub fn $op(self, axis: usize, keepdims: bool $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
+            let op = $Name::new(self, axis, keepdims $($(, $extra_arg)*)?).unwrap();
             crate::Array::from_storage(op)
         }
     };
 
-    ($op:ident : $Name:ident) => {
+    ($op:ident : $Name:ident $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
         #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op(self, axes: &[usize], keepdims: bool) -> crate::Array<$Name<S>> {
-            let op = $Name::new(self, axes, keepdims).unwrap();
+        pub fn $op(self, axes: &[usize], keepdims: bool $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
+            let op = $Name::new(self, axes, keepdims $($(, $extra_arg)*)?).unwrap();
             crate::Array::from_storage(op)
         }
     };
@@ -510,6 +626,9 @@ where
     define_array_reduction_method!(argmin: ArgMin, single_axis = "true");
     define_array_reduction_method!(sum: Sum);
     define_array_reduction_method!(product: Product);
+    define_array_reduction_method!(mean: Mean);
+    define_array_reduction_method!(var: Variance, extra_args = (ddof: f64));
+    define_array_reduction_method!(std: StandardDeviation, extra_args = (ddof: f64));
     define_array_reduction_method!(all: All);
     define_array_reduction_method!(any: Any);
 }
@@ -1787,6 +1906,211 @@ mod tests {
         #[should_panic]
         fn error_axis_out_of_bounds() {
             make(seq(6), &[2, 3]).argmin(2, false);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // mean
+    // -----------------------------------------------------------------------
+
+    mod mean {
+        use super::*;
+
+        #[test]
+        fn output_dtype_i32_to_f64() {
+            use crate::dtype::DtypeScalarKind;
+            let a: Array<_> = make(seq(6), &[2, 3]);
+            assert_eq!(
+                a.mean(&[0], false).dtype().try_to_scalar(),
+                Some(DtypeScalarKind::F64)
+            );
+        }
+
+        #[test]
+        fn read_axis0_f64() {
+            // [[0,2,4],[2,4,6]] mean over rows → [1,3,5]
+            let got: ArrayD<f64> = make(vec![0.0f64, 2.0, 4.0, 2.0, 4.0, 6.0], &[2, 3])
+                .mean(&[0], false)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![3], vec![1.0f64, 3.0, 5.0]).unwrap()
+            );
+        }
+
+        #[test]
+        fn read_axis1_f64() {
+            // [[0,2,4],[2,4,6]] mean over cols → [2,4]
+            let got: ArrayD<f64> = make(vec![0.0f64, 2.0, 4.0, 2.0, 4.0, 6.0], &[2, 3])
+                .mean(&[1], false)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![2], vec![2.0f64, 4.0]).unwrap()
+            );
+        }
+
+        #[test]
+        fn read_all_axes_i32() {
+            // mean of [0..5] = 2.5
+            let got: ArrayD<f64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
+                .mean(&[0, 1], false)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![2.5f64]).unwrap());
+        }
+
+        #[test]
+        fn keepdims_shape() {
+            assert_eq!(make(seq(12), &[3, 4]).mean(&[0], true).shape(), &[1, 4]);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // var
+    // -----------------------------------------------------------------------
+
+    mod var {
+        use super::*;
+
+        #[test]
+        fn output_dtype_i32_to_f64() {
+            use crate::dtype::DtypeScalarKind;
+            let a: Array<_> = make(seq(4), &[2, 2]);
+            assert_eq!(
+                a.var(&[0], false, 0.0).dtype().try_to_scalar(),
+                Some(DtypeScalarKind::F64)
+            );
+        }
+
+        #[test]
+        fn population_variance_1d() {
+            // [1,3]: mean=2, var_0 = 1.0
+            let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
+                .var(&[1], false, 0.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1.0f64]).unwrap());
+        }
+
+        #[test]
+        fn sample_variance_1d() {
+            // [1,3]: mean=2, var_1 = 2.0
+            let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
+                .var(&[1], false, 1.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![2.0f64]).unwrap());
+        }
+
+        #[test]
+        fn read_axis0_f64() {
+            // [[1,3],[3,7]]: col means=[2,5], var_0 per col = [1,4]
+            let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
+                .var(&[0], false, 0.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![2], vec![1.0f64, 4.0]).unwrap()
+            );
+        }
+
+        #[test]
+        fn read_axis1_f64() {
+            // [[1,3],[3,7]]: row means=[2,5], var_0 per row = [1,4]
+            let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
+                .var(&[1], false, 0.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![2], vec![1.0f64, 4.0]).unwrap()
+            );
+        }
+
+        #[test]
+        fn ddof_exceeds_n_gives_nan() {
+            // ddof=2 with n=1 → NAN
+            let got: ArrayD<f64> = make(vec![1.0f64], &[1, 1])
+                .var(&[1], false, 2.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert!(got.iter().all(|v| v.is_nan()));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // std
+    // -----------------------------------------------------------------------
+
+    mod std {
+        use super::*;
+
+        #[test]
+        fn output_dtype_i32_to_f64() {
+            use crate::dtype::DtypeScalarKind;
+            let a: Array<_> = make(seq(4), &[2, 2]);
+            assert_eq!(
+                a.std(&[0], false, 0.0).dtype().try_to_scalar(),
+                Some(DtypeScalarKind::F64)
+            );
+        }
+
+        #[test]
+        fn population_std_1d() {
+            // [1,3]: mean=2, std_0 = 1.0
+            let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
+                .std(&[1], false, 0.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1.0f64]).unwrap());
+        }
+
+        #[test]
+        fn read_axis0_f64() {
+            // [[1,3],[3,7]]: var_0 per col = [1,4], std = [1,2]
+            let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
+                .std(&[0], false, 0.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(
+                got,
+                ArrayD::from_shape_vec(vec![2], vec![1.0f64, 2.0]).unwrap()
+            );
+        }
+
+        #[test]
+        fn classic_8_elements() {
+            // [2,4,4,4,5,5,7,9]: mean=5, var=4, std=2 (ddof=0)
+            let got: ArrayD<f64> = make(vec![2.0f64, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0], &[1, 8])
+                .std(&[1], false, 0.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![2.0f64]).unwrap());
+        }
+
+        #[test]
+        fn ddof_exceeds_n_gives_nan() {
+            let got: ArrayD<f64> = make(vec![1.0f64], &[1, 1])
+                .std(&[1], false, 2.0)
+                .data()
+                .to_ndarray()
+                .unwrap();
+            assert!(got.iter().all(|v| v.is_nan()));
         }
     }
 }

@@ -104,13 +104,39 @@ where
     }
 
     pub(crate) fn map<T>(
-        mut self,
-        mut f: impl FnMut((&[Ix], E::Item<'_>)) -> T + Clone,
+        self,
+        f: impl FnMut((&[Ix], E::Item<'_>)) -> T + Clone,
     ) -> impl Iterator<Item = T> + Clone
     where
         Self: Clone,
+        E: Clone,
     {
-        std::iter::from_fn(move || self.next().map(|(idx, ext)| f((idx, ext))))
+        #[derive(Clone)]
+        struct Iter<Ix, E, F>(NdIter<Ix, E>, F);
+        impl<Ix, E, F, T> Iterator for Iter<Ix, E, F>
+        where
+            Ix: Idx,
+            E: NdIterExtension<Ix> + Clone,
+            F: FnMut((&[Ix], E::Item<'_>)) -> T + Clone,
+        {
+            type Item = T;
+            fn next(&mut self) -> Option<Self::Item> {
+                self.0.next().map(|step| (self.1)(step))
+            }
+
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                let len = self.0.begin.as_ref().iter().zip(self.0.end.as_ref()).fold(
+                    1,
+                    |acc, (&b, &e)| {
+                        let e: usize = e.try_into().unwrap();
+                        let b: usize = b.try_into().unwrap();
+                        acc * (e - b)
+                    },
+                );
+                (len, Some(len))
+            }
+        }
+        Iter(self, f)
     }
 }
 

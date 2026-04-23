@@ -9,5 +9,7 @@
     - std
     - var
     - split
-- use proptest
+    - sort
+    - where
+    - full/zeros/ones/
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
