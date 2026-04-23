@@ -77,3 +77,6 @@ macro_rules! scalar_kind {
 }
 
 pub(crate) use {define_array_op1_method, define_array_op2_method, scalar_kind};
+
+// TODO: optimize per scalar type
+pub(crate) const BULK: usize = 8;

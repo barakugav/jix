@@ -2,19 +2,97 @@ use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
-use crate::dtype::{f16, Complex, Dtype};
+use crate::dtype::{f16, Complex, Dtype, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
 pub(crate) trait Op2Kernel {
-    fn apply<'a>(
-        &self,
-        data: impl Iterator<Item = ((&'a [u8], &'a [u8]), &'a mut [u8])>,
-        input_dtypes: (&Dtype, &Dtype),
-    ) -> Result<()>;
+    fn apply(&self, data: Op2KernelData, input_dtypes: (&Dtype, &Dtype)) -> Result<()>;
 
     fn output_dtype(&self, input_dtypes: (&Dtype, &Dtype)) -> Result<Dtype>;
+}
+
+pub(crate) struct Op2KernelData<'a> {
+    src_a_data: *const u8,
+    src_b_data: *const u8,
+    dst_data: *mut u8, // potentially an alias to src_a_data or src_b_data
+    nitems: usize,
+    src_a_itemsize: Itemsize,
+    src_b_itemsize: Itemsize,
+    dst_itemsize: Itemsize,
+    phantom: std::marker::PhantomData<&'a ()>,
+}
+#[allow(unused)]
+impl<'a> Op2KernelData<'a> {
+    pub(crate) fn read_as_bytes(&mut self) -> Option<(&[u8], &[u8])> {
+        (self.nitems > 0).then(|| unsafe {
+            (
+                std::slice::from_raw_parts(self.src_a_data, self.src_a_itemsize as usize),
+                std::slice::from_raw_parts(self.src_b_data, self.src_b_itemsize as usize),
+            )
+        })
+    }
+
+    pub(crate) unsafe fn read<T1, T2>(&mut self) -> Option<(T1, T2)> {
+        debug_assert_eq!(self.src_a_itemsize as usize, size_of::<T1>());
+        debug_assert_eq!(self.src_b_itemsize as usize, size_of::<T2>());
+        (self.nitems > 0).then(|| unsafe {
+            (
+                self.src_a_data.cast::<T1>().read(),
+                self.src_b_data.cast::<T2>().read(),
+            )
+        })
+    }
+
+    pub(crate) unsafe fn read_bulk<T1, T2, const N: usize>(
+        &mut self,
+    ) -> Option<([T1; N], [T2; N])> {
+        debug_assert_eq!(self.src_a_itemsize as usize, size_of::<T1>());
+        debug_assert_eq!(self.src_b_itemsize as usize, size_of::<T2>());
+        (self.nitems >= N).then(|| unsafe {
+            (
+                self.src_a_data.cast::<[T1; N]>().read(),
+                self.src_b_data.cast::<[T2; N]>().read(),
+            )
+        })
+    }
+
+    pub(crate) unsafe fn write_bytes(&mut self, data: &[u8]) {
+        assert_eq!(self.dst_itemsize as usize, data.len());
+        assert!(self.nitems > 0);
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), self.dst_data, data.len());
+        }
+        self.nitems -= 1;
+        self.src_a_data = unsafe { self.src_a_data.add(self.src_a_itemsize as usize) };
+        self.src_b_data = unsafe { self.src_b_data.add(self.src_b_itemsize as usize) };
+        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize) };
+    }
+
+    pub(crate) unsafe fn write<T>(&mut self, data: T) {
+        debug_assert_eq!(self.dst_itemsize as usize, size_of::<T>());
+        assert!(self.nitems > 0);
+        unsafe {
+            self.dst_data.cast::<T>().write(data);
+        }
+        self.nitems -= 1;
+        self.src_a_data = unsafe { self.src_a_data.add(self.src_a_itemsize as usize) };
+        self.src_b_data = unsafe { self.src_b_data.add(self.src_b_itemsize as usize) };
+        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize) };
+    }
+
+    pub(crate) unsafe fn write_bulk<T, const N: usize>(&mut self, data: [T; N]) {
+        debug_assert_eq!(self.dst_itemsize as usize, size_of::<T>());
+        assert!(self.nitems >= N);
+        unsafe {
+            self.dst_data.cast::<[T; N]>().write(data);
+        }
+        self.nitems -= N;
+        self.src_a_data = unsafe { self.src_a_data.add(self.src_a_itemsize as usize * N) };
+        self.src_b_data = unsafe { self.src_b_data.add(self.src_b_itemsize as usize * N) };
+        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize * N) };
+    }
 }
 
 pub(crate) struct Op2<Op, S1, S2> {
@@ -23,7 +101,7 @@ pub(crate) struct Op2<Op, S1, S2> {
     a: Array<S1>,
     b: Array<S2>,
 
-    dtype: Dtype,
+    output_dtype: Dtype,
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
@@ -44,7 +122,7 @@ impl<Op, S1, S2> Op2<Op, S1, S2> {
         );
         Ok(Self {
             op,
-            dtype: output_dtype,
+            output_dtype,
             shape: a.shape().try_into().unwrap(),
             blocks_layout: a.blocks_layout().clone(),
             a,
@@ -60,34 +138,64 @@ where
 {
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(&self.shape, index)?;
-        let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
+        let nitems = check_get_buffer_size(index, &self.output_dtype, buf)?;
 
-        let a_dtype = self.a.dtype();
-        let b_dtype = self.b.dtype();
-        let output_dtype = self.dtype();
-        // TODO: if the itemsize (and alignment) of one of the inputs and output dtype are the same,
-        // we can read directly into the output buffer, and perform the op in-place, avoiding the
-        // memcopy from temporary buffer. Need to change the op::apply signature.
-        let mut a_buf = context.tmp_buf(nitems * a_dtype.itemsize() as usize, a_dtype.alignment());
-        let mut b_buf = context.tmp_buf(nitems * b_dtype.itemsize() as usize, b_dtype.alignment());
-        let a_buf = a_buf.as_mut_slice();
-        let b_buf = b_buf.as_mut_slice();
+        let (a_dtype, b_dtype, dst_dtype) = (self.a.dtype(), self.b.dtype(), &self.output_dtype);
+        let (src_a_itemsize, src_b_itemsize, dst_itemsize) = (
+            a_dtype.itemsize() as usize,
+            b_dtype.itemsize() as usize,
+            dst_dtype.itemsize() as usize,
+        );
+
+        let a_in_place = src_a_itemsize == dst_itemsize
+            && (buf.as_ptr() as usize).is_multiple_of(a_dtype.alignment() as usize);
+        let b_in_place = src_b_itemsize == dst_itemsize
+            && (buf.as_ptr() as usize).is_multiple_of(b_dtype.alignment() as usize);
+        let mut a_tmp_buf;
+        let mut b_tmp_buf;
+        let (a_buf, b_buf, dst) = if a_in_place {
+            b_tmp_buf = context.tmp_buf(nitems * src_b_itemsize, b_dtype.alignment());
+            let b_tmp_buf = b_tmp_buf.as_mut_slice();
+            let ptr = buf.as_mut_ptr();
+            (buf, b_tmp_buf, ptr)
+        } else if b_in_place {
+            a_tmp_buf = context.tmp_buf(nitems * src_a_itemsize, a_dtype.alignment());
+            let a_tmp_buf = a_tmp_buf.as_mut_slice();
+            let dst = buf.as_mut_ptr();
+            (a_tmp_buf, buf, dst)
+        } else {
+            a_tmp_buf = context.tmp_buf(nitems * src_a_itemsize, a_dtype.alignment());
+            let a_tmp_buf = a_tmp_buf.as_mut_slice();
+
+            b_tmp_buf = context.tmp_buf(nitems * src_b_itemsize, b_dtype.alignment());
+            let b_tmp_buf = b_tmp_buf.as_mut_slice();
+
+            (a_tmp_buf, b_tmp_buf, buf.as_mut_ptr())
+        };
 
         self.a.storage.read_data(index, a_buf, context)?;
         self.b.storage.read_data(index, b_buf, context)?;
 
-        let a_iter = a_buf.chunks_exact(a_dtype.itemsize() as usize);
-        let b_iter = b_buf.chunks_exact(b_dtype.itemsize() as usize);
-        let out_iter = buf.chunks_exact_mut(output_dtype.itemsize() as usize);
-        self.op
-            .apply(a_iter.zip(b_iter).zip(out_iter), (a_dtype, b_dtype))
+        self.op.apply(
+            Op2KernelData {
+                src_a_data: a_buf.as_ptr(),
+                src_b_data: b_buf.as_ptr(),
+                dst_data: dst,
+                nitems,
+                src_a_itemsize: a_dtype.itemsize(),
+                src_b_itemsize: b_dtype.itemsize(),
+                dst_itemsize: dst_dtype.itemsize(),
+                phantom: std::marker::PhantomData,
+            },
+            (a_dtype, b_dtype),
+        )
     }
 
     fn shape(&self) -> &[u64] {
         &self.shape
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        &self.output_dtype
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -190,25 +298,37 @@ macro_rules! define_op2_kernel {
     ) => {
         struct $NameKernel;
         impl crate::ops::op2::Op2Kernel for $NameKernel {
-            fn apply<'a>(
+            fn apply(
                 &self,
-                data: impl Iterator<Item = ((&'a [u8], &'a [u8]), &'a mut [u8])>,
+                mut data: crate::ops::op2::Op2KernelData,
                 input_dtypes: (&crate::dtype::Dtype, &crate::dtype::Dtype),
             ) -> crate::error::Result<()> {
                 macro_rules! apply_loop_impl {
                     ($input_type2:ty, $output_type2:ty) => {{
-                        let data = data.map(|((a_src, b_src), dst)| {
-                            let a_src = unsafe { a_src.as_ptr().cast::<$input_type2>().read() };
-                            let b_src = unsafe { b_src.as_ptr().cast::<$input_type2>().read() };
-                            let dst = unsafe { &mut *dst.as_mut_ptr().cast::<$output_type2>() };
-                            (a_src, b_src, dst)
-                        });
-                        for (a_src, b_src, dst) in data {
-                            let $a = a_src;
-                            let $b = b_src;
-                            *dst = $body;
+                        unsafe {
+                            while let Some((src_a, src_b)) = data.read_bulk::<$input_type2, $input_type2, { crate::ops::common::BULK }>() {
+                                let mut dst: [std::mem::MaybeUninit<$output_type2>; crate::ops::common::BULK]
+                                    = std::mem::transmute(std::mem::MaybeUninit::<[$output_type2; crate::ops::common::BULK]>::uninit());
+                                for i in 0..crate::ops::common::BULK {
+                                    dst[i].write({
+                                        let $a = src_a[i];
+                                        let $b = src_b[i];
+                                        $body
+                                    });
+                                }
+                                data.write_bulk(dst);
+                            }
+                            while let Some((src_a, src_b)) = data.read::<$input_type2, $input_type2>() {
+                                let mut dst = std::mem::MaybeUninit::<$output_type2>::uninit();
+                                dst.write({
+                                    let $a = src_a;
+                                    let $b = src_b;
+                                    $body
+                                });
+                                data.write(dst);
+                            }
                         }
-                        return Ok(())
+                        return Ok(());
                     }};
                 }
                 macro_rules! apply_loop {
@@ -296,6 +416,13 @@ define_op2!(
     core_op = (Div, div),
     |a, b| a / b,
     [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
+    output_type = "same"
+);
+define_op2!(
+    Power,
+    PowerKernel,
+    |a, b| a.powf(b),
+    [f32, f64],
     output_type = "same"
 );
 

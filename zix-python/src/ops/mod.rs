@@ -44,6 +44,7 @@ define_op2!(
 define_op2!(subtract, Sub);
 define_op2!(multiply, Mul);
 define_op2!(divide, Div);
+define_op2!(power, Power);
 
 // logical1
 define_op1!(is_nan, IsNan);

@@ -2,20 +2,75 @@ use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
-use crate::dtype::{f16, Complex, Dtype};
+use crate::dtype::{f16, Complex, Dtype, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::common::define_array_op1_method;
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 
 pub(crate) trait Op1Kernel {
-    fn apply<'a>(
-        &self,
-        data: impl Iterator<Item = (&'a [u8], &'a mut [u8])>,
-        input_dtype: &Dtype,
-    ) -> Result<()>;
+    fn apply(&self, data: Op1KernelData, input_dtype: &Dtype) -> Result<()>;
 
     fn output_dtype(&self, input_dtype: &Dtype) -> Result<Dtype>;
+}
+pub(crate) struct Op1KernelData<'a> {
+    src_data: *const u8,
+    dst_data: *mut u8, // potentially an alias to src_data
+    nitems: usize,
+    src_itemsize: Itemsize,
+    dst_itemsize: Itemsize,
+    phantom: std::marker::PhantomData<&'a ()>,
+}
+#[allow(unused)]
+impl<'a> Op1KernelData<'a> {
+    pub(crate) fn read_as_bytes(&mut self) -> Option<&[u8]> {
+        (self.nitems > 0).then(|| unsafe {
+            std::slice::from_raw_parts(self.src_data, self.src_itemsize as usize)
+        })
+    }
+
+    pub(crate) unsafe fn read<T>(&mut self) -> Option<T> {
+        debug_assert_eq!(self.src_itemsize as usize, size_of::<T>());
+        (self.nitems > 0).then(|| unsafe { self.src_data.cast::<T>().read() })
+    }
+
+    pub(crate) unsafe fn read_bulk<T, const N: usize>(&mut self) -> Option<[T; N]> {
+        debug_assert_eq!(self.src_itemsize as usize, size_of::<T>());
+        (self.nitems >= N).then(|| unsafe { self.src_data.cast::<[T; N]>().read() })
+    }
+
+    pub(crate) unsafe fn write_bytes(&mut self, data: &[u8]) {
+        assert_eq!(self.dst_itemsize as usize, data.len());
+        assert!(self.nitems > 0);
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), self.dst_data, data.len());
+        }
+        self.nitems -= 1;
+        self.src_data = unsafe { self.src_data.add(self.src_itemsize as usize) };
+        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize) };
+    }
+
+    pub(crate) unsafe fn write<T>(&mut self, data: T) {
+        debug_assert_eq!(self.dst_itemsize as usize, size_of::<T>());
+        assert!(self.nitems > 0);
+        unsafe {
+            self.dst_data.cast::<T>().write(data);
+        }
+        self.nitems -= 1;
+        self.src_data = unsafe { self.src_data.add(self.src_itemsize as usize) };
+        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize) };
+    }
+
+    pub(crate) unsafe fn write_bulk<T, const N: usize>(&mut self, data: [T; N]) {
+        debug_assert_eq!(self.dst_itemsize as usize, size_of::<T>());
+        assert!(self.nitems >= N);
+        unsafe {
+            self.dst_data.cast::<[T; N]>().write(data);
+        }
+        self.nitems -= N;
+        self.src_data = unsafe { self.src_data.add(self.src_itemsize as usize * N) };
+        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize * N) };
+    }
 }
 
 pub(crate) struct Op1<Op, S> {
@@ -51,21 +106,36 @@ where
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(&self.shape, index)?;
         let nitems = check_get_buffer_size(index, &self.output_dtype, buf)?;
-        let input_dtype = self.array.dtype();
-        let output_dtype = self.dtype();
-        // TODO: if the itemsize (and alignment) of the input and output dtype are the same,
-        // we can read directly into the output buffer, and perform the op in-place, avoiding the
-        // memcopy from temporary buffer. Need to change the op::apply signature.
-        let mut tmp_buf = context.tmp_buf(
-            nitems * input_dtype.itemsize() as usize,
-            input_dtype.alignment(),
-        );
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.storage.read_data(index, tmp_buf, context)?;
 
-        let data_iter = tmp_buf.chunks_exact(input_dtype.itemsize() as usize);
-        let out_iter = buf.chunks_exact_mut(output_dtype.itemsize() as usize);
-        self.op.apply(data_iter.zip(out_iter), input_dtype)
+        let (src_dtype, dst_dtype) = (self.array.dtype(), &self.output_dtype);
+        let (src_itemsize, dst_itemsize) =
+            (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
+
+        let in_place = src_itemsize == dst_itemsize
+            && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment() as usize);
+        let mut tmp_buf;
+        let (read_buf, dst) = if in_place {
+            let ptr = buf.as_mut_ptr();
+            (buf, ptr)
+        } else {
+            tmp_buf = context.tmp_buf(nitems * src_itemsize, src_dtype.alignment());
+            let tmp_buf = tmp_buf.as_mut_slice();
+            (tmp_buf, buf.as_mut_ptr())
+        };
+        self.array.storage.read_data(index, read_buf, context)?;
+        let src = read_buf.as_ptr();
+
+        self.op.apply(
+            Op1KernelData {
+                src_data: src,
+                dst_data: dst,
+                nitems,
+                src_itemsize: src_dtype.itemsize(),
+                dst_itemsize: dst_dtype.itemsize(),
+                phantom: std::marker::PhantomData,
+            },
+            src_dtype,
+        )
     }
 
     fn shape(&self) -> &[u64] {
@@ -148,23 +218,35 @@ macro_rules! define_op1_kernel {
     ) => {
         struct $NameKernel;
         impl crate::ops::op1::Op1Kernel for $NameKernel {
-            fn apply<'a>(
+            fn apply(
                 &self,
-                data: impl Iterator<Item = (&'a [u8], &'a mut [u8])>,
+                mut data: crate::ops::op1::Op1KernelData,
                 input_dtype: &crate::dtype::Dtype,
             ) -> crate::error::Result<()> {
                 macro_rules! apply_loop_impl {
                     ($input_type2:ty, $output_type2:ty) => {{
-                        let data = data.map(|(src, dst)| {
-                            let src = unsafe { src.as_ptr().cast::<$input_type2>().read() };
-                            let dst = unsafe { &mut *dst.as_mut_ptr().cast::<$output_type2>() };
-                            (src, dst)
-                        });
-                        for (src, dst) in data {
-                            let $arg = src;
-                            *dst = $body;
+                        unsafe {
+                            while let Some(src) = data.read_bulk::<$input_type2, { crate::ops::common::BULK }>() {
+                                let mut dst: [std::mem::MaybeUninit<$output_type2>; crate::ops::common::BULK]
+                                    = std::mem::transmute(std::mem::MaybeUninit::<[$output_type2; crate::ops::common::BULK]>::uninit());
+                                for i in 0..crate::ops::common::BULK {
+                                    dst[i].write({
+                                        let $arg = src[i];
+                                        $body
+                                    });
+                                }
+                                data.write_bulk(dst);
+                            }
+                            while let Some(src) = data.read::<$input_type2>() {
+                                let mut dst = std::mem::MaybeUninit::<$output_type2>::uninit();
+                                dst.write({
+                                    let $arg = src;
+                                    $body
+                                });
+                                data.write(dst);
+                            }
                         }
-                        return Ok(())
+                        return Ok(());
                     }};
                 }
                 macro_rules! apply_loop {
