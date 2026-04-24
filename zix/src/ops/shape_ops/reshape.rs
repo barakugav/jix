@@ -429,7 +429,7 @@ mod tests {
     fn full_read_1d_to_2d_3x4_u8() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], u8s(12)).unwrap());
     }
 
@@ -437,7 +437,7 @@ mod tests {
     fn full_read_1d_to_2d_4x3_u8() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[4, 3]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![4, 3], u8s(12)).unwrap());
     }
 
@@ -445,7 +445,7 @@ mod tests {
     fn full_read_1d_to_2d_2x6_u8() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[2, 6]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 6], u8s(12)).unwrap());
     }
 
@@ -453,7 +453,7 @@ mod tests {
     fn full_read_1d_to_2d_6x2_u8() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[6, 2]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![6, 2], u8s(12)).unwrap());
     }
 
@@ -465,7 +465,7 @@ mod tests {
     fn full_read_2d_to_1d_flatten() {
         let a = make2d(i32s(12), 3, 4, &[3, 4]);
         let r = a.reshape_view(&[12]);
-        let got: ArrayD<i32> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![12], i32s(12)).unwrap());
     }
 
@@ -473,7 +473,7 @@ mod tests {
     fn full_read_2d_to_1d_flatten_non_square() {
         let a = make2d(u8s(20), 4, 5, &[4, 5]);
         let r = a.reshape_view(&[20]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![20], u8s(20)).unwrap());
     }
 
@@ -486,7 +486,7 @@ mod tests {
         // [3, 4] → [2, 6]: rows of 3 in orig map to interleaved rows of 2 in new
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
         let r = a.reshape_view(&[2, 6]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 6], u8s(12)).unwrap());
     }
 
@@ -495,7 +495,7 @@ mod tests {
         // [4, 3] → [3, 4]
         let a = make2d(u8s(12), 4, 3, &[4, 3]);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], u8s(12)).unwrap());
     }
 
@@ -507,7 +507,7 @@ mod tests {
     fn full_read_1d_to_3d() {
         let a = make1d(u8s(24), 24);
         let r = a.reshape_view(&[2, 3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 3, 4], u8s(24)).unwrap());
     }
 
@@ -515,7 +515,7 @@ mod tests {
     fn full_read_3d_to_1d_flatten() {
         let a = make3d(i32s(24), 2, 3, 4, &[2, 3, 4]);
         let r = a.reshape_view(&[24]);
-        let got: ArrayD<i32> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![24], i32s(24)).unwrap());
     }
 
@@ -524,7 +524,7 @@ mod tests {
         // [2, 3, 4] → [6, 4]
         let a = make3d(u8s(24), 2, 3, 4, &[2, 3, 4]);
         let r = a.reshape_view(&[6, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![6, 4], u8s(24)).unwrap());
     }
 
@@ -533,7 +533,7 @@ mod tests {
         // [6, 4] → [2, 3, 4]
         let a = make2d(u8s(24), 6, 4, &[6, 4]);
         let r = a.reshape_view(&[2, 3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 3, 4], u8s(24)).unwrap());
     }
 
@@ -542,7 +542,7 @@ mod tests {
         // [2, 3, 4] → [2, 12]
         let a = make3d(u8s(24), 2, 3, 4, &[2, 3, 4]);
         let r = a.reshape_view(&[2, 12]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 12], u8s(24)).unwrap());
     }
 
@@ -554,7 +554,7 @@ mod tests {
     fn full_read_same_shape_1d() {
         let a = make1d(i32s(8), 8);
         let r = a.reshape_view(&[8]);
-        let got: ArrayD<i32> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![8], i32s(8)).unwrap());
     }
 
@@ -562,7 +562,7 @@ mod tests {
     fn full_read_same_shape_2d() {
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], u8s(12)).unwrap());
     }
 
@@ -574,7 +574,7 @@ mod tests {
     fn full_read_single_element_1d_to_1d() {
         let a = make1d(vec![42u8], 1);
         let r = a.reshape_view(&[1]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![42u8]).unwrap());
     }
 
@@ -586,7 +586,7 @@ mod tests {
     fn full_read_dtype_i32() {
         let a = make1d(i32s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<i32> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], i32s(12)).unwrap());
     }
 
@@ -594,7 +594,7 @@ mod tests {
     fn full_read_dtype_f32() {
         let a = make1d(f32s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<f32> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<f32> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], f32s(12)).unwrap());
     }
 
@@ -602,7 +602,7 @@ mod tests {
     fn full_read_dtype_f64() {
         let a = make1d(f64s(12), 12);
         let r = a.reshape_view(&[4, 3]);
-        let got: ArrayD<f64> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<f64> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![4, 3], f64s(12)).unwrap());
     }
 
@@ -619,7 +619,7 @@ mod tests {
     fn sub_read_first_row() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..1, 0..4]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[0..1, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 4], vec![0, 1, 2, 3]).unwrap()
@@ -630,7 +630,7 @@ mod tests {
     fn sub_read_middle_row() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[1..2, 0..4]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[1..2, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 4], vec![4, 5, 6, 7]).unwrap()
@@ -641,7 +641,7 @@ mod tests {
     fn sub_read_last_row() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[2..3, 0..4]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[2..3, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 4], vec![8, 9, 10, 11]).unwrap()
@@ -652,7 +652,7 @@ mod tests {
     fn sub_read_first_two_rows() {
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..2, 0..4]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[0..2, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 4], vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap()
@@ -664,7 +664,7 @@ mod tests {
         // [0..3, 0..2] → rows 0-2, cols 0-1
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..3, 0..2]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[0..3, 0..2], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![3, 2], vec![0, 1, 4, 5, 8, 9]).unwrap()
@@ -676,7 +676,7 @@ mod tests {
         // [0..3, 2..4] → rows 0-2, cols 2-3
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..3, 2..4]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[0..3, 2..4], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![3, 2], vec![2, 3, 6, 7, 10, 11]).unwrap()
@@ -688,7 +688,7 @@ mod tests {
         // [1..3, 1..3]
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[1..3, 1..3]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[1..3, 1..3], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 2], vec![5, 6, 9, 10]).unwrap()
@@ -700,7 +700,7 @@ mod tests {
         // [1..2, 2..3] → element at (1,2) = 6
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[1..2, 2..3]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[1..2, 2..3], &r.read_ctx()).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1, 1], vec![6]).unwrap());
     }
 
@@ -709,7 +709,7 @@ mod tests {
         // [2..3, 3..4] → element at (2,3) = 11
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[2..3, 3..4]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[2..3, 3..4], &r.read_ctx()).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1, 1], vec![11]).unwrap());
     }
 
@@ -722,7 +722,7 @@ mod tests {
     fn sub_read_flatten_middle_range() {
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
         let r = a.reshape_view(&[12]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[3..9]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[3..9], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![6], vec![3, 4, 5, 6, 7, 8]).unwrap()
@@ -734,7 +734,7 @@ mod tests {
         // Flat [2..6) spans the last 2 of row-0 and first 2 of row-1 (in orig [3,4])
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
         let r = a.reshape_view(&[12]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[2..6]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[2..6], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![4], vec![2, 3, 4, 5]).unwrap()
@@ -754,7 +754,7 @@ mod tests {
         // [0..1, 1..4] → [1, 3] = [1, 2, 3]
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[2, 6]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..1, 1..4]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[0..1, 1..4], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 3], vec![1, 2, 3]).unwrap()
@@ -767,7 +767,7 @@ mod tests {
         // row 0: [2, 3, 4]; row 1: [8, 9, 10]
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[2, 6]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..2, 2..5]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[0..2, 2..5], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 3], vec![2, 3, 4, 8, 9, 10]).unwrap()
@@ -787,7 +787,9 @@ mod tests {
         // [0..1, 1..2, 0..4] → (0,1,*) = [4, 5, 6, 7]
         let a = make1d(u8s(24), 24);
         let r = a.reshape_view(&[2, 3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..1, 1..2, 0..4]).unwrap();
+        let got: ArrayD<u8> = r
+            .to_ndarray_sub(&[0..1, 1..2, 0..4], &r.read_ctx())
+            .unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 1, 4], vec![4, 5, 6, 7]).unwrap()
@@ -803,7 +805,9 @@ mod tests {
         //   (1,2,1)=21 (1,2,2)=22
         let a = make1d(u8s(24), 24);
         let r = a.reshape_view(&[2, 3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..2, 1..3, 1..3]).unwrap();
+        let got: ArrayD<u8> = r
+            .to_ndarray_sub(&[0..2, 1..3, 1..3], &r.read_ctx())
+            .unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 2, 2], vec![5, 6, 9, 10, 17, 18, 21, 22]).unwrap()
@@ -815,7 +819,9 @@ mod tests {
         // [1..2, 0..3, 0..4] → all of the second "slab" = [12..24]
         let a = make1d(u8s(24), 24);
         let r = a.reshape_view(&[2, 3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[1..2, 0..3, 0..4]).unwrap();
+        let got: ArrayD<u8> = r
+            .to_ndarray_sub(&[1..2, 0..3, 0..4], &r.read_ctx())
+            .unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 3, 4], (12u8..24).collect()).unwrap()
@@ -831,7 +837,7 @@ mod tests {
         // 12 elements, block_size=4 → 3 blocks; reshape to [3, 4]
         let a = make1d(u8s(12), 4);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], u8s(12)).unwrap());
     }
 
@@ -841,7 +847,7 @@ mod tests {
         // flat [0..4) = one full original block → [0, 1, 2, 3]
         let a = make1d(u8s(12), 4);
         let r = a.reshape_view(&[3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..1, 0..4]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[0..1, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 4], vec![0, 1, 2, 3]).unwrap()
@@ -854,7 +860,7 @@ mod tests {
         //   row 0: [0..6) spans block0 (0-3) and part of block1 (4-5)
         let a = make1d(u8s(12), 4);
         let r = a.reshape_view(&[2, 6]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[0..1, 0..6]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[0..1, 0..6], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 6], vec![0, 1, 2, 3, 4, 5]).unwrap()
@@ -865,7 +871,7 @@ mod tests {
     fn multiblock_1d_to_2x6_full_read() {
         let a = make1d(u8s(12), 4);
         let r = a.reshape_view(&[2, 6]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 6], u8s(12)).unwrap());
     }
 
@@ -874,7 +880,7 @@ mod tests {
         // orig [3, 4] with block_shape [2, 2], flatten to [12]
         let a = make2d(u8s(12), 3, 4, &[2, 2]);
         let r = a.reshape_view(&[12]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![12], u8s(12)).unwrap());
     }
 
@@ -884,7 +890,7 @@ mod tests {
         // sub-read row 1: flat [6..12) → [6, 7, 8, 9, 10, 11]
         let a = make2d(u8s(12), 3, 4, &[2, 2]);
         let r = a.reshape_view(&[2, 6]);
-        let got: ArrayD<u8> = r.data().to_ndarray_sub(&[1..2, 0..6]).unwrap();
+        let got: ArrayD<u8> = r.to_ndarray_sub(&[1..2, 0..6], &r.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![1, 6], vec![6, 7, 8, 9, 10, 11]).unwrap()
@@ -896,7 +902,9 @@ mod tests {
         // 24 elements, block_size=3 → 8 blocks; reshape to [2, 3, 4]
         let a = make1d(u8s(24), 3);
         let r = a.reshape_view(&[2, 3, 4]);
-        let got: ArrayD<u8> = r.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r
+            .to_ndarray_sub(&[0..2, 0..3, 0..4], &r.read_ctx())
+            .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 3, 4], u8s(24)).unwrap());
     }
 
@@ -909,7 +917,7 @@ mod tests {
         let a = make1d(u8s(24), 24);
         let r1 = a.reshape_view(&[4, 6]);
         let r2 = r1.reshape_view(&[2, 3, 4]);
-        let got: ArrayD<u8> = r2.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = r2.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 3, 4], u8s(24)).unwrap());
     }
 
@@ -918,7 +926,7 @@ mod tests {
         let a = make1d(i32s(12), 12);
         let r1 = a.reshape_view(&[3, 4]);
         let r2 = r1.reshape_view(&[12]);
-        let got: ArrayD<i32> = r2.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = r2.to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![12], i32s(12)).unwrap());
     }
 
@@ -934,8 +942,8 @@ mod tests {
         let r43 = a12.as_ref().reshape_view(&[4, 3]);
         let r34 = a12.as_ref().reshape_view(&[3, 4]);
 
-        let flat_43: ArrayD<u8> = r43.reshape_view(&[12]).data().to_ndarray().unwrap();
-        let flat_34: ArrayD<u8> = r34.reshape_view(&[12]).data().to_ndarray().unwrap();
+        let flat_43: ArrayD<u8> = r43.reshape_view(&[12]).to_ndarray().unwrap();
+        let flat_34: ArrayD<u8> = r34.reshape_view(&[12]).to_ndarray().unwrap();
         assert_eq!(flat_43, flat_34);
         assert_eq!(flat_43, ArrayD::from_shape_vec(vec![12], u8s(12)).unwrap());
     }

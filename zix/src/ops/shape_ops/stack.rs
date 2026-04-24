@@ -234,7 +234,7 @@ mod tests {
         let b = ndarray::array![5i32, 6, 7, 8];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[4])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[4])).unwrap();
-        let actual = stack(vec![za, zb], 0).data().to_ndarray::<i32>().unwrap();
+        let actual = stack(vec![za, zb], 0).to_ndarray::<i32>().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -246,7 +246,7 @@ mod tests {
         let b = ndarray::array![4i32, 5, 6];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3])).unwrap();
-        let actual = stack([za, zb], 1).data().to_ndarray::<i32>().unwrap();
+        let actual = stack([za, zb], 1).to_ndarray::<i32>().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -258,7 +258,7 @@ mod tests {
         let b = ndarray::array![[7i32, 8, 9], [10, 11, 12]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2, 3])).unwrap();
-        let actual = stack((za, &zb), 0).data().to_ndarray::<i32>().unwrap();
+        let actual = stack((za, &zb), 0).to_ndarray::<i32>().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -270,7 +270,7 @@ mod tests {
         let b = ndarray::array![[7i32, 8, 9], [10, 11, 12]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2, 3])).unwrap();
-        let actual = stack(vec![&za, &zb], 1).data().to_ndarray::<i32>().unwrap();
+        let actual = stack(vec![&za, &zb], 1).to_ndarray::<i32>().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -284,7 +284,7 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3])).unwrap();
         let zc = Array::from_ndarray(&c.view().into_dyn(), arr_params(&[3])).unwrap();
-        let actual = stack([za, zb, zc], 0).data().to_ndarray::<i32>().unwrap();
+        let actual = stack([za, zb, zc], 0).to_ndarray::<i32>().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -296,7 +296,7 @@ mod tests {
         let b = ndarray::array![5.0f32, 6.0, 7.0, 8.0];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[4])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[4])).unwrap();
-        let actual = stack([za, zb], 0).data().to_ndarray::<f32>().unwrap();
+        let actual = stack([za, zb], 0).to_ndarray::<f32>().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -308,7 +308,7 @@ mod tests {
         let b = ndarray::array![[7.0f32, 8.0], [9.0, 10.0], [11.0, 12.0]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3, 2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3, 2])).unwrap();
-        let actual = stack([&za, &zb], 1).data().to_ndarray::<f32>().unwrap();
+        let actual = stack([&za, &zb], 1).to_ndarray::<f32>().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -322,7 +322,7 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2])).unwrap();
         let zc = Array::from_ndarray(&c.view().into_dyn(), arr_params(&[2])).unwrap();
-        let actual = stack((za, zb, &zc), 0).data().to_ndarray::<f32>().unwrap();
+        let actual = stack((za, zb, &zc), 0).to_ndarray::<f32>().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }

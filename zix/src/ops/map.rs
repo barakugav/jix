@@ -131,7 +131,7 @@ mod tests {
     fn map_same_type_1d() {
         let a = ndarray::array![1i32, 2, 3, 4].into_dyn();
         let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
-        let actual = za.map(|x: i32| x * 2).data().to_ndarray::<i32>().unwrap();
+        let actual = za.map(|x: i32| x * 2).to_ndarray::<i32>().unwrap();
         assert_eq!(actual, a.mapv(|x| x * 2));
     }
 
@@ -139,7 +139,7 @@ mod tests {
     fn map_same_type_multi_block() {
         let a = ndarray::array![1i32, 2, 3, 4, 5, 6].into_dyn();
         let za = Array::from_ndarray(&a, arr_params(&[2])).unwrap();
-        let actual = za.map(|x: i32| x + 10).data().to_ndarray::<i32>().unwrap();
+        let actual = za.map(|x: i32| x + 10).to_ndarray::<i32>().unwrap();
         assert_eq!(actual, a.mapv(|x| x + 10));
     }
 
@@ -147,11 +147,7 @@ mod tests {
     fn map_type_change_i32_to_f64() {
         let a = ndarray::array![1i32, 2, 3, 4].into_dyn();
         let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
-        let actual = za
-            .map(|x: i32| x as f64 * 0.5)
-            .data()
-            .to_ndarray::<f64>()
-            .unwrap();
+        let actual = za.map(|x: i32| x as f64 * 0.5).to_ndarray::<f64>().unwrap();
         let expected = a.mapv(|x| x as f64 * 0.5);
         assert_eq!(actual, expected);
     }
@@ -160,11 +156,7 @@ mod tests {
     fn map_type_change_f32_to_bool() {
         let a = ndarray::array![0.0f32, 1.0, -1.0, 0.0].into_dyn();
         let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
-        let actual = za
-            .map(|x: f32| x != 0.0)
-            .data()
-            .to_ndarray::<bool>()
-            .unwrap();
+        let actual = za.map(|x: f32| x != 0.0).to_ndarray::<bool>().unwrap();
         let expected = a.mapv(|x| x != 0.0);
         assert_eq!(actual, expected);
     }
@@ -175,7 +167,7 @@ mod tests {
             (idx[0] * 4 + idx[1]) as i32
         });
         let za = Array::from_ndarray(&a, arr_params(&[2, 2])).unwrap();
-        let actual = za.map(|x: i32| x * x).data().to_ndarray::<i32>().unwrap();
+        let actual = za.map(|x: i32| x * x).to_ndarray::<i32>().unwrap();
         let expected = a.mapv(|x| x * x);
         assert_eq!(actual, expected);
     }
@@ -202,7 +194,6 @@ mod tests {
         let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
         let actual = za
             .map(|v: i32| Point { x: v, y: v * 10 })
-            .data()
             .to_ndarray::<Point>()
             .unwrap();
         let expected = ndarray::array![
@@ -241,7 +232,6 @@ mod tests {
                 y: s.y,
                 norm_sq: (s.x as i64) * (s.x as i64) + (s.y as i64) * (s.y as i64),
             })
-            .data()
             .to_ndarray::<Big>()
             .unwrap();
         let expected = ndarray::array![

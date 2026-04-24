@@ -287,7 +287,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3])).unwrap();
         let actual = concatenate(vec![za, zb], 0)
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
@@ -302,7 +301,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[4])).unwrap();
         let actual = concatenate(vec![za, zb], 0)
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
@@ -319,7 +317,6 @@ mod tests {
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3])).unwrap();
         let zc = Array::from_ndarray(&c.view().into_dyn(), arr_params(&[1])).unwrap();
         let actual = concatenate(vec![za, zb, zc], 0)
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         let expected =
@@ -335,7 +332,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[1, 3])).unwrap();
         let actual = concatenate(vec![za, zb], 0)
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
@@ -350,7 +346,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3, 2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3, 3])).unwrap();
         let actual = concatenate(vec![za, zb], 1)
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
@@ -367,7 +362,6 @@ mod tests {
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2, 3])).unwrap();
         let zc = Array::from_ndarray(&c.view().into_dyn(), arr_params(&[2, 2])).unwrap();
         let actual = concatenate(vec![za, zb, zc], 1)
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         let expected =
@@ -383,7 +377,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2])).unwrap();
         let actual = concatenate(vec![za, zb], 0)
-            .data()
             .to_ndarray::<f32>()
             .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
@@ -398,7 +391,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2, 3])).unwrap();
         let actual = concatenate(vec![za, zb], 1)
-            .data()
             .to_ndarray::<f32>()
             .unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();

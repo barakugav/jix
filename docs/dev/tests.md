@@ -219,7 +219,7 @@ mod tests {
                             &ArrayD::from_shape_vec(vec![4], vals.clone()).unwrap(),
                             arr_params(&[4]),
                         ).unwrap();
-                        let actual = a.my_op().data().to_ndarray::<$dtype>().unwrap();
+                        let actual = a.my_op().to_ndarray::<$dtype>().unwrap();
                         let expected = ArrayD::from_shape_vec(
                             vec![4],
                             vals.iter().map(|&x| my_op_scalar(x)).collect(),
@@ -265,7 +265,6 @@ fn shape_after_op() {
 fn values_after_op() {
     let got: ndarray::ArrayD<i32> = make(seq(12), &[3, 4])
         .my_op(&[0])
-        .data()
         .to_ndarray()
         .unwrap();
     assert_eq!(

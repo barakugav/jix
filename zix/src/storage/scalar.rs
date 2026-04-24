@@ -29,7 +29,7 @@ use crate::Array;
 /// let nd = ndarray::array![[1.0f32, 2.0], [3.0, 4.0]].into_dyn();
 /// let arr = Array::from_ndarray(&nd, ArrayParams::new())?;
 ///
-/// let result = (arr * 5.0f32).data().to_ndarray::<f32>()?; // the scalar is broadcast automatically
+/// let result = (arr * 5.0f32).to_ndarray::<f32>()?; // the scalar is broadcast automatically
 /// assert_eq!(result, ndarray::array![[5.0f32, 10.0], [15.0, 20.0]].into_dyn());
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -43,7 +43,7 @@ use crate::Array;
 /// let arr = Array::from_ndarray(&nd, ArrayParams::new())?;
 ///
 /// let scalar_arr = Array::from_scalar(5.0f32, &[2, 2])?;
-/// let result = (arr * scalar_arr).data().to_ndarray::<f32>()?;
+/// let result = (arr * scalar_arr).to_ndarray::<f32>()?;
 /// assert_eq!(result, ndarray::array![[5.0f32, 10.0], [15.0, 20.0]].into_dyn());
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -149,6 +149,7 @@ where
 mod tests {
     use ndarray::ArrayD;
 
+    use crate::codec::ReadContext;
     use crate::Array;
 
     // -----------------------------------------------------------------------
@@ -165,7 +166,6 @@ mod tests {
     fn broadcast_1d_read_i32() {
         let got: ArrayD<i32> = Array::from_scalar(5i32, &[4])
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![4], vec![5i32; 4]).unwrap());
@@ -181,7 +181,6 @@ mod tests {
     fn broadcast_2d_read_u8() {
         let got: ArrayD<u8> = Array::from_scalar(9u8, &[2, 3])
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -194,8 +193,7 @@ mod tests {
     fn broadcast_2d_subregion_read() {
         let got: ArrayD<i32> = Array::from_scalar(42i32, &[5, 5])
             .unwrap()
-            .data()
-            .to_ndarray_sub(&[1..3, 2..4])
+            .to_ndarray_sub(&[1..3, 2..4], &ReadContext::default())
             .unwrap();
         assert_eq!(
             got,
@@ -207,7 +205,6 @@ mod tests {
     fn broadcast_3d_read_f32() {
         let got: ArrayD<f32> = Array::from_scalar(1.5f32, &[2, 3, 4])
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -226,7 +223,6 @@ mod tests {
         let got: ArrayD<f64> = Array::from_scalar(7.0f64, &[3, 4])
             .unwrap()
             .max(&[0], false)
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -241,7 +237,6 @@ mod tests {
         let got: ArrayD<i64> = Array::from_scalar(2i32, &[3, 4])
             .unwrap()
             .sum(&[0], false)
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![4], vec![6i64; 4]).unwrap());

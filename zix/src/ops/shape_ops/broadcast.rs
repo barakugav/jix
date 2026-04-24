@@ -212,6 +212,7 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::array::Array;
+    use crate::codec::ReadContext;
     use crate::util::arr_params;
 
     fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Compact> {
@@ -280,7 +281,6 @@ mod tests {
         // [1, 4] → [3, 4]: each row is [0,1,2,3]
         let got: ArrayD<i32> = make(seq(4), &[1, 4])
             .broadcast_view(&[3, 4])
-            .data()
             .to_ndarray()
             .unwrap();
         let expected =
@@ -293,7 +293,6 @@ mod tests {
         // [3, 1] → [3, 4]: each col is [0,1,2]
         let got: ArrayD<i32> = make(seq(3), &[3, 1])
             .broadcast_view(&[3, 4])
-            .data()
             .to_ndarray()
             .unwrap();
         let expected =
@@ -306,7 +305,6 @@ mod tests {
         // [1, 1] → [2, 3]: all elements == 7
         let got: ArrayD<i32> = make(vec![7], &[1, 1])
             .broadcast_view(&[2, 3])
-            .data()
             .to_ndarray()
             .unwrap();
         let expected = ArrayD::from_shape_vec(vec![2, 3], vec![7; 6]).unwrap();
@@ -317,7 +315,6 @@ mod tests {
     fn full_read_no_broadcast() {
         let got: ArrayD<i32> = make(seq(12), &[3, 4])
             .broadcast_view(&[3, 4])
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
@@ -328,7 +325,6 @@ mod tests {
         // [2, 1, 3] → [2, 4, 3]: axis 1 repeats 4 times
         let got: ArrayD<i32> = make(seq(6), &[2, 1, 3])
             .broadcast_view(&[2, 4, 3])
-            .data()
             .to_ndarray()
             .unwrap();
         // row 0 of inner: [0,1,2], row 1: [3,4,5], each repeated 4 times along axis 1
@@ -351,8 +347,7 @@ mod tests {
         // [1, 4] → [3, 4]: read rows 1..3, cols 1..3
         let got: ArrayD<i32> = make(seq(4), &[1, 4])
             .broadcast_view(&[3, 4])
-            .data()
-            .to_ndarray_sub(&[1..3, 1..3])
+            .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
         // each row is [1, 2]
         let expected = ArrayD::from_shape_vec(vec![2, 2], vec![1, 2, 1, 2]).unwrap();
@@ -364,8 +359,7 @@ mod tests {
         // [3, 1] → [3, 5]: read rows 0..2, cols 2..5 (all same element per row)
         let got: ArrayD<i32> = make(seq(3), &[3, 1])
             .broadcast_view(&[3, 5])
-            .data()
-            .to_ndarray_sub(&[0..2, 2..5])
+            .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
             .unwrap();
         // row 0: [0,0,0], row 1: [1,1,1]
         let expected = ArrayD::from_shape_vec(vec![2, 3], vec![0, 0, 0, 1, 1, 1]).unwrap();
@@ -394,7 +388,6 @@ mod tests {
     fn identity_full_read_correct() {
         let got: ArrayD<i32> = make(seq(12), &[3, 4])
             .broadcast_view(&[3, 4])
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
@@ -404,8 +397,7 @@ mod tests {
     fn identity_sub_read_correct() {
         let got: ArrayD<i32> = make(seq(12), &[3, 4])
             .broadcast_view(&[3, 4])
-            .data()
-            .to_ndarray_sub(&[1..3, 1..3])
+            .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
         // rows 1..3, cols 1..3 of [[0,1,2,3],[4,5,6,7],[8,9,10,11]] = [[5,6],[9,10]]
         assert_eq!(

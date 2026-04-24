@@ -131,7 +131,6 @@ mod tests {
             .unwrap()
             .borrow()
             .arr
-            .data()
             .to_ndarray::<T>()
             .unwrap()
     }

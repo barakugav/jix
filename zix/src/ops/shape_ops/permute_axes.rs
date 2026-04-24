@@ -143,7 +143,7 @@ mod tests {
     fn test_i32_2d_transpose() {
         let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3])).unwrap();
-        let actual = za.permute_axes(&[1, 0]).data().to_ndarray::<i32>().unwrap();
+        let actual = za.permute_axes(&[1, 0]).to_ndarray::<i32>().unwrap();
         let expected = a
             .view()
             .permuted_axes([1, 0])
@@ -158,7 +158,7 @@ mod tests {
     fn test_f32_2d_transpose() {
         let a = ndarray::array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3, 2])).unwrap();
-        let actual = za.permute_axes(&[1, 0]).data().to_ndarray::<f32>().unwrap();
+        let actual = za.permute_axes(&[1, 0]).to_ndarray::<f32>().unwrap();
         let expected = a
             .view()
             .permuted_axes([1, 0])
@@ -175,7 +175,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
         let actual = za
             .permute_axes(&[2, 0, 1])
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         let expected = a
@@ -194,7 +193,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
         let actual = za
             .permute_axes(&[0, 2, 1])
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         let expected = a
@@ -213,7 +211,6 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
         let actual = za
             .permute_axes(&[0, 1, 2])
-            .data()
             .to_ndarray::<i32>()
             .unwrap();
         assert_eq!(actual, a.into_dyn());

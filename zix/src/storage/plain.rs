@@ -37,7 +37,7 @@ use crate::Array;
 /// let plain = Array::from_ndarray_plain(nd_plain)?;
 ///
 /// // The result is computed lazily — no data is read until to_ndarray() is called.
-/// let result = (compact + plain).data().to_ndarray::<f32>()?;
+/// let result = (compact + plain).to_ndarray::<f32>()?;
 /// assert_eq!(result, ndarray::array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -271,6 +271,7 @@ impl<S> ArrayStorage for Plain<S> {
 mod tests {
     use ndarray::{s, ArrayD, IxDyn};
 
+    use crate::codec::ReadContext;
     use crate::Array;
 
     // -----------------------------------------------------------------------
@@ -295,7 +296,6 @@ mod tests {
         let nd = ndarray::array![10i32, 20, 30].into_dyn();
         let got: ArrayD<i32> = Array::from_ndarray_plain(nd.clone())
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, nd);
@@ -306,7 +306,6 @@ mod tests {
         let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]].into_dyn();
         let got: ArrayD<i32> = Array::from_ndarray_plain(nd.clone())
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, nd);
@@ -317,8 +316,7 @@ mod tests {
         let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]].into_dyn();
         let got: ArrayD<i32> = Array::from_ndarray_plain(nd.clone())
             .unwrap()
-            .data()
-            .to_ndarray_sub(&[1..3, 0..2])
+            .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
         assert_eq!(
             got,
@@ -332,7 +330,6 @@ mod tests {
         let nd = ArrayD::from_shape_vec(vec![2, 3, 4], vals.clone()).unwrap();
         let got: ArrayD<f32> = Array::from_ndarray_plain(nd.clone())
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, nd);
@@ -343,7 +340,6 @@ mod tests {
         let nd = ndarray::array![[1.0f64, 2.0], [3.0, 4.0]].into_dyn();
         let got: ArrayD<f64> = Array::from_ndarray_plain(nd.clone())
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, nd);
@@ -354,7 +350,6 @@ mod tests {
         let nd = ndarray::array![[true, false], [false, true]].into_dyn();
         let got: ArrayD<bool> = Array::from_ndarray_plain(nd.clone())
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, nd);
@@ -367,7 +362,6 @@ mod tests {
         let transposed = nd.clone().reversed_axes(); // shape [3,2], strides swapped
         let got: ArrayD<i32> = Array::from_ndarray_plain(transposed.clone())
             .unwrap()
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, transposed);
@@ -390,7 +384,7 @@ mod tests {
         let nd = ndarray::array![10i32, 20, 30].into_dyn();
         let a =
             Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&nd).unwrap();
-        let got: ArrayD<i32> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = a.to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
@@ -399,7 +393,7 @@ mod tests {
         let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]].into_dyn();
         let a =
             Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&nd).unwrap();
-        let got: ArrayD<i32> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = a.to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
@@ -408,7 +402,7 @@ mod tests {
         let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]].into_dyn();
         let a =
             Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&nd).unwrap();
-        let got: ArrayD<i32> = a.data().to_ndarray_sub(&[1..3, 1..3]).unwrap();
+        let got: ArrayD<i32> = a.to_ndarray_sub(&[1..3, 1..3], &a.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 2], vec![5i32, 6, 8, 9]).unwrap()
@@ -422,7 +416,7 @@ mod tests {
         let sliced = nd.slice(s![.., ..;2]).into_dyn(); // columns 0 and 2: [[1,3],[5,7]]
         let a = Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&sliced)
             .unwrap();
-        let got: ArrayD<i32> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = a.to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 2], vec![1i32, 3, 5, 7]).unwrap()
@@ -434,7 +428,7 @@ mod tests {
         let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]].into_dyn();
         let t = nd.t().into_dyn(); // shape [3, 2]
         let a = Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&t).unwrap();
-        let got: ArrayD<i32> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = a.to_ndarray().unwrap();
         // t[[0,0]]=1, t[[0,1]]=4, t[[1,0]]=2, t[[1,1]]=5, t[[2,0]]=3, t[[2,1]]=6
         assert_eq!(
             got,
@@ -452,7 +446,6 @@ mod tests {
         let got: ArrayD<i32> = Array::from_ndarray_plain(nd)
             .unwrap()
             .max(&[0], false)
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -467,7 +460,6 @@ mod tests {
         let got: ArrayD<i64> = Array::from_ndarray_plain(nd)
             .unwrap()
             .sum(&[1], false)
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(

@@ -21,13 +21,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![f32::NAN, 1.0f32, f32::INFINITY, -1.0f32];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.is_nan().data().to_ndarray::<bool>()?;
+    /// let result = za.is_nan().to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false, false]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = ndarray::array![[f32::NAN, 1.0f32], [2.0f32, f32::NAN]];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.is_nan().data().to_ndarray::<bool>()?;
+    /// let result = zb.is_nan().to_ndarray::<bool>()?;
     /// assert_eq!(result.shape(), &[2, 2]);
     /// assert_eq!(result[[0, 0]], true);
     /// assert_eq!(result[[1, 1]], true);
@@ -55,13 +55,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![1.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.is_finite().data().to_ndarray::<bool>()?;
+    /// let result = za.is_finite().to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false, false]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = ndarray::array![[1.0f32, f32::INFINITY], [f32::NAN, -2.0f32]];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.is_finite().data().to_ndarray::<bool>()?;
+    /// let result = zb.is_finite().to_ndarray::<bool>()?;
     /// assert_eq!(result.shape(), &[2, 2]);
     /// assert_eq!(result[[0, 0]], true);
     /// assert_eq!(result[[0, 1]], false);
@@ -89,13 +89,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1.0f32];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.is_infinite().data().to_ndarray::<bool>()?;
+    /// let result = za.is_infinite().to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false, false]);
     ///
     /// // Shape is preserved for 2-D input.
     /// let b = ndarray::array![[f32::INFINITY, 0.0f32], [-1.0f32, f32::NEG_INFINITY]];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.is_infinite().data().to_ndarray::<bool>()?;
+    /// let result = zb.is_infinite().to_ndarray::<bool>()?;
     /// assert_eq!(result.shape(), &[2, 2]);
     /// assert_eq!(result[[0, 0]], true);
     /// assert_eq!(result[[1, 1]], true);

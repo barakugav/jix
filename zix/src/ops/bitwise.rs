@@ -26,7 +26,7 @@ define_op2!(
     /// let b = ndarray::array![1i32, 1, 0, 0];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.logical_and(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.logical_and(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true, false, false]);
     ///
     /// // Works on bool arrays directly.
@@ -34,7 +34,7 @@ define_op2!(
     /// let d = ndarray::array![true, true, false];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.logical_and(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.logical_and(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -64,7 +64,7 @@ define_op2!(
     /// let b = ndarray::array![0i32, 0, 0, 0];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.logical_or(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.logical_or(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true, false, true]);
     ///
     /// // Works on bool arrays directly.
@@ -72,7 +72,7 @@ define_op2!(
     /// let d = ndarray::array![false, true, false];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.logical_or(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.logical_or(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -102,7 +102,7 @@ define_op2!(
     /// let b = ndarray::array![0i32, 1, 1, 0];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.logical_xor(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.logical_xor(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, false, true, true]);
     ///
     /// // Works on bool arrays directly.
@@ -110,7 +110,7 @@ define_op2!(
     /// let d = ndarray::array![true, false, false];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.logical_xor(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.logical_xor(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, false, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -138,13 +138,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![0i32, 1, -3, 0];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.logical_not().data().to_ndarray::<bool>()?;
+    /// let result = za.logical_not().to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false, true]);
     ///
     /// // Works on bool arrays directly.
     /// let b = ndarray::array![true, false, true];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.logical_not().data().to_ndarray::<bool>()?;
+    /// let result = zb.logical_not().to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -173,7 +173,7 @@ define_op2!(
     /// let b = ndarray::array![0b1010u8, 0b0101, 0b0000];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.bitwise_and(zb).data().to_ndarray::<u8>()?;
+    /// let result = za.bitwise_and(zb).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b1000, 0b0000, 0b0000]);
     ///
     /// // Mask out the lower nibble.
@@ -181,7 +181,7 @@ define_op2!(
     /// let d = ndarray::array![0xF0u8, 0xF0u8];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.bitwise_and(zd).data().to_ndarray::<u8>()?;
+    /// let result = zc.bitwise_and(zd).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xA0, 0xC0]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -209,7 +209,7 @@ define_op2!(
     /// let b = ndarray::array![0b1010u8, 0b0101, 0b1111];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.bitwise_or(zb).data().to_ndarray::<u8>()?;
+    /// let result = za.bitwise_or(zb).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b1110, 0b1111, 0b1111]);
     ///
     /// // Set a specific bit pattern.
@@ -217,7 +217,7 @@ define_op2!(
     /// let d = ndarray::array![0xF0u8, 0xF0u8];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.bitwise_or(zd).data().to_ndarray::<u8>()?;
+    /// let result = zc.bitwise_or(zd).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xFF, 0xF0]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -245,7 +245,7 @@ define_op2!(
     /// let b = ndarray::array![0b1010u8, 0b1010, 0b1111];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.bitwise_xor(zb).data().to_ndarray::<u8>()?;
+    /// let result = za.bitwise_xor(zb).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b0110, 0b0000, 0b0000]);
     ///
     /// // Toggle bits using a mask.
@@ -253,7 +253,7 @@ define_op2!(
     /// let d = ndarray::array![0x0Fu8, 0x0Fu8];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.bitwise_xor(zd).data().to_ndarray::<u8>()?;
+    /// let result = zc.bitwise_xor(zd).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xF0, 0x00]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -279,13 +279,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![0b00001111u8, 0b11110000u8, 0u8];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.bitwise_not().data().to_ndarray::<u8>()?;
+    /// let result = za.bitwise_not().to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b11110000, 0b00001111, 0xFF]);
     ///
     /// // For bool arrays, bitwise NOT is equivalent to logical NOT.
     /// let b = ndarray::array![true, false];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.bitwise_not().data().to_ndarray::<bool>()?;
+    /// let result = zb.bitwise_not().to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -316,7 +316,7 @@ define_op2!(
     /// let b = ndarray::array![1u8, 2, 3];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.bitwise_shift_left(zb).data().to_ndarray::<u8>()?;
+    /// let result = za.bitwise_shift_left(zb).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b00000010, 0b00001000, 0b00100000]);
     ///
     /// // Signed arithmetic left shift: sign bit is lost if shifted out.
@@ -324,7 +324,7 @@ define_op2!(
     /// let d = ndarray::array![3i8, 1i8];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.bitwise_shift_left(zd).data().to_ndarray::<i8>()?;
+    /// let result = zc.bitwise_shift_left(zd).to_ndarray::<i8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[8, -2]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -355,7 +355,7 @@ define_op2!(
     /// let b = ndarray::array![1u8, 2, 3];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.bitwise_shift_right(zb).data().to_ndarray::<u8>()?;
+    /// let result = za.bitwise_shift_right(zb).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b01000000, 0b00001000, 0b00000001]);
     ///
     /// // Signed arithmetic right shift: vacated bits are filled with the sign bit.
@@ -363,7 +363,7 @@ define_op2!(
     /// let d = ndarray::array![2i8, 1i8];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.bitwise_shift_right(zd).data().to_ndarray::<i8>()?;
+    /// let result = zc.bitwise_shift_right(zd).to_ndarray::<i8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-2, -1]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -389,13 +389,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![0b00001111u8, 0b11001100u8, 0b11111111u8];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.count_ones().data().to_ndarray::<u32>()?;
+    /// let result = za.count_ones().to_ndarray::<u32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 4, 8]);
     ///
     /// // Zero has no set bits.
     /// let b = ndarray::array![0u8, 0u8];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.count_ones().data().to_ndarray::<u32>()?;
+    /// let result = zb.count_ones().to_ndarray::<u32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0, 0]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -421,13 +421,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![0b11110000u8, 0b00001111u8, 0b11111111u8];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.count_zeros().data().to_ndarray::<u32>()?;
+    /// let result = za.count_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 4, 0]);
     ///
     /// // Zero has all bits unset: count_zeros == bit width.
     /// let b = ndarray::array![0u8];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.count_zeros().data().to_ndarray::<u32>()?;
+    /// let result = zb.count_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result[[0]], 8); // u8 has 8 bits
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -454,13 +454,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![0x00010000u32, 0x80000000u32, 0x00000001u32];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.leading_zeros().data().to_ndarray::<u32>()?;
+    /// let result = za.leading_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[15, 0, 31]);
     ///
     /// // Zero returns the bit width of the type (32 for u32).
     /// let b = ndarray::array![0u32];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.leading_zeros().data().to_ndarray::<u32>()?;
+    /// let result = zb.leading_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result[[0]], 32);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -487,13 +487,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![0x00010000u32, 0x80000000u32, 0x00000001u32];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.trailing_zeros().data().to_ndarray::<u32>()?;
+    /// let result = za.trailing_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[16, 31, 0]);
     ///
     /// // Zero returns the bit width of the type (32 for u32).
     /// let b = ndarray::array![0u32];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.trailing_zeros().data().to_ndarray::<u32>()?;
+    /// let result = zb.trailing_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result[[0]], 32);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -520,13 +520,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![0x00FF0000u32, 0x0000FF00u32];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.swap_bytes().data().to_ndarray::<u32>()?;
+    /// let result = za.swap_bytes().to_ndarray::<u32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0x0000FF00, 0x00FF0000]);
     ///
     /// // Classic endian-swap example.
     /// let b = ndarray::array![0x12345678u32];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.swap_bytes().data().to_ndarray::<u32>()?;
+    /// let result = zb.swap_bytes().to_ndarray::<u32>()?;
     /// assert_eq!(result[[0]], 0x78563412u32);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -551,13 +551,13 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// let a = ndarray::array![0b00000001u8, 0b10000000u8, 0b10101010u8];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.reverse_bits().data().to_ndarray::<u8>()?;
+    /// let result = za.reverse_bits().to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b10000000, 0b00000001, 0b01010101]);
     ///
     /// // Reversing bits of 0 gives 0.
     /// let b = ndarray::array![0u8];
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.reverse_bits().data().to_ndarray::<u8>()?;
+    /// let result = zb.reverse_bits().to_ndarray::<u8>()?;
     /// assert_eq!(result[[0]], 0u8);
     /// # Ok::<(), zix::error::Error>(())
     /// ```

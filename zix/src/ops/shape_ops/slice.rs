@@ -385,6 +385,7 @@ mod tests {
 
     use super::SliceItem;
     use crate::array::Array;
+    use crate::codec::ReadContext;
     use crate::util::arr_params;
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<crate::storage::Compact> {
@@ -450,7 +451,6 @@ mod tests {
     fn full_read_slice_rows() {
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .slice((1..3, ..))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -463,7 +463,6 @@ mod tests {
     fn full_read_slice_cols() {
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .slice((.., 1..3))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -476,7 +475,6 @@ mod tests {
     fn full_read_slice_subblock() {
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .slice((1..3, 1..3))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -490,7 +488,6 @@ mod tests {
         // [2,3,4] → (0..2, 1..3, 1..3)
         let got: ArrayD<i32> = make3d(seq(24), 2, 3, 4)
             .slice((0..2, 1..3, 1..3))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -508,7 +505,6 @@ mod tests {
         // [3, 8], step 2 on axis 1 → cols 0,2,4,6
         let got: ArrayD<i32> = make2d(seq(24), 3, 8)
             .slice((.., SliceItem::new(None, None, 2)))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -523,7 +519,6 @@ mod tests {
         // [6, 4], step 2 on axis 0 → rows 0, 2, 4
         let got: ArrayD<i32> = make2d(seq(24), 6, 4)
             .slice((SliceItem::new(None, None, 2), ..))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -538,7 +533,6 @@ mod tests {
         // [4, 6], step 2 on both → rows 0,2; cols 0,2,4
         let got: ArrayD<i32> = make2d(seq(24), 4, 6)
             .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -552,7 +546,6 @@ mod tests {
         // [6, 8]: axis 1 from index 1, step 2 → indices 1,3,5,7
         let got: ArrayD<i32> = make2d(seq(48), 6, 8)
             .slice((.., SliceItem::new(Some(1), None, 2)))
-            .data()
             .to_ndarray()
             .unwrap();
         let expected_row = |r: i32| vec![r * 8 + 1, r * 8 + 3, r * 8 + 5, r * 8 + 7];
@@ -565,7 +558,6 @@ mod tests {
         // [4, 4, 4], step 2 on middle axis
         let got: ArrayD<i32> = make3d(seq(64), 4, 4, 4)
             .slice((.., SliceItem::new(None, None, 2), ..))
-            .data()
             .to_ndarray()
             .unwrap();
         // inner[i,j,k] = i*16 + j*4 + k; axis 1 keeps j=0,2
@@ -592,7 +584,6 @@ mod tests {
         // (-2..) on axis 0 of [5, 4] → rows 3 and 4
         let got: ArrayD<i32> = make2d(seq(20), 5, 4)
             .slice((-2.., ..))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -606,7 +597,6 @@ mod tests {
         // (..-1) on axis 1 of [3, 4] → cols 0,1,2
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .slice((.., ..-1))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -620,7 +610,6 @@ mod tests {
         // [3, 6]: axis 1 with (-4..-1) → indices 2,3,4
         let got: ArrayD<i32> = make2d(seq(18), 3, 6)
             .slice((.., -4..-1))
-            .data()
             .to_ndarray()
             .unwrap();
         // row 0: [2,3,4]; row 1: [8,9,10]; row 2: [14,15,16]
@@ -636,7 +625,6 @@ mod tests {
         // negative start + step requires SliceItem since range syntax has no step
         let got: ArrayD<i32> = make2d(seq(24), 6, 4)
             .slice((SliceItem::new(Some(-6), None, 2), ..))
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -654,8 +642,7 @@ mod tests {
     fn sub_read_within_contiguous_slice() {
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .slice((1..3, ..))
-            .data()
-            .to_ndarray_sub(&[0..1, 0..4])
+            .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
             .unwrap();
         assert_eq!(
             got,
@@ -668,8 +655,7 @@ mod tests {
         // [6, 8] step 2 on axis 1 → shape [6, 4]; then read only row 0
         let got: ArrayD<i32> = make2d(seq(48), 6, 8)
             .slice((.., SliceItem::new(None, None, 2)))
-            .data()
-            .to_ndarray_sub(&[0..1, 0..4])
+            .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
             .unwrap();
         assert_eq!(
             got,

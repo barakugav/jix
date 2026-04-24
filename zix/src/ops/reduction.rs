@@ -419,17 +419,17 @@ define_reduction_op!(
     ///
     /// // Reduce all axes → scalar
     /// let scalar = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .max(&[0, 1], false).data().to_ndarray::<i32>()?;
+    ///     .max(&[0, 1], false).to_ndarray::<i32>()?;
     /// assert_eq!(scalar[[]], 6);
     ///
     /// // Reduce axis 0, keepdims=false → shape [3]
     /// let col_max = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .max(&[0], false).data().to_ndarray::<i32>()?;
+    ///     .max(&[0], false).to_ndarray::<i32>()?;
     /// assert_eq!(col_max.as_slice().unwrap(), &[4, 5, 6]);
     ///
     /// // Reduce axis 0, keepdims=true → shape [1, 3]
     /// let col_max_k = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .max(&[0], true).data().to_ndarray::<i32>()?;
+    ///     .max(&[0], true).to_ndarray::<i32>()?;
     /// assert_eq!(col_max_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -461,17 +461,17 @@ define_reduction_op!(
     ///
     /// // Reduce all axes → scalar
     /// let scalar = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .min(&[0, 1], false).data().to_ndarray::<i32>()?;
+    ///     .min(&[0, 1], false).to_ndarray::<i32>()?;
     /// assert_eq!(scalar[[]], 1);
     ///
     /// // Reduce axis 0, keepdims=false → shape [3]
     /// let col_min = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .min(&[0], false).data().to_ndarray::<i32>()?;
+    ///     .min(&[0], false).to_ndarray::<i32>()?;
     /// assert_eq!(col_min.as_slice().unwrap(), &[1, 2, 3]);
     ///
     /// // Reduce axis 0, keepdims=true → shape [1, 3]
     /// let col_min_k = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .min(&[0], true).data().to_ndarray::<i32>()?;
+    ///     .min(&[0], true).to_ndarray::<i32>()?;
     /// assert_eq!(col_min_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -503,17 +503,17 @@ define_reduction_op!(
     ///
     /// // Index of max along axis 1 (per row), keepdims=false → shape [2]
     /// let idx = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .argmax(1, false).data().to_ndarray::<u64>()?;
+    ///     .argmax(1, false).to_ndarray::<u64>()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[1, 2]); // max of row 0 at col 1, row 1 at col 2
     ///
     /// // Index of max along axis 0 (per column), keepdims=false → shape [3]
     /// let col_idx = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .argmax(0, false).data().to_ndarray::<u64>()?;
+    ///     .argmax(0, false).to_ndarray::<u64>()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[1, 0, 1]); // max of col 0 at row 1, col 1 at row 0, col 2 at row 1
     ///
     /// // keepdims=true → shape [2, 1]
     /// let idx_k = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .argmax(1, true).data().to_ndarray::<u64>()?;
+    ///     .argmax(1, true).to_ndarray::<u64>()?;
     /// assert_eq!(idx_k.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -552,17 +552,17 @@ define_reduction_op!(
     ///
     /// // Index of min along axis 1 (per row), keepdims=false → shape [2]
     /// let idx = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .argmin(1, false).data().to_ndarray::<u64>()?;
+    ///     .argmin(1, false).to_ndarray::<u64>()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[0, 1]); // min of row 0 at col 0, row 1 at col 1
     ///
     /// // Index of min along axis 0 (per column), keepdims=false → shape [3]
     /// let col_idx = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .argmin(0, false).data().to_ndarray::<u64>()?;
+    ///     .argmin(0, false).to_ndarray::<u64>()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[0, 1, 0]); // min of col 0 at row 0, col 1 at row 1, col 2 at row 0
     ///
     /// // keepdims=true → shape [2, 1]
     /// let idx_k = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .argmin(1, true).data().to_ndarray::<u64>()?;
+    ///     .argmin(1, true).to_ndarray::<u64>()?;
     /// assert_eq!(idx_k.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -605,17 +605,17 @@ define_reduction_op!(
     ///
     /// // Sum all elements → i64
     /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .sum(&[0, 1], false).data().to_ndarray::<i64>()?;
+    ///     .sum(&[0, 1], false).to_ndarray::<i64>()?;
     /// assert_eq!(total[[]], 21);
     ///
     /// // Sum along axis 0, keepdims=false → shape [3]
     /// let col_sums = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .sum(&[0], false).data().to_ndarray::<i64>()?;
+    ///     .sum(&[0], false).to_ndarray::<i64>()?;
     /// assert_eq!(col_sums.as_slice().unwrap(), &[5, 7, 9]);
     ///
     /// // Sum along axis 1, keepdims=true → shape [2, 1]
     /// let row_sums = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .sum(&[1], true).data().to_ndarray::<i64>()?;
+    ///     .sum(&[1], true).to_ndarray::<i64>()?;
     /// assert_eq!(row_sums.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -653,17 +653,17 @@ define_reduction_op!(
     ///
     /// // Product of all elements → i64
     /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .product(&[0, 1], false).data().to_ndarray::<i64>()?;
+    ///     .product(&[0, 1], false).to_ndarray::<i64>()?;
     /// assert_eq!(total[[]], 720);
     ///
     /// // Product along axis 0, keepdims=false → shape [3]
     /// let col_products = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .product(&[0], false).data().to_ndarray::<i64>()?;
+    ///     .product(&[0], false).to_ndarray::<i64>()?;
     /// assert_eq!(col_products.as_slice().unwrap(), &[4, 10, 18]);
     ///
     /// // Product along axis 1, keepdims=true → shape [2, 1]
     /// let row_products = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .product(&[1], true).data().to_ndarray::<i64>()?;
+    ///     .product(&[1], true).to_ndarray::<i64>()?;
     /// assert_eq!(row_products.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -694,17 +694,17 @@ define_reduction_op!(
     ///
     /// // Mean of all elements → f64
     /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .mean(&[0, 1], false).data().to_ndarray::<f64>()?;
+    ///     .mean(&[0, 1], false).to_ndarray::<f64>()?;
     /// assert_eq!(total[[]], 3.5);
     ///
     /// // Mean along axis 0, keepdims=false → shape [3]
     /// let col_means = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .mean(&[0], false).data().to_ndarray::<f64>()?;
+    ///     .mean(&[0], false).to_ndarray::<f64>()?;
     /// assert_eq!(col_means.as_slice().unwrap(), &[2.5, 3.5, 4.5]);
     ///
     /// // Mean along axis 0, keepdims=true → shape [1, 3]
     /// let col_means_k = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .mean(&[0], true).data().to_ndarray::<f64>()?;
+    ///     .mean(&[0], true).to_ndarray::<f64>()?;
     /// assert_eq!(col_means_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -748,17 +748,17 @@ define_reduction_op!(
     ///
     /// // Population variance (ddof=0) of all elements → f64
     /// let var_all = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .var(&[0, 1], false, 0.0).data().to_ndarray::<f64>()?;
+    ///     .var(&[0, 1], false, 0.0).to_ndarray::<f64>()?;
     /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
     ///
     /// // Sample variance (ddof=1) along axis 0, keepdims=false → shape [3]
     /// let col_vars = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .var(&[0], false, 1.0).data().to_ndarray::<f64>()?;
+    ///     .var(&[0], false, 1.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_vars.as_slice().unwrap(), &[4.5, 4.5, 4.5]);
     ///
     /// // Population variance along axis 0, keepdims=true → shape [1, 3]
     /// let col_vars_k = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .var(&[0], true, 0.0).data().to_ndarray::<f64>()?;
+    ///     .var(&[0], true, 0.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_vars_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -791,17 +791,17 @@ define_reduction_op!(
     ///
     /// // Population std (ddof=0) of all elements → f64
     /// let std_all = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .std(&[0, 1], false, 0.0).data().to_ndarray::<f64>()?;
+    ///     .std(&[0, 1], false, 0.0).to_ndarray::<f64>()?;
     /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
     ///
     /// // Sample std (ddof=1) along axis 0, keepdims=false → shape [3]
     /// let col_stds = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .std(&[0], false, 1.0).data().to_ndarray::<f64>()?;
+    ///     .std(&[0], false, 1.0).to_ndarray::<f64>()?;
     /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
     ///
     /// // Population std along axis 0, keepdims=true → shape [1, 3]
     /// let col_stds_k = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .std(&[0], true, 0.0).data().to_ndarray::<f64>()?;
+    ///     .std(&[0], true, 0.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_stds_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -905,17 +905,17 @@ define_reduction_op!(
     ///
     /// // All elements truthy? → false (contains a zero)
     /// let all_true = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .all(&[0, 1], false).data().to_ndarray::<bool>()?;
+    ///     .all(&[0, 1], false).to_ndarray::<bool>()?;
     /// assert_eq!(all_true[[]], false);
     ///
     /// // All truthy along axis 0, keepdims=false → shape [3]
     /// let col_all = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .all(&[0], false).data().to_ndarray::<bool>()?;
+    ///     .all(&[0], false).to_ndarray::<bool>()?;
     /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
     ///
     /// // All truthy along axis 1, keepdims=true → shape [2, 1]
     /// let row_all = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .all(&[1], true).data().to_ndarray::<bool>()?;
+    ///     .all(&[1], true).to_ndarray::<bool>()?;
     /// assert_eq!(row_all.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -947,17 +947,17 @@ define_reduction_op!(
     ///
     /// // Any element truthy? → true
     /// let any_true = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .any(&[0, 1], false).data().to_ndarray::<bool>()?;
+    ///     .any(&[0, 1], false).to_ndarray::<bool>()?;
     /// assert_eq!(any_true[[]], true);
     ///
     /// // Any truthy along axis 0, keepdims=false → shape [3]
     /// let col_any = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .any(&[0], false).data().to_ndarray::<bool>()?;
+    ///     .any(&[0], false).to_ndarray::<bool>()?;
     /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
     ///
     /// // Any truthy along axis 1, keepdims=true → shape [2, 1]
     /// let row_any = Array::from_ndarray(&nd, ArrayParams::new())?
-    ///     .any(&[1], true).data().to_ndarray::<bool>()?;
+    ///     .any(&[1], true).to_ndarray::<bool>()?;
     /// assert_eq!(row_any.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -1048,7 +1048,7 @@ mod tests {
                 let input: Vec<$in_ty> = row0.into_iter().chain(row1).collect();
                 let nd = ArrayD::<$in_ty>::from_shape_vec(vec![2, n], input).unwrap();
                 let a = Array::from_ndarray(&nd, crate::util::arr_params(&[2, n])).unwrap();
-                let got: ArrayD<$out_ty> = a.$method(&[0], false).data().to_ndarray().unwrap();
+                let got: ArrayD<$out_ty> = a.$method(&[0], false).to_ndarray().unwrap();
                 assert_eq!(
                     got,
                     ArrayD::<$out_ty>::from_shape_vec(vec![n], vec![$($e),+]).unwrap()
@@ -1118,11 +1118,7 @@ mod tests {
         #[test]
         fn keepdims_read_axis0_i32() {
             // [[0..3],[4..7],[8..11]] → max per col = [[8,9,10,11]] shape [1,4]
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .max(&[0], true)
-                .data()
-                .to_ndarray()
-                .unwrap();
+            let got: ArrayD<i32> = make(seq(12), &[3, 4]).max(&[0], true).to_ndarray().unwrap();
             assert_eq!(
                 got,
                 ArrayD::from_shape_vec(vec![1, 4], vec![8, 9, 10, 11]).unwrap()
@@ -1132,11 +1128,7 @@ mod tests {
         #[test]
         fn keepdims_read_axis1_i32() {
             // max per row = [[3],[7],[11]] shape [3,1]
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .max(&[1], true)
-                .data()
-                .to_ndarray()
-                .unwrap();
+            let got: ArrayD<i32> = make(seq(12), &[3, 4]).max(&[1], true).to_ndarray().unwrap();
             assert_eq!(
                 got,
                 ArrayD::from_shape_vec(vec![3, 1], vec![3, 7, 11]).unwrap()
@@ -1147,7 +1139,6 @@ mod tests {
         fn keepdims_read_both_axes_i32() {
             let got: ArrayD<i32> = make(seq(12), &[3, 4])
                 .max(&[0, 1], true)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![1, 1], vec![11]).unwrap());
@@ -1157,7 +1148,7 @@ mod tests {
         fn keepdims_read_3d_middle_axis() {
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
             let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
-            let got: ArrayD<i32> = a.max(&[1], true).data().to_ndarray().unwrap();
+            let got: ArrayD<i32> = a.max(&[1], true).to_ndarray().unwrap();
             // same values as no-keepdims but shape [2,1,4]
             let expected: Vec<i32> = (0..2)
                 .flat_map(|i| (0..4).map(move |k| i * 12 + 8 + k))
@@ -1173,7 +1164,6 @@ mod tests {
             // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → max per col
             let got: ArrayD<i32> = make(seq(12), &[3, 4])
                 .max(&[0], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1187,7 +1177,6 @@ mod tests {
             // max per row
             let got: ArrayD<i32> = make(seq(12), &[3, 4])
                 .max(&[1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1200,7 +1189,6 @@ mod tests {
         fn read_all_axes_i32() {
             let got: ArrayD<i32> = make(seq(12), &[3, 4])
                 .max(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![11]).unwrap());
@@ -1211,7 +1199,7 @@ mod tests {
             // a[i,j,k] = i*12 + j*4 + k; max over j → i*12 + 8 + k
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
             let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
-            let got: ArrayD<i32> = a.max(&[1], false).data().to_ndarray().unwrap();
+            let got: ArrayD<i32> = a.max(&[1], false).to_ndarray().unwrap();
             let expected: Vec<i32> = (0..2)
                 .flat_map(|i| (0..4).map(move |k| i * 12 + 8 + k))
                 .collect();
@@ -1262,7 +1250,6 @@ mod tests {
             // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → min per col = [0,1,2,3]
             let got: ArrayD<i32> = make(seq(12), &[3, 4])
                 .min(&[0], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1276,7 +1263,6 @@ mod tests {
             // min per row = [0, 4, 8]
             let got: ArrayD<i32> = make(seq(12), &[3, 4])
                 .min(&[1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![0, 4, 8]).unwrap());
@@ -1286,7 +1272,6 @@ mod tests {
         fn read_all_axes_i32() {
             let got: ArrayD<i32> = make(seq(12), &[3, 4])
                 .min(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![0]).unwrap());
@@ -1297,7 +1282,7 @@ mod tests {
             // a[i,j,k] = i*12 + j*4 + k; min over j → i*12 + k  (j=0 is min)
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
             let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
-            let got: ArrayD<i32> = a.min(&[1], false).data().to_ndarray().unwrap();
+            let got: ArrayD<i32> = a.min(&[1], false).to_ndarray().unwrap();
             let expected: Vec<i32> = (0..2)
                 .flat_map(|i| (0..4).map(move |k| i * 12 + k))
                 .collect();
@@ -1351,7 +1336,6 @@ mod tests {
             // [[0,1,2],[3,4,5]] sum over rows → [3,5,7] (as i64)
             let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
                 .sum(&[0], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1365,7 +1349,6 @@ mod tests {
             // [[0,1,2],[3,4,5]] sum over cols → [3, 12] (as i64)
             let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
                 .sum(&[1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1379,7 +1362,6 @@ mod tests {
             // sum of 0..6 = 15
             let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
                 .sum(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![15i64]).unwrap());
@@ -1390,7 +1372,6 @@ mod tests {
             // f64 input → f64 output
             let got: ArrayD<f64> = make(vec![1.0f64, 2.0, 3.0, 4.0], &[2, 2])
                 .sum(&[1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1404,7 +1385,6 @@ mod tests {
             // [[0,1,2],[3,4,5]] sum over rows with keepdims → [[3,5,7]] shape [1,3]
             let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
                 .sum(&[0], true)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1418,7 +1398,6 @@ mod tests {
             // [[0,1,2],[3,4,5]] sum over cols with keepdims → [[3],[12]] shape [2,1]
             let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
                 .sum(&[1], true)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1432,7 +1411,6 @@ mod tests {
             // sum of 0..6 = 15, shape [1,1]
             let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
                 .sum(&[0, 1], true)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1495,7 +1473,6 @@ mod tests {
             // [[1,2,3],[4,5,6]] product over rows → [4,10,18]
             let got: ArrayD<i64> = make(vec![1i32, 2, 3, 4, 5, 6], &[2, 3])
                 .product(&[0], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1509,7 +1486,6 @@ mod tests {
             // [[1,2,3],[4,5,6]] product over cols → [6, 120]
             let got: ArrayD<i64> = make(vec![1i32, 2, 3, 4, 5, 6], &[2, 3])
                 .product(&[1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1523,7 +1499,6 @@ mod tests {
             // product of 1..5 = 24
             let got: ArrayD<i64> = make(vec![1i32, 2, 3, 4], &[2, 2])
                 .product(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![24i64]).unwrap());
@@ -1581,7 +1556,6 @@ mod tests {
             // [[1,0,1],[1,1,1]] all over rows → [true, false, true]
             let got: ArrayD<bool> = make(vec![1i32, 0, 1, 1, 1, 1], &[2, 3])
                 .all(&[0], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1595,7 +1569,6 @@ mod tests {
             // [[1,1,1],[0,1,1]] all over cols → [true, false]
             let got: ArrayD<bool> = make(vec![1i32, 1, 1, 0, 1, 1], &[2, 3])
                 .all(&[1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1608,7 +1581,6 @@ mod tests {
         fn read_all_axes_true_i32() {
             let got: ArrayD<bool> = make(vec![1i32, 2, 3, 4], &[2, 2])
                 .all(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![true]).unwrap());
@@ -1618,7 +1590,6 @@ mod tests {
         fn read_all_axes_false_i32() {
             let got: ArrayD<bool> = make(vec![1i32, 0, 1, 1], &[2, 2])
                 .all(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![false]).unwrap());
@@ -1629,7 +1600,6 @@ mod tests {
             // [[1,0,1],[1,1,1]] all over rows with keepdims → [[true,false,true]] shape [1,3]
             let got: ArrayD<bool> = make(vec![1i32, 0, 1, 1, 1, 1], &[2, 3])
                 .all(&[0], true)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1643,7 +1613,6 @@ mod tests {
             // [[1,1,1],[0,1,1]] all over cols with keepdims → [[true],[false]] shape [2,1]
             let got: ArrayD<bool> = make(vec![1i32, 1, 1, 0, 1, 1], &[2, 3])
                 .all(&[1], true)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1702,7 +1671,6 @@ mod tests {
             // [[0,0,1],[0,0,0]] any over rows → [false, false, true]
             let got: ArrayD<bool> = make(vec![0i32, 0, 1, 0, 0, 0], &[2, 3])
                 .any(&[0], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1716,7 +1684,6 @@ mod tests {
             // [[0,0,0],[0,0,1]] any over cols → [false, true]
             let got: ArrayD<bool> = make(vec![0i32, 0, 0, 0, 0, 1], &[2, 3])
                 .any(&[1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1729,7 +1696,6 @@ mod tests {
         fn read_all_axes_false_i32() {
             let got: ArrayD<bool> = make(vec![0i32, 0, 0, 0], &[2, 2])
                 .any(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![false]).unwrap());
@@ -1739,7 +1705,6 @@ mod tests {
         fn read_all_axes_true_i32() {
             let got: ArrayD<bool> = make(vec![0i32, 0, 0, 1], &[2, 2])
                 .any(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![true]).unwrap());
@@ -1837,7 +1802,6 @@ mod tests {
             // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → argmax per col = [2,2,2,2]
             let got: ArrayD<u64> = make(seq(12), &[3, 4])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1851,7 +1815,6 @@ mod tests {
             // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → argmax per row = [3,3,3]
             let got: ArrayD<u64> = make(seq(12), &[3, 4])
                 .argmax(1, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -1865,7 +1828,6 @@ mod tests {
             // [[5,1],[2,8],[3,4]] → argmax per col: col0→0(5), col1→1(8)
             let got: ArrayD<u64> = make(vec![5i32, 1, 2, 8, 3, 4], &[3, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
@@ -1876,7 +1838,6 @@ mod tests {
             // [3,1,4,1,5] → argmax = 4
             let got: ArrayD<u64> = make(vec![3i32, 1, 4, 1, 5], &[5])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![4u64]).unwrap());
@@ -1887,18 +1848,14 @@ mod tests {
             // a[i,j,k] = i*12+j*4+k; max is always at j=2 → argmax=2
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
             let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
-            let got: ArrayD<u64> = a.argmax(1, false).data().to_ndarray().unwrap();
+            let got: ArrayD<u64> = a.argmax(1, false).to_ndarray().unwrap();
             let expected = vec![2u64; 8];
             assert_eq!(got, ArrayD::from_shape_vec(vec![2, 4], expected).unwrap());
         }
 
         #[test]
         fn keepdims_read_axis0_i32() {
-            let got: ArrayD<u64> = make(seq(12), &[3, 4])
-                .argmax(0, true)
-                .data()
-                .to_ndarray()
-                .unwrap();
+            let got: ArrayD<u64> = make(seq(12), &[3, 4]).argmax(0, true).to_ndarray().unwrap();
             assert_eq!(
                 got,
                 ArrayD::from_shape_vec(vec![1, 4], vec![2u64, 2, 2, 2]).unwrap()
@@ -1907,11 +1864,7 @@ mod tests {
 
         #[test]
         fn keepdims_read_axis1_i32() {
-            let got: ArrayD<u64> = make(seq(12), &[3, 4])
-                .argmax(1, true)
-                .data()
-                .to_ndarray()
-                .unwrap();
+            let got: ArrayD<u64> = make(seq(12), &[3, 4]).argmax(1, true).to_ndarray().unwrap();
             assert_eq!(
                 got,
                 ArrayD::from_shape_vec(vec![3, 1], vec![3u64, 3, 3]).unwrap()
@@ -1924,7 +1877,6 @@ mod tests {
         fn dtype_i8() {
             let got: ArrayD<u64> = make(vec![1i8, 4i8, 3i8, 2i8], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             // col0: max(1,3)=3 at idx 1; col1: max(4,2)=4 at idx 0
@@ -1935,7 +1887,6 @@ mod tests {
         fn dtype_u8() {
             let got: ArrayD<u64> = make(vec![1u8, 4u8, 3u8, 2u8], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -1945,7 +1896,6 @@ mod tests {
         fn dtype_i16() {
             let got: ArrayD<u64> = make(vec![1i16, 4i16, 3i16, 2i16], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -1955,7 +1905,6 @@ mod tests {
         fn dtype_u16() {
             let got: ArrayD<u64> = make(vec![1u16, 4u16, 3u16, 2u16], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -1965,7 +1914,6 @@ mod tests {
         fn dtype_u32() {
             let got: ArrayD<u64> = make(vec![1u32, 4u32, 3u32, 2u32], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -1975,7 +1923,6 @@ mod tests {
         fn dtype_i64() {
             let got: ArrayD<u64> = make(vec![1i64, 4i64, 3i64, 2i64], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -1985,7 +1932,6 @@ mod tests {
         fn dtype_u64() {
             let got: ArrayD<u64> = make(vec![1u64, 4u64, 3u64, 2u64], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -1995,7 +1941,6 @@ mod tests {
         fn dtype_f32() {
             let got: ArrayD<u64> = make(vec![1f32, 4f32, 3f32, 2f32], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -2005,7 +1950,6 @@ mod tests {
         fn dtype_f64() {
             let got: ArrayD<u64> = make(vec![1f64, 4f64, 3f64, 2f64], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -2016,7 +1960,6 @@ mod tests {
             // [[false, true], [true, false]] → argmax per col: col0→1(true), col1→0(true)
             let got: ArrayD<u64> = make(vec![false, true, true, false], &[2, 2])
                 .argmax(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -2035,7 +1978,6 @@ mod tests {
                 &[2, 2],
             )
             .argmax(0, false)
-            .data()
             .to_ndarray()
             .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -2100,7 +2042,6 @@ mod tests {
             // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → argmin per col = [0,0,0,0]
             let got: ArrayD<u64> = make(seq(12), &[3, 4])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -2114,7 +2055,6 @@ mod tests {
             // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → argmin per row = [0,0,0]
             let got: ArrayD<u64> = make(seq(12), &[3, 4])
                 .argmin(1, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -2128,7 +2068,6 @@ mod tests {
             // [[5,8],[2,1],[3,4]] → argmin per col: col0→1(2), col1→1(1)
             let got: ArrayD<u64> = make(vec![5i32, 8, 2, 1, 3, 4], &[3, 2])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 1]).unwrap());
@@ -2139,7 +2078,6 @@ mod tests {
             // [3,1,4,1,5] → argmin = 1
             let got: ArrayD<u64> = make(vec![3i32, 1, 4, 1, 5], &[5])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![1u64]).unwrap());
@@ -2150,18 +2088,14 @@ mod tests {
             // a[i,j,k] = i*12+j*4+k; min is always at j=0 → argmin=0
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
             let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
-            let got: ArrayD<u64> = a.argmin(1, false).data().to_ndarray().unwrap();
+            let got: ArrayD<u64> = a.argmin(1, false).to_ndarray().unwrap();
             let expected = vec![0u64; 8];
             assert_eq!(got, ArrayD::from_shape_vec(vec![2, 4], expected).unwrap());
         }
 
         #[test]
         fn keepdims_read_axis0_i32() {
-            let got: ArrayD<u64> = make(seq(12), &[3, 4])
-                .argmin(0, true)
-                .data()
-                .to_ndarray()
-                .unwrap();
+            let got: ArrayD<u64> = make(seq(12), &[3, 4]).argmin(0, true).to_ndarray().unwrap();
             assert_eq!(
                 got,
                 ArrayD::from_shape_vec(vec![1, 4], vec![0u64, 0, 0, 0]).unwrap()
@@ -2170,11 +2104,7 @@ mod tests {
 
         #[test]
         fn keepdims_read_axis1_i32() {
-            let got: ArrayD<u64> = make(seq(12), &[3, 4])
-                .argmin(1, true)
-                .data()
-                .to_ndarray()
-                .unwrap();
+            let got: ArrayD<u64> = make(seq(12), &[3, 4]).argmin(1, true).to_ndarray().unwrap();
             assert_eq!(
                 got,
                 ArrayD::from_shape_vec(vec![3, 1], vec![0u64, 0, 0]).unwrap()
@@ -2187,7 +2117,6 @@ mod tests {
         fn dtype_i8() {
             let got: ArrayD<u64> = make(vec![1i8, 4i8, 3i8, 2i8], &[2, 2])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             // col0: min(1,3)=1 at idx 0; col1: min(4,2)=2 at idx 1
@@ -2198,7 +2127,6 @@ mod tests {
         fn dtype_u8() {
             let got: ArrayD<u64> = make(vec![1u8, 4u8, 3u8, 2u8], &[2, 2])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
@@ -2208,7 +2136,6 @@ mod tests {
         fn dtype_i16() {
             let got: ArrayD<u64> = make(vec![1i16, 4i16, 3i16, 2i16], &[2, 2])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
@@ -2218,7 +2145,6 @@ mod tests {
         fn dtype_u32() {
             let got: ArrayD<u64> = make(vec![1u32, 4u32, 3u32, 2u32], &[2, 2])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
@@ -2228,7 +2154,6 @@ mod tests {
         fn dtype_f32() {
             let got: ArrayD<u64> = make(vec![1f32, 4f32, 3f32, 2f32], &[2, 2])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
@@ -2238,7 +2163,6 @@ mod tests {
         fn dtype_f64() {
             let got: ArrayD<u64> = make(vec![1f64, 4f64, 3f64, 2f64], &[2, 2])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
@@ -2249,7 +2173,6 @@ mod tests {
             // [[true, false], [false, true]] → argmin per col: col0→1(false), col1→0(false)
             let got: ArrayD<u64> = make(vec![true, false, false, true], &[2, 2])
                 .argmin(0, false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
@@ -2268,7 +2191,6 @@ mod tests {
                 &[2, 2],
             )
             .argmin(0, false)
-            .data()
             .to_ndarray()
             .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
@@ -2305,7 +2227,6 @@ mod tests {
             // [[0,2,4],[2,4,6]] mean over rows → [1,3,5]
             let got: ArrayD<f64> = make(vec![0.0f64, 2.0, 4.0, 2.0, 4.0, 6.0], &[2, 3])
                 .mean(&[0], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -2319,7 +2240,6 @@ mod tests {
             // [[0,2,4],[2,4,6]] mean over cols → [2,4]
             let got: ArrayD<f64> = make(vec![0.0f64, 2.0, 4.0, 2.0, 4.0, 6.0], &[2, 3])
                 .mean(&[1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -2333,7 +2253,6 @@ mod tests {
             // mean of [0..5] = 2.5
             let got: ArrayD<f64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
                 .mean(&[0, 1], false)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![2.5f64]).unwrap());
@@ -2367,7 +2286,6 @@ mod tests {
             // [1,3]: mean=2, var_0 = 1.0
             let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
                 .var(&[1], false, 0.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1.0f64]).unwrap());
@@ -2378,7 +2296,6 @@ mod tests {
             // [1,3]: mean=2, var_1 = 2.0
             let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
                 .var(&[1], false, 1.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![2.0f64]).unwrap());
@@ -2389,7 +2306,6 @@ mod tests {
             // [[1,3],[3,7]]: col means=[2,5], var_0 per col = [1,4]
             let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
                 .var(&[0], false, 0.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -2403,7 +2319,6 @@ mod tests {
             // [[1,3],[3,7]]: row means=[2,5], var_0 per row = [1,4]
             let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
                 .var(&[1], false, 0.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -2417,7 +2332,6 @@ mod tests {
             // ddof=2 with n=1 → NAN
             let got: ArrayD<f64> = make(vec![1.0f64], &[1, 1])
                 .var(&[1], false, 2.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert!(got.iter().all(|v| v.is_nan()));
@@ -2446,7 +2360,6 @@ mod tests {
             // [1,3]: mean=2, std_0 = 1.0
             let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
                 .std(&[1], false, 0.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1.0f64]).unwrap());
@@ -2457,7 +2370,6 @@ mod tests {
             // [[1,3],[3,7]]: var_0 per col = [1,4], std = [1,2]
             let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
                 .std(&[0], false, 0.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(
@@ -2471,7 +2383,6 @@ mod tests {
             // [2,4,4,4,5,5,7,9]: mean=5, var=4, std=2 (ddof=0)
             let got: ArrayD<f64> = make(vec![2.0f64, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0], &[1, 8])
                 .std(&[1], false, 0.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![2.0f64]).unwrap());
@@ -2481,7 +2392,6 @@ mod tests {
         fn ddof_exceeds_n_gives_nan() {
             let got: ArrayD<f64> = make(vec![1.0f64], &[1, 1])
                 .std(&[1], false, 2.0)
-                .data()
                 .to_ndarray()
                 .unwrap();
             assert!(got.iter().all(|v| v.is_nan()));

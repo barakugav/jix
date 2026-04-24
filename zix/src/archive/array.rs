@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(a2.shape(), &[4]);
         assert_eq!(a2.ndim(), 1);
         assert_eq!(a2.dtype(), &u8::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -202,7 +202,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
         let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
         assert_eq!(a2.shape(), &[6]);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -211,7 +211,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3, 4];
         let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
         assert_eq!(a2.shape(), &[5]);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -219,7 +219,7 @@ mod tests {
         let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
         let a2 = array_round_trip::<i32, _, _>(&src, &[4]);
         assert_eq!(a2.dtype(), &i32::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -227,7 +227,7 @@ mod tests {
         let src = ndarray::array![0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5];
         let a2 = array_round_trip::<f32, _, _>(&src, &[3]);
         assert_eq!(a2.dtype(), &f32::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<f32>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<f32>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
         let a2 = array_round_trip::<u8, _, _>(&src, &[2, 3]);
         assert_eq!(a2.shape(), &[4, 6]);
         assert_eq!(a2.ndim(), 2);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -256,7 +256,7 @@ mod tests {
         ];
         let a2 = array_round_trip::<i32, _, _>(&src, &[2, 3]);
         assert_eq!(a2.shape(), &[3, 5]);
-        assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
     #[cfg(not(miri))]
@@ -275,7 +275,7 @@ mod tests {
 
         assert_eq!(a2.shape(), &[12]);
         assert_eq!(a2.dtype(), &u32::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<u32>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<u32>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(r0.shape(), &[4]);
         assert_eq!(r0.ndim(), 1);
         assert_eq!(r0.dtype(), &u8::DTYPE);
-        assert_eq!(r0.data().to_ndarray::<u8>().unwrap(), src0.into_dyn());
+        assert_eq!(r0.to_ndarray::<u8>().unwrap(), src0.into_dyn());
 
         // Read array 1 (padded offset, 2D).
         let r1 = Array::read_from_reader(
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(r1.shape(), &[3, 4]);
         assert_eq!(r1.ndim(), 2);
         assert_eq!(r1.dtype(), &i32::DTYPE);
-        assert_eq!(r1.data().to_ndarray::<i32>().unwrap(), src1.into_dyn());
+        assert_eq!(r1.to_ndarray::<i32>().unwrap(), src1.into_dyn());
 
         // Read array 2 (padded offset, 3D).
         let r2 = Array::read_from_reader(
@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(r2.shape(), &[2, 2, 3]);
         assert_eq!(r2.ndim(), 3);
         assert_eq!(r2.dtype(), &f32::DTYPE);
-        assert_eq!(r2.data().to_ndarray::<f32>().unwrap(), src2.into_dyn());
+        assert_eq!(r2.to_ndarray::<f32>().unwrap(), src2.into_dyn());
     }
 
     // -----------------------------------------------------------------------
@@ -394,7 +394,7 @@ mod tests {
         assert_eq!(a2.shape(), &[4]);
         assert_eq!(a2.ndim(), 1);
         assert_eq!(a2.dtype(), &u8::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[cfg(not(miri))]
@@ -404,7 +404,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
         let a2 = array_mmap_round_trip::<u8, _, _>(&src, &[3], &tmp);
         assert_eq!(a2.shape(), &[6]);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[cfg(not(miri))]
@@ -414,7 +414,7 @@ mod tests {
         let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
         let a2 = array_mmap_round_trip::<i32, _, _>(&src, &[4], &tmp);
         assert_eq!(a2.dtype(), &i32::DTYPE);
-        assert_eq!(a2.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
     #[cfg(not(miri))]
@@ -431,7 +431,7 @@ mod tests {
         let a2 = array_mmap_round_trip::<u8, _, _>(&src, &[2, 3], &tmp);
         assert_eq!(a2.shape(), &[4, 6]);
         assert_eq!(a2.ndim(), 2);
-        assert_eq!(a2.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[cfg(not(miri))]
@@ -463,7 +463,7 @@ mod tests {
         }
         .unwrap();
         assert_eq!(read.shape(), &[6]);
-        assert_eq!(read.data().to_ndarray::<u8>().unwrap(), src2.into_dyn());
+        assert_eq!(read.to_ndarray::<u8>().unwrap(), src2.into_dyn());
         drop(tmp_file);
     }
 }

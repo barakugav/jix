@@ -25,7 +25,7 @@ pub fn broadcast<'py>(
     }
     // release the GIL while copying the data
     py.detach(|| {
-        let ret = ZixArray::from_storage(ret).data().copy().into_py_result()?;
+        let ret = ZixArray::from_storage(ret).copy().into_py_result()?;
         Ok(Array::from_core_storage(ret.into_storage()))
     })
 }
@@ -72,7 +72,7 @@ pub fn reshape<'py>(array: &Bound<'py, Array>, new_shape: Vec<u64>, copy: bool) 
     }
     // release the GIL while copying the data
     py.detach(|| {
-        let ret = ZixArray::from_storage(ret).data().copy().into_py_result()?;
+        let ret = ZixArray::from_storage(ret).copy().into_py_result()?;
         Ok(Array::from_core_storage(ret.into_storage()))
     })
 }

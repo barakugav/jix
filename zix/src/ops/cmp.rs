@@ -24,7 +24,7 @@ define_op2!(
     /// let b = ndarray::array![1i32, 0, 3];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.equal(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.equal(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, true]);
     ///
     /// // NaN != NaN per IEEE 754.
@@ -32,7 +32,7 @@ define_op2!(
     /// let d = ndarray::array![f32::NAN, 1.0f32];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.equal(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.equal(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -61,7 +61,7 @@ define_op2!(
     /// let b = ndarray::array![1i32, 0, 3];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.not_equal(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.not_equal(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
     ///
     /// // NaN != NaN is true per IEEE 754.
@@ -69,7 +69,7 @@ define_op2!(
     /// let d = ndarray::array![f32::NAN, 2.0f32];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.not_equal(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.not_equal(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -98,7 +98,7 @@ define_op2!(
     /// let b = ndarray::array![1i32, 1, 3];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.greater(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.greater(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     ///
     /// // true > false for bool dtype.
@@ -106,7 +106,7 @@ define_op2!(
     /// let d = ndarray::array![false, false, true];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.greater(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.greater(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -135,7 +135,7 @@ define_op2!(
     /// let b = ndarray::array![1i32, 1, 3];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.greater_equal(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.greater_equal(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
     ///
     /// // true >= false and false >= false hold.
@@ -143,7 +143,7 @@ define_op2!(
     /// let d = ndarray::array![false, false, true];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.greater_equal(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.greater_equal(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -172,7 +172,7 @@ define_op2!(
     /// let b = ndarray::array![3i32, 1, 2];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.less(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.less(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     ///
     /// // false < true for bool dtype.
@@ -180,7 +180,7 @@ define_op2!(
     /// let d = ndarray::array![true, false, true];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.less(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.less(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -209,7 +209,7 @@ define_op2!(
     /// let b = ndarray::array![3i32, 1, 2];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.less_equal(zb).data().to_ndarray::<bool>()?;
+    /// let result = za.less_equal(zb).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
     ///
     /// // false <= true and true <= true hold.
@@ -217,7 +217,7 @@ define_op2!(
     /// let d = ndarray::array![true, false, true];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.less_equal(zd).data().to_ndarray::<bool>()?;
+    /// let result = zc.less_equal(zd).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -248,7 +248,7 @@ define_op2!(
     /// let b = ndarray::array![4i32, 2, 3];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.maximum(zb).data().to_ndarray::<i32>()?;
+    /// let result = za.maximum(zb).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 5, 3]);
     ///
     /// // NaN is propagated: if either operand is NaN the result is NaN.
@@ -256,7 +256,7 @@ define_op2!(
     /// let d = ndarray::array![2.0f32, 3.0f32];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.maximum(zd).data().to_ndarray::<f32>()?;
+    /// let result = zc.maximum(zd).to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 3.0);
     /// # Ok::<(), zix::error::Error>(())
@@ -287,7 +287,7 @@ define_op2!(
     /// let b = ndarray::array![4i32, 2, 3];
     /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
     /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.minimum(zb).data().to_ndarray::<i32>()?;
+    /// let result = za.minimum(zb).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
     ///
     /// // NaN is propagated: if either operand is NaN the result is NaN.
@@ -295,7 +295,7 @@ define_op2!(
     /// let d = ndarray::array![2.0f32, 3.0f32];
     /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
     /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.minimum(zd).data().to_ndarray::<f32>()?;
+    /// let result = zc.minimum(zd).to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 1.0);
     /// # Ok::<(), zix::error::Error>(())

@@ -379,7 +379,7 @@ mod tests {
     use std::io::Cursor;
 
     use super::{BlockSize, BlockTable};
-    use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
+    use crate::codec::{Encoder, EncoderParams, ReadContext};
     use crate::dtype::{Dtype, Dtyped};
     use crate::error::Result;
     use crate::storage::block::{BlockTableStorage, Owned};
@@ -423,7 +423,7 @@ mod tests {
         let table = build_from_items(&items, 8, encoder).unwrap();
         assert_eq!(table.block_offsets.len(), 2);
         assert_eq!(table.nitems, 8);
-        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        let mut context = ReadContext::default();
         assert_eq!(decode_block(&table, 0, &mut context), items);
     }
 
@@ -436,7 +436,7 @@ mod tests {
         let table = build_from_items(&items, 4, encoder).unwrap();
         assert_eq!(table.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
-        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        let mut context = ReadContext::default();
         assert_eq!(decode_block(&table, 0, &mut context), items[0..4]);
         assert_eq!(decode_block(&table, 1, &mut context), items[4..8]);
         assert_eq!(decode_block(&table, 2, &mut context), items[8..12]);
@@ -463,7 +463,7 @@ mod tests {
         let table = build_from_items(&items, 2, encoder).unwrap();
         assert_eq!(table.block_offsets.len(), 3);
         assert_eq!(table.nitems, 4);
-        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        let mut context = ReadContext::default();
         assert_eq!(decode_block(&table, 0, &mut context), unsafe {
             cast_slice::<u32, u8>(&items[0..2])
         });
@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(table2.nitems, 8);
         assert_eq!(table2.block_size, 8);
         assert_eq!(*table2.dtype(), u8::DTYPE);
-        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        let mut context = ReadContext::default();
         assert_eq!(decode_block(&table2, 0, &mut context), items);
     }
 
@@ -505,7 +505,7 @@ mod tests {
         let table = round_trip(&items, 4);
         assert_eq!(table.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
-        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        let mut context = ReadContext::default();
         let recovered: Vec<u8> = (0..table.block_offsets.len() - 1)
             .flat_map(|i| decode_block(&table, i, &mut context))
             .collect();
@@ -545,7 +545,7 @@ mod tests {
 
         assert_eq!(table2.block_offsets.len(), 7);
         assert_eq!(table2.nitems, 18);
-        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        let mut context = ReadContext::default();
         let recovered: Vec<u8> = (0..table2.block_offsets.len() - 1)
             .flat_map(|i| decode_block(&table2, i, &mut context))
             .collect();
@@ -571,7 +571,7 @@ mod tests {
         T: Dtyped,
         S: BlockTableStorage,
     {
-        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        let mut context = ReadContext::default();
         let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
         let mut buf = AlignedBytes::with_capacity(T::DTYPE.alignment().as_usize(), block_bytes);
         unsafe { buf.set_len(block_bytes) };
@@ -621,7 +621,7 @@ mod tests {
         let encoder_params = EncoderParams::default();
         let s = make_storage(&items, 4, &encoder_params);
         let mut buf = vec![0u8; 3]; // one byte short
-        let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
+        let mut context = ReadContext::default();
         assert!(s.read_block(0, &mut buf, &mut context).is_err());
     }
 }

@@ -1,5 +1,3 @@
-use std::any::TypeId;
-use std::cell::Cell;
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
@@ -13,7 +11,7 @@ use crate::storage::{
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
 use crate::util::{
-    cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray, MaybeOwned,
+    cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray,
 };
 
 #[derive(Clone)]
@@ -48,7 +46,7 @@ impl Array<Compact> {
         params.preferred_read_block_shape = Some(b_layout.preferred_read_block_shape);
         params.preferred_read_block_size_hint = Some(b_layout.preferred_read_block_size_hint);
 
-        array.data().copy_with(params)
+        array.copy_with(params, &array.read_ctx())
     }
 }
 
@@ -101,18 +99,127 @@ impl<S: ArrayStorage> Array<S> {
         self.storage.dtype()
     }
 
-    pub fn data(&self) -> ArrayData<'_, S> {
+    pub fn to_ndarray<T>(&self) -> Result<ndarray::ArrayD<T>>
+    where
+        T: Dtyped,
+    {
+        let shape = self.shape();
+        let full_range = dim_arr(shape.len(), |dim| 0u64..shape[dim]);
+        self.to_ndarray_sub(&full_range, &self.read_ctx())
+    }
+
+    pub fn to_ndarray_sub<T>(
+        &self,
+        range: &[Range<u64>],
+        context: &ReadContext,
+    ) -> Result<ndarray::ArrayD<T>>
+    where
+        T: Dtyped,
+    {
+        self.check_type::<T>()?;
+        check_get_range(self.shape(), range)?;
+        let ndim = self.ndim();
+        let out_shape = dim_arr(ndim, |dim| {
+            let len = range[dim].end - range[dim].start;
+            let len: usize = len.try_into().unwrap();
+            len
+        });
+        let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
+        self.to_ndarray_buf(
+            range,
+            unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) },
+            context,
+        )?;
+        Ok(unsafe { array.assume_init() })
+    }
+
+    pub fn to_ndarray_buf(
+        &self,
+        range: &[Range<u64>],
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> Result<()> {
+        // TODO: call read_data multiple times with smaller blocks
+        self.storage.read_data(range, buf, context)
+    }
+
+    pub fn copy(&self) -> Result<Array<Compact>>
+    where
+        S: ArrayStorage,
+    {
+        let context = self.read_ctx();
+        self.copy_with(ArrayParams::default(), &context)
+    }
+
+    pub fn copy_with(
+        &self,
+        mut params: ArrayParams,
+        context: &ReadContext,
+    ) -> Result<Array<Compact>>
+    where
+        S: ArrayStorage,
+    {
+        params.override_from_storage(&self.storage);
+
+        let ndim = self.ndim();
+        let dtype = self.dtype().clone();
+        let itemsize = dtype.itemsize() as usize;
+        let mut tmp_block_data = AlignedBytes::new(dtype.alignment().as_usize());
+        let builder = ArrayBuilder::new(self.shape(), dtype, params)?;
+        builder.build(
+            |builder, block_idx, block_inner_offset, block_size, output_block| {
+                let block_shape = builder.block_shape();
+                let range = dim_arr(ndim, |dim| {
+                    let start = block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
+                    let end = start + block_size[dim];
+                    start..end
+                });
+
+                let full_block = (0..ndim).all(|dim| {
+                    block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim] as u64
+                });
+
+                let output_block_ptr = output_block.as_mut_ptr();
+                let read_data_buf = if full_block {
+                    output_block
+                } else {
+                    let b_size_bytes = block_size.iter().product::<u64>() as usize * itemsize;
+                    tmp_block_data.clear();
+                    tmp_block_data.reserve(b_size_bytes);
+                    unsafe { tmp_block_data.set_len(b_size_bytes) };
+                    tmp_block_data.as_mut_slice()
+                };
+
+                self.storage.read_data(&range, read_data_buf, context)?;
+
+                if !full_block {
+                    // Copy from temporary buffer to output block with correct strides.
+                    let src_strides =
+                        default_strides(&dim_arr(ndim, |dim| block_size[dim] as usize), itemsize);
+                    unsafe {
+                        nd_copy(
+                            read_data_buf.as_ptr(),
+                            output_block_ptr,
+                            block_size,
+                            &src_strides,
+                            &builder.block_strides,
+                            itemsize,
+                        )
+                    };
+                }
+
+                Ok(())
+            },
+        )
+    }
+
+    pub fn read_ctx(&self) -> ReadContext {
         let params = self.storage.spec().decoder_params;
         let context = match params {
             Some(params) => ReadContext::new(params),
             None => ReadContext::new(&DecoderParams::default()),
         };
-        let context = context.expect("failed to create read context");
-        ArrayData::new(self, MaybeOwned::Owned(context))
-    }
-
-    pub fn data_ctx<'a>(&'a self, context: &'a ReadContext) -> ArrayData<'a, S> {
-        ArrayData::new(self, MaybeOwned::Borrowed(context))
+        context.expect("failed to create read context")
     }
 
     pub fn as_ref(&self) -> Array<Ref<'_, S>> {
@@ -134,6 +241,17 @@ impl<S: ArrayStorage> Array<S> {
 
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
         self.storage.spec().blocks_layout
+    }
+
+    fn check_type<T: Dtyped>(&self) -> Result<()> {
+        let dtype = T::DTYPE;
+        ensure!(
+            self.dtype() == &dtype,
+            UnsupportedDtype,
+            "requested type {dtype:?} does not match array dtype {:?}",
+            self.dtype()
+        );
+        Ok(())
     }
 }
 
@@ -244,155 +362,6 @@ impl ArrayBuilder {
     }
 }
 
-pub struct ArrayData<'a, S> {
-    array: &'a Array<S>,
-    context: MaybeOwned<'a, ReadContext>,
-    type_id_cache: Cell<Option<TypeId>>,
-}
-
-impl<'a, S: ArrayStorage> ArrayData<'a, S> {
-    fn new(array: &'a Array<S>, context: MaybeOwned<'a, ReadContext>) -> Self {
-        Self {
-            array,
-            context,
-            type_id_cache: Cell::new(None),
-        }
-    }
-
-    pub fn shape(&self) -> &[u64] {
-        self.array.shape()
-    }
-
-    pub fn ndim(&self) -> usize {
-        self.array.ndim()
-    }
-
-    pub fn dtype(&self) -> &Dtype {
-        self.array.dtype()
-    }
-
-    fn check_type<T: Dtyped>(&self) -> Result<()> {
-        let type_id = TypeId::of::<T>();
-        if self.type_id_cache.get() == Some(type_id) {
-            return Ok(());
-        }
-
-        let dtype = T::DTYPE;
-        ensure!(
-            self.dtype() == &dtype,
-            UnsupportedDtype,
-            "requested type {dtype:?} does not match array dtype {:?}",
-            self.dtype()
-        );
-
-        self.type_id_cache.set(Some(type_id));
-        Ok(())
-    }
-
-    pub fn to_ndarray<T>(&self) -> Result<ndarray::ArrayD<T>>
-    where
-        T: Dtyped,
-    {
-        let shape = self.shape();
-        let full_range = dim_arr(shape.len(), |dim| 0u64..shape[dim]);
-        self.to_ndarray_sub(&full_range)
-    }
-
-    pub fn to_ndarray_sub<T>(&self, range: &[Range<u64>]) -> Result<ndarray::ArrayD<T>>
-    where
-        T: Dtyped,
-    {
-        self.check_type::<T>()?;
-        check_get_range(self.shape(), range)?;
-        let ndim = self.ndim();
-        let out_shape = dim_arr(ndim, |dim| {
-            let len = range[dim].end - range[dim].start;
-            let len: usize = len.try_into().unwrap();
-            len
-        });
-        let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
-        self.to_ndarray_buf(range, {
-            unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) }
-        })?;
-        Ok(unsafe { array.assume_init() })
-    }
-
-    pub fn to_ndarray_buf(&self, range: &[Range<u64>], buf: &mut [u8]) -> Result<()> {
-        // TODO: call read_data multiple times with smaller blocks
-        self.array
-            .storage
-            .read_data(range, buf, self.context.as_ref())
-    }
-
-    pub fn copy(&self) -> Result<Array<Compact>>
-    where
-        S: ArrayStorage,
-    {
-        self.copy_with(ArrayParams::default())
-    }
-
-    pub fn copy_with(&self, mut params: ArrayParams) -> Result<Array<Compact>>
-    where
-        S: ArrayStorage,
-    {
-        params.override_from_storage(&self.array.storage);
-
-        let ndim = self.ndim();
-        let dtype = self.dtype().clone();
-        let itemsize = dtype.itemsize() as usize;
-        let mut tmp_block_data = AlignedBytes::new(dtype.alignment().as_usize());
-        let builder = ArrayBuilder::new(self.shape(), dtype, params)?;
-        builder.build(
-            |builder, block_idx, block_inner_offset, block_size, output_block| {
-                let block_shape = builder.block_shape();
-                let range = dim_arr(ndim, |dim| {
-                    let start = block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
-                    let end = start + block_size[dim];
-                    start..end
-                });
-
-                let full_block = (0..ndim).all(|dim| {
-                    block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim] as u64
-                });
-
-                let output_block_ptr = output_block.as_mut_ptr();
-                let read_data_buf = if full_block {
-                    output_block
-                } else {
-                    let b_size_bytes = block_size.iter().product::<u64>() as usize * itemsize;
-                    tmp_block_data.clear();
-                    tmp_block_data.reserve(b_size_bytes);
-                    unsafe { tmp_block_data.set_len(b_size_bytes) };
-                    tmp_block_data.as_mut_slice()
-                };
-
-                self.array
-                    .storage
-                    .read_data(&range, read_data_buf, self.context.as_ref())?;
-
-                if !full_block {
-                    // Copy from temporary buffer to output block with correct strides.
-                    let src_strides =
-                        default_strides(&dim_arr(ndim, |dim| block_size[dim] as usize), itemsize);
-                    unsafe {
-                        nd_copy(
-                            // TODO use in other place
-                            read_data_buf.as_ptr(),
-                            output_block_ptr,
-                            block_size,
-                            &src_strides,
-                            &builder.block_strides,
-                            itemsize,
-                        )
-                    };
-                }
-
-                Ok(())
-            },
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use ndarray::ArrayD;
@@ -416,7 +385,7 @@ mod tests {
         D: ndarray::Dimension,
     {
         let a = Array::from_ndarray(&src, arr_params(block_shape)).unwrap();
-        a.data().to_ndarray().unwrap()
+        a.to_ndarray().unwrap()
     }
 
     // -----------------------------------------------------------------------
@@ -475,7 +444,7 @@ mod tests {
     #[test]
     fn to_ndarray_1d_single_block() {
         let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
-        let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = a.to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![4], vec![0, 1, 2, 3]).unwrap()
@@ -485,7 +454,7 @@ mod tests {
     #[test]
     fn to_ndarray_1d_two_blocks() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = a.to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
@@ -495,7 +464,7 @@ mod tests {
     #[test]
     fn to_ndarray_1d_i32() {
         let a = array(&[&[10i32, 20, 30, 40], &[50, 60, 70, 80]], &[8], &[4]);
-        let got: ArrayD<i32> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<i32> = a.to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![8], vec![10, 20, 30, 40, 50, 60, 70, 80]).unwrap()
@@ -525,7 +494,7 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = a.to_ndarray().unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![4, 6], (0u8..24).collect()).unwrap()
@@ -539,7 +508,7 @@ mod tests {
     #[test]
     fn to_ndarray_sub_1d_full_range() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[0..6]).unwrap();
+        let got: ArrayD<u8> = a.to_ndarray_sub(&[0..6], &a.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
@@ -550,7 +519,7 @@ mod tests {
     fn to_ndarray_sub_1d_aligned_second_block() {
         // range [3..6) → output shape [3], values [3,4,5]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[3..6]).unwrap();
+        let got: ArrayD<u8> = a.to_ndarray_sub(&[3..6], &a.read_ctx()).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![3, 4, 5]).unwrap());
     }
 
@@ -558,7 +527,7 @@ mod tests {
     fn to_ndarray_sub_1d_cross_block_boundary() {
         // range [1..5) → output shape [4], values [1,2,3,4]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..5]).unwrap();
+        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![4], vec![1, 2, 3, 4]).unwrap()
@@ -569,7 +538,7 @@ mod tests {
     fn to_ndarray_sub_1d_within_single_block() {
         // range [1..2) → output shape [1], value [1]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..2]).unwrap();
+        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..2], &a.read_ctx()).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1]).unwrap());
     }
 
@@ -594,7 +563,7 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..3, 2..5]).unwrap();
+        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 3], vec![8, 9, 10, 14, 15, 16]).unwrap()
@@ -623,7 +592,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3, 4];
         let a = Array::from_ndarray(&src, arr_params(&[3])).unwrap();
         assert_eq!(a.shape(), &[5]);
-        let got: ArrayD<u8> = a.data().to_ndarray().unwrap();
+        let got: ArrayD<u8> = a.to_ndarray().unwrap();
         assert_eq!(got, src.into_dyn());
     }
 
@@ -645,7 +614,7 @@ mod tests {
         let src = ndarray::array![0u8, 1, 2, 3];
         let a = Array::from_ndarray(&src, arr_params(&[10])).unwrap();
         assert_eq!(a.shape(), &[4]);
-        assert_eq!(a.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -656,7 +625,7 @@ mod tests {
         let a = Array::from_ndarray(&view, arr_params(&[3])).unwrap();
         assert_eq!(a.shape(), &[5]);
         assert_eq!(
-            a.data().to_ndarray::<u8>().unwrap(),
+            a.to_ndarray::<u8>().unwrap(),
             ndarray::array![0u8, 2, 4, 6, 8].into_dyn()
         );
     }
@@ -701,7 +670,7 @@ mod tests {
         ];
         let a = Array::from_ndarray(&src, arr_params(&[2, 3])).unwrap();
         assert_eq!(a.shape(), &[3, 5]);
-        assert_eq!(a.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
+        assert_eq!(a.to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -723,7 +692,7 @@ mod tests {
     fn from_ndarray_then_to_ndarray_sub_1d() {
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
         let a = Array::from_ndarray(&src, arr_params(&[3])).unwrap();
-        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..5]).unwrap();
+        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
         assert_eq!(got, ndarray::array![1u8, 2, 3, 4].into_dyn());
     }
 
@@ -737,43 +706,8 @@ mod tests {
             [18,  19, 20, 21, 22, 23],
         ];
         let a = Array::from_ndarray(&src, arr_params(&[2, 3])).unwrap();
-        let got: ArrayD<u8> = a.data().to_ndarray_sub(&[1..3, 2..5]).unwrap();
+        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
         assert_eq!(got, ndarray::array![[8u8, 9, 10], [14, 15, 16]].into_dyn());
-    }
-
-    // -----------------------------------------------------------------------
-    // type_id cache tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn check_type_cached_correct_dtype_multiple_reads() {
-        // Repeated reads with the correct dtype should all succeed (the cached
-        // TypeId path is exercised from the second call onward).
-        let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
-        let data = a.data();
-        let expected = ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap();
-        for _ in 0..4 {
-            assert_eq!(data.to_ndarray::<u8>().unwrap(), expected);
-        }
-    }
-
-    #[test]
-    fn check_type_interleaved_correct_and_incorrect_dtype() {
-        // Reads with the wrong dtype should always return an error, even after
-        // a successful read has primed the TypeId cache.
-        let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
-        let data = a.data();
-        let expected = ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap();
-
-        // First two reads: wrong types — must error before cache is primed.
-        assert!(data.to_ndarray::<u32>().is_err());
-        assert!(data.to_ndarray::<i8>().is_err());
-        // Third read: correct — primes the cache.
-        assert_eq!(data.to_ndarray::<u8>().unwrap(), expected);
-        // Fourth read: wrong type — must error even after cache is primed.
-        assert!(data.to_ndarray::<u32>().is_err());
-        // Fifth read: correct — cache still valid.
-        assert_eq!(data.to_ndarray::<u8>().unwrap(), expected);
     }
 
     // -----------------------------------------------------------------------
@@ -783,13 +717,13 @@ mod tests {
     #[test]
     fn copy_1d_single_block() {
         let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[4]);
         assert_eq!(b.ndim(), 1);
         assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [4]);
         assert_eq!(
-            b.data().to_ndarray::<u8>().unwrap(),
+            b.to_ndarray::<u8>().unwrap(),
             ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap()
         );
     }
@@ -797,11 +731,11 @@ mod tests {
     #[test]
     fn copy_1d_multi_block() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[6]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
         assert_eq!(
-            b.data().to_ndarray::<u8>().unwrap(),
+            b.to_ndarray::<u8>().unwrap(),
             ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
         );
     }
@@ -811,20 +745,20 @@ mod tests {
         // shape [5], block [3] → stored as 6 elements (padded)
         let src = ndarray::array![0u8, 1, 2, 3, 4];
         let a = Array::from_ndarray(&src, arr_params(&[3])).unwrap();
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[5]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
-        assert_eq!(b.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[test]
     fn copy_1d_i32() {
         let a = array(&[&[10i32, 20, 30, 40], &[50, 60, 70, 80]], &[8], &[4]);
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[8]);
         assert_eq!(b.dtype(), &i32::DTYPE);
         assert_eq!(
-            b.data().to_ndarray::<i32>().unwrap(),
+            b.to_ndarray::<i32>().unwrap(),
             ArrayD::from_shape_vec(vec![8], vec![10i32, 20, 30, 40, 50, 60, 70, 80]).unwrap()
         );
     }
@@ -833,11 +767,11 @@ mod tests {
     fn copy_2d_single_block() {
         // shape=[2,3], block=[2,3] — one block, no partial-block path
         let a = array(&[&[0u8, 1, 2, 3, 4, 5]], &[2, 3], &[2, 3]);
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[2, 3]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(
-            b.data().to_ndarray::<u8>().unwrap(),
+            b.to_ndarray::<u8>().unwrap(),
             ArrayD::from_shape_vec(vec![2, 3], (0u8..6).collect()).unwrap()
         );
     }
@@ -861,11 +795,11 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[4, 6]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(
-            b.data().to_ndarray::<u8>().unwrap(),
+            b.to_ndarray::<u8>().unwrap(),
             ArrayD::from_shape_vec(vec![4, 6], (0u8..24).collect()).unwrap()
         );
     }
@@ -885,10 +819,10 @@ mod tests {
             [10,   11, 12, 13, 14],
         ];
         let a = Array::from_ndarray(&src, arr_params(&[2, 3])).unwrap();
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[3, 5]);
         assert_eq!(b.dtype(), &i32::DTYPE);
-        assert_eq!(b.data().to_ndarray::<i32>().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray::<i32>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -899,11 +833,11 @@ mod tests {
         //   size [1,1,2] vs block_shape [2,2,3].
         let src = ndarray::Array3::<u8>::from_shape_vec([3, 3, 5], (0u8..45).collect()).unwrap();
         let a = Array::from_ndarray(&src, arr_params(&[2, 2, 3])).unwrap();
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[3, 3, 5]);
         assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 2, 3]);
-        assert_eq!(b.data().to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray::<u8>().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -911,7 +845,7 @@ mod tests {
         // Verify the copied array has the same block layout as the source.
         let src = ndarray::array![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         let a = Array::from_ndarray(&src, arr_params(&[4])).unwrap();
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         assert_eq!(
             a.blocks_layout().block_shape_hint[..],
             b.blocks_layout().block_shape_hint[..]
@@ -925,11 +859,8 @@ mod tests {
         // both through write/read and checking values remain consistent.
         let src = ndarray::array![10u8, 20, 30, 40];
         let a = Array::from_ndarray(&src, arr_params(&[4])).unwrap();
-        let b = a.data().copy().unwrap();
+        let b = a.copy().unwrap();
         // Both should read back the same data independently.
-        assert_eq!(
-            a.data().to_ndarray::<u8>().unwrap(),
-            b.data().to_ndarray::<u8>().unwrap()
-        );
+        assert_eq!(a.to_ndarray::<u8>().unwrap(), b.to_ndarray::<u8>().unwrap());
     }
 }

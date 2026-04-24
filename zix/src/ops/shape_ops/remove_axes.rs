@@ -166,6 +166,7 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::array::Array;
+    use crate::codec::ReadContext;
     use crate::util::arr_params;
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<crate::storage::Compact> {
@@ -240,7 +241,6 @@ mod tests {
         let got: ArrayD<i32> = make1d(seq(6), 6)
             .insert_axes(&[0])
             .remove_axes(&[0])
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![6], seq(6)).unwrap());
@@ -251,7 +251,6 @@ mod tests {
         let got: ArrayD<i32> = make1d(seq(6), 6)
             .insert_axes(&[1])
             .remove_axes(&[1])
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![6], seq(6)).unwrap());
@@ -262,7 +261,6 @@ mod tests {
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .insert_axes(&[1])
             .remove_axes(&[1])
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
@@ -273,7 +271,6 @@ mod tests {
         let got: ArrayD<i32> = make2d(seq(6), 2, 3)
             .insert_axes(&[0, 1, 2])
             .remove_axes(&[0, 2, 4])
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![2, 3], seq(6)).unwrap());
@@ -281,11 +278,7 @@ mod tests {
 
     #[test]
     fn full_read_identity_empty_axes() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
-            .remove_axes(&[])
-            .data()
-            .to_ndarray()
-            .unwrap();
+        let got: ArrayD<i32> = make2d(seq(12), 3, 4).remove_axes(&[]).to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
     }
 
@@ -299,8 +292,7 @@ mod tests {
         let got: ArrayD<i32> = make1d(seq(6), 6)
             .insert_axes(&[0])
             .remove_axes(&[0])
-            .data()
-            .to_ndarray_sub(&[2..5])
+            .to_ndarray_sub(&[2..5], &ReadContext::default())
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![2, 3, 4]).unwrap());
     }
@@ -311,8 +303,7 @@ mod tests {
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .insert_axes(&[1])
             .remove_axes(&[1])
-            .data()
-            .to_ndarray_sub(&[1..3, 0..2])
+            .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
         // row1=[4,5], row2=[8,9]
         assert_eq!(

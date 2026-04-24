@@ -18,14 +18,14 @@
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
 //! the transformation at read time. These are defined in [`zix::ops`](crate::ops) and include shape
 //! operations (`Reshape`, `Slice`, `PermuteAxes`, `Broadcast`, …), element-wise operations
-//! (`Neg`, `Add`, `Exp`, `AsType`, …), reductions (`Sum`, `Mean`, …), et.
+//! (`Neg`, `Add`, `Exp`, `AsType`, …), reductions (`Sum`, `Mean`, …), etc.
 //!
 //! # Notable items in this module
 //!
 //! - [`ArrayStorage`] — the trait all storage backends implement.
 //! - [`Compact`] — the main block-compressed storage backend.
-//! - [`BlocksLayout`] — block geometry hints attached to every storage.
 //! - [`Plain`] and [`Scalar`] — adapters for non-compressed data.
+//! - [`BlocksLayout`] — block geometry hints attached to every storage.
 
 use std::ops::Range;
 

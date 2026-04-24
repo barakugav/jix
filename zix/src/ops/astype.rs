@@ -490,7 +490,7 @@ mod tests {
                     ) {
                         let a = ndarray::ArrayD::from_shape_vec(vec![8], vals).unwrap();
                         let za = Array::from_ndarray(&a, crate::util::arr_params(&[8])).unwrap();
-                        let actual = za.astype(<$dst>::DTYPE).data().to_ndarray::<$dst>().unwrap();
+                        let actual = za.astype(<$dst>::DTYPE).to_ndarray::<$dst>().unwrap();
                         let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
                         proptest::prop_assert_eq!(actual, expected);
                     }
@@ -503,7 +503,7 @@ mod tests {
                     ) {
                         let a = ndarray::ArrayD::from_shape_vec(vec![6], vals).unwrap();
                         let za = Array::from_ndarray(&a, crate::util::arr_params(&[2])).unwrap();
-                        let actual = za.astype(<$dst>::DTYPE).data().to_ndarray::<$dst>().unwrap();
+                        let actual = za.astype(<$dst>::DTYPE).to_ndarray::<$dst>().unwrap();
                         let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
                         proptest::prop_assert_eq!(actual, expected);
                     }
@@ -516,7 +516,7 @@ mod tests {
                     ) {
                         let a = ndarray::ArrayD::from_shape_vec(vec![3, 4], vals).unwrap();
                         let za = Array::from_ndarray(&a, crate::util::arr_params(&[3, 4])).unwrap();
-                        let actual = za.astype(<$dst>::DTYPE).data().to_ndarray::<$dst>().unwrap();
+                        let actual = za.astype(<$dst>::DTYPE).to_ndarray::<$dst>().unwrap();
                         let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
                         proptest::prop_assert_eq!(actual, expected);
                     }
@@ -529,7 +529,7 @@ mod tests {
                     ) {
                         let a = ndarray::ArrayD::from_shape_vec(vec![4, 4], vals).unwrap();
                         let za = Array::from_ndarray(&a, crate::util::arr_params(&[2, 2])).unwrap();
-                        let actual = za.astype(<$dst>::DTYPE).data().to_ndarray::<$dst>().unwrap();
+                        let actual = za.astype(<$dst>::DTYPE).to_ndarray::<$dst>().unwrap();
                         let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
                         proptest::prop_assert_eq!(actual, expected);
                     }

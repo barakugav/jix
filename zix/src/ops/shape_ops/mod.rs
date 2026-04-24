@@ -31,7 +31,7 @@ where
 {
     #[track_caller]
     pub fn reshape(self, new_shape: &[u64]) -> Array<Compact> {
-        self.reshape_view(new_shape).data().copy().unwrap()
+        self.reshape_view(new_shape).copy().unwrap()
     }
 
     #[track_caller]
@@ -136,7 +136,7 @@ where
     /// See [`broadcast_view`](Self::broadcast_view) for the validity rules on `new_shape`.
     #[track_caller]
     pub fn broadcast(self, new_shape: &[u64]) -> Array<Compact> {
-        self.broadcast_view(new_shape).data().copy().unwrap()
+        self.broadcast_view(new_shape).copy().unwrap()
     }
 
     /// Return a lazy view of the array expanded to `new_shape` by repeating elements along

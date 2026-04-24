@@ -69,8 +69,7 @@ impl Array {
         if np_arr_data_size > 0 {
             py.detach(|| {
                 self.arr
-                    .data()
-                    .to_ndarray_buf(index, np_arr_data)
+                    .to_ndarray_buf(index, np_arr_data, &self.arr.read_ctx())
                     .into_py_result()
             })?;
         }

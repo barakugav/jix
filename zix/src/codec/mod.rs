@@ -217,7 +217,7 @@ pub struct ReadContext {
 }
 impl ReadContext {
     pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
-        let tmp_buf1 = AlignedBytes::new(8);
+        let tmp_buf1 = AlignedBytes::new(16);
         let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {
             tmp_buffers: TmpBufferPool::new(),
@@ -234,6 +234,11 @@ impl ReadContext {
 
     pub(crate) fn tmp_buf(&self, size: usize, alignment: Alignment) -> TmpBuf<'_> {
         self.tmp_buffers.get(size, alignment)
+    }
+}
+impl Default for ReadContext {
+    fn default() -> Self {
+        Self::new(&DecoderParams::default()).unwrap()
     }
 }
 

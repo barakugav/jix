@@ -215,7 +215,7 @@ impl<S: ArrayStorage> ArrayStorage for InsertAxes<S> {
 mod tests {
     use ndarray::ArrayD;
 
-    use crate::{array::Array, util::arr_params};
+    use crate::{array::Array, codec::ReadContext, util::arr_params};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
@@ -302,21 +302,13 @@ mod tests {
 
     #[test]
     fn full_read_insert_before_first() {
-        let got: ArrayD<i32> = make1d(seq(6), 6)
-            .insert_axes(&[0])
-            .data()
-            .to_ndarray()
-            .unwrap();
+        let got: ArrayD<i32> = make1d(seq(6), 6).insert_axes(&[0]).to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1, 6], seq(6)).unwrap());
     }
 
     #[test]
     fn full_read_insert_after_last() {
-        let got: ArrayD<i32> = make1d(seq(6), 6)
-            .insert_axes(&[1])
-            .data()
-            .to_ndarray()
-            .unwrap();
+        let got: ArrayD<i32> = make1d(seq(6), 6).insert_axes(&[1]).to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![6, 1], seq(6)).unwrap());
     }
 
@@ -324,7 +316,6 @@ mod tests {
     fn full_read_insert_between_dims() {
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .insert_axes(&[1])
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 1, 4], seq(12)).unwrap());
@@ -332,11 +323,7 @@ mod tests {
 
     #[test]
     fn full_read_insert_front_and_back() {
-        let got: ArrayD<i32> = make1d(seq(6), 6)
-            .insert_axes(&[0, 1])
-            .data()
-            .to_ndarray()
-            .unwrap();
+        let got: ArrayD<i32> = make1d(seq(6), 6).insert_axes(&[0, 1]).to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1, 6, 1], seq(6)).unwrap());
     }
 
@@ -345,7 +332,6 @@ mod tests {
         // axes=(0,1,1,1,3) on (2,3,4) → (1,2,1,1,1,3,4,1), elements unchanged
         let got: ArrayD<i32> = make3d(seq(24), 2, 3, 4)
             .insert_axes(&[0, 1, 1, 1, 3])
-            .data()
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -356,11 +342,7 @@ mod tests {
 
     #[test]
     fn full_read_identity_empty_axes() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
-            .insert_axes(&[])
-            .data()
-            .to_ndarray()
-            .unwrap();
+        let got: ArrayD<i32> = make2d(seq(12), 3, 4).insert_axes(&[]).to_ndarray().unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
     }
 
@@ -373,8 +355,7 @@ mod tests {
         // [1, 6]: read [0..1, 2..5] → same as reading [2..5] from the 1D inner
         let got: ArrayD<i32> = make1d(seq(6), 6)
             .insert_axes(&[0])
-            .data()
-            .to_ndarray_sub(&[0..1, 2..5])
+            .to_ndarray_sub(&[0..1, 2..5], &ReadContext::default())
             .unwrap();
         assert_eq!(
             got,
@@ -387,8 +368,7 @@ mod tests {
         // [3, 1, 4]: read rows 1..3, inserted dim 0..1, cols 0..2
         let got: ArrayD<i32> = make2d(seq(12), 3, 4)
             .insert_axes(&[1])
-            .data()
-            .to_ndarray_sub(&[1..3, 0..1, 0..2])
+            .to_ndarray_sub(&[1..3, 0..1, 0..2], &ReadContext::default())
             .unwrap();
         // row1=[4,5], row2=[8,9]
         assert_eq!(
