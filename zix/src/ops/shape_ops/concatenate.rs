@@ -7,60 +7,12 @@ use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result}
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 
-/// Join a sequence of arrays along an existing axis.
-///
-/// All input arrays must have the same number of dimensions and the same size on every axis
-/// *except* the concatenation axis, along which their sizes may differ.  All arrays must share
-/// the same [`Dtype`].  The result is a lazy [`Array`] whose data is read on demand; no copy is
-/// made at construction time.
-///
-/// This is the array-axis analogue of NumPy's `numpy.concatenate`.  Unlike [`stack`], which
-/// introduces a *new* axis, `concatenate` joins along an *existing* one, so the output has the
-/// same number of dimensions as the inputs.
-///
-/// [`stack`]: crate::ops::stack
-///
-/// # Arguments
-///
-/// * `arrays` — any [`ArraySequence`]: a `Vec`, a slice, or a tuple of up to ten arrays.
-///   All elements must have identical dtypes and identical shapes on every axis other than `axis`.
-/// * `axis` — the axis along which to concatenate.  Must be less than the number of dimensions
-///   of the input arrays.
+/// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
 ///
 /// # Panics
 ///
-/// Panics if any of the following conditions hold (the underlying [`Concatenate::new`] returns an
-/// error, which this function unwraps):
-///
-/// * `arrays` is empty.
-/// * `axis` is out of bounds (≥ number of dimensions of the arrays).
-/// * Any two arrays differ in dtype.
-/// * Any two arrays differ in shape on an axis *other* than `axis`.
-///
-/// # Examples
-///
-/// ```
-/// use zix::{Array, ArrayParams};
-/// use zix::ops::concatenate;
-///
-/// // 1-D concatenation — analogous to np.concatenate([a, b])
-/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let b = Array::from_ndarray(&ndarray::array![4i32, 5].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let c = concatenate(vec![a, b], 0);
-/// assert_eq!(c.shape(), &[5]);
-///
-/// // 2-D concatenation along axis 0 (stack rows)
-/// let a = Array::from_ndarray(&ndarray::array![[1i32, 2], [3, 4]].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let b = Array::from_ndarray(&ndarray::array![[5i32, 6]].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let c = concatenate(vec![a, b], 0);
-/// assert_eq!(c.shape(), &[3, 2]);
-///
-/// // 2-D concatenation along axis 1 (stack columns)
-/// let a = Array::from_ndarray(&ndarray::array![[1i32, 2], [3, 4]].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let b = Array::from_ndarray(&ndarray::array![[5i32, 6, 7], [8, 9, 10]].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let c = concatenate(vec![a, b], 1);
-/// assert_eq!(c.shape(), &[2, 5]);
-/// ```
+/// Panics if `arrays` is empty, `axis` is out of bounds, dtypes differ, or shapes differ on any
+/// axis other than `axis`.
 #[track_caller]
 pub fn concatenate<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Concatenate<ArraysT>>
 where
@@ -69,10 +21,40 @@ where
     Array::from_storage(Concatenate::new(arrays, axis).unwrap())
 }
 
-/// Lazy storage type returned by [`concatenate`].
+/// Joins a sequence of arrays along an existing axis, returned by [`concatenate`].
 ///
-/// Holds the input arrays and the bookkeeping needed to serve arbitrary read requests.  See
-/// [`concatenate`] for the full description, accepted inputs, error conditions, and examples.
+/// All input arrays must have the same number of dimensions and the same size on every axis
+/// *except* the concatenation axis, along which their sizes may differ. All arrays must share the
+/// same [`Dtype`]. The output has the same number of dimensions as the inputs — unlike
+/// [`Stack`](crate::ops::Stack), which introduces a new axis.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Examples
+///
+/// ```
+/// use zix::{Array, ArrayParams};
+/// use zix::ops::concatenate;
+///
+/// // 1-D: join two arrays end-to-end
+/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), ArrayParams::new())?;
+/// let b = Array::from_ndarray(&ndarray::array![4i32, 5].view().into_dyn(), ArrayParams::new())?;
+/// let c = concatenate((a, b), 0);
+/// assert_eq!(c.shape(), &[5]);
+///
+/// // 2-D: stack rows (axis 0)
+/// let a = Array::from_ndarray(&ndarray::array![[1i32, 2], [3, 4]].view().into_dyn(), ArrayParams::new())?;
+/// let b = Array::from_ndarray(&ndarray::array![[5i32, 6]].view().into_dyn(), ArrayParams::new())?;
+/// let c = concatenate((a, b), 0);
+/// assert_eq!(c.shape(), &[3, 2]);
+///
+/// // 2-D: append columns (axis 1)
+/// let a = Array::from_ndarray(&ndarray::array![[1i32, 2], [3, 4]].view().into_dyn(), ArrayParams::new())?;
+/// let b = Array::from_ndarray(&ndarray::array![[5i32, 6, 7], [8, 9, 10]].view().into_dyn(), ArrayParams::new())?;
+/// let c = concatenate((a, b), 1);
+/// assert_eq!(c.shape(), &[2, 5]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct Concatenate<ArraysT> {
     arrays: ArraysT,
     concat_axis: usize,
@@ -286,9 +268,7 @@ mod tests {
         let b = ndarray::array![4i32, 5, 6];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3])).unwrap();
-        let actual = concatenate(vec![za, zb], 0)
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = concatenate((za, zb), 0).to_ndarray::<i32>().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -300,9 +280,7 @@ mod tests {
         let b = ndarray::array![3i32, 4, 5, 6];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[4])).unwrap();
-        let actual = concatenate(vec![za, zb], 0)
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = concatenate((za, zb), 0).to_ndarray::<i32>().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -316,9 +294,7 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3])).unwrap();
         let zc = Array::from_ndarray(&c.view().into_dyn(), arr_params(&[1])).unwrap();
-        let actual = concatenate(vec![za, zb, zc], 0)
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = concatenate((za, zb, zc), 0).to_ndarray::<i32>().unwrap();
         let expected =
             ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
@@ -331,9 +307,7 @@ mod tests {
         let b = ndarray::array![[7i32, 8, 9]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[1, 3])).unwrap();
-        let actual = concatenate(vec![za, zb], 0)
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = concatenate((za, zb), 0).to_ndarray::<i32>().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -345,9 +319,7 @@ mod tests {
         let b = ndarray::array![[7i32, 8, 9], [10, 11, 12], [13, 14, 15]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3, 2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[3, 3])).unwrap();
-        let actual = concatenate(vec![za, zb], 1)
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = concatenate((za, zb), 1).to_ndarray::<i32>().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -361,9 +333,7 @@ mod tests {
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 1])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2, 3])).unwrap();
         let zc = Array::from_ndarray(&c.view().into_dyn(), arr_params(&[2, 2])).unwrap();
-        let actual = concatenate(vec![za, zb, zc], 1)
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = concatenate((za, zb, zc), 1).to_ndarray::<i32>().unwrap();
         let expected =
             ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
@@ -376,9 +346,7 @@ mod tests {
         let b = ndarray::array![4.0f32, 5.0];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2])).unwrap();
-        let actual = concatenate(vec![za, zb], 0)
-            .to_ndarray::<f32>()
-            .unwrap();
+        let actual = concatenate((za, zb), 0).to_ndarray::<f32>().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -390,9 +358,7 @@ mod tests {
         let b = ndarray::array![[5.0f32, 6.0, 7.0], [8.0, 9.0, 10.0]];
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 2])).unwrap();
         let zb = Array::from_ndarray(&b.view().into_dyn(), arr_params(&[2, 3])).unwrap();
-        let actual = concatenate(vec![za, zb], 1)
-            .to_ndarray::<f32>()
-            .unwrap();
+        let actual = concatenate((za, zb), 1).to_ndarray::<f32>().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -410,7 +376,7 @@ mod tests {
             arr_params(&[1, 2]),
         )
         .unwrap();
-        let _ = concatenate(vec![a, b], 0);
+        let _ = concatenate((a, b), 0);
     }
 
     #[test]

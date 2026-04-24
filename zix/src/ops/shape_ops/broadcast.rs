@@ -7,20 +7,16 @@ use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result}
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 
-/// Lazy storage type returned by [`Array::broadcast_view`](crate::Array::broadcast_view).
+/// Expands an array to a larger shape by repeating elements along length-1 dimensions,
+/// returned by [`Array::broadcast_view`](crate::Array::broadcast_view).
 ///
-/// Presents the underlying array expanded to a larger shape by repeating elements along dimensions
-/// that had length 1, without copying any data at construction time.
+/// `new_shape` must have the same number of dimensions as the input. For each dimension `d`,
+/// either `new_shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
+/// the single element is repeated `new_shape[d]` times). Any other combination is an error.
 ///
-/// # Shape rules
+/// Output dtype equals the input dtype. Output shape equals `new_shape`.
 ///
-/// The `new_shape` must have the same number of dimensions as the input array.  For each
-/// dimension `d`:
-///
-/// * If `input_shape[d] == new_shape[d]` — the dimension is kept as-is.
-/// * If `input_shape[d] == 1` and `new_shape[d] >= 1` — the dimension is **broadcast**: the
-///   single element is repeated `new_shape[d]` times along that axis.
-/// * Any other combination is an error (e.g. trying to broadcast a dim of size 3 to size 5).
+/// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples
 ///
@@ -43,13 +39,6 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 /// assert_eq!(result[[2, 1]], 30);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
-///
-/// # Read behaviour
-///
-/// Reading a sub-region of the output works by collapsing all broadcast dims in the requested
-/// index ranges to `0..1`, reading from the inner storage, then replicating the data into the
-/// output buffer using zero strides (advancing along a broadcast output axis always re-reads the
-/// same inner element).  No data is copied at construction time.
 pub struct Broadcast<S> {
     array: Array<S>,
     /// `is_broadcast[d]` is `true` when output dim `d` was expanded from length 1.

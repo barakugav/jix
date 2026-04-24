@@ -7,64 +7,11 @@ use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, R
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 
-/// Join a sequence of arrays along a *new* axis.
-///
-/// All input arrays must have identical shapes and the same [`Dtype`].  A new axis is inserted at
-/// position `axis` in the output, whose size equals the number of input arrays.  The result is a
-/// lazy [`Array`] whose data is read on demand; no copy is made at construction time.
-///
-/// This is the array-axis analogue of NumPy's `numpy.stack`.  Unlike [`concatenate`], which joins
-/// along an *existing* axis, `stack` introduces a *new* dimension, so the output has one more
-/// dimension than the inputs.
-///
-/// [`concatenate`]: crate::ops::concatenate
-///
-/// # Arguments
-///
-/// * `arrays` — any [`ArraySequence`]: a `Vec`, a slice, or a tuple of up to ten arrays.
-///   All elements must have identical dtypes and identical shapes.
-/// * `axis` — the position in the output array at which the new axis is inserted.  Must be in the
-///   range `0..=ndim`, where `ndim` is the number of dimensions of the input arrays.
+/// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///
 /// # Panics
 ///
-/// Panics if any of the following conditions hold (the underlying [`Stack::new`] returns an error,
-/// which this function unwraps):
-///
-/// * `arrays` is empty.
-/// * `axis` is out of bounds (> number of dimensions of the input arrays).
-/// * Any two arrays differ in dtype.
-/// * Any two arrays differ in shape.
-/// * Inserting the new axis would exceed the maximum supported number of dimensions.
-///
-/// # Examples
-///
-/// ```
-/// use zix::{ArrayParams, Array};
-/// use zix::ops::stack;
-///
-/// // Stack two 1-D arrays along axis 0 — analogous to np.stack([a, b], axis=0)
-/// // Result shape: [2, N]
-/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let c = stack(vec![a, b], 0);
-/// assert_eq!(c.shape(), &[2, 3]);
-///
-/// // Stack two 1-D arrays along axis 1 — analogous to np.stack([a, b], axis=1)
-/// // Result shape: [N, 2]
-/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let c = stack(vec![a, b], 1);
-/// assert_eq!(c.shape(), &[3, 2]);
-///
-/// // Stack three 2-D arrays along a new leading axis
-/// // Result shape: [3, M, N]
-/// let a = Array::from_ndarray(&ndarray::array![[1i32, 2], [3, 4]].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let b = Array::from_ndarray(&ndarray::array![[5i32, 6], [7, 8]].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let c_arr = Array::from_ndarray(&ndarray::array![[9i32, 10], [11, 12]].view().into_dyn(), ArrayParams::default()).unwrap();
-/// let out = stack(vec![a, b, c_arr], 0);
-/// assert_eq!(out.shape(), &[3, 2, 2]);
-/// ```
+/// Panics if `arrays` is empty, `axis` is out of bounds, dtypes differ, or shapes differ.
 #[track_caller]
 pub fn stack<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Stack<ArraysT>>
 where
@@ -73,10 +20,34 @@ where
     Array::from_storage(Stack::new(arrays, axis).unwrap())
 }
 
-/// Lazy storage type returned by [`stack`].
+/// Joins a sequence of arrays along a new axis, returned by [`stack`].
 ///
-/// Holds the input arrays and the bookkeeping needed to serve arbitrary read requests.  See
-/// [`stack`] for the full description, accepted inputs, error conditions, and examples.
+/// All input arrays must have identical shapes and the same [`Dtype`]. A new axis of size equal to
+/// the number of input arrays is inserted at position `axis` in the output. The output has one more
+/// dimension than the inputs — unlike
+/// [`Concatenate`](crate::ops::Concatenate), which joins along an existing axis.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Examples
+///
+/// ```
+/// use zix::{Array, ArrayParams};
+/// use zix::ops::stack;
+///
+/// // Stack two 1-D arrays along a new leading axis → shape [2, N]
+/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), ArrayParams::new())?;
+/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6].view().into_dyn(), ArrayParams::new())?;
+/// let c = stack((a, b), 0);
+/// assert_eq!(c.shape(), &[2, 3]);
+///
+/// // Stack along axis 1 → shape [N, 2]
+/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3].view().into_dyn(), ArrayParams::new())?;
+/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6].view().into_dyn(), ArrayParams::new())?;
+/// let c = stack((a, b), 1);
+/// assert_eq!(c.shape(), &[3, 2]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct Stack<ArraysT> {
     arrays: ArraysT,
     stack_axis: usize,

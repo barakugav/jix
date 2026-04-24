@@ -7,49 +7,25 @@ use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
 use crate::Array;
 
-/// Lazy storage type returned by [`Array::remove_axes`](crate::Array::remove_axes).
+/// Removes length-1 dimensions from an array's shape,
+/// returned by [`Array::remove_axes`](crate::Array::remove_axes).
 ///
-/// Presents the underlying array with the specified dimensions removed, without copying any data.
+/// `axes` is a set of axis indices in the *input* shape (0-based). Each named dimension must have
+/// length exactly 1 and is dropped from the output shape. Duplicate axis indices are not allowed.
+/// The order of values in `axes` does not matter. Valid axis indices are `0..input_ndim`.
 ///
-/// # Axis convention
+/// Output dtype equals the input dtype.
 ///
-/// The `axes` argument is a **set of axis indices** in the *input* shape (0-based).  Each named
-/// dimension must have length exactly 1 and is dropped from the output shape.
-///
-/// * Duplicate axis indices are **not** allowed — specifying the same axis twice is an error.
-/// * Every specified axis must have length exactly 1 — attempting to remove a longer dimension is
-///   an error.
-/// * Valid axis indices are `0..input_ndim`.  Passing a value outside this range is an error.
-/// * The order of values in `axes` does not matter — only the set of axis indices matters.
+/// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples
 ///
-/// **Remove the first dim:**
 /// ```text
-/// input shape: [1, N]       axes: [0]       output shape: [N]
+/// [1, N]          axes: [0]       → [N]
+/// [N, 1]          axes: [1]       → [N]
+/// [N, 1, M]       axes: [1]       → [N, M]
+/// [1, N, 1, M, 1] axes: [0, 2, 4] → [N, M]
 /// ```
-///
-/// **Remove the last dim:**
-/// ```text
-/// input shape: [N, 1]       axes: [1]       output shape: [N]
-/// ```
-///
-/// **Remove a middle dim:**
-/// ```text
-/// input shape: [N, 1, M]    axes: [1]       output shape: [N, M]
-/// ```
-///
-/// **Remove multiple dims at once:**
-/// ```text
-/// input shape: [1, N, 1, M, 1]    axes: [0, 2, 4]    output shape: [N, M]
-/// ```
-///
-/// **Empty axes — identity:**
-/// ```text
-/// input shape: [N, M, K]    axes: []        output shape: [N, M, K]
-/// ```
-///
-/// # Examples
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
@@ -66,12 +42,6 @@ use crate::Array;
 /// assert_eq!(zb.remove_axes(&[0, 2]).shape(), &[2]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
-///
-/// # Read behaviour
-///
-/// Because all removed dimensions have length 1, the flat C-order element sequence is identical to
-/// that of the inner array.  Reads re-insert the stripped dimensions (as `0..1` ranges) and
-/// delegate directly to the inner storage — no temporary buffer or data rearrangement is required.
 pub struct RemoveAxes<S> {
     array: Array<S>,
     /// `is_removed[input_dim]` is `true` for every input dimension that was removed.

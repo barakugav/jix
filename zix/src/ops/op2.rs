@@ -254,6 +254,9 @@ macro_rules! define_op2 {
         $(#[$meta])*
         pub struct $Name<S1, S2>(crate::ops::op2::Op2<$NameKernel, S1, S2>);
         impl<S1, S2> $Name<S1, S2> {
+            /// Creates a new view storage applying the operation element-wise to arrays `a` and `b`.
+            ///
+            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new(a: crate::Array<S1>, b: crate::Array<S2>) -> crate::error::Result<Self>
             where
                 S1: crate::storage::ArrayStorage,

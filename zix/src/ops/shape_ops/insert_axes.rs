@@ -7,99 +7,58 @@ use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout
 use crate::util::DimArray;
 use crate::Array;
 
-/// Lazy storage type returned by [`Array::insert_axes`](crate::Array::insert_axes).
+/// Inserts new length-1 dimensions at specified positions in an array's shape,
+/// returned by [`Array::insert_axes`](crate::Array::insert_axes).
 ///
-/// Presents the underlying array with additional length-1 dimensions inserted at specified gap
-/// positions, without copying any data.
-///
-/// # Gap-index convention
-///
-/// The `axes` argument is a **multiset of gap indices**.  A gap index identifies a position
-/// *between* (or outside) the input dimensions:
+/// Each element of `axes` is a **gap index** that identifies a position *between* (or outside)
+/// the input dimensions:
 ///
 /// ```text
 /// gap:   0     1     2       orig_ndim
 ///         |  d0  |  d1  |  d2  |
 /// ```
 ///
-/// * Gap `0`          — before the first input dimension.
-/// * Gap `k`          — between input dimensions `k-1` and `k`.
-/// * Gap `orig_ndim`  — after the last input dimension.
+/// * Gap `0` — before the first input dimension.
+/// * Gap `k` — between input dimensions `k-1` and `k`.
+/// * Gap `orig_ndim` — after the last input dimension.
 ///
-/// Each occurrence of a gap index in `axes` inserts **one** new dimension (of length 1) at that
-/// position.  Duplicate gap indices are allowed and each one adds another dimension at the same
-/// gap.  The order of values in `axes` does not matter — only the multiset of gap indices matters;
-/// they are sorted internally before the output shape is assembled.
+/// Each occurrence of a gap index inserts one new length-1 dimension at that position. Duplicate
+/// gap indices are allowed and each adds another dimension at the same gap. The order of values in
+/// `axes` does not matter — only the multiset of gap indices matters. Valid gap indices are
+/// `0..=orig_ndim`.
 ///
-/// Valid gap indices are `0..=orig_ndim`.  Passing a value outside this range is an error.
+/// Output dtype equals the input dtype.
 ///
-/// # Examples
-///
-/// **Single insertion — before the first dim:**
-/// ```text
-/// input shape: [N]          axes: [0]       output shape: [1, N]
-/// ```
-///
-/// **Single insertion — after the last dim:**
-/// ```text
-/// input shape: [N]          axes: [1]       output shape: [N, 1]
-/// ```
-///
-/// **Single insertion — between two dims:**
-/// ```text
-/// input shape: [N, M]       axes: [1]       output shape: [N, 1, M]
-/// ```
-///
-/// **Multiple insertions at different gaps:**
-/// ```text
-/// input shape: [N, M]       axes: [0, 2]    output shape: [1, N, M, 1]
-/// ```
-///
-/// **Duplicate gap indices (multiple insertions at the same gap):**
-/// ```text
-/// input shape: [N, M, K]    axes: [0, 1, 1, 1, 3]
-/// output shape: [1, N, 1, 1, 1, M, K, 1]
-///               ^ gap 0    ^^^^ gap 1 (x3)     ^ gap 3
-/// ```
-///
-/// **Order of values does not matter:**
-/// ```text
-/// axes: [0, 1, 1, 1, 3]  ≡  axes: [3, 1, 0, 1, 1]   (same output shape)
-/// ```
-///
-/// **Empty axes — identity:**
-/// ```text
-/// input shape: [N, M, K]    axes: []        output shape: [N, M, K]
-/// ```
+/// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples
+///
+/// ```text
+/// [N]       axes: [0]     → [1, N]      (insert before first dim)
+/// [N]       axes: [1]     → [N, 1]      (append after last dim)
+/// [N, M]    axes: [1]     → [N, 1, M]   (insert between dims)
+/// [N, M]    axes: [0, 2]  → [1, N, M, 1]
+/// ```
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
 /// let a = ndarray::array![1i32, 2, 3];
 /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
 ///
-/// // [3] → [1, 3] (insert before first dim)
+/// // [3] → [1, 3]
 /// assert_eq!(za.insert_axes(&[0]).shape(), &[1, 3]);
 ///
-/// // [3] → [3, 1] (append after last dim)
+/// // [3] → [3, 1]
 /// let a = ndarray::array![1i32, 2, 3];
 /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
 /// assert_eq!(za.insert_axes(&[1]).shape(), &[3, 1]);
 ///
-/// // [2, 3] → [1, 2, 3, 1] (insert at both ends)
+/// // [2, 3] → [1, 2, 3, 1]
 /// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
 /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
 /// assert_eq!(za.insert_axes(&[0, 2]).shape(), &[1, 2, 3, 1]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
-///
-/// # Read behaviour
-///
-/// Because all inserted dimensions have length 1, the flat C-order element sequence is identical
-/// to that of the inner array.  Reads strip the inserted dimensions from the requested index
-/// ranges and delegate directly to the inner storage — no temporary buffer or data rearrangement
-/// is required.
 pub struct InsertAxes<S> {
     array: Array<S>,
     /// `is_inserted[output_dim]` is `true` for every output dimension that was inserted

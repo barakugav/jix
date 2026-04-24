@@ -240,6 +240,9 @@ macro_rules! define_reduction_op {
         $(#[$meta])*
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
+            /// Creates a new view storage applying the operation by reducing the specified axis.
+            ///
+            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new(array: crate::Array<S>, axis: usize, keepdims: bool $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
@@ -267,6 +270,9 @@ macro_rules! define_reduction_op {
         $(#[$meta])*
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
+            /// Creates a new view storage applying the operation by reducing the specified axes.
+            ///
+            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new(array: crate::Array<S>, axes: &[usize], keepdims: bool $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
