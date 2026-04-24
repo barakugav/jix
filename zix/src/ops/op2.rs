@@ -202,12 +202,18 @@ where
 
 macro_rules! define_op2 {
     (
+        $(#[$meta:meta])*
         $Name:ident,
         $NameKernel:ident,
         core_op = ($op_trait:ident, $op_fn:ident),
         $($kernel_args:tt)*
     ) => {
-        define_op2!($Name, $NameKernel, $($kernel_args)*);
+        define_op2!(
+            $(#[$meta])*
+            $Name,
+            $NameKernel,
+            $($kernel_args)*
+        );
 
         impl<S1, S2> core::ops::$op_trait<Array<S2>> for Array<S1>
         where
@@ -240,10 +246,12 @@ macro_rules! define_op2 {
     };
 
     (
+        $(#[$meta:meta])*
         $Name:ident,
         $NameKernel:ident,
         $($kernel_args:tt)*
     ) => {
+        $(#[$meta])*
         pub struct $Name<S1, S2>(crate::ops::op2::Op2<$NameKernel, S1, S2>);
         impl<S1, S2> $Name<S1, S2> {
             pub fn new(a: crate::Array<S1>, b: crate::Array<S2>) -> crate::error::Result<Self>
@@ -382,6 +390,36 @@ macro_rules! define_op2_kernel {
 
 pub(crate) use {define_op2, define_op2_kernel};
 define_op2!(
+    /// Element-wise addition of two arrays.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Both arrays must have
+    /// the same dtype. Output dtype and shape equal the input.
+    ///
+    /// For **integer** types the result wraps on overflow (two's complement).
+    /// For **complex** types each component is added independently:
+    /// `(a + bi) + (c + di) = (a+c) + (b+d)i`.
+    ///
+    /// Available via the `+` operator. A raw scalar can be used as the right-hand
+    /// side and is broadcast to the array's shape: `arr + 1i32`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1i32, 2, 3];
+    /// let b = ndarray::array![10i32, 20, 30];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = (za + zb).data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[11, 22, 33]);
+    ///
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = (za + 10i32).data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[11, 12, 13]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Add,
     AddKernel,
     core_op = (Add, add),
@@ -390,6 +428,36 @@ define_op2!(
     output_type = "same"
 );
 define_op2!(
+    /// Element-wise subtraction of two arrays (`a - b`).
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Both arrays must have
+    /// the same dtype. Output dtype and shape equal the input.
+    ///
+    /// For **integer** types the result wraps on underflow (two's complement).
+    /// For **complex** types each component is subtracted independently:
+    /// `(a + bi) - (c + di) = (a-c) + (b-d)i`.
+    ///
+    /// Available via the `-` operator. A raw scalar can be used as the right-hand
+    /// side and is broadcast to the array's shape: `arr - 1i32`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![10i32, 20, 30];
+    /// let b = ndarray::array![1i32, 2, 3];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = (za - zb).data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[9, 18, 27]);
+    ///
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = (za - 5i32).data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[5, 15, 25]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Sub,
     SubKernel,
     core_op = (Sub, sub),
@@ -398,6 +466,36 @@ define_op2!(
     output_type = "same"
 );
 define_op2!(
+    /// Element-wise multiplication of two arrays.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Both arrays must have
+    /// the same dtype. Output dtype and shape equal the input.
+    ///
+    /// For **integer** types the result wraps on overflow (two's complement).
+    /// For **complex** types this is full complex multiplication:
+    /// `(a + bi) * (c + di) = (ac - bd) + (ad + bc)i`.
+    ///
+    /// Available via the `*` operator. A raw scalar can be used as the right-hand
+    /// side and is broadcast to the array's shape: `arr * 2i32`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1i32, 2, 3];
+    /// let b = ndarray::array![4i32, 5, 6];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = (za * zb).data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[4, 10, 18]);
+    ///
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = (za * 3i32).data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[3, 6, 9]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Mul,
     MulKernel,
     core_op = (Mul, mul),
@@ -406,6 +504,37 @@ define_op2!(
     output_type = "same"
 );
 define_op2!(
+    /// Element-wise division of two arrays (`a / b`).
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Both arrays must have
+    /// the same dtype. Output dtype and shape equal the input.
+    ///
+    /// For **integer** types the result is truncating (rounds towards zero); dividing
+    /// by zero panics in debug builds and the result is implementation-defined in release.
+    /// For **float** types semantics follow [`f32::div`].
+    /// For **complex** types this is full complex division.
+    ///
+    /// Available via the `/` operator. A raw scalar can be used as the right-hand
+    /// side and is broadcast to the array's shape: `arr / 2i32`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![10i32, 20, 30];
+    /// let b = ndarray::array![2i32, 4, 5];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = (za / zb).data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[5, 5, 6]);
+    ///
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = (za / 10i32).data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Div,
     DivKernel,
     core_op = (Div, div),
@@ -414,6 +543,35 @@ define_op2!(
     output_type = "same"
 );
 define_op2!(
+    /// Element-wise exponentiation (`a` raised to the power `b`).
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    ///
+    /// Negative base with a non-integer exponent produces `NaN`.
+    /// Semantics follow [`f32::powf`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// use zix::ops::Power;
+    /// let a = ndarray::array![2.0f32, 3.0, 4.0];
+    /// let b = ndarray::array![3.0f32, 2.0, 0.5];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = Array::from_storage(Power::new(za, zb)?)
+    ///     .data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[8.0, 9.0, 2.0]);
+    ///
+    /// // Raise each element to a scalar exponent by broadcasting a scalar array.
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let exp = Array::from_scalar(2.0f32, &[3])?;
+    /// let result = Array::from_storage(Power::new(za, exp)?)
+    ///     .data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[4.0, 9.0, 16.0]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Power,
     PowerKernel,
     |a, b| a.powf(b),

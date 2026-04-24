@@ -26,7 +26,7 @@ define_op1!(ceil, Ceil);
 define_op1!(round, Round);
 define_op1!(sqrt, Sqrt);
 define_op1!(exp, Exp);
-define_op1!(log, Log);
+define_op1!(log, Ln);
 define_op1!(sin, Sin);
 define_op1!(cos, Cos);
 define_op1!(tan, Tan);

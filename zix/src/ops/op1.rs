@@ -148,8 +148,19 @@ where
 }
 
 macro_rules! define_op1 {
-    ($Name:ident, $NameKernel:ident, core_op = ($op_trait:ident, $op_fn:ident), $($kernel_args:tt)*) => {
-        define_op1!($Name, $NameKernel, $($kernel_args)*);
+    (
+        $(#[$meta:meta])*
+        $Name:ident,
+        $NameKernel:ident,
+        core_op = ($op_trait:ident, $op_fn:ident),
+        $($kernel_args:tt)*
+    ) => {
+        define_op1!(
+            $(#[$meta])*
+            $Name,
+            $NameKernel,
+            $($kernel_args)*
+        );
 
         impl<S> core::ops::$op_trait for crate::Array<S>
         where
@@ -164,9 +175,18 @@ macro_rules! define_op1 {
         }
     };
 
-    ($Name:ident, $NameKernel:ident, $($kernel_args:tt)*) => {
+    (
+        $(#[$meta:meta])*
+        $Name:ident,
+        $NameKernel:ident,
+        $($kernel_args:tt)*
+    ) => {
+        $(#[$meta])*
         pub struct $Name<S>(crate::ops::op1::Op1<$NameKernel, S>);
         impl<S> $Name<S> {
+            /// Creates a new view storage applying the operation element-wise to `array`.
+            ///
+            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new(array: crate::Array<S>) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
@@ -288,6 +308,45 @@ macro_rules! define_op1_kernel {
 pub(crate) use {define_op1, define_op1_kernel};
 
 define_op1!(
+    /// Arithmetic negation applied element-wise.
+    ///
+    /// Supported dtypes and output dtype:
+    ///
+    /// | Input dtype | Output dtype |
+    /// |-------------|--------------|
+    /// | `i8`, `i16`, `i32`, `i64` | same |
+    /// | `f16`, `f32`, `f64` | same |
+    /// | `Complex<f32>`, `Complex<f64>` | same |
+    ///
+    /// The output shape equals the input shape.
+    ///
+    /// For **integer** types the result is the two's-complement negation.
+    /// Negating the minimum representable value (e.g. `i32::MIN`) overflows:
+    /// it wraps in release builds and panics in debug builds.
+    ///
+    /// For **complex** types both components are negated independently:
+    /// `-(a + bi) = -a - bi`.
+    ///
+    /// Available via the unary `-` operator on [`Array`](crate::Array): `-arr`.
+    /// Floating-point semantics follow [`f32::neg`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1.0f32, -2.5, 3.0];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = (-za).data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[-1.0, 2.5, -3.0]);
+    ///
+    /// // Negating i8::MIN wraps in release builds (two's complement overflow).
+    /// let b = ndarray::array![0i8, 1, -1];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = (-zb).data().to_ndarray::<i8>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[0, -1, 1]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Neg,
     NegKernel,
     core_op = (Neg, neg),
@@ -297,6 +356,29 @@ define_op1!(
 );
 // TODO f16
 define_op1!(
+    /// Rounds each element down to the nearest integer (towards −∞).
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    /// Semantics follow [`f32::floor`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1.1f32, 2.9, 3.0];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.floor().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1.0, 2.0, 3.0]);
+    ///
+    /// // Floor rounds towards −∞, so negative values floor down.
+    /// let b = ndarray::array![-1.1f32, -2.9, -3.0];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.floor().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[-2.0, -3.0, -3.0]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Floor,
     FloorKernel,
     |a| a.floor(),
@@ -304,6 +386,29 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Rounds each element up to the nearest integer (towards +∞).
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    /// Semantics follow [`f32::ceil`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1.1f32, 2.0, 3.9];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.ceil().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[2.0, 2.0, 4.0]);
+    ///
+    /// // Ceil rounds towards +∞, so negative values ceil up.
+    /// let b = ndarray::array![-1.7f32, -2.0, -0.1];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.ceil().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[-1.0, -2.0, 0.0]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Ceil,
     CeilKernel,
     |a| a.ceil(),
@@ -311,6 +416,33 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Rounds each element to the nearest integer.
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    ///
+    /// Ties (values exactly halfway between two integers) are broken by rounding
+    /// away from zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from
+    /// "round-half-to-even" (banker's rounding) used in some other libraries.
+    /// Semantics follow [`f32::round`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1.4f32, 1.6, 2.0];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.round().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1.0, 2.0, 2.0]);
+    ///
+    /// // Ties are broken away from zero: 0.5 → 1.0, -0.5 → -1.0.
+    /// let b = ndarray::array![0.5f32, -0.5];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.round().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Round,
     RoundKernel,
     |a| a.round(),
@@ -318,6 +450,30 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Computes the square root of each element.
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    ///
+    /// Negative inputs produce `NaN`. Semantics follow [`f32::sqrt`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![4.0f32, 9.0, 16.0];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.sqrt().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[2.0, 3.0, 4.0]);
+    ///
+    /// // Negative input produces NaN.
+    /// let b = ndarray::array![-1.0f32];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.sqrt().data().to_ndarray::<f32>()?;
+    /// assert!(result[[0]].is_nan());
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Sqrt,
     SqrtKernel,
     |a| a.sqrt(),
@@ -325,14 +481,96 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Computes the natural exponential (`e^x`) of each element.
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    /// Semantics follow [`f32::exp`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1.0f32, 2.0, 3.0];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.exp().data().to_ndarray::<f32>()?;
+    /// assert!((result[[0]] - std::f32::consts::E).abs() < 1e-5);
+    ///
+    /// // exp(0.0) = 1.0 and exp(1.0) ≈ e.
+    /// let b = ndarray::array![0.0f32, 1.0];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.exp().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], 1.0);
+    /// assert!((result[[1]] - std::f32::consts::E).abs() < 1e-5);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Exp,
     ExpKernel,
     |a| a.exp(),
     [f32, f64],
     output_type = "same"
 );
-define_op1!(Log, LogKernel, |a| a.ln(), [f32, f64], output_type = "same");
 define_op1!(
+    /// Computes the natural logarithm (`ln x`) of each element.
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    ///
+    /// Negative inputs produce `NaN`; zero produces `-∞`.
+    /// Semantics follow [`f32::ln`].
+    ///
+    /// Available as the `.ln()` method on [`Array`](crate::Array).
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.ln().data().to_ndarray::<f32>()?;
+    /// assert!((result[[0]] - 0.0).abs() < 1e-5);
+    /// assert!((result[[1]] - 1.0).abs() < 1e-5);
+    ///
+    /// // Zero produces -inf; negative input produces NaN.
+    /// let b = ndarray::array![0.0f32, -1.0];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.ln().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], f32::NEG_INFINITY);
+    /// assert!(result[[1]].is_nan());
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
+    Ln,
+    LnKernel,
+    |a| a.ln(),
+    [f32, f64],
+    output_type = "same"
+);
+define_op1!(
+    /// Computes the sine of each element (input in radians).
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    /// Semantics follow [`f32::sin`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![std::f32::consts::FRAC_PI_2, std::f32::consts::PI];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.sin().data().to_ndarray::<f32>()?;
+    /// assert!((result[[0]] - 1.0).abs() < 1e-5);
+    ///
+    /// // sin(0.0) = 0.0.
+    /// let b = ndarray::array![0.0f32];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.sin().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], 0.0);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Sin,
     SinKernel,
     |a| a.sin(),
@@ -340,6 +578,30 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Computes the cosine of each element (input in radians).
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    /// Semantics follow [`f32::cos`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![0.0f32, std::f32::consts::PI];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.cos().data().to_ndarray::<f32>()?;
+    /// assert!((result[[0]] - 1.0).abs() < 1e-5);
+    /// assert!((result[[1]] - (-1.0)).abs() < 1e-5);
+    ///
+    /// // cos(0.0) = 1.0.
+    /// let b = ndarray::array![0.0f32];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.cos().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], 1.0);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Cos,
     CosKernel,
     |a| a.cos(),
@@ -347,6 +609,29 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Computes the tangent of each element (input in radians).
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    /// Semantics follow [`f32::tan`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_2 * 0.5];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.tan().data().to_ndarray::<f32>()?;
+    /// assert!((result[[0]] - 1.0).abs() < 1e-5);
+    ///
+    /// // tan(0.0) = 0.0.
+    /// let b = ndarray::array![0.0f32];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.tan().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], 0.0);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Tan,
     TanKernel,
     |a| a.tan(),
@@ -354,6 +639,31 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Computes the arcsine of each element; output is in radians in `[-π/2, π/2]`.
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    ///
+    /// Inputs outside `[-1, 1]` produce `NaN`. Semantics follow [`f32::asin`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![0.0f32, 1.0, -1.0];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.asin().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], 0.0);
+    /// assert!((result[[1]] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+    ///
+    /// // Input outside [-1, 1] produces NaN.
+    /// let b = ndarray::array![2.0f32];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.asin().data().to_ndarray::<f32>()?;
+    /// assert!(result[[0]].is_nan());
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Asin,
     AsinKernel,
     |a| a.asin(),
@@ -361,6 +671,31 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Computes the arccosine of each element; output is in radians in `[0, π]`.
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    ///
+    /// Inputs outside `[-1, 1]` produce `NaN`. Semantics follow [`f32::acos`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![1.0f32, 0.0, -1.0];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.acos().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], 0.0);
+    /// assert!((result[[1]] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+    ///
+    /// // Input outside [-1, 1] produces NaN.
+    /// let b = ndarray::array![2.0f32];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.acos().data().to_ndarray::<f32>()?;
+    /// assert!(result[[0]].is_nan());
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Acos,
     AcosKernel,
     |a| a.acos(),
@@ -368,6 +703,29 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Computes the arctangent of each element; output is in radians in `(-π/2, π/2)`.
+    ///
+    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    /// Semantics follow [`f32::atan`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![0.0f32, -1.0, 1.0];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.atan().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], 0.0);
+    ///
+    /// // atan(1.0) = π/4.
+    /// let b = ndarray::array![1.0f32];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.atan().data().to_ndarray::<f32>()?;
+    /// assert!((result[[0]] - std::f32::consts::FRAC_PI_4).abs() < 1e-5);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Atan,
     AtanKernel,
     |a| a.atan(),
@@ -375,6 +733,32 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Returns the sign of each element as a floating-point value.
+    ///
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype is the same as the input.
+    /// The output shape equals the input shape.
+    ///
+    /// Returns `+1.0` for positive values and `-1.0` for negative values.
+    /// Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns `-1.0`.
+    /// Semantics follow [`f32::signum`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![3.0f32, -5.0, -0.1];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.signum().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0, -1.0]);
+    ///
+    /// // Positive zero returns +1.0.
+    /// let b = ndarray::array![0.0f32];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.signum().data().to_ndarray::<f32>()?;
+    /// assert_eq!(result[[0]], 1.0);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Signum,
     SignumKernel,
     |a| a.signum(),
@@ -382,6 +766,53 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
+    /// Computes the absolute value of each element.
+    ///
+    /// Supported dtypes and output dtype:
+    ///
+    /// | Input dtype | Output dtype |
+    /// |-------------|--------------|
+    /// | `i8`, `i16`, `i32`, `i64` | same |
+    /// | `f16`, `f32`, `f64` | same |
+    /// | `Complex<f32>` | `f32` |
+    /// | `Complex<f64>` | `f64` |
+    ///
+    /// The output shape equals the input shape.
+    ///
+    /// For **complex** types the result is the modulus `sqrt(re² + im²)`, computed
+    /// via `hypot` for numerical stability. The output dtype is the real component type
+    /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
+    ///
+    /// For **signed integer** types, `MIN.abs()` overflows: `(-128i8).abs()` wraps back
+    /// to `i8::MIN` in release builds and panics in debug builds.
+    ///
+    /// Floating-point semantics follow [`f32::abs`].
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let a = ndarray::array![-3i32, 0, 5, -7];
+    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+    /// let result = za.abs().data().to_ndarray::<i32>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[3, 0, 5, 7]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
+    ///
+    /// ```
+    /// # #[cfg(feature = "num-complex")]
+    /// # {
+    /// use zix::{Array, ArrayParams};
+    /// // For complex input the result is the modulus sqrt(re² + im²).
+    /// use zix::dtype::Complex;
+    /// let b = ndarray::array![Complex { re: 3.0f32, im: 4.0 }];
+    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+    /// let result = zb.abs().data().to_ndarray::<f32>()?;
+    /// assert!((result[[0]] - 5.0).abs() < 1e-5);
+    /// # }
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Abs,
     AbsKernel,
     |a| a.abs(),
@@ -431,7 +862,7 @@ where
     define_array_op1_method!(round: Round);
     define_array_op1_method!(sqrt: Sqrt);
     define_array_op1_method!(exp: Exp);
-    define_array_op1_method!(ln: Log);
+    define_array_op1_method!(ln: Ln);
     define_array_op1_method!(sin: Sin);
     define_array_op1_method!(cos: Cos);
     define_array_op1_method!(tan: Tan);

@@ -230,12 +230,14 @@ where
 
 macro_rules! define_reduction_op {
     (
+        $(#[$meta:meta])*
         $Name:ident,
         $NameKernel:ident,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = $types:tt,
         single_axis = "true"
     ) => {
+        $(#[$meta])*
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
             pub fn new(array: crate::Array<S>, axis: usize, keepdims: bool $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
@@ -256,11 +258,13 @@ macro_rules! define_reduction_op {
     };
 
     (
+        $(#[$meta:meta])*
         $Name:ident,
         $NameKernel:ident,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = $types:tt
     ) => {
+        $(#[$meta])*
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
         impl<S> $Name<S> {
             pub fn new(array: crate::Array<S>, axes: &[usize], keepdims: bool $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
@@ -396,6 +400,39 @@ macro_rules! define_reduction_op_kernel {
 // pub(crate) use {define_reduction_op, define_reduction_op_kernel};
 
 define_reduction_op!(
+    /// Reduces one or more axes by taking the maximum element.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the input dtype.
+    ///
+    /// For **float** types, `NaN` values are ignored: if at least one non-`NaN` value
+    /// is present, the result is the maximum of the non-`NaN` values. If all elements
+    /// are `NaN`, the result is `NaN`. This deviates from the element-wise [`Maximum`](crate::ops::Maximum)
+    /// op (which propagates `NaN`) but matches `numpy.max`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    ///
+    /// // Reduce all axes → scalar
+    /// let scalar = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .max(&[0, 1], false).data().to_ndarray::<i32>()?;
+    /// assert_eq!(scalar[[]], 6);
+    ///
+    /// // Reduce axis 0, keepdims=false → shape [3]
+    /// let col_max = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .max(&[0], false).data().to_ndarray::<i32>()?;
+    /// assert_eq!(col_max.as_slice().unwrap(), &[4, 5, 6]);
+    ///
+    /// // Reduce axis 0, keepdims=true → shape [1, 3]
+    /// let col_max_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .max(&[0], true).data().to_ndarray::<i32>()?;
+    /// assert_eq!(col_max_k.shape(), &[1, 3]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Max,
     MaxKernel,
     |items| { items.reduce(|m, x| m.max(x)).unwrap() },
@@ -405,6 +442,39 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
+    /// Reduces one or more axes by taking the minimum element.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the input dtype.
+    ///
+    /// For **float** types, `NaN` values are ignored: if at least one non-`NaN` value
+    /// is present, the result is the minimum of the non-`NaN` values. If all elements
+    /// are `NaN`, the result is `NaN`. This deviates from the element-wise [`Minimum`](crate::ops::Minimum)
+    /// op (which propagates `NaN`) but matches `numpy.min`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    ///
+    /// // Reduce all axes → scalar
+    /// let scalar = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .min(&[0, 1], false).data().to_ndarray::<i32>()?;
+    /// assert_eq!(scalar[[]], 1);
+    ///
+    /// // Reduce axis 0, keepdims=false → shape [3]
+    /// let col_min = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .min(&[0], false).data().to_ndarray::<i32>()?;
+    /// assert_eq!(col_min.as_slice().unwrap(), &[1, 2, 3]);
+    ///
+    /// // Reduce axis 0, keepdims=true → shape [1, 3]
+    /// let col_min_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .min(&[0], true).data().to_ndarray::<i32>()?;
+    /// assert_eq!(col_min_k.shape(), &[1, 3]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Min,
     MinKernel,
     |items| { items.reduce(|m, x| m.min(x)).unwrap() },
@@ -414,6 +484,39 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
+    /// Reduces a single axis by returning the index of the maximum element.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`, `bool`. Output dtype is `u64`.
+    ///
+    /// Unlike [`Max`], this op accepts only a single axis. If multiple elements share
+    /// the maximum value, the index of the first occurrence is returned.
+    /// For **float** types, `NaN` values are treated as less than any non-`NaN` value,
+    /// so they are never selected unless all elements are `NaN`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 5, 3], [4, 2, 6]];
+    ///
+    /// // Index of max along axis 1 (per row), keepdims=false → shape [2]
+    /// let idx = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .argmax(1, false).data().to_ndarray::<u64>()?;
+    /// assert_eq!(idx.as_slice().unwrap(), &[1, 2]); // max of row 0 at col 1, row 1 at col 2
+    ///
+    /// // Index of max along axis 0 (per column), keepdims=false → shape [3]
+    /// let col_idx = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .argmax(0, false).data().to_ndarray::<u64>()?;
+    /// assert_eq!(col_idx.as_slice().unwrap(), &[1, 0, 1]); // max of col 0 at row 1, col 1 at row 0, col 2 at row 1
+    ///
+    /// // keepdims=true → shape [2, 1]
+    /// let idx_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .argmax(1, true).data().to_ndarray::<u64>()?;
+    /// assert_eq!(idx_k.shape(), &[2, 1]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     ArgMax,
     ArgMaxKernel,
     |items| {
@@ -430,6 +533,39 @@ define_reduction_op!(
     single_axis = "true"
 );
 define_reduction_op!(
+    /// Reduces a single axis by returning the index of the minimum element.
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`, `bool`. Output dtype is `u64`.
+    ///
+    /// Unlike [`Min`], this op accepts only a single axis. If multiple elements share
+    /// the minimum value, the index of the first occurrence is returned.
+    /// For **float** types, `NaN` values are treated as greater than any non-`NaN` value,
+    /// so they are never selected unless all elements are `NaN`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 5, 3], [4, 2, 6]];
+    ///
+    /// // Index of min along axis 1 (per row), keepdims=false → shape [2]
+    /// let idx = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .argmin(1, false).data().to_ndarray::<u64>()?;
+    /// assert_eq!(idx.as_slice().unwrap(), &[0, 1]); // min of row 0 at col 0, row 1 at col 1
+    ///
+    /// // Index of min along axis 0 (per column), keepdims=false → shape [3]
+    /// let col_idx = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .argmin(0, false).data().to_ndarray::<u64>()?;
+    /// assert_eq!(col_idx.as_slice().unwrap(), &[0, 1, 0]); // min of col 0 at row 0, col 1 at row 1, col 2 at row 0
+    ///
+    /// // keepdims=true → shape [2, 1]
+    /// let idx_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .argmin(1, true).data().to_ndarray::<u64>()?;
+    /// assert_eq!(idx_k.shape(), &[2, 1]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     ArgMin,
     ArgMinKernel,
     |items| {
@@ -446,6 +582,43 @@ define_reduction_op!(
     single_axis = "true"
 );
 define_reduction_op!(
+    /// Reduces one or more axes by summing all elements along those axes.
+    ///
+    /// Supported dtypes and output dtype:
+    ///
+    /// | Input dtype | Output dtype |
+    /// |-------------|--------------|
+    /// | `i8`, `i16`, `i32`, `i64` | `i64` |
+    /// | `u8`, `u16`, `u32`, `u64`, `bool` | `u64` |
+    /// | `f16`, `f32`, `f64` | `f64` |
+    /// | `Complex<f32>`, `Complex<f64>` | `Complex<f64>` |
+    ///
+    /// The output dtype is always widened to avoid overflow on large reductions.
+    /// An empty reduction (zero elements along the reduced axes) returns `0`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    ///
+    /// // Sum all elements → i64
+    /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .sum(&[0, 1], false).data().to_ndarray::<i64>()?;
+    /// assert_eq!(total[[]], 21);
+    ///
+    /// // Sum along axis 0, keepdims=false → shape [3]
+    /// let col_sums = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .sum(&[0], false).data().to_ndarray::<i64>()?;
+    /// assert_eq!(col_sums.as_slice().unwrap(), &[5, 7, 9]);
+    ///
+    /// // Sum along axis 1, keepdims=true → shape [2, 1]
+    /// let row_sums = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .sum(&[1], true).data().to_ndarray::<i64>()?;
+    /// assert_eq!(row_sums.shape(), &[2, 1]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Sum,
     SumKernel,
     |items| { items.fold(crate::ops::astype::cast(0), |m, x| m + crate::ops::astype::cast_as(x, &m)) },
@@ -457,6 +630,43 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
+    /// Reduces one or more axes by multiplying all elements along those axes.
+    ///
+    /// Supported dtypes and output dtype:
+    ///
+    /// | Input dtype | Output dtype |
+    /// |-------------|--------------|
+    /// | `i8`, `i16`, `i32`, `i64` | `i64` |
+    /// | `u8`, `u16`, `u32`, `u64` | `u64` |
+    /// | `f16`, `f32`, `f64` | `f64` |
+    /// | `Complex<f32>`, `Complex<f64>` | `Complex<f64>` |
+    ///
+    /// Note: `bool` is not supported. The output dtype is always widened.
+    /// An empty reduction (zero elements along the reduced axes) returns `1`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    ///
+    /// // Product of all elements → i64
+    /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .product(&[0, 1], false).data().to_ndarray::<i64>()?;
+    /// assert_eq!(total[[]], 720);
+    ///
+    /// // Product along axis 0, keepdims=false → shape [3]
+    /// let col_products = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .product(&[0], false).data().to_ndarray::<i64>()?;
+    /// assert_eq!(col_products.as_slice().unwrap(), &[4, 10, 18]);
+    ///
+    /// // Product along axis 1, keepdims=true → shape [2, 1]
+    /// let row_products = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .product(&[1], true).data().to_ndarray::<i64>()?;
+    /// assert_eq!(row_products.shape(), &[2, 1]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Product,
     ProductKernel,
     |items| { items.fold(crate::ops::astype::cast(1), |m, x| m * crate::ops::astype::cast_as(x, &m)) },
@@ -468,6 +678,36 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
+    /// Reduces one or more axes by computing the arithmetic mean.
+    ///
+    /// Supported dtypes: all numeric types and `bool`. Output dtype is `f64` for all
+    /// scalar inputs; `Complex<f64>` for `Complex<f32>` and `Complex<f64>` inputs.
+    ///
+    /// Reducing an empty slice (zero elements) panics.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    ///
+    /// // Mean of all elements → f64
+    /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .mean(&[0, 1], false).data().to_ndarray::<f64>()?;
+    /// assert_eq!(total[[]], 3.5);
+    ///
+    /// // Mean along axis 0, keepdims=false → shape [3]
+    /// let col_means = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .mean(&[0], false).data().to_ndarray::<f64>()?;
+    /// assert_eq!(col_means.as_slice().unwrap(), &[2.5, 3.5, 4.5]);
+    ///
+    /// // Mean along axis 0, keepdims=true → shape [1, 3]
+    /// let col_means_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .mean(&[0], true).data().to_ndarray::<f64>()?;
+    /// assert_eq!(col_means_k.shape(), &[1, 3]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Mean,
     MeanKernel,
     |items| {{
@@ -486,6 +726,42 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
+    /// Reduces one or more axes by computing the variance.
+    ///
+    /// Supported dtypes: all integer and float types, `Complex<f32>`, `Complex<f64>`.
+    /// Output dtype is `f64`. For complex inputs the result is the real-valued variance
+    /// `E[|x - mean|²]`.
+    ///
+    /// The `ddof` parameter (delta degrees of freedom) adjusts the divisor: the variance
+    /// is computed as `sum((x - mean)²) / (n - ddof)`. Use `ddof=0` for the population
+    /// variance and `ddof=1` for the sample variance (Bessel's correction). If
+    /// `n - ddof <= 0`, the result is `NaN`.
+    ///
+    /// Uses Welford's online algorithm for numerical stability.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    ///
+    /// // Population variance (ddof=0) of all elements → f64
+    /// let var_all = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .var(&[0, 1], false, 0.0).data().to_ndarray::<f64>()?;
+    /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
+    ///
+    /// // Sample variance (ddof=1) along axis 0, keepdims=false → shape [3]
+    /// let col_vars = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .var(&[0], false, 1.0).data().to_ndarray::<f64>()?;
+    /// assert_eq!(col_vars.as_slice().unwrap(), &[4.5, 4.5, 4.5]);
+    ///
+    /// // Population variance along axis 0, keepdims=true → shape [1, 3]
+    /// let col_vars_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .var(&[0], true, 0.0).data().to_ndarray::<f64>()?;
+    /// assert_eq!(col_vars_k.shape(), &[1, 3]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Variance,
     VarianceKernel,
     |items, ddof: f64| { variance_impl(items, ddof) },
@@ -497,6 +773,38 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
+    /// Reduces one or more axes by computing the standard deviation.
+    ///
+    /// Supported dtypes: all integer and float types, `Complex<f32>`, `Complex<f64>`.
+    /// Output dtype is `f64`. For complex inputs the result is the real-valued standard
+    /// deviation `sqrt(E[|x - mean|²])`.
+    ///
+    /// Equivalent to `sqrt(variance)`. The `ddof` parameter has the same meaning as in
+    /// [`Variance`]: use `ddof=0` for population std and `ddof=1` for sample std.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    ///
+    /// // Population std (ddof=0) of all elements → f64
+    /// let std_all = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .std(&[0, 1], false, 0.0).data().to_ndarray::<f64>()?;
+    /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
+    ///
+    /// // Sample std (ddof=1) along axis 0, keepdims=false → shape [3]
+    /// let col_stds = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .std(&[0], false, 1.0).data().to_ndarray::<f64>()?;
+    /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
+    ///
+    /// // Population std along axis 0, keepdims=true → shape [1, 3]
+    /// let col_stds_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .std(&[0], true, 0.0).data().to_ndarray::<f64>()?;
+    /// assert_eq!(col_stds_k.shape(), &[1, 3]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     StandardDeviation,
     StandardDeviationKernel,
     |items, ddof: f64| { variance_impl(items, ddof).sqrt() },
@@ -578,6 +886,39 @@ impl_complex_variance_impl!(f64);
 impl_num_variance_impl!(bool);
 
 define_reduction_op!(
+    /// Reduces one or more axes by testing whether all elements are truthy.
+    ///
+    /// Supported dtypes: all numeric types, `bool`, `Complex<f32>`, `Complex<f64>`.
+    /// Output dtype is `bool`.
+    ///
+    /// Each element is cast to `bool` before reduction (zero → `false`, any non-zero
+    /// → `true`; for `bool` this is the identity; for complex, non-zero means at least
+    /// one component is non-zero). Returns `true` only when every element is truthy.
+    /// An empty reduction returns `true`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[1i32, 0, 3], [4, 5, 6]];
+    ///
+    /// // All elements truthy? → false (contains a zero)
+    /// let all_true = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .all(&[0, 1], false).data().to_ndarray::<bool>()?;
+    /// assert_eq!(all_true[[]], false);
+    ///
+    /// // All truthy along axis 0, keepdims=false → shape [3]
+    /// let col_all = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .all(&[0], false).data().to_ndarray::<bool>()?;
+    /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
+    ///
+    /// // All truthy along axis 1, keepdims=true → shape [2, 1]
+    /// let row_all = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .all(&[1], true).data().to_ndarray::<bool>()?;
+    /// assert_eq!(row_all.shape(), &[2, 1]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     All,
     AllKernel,
     |items| { items.fold(true, |m, x| m && crate::ops::astype::cast::<_, bool>(x)) },
@@ -587,6 +928,39 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
+    /// Reduces one or more axes by testing whether any element is truthy.
+    ///
+    /// Supported dtypes: all numeric types, `bool`, `Complex<f32>`, `Complex<f64>`.
+    /// Output dtype is `bool`.
+    ///
+    /// Each element is cast to `bool` before reduction (zero → `false`, any non-zero
+    /// → `true`; for `bool` this is the identity; for complex, non-zero means at least
+    /// one component is non-zero). Returns `true` when at least one element is truthy.
+    /// An empty reduction returns `false`.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// let nd = ndarray::array![[0i32, 0, 0], [4, 5, 6]];
+    ///
+    /// // Any element truthy? → true
+    /// let any_true = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .any(&[0, 1], false).data().to_ndarray::<bool>()?;
+    /// assert_eq!(any_true[[]], true);
+    ///
+    /// // Any truthy along axis 0, keepdims=false → shape [3]
+    /// let col_any = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .any(&[0], false).data().to_ndarray::<bool>()?;
+    /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
+    ///
+    /// // Any truthy along axis 1, keepdims=true → shape [2, 1]
+    /// let row_any = Array::from_ndarray(&nd, ArrayParams::new())?
+    ///     .any(&[1], true).data().to_ndarray::<bool>()?;
+    /// assert_eq!(row_any.shape(), &[2, 1]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     Any,
     AnyKernel,
     |items| { items.fold(false, |m, x| m || crate::ops::astype::cast::<_, bool>(x)) },
