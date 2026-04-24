@@ -63,7 +63,7 @@ where
                 .collect(),
             table_of_contents: vec![
                 schema::block_table_header::TableOfContents::BlockOffsets as i32,
-                schema::block_table_header::TableOfContents::Cdata as i32,
+                schema::block_table_header::TableOfContents::BlockDataContinuous as i32,
             ],
         };
         writer.write_message(&header).map_err(Error::io)?;
@@ -74,8 +74,8 @@ where
         writer.write_all(toc.as_bytes()).map_err(Error::io)?;
 
         // Write body data sections
-        let cdata = writer
-            .write_section(self.cdata.as_ref(), align_of::<u8>())
+        let block_data = writer
+            .write_section(self.block_data.as_ref(), align_of::<u8>())
             .map_err(Error::io)?;
         let block_offsets = writer
             .write_section(
@@ -85,7 +85,7 @@ where
             .map_err(Error::io)?;
 
         // Go back and write table of contents
-        toc = [block_offsets, cdata];
+        toc = [block_offsets, block_data];
         let current_pos = writer.stream_position().map_err(Error::io)?;
         writer
             .seek(SeekFrom::Start(toc_offset))
@@ -163,27 +163,27 @@ where
         );
 
         let toc = <[Section; 2]>::read_from_io(reader.inner_mut()).map_err(Error::io)?;
-        let mut cdata_section = None;
+        let mut block_data_section = None;
         let mut block_offsets_section = None;
         for (toc_idx, toc_entry) in header.table_of_contents().enumerate() {
             match toc_entry {
                 schema::block_table_header::TableOfContents::Unspecified => {} // fail later
-                schema::block_table_header::TableOfContents::Cdata => {
-                    cdata_section = Some(toc[toc_idx])
+                schema::block_table_header::TableOfContents::BlockDataContinuous => {
+                    block_data_section = Some(toc[toc_idx])
                 }
                 schema::block_table_header::TableOfContents::BlockOffsets => {
                     block_offsets_section = Some(toc[toc_idx])
                 }
             }
         }
-        let (Some(cdata_section), Some(block_offsets_section)) =
-            (cdata_section, block_offsets_section)
+        let (Some(block_data_section), Some(block_offsets_section)) =
+            (block_data_section, block_offsets_section)
         else {
             bail!(InvalidArchive, "missing sections in table of contents");
         };
 
         // Read body data sections
-        let cdata = storage.read_content(reader, cdata_section)?;
+        let block_data = storage.read_content(reader, block_data_section)?;
         let block_offsets = storage.read_content(reader, block_offsets_section)?;
 
         let decoder_config = DecoderCodecConfig {
@@ -193,7 +193,7 @@ where
         };
 
         Self::new(
-            cdata,
+            block_data,
             block_offsets,
             header.nitems,
             header.block_size as BlockSize,

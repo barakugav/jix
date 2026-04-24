@@ -14,18 +14,38 @@ const _: () = const {
 
 pub(crate) type BlockSize = u32;
 
-/// Storage of 1D array items, organized in blocks.
+/// Compressed 1D storage of typed items, divided into independently-encoded fixed-size blocks.
 ///
-/// The number of items must be divisible by the block length, there is no support for partial blocks.
-/// At all times the storage holds the invariants:
+/// Items are stored as a flat sequence of `nitems` elements of type `dtype`. The sequence is
+/// split into blocks of `block_size` items each; every block is compressed independently using
+/// the codec pipeline described by `decoder_config`. All blocks are full — `nitems` must be an
+/// exact multiple of `block_size`.
+///
+/// Internally the compressed bytes of all blocks are concatenated into a single byte buffer
+/// (`block_data`). A parallel array of `nblocks + 1` byte offsets (`block_offsets`) records where
+/// each block's data begins and ends, enabling O(1) random access to any block without
+/// scanning the compressed data.
+///
+/// # Storage backends
+///
+/// The generic parameter `S: `[`BlockTableStorage`] determines how `block_data` and `block_offsets`
+/// are held in memory:
+/// - [`Owned`] — heap-allocated; produced by [`BlockTableBuilder`] or [`Self::build_from_data`].
+/// - [`Borrowed<'a>`] — borrowed slice; zero-copy view into an existing byte buffer.
+/// - [`Mmap`] — memory-mapped file; data is read from disk on demand by the OS.
+///
+/// # Invariants
+///
 /// - `block_size > 0`
 /// - `nitems % block_size == 0`
+/// - `block_offsets.len() == nblocks + 1` when `nblocks > 0`, or `0` when `nblocks == 0`
+/// - `block_offsets` is strictly increasing; the last entry equals `block_data.len()`
 pub(crate) struct BlockTable<S>
 where
     S: BlockTableStorage,
 {
     // pub(crate) storage: S,
-    pub(crate) cdata: S::Data<u8>,
+    pub(crate) block_data: S::Data<u8>,
     pub(crate) block_offsets: S::Data<u64>,
 
     pub(crate) nitems: u64,
@@ -40,8 +60,27 @@ impl<S> BlockTable<S>
 where
     S: BlockTableStorage,
 {
+    /// Construct a `BlockTable` from pre-encoded data, validating structural invariants.
+    ///
+    /// # Arguments
+    ///
+    /// - `block_data` — concatenated compressed bytes for all blocks.
+    /// - `block_offsets` — byte positions into `block_data` that delimit each block.
+    ///   Block `i`'s compressed bytes are `block_data[block_offsets[i]..block_offsets[i+1]]`.
+    ///   Must have length `nblocks + 1` when `nblocks > 0`, or length `0` when `nblocks == 0`.
+    ///   Entries must be strictly increasing and the last entry must not exceed `block_data.len()`.
+    /// - `nitems` — total number of items across all blocks. Must be a multiple of `block_size`.
+    /// - `block_size` — number of items per block (must be `> 0`).
+    /// - `decoder_config` — codec and dtype configuration used when decoding blocks.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if:
+    /// - `block_size == 0`
+    /// - `nitems` is not a multiple of `block_size`
+    /// - `block_offsets.len()` does not equal `nblocks + 1` (or `0` for an empty table)
     pub(crate) fn new(
-        cdata: S::Data<u8>,
+        block_data: S::Data<u8>,
         block_offsets: S::Data<u64>,
         nitems: u64,
         block_size: BlockSize,
@@ -61,10 +100,12 @@ where
         );
         if nblocks > 0 {
             debug_assert!(block_offsets.as_ref().windows(2).all(|w| w[0] < w[1]));
-            debug_assert!(*block_offsets.as_ref().last().unwrap() <= cdata.as_ref().len() as u64);
+            debug_assert!(
+                *block_offsets.as_ref().last().unwrap() <= block_data.as_ref().len() as u64
+            );
         }
         Ok(Self {
-            cdata,
+            block_data,
             block_offsets,
             nitems,
             block_size,
@@ -89,13 +130,19 @@ where
         self.block_size
     }
 
-    /// Read a block of items into the provided buffer.
+    /// Decompress one block into `buf`.
     ///
     /// # Arguments
     ///
-    /// - `block_idx`: The index of the block to read, in the range `0..(nitems / block_len)`.
-    /// - `buf`: The buffer to read the block into. Must be of size `block_len * dtype.itemsize()`.
-    /// - `context`: a read context containing global configuration and reuseable buffers.
+    /// - `block_idx` — zero-based block index in `0..(nitems / block_len)`.
+    ///   **Panics** if out of range.
+    /// - `buf` — destination buffer. Must be exactly `block_len * dtype.itemsize()` bytes.
+    /// - `context` — read context used for decoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidBufferSize` if `buf` has the wrong length.
+    /// Propagates any codec error.
     pub(crate) fn read_block(
         &self,
         block_idx: u64,
@@ -113,16 +160,37 @@ where
         let block_offsets = self.block_offsets.as_ref();
         let begin = block_offsets[block_idx as usize] as usize;
         let end = block_offsets[block_idx as usize + 1] as usize;
-        let b_cdata = &self.cdata.as_ref()[begin..end];
+        let block_data = &self.block_data.as_ref()[begin..end];
 
         let decoder = context.decoder(&self.decoder_config);
-        let nbytes = decoder.decode(b_cdata, buf)?;
+        let nbytes = decoder.decode(block_data, buf)?;
         debug_assert_eq!(nbytes, b_size_bytes);
         Ok(())
     }
 }
 
 impl BlockTable<Owned> {
+    /// Build a `BlockTable` by encoding raw item bytes in one shot.
+    ///
+    /// Splits `data` into chunks of `block_size * dtype.itemsize()` bytes, compresses each
+    /// chunk with `encoder`, and returns the fully constructed table.
+    /// This is the single-call alternative to the incremental [`BlockTableBuilder`].
+    ///
+    /// # Arguments
+    ///
+    /// - `data` — contiguous raw (uncompressed) item bytes; length must equal
+    ///   `nitems * dtype.itemsize()`.
+    /// - `dtype` — element type of the stored items.
+    /// - `block_size` — number of items per block (must be `> 0`).
+    /// - `encoder` — codec pipeline (filters + compressor) applied to each block.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if:
+    /// - `dtype.itemsize() == 0`
+    /// - `block_size == 0`
+    /// - `data.len()` is not a multiple of `dtype.itemsize()`
+    /// - The resulting `nitems` is not a multiple of `block_size`
     #[allow(unused)]
     pub(crate) fn build_from_data(
         data: &[u8],
@@ -154,6 +222,14 @@ impl BlockTable<Owned> {
     }
 }
 
+/// Abstraction over the backing storage of a [`BlockTable`]'s byte arrays.
+///
+/// The associated type `Data<T>` determines how a typed array is held in memory.
+/// Three implementations are provided:
+/// - [`Owned`] — heap-allocated `Vec<T>`; owns its data.
+/// - [`Borrowed<'a>`] — a borrowed slice `&'a [T]`; zero-copy view into existing memory.
+/// - [`Mmap`] — memory-mapped file via [`MmapData<T>`]; the `Arc<Mmap>` keeps the mapping
+///   alive for as long as any `BlockTable<Mmap>` referencing it exists.
 pub trait BlockTableStorage {
     type Data<T: 'static>: AsRef<[T]>;
 }
@@ -170,6 +246,11 @@ impl BlockTableStorage for Owned {
 impl<'a> BlockTableStorage for Borrowed<'a> {
     type Data<T: 'static> = &'a [T];
 }
+/// The `BlockTableStorage::Data<T>` type for memory-mapped storage.
+///
+/// Pairs an `Arc<Mmap>` — which keeps the memory mapping alive — with a raw pointer and
+/// length describing the typed slice within it. The pointer is derived directly from the
+/// mapped region, so no allocation or copy takes place when reading.
 pub struct MmapData<T: 'static> {
     #[allow(unused)]
     pub(crate) mmap: Arc<memmap2::Mmap>,
@@ -184,15 +265,29 @@ impl BlockTableStorage for Mmap {
     type Data<T: 'static> = MmapData<T>;
 }
 
+/// Incremental builder for [`BlockTable<Owned>`].
+///
+/// Use this when blocks are produced one at a time (e.g. while encoding an nd-array block by
+/// block). Call [`add_block`](Self::add_block) once per block in order, then call
+/// [`finish`](Self::finish) to obtain the completed [`BlockTable`].
+///
+/// For the single-shot case where all data is already in memory, prefer
+/// [`BlockTable::build_from_data`].
 pub(crate) struct BlockTableBuilder {
     dtype: Dtype,
     block_size: BlockSize,
     encoder: Encoder,
-    cdata: Vec<u8>,
+    block_data: Vec<u8>,
     block_offsets: Vec<u64>,
     max_blk_cdata_len: usize,
 }
 impl BlockTableBuilder {
+    /// Create an empty builder for a `BlockTable` with the given element type, block size,
+    /// and compression configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if `dtype.itemsize() == 0` or `block_size == 0`.
     pub(crate) fn new(dtype: Dtype, block_size: BlockSize, encoder: Encoder) -> Result<Self> {
         ensure!(
             dtype.itemsize() > 0,
@@ -206,12 +301,25 @@ impl BlockTableBuilder {
             dtype,
             block_size,
             encoder,
-            cdata: Vec::new(),
+            block_data: Vec::new(),
             block_offsets: Vec::new(),
             max_blk_cdata_len,
         })
     }
 
+    /// Compress one block of raw item bytes and append it to the table being built.
+    ///
+    /// Blocks must be added in order; each call appends the next block.
+    ///
+    /// # Arguments
+    ///
+    /// - `block_data` — raw (uncompressed) bytes for one block.
+    ///   Must be exactly `block_size * dtype.itemsize()` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if `block_data.len()` does not match the expected size.
+    /// Propagates any codec error returned by the encoder.
     pub(crate) fn add_block(&mut self, block_data: &[u8]) -> Result<()> {
         let b_size_bytes = self.block_size as usize * self.dtype.itemsize() as usize;
         ensure!(
@@ -221,25 +329,31 @@ impl BlockTableBuilder {
             block_data.len()
         );
 
-        let cdata_len = self.cdata.len();
-        self.cdata.reserve(self.max_blk_cdata_len);
+        let block_data_len = self.block_data.len();
+        self.block_data.reserve(self.max_blk_cdata_len);
         #[allow(clippy::uninit_vec)]
         unsafe {
-            self.cdata.set_len(cdata_len + self.max_blk_cdata_len)
+            self.block_data
+                .set_len(block_data_len + self.max_blk_cdata_len)
         };
-        let blk_buf = &mut self.cdata[cdata_len..];
+        let blk_buf = &mut self.block_data[block_data_len..];
 
         let blk_cdata_len = self.encoder.encode(block_data, blk_buf)?;
         debug_assert!(blk_cdata_len <= self.max_blk_cdata_len);
-        unsafe { self.cdata.set_len(cdata_len + blk_cdata_len) };
+        unsafe { self.block_data.set_len(block_data_len + blk_cdata_len) };
 
         if self.block_offsets.is_empty() {
             self.block_offsets.push(0);
         }
-        self.block_offsets.push(self.cdata.len() as u64);
+        self.block_offsets.push(self.block_data.len() as u64);
         Ok(())
     }
 
+    /// Finalise the builder and return the completed [`BlockTable`].
+    ///
+    /// Derives the decoder configuration from the encoder used during building
+    /// and constructs the table from the accumulated compressed data.
+    /// The builder is consumed and cannot be used after this call.
     pub(crate) fn finish(self) -> Result<BlockTable<Owned>> {
         let nblocks = self.block_offsets.len().saturating_sub(1);
         let nitems = nblocks * self.block_size as usize;
@@ -251,7 +365,7 @@ impl BlockTableBuilder {
             dtype: self.dtype.clone(),
         };
         BlockTable::new(
-            self.cdata,
+            self.block_data,
             self.block_offsets,
             nitems as u64,
             self.block_size,

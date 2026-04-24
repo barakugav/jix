@@ -261,7 +261,7 @@ pub mod block_table_header {
     #[repr(i32)]
     pub enum TableOfContents {
         Unspecified = 0,
-        Cdata = 1,
+        BlockDataContinuous = 1,
         BlockOffsets = 2,
     }
     impl TableOfContents {
@@ -272,7 +272,7 @@ pub mod block_table_header {
         pub fn as_str_name(&self) -> &'static str {
             match self {
                 Self::Unspecified => "TABLE_OF_CONTENTS_UNSPECIFIED",
-                Self::Cdata => "TABLE_OF_CONTENTS_CDATA",
+                Self::BlockDataContinuous => "TABLE_OF_CONTENTS_BLOCK_DATA_CONTINUOUS",
                 Self::BlockOffsets => "TABLE_OF_CONTENTS_BLOCK_OFFSETS",
             }
         }
@@ -280,7 +280,9 @@ pub mod block_table_header {
         pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
             match value {
                 "TABLE_OF_CONTENTS_UNSPECIFIED" => Some(Self::Unspecified),
-                "TABLE_OF_CONTENTS_CDATA" => Some(Self::Cdata),
+                "TABLE_OF_CONTENTS_BLOCK_DATA_CONTINUOUS" => {
+                    Some(Self::BlockDataContinuous)
+                }
                 "TABLE_OF_CONTENTS_BLOCK_OFFSETS" => Some(Self::BlockOffsets),
                 _ => None,
             }

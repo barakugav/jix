@@ -154,7 +154,7 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub(crate) fn decode(&self, cdata: &[u8], dst: &mut [u8]) -> Result<usize> {
+    pub(crate) fn decode(&self, src: &[u8], dst: &mut [u8]) -> Result<usize> {
         let dst_len = dst.len();
         let dst_ptr = dst.as_mut_ptr();
 
@@ -176,15 +176,15 @@ impl<'a> Decoder<'a> {
 
         cfg_if::cfg_if! { if #[cfg(not(miri))] {
             let inner = unsafe { &mut *self.inner.get() };
-            let nbytes = inner.decompress_to_buffer(cdata, decompress_out).map_err(|e| {
+            let nbytes = inner.decompress_to_buffer(src, decompress_out).map_err(|e| {
                 Error::new(
                     ErrorKind::CodecError,
                     format!("Failed to decompress data with Zstd: {e}"),
                 )
             })?;
         } else {
-            decompress_out.copy_from_slice(cdata);
-            let nbytes = cdata.len();
+            decompress_out.copy_from_slice(src);
+            let nbytes = src.len();
         } }
 
         // Apply filters in reverse order

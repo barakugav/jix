@@ -23,7 +23,7 @@ message BlockTableHeader {
   repeated TableOfContents table_of_contents = 6;
   enum TableOfContents {
     TABLE_OF_CONTENTS_UNSPECIFIED = 0;
-    TABLE_OF_CONTENTS_CDATA = 1;
+    TABLE_OF_CONTENTS_BLOCK_DATA_CONTINUOUS = 1;
     TABLE_OF_CONTENTS_BLOCK_OFFSETS = 2;
   }
 }

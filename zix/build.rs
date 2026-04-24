@@ -28,6 +28,7 @@ fn build_schema() {
         )
         .expect("Failed to compile protos");
 
+    println!("cargo:rerun-if-env-changed=ZIX_SCHEMA_GEN_UPDATE");
     if std::env::var("ZIX_SCHEMA_GEN_UPDATE").as_deref() == Ok("1") {
         let published_proto_gen = crate_dir
             .join("src")
