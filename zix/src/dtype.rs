@@ -48,7 +48,7 @@ pub struct Alignment(NonZero<u8>);
 impl Alignment {
     /// Creates a new `Alignment` from an integer value in bytes.
     ///
-    /// The value must be a non zero, power of two, and less than the supported maximum
+    /// The value must be non-zero, a power of two, and less than the supported maximum
     /// alignment (currently 128 bytes, may change in the future).
     pub const fn new(value: usize) -> Option<Self> {
         if 1 <= value && value <= 128 && value.is_power_of_two() {

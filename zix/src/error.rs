@@ -1,3 +1,9 @@
+//! Error type for the `zix` crate.
+//!
+//! [`Error`] is the single error type returned by all fallible operations in this crate.
+//! It pairs an [`ErrorKind`] for programmatic branching with a human-readable message for
+//! diagnostics and logging.
+
 use core::fmt;
 use std::borrow::Cow;
 use std::ops::Range;
@@ -5,6 +11,11 @@ use std::ops::Range;
 use crate::dtype::Dtype;
 use crate::NDIM_MAX;
 
+/// Error type for all operations in this crate.
+///
+/// An error consists of an [`ErrorKind`] for programmatic matching and a human-readable
+/// message for diagnostics. Use [`Error::kind`] to branch on the failure category and
+/// [`Error::message`] (or the [`Display`](fmt::Display) impl) for a descriptive string.
 pub struct Error(Box<ErrorRepr>);
 struct ErrorRepr {
     kind: ErrorKind,
@@ -17,11 +28,13 @@ impl Error {
     }
 }
 impl Error {
+    /// Get the error kind.
     pub fn kind(&self) -> ErrorKind {
         self.0.kind
     }
 
-    fn message(&self) -> &str {
+    /// Get the error message.
+    pub fn message(&self) -> &str {
         &self.0.msg
     }
 
@@ -30,6 +43,10 @@ impl Error {
     }
 }
 
+/// Categorises errors returned by this crate.
+///
+/// Match on this to distinguish failure modes programmatically; the human-readable
+/// description is available via [`Error::message`] or the [`Display`](fmt::Display) impl.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ErrorKind {
     /// Index out of bounds, slice start > end, nd-index with wrong number of dimensions, etc
@@ -69,7 +86,7 @@ impl fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
-pub type Result<T, E = Error> = std::result::Result<T, E>;
+pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 
 macro_rules! bail {
     ($kind:ident, $($arg:tt)*) => {

@@ -13,7 +13,7 @@ impl ArrayStorage for DynStorage {
         index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> zix_core::error::Result<()> {
+    ) -> Result<(), zix_core::error::Error> {
         self.0.read_data(index, buf, context)
     }
 
