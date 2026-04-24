@@ -24,11 +24,23 @@ use crate::Array;
 /// * `Plain<PlainRef<'a, T>>` — borrows from an `ndarray` view
 ///   (see [`Array::from_ndarray_view_plain`]).
 ///
-/// # Safety
+/// # Examples
 ///
-/// The raw pointer is not checked after construction.  Callers of
-/// [`Plain::new`] must ensure the pointer and strides are valid for the
-/// lifetime of the `Plain` value.
+/// Mix a plain array with a compressed array in an element-wise operation:
+///
+/// ```
+/// # use zix::{Array, ArrayParams};
+/// let nd_compact = ndarray::array![[1.0f32, 2.0], [3.0, 4.0]].into_dyn();
+/// let compact = Array::from_ndarray(&nd_compact, ArrayParams::new())?;
+///
+/// let nd_plain = ndarray::array![[10.0f32, 20.0], [30.0, 40.0]].into_dyn();
+/// let plain = Array::from_ndarray_plain(nd_plain)?;
+///
+/// // The result is computed lazily — no data is read until to_ndarray() is called.
+/// let result = (compact + plain).data().to_ndarray::<f32>()?;
+/// assert_eq!(result, ndarray::array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct Plain<S> {
     #[allow(unused)]
     storage: S,

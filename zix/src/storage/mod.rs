@@ -25,7 +25,7 @@
 //! - [`ArrayStorage`] — the trait all storage backends implement.
 //! - [`Compact`] — the main block-compressed storage backend.
 //! - [`BlocksLayout`] — block geometry hints attached to every storage.
-//! - [`Plain`], [`PlainRef`] and [`Scalar`] — adapters for non-compressed data.
+//! - [`Plain`] and [`Scalar`] — adapters for non-compressed data.
 
 use std::ops::Range;
 

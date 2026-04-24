@@ -232,7 +232,7 @@ macro_rules! define_op2 {
             #[doc = concat!("Applies the [`", stringify!($Name), "`] operation by broadcasting the scalar, see the op struct docs for details.")]
             #[track_caller]
             fn $op_fn(self, b: T) -> Array<$Name<S, crate::storage::Scalar<T>>> {
-                let b = Array::from_scalar_broadcast(b, self.shape()).unwrap();
+                let b = Array::from_scalar(b, self.shape()).unwrap();
                 let op = $Name::new(self, b).unwrap();
                 Array::from_storage(op)
             }
