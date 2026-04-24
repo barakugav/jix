@@ -8,7 +8,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::{BlockSize, BlockTableBuilder};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Owned, Ref,
+    ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Compact, Ref,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
@@ -21,7 +21,7 @@ pub struct Array<S> {
     pub(crate) storage: S,
 }
 
-impl Array<Owned> {
+impl Array<Compact> {
     pub fn from_ndarray<S, T, D>(
         array: &ndarray::ArrayBase<S, D, T>,
         mut params: ArrayParams,
@@ -179,7 +179,7 @@ impl ArrayBuilder {
     fn build(
         self,
         mut block_fn: impl FnMut(&Self, &[u64], &[u64], &[u64], &mut [u8]) -> Result<()>,
-    ) -> Result<Array<Owned>> {
+    ) -> Result<Array<Compact>> {
         let ndim = self.shape.len();
         let block_shape = &self.blocks_layout.block_shape_hint;
         assert_eq!(ndim, block_shape.len());
@@ -229,7 +229,7 @@ impl ArrayBuilder {
         let blocks = builder.finish()?;
 
         Ok(Array {
-            storage: Owned(ArrayBlockTableStorageBase::new(
+            storage: Compact(ArrayBlockTableStorageBase::new(
                 blocks,
                 self.shape,
                 self.blocks_layout,
@@ -324,14 +324,14 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
             .read_data(range, buf, self.context.as_ref())
     }
 
-    pub fn copy(&self) -> Result<Array<Owned>>
+    pub fn copy(&self) -> Result<Array<Compact>>
     where
         S: ArrayStorage,
     {
         self.copy_with(ArrayParams::default())
     }
 
-    pub fn copy_with(&self, mut params: ArrayParams) -> Result<Array<Owned>>
+    pub fn copy_with(&self, mut params: ArrayParams) -> Result<Array<Compact>>
     where
         S: ArrayStorage,
     {
@@ -398,7 +398,7 @@ mod tests {
     use ndarray::ArrayD;
 
     use super::Array;
-    use crate::array::{ArrayBlockTableStorageBase, Owned};
+    use crate::array::{ArrayBlockTableStorageBase, Compact};
     use crate::codec::{DecoderParams, Encoder, EncoderParams};
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
@@ -433,7 +433,7 @@ mod tests {
         BlockTable::build_from_data(&data, T::DTYPE, block_len, encoder).unwrap()
     }
 
-    fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Owned> {
+    fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Compact> {
         let shape: DimArray<u64> = shape.iter().map(|&x| x as u64).collect();
         let ndim = block_shape.len();
         let block_shape_hint: DimArray<BlockSize> =
@@ -446,7 +446,7 @@ mod tests {
             preferred_read_block_size_hint: 0,
         };
         Array {
-            storage: Owned(ArrayBlockTableStorageBase::new(
+            storage: Compact(ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),
                 shape,
                 layout,
@@ -921,7 +921,7 @@ mod tests {
     #[test]
     fn copy_result_is_independent() {
         // Mutating the source array should not affect the copy (they are independent).
-        // Since Array<Owned> doesn't expose mutation, we verify by round-tripping
+        // Since Array<Compact> doesn't expose mutation, we verify by round-tripping
         // both through write/read and checking values remain consistent.
         let src = ndarray::array![10u8, 20, 30, 40];
         let a = Array::from_ndarray(&src, arr_params(&[4])).unwrap();

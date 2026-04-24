@@ -394,13 +394,13 @@ mod tests {
     use pyo3::types::{PyAny, PyEllipsis, PySlice, PyTuple};
     use pyo3::{Bound, IntoPyObject, Python};
     use zix_core::dtype::Dtyped;
-    use zix_core::storage::Owned;
+    use zix_core::storage::Compact;
     use zix_core::{Array as ZixArray, ArrayParams};
 
     use super::{Array, DynStorage};
 
     fn make_py_array<'py, T: Dtyped>(py: Python<'py>, ndarray: &ArrayD<T>) -> Bound<'py, Array> {
-        let core = ZixArray::<Owned>::from_ndarray(ndarray, ArrayParams::default()).unwrap();
+        let core = ZixArray::<Compact>::from_ndarray(ndarray, ArrayParams::default()).unwrap();
         let dyn_storage = DynStorage(Arc::new(core.into_storage()));
         Bound::new(py, Array::from_storage(dyn_storage)).unwrap()
     }

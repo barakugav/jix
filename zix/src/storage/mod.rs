@@ -1,3 +1,32 @@
+//! Storage backends for [`Array`](crate::Array).
+//!
+//! Every `Array<S>` is backed by a storage type `S: ArrayStorage`, which exposes three things:
+//! the array's shape, its element dtype, and [`read_data`](ArrayStorage::read_data)
+//! which reads any rectangular sub-region into a caller-supplied byte buffer.
+//! All higher-level operations are built on top of these three methods.
+//!
+//! # Storage implementations
+//!
+//! The primary storages are block-compressed backends:
+//! - [`Compact`] — heap-allocated
+//! - [`CompactMmap`] — memory-mapped file
+//!
+//! Two adapters let non-compressed data participate in the same `Array` world (such as math operations with compressed arrays):
+//! - [`Plain`] — a zero-copy view into a contiguous or strided in-memory buffer.
+//! - [`Scalar<T>`] — a single value broadcast to any shape.
+//!
+//! Operations on `Array` produce lazy views whose storage wraps the original and applies
+//! the transformation at read time. These are defined in [`zix::ops`](crate::ops) and include shape
+//! operations (`Reshape`, `Slice`, `PermuteAxes`, `Broadcast`, …), element-wise operations
+//! (`Neg`, `Add`, `Exp`, `AsType`, …), reductions (`Sum`, `Mean`, …), et.
+//!
+//! # Notable items in this module
+//!
+//! - [`ArrayStorage`] — the trait all storage backends implement.
+//! - [`Compact`] — the main block-compressed storage backend.
+//! - [`BlocksLayout`] — block geometry hints attached to every storage.
+//! - [`Plain`], [`PlainRef`] and [`Scalar`] — adapters for non-compressed data.
+
 use std::ops::Range;
 
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
@@ -17,27 +46,89 @@ pub use scalar::*;
 
 pub(crate) mod block;
 
+/// The backing data source of an [`Array<S>`](crate::Array).
+///
+/// `Array<S>` is generic over its storage `S: ArrayStorage`, which provides three pieces
+/// of information: the array's shape, its element type, and the ability to read any
+/// rectangular sub-region into a byte buffer. Everything else — slicing, reshaping,
+/// arithmetic, reductions — is built on top of these three methods.
+///
+/// # Primary storage backends
+///
+/// The main concrete storages are the block-compressed backends:
+/// `compressed::Compact` (heap-allocated) and `compressed::CompactMmap` (memory-mapped file)
+///  These store the array as independently
+/// compressed nd-blocks and are the primary on-disk format.
+///
+/// # Adapters
+///
+/// Two adapters let plain data participate in the same `Array<S>` world:
+/// - `plain::Plain` — wraps a contiguous or strided in-memory ndarray, used when
+///   operating on regular Rust/ndarray data alongside compressed arrays.
+/// - `scalar::Scalar<T>` — represents a single scalar value broadcast to any shape,
+///   used as the right-hand side in operations like `array + scalar`.
+///
+/// # Lazy operation views
+///
+/// Every operation on an `Array<S>` returns a new `Array` whose storage wraps the
+/// original, applying the transformation lazily on each `read_data` call:
+///
+/// ```text
+/// arr.neg()                  -> Array<Neg<S>>
+/// arr.reshape(new_shape)     -> Array<Reshape<S>>
+/// arr.permute_axes(axes)     -> Array<PermuteAxes<S>>
+/// arr1.add(arr2)             -> Array<Add<S1, S2>>
+/// arr.sum(axis)              -> Array<Sum<S>>
+/// arr.astype(f32::DTYPE)     -> Array<AsType<S>>
+/// ```
+///
+/// No data is copied or computed until `read_data` is called. At that point the index
+/// transformation propagates inward through the storage chain and only the minimum
+/// required data is read from the innermost backend.
+///
+/// # Flexibility
+///
+/// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations
+/// carry zero heap allocation or virtual dispatch overhead. The full static type of an
+/// expression — e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` — is resolved by the compiler,
+/// and only the final `read_data` call touches actual bytes.
 pub trait ArrayStorage {
-    /// Read the specified slice of the array into the provided buffer.
+    /// Read a sub-region of the array into a caller-supplied byte buffer.
+    ///
+    /// This is the single I/O method that every storage backend must implement.
+    /// All higher-level read operations (`to_ndarray`, `to_ndarray_sub`, etc.) bottom
+    /// out here.
     ///
     /// # Arguments
     ///
-    /// - `index`: A slice of ranges, one per dimension, specifying the slice of the array to read.
-    ///   Each range is half-open: `start..end`, where `start` is inclusive and `end` is exclusive.
-    /// - `buf`: A mutable byte slice to store the read data.
-    ///   The size of the buffer must be exactly equal to the number of elements in the specified
-    ///   slice multiplied by the item size of the array's dtype.
-    ///   The buffer base pointer must be suitably aligned for the array's dtype.
-    ///   Elements should be laid out in row-major order (C-style contiguous) in the buffer.
-    /// - `context`: A context object that may be used for caching or other purposes during the
-    ///   read operation. See `ReadContext` for more details.
+    /// - `index` — one half-open range per dimension (`start..end`).
+    ///   The number of ranges must equal `self.shape().len()`.
+    ///   Ranges must be within the array shape bounds; empty ranges are allowed.
+    /// - `buf` — destination byte buffer.
+    ///   Must be exactly `index.iter().map(|r| r.len()).product() * dtype.itemsize()` bytes.
+    ///   Must be aligned to `dtype.alignment()`.
+    ///   On success the elements are written in row-major (C-contiguous) order.
+    /// - `context` — read context carrying the decoder state.
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>;
 
+    /// Returns the shape of the array, one element per dimension.
     fn shape(&self) -> &[u64];
+
+    /// Returns the element type of the array.
     fn dtype(&self) -> &Dtype;
 
+    /// Returns metadata about this storage backend.
+    ///
+    /// Used internally by [`Array`](crate::Array) to propagate block geometry and codec
+    /// parameters through lazy view operations and when re-encoding via `copy` / `copy_with`.
+    /// Not intended to be called directly.
     fn spec(&self) -> ArrayStorageSpec<'_>;
 }
+/// Metadata returned by [`ArrayStorage::spec`].
+///
+/// Carries the information [`Array`](crate::Array) needs when creating a new storage
+/// from an existing one — such as during `copy`, `copy_with`, and lazy view operations.
+/// Not intended to be used directly.
 pub struct ArrayStorageSpec<'a> {
     pub(crate) blocks_layout: &'a BlocksLayout,
     pub(crate) encoder_params: Option<&'a EncoderParams>,
@@ -45,52 +136,121 @@ pub struct ArrayStorageSpec<'a> {
     // pub(crate) decoder_config: Option<&'a DecoderCodecConfig>,
 }
 
+/// Block geometry hints for an nd-array storage.
+///
+/// Carries two independent hints that describe the recommended block shape for an array:
+///
+/// - **Storage block shape** (`block_shape_hint`, `block_shape_tag`, `block_size_hint`) —
+///   the recommended nd-block shape to use when encoding array data into block storage.
+///   For the baseline compressed storage this matches the actual block shape, but in
+///   general it is only a hint that may differ from the true underlying layout.
+///
+/// - **Preferred read block shape** (`preferred_read_block_shape`, `preferred_read_block_size_hint`) —
+///   the recommended region size to request in a single read, typically larger than the
+///   storage block shape and targeting the L2 cache.
+///
+/// Element-wise operations (e.g. negation, `exp`) propagate this layout unchanged.
+/// Shape-changing operations (reshape, permute, broadcast, reduction, etc.) update the
+/// hints to reflect a layout that would work well for arrays subsequently constructed
+/// from the view.
 #[derive(Clone)]
 pub struct BlocksLayout {
-    /// === how preferred read block shape is transformed by view ops ===
-    /// permute_axis - permute the block shape
-    /// insert_axis - insert a block dim of size 1
-    /// broadcast - broadcasted dims will be set to full dim size
-    /// reduce_axis - just remove the block dim, or set it to 1 if keepdims
-    /// reshape:
-    ///   - dims that kept the logical stride and length will keep the same block shape.
-    ///   - dims that kept the logical stride and reduced length will keep the same block shape.
-    ///   - dims that kept the logical stride and increased length will use the dim's block
-    ///     shape multiplied by some factor (see later).
-    ///   - other dims will use 1, and will be scaled up by some factor (see later).
-    ///   - After the initial block shape is determined, without the factors, the block shape is
-    ///     scaled to block_size_hint by scaling each dim by a factor, starting
-    ///     with the last dim, until the block size is at most block_size_hint.
+    /// Recommended storage block shape, in items per dimension.
+    ///
+    /// This is a *hint*, not an exact description of the underlying storage. For the
+    /// baseline compressed storage it matches the actual block shape, but lazy operations
+    /// (reduction, broadcast, reshape, etc.) may update it to reflect a recommended shape
+    /// for arrays constructed from their views. Callers should treat it as a recommendation,
+    /// not a guarantee.
     pub(crate) block_shape_hint: DimArray<BlockSize>,
-    pub(crate) block_shape_tag: DimArray<BlockShapeTag>,
-    pub(crate) block_size_hint: u64, // in bytes units
 
-    /// === how preferred read block shape is transformed by view ops ===
-    /// permute_axis - permute the block shape
-    /// insert_axis - insert a block dim of size 1
-    /// broadcast - broadcasted dims will be set to full dim size
-    /// reduce_axis - just remove the block dim, or set it to 1 if keepdims
-    /// reshape:
-    ///   - dims that kept the logical stride and length will keep the same block shape.
-    ///   - dims that kept the logical stride and reduced length will keep the same block shape.
-    ///   - dims that kept the logical stride and increased length will use the dim's block
-    ///     shape multiplied by some factor (see later).
-    ///   - other dims will use 1, and will be scaled up by some factor (see later).
-    ///   - After the initial block shape is determined, without the factors, the block shape is
-    ///     scaled to preferred_read_block_size_hint by scaling each dim by a factor, starting
-    ///     with the last dim, until the block size is at most preferred_read_block_size_hint.
+    /// Per-dimension tag describing how `block_shape_hint` should be treated when a new
+    /// array needs to choose a block shape automatically (i.e. without an explicit user
+    /// override).
+    ///
+    /// Users typically choose a block shape based on their access patterns, so `Fixed`
+    /// is the default — it preserves that choice in downstream arrays. Operations that
+    /// change the logical shape (reduction, broadcast, reshape, etc.) may tag affected
+    /// dimensions as `Any` or `MultipleOf` to let the heuristic freely pick a suitable
+    /// size for those dimensions.
+    pub(crate) block_shape_tag: DimArray<BlockShapeTag>,
+
+    /// Target byte size hint for a storage block.
+    ///
+    /// Used as the budget when auto-choosing a block shape for a new array. It is a hint
+    /// only — it may differ from `block_shape_hint.iter().product() * itemsize` when both
+    /// a shape and a hint were provided independently, or when a lazy operation updated
+    /// one without changing the other. Defaults to the L1 data cache size when no block
+    /// shape or hint has been set explicitly.
+    pub(crate) block_size_hint: u64,
+
+    /// Recommended nd-region size to request in a single read, in items per dimension.
+    ///
+    /// A hint to the read path: reads are most efficient when they cover a region of
+    /// approximately this shape. Typically larger than `block_shape_hint` (targeting the
+    /// L2 cache), it guides operations like `copy` to issue larger read requests. Like
+    /// `block_shape_hint`, lazy operations may update this independently.
     pub(crate) preferred_read_block_shape: DimArray<BlockSize>,
-    pub(crate) preferred_read_block_size_hint: u64, // in bytes units
+
+    /// Target byte size hint for a single read region.
+    ///
+    /// Analogous to `block_size_hint` but for the preferred read shape. May differ from
+    /// `preferred_read_block_shape.iter().product() * itemsize` for the same reasons.
+    /// Defaults to the L2 cache size when not set explicitly.
+    pub(crate) preferred_read_block_size_hint: u64,
 }
 
+/// Per-dimension constraint on how a block shape dimension may be automatically scaled
+/// when a new array is constructed without an explicit block shape.
+///
+/// See [`BlocksLayout::block_shape_tag`](BlocksLayout).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BlockShapeTag {
+    /// The block size for this dimension is exactly the value in `block_shape_hint` and
+    /// must not be changed. Used for most user-specified block shapes to preserve the
+    /// user's intent.
     Fixed,
+    /// The block size must be a multiple of the value in `block_shape_hint`, but may be
+    /// scaled up to fit the target byte size. Used when an operation constrains the
+    /// granularity without fixing the exact size.
     MultipleOf,
+    /// The block size for this dimension can be freely chosen up to the target byte size.
+    /// The value in `block_shape_hint` is ignored. Used when an operation makes the
+    /// original block size irrelevant (e.g. a dimension added by broadcast).
     Any,
 }
 
 impl BlocksLayout {
+    /// Compute and validate the block geometry for an array.
+    ///
+    /// Both the storage block shape and the preferred read block shape are resolved here;
+    /// either can be supplied explicitly or left as `None` to be auto-computed from a
+    /// target byte size.
+    ///
+    /// # Arguments
+    ///
+    /// - `block_shape` — shape of one storage block in items per dimension.
+    ///   When `None`, a shape is chosen automatically so that each block is approximately
+    ///   `block_size_hint` bytes.
+    /// - `block_shape_tag` — per-dimension constraint on how the block shape may be scaled;
+    ///   requires `block_shape` to also be provided. Defaults to all-[`BlockShapeTag::Fixed`].
+    ///   See [`BlockShapeTag`] for the available options.
+    /// - `block_size_hint` — target block size in bytes used when auto-computing or scaling
+    ///   the block shape. Defaults to the L1 data cache size when the shape is not fully
+    ///   [`BlockShapeTag::Fixed`].
+    /// - `preferred_read_block_shape` — region size the read path prefers to request at once,
+    ///   in items per dimension. When `None`, auto-computed from `preferred_read_block_size_hint`.
+    /// - `preferred_read_block_size_hint` — target size for the preferred read region in bytes.
+    ///   Defaults to the L2 cache size.
+    /// - `shape` — the array shape, used to clamp block dimensions that would exceed the array.
+    /// - `itemsize` — bytes per array element.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if:
+    /// - `block_shape_tag` is provided without `block_shape`
+    /// - the length of `block_shape_tag` or `preferred_read_block_shape` does not match `ndim`
+    /// - `ndim` exceeds [`crate::NDIM_MAX`]
     pub(crate) fn new(
         block_shape: Option<DimArray<BlockSize>>,
         block_shape_tag: Option<DimArray<BlockShapeTag>>,
@@ -261,6 +421,10 @@ impl BlocksLayout {
     }
 }
 
+/// A borrowed reference to an [`ArrayStorage`], itself implementing [`ArrayStorage`].
+///
+/// Created by [`Array::as_ref`](crate::Array::as_ref) to produce an `Array<Ref<'_, S>>`
+/// from `&Array<S>` without cloning the underlying storage.
 pub struct Ref<'a, S>(pub(crate) &'a S);
 impl_array_storage_forward!(Ref<'a, S> where S: ArrayStorage);
 

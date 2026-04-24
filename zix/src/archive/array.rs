@@ -9,11 +9,11 @@ use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Mmap, Owned};
+use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Compact, CompactMmap};
 use crate::util::{dim_arr, DimArray, Idx};
 use crate::{Array, ArrayParams};
 
-impl Array<Owned> {
+impl Array<Compact> {
     pub fn write_to<W>(&self, writer: W) -> Result<()>
     where
         W: Write + Seek,
@@ -48,11 +48,11 @@ impl Array<Owned> {
             params,
         )?;
         Ok(Self {
-            storage: Owned(storage),
+            storage: Compact(storage),
         })
     }
 }
-impl Array<Mmap> {
+impl Array<CompactMmap> {
     /// # Safety
     ///
     /// Same as `memmap2::Mmap::map`.
@@ -75,7 +75,7 @@ impl Array<Mmap> {
         )?;
 
         Ok(Self {
-            storage: Mmap(storage),
+            storage: CompactMmap(storage),
         })
     }
 }
@@ -158,7 +158,7 @@ mod tests {
     use std::io::{Cursor, Seek, Write};
 
     use crate::dtype::Dtyped;
-    use crate::storage::Owned;
+    use crate::storage::Compact;
     use crate::util::arr_params;
     use crate::{Array, ArrayParams};
 
@@ -173,7 +173,7 @@ mod tests {
     fn array_round_trip<T, S, D>(
         src: &ndarray::ArrayBase<S, D>,
         block_shape: &[usize],
-    ) -> Array<Owned>
+    ) -> Array<Compact>
     where
         T: Dtyped,
         S: ndarray::Data<Elem = T>,
@@ -364,7 +364,7 @@ mod tests {
         src: &ndarray::ArrayBase<S, D>,
         block_shape: &[usize],
         tmp_file: &tempfile::NamedTempFile,
-    ) -> super::Array<super::Mmap>
+    ) -> super::Array<super::CompactMmap>
     where
         T: Dtyped,
         S: ndarray::Data<Elem = T>,
@@ -375,7 +375,12 @@ mod tests {
         a.write_to(std::fs::File::create(&path).unwrap()).unwrap();
         let len = std::fs::metadata(&path).unwrap().len();
         unsafe {
-            super::Array::<super::Mmap>::read_from_file_mmap(&path, 0, len, ArrayParams::default())
+            super::Array::<super::CompactMmap>::read_from_file_mmap(
+                &path,
+                0,
+                len,
+                ArrayParams::default(),
+            )
         }
         .unwrap()
     }
@@ -449,7 +454,7 @@ mod tests {
 
         let len2 = total_len - offset;
         let read = unsafe {
-            super::Array::<super::Mmap>::read_from_file_mmap(
+            super::Array::<super::CompactMmap>::read_from_file_mmap(
                 &path,
                 offset,
                 len2,

@@ -217,17 +217,17 @@ mod tests {
 
     use crate::{array::Array, util::arr_params};
 
-    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<crate::storage::Owned> {
+    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
         Array::from_ndarray(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<crate::storage::Owned> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::from_ndarray(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<crate::storage::Owned> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::from_ndarray(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }

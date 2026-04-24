@@ -10,9 +10,12 @@ use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 
-pub struct Owned(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned>);
-pub struct Borrowed<'a>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>>);
-pub struct Mmap(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap>);
+pub struct Compact(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned>);
+#[allow(unused)]
+pub(crate) struct CompactBorrowed<'a>(
+    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>>,
+);
+pub struct CompactMmap(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap>);
 macro_rules! impl_array_storage {
     ($ty:ty) => {
         impl ArrayStorage for $ty {
@@ -41,9 +44,9 @@ macro_rules! impl_array_storage {
         }
     };
 }
-impl_array_storage!(Owned);
-impl_array_storage!(Borrowed<'_>);
-impl_array_storage!(Mmap);
+impl_array_storage!(Compact);
+impl_array_storage!(CompactBorrowed<'_>);
+impl_array_storage!(CompactMmap);
 
 pub(crate) struct ArrayBlockTableStorageBase<S>
 where

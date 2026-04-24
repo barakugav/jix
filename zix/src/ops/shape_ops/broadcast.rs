@@ -214,7 +214,7 @@ mod tests {
     use crate::array::Array;
     use crate::util::arr_params;
 
-    fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Owned> {
+    fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Compact> {
         let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::from_ndarray(&nd, arr_params(shape)).unwrap()
     }

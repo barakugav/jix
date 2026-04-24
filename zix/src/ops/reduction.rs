@@ -644,7 +644,7 @@ mod tests {
     use crate::dtype::Complex;
     use crate::util::arr_params;
 
-    fn make<T>(vals: Vec<T>, shape: &[usize]) -> Array<crate::storage::Owned>
+    fn make<T>(vals: Vec<T>, shape: &[usize]) -> Array<crate::storage::Compact>
     where
         T: Clone + crate::dtype::Dtyped,
     {

@@ -22,7 +22,7 @@ pub use concatenate::*;
 mod stack;
 pub use stack::*;
 
-use crate::storage::{ArrayStorage, Owned};
+use crate::storage::{ArrayStorage, Compact};
 use crate::Array;
 
 impl<S> Array<S>
@@ -30,7 +30,7 @@ where
     S: ArrayStorage,
 {
     #[track_caller]
-    pub fn reshape(self, new_shape: &[u64]) -> Array<Owned> {
+    pub fn reshape(self, new_shape: &[u64]) -> Array<Compact> {
         self.reshape_view(new_shape).data().copy().unwrap()
     }
 
@@ -135,7 +135,7 @@ where
     ///
     /// See [`broadcast_view`](Self::broadcast_view) for the validity rules on `new_shape`.
     #[track_caller]
-    pub fn broadcast(self, new_shape: &[u64]) -> Array<Owned> {
+    pub fn broadcast(self, new_shape: &[u64]) -> Array<Compact> {
         self.broadcast_view(new_shape).data().copy().unwrap()
     }
 

@@ -337,34 +337,34 @@ mod tests {
     // Helpers
     // -----------------------------------------------------------------------
 
-    /// Create a 1-D Array<Owned> from `vals` with the given block size.
+    /// Create a 1-D Array<Compact> from `vals` with the given block size.
     fn make1d<T: crate::dtype::Dtyped>(
         vals: Vec<T>,
         block_size: usize,
-    ) -> Array<crate::storage::Owned> {
+    ) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
         Array::from_ndarray(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    /// Create a 2-D Array<Owned>.
+    /// Create a 2-D Array<Compact>.
     fn make2d<T: crate::dtype::Dtyped>(
         vals: Vec<T>,
         rows: usize,
         cols: usize,
         block_shape: &[usize],
-    ) -> Array<crate::storage::Owned> {
+    ) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::from_ndarray(&nd, arr_params(block_shape)).unwrap()
     }
 
-    /// Create a 3-D Array<Owned>.
+    /// Create a 3-D Array<Compact>.
     fn make3d<T: crate::dtype::Dtyped>(
         vals: Vec<T>,
         d0: usize,
         d1: usize,
         d2: usize,
         block_shape: &[usize],
-    ) -> Array<crate::storage::Owned> {
+    ) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::from_ndarray(&nd, arr_params(block_shape)).unwrap()
     }

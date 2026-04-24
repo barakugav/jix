@@ -362,6 +362,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_empty_panics() {
-        let _ = stack(Vec::<Array<crate::storage::Owned>>::new(), 0);
+        let _ = stack(Vec::<Array<crate::storage::Compact>>::new(), 0);
     }
 }

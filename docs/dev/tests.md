@@ -247,7 +247,7 @@ For correctness tests with known inputs and outputs, use the pattern established
 in `ops/reduction.rs` and `ops/shape_ops/`:
 
 ```rust
-fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Owned> {
+fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Compact> {
     let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
     Array::from_ndarray(&nd, arr_params(shape)).unwrap()
 }
