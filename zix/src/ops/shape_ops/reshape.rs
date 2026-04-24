@@ -9,6 +9,42 @@ use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::NDIM_MAX;
 
+/// Reinterprets an array with a different shape, returned by [`Array::reshape_view`].
+///
+/// The total number of elements must be the same: the product of `new_shape` must equal the
+/// product of the original shape. Output dtype equals the input dtype.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Performance
+///
+/// When the new shape is not aligned with the underlying block layout, a single read request may
+/// span many blocks that were not contiguous in the original array, causing significant
+/// read-amplification. In the worst case every element access decompresses a different block.
+///
+/// Prefer [`Array::reshape`] over `reshape_view` unless you intend to chain further lazy
+/// operations before materializing. If you do use `reshape_view`, call [`.copy()`](Array::copy)
+/// as soon as possible to produce a compactly-stored array with a block layout matched to the
+/// new shape.
+///
+/// # Examples
+/// ```
+/// use zix::{Array, ArrayParams};
+/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+///
+/// // Flatten [2, 3] → [6]
+/// let flat = za.reshape_view(&[6]);
+/// assert_eq!(flat.shape(), &[6]);
+/// assert_eq!(flat.to_ndarray::<i32>()?.as_slice().unwrap(), &[1, 2, 3, 4, 5, 6]);
+///
+/// // Reshape [6] → [3, 2]
+/// let b = ndarray::array![1i32, 2, 3, 4, 5, 6];
+/// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+/// let result = zb.reshape_view(&[3, 2]).to_ndarray::<i32>()?;
+/// assert_eq!(result.shape(), &[3, 2]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct Reshape<S> {
     array: Array<S>,
 

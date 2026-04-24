@@ -28,7 +28,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 /// compressed. All compressed bytes are held in a heap-allocated buffer owned by
 /// this struct.
 ///
-/// Created by [`Array::copy`](crate::ArrayData::copy) and [`Array::copy_with`](crate::ArrayData::copy_with),
+/// Created by [`Array::copy`](crate::Array::copy) and [`Array::copy_with`](crate::Array::copy_with),
 /// or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
 pub struct Compact(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned>);
 

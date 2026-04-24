@@ -11,15 +11,55 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
+    /// Casts the element type of the array to `dtype`. See [`AsType`] for details and examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cast is unsupported. Use [`try_astype`](Self::try_astype) for a fallible
+    /// version.
     #[track_caller]
     pub fn astype(self, dtype: Dtype) -> Array<AsType<S>> {
         self.try_astype(dtype).unwrap()
     }
 
+    /// Fallible version of [`astype`](Self::astype).
+    ///
+    /// Returns an error instead of panicking when the cast is unsupported. See [`AsType`] for
+    /// details.
     pub fn try_astype(self, dtype: Dtype) -> Result<Array<AsType<S>>> {
         Ok(Array::from_storage(AsType::new(self, dtype)?))
     }
 }
+/// Casts each element to a new dtype, returned by [`Array::astype`].
+///
+/// Supported casts:
+/// - Between any two scalar types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+///   `f16` (requires the `half` feature), `f32`, `f64`, `bool`.
+/// - Between the two complex types: `Complex<f32>` ↔ `Complex<f64>`.
+///
+/// `bool` conversions follow C semantics: zero → `false`, any non-zero value → `true`.
+/// Casting between complex and non-complex types, or involving struct dtypes, is not supported.
+///
+/// Output dtype is the target dtype. Output shape equals the input shape.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Examples
+/// ```
+/// use zix::{Array, ArrayParams};
+/// use zix::dtype::Dtyped;
+/// let a = ndarray::array![1i32, 2, 3, 4];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// let result = za.astype(f64::DTYPE).to_ndarray::<f64>()?;
+/// assert_eq!(result.as_slice().unwrap(), &[1.0f64, 2.0, 3.0, 4.0]);
+///
+/// // Zero → false, non-zero → true
+/// let b = ndarray::array![0i32, 1, -2, 0];
+/// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+/// let result = zb.astype(bool::DTYPE).to_ndarray::<bool>()?;
+/// assert_eq!(result.as_slice().unwrap(), &[false, true, true, false]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct AsType<S> {
     array: Array<S>,
 

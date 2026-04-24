@@ -25,6 +25,9 @@ pub use reduction::*;
 mod map;
 pub use map::*;
 
+mod where_op;
+pub use where_op::*;
+
 mod sub_dtype;
 pub use sub_dtype::*;
 

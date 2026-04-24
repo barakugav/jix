@@ -7,7 +7,38 @@ use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::Array;
 
-/// Lazy storage type returned by [`Array::permute_axes`](crate::Array::permute_axes).
+/// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
+///
+/// The `i`-th output axis corresponds to axis `axes[i]` of the input — identical to the
+/// convention used by NumPy's `numpy.transpose`. No data is copied at construction time;
+/// elements are rearranged on demand when the result is read.
+///
+/// `axes` must be a permutation of `0..ndim`: correct length, all values in range, no
+/// duplicates.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Examples
+///
+/// ```
+/// use zix::{Array, ArrayParams};
+/// // 2-D transpose: [2, 3] → [3, 2]
+/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// let t = za.permute_axes(&[1, 0]);
+/// assert_eq!(t.shape(), &[3, 2]);
+/// let result = t.to_ndarray::<i32>()?;
+/// assert_eq!(result[[0, 0]], 1);
+/// assert_eq!(result[[0, 1]], 4);
+/// assert_eq!(result[[2, 1]], 6);
+///
+/// // 3-D cyclic permutation [2, 3, 4] → [4, 2, 3]
+/// let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// let p = za.permute_axes(&[2, 0, 1]);
+/// assert_eq!(p.shape(), &[4, 2, 3]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct PermuteAxes<S> {
     array: Array<S>,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.

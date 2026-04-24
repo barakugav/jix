@@ -29,168 +29,106 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
+    /// Returns a copy of the array with a new shape. See [`Reshape`] for details and examples.
+    ///
+    /// Preferred over [`reshape_view`](Self::reshape_view) when the result will be read more than
+    /// once: the copy realigns blocks to the new shape, avoiding read-amplification on future
+    /// reads.
     #[track_caller]
     pub fn reshape(self, new_shape: &[u64]) -> Array<Compact> {
         self.reshape_view(new_shape).copy().unwrap()
     }
 
+    /// Returns a lazy view of the array with a new shape. See [`Reshape`] for details and
+    /// examples.
+    ///
+    /// No data is copied at construction time, but reads may be slow when the new shape crosses
+    /// block boundaries of the original layout. Call [`.copy()`](Array::copy) to realign blocks
+    /// before repeated reads, or prefer [`reshape`](Self::reshape) directly.
     #[track_caller]
     pub fn reshape_view(self, new_shape: &[u64]) -> Array<Reshape<S>> {
         Array::from_storage(Reshape::new(self, new_shape).unwrap())
     }
 
-    /// Return a lazy view of a sub-region of the array.
+    /// Returns a lazy view of a sub-region of the array. See [`Slice`] for details and examples.
     ///
-    /// `slice` accepts anything that converts to [`SliceSpec`].  The most ergonomic form is a
-    /// tuple — one item per dimension — where each item can be a standard Rust range or a
-    /// [`SliceItem`]:
-    ///
-    /// ```text
-    /// array.slice((.., 1..4))              // axis 0: all, axis 1: indices 1, 2, 3
-    /// array.slice((2.., ..3))              // axis 0: from 2, axis 1: up to (not including) 3
-    /// array.slice((1..=3, ..))             // axis 0: indices 1, 2, 3 (inclusive end)
-    /// array.slice((.., SliceItem::new(None, None, 2)))   // axis 1: every other element
-    /// ```
-    ///
-    /// **Negative indices** (Python-style) — use negative integer range literals:
-    ///
-    /// ```text
-    /// array.slice(((-2..), ..))            // axis 0: last 2 elements  (start = len - 2)
-    /// array.slice((.., ..-1))              // axis 1: all but the last (end   = len - 1)
-    /// array.slice((.., -4..-1))            // axis 1: four-from-end up to one-from-end
-    /// ```
-    ///
-    /// When a step is also needed, use [`SliceItem`] directly (range syntax has no step):
-    ///
-    /// ```text
-    /// array.slice((SliceItem::new(Some(-6), None, 2), ..))  // last-6 to end, every 2nd
-    /// ```
-    ///
-    /// No data is copied at construction time.
+    /// Accepts a tuple of Rust ranges or [`SliceItem`]s, one per dimension. Negative integer
+    /// range bounds are supported (Python-style end-relative indexing). No data is copied.
     ///
     /// # Panics
     ///
-    /// Panics if `slice` is invalid:
-    ///
-    /// * number of items != `self.ndim()`
-    /// * any `step < 1` (for anow)
+    /// Panics if the number of items != `self.ndim()` or any `step < 1`.
     #[track_caller]
     pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
         Array::from_storage(Slice::new(self, slice.into()).unwrap())
     }
 
-    /// Return a lazy view of the array with its axes reordered.
+    /// Returns a lazy view of the array with its axes reordered. See [`PermuteAxes`] for details
+    /// and examples.
     ///
-    /// The i-th axis of the returned array corresponds to the axis numbered `axes[i]` of the
-    /// input — identical to the convention used by NumPy's `numpy.permute_axes` (also known as
-    /// `numpy.transpose`).  No data is copied at construction time; elements are read and
-    /// rearranged on demand when the result is materialized.
-    ///
-    /// # Arguments
-    ///
-    /// * `axes` — a permutation of `0..ndim`.  Must satisfy:
-    ///   - `axes.len() == self.ndim()`
-    ///   - every value is in `0..self.ndim()`
-    ///   - no value appears more than once
+    /// `axes[i]` names the input axis that maps to output axis `i`. No data is copied.
     ///
     /// # Panics
     ///
-    /// Panics if `axes` is not a valid permutation of `0..ndim`:
-    ///
-    /// * `axes.len() != self.ndim()`
-    /// * any axis value is ≥ `self.ndim()`
-    /// * any axis value is repeated
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use zix::{Array, ArrayParams};
-    ///
-    /// // 2-D transpose — equivalent to np.permute_axes(a, [1, 0])
-    /// let a = Array::from_ndarray(&ndarray::array![[1i32, 2, 3], [4, 5, 6]].view().into_dyn(), ArrayParams::default()).unwrap();
-    /// let t = a.permute_axes(&[1, 0]);
-    /// assert_eq!(t.shape(), &[3, 2]);
-    /// // t[i, j] == a[j, i]
-    ///
-    /// // 3-D cyclic permutation — equivalent to np.permute_axes(a, [2, 0, 1])
-    /// // output axis 0 ← input axis 2
-    /// // output axis 1 ← input axis 0
-    /// // output axis 2 ← input axis 1
-    /// let a = Array::from_ndarray(&ndarray::Array::from_shape_fn((2,3,4), |(i,j,k)| (i*12+j*4+k) as i32).view().into_dyn(), ArrayParams::default()).unwrap();
-    /// let p = a.permute_axes(&[2, 0, 1]);
-    /// assert_eq!(p.shape(), &[4, 2, 3]);
-    /// ```
+    /// Panics if `axes` is not a valid permutation of `0..ndim`.
     #[track_caller]
     pub fn permute_axes(self, axes: &[usize]) -> Array<PermuteAxes<S>> {
         Array::from_storage(PermuteAxes::new(self, axes).unwrap())
     }
 
-    /// Expand the array to `new_shape` and return a fully materialized copy.
+    /// Expands the array to `new_shape` by repeating length-1 dimensions and returns a
+    /// materialized copy. See [`Broadcast`] for details and examples.
     ///
-    /// Equivalent to calling [`broadcast_view`](Self::broadcast_view) and then copying the result
-    /// into a new owned array.  Use `broadcast_view` instead when you only need a lazy view
-    /// without allocating.
+    /// Preferred over [`broadcast_view`](Self::broadcast_view) when the result will be read more
+    /// than once: the copy stores each element once at its expanded position, avoiding repeated
+    /// reads of the same source blocks on future accesses.
     ///
     /// # Panics
     ///
-    /// See [`broadcast_view`](Self::broadcast_view) for the validity rules on `new_shape`.
+    /// See [`broadcast_view`](Self::broadcast_view) for validity rules.
     #[track_caller]
     pub fn broadcast(self, new_shape: &[u64]) -> Array<Compact> {
         self.broadcast_view(new_shape).copy().unwrap()
     }
 
-    /// Return a lazy view of the array expanded to `new_shape` by repeating elements along
-    /// dimensions that have length 1.
+    /// Returns a lazy view of the array expanded to `new_shape` by repeating length-1 dimensions.
+    /// See [`Broadcast`] for details and examples.
     ///
-    /// `new_shape` must have the same number of dimensions as the array.  For each dimension:
-    /// either it stays the same (`new_shape[d] == self.shape()[d]`), or it is broadcast from
-    /// length 1 to `new_shape[d]`.  Attempting to change the size of a dimension that is not
-    /// length 1 panics.  No data is copied at construction time.
+    /// No data is copied, but reads may be slow — the same source blocks are decompressed
+    /// repeatedly. Call [`.copy()`](Array::copy) to materialise, or prefer
+    /// [`broadcast`](Self::broadcast) directly.
     ///
     /// # Panics
     ///
-    /// Panics if `new_shape` is invalid:
-    ///
-    /// * `new_shape.len() != self.ndim()`
-    /// * any dimension with `input_shape[d] != new_shape[d]` has `input_shape[d] != 1`
+    /// Panics if `new_shape.len() != self.ndim()` or any dimension with size > 1 is expanded.
     #[track_caller]
     pub fn broadcast_view(self, new_shape: &[u64]) -> Array<Broadcast<S>> {
         Array::from_storage(Broadcast::new(self, new_shape).unwrap())
     }
 
-    /// Return a lazy view of the array with the specified dimensions removed.
+    /// Returns a lazy view of the array with the specified length-1 dimensions removed.
+    /// See [`RemoveAxes`] for details and examples.
     ///
-    /// Each value in `axes` names an axis of the input array (0-based index). That axis must
-    /// have length exactly 1; attempting to remove a dimension with length > 1 panics. Duplicate
-    /// axis indices are not allowed.
+    /// Each axis in `axes` must have length 1. No data is copied.
     ///
     /// # Panics
     ///
-    /// Panics if `axes` is invalid:
-    ///
-    /// * any axis value is ≥ `self.ndim()`
-    /// * any axis value is duplicated
-    /// * any named axis has length != 1
+    /// Panics if any axis is out of bounds, duplicated, or has length != 1.
     #[track_caller]
     pub fn remove_axes(self, axes: &[usize]) -> Array<RemoveAxes<S>> {
         Array::from_storage(RemoveAxes::new(self, axes).unwrap())
     }
 
-    /// Return a lazy view of the array with new length-1 dimensions inserted at the given gap
-    /// positions.
+    /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertAxes`]
+    /// for details and examples.
     ///
-    /// Each value in `axes` is a **gap index in the input shape**: `0` means "before input dim 0",
-    /// `1` means "between input dims 0 and 1", ..., `ndim` means "after the last input dim".
-    /// Duplicate values are allowed — each occurrence inserts one additional dimension at that gap.
-    /// The order of values in `axes` does not matter; only the multiset of gap indices matters.
-    /// No data is copied at construction time or at read time.
+    /// Each value in `axes` is a gap index in the output shape: `0` inserts before dim 0, `ndim`
+    /// appends after the last dim. Duplicates are allowed and each inserts one dimension. No data
+    /// is copied.
     ///
     /// # Panics
     ///
-    /// Panics if `axes` is invalid:
-    ///
-    /// * any axis value is > `self.ndim()` (valid gap indices are `0..=self.ndim()`)
-    /// * the resulting ndim would exceed the maximum allowed ndim
+    /// Panics if any value in `axes` is > `self.ndim()` or the resulting ndim exceeds the maximum.
     #[track_caller]
     pub fn insert_axes(self, axes: &[usize]) -> Array<InsertAxes<S>> {
         Array::from_storage(InsertAxes::new(self, axes).unwrap())

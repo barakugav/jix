@@ -49,6 +49,24 @@ use crate::Array;
 /// input shape: [N, M, K]    axes: []        output shape: [N, M, K]
 /// ```
 ///
+/// # Examples
+///
+/// ```
+/// use zix::{Array, ArrayParams};
+/// // [1, 3] → [3]: remove the leading size-1 dim
+/// let a = ndarray::array![[1i32, 2, 3]];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// let result = za.remove_axes(&[0]).to_ndarray::<i32>()?;
+/// assert_eq!(result.shape(), &[3]);
+/// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
+///
+/// // [1, 2, 1] → [2]: remove both size-1 dims at once
+/// let b = ndarray::array![[[10i32], [20]]]; // shape [1, 2, 1]
+/// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+/// assert_eq!(zb.remove_axes(&[0, 2]).shape(), &[2]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
+///
 /// # Read behaviour
 ///
 /// Because all removed dimensions have length 1, the flat C-order element sequence is identical to

@@ -1,0 +1,470 @@
+use std::ops::Range;
+
+use crate::array::Array;
+use crate::codec::ReadContext;
+use crate::dtype::{Dtype, Dtyped};
+use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::util::{cast_slice, cast_slice_mut, DimArray};
+
+/// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
+/// examples.
+///
+/// # Panics
+///
+/// Panics if `condition` is not `bool`, `x` and `y` differ in dtype, or any two arrays differ
+/// in shape.
+#[track_caller]
+pub fn where_condition<S1, S2, S3>(
+    condition: Array<S1>,
+    x: Array<S2>,
+    y: Array<S3>,
+) -> Array<Where<S1, S2, S3>>
+where
+    S1: ArrayStorage,
+    S2: ArrayStorage,
+    S3: ArrayStorage,
+{
+    Array::from_storage(Where::new(condition, x, y).unwrap())
+}
+
+/// Selects elements element-wise from `x` or `y` depending on `condition`, returned by
+/// [`where_condition`].
+///
+/// For each index `i`, the output is `x[i]` if `condition[i]` is `true`, otherwise `y[i]`.
+/// Semantics match `numpy.where(condition, x, y)`.
+///
+/// `condition` must have dtype `bool`. `x` and `y` must have the same dtype. All three arrays
+/// must have the same shape. Output dtype equals the dtype of `x` and `y`. Output shape equals
+/// the input shape.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Examples
+/// ```
+/// use zix::{Array, ArrayParams};
+/// use zix::ops::where_condition;
+/// let cond = ndarray::array![true, false, true, false];
+/// let x = ndarray::array![1i32, 2, 3, 4];
+/// let y = ndarray::array![10i32, 20, 30, 40];
+/// let zcond = Array::from_ndarray(&cond, ArrayParams::new())?;
+/// let zx = Array::from_ndarray(&x, ArrayParams::new())?;
+/// let zy = Array::from_ndarray(&y, ArrayParams::new())?;
+/// let result = where_condition(zcond, zx, zy).to_ndarray::<i32>()?;
+/// assert_eq!(result.as_slice().unwrap(), &[1, 20, 3, 40]);
+///
+/// // 2-D arrays
+/// let cond = ndarray::array![[true, false], [false, true]];
+/// let x = ndarray::array![[1.0f64, 2.0], [3.0, 4.0]];
+/// let y = ndarray::array![[10.0f64, 20.0], [30.0, 40.0]];
+/// let zcond = Array::from_ndarray(&cond, ArrayParams::new())?;
+/// let zx = Array::from_ndarray(&x, ArrayParams::new())?;
+/// let zy = Array::from_ndarray(&y, ArrayParams::new())?;
+/// let result = where_condition(zcond, zx, zy).to_ndarray::<f64>()?;
+/// assert_eq!(result[[0, 0]], 1.0);
+/// assert_eq!(result[[0, 1]], 20.0);
+/// assert_eq!(result[[1, 0]], 30.0);
+/// assert_eq!(result[[1, 1]], 4.0);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
+pub struct Where<S1, S2, S3> {
+    condition: Array<S1>,
+    x: Array<S2>,
+    y: Array<S3>,
+
+    dtype: Dtype,
+    shape: DimArray<u64>,
+}
+impl<S1, S2, S3> Where<S1, S2, S3> {
+    pub fn new(condition: Array<S1>, x: Array<S2>, y: Array<S3>) -> Result<Self>
+    where
+        S1: ArrayStorage,
+        S2: ArrayStorage,
+        S3: ArrayStorage,
+    {
+        ensure!(
+            condition.dtype() == &bool::DTYPE,
+            UnsupportedDtype,
+            "where condition must have boolean dtype, got {:?}",
+            condition.dtype()
+        );
+        ensure!(
+            x.dtype() == y.dtype(),
+            UnsupportedDtype,
+            "x and y arrays must have the same dtype, got {:?} and {:?}",
+            x.dtype(),
+            y.dtype()
+        );
+        let shape = condition.shape();
+        ensure!(
+            x.shape() == shape && y.shape() == shape,
+            InvalidArgument,
+            "condition, x, and y arrays must have the same shape, got {:?}, {:?}, and {:?}",
+            shape,
+            x.shape(),
+            y.shape()
+        );
+
+        Ok(Self {
+            dtype: x.dtype().clone(),
+            shape: shape.try_into().unwrap(),
+            condition,
+            x,
+            y,
+        })
+    }
+}
+impl<S1, S2, S3> ArrayStorage for Where<S1, S2, S3>
+where
+    S1: ArrayStorage,
+    S2: ArrayStorage,
+    S3: ArrayStorage,
+{
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        check_get_range(&self.shape, index)?;
+        let dtype = self.dtype();
+        let nitems = check_get_buffer_size(index, &dtype, buf)?;
+
+        let mut condition_buf =
+            context.tmp_buf(nitems * size_of::<bool>(), bool::DTYPE.alignment());
+        let condition_buf = condition_buf.as_mut_slice();
+        let mut y_buf = context.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
+        let y_buf = y_buf.as_mut_slice();
+
+        self.condition
+            .storage
+            .read_data(index, condition_buf, context)?;
+        self.x.storage.read_data(index, buf, context)?; // read 'x' data directly into output buffer
+        self.y.storage.read_data(index, y_buf, context)?;
+
+        let condition = unsafe { cast_slice::<_, bool>(condition_buf) };
+
+        unsafe fn where_impl<T>(condition: &[bool], buf: &mut [u8], y_buf: &[u8])
+        where
+            T: Copy,
+        {
+            let x = unsafe { cast_slice_mut::<_, T>(buf) };
+            let y = unsafe { cast_slice::<_, T>(y_buf) };
+            for (cond, (x, y)) in condition.iter().zip(x.into_iter().zip(y)) {
+                if !cond {
+                    *x = *y;
+                }
+            }
+        }
+
+        match (dtype.itemsize(), dtype.alignment().as_usize()) {
+            (1, 1) => unsafe { where_impl::<u8>(condition, buf, y_buf) },
+            (2, 2) => unsafe { where_impl::<u16>(condition, buf, y_buf) },
+            (4, 2) => unsafe { where_impl::<[u16; 2]>(condition, buf, y_buf) },
+            (4, 4) => unsafe { where_impl::<u32>(condition, buf, y_buf) },
+            (8, 4) => unsafe { where_impl::<[u32; 2]>(condition, buf, y_buf) },
+            (8, 8) => unsafe { where_impl::<u64>(condition, buf, y_buf) },
+            (16, 8) => unsafe { where_impl::<[u64; 2]>(condition, buf, y_buf) },
+            (itemsize, _) => {
+                let x = buf.chunks_exact_mut(itemsize as usize);
+                let y = y_buf.chunks_exact(itemsize as usize);
+                for (cond, (x, y)) in condition.iter().zip(x.zip(y)) {
+                    if !cond {
+                        x.copy_from_slice(y);
+                    }
+                }
+            }
+        };
+        Ok(())
+    }
+
+    fn shape(&self) -> &[u64] {
+        &self.shape
+    }
+    fn dtype(&self) -> &Dtype {
+        &self.dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        self.x.storage.spec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{where_condition, Where};
+    use crate::array::Array;
+    use crate::util::{arr_params, ScalarStrategy};
+
+    // Proptest macro: covers all four layout cases for one dtype.
+    // Tests correctness against the scalar reference: result[i] = x[i] if cond[i] else y[i].
+    macro_rules! test_where_dtype {
+        ($mod_name:ident, $dtype:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                proptest::proptest! {
+                    #[test]
+                    fn where_1d(
+                        cond in proptest::collection::vec(proptest::bool::ANY, 8usize),
+                        x in proptest::collection::vec(
+                            <$dtype as ScalarStrategy>::any_strategy(), 8usize,
+                        ),
+                        y in proptest::collection::vec(
+                            <$dtype as ScalarStrategy>::any_strategy(), 8usize,
+                        ),
+                    ) {
+                        let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
+                            .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
+                            .collect();
+                        let zcond = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![8], cond).unwrap(),
+                            arr_params(&[8]),
+                        ).unwrap();
+                        let zx = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![8], x).unwrap(),
+                            arr_params(&[8]),
+                        ).unwrap();
+                        let zy = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![8], y).unwrap(),
+                            arr_params(&[8]),
+                        ).unwrap();
+                        let actual = where_condition(zcond, zx, zy).to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(
+                            actual,
+                            ndarray::ArrayD::from_shape_vec(vec![8], exp).unwrap()
+                        );
+                    }
+
+                    #[test]
+                    fn where_1d_multi_block(
+                        cond in proptest::collection::vec(proptest::bool::ANY, 6usize),
+                        x in proptest::collection::vec(
+                            <$dtype as ScalarStrategy>::any_strategy(), 6usize,
+                        ),
+                        y in proptest::collection::vec(
+                            <$dtype as ScalarStrategy>::any_strategy(), 6usize,
+                        ),
+                    ) {
+                        let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
+                            .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
+                            .collect();
+                        let zcond = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![6], cond).unwrap(),
+                            arr_params(&[2]),
+                        ).unwrap();
+                        let zx = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![6], x).unwrap(),
+                            arr_params(&[2]),
+                        ).unwrap();
+                        let zy = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![6], y).unwrap(),
+                            arr_params(&[2]),
+                        ).unwrap();
+                        let actual = where_condition(zcond, zx, zy).to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(
+                            actual,
+                            ndarray::ArrayD::from_shape_vec(vec![6], exp).unwrap()
+                        );
+                    }
+
+                    #[test]
+                    fn where_2d(
+                        cond in proptest::collection::vec(proptest::bool::ANY, 12usize),
+                        x in proptest::collection::vec(
+                            <$dtype as ScalarStrategy>::any_strategy(), 12usize,
+                        ),
+                        y in proptest::collection::vec(
+                            <$dtype as ScalarStrategy>::any_strategy(), 12usize,
+                        ),
+                    ) {
+                        let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
+                            .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
+                            .collect();
+                        let zcond = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![3, 4], cond).unwrap(),
+                            arr_params(&[3, 4]),
+                        ).unwrap();
+                        let zx = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![3, 4], x).unwrap(),
+                            arr_params(&[3, 4]),
+                        ).unwrap();
+                        let zy = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![3, 4], y).unwrap(),
+                            arr_params(&[3, 4]),
+                        ).unwrap();
+                        let actual = where_condition(zcond, zx, zy).to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(
+                            actual,
+                            ndarray::ArrayD::from_shape_vec(vec![3, 4], exp).unwrap()
+                        );
+                    }
+
+                    #[test]
+                    fn where_2d_multi_block(
+                        cond in proptest::collection::vec(proptest::bool::ANY, 16usize),
+                        x in proptest::collection::vec(
+                            <$dtype as ScalarStrategy>::any_strategy(), 16usize,
+                        ),
+                        y in proptest::collection::vec(
+                            <$dtype as ScalarStrategy>::any_strategy(), 16usize,
+                        ),
+                    ) {
+                        let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
+                            .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
+                            .collect();
+                        let zcond = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![4, 4], cond).unwrap(),
+                            arr_params(&[2, 2]),
+                        ).unwrap();
+                        let zx = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![4, 4], x).unwrap(),
+                            arr_params(&[2, 2]),
+                        ).unwrap();
+                        let zy = Array::from_ndarray(
+                            &ndarray::ArrayD::from_shape_vec(vec![4, 4], y).unwrap(),
+                            arr_params(&[2, 2]),
+                        ).unwrap();
+                        let actual = where_condition(zcond, zx, zy).to_ndarray::<$dtype>().unwrap();
+                        proptest::prop_assert_eq!(
+                            actual,
+                            ndarray::ArrayD::from_shape_vec(vec![4, 4], exp).unwrap()
+                        );
+                    }
+                }
+            }
+        };
+    }
+
+    // Covers where_impl branches: (1,1)=u8, (2,2)=u16, (4,4)=u32, (8,8)=u64
+    test_where_dtype!(i8, i8);
+    test_where_dtype!(u8, u8);
+    test_where_dtype!(bool_dtype, bool);
+    test_where_dtype!(i16, i16);
+    test_where_dtype!(u16, u16);
+    test_where_dtype!(i32, i32);
+    test_where_dtype!(u32, u32);
+    test_where_dtype!(f32, f32);
+    test_where_dtype!(i64, i64);
+    test_where_dtype!(u64, u64);
+    test_where_dtype!(f64, f64);
+
+    #[cfg(feature = "half")]
+    test_where_dtype!(f16, crate::dtype::f16);
+
+    #[cfg(feature = "num-complex")]
+    test_where_dtype!(complex_f32, crate::dtype::Complex<f32>); // (8, 4) branch
+    #[cfg(feature = "num-complex")]
+    test_where_dtype!(complex_f64, crate::dtype::Complex<f64>); // (16, 8) branch
+
+    // --- error cases ---
+
+    #[test]
+    fn condition_not_bool_fails() {
+        let cond = Array::from_ndarray(
+            &ndarray::array![0i32, 1, 0].into_dyn(),
+            arr_params(&[3]),
+        )
+        .unwrap();
+        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3].into_dyn(), arr_params(&[3])).unwrap();
+        let y = Array::from_ndarray(&ndarray::array![4i32, 5, 6].into_dyn(), arr_params(&[3])).unwrap();
+        assert!(Where::new(cond, x, y).is_err());
+    }
+
+    #[test]
+    fn x_y_dtype_mismatch_fails() {
+        let cond = Array::from_ndarray(
+            &ndarray::array![true, false, true].into_dyn(),
+            arr_params(&[3]),
+        )
+        .unwrap();
+        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3].into_dyn(), arr_params(&[3])).unwrap();
+        let y =
+            Array::from_ndarray(&ndarray::array![4.0f64, 5.0, 6.0].into_dyn(), arr_params(&[3])).unwrap();
+        assert!(Where::new(cond, x, y).is_err());
+    }
+
+    #[test]
+    fn shape_mismatch_condition_vs_x_fails() {
+        let cond = Array::from_ndarray(
+            &ndarray::array![true, false].into_dyn(),
+            arr_params(&[2]),
+        )
+        .unwrap();
+        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3].into_dyn(), arr_params(&[3])).unwrap();
+        let y = Array::from_ndarray(&ndarray::array![4i32, 5, 6].into_dyn(), arr_params(&[3])).unwrap();
+        assert!(Where::new(cond, x, y).is_err());
+    }
+
+    #[test]
+    fn shape_mismatch_x_vs_y_fails() {
+        let cond = Array::from_ndarray(
+            &ndarray::array![true, false, true].into_dyn(),
+            arr_params(&[3]),
+        )
+        .unwrap();
+        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3].into_dyn(), arr_params(&[3])).unwrap();
+        let y = Array::from_ndarray(&ndarray::array![4i32, 5].into_dyn(), arr_params(&[2])).unwrap();
+        assert!(Where::new(cond, x, y).is_err());
+    }
+
+    // --- edge cases ---
+
+    #[test]
+    fn all_true_selects_x() {
+        let cond = Array::from_ndarray(
+            &ndarray::array![true, true, true, true].into_dyn(),
+            arr_params(&[4]),
+        )
+        .unwrap();
+        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3, 4].into_dyn(), arr_params(&[4])).unwrap();
+        let y =
+            Array::from_ndarray(&ndarray::array![10i32, 20, 30, 40].into_dyn(), arr_params(&[4])).unwrap();
+        let result = where_condition(cond, x, y).to_ndarray::<i32>().unwrap();
+        assert_eq!(result.as_slice().unwrap(), &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn all_false_selects_y() {
+        let cond = Array::from_ndarray(
+            &ndarray::array![false, false, false, false].into_dyn(),
+            arr_params(&[4]),
+        )
+        .unwrap();
+        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3, 4].into_dyn(), arr_params(&[4])).unwrap();
+        let y =
+            Array::from_ndarray(&ndarray::array![10i32, 20, 30, 40].into_dyn(), arr_params(&[4])).unwrap();
+        let result = where_condition(cond, x, y).to_ndarray::<i32>().unwrap();
+        assert_eq!(result.as_slice().unwrap(), &[10, 20, 30, 40]);
+    }
+
+    // Exercises the fallback byte-copy path in where_impl for struct dtypes.
+    #[test]
+    fn struct_dtype_fallback_path() {
+        #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[repr(C)]
+        struct Pair {
+            a: i32,
+            b: i32,
+        }
+
+        let cond = Array::from_ndarray(
+            &ndarray::array![true, false, true].into_dyn(),
+            arr_params(&[3]),
+        )
+        .unwrap();
+        let x = Array::from_ndarray(
+            &ndarray::array![Pair { a: 1, b: 2 }, Pair { a: 3, b: 4 }, Pair { a: 5, b: 6 }].into_dyn(),
+            arr_params(&[3]),
+        )
+        .unwrap();
+        let y = Array::from_ndarray(
+            &ndarray::array![
+                Pair { a: 10, b: 20 },
+                Pair { a: 30, b: 40 },
+                Pair { a: 50, b: 60 }
+            ]
+            .into_dyn(),
+            arr_params(&[3]),
+        )
+        .unwrap();
+        let result = where_condition(cond, x, y).to_ndarray::<Pair>().unwrap();
+        assert_eq!(result[0], Pair { a: 1, b: 2 });   // cond=true  → x
+        assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false → y
+        assert_eq!(result[2], Pair { a: 5, b: 6 });   // cond=true  → x
+    }
+}

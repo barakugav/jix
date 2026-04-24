@@ -512,7 +512,7 @@ define_op2!(
     ///
     /// For **integer** types the result is truncating (rounds towards zero); dividing
     /// by zero panics in debug builds and the result is implementation-defined in release.
-    /// For **float** types semantics follow [`f32::div`].
+    /// For **float** types semantics follow `f32::div`.
     /// For **complex** types this is full complex division.
     ///
     /// Available via the `/` operator. A raw scalar can be used as the right-hand

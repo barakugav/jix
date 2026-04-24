@@ -11,11 +11,43 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
+    /// Returns a view of one named field of a struct dtype. See [`SubDtype`] for details and
+    /// examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the array dtype is not a struct dtype or has no field with the given name.
     #[track_caller]
     pub fn dtype_sub_field(self, sub_field: &str) -> Array<SubDtype<S>> {
         Array::from_storage(SubDtype::new(self, sub_field).unwrap())
     }
 }
+/// Extracts one named field from a struct dtype array, returned by [`Array::dtype_sub_field`].
+///
+/// The input array must have a struct dtype with a field named `sub_field`. The output has the
+/// dtype of that field and the same shape as the input. Field bytes are copied out of each
+/// element on demand.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Examples
+/// ```rust,ignore
+/// use zix::{Array, ArrayParams};
+///
+/// #[derive(Copy, Clone, zix::dtype::Dtyped)]
+/// #[repr(C)]
+/// struct Point { x: i32, y: i32 }
+///
+/// let pts = ndarray::array![
+///     Point { x: 1, y: 10 },
+///     Point { x: 2, y: 20 },
+///     Point { x: 3, y: 30 },
+/// ].into_dyn();
+/// let za = Array::from_ndarray(&pts, ArrayParams::new())?;
+/// let xs = za.dtype_sub_field("x").to_ndarray::<i32>()?;
+/// assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct SubDtype<S> {
     array: Array<S>,
 

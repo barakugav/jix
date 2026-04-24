@@ -5,11 +5,8 @@
 - use u8 for dim index everywhere, like axes: DimArray<usize>, and concat_axis: usize
 - ops
     - clip
-    - mean
-    - std
-    - var
     - split
     - sort
-    - where
     - full/zeros/ones/
+    - array::from_fn
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.

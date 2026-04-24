@@ -11,13 +11,11 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    /// Applies `map_fn` element-wise, producing an array with dtype `R`.
-    ///
-    /// `T` must match the array's element type at runtime; the mapping function
-    /// receives each element as `T` and produces an `R`. The output array has
-    /// the same shape and block layout as the input.
+    /// Applies `map_fn` to each element, returning an array with dtype `R`. See [`Map`] for
+    /// details and examples.
     ///
     /// # Panics
+    ///
     /// Panics if the array's dtype does not match `T::DTYPE`.
     #[track_caller]
     pub fn map<T, R, F>(self, map_fn: F) -> Array<Map<S, T, R, F>>
@@ -30,13 +28,29 @@ where
     }
 }
 
-/// Lazy element-wise mapping over an array.
+/// Applies a function element-wise to an array, returned by [`Array::map`].
 ///
-/// Stores the source array and a function `F: Fn(T) -> R`. On read, each
-/// element is interpreted as `T`, passed through the function, and the result
-/// written as `R`. No allocation beyond the read buffer occurs.
+/// `T` must match the array's element dtype at runtime; each element is passed to
+/// `F: Fn(T) -> R` and the result written as `R`. The output dtype is `R::DTYPE` and the output
+/// shape equals the input shape.
 ///
-/// Construct via [`Array::map`]; use [`Map::new`] for fallible construction.
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Examples
+/// ```
+/// use zix::{Array, ArrayParams};
+/// let a = ndarray::array![1i32, 2, 3, 4];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// let result = za.map(|x: i32| x * x).to_ndarray::<i32>()?;
+/// assert_eq!(result.as_slice().unwrap(), &[1, 4, 9, 16]);
+///
+/// // Change element type in the mapping function
+/// let b = ndarray::array![0.0f32, 1.5, -2.0];
+/// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+/// let result = zb.map(|x: f32| x > 0.0).to_ndarray::<bool>()?;
+/// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct Map<S, I, O, F> {
     array: Array<S>,
 

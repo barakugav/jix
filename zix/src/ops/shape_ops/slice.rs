@@ -9,33 +9,55 @@ use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 
-/// Lazy storage type returned by [`Array::slice`](crate::Array::slice).
+/// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
-/// Presents a sub-region of the underlying array, selecting elements along each dimension
-/// with an optional step, without copying any data at construction time.
+/// The most ergonomic form is a tuple — one Rust range (or [`SliceItem`]) per dimension.
+/// Standard range types and negative integer ranges are all accepted:
+///
+/// ```text
+/// array.slice((.., 1..4))                            // axis 0: all, axis 1: indices 1, 2, 3
+/// array.slice((2.., ..3))                            // axis 0: from 2, axis 1: up to (excl.) 3
+/// array.slice((1..=3, ..))                           // axis 0: indices 1–3 (inclusive end)
+/// array.slice(((-2..), ..))                          // axis 0: last 2 elements
+/// array.slice((.., ..-1))                            // axis 1: all but the last
+/// array.slice((.., SliceItem::new(None, None, 2)))   // axis 1: every other element (step=2)
+/// ```
 ///
 /// # Slice convention
 ///
 /// The slice is specified via [`SliceSpec`], which wraps one [`SliceItem`] per dimension.
-/// Each item has three fields:
+/// Each [`SliceItem`] has three fields:
 ///
 /// * `start` — first element to include (negative: counted from the end; `None`: beginning).
 /// * `end`   — first element to exclude (negative: counted from the end; `None`: past the end).
-/// * `step`  — step between selected elements (must be >= 1 for now).
+/// * `step`  — step between selected elements (must be ≥ 1).
 ///
-/// Ranges like `1..4`, `..3`, `2..-7`, `..`, and `1..=3` all convert to [`SliceItem`] automatically.
+/// Standard Rust ranges convert to [`SliceItem`] automatically; negative-integer range
+/// literals work for Python-style end-relative indexing.
 ///
-/// # Read behaviour
+/// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// When all dimensions have `step == 1` (`no_steps` fast path), each read translates the
-/// requested index ranges by the per-dimension `start` offsets and forwards directly to the inner
-/// storage — no temporary buffer is needed.
+/// # Examples
 ///
-/// When any dimension has `step > 1`, [`NdIter`] iterates over every combination of strided-dim
-/// output indices.  For each step:
-/// * Strided dims use a single-element inner range for that step's position.
-/// * Non-strided dims use the full translated range.
-/// The inner read goes into a temporary buffer which is then scattered into `buf` via [`nd_copy`].
+/// ```
+/// use zix::{Array, ArrayParams};
+/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+///
+/// // First two rows, last two columns
+/// let result = za.slice((0..2, 1..)).to_ndarray::<i32>()?;
+/// assert_eq!(result.shape(), &[2, 2]);
+/// assert_eq!(result[[0, 0]], 2);
+/// assert_eq!(result[[1, 1]], 6);
+///
+/// // Negative index: last row only
+/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// let result = za.slice(((-1i64..), ..)).to_ndarray::<i32>()?;
+/// assert_eq!(result.shape(), &[1, 3]);
+/// assert_eq!(result[[0, 1]], 8);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 pub struct Slice<S> {
     array: Array<S>,
     /// Resolved slice for each dimension.
@@ -97,6 +119,18 @@ impl<S: ArrayStorage> Slice<S> {
 
 impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        // # Read behaviour
+        //
+        // When all dimensions have `step == 1` (`no_steps` fast path), each read translates the
+        // requested index ranges by the per-dimension `start` offsets and forwards directly to the inner
+        // storage — no temporary buffer is needed.
+        //
+        // When any dimension has `step > 1`, [`NdIter`] iterates over every combination of strided-dim
+        // output indices.  For each step:
+        // * Strided dims use a single-element inner range for that step's position.
+        // * Non-strided dims use the full translated range.
+        // The inner read goes into a temporary buffer which is then scattered into `buf` via [`nd_copy`].
+
         check_get_range(self.shape(), index)?;
 
         // -----------------------------------------------------------------------

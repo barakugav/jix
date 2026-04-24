@@ -24,27 +24,24 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 ///
 /// # Examples
 ///
-/// **Broadcast a row vector to a matrix (repeat along axis 0):**
-/// ```text
-/// input shape: [1, N]    new_shape: [M, N]    output shape: [M, N]
 /// ```
-/// Every row of the output is identical — it contains the same N elements as the input.
+/// use zix::{Array, ArrayParams};
+/// // Row vector [1, 3] → matrix [2, 3]: every row is identical
+/// let a = ndarray::array![[1i32, 2, 3]];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// let result = za.broadcast_view(&[2, 3]).to_ndarray::<i32>()?;
+/// assert_eq!(result[[0, 0]], result[[1, 0]]);
+/// assert_eq!(result[[0, 2]], result[[1, 2]]);
 ///
-/// **Broadcast a column vector to a matrix (repeat along axis 1):**
-/// ```text
-/// input shape: [M, 1]    new_shape: [M, N]    output shape: [M, N]
-/// ```
-/// Every column of the output is identical — it contains the same M elements as the input.
-///
-/// **Broadcast both axes:**
-/// ```text
-/// input shape: [1, 1]    new_shape: [M, N]    output shape: [M, N]
-/// ```
-/// All M×N output elements are equal to the single input element.
-///
-/// **No-op (no broadcast dims):**
-/// ```text
-/// input shape: [M, N]    new_shape: [M, N]    output shape: [M, N]
+/// // Column vector [3, 1] → matrix [3, 2]: every column is identical
+/// let b = ndarray::array![[10i32], [20], [30]];
+/// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
+/// let result = zb.broadcast_view(&[3, 2]).to_ndarray::<i32>()?;
+/// assert_eq!(result[[0, 0]], 10);
+/// assert_eq!(result[[0, 1]], 10);
+/// assert_eq!(result[[2, 0]], 30);
+/// assert_eq!(result[[2, 1]], 30);
+/// # Ok::<(), zix::error::Error>(())
 /// ```
 ///
 /// # Read behaviour

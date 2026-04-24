@@ -72,6 +72,28 @@ use crate::Array;
 /// input shape: [N, M, K]    axes: []        output shape: [N, M, K]
 /// ```
 ///
+/// # Examples
+///
+/// ```
+/// use zix::{Array, ArrayParams};
+/// let a = ndarray::array![1i32, 2, 3];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+///
+/// // [3] → [1, 3] (insert before first dim)
+/// assert_eq!(za.insert_axes(&[0]).shape(), &[1, 3]);
+///
+/// // [3] → [3, 1] (append after last dim)
+/// let a = ndarray::array![1i32, 2, 3];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// assert_eq!(za.insert_axes(&[1]).shape(), &[3, 1]);
+///
+/// // [2, 3] → [1, 2, 3, 1] (insert at both ends)
+/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// assert_eq!(za.insert_axes(&[0, 2]).shape(), &[1, 2, 3, 1]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
+///
 /// # Read behaviour
 ///
 /// Because all inserted dimensions have length 1, the flat C-order element sequence is identical

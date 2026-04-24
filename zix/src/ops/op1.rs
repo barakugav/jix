@@ -328,7 +328,7 @@ define_op1!(
     /// `-(a + bi) = -a - bi`.
     ///
     /// Available via the unary `-` operator on [`Array`](crate::Array): `-arr`.
-    /// Floating-point semantics follow [`f32::neg`].
+    /// Floating-point semantics follow `f32::neg`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
