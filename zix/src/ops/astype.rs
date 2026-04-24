@@ -4,7 +4,7 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{f16, Complex, Dtype, DtypeScalarKind};
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec};
 use crate::util::DimArray;
 
 impl<S> Array<S>
@@ -25,7 +25,6 @@ pub struct AsType<S> {
 
     dst_dtype: Dtype,
     shape: DimArray<u64>,
-    blocks_layout: BlocksLayout,
 }
 impl<S> AsType<S> {
     pub fn new(array: Array<S>, dtype: Dtype) -> Result<Self>
@@ -42,7 +41,6 @@ impl<S> AsType<S> {
         Ok(Self {
             dst_dtype: dtype,
             shape: array.shape().try_into().unwrap(),
-            blocks_layout: array.blocks_layout().clone(),
             array,
         })
     }
@@ -215,10 +213,7 @@ where
         &self.dst_dtype
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
-        }
+        self.array.storage.spec()
     }
 }
 

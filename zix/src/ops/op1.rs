@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{f16, Complex, Dtype, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::common::define_array_op1_method;
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec};
 use crate::util::DimArray;
 
 pub(crate) trait Op1Kernel {
@@ -80,7 +80,6 @@ pub(crate) struct Op1<Op, S> {
 
     output_dtype: Dtype,
     shape: DimArray<u64>,
-    blocks_layout: BlocksLayout,
 }
 impl<Op, S> Op1<Op, S> {
     pub(crate) fn new(op: Op, array: Array<S>) -> Result<Self>
@@ -93,7 +92,6 @@ impl<Op, S> Op1<Op, S> {
             op,
             output_dtype,
             shape: array.shape().try_into().unwrap(),
-            blocks_layout: array.blocks_layout().clone(),
             array,
         })
     }
@@ -145,10 +143,7 @@ where
         &self.output_dtype
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
-        }
+        self.array.storage.spec()
     }
 }
 

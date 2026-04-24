@@ -1,3 +1,5 @@
+use numpy::npyffi::npy_intp;
+use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray};
 use pyo3::prelude::*;
 use zix_core::NDIM_MAX;
 
@@ -23,6 +25,26 @@ impl<T> IntoPyResult<T> for zix_core::error::Result<T> {
     fn into_py_result(self) -> PyResult<T> {
         self.map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))
     }
+}
+
+pub(crate) fn numpy_empty<'py>(
+    dtype: Bound<'py, PyArrayDescr>,
+    shape: &[u64],
+) -> PyResult<Bound<'py, PyUntypedArray>> {
+    let py = dtype.py();
+    let ndim = shape.len();
+    let shape = dim_arr(ndim, |dim| shape[dim] as npy_intp);
+    let is_fortran = false;
+    let np_arr = unsafe {
+        numpy::PY_ARRAY_API.PyArray_Empty(
+            py,
+            shape.len() as _,
+            shape.as_ptr().cast_mut(),
+            dtype.into_dtype_ptr(),
+            if is_fortran { -1 } else { 0 },
+        )
+    };
+    Ok(unsafe { Bound::from_owned_ptr(py, np_arr).cast_into_unchecked() })
 }
 
 #[cfg(test)]

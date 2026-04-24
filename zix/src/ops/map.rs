@@ -4,7 +4,7 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec};
 use crate::util::DimArray;
 
 impl<S> Array<S>
@@ -45,7 +45,6 @@ pub struct Map<S, I, O, F> {
     _phantom: std::marker::PhantomData<(I, O)>,
 
     shape: DimArray<u64>,
-    blocks_layout: BlocksLayout,
 }
 impl<S, I, O, F> Map<S, I, O, F> {
     pub fn new(array: Array<S>, map_fn: F) -> Result<Self>
@@ -68,7 +67,6 @@ impl<S, I, O, F> Map<S, I, O, F> {
             output_dtype: O::DTYPE,
             _phantom: std::marker::PhantomData,
             shape: array.shape().try_into().unwrap(),
-            blocks_layout: array.blocks_layout().clone(),
             array,
         })
     }
@@ -120,10 +118,7 @@ where
         &self.output_dtype
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
-        }
+        self.array.storage.spec()
     }
 }
 

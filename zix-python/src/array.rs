@@ -1,16 +1,20 @@
 use std::sync::Arc;
 
-use numpy::npyffi::npy_intp;
-use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
+use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;
+use pyo3::types::{PyEllipsis, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+use zix_core::ops::SliceItem;
 use zix_core::storage::ArrayStorage;
 use zix_core::Array as ZixArray;
 
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
+use pyo3::types::{PyAnyMethods, PySlice};
+use std::ops::Range;
+
 use crate::dtype::dtype_to_numpy;
 use crate::storage::DynStorage;
-use crate::util::{dim_arr, IntoPyResult};
+use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult};
 
 #[gen_stub_pyclass]
 #[pyclass]
@@ -30,6 +34,51 @@ impl Array {
 
     pub(crate) fn to_core_array(&self) -> ZixArray<DynStorage> {
         ZixArray::from_storage(self.arr.storage().clone())
+    }
+
+    pub fn to_numpy<'py>(
+        &self,
+        py: Python<'py>,
+        index: &[Range<u64>],
+    ) -> PyResult<Bound<'py, PyUntypedArray>> {
+        let arr_shape = self.arr.shape();
+        let ndim = arr_shape.len();
+        if index.len() != ndim {
+            return Err(PyIndexError::new_err(format!(
+                "index has {} dimensions, but array has {ndim}",
+                index.len()
+            )));
+        }
+        for (dim, r) in index.iter().enumerate() {
+            if r.start > r.end || r.end > arr_shape[dim] {
+                return Err(PyIndexError::new_err(format!(
+                    "index {r:?} is out of bounds for axis {dim} with size {}",
+                    arr_shape[dim]
+                )));
+            }
+        }
+        let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let itemsize = self.arr.dtype().itemsize() as usize;
+
+        let np_arr = numpy_empty(self.dtype_numpy(py)?, &read_shape)?;
+        let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
+        let np_arr_data_size = itemsize * read_shape.iter().product::<u64>() as usize;
+        let np_arr_data =
+            unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
+
+        if np_arr_data_size > 0 {
+            py.detach(|| {
+                self.arr
+                    .data()
+                    .to_ndarray_buf(index, np_arr_data)
+                    .into_py_result()
+            })?;
+        }
+
+        let np_arr: Bound<'_, PyUntypedArray> = np_arr
+            .call_method1("reshape", (read_shape.as_slice(),))?
+            .cast_into()?;
+        Ok(np_arr)
     }
 }
 
@@ -67,75 +116,271 @@ impl Array {
         dtype_to_numpy(py, self.arr.dtype())
     }
 
-    /// Export the array as a NumPy array.
+    /// Decode the array (or a sub-region of it) into a NumPy array.
     ///
-    /// Allocates a new C-contiguous NumPy array with the same shape and dtype, decodes all blocks
-    /// into it, and returns it. The returned array is independent of this array — mutations to one
-    /// do not affect the other.
-    pub fn numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let dtype = self.arr.dtype();
-        let dtype_np = dtype_to_numpy(py, dtype)?;
+    /// This is the primary way to materialize a `zix.Array` into a form that ordinary Python
+    /// and NumPy code can consume. It decodes the compressed block data, copies it into a
+    /// freshly-allocated NumPy array, and returns that array. The returned array is fully
+    /// independent: mutations to one do not affect the other.
+    ///
+    /// # Return value
+    ///
+    /// * **dtype** — identical to `self.dtype_numpy()`. No casting is performed.
+    /// * **shape** — determined by the `index` argument (see below). When no index is
+    ///   supplied the shape equals `self.shape`.
+    /// * **memory layout** — always C-contiguous (row-major).
+    /// * **ownership** — a brand-new allocation; the caller owns it outright.
+    ///
+    /// # The `index` argument
+    ///
+    /// `index` selects a sub-region to read. It accepts the same syntax Python uses inside `[…]`:
+    ///
+    /// | Form | Example | Effect |
+    /// |---|---|---|
+    /// | omitted / `None` argument | `arr.numpy()` | read the whole array |
+    /// | integer | `arr[2]` or `arr.numpy(2)` | select a single position along axis 0 |
+    /// | slice | `arr[1:4]` or `arr.numpy(slice(1, 4))` | select a range along axis 0 |
+    /// | `...` (Ellipsis) | `arr[...]` or `arr.numpy(...)` | fill all remaining axes with full slices |
+    /// | tuple of the above | `arr[0, 1:3, ..., :-2]` or `arr.numpy((0, slice(1,3)))` | index each axis independently |
+    ///
+    /// Most callers use `__getitem__` (`arr[…]`) instead of calling `numpy` directly; the two
+    /// are equivalent.
+    ///
+    /// ## Integers
+    ///
+    /// An integer selects one position along the corresponding axis and **removes** that axis
+    /// from the output shape (just like NumPy).
+    ///
+    /// * **Negative indices** are supported: `-1` means the last element, `-n` means the
+    ///   first.
+    /// * **Out-of-bounds** raises `IndexError`. The valid range is `[-len, len-1]` where
+    ///   `len` is the size of that axis.
+    ///
+    /// ## Slices
+    ///
+    /// A slice selects a contiguous range along the corresponding axis and **keeps** that axis
+    /// in the output (possibly with a smaller size).
+    ///
+    /// * `start` defaults to `0`; `stop` defaults to the axis length.
+    /// * Both `start` and `stop` may be negative (counted from the end).
+    /// * The **step must be 1** (explicit or omitted). Any other step raises `ValueError`.
+    /// * **Bounds**: after normalizing negative values, `start` must satisfy
+    ///   `0 ≤ start < len` and `stop` must satisfy `0 ≤ stop ≤ len`. This is stricter than
+    ///   NumPy, which silently clamps out-of-range slice endpoints.
+    /// * An empty slice (where `start == stop`) is valid and produces an axis of length 0.
+    ///
+    /// ## Ellipsis (`...`)
+    ///
+    /// Expands to as many full-range slices as needed to account for all axes not covered by
+    /// the rest of the index. At most one ellipsis is allowed; a second one raises
+    /// `IndexError`.
+    ///
+    /// ## Omitted trailing axes
+    ///
+    /// If the index covers fewer axes than the array has dimensions, the remaining axes are
+    /// implicitly given full-range slices (equivalent to appending `...`).
+    ///
+    /// ## Too many indices
+    ///
+    /// If the number of integer/slice items exceeds the array's number of dimensions,
+    /// `IndexError` is raised.
+    ///
+    /// ## Unsupported index types
+    ///
+    /// Anything other than an integer, slice, `...`, or tuple of these raises `TypeError`.
+    ///
+    /// # Errors
+    ///
+    /// | Exception | Condition |
+    /// |---|---|
+    /// | `IndexError` | integer out of bounds |
+    /// | `IndexError` | slice `start` or `stop` out of bounds |
+    /// | `IndexError` | more index items than array dimensions |
+    /// | `IndexError` | more than one ellipsis |
+    /// | `ValueError` | slice step other than 1 |
+    /// | `TypeError` | unsupported index item type |
+    #[pyo3(signature = (index=None))]
+    pub fn numpy<'py>(
+        &self,
+        py: Python<'py>,
+        index: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyUntypedArray>> {
         let shape = self.arr.shape();
         let ndim = shape.len();
-        let shape = dim_arr(ndim, |dim| shape[dim] as npy_intp);
-        let is_fortran = false;
-        let np_arr = unsafe {
-            numpy::PY_ARRAY_API.PyArray_Empty(
-                py,
-                shape.len() as _,
-                shape.as_ptr().cast_mut(),
-                dtype_np.into_dtype_ptr(),
-                if is_fortran { -1 } else { 0 },
-            )
+
+        enum RawIdxItem {
+            Int(i64),
+            Slice(SliceItem),
+            Ellipsis,
+        }
+
+        enum IdxItem {
+            Int(u64),        // already resolved, consumes a real axis, drops it
+            Slice(u64, u64), // already resolved, consumes a real axis, keeps it
+        }
+
+        // 1. Normalize index into a tuple of items.
+        let raw = match index {
+            Some(index) => {
+                if let Ok(tup) = index.cast::<PyTuple>() {
+                    tup.iter().collect::<Vec<_>>()
+                } else {
+                    vec![index.clone()]
+                }
+            }
+            None => vec![],
         };
-        let np_arr = unsafe { Bound::from_owned_ptr(py, np_arr).cast_into_unchecked() };
-        let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
-        let np_arr_data_size =
-            dtype.itemsize() as usize * shape.iter().map(|s| *s as usize).product::<usize>();
-        let np_arr_data =
-            unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
+        let raw = raw
+            .into_iter()
+            .map(|item| {
+                if item.is_instance_of::<PyEllipsis>() {
+                    return Ok(RawIdxItem::Ellipsis);
+                }
+                if let Ok(slice) = item.cast::<PySlice>() {
+                    // Pull start/stop/step as Option<i64>. PySlice exposes them as attrs
+                    // that are either int or None.
+                    let start = slice.getattr("start")?.extract::<Option<i64>>()?;
+                    let stop = slice.getattr("stop")?.extract::<Option<i64>>()?;
+                    let step = slice
+                        .getattr("step")?
+                        .extract::<Option<i64>>()?
+                        .unwrap_or(1);
+                    return Ok(RawIdxItem::Slice(SliceItem {
+                        start,
+                        end: stop,
+                        step,
+                    }));
+                }
+                if let Ok(i) = item.extract::<i64>() {
+                    return Ok(RawIdxItem::Int(i));
+                }
+                Err(PyTypeError::new_err(
+                    "only integers, slices (`:`), and ellipsis (`...`) are valid indices",
+                ))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
 
-        py.detach(|| {
-            let range = dim_arr(ndim, |dim| 0..(shape[dim] as u64));
-            self.arr
-                .data()
-                .to_ndarray_buf(&range, np_arr_data)
-                .into_py_result()
-        })?;
+        // 2. Validate ellipsis count and real-axis-consumer count.
+        let mut ellipsis_count = 0usize;
+        let mut consumers = 0usize; // Int + Slice + Ellipsis-as-one-slot
+        for r in &raw {
+            match r {
+                RawIdxItem::Ellipsis => ellipsis_count += 1,
+                RawIdxItem::Int(_) | RawIdxItem::Slice(_) => consumers += 1,
+            }
+        }
+        if ellipsis_count > 1 {
+            return Err(PyIndexError::new_err(
+                "an index can only have a single ellipsis ('...')",
+            ));
+        }
+        if consumers > ndim {
+            return Err(PyIndexError::new_err(format!(
+                "too many indices for array: array is {ndim}-dimensional, \
+                 but {consumers} were indexed"
+            )));
+        }
 
+        // 3. Expand ellipsis (or pad at the end if absent) so we get exactly
+        //    ndim real-axis consumers. NewAxis entries pass through.
+        let fill = ndim - consumers;
+        let mut axes: Vec<IdxItem> = Vec::with_capacity(ndim);
+        let mut axis_cursor = 0usize; // which real axis we're on
+        for r in raw {
+            match r {
+                RawIdxItem::Ellipsis => {
+                    for _ in 0..fill {
+                        axes.push(IdxItem::Slice(0, shape[axis_cursor]));
+                        axis_cursor += 1;
+                    }
+                }
+                RawIdxItem::Int(i) => {
+                    let len = shape[axis_cursor] as i64;
+                    let i = if i < 0 { i + len } else { i };
+                    if i < 0 || i >= len {
+                        return Err(PyIndexError::new_err(format!(
+                            "index {i} is out of bounds for axis {axis_cursor} with size {len}"
+                        )));
+                    }
+                    axes.push(IdxItem::Int(i as u64));
+                    axis_cursor += 1;
+                }
+                RawIdxItem::Slice(s) => {
+                    if s.step != 1 {
+                        return Err(PyValueError::new_err("slice step must be 1"));
+                    }
+                    let len = shape[axis_cursor] as i64;
+                    let start = s.start.unwrap_or(0);
+                    let stop = s.end.unwrap_or(len);
+                    let start_norm = if start < 0 { start + len } else { start };
+                    let stop_norm = if stop < 0 { stop + len } else { stop };
+                    if start_norm < 0 || start_norm >= len {
+                        return Err(PyIndexError::new_err(format!(
+                            "slice start {start} is out of bounds for axis {axis_cursor} with size {len}"
+                        )));
+                    }
+                    if stop_norm < 0 || stop_norm > len {
+                        return Err(PyIndexError::new_err(format!(
+                            "slice stop {stop} is out of bounds for axis {axis_cursor} with size {len}"
+                        )));
+                    }
+                    axes.push(IdxItem::Slice(start_norm as u64, stop_norm as u64));
+                    axis_cursor += 1;
+                }
+            }
+        }
+        // fewer consumers than ndim: pad at the end.
+        while axis_cursor < ndim {
+            axes.push(IdxItem::Slice(0, shape[axis_cursor]));
+            axis_cursor += 1;
+        }
+
+        // 4. Build the ranges for get_data (length == ndim) and the output
+        //    shape (length == number of kept axes + NewAxis entries).
+        let mut ranges = DimArray::new();
+        let mut out_shape: Vec<usize> = Vec::with_capacity(axes.len());
+        for ax in &axes {
+            match ax {
+                IdxItem::Int(i) => ranges.push(*i..*i + 1),
+                IdxItem::Slice(s, e) => {
+                    ranges.push(*s..*e);
+                    out_shape.push((e - s) as usize);
+                }
+            }
+        }
+
+        // 5. Read data
+        let np_arr = self.to_numpy(py, &ranges)?;
+
+        let np_arr: Bound<'_, PyUntypedArray> =
+            np_arr.call_method1("reshape", (out_shape,))?.cast_into()?;
         Ok(np_arr)
     }
 
-    pub fn __add__<'py>(
+    /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.
+    ///
+    /// This function is identical to `numpy()`, see that method for details.
+    fn __getitem__<'py>(
         slf: &Bound<'py, Self>,
-        py: Python<'py>,
-        other: &Bound<'py, PyAny>,
-    ) -> PyResult<Self> {
-        crate::ops::add(py, slf, other)
+        key: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyUntypedArray>> {
+        Self::numpy(&slf.borrow(), slf.py(), Some(key))
     }
 
-    pub fn __sub__<'py>(
-        slf: &Bound<'py, Self>,
-        py: Python<'py>,
-        other: &Bound<'py, PyAny>,
-    ) -> PyResult<Self> {
-        crate::ops::subtract(py, slf, other)
+    pub fn __add__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::add(slf, other)
     }
 
-    pub fn __mul__<'py>(
-        slf: &Bound<'py, Self>,
-        py: Python<'py>,
-        other: &Bound<'py, PyAny>,
-    ) -> PyResult<Self> {
-        crate::ops::multiply(py, slf, other)
+    pub fn __sub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::subtract(slf, other)
     }
 
-    pub fn __truediv__<'py>(
-        slf: &Bound<'py, Self>,
-        py: Python<'py>,
-        other: &Bound<'py, PyAny>,
-    ) -> PyResult<Self> {
-        crate::ops::divide(py, slf, other)
+    pub fn __mul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::multiply(slf, other)
+    }
+
+    pub fn __truediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::divide(slf, other)
     }
 }
 
@@ -145,7 +390,9 @@ mod tests {
 
     use ndarray::{array, ArrayD, IxDyn};
     use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
-    use pyo3::{Bound, Python};
+    use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
+    use pyo3::types::{PyAny, PyEllipsis, PySlice, PyTuple};
+    use pyo3::{Bound, IntoPyObject, Python};
     use zix_core::dtype::Dtyped;
     use zix_core::storage::Owned;
     use zix_core::{Array as ZixArray, ArrayParams};
@@ -165,7 +412,7 @@ mod tests {
         // ndarray::Array -> zix_core::Array -> zix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.borrow().numpy(py).unwrap();
+            let np = py_arr.borrow().numpy(py, None).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array()
         })
@@ -249,7 +496,7 @@ mod tests {
                 .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.borrow().numpy(py).unwrap();
+            let np = py_arr.borrow().numpy(py, None).unwrap();
             assert_eq!(np.shape(), &[2usize, 3, 4]);
         });
     }
@@ -260,7 +507,7 @@ mod tests {
         let original: ArrayD<f32> = array![1.0f32, 2.0].into_dyn();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.borrow().numpy(py).unwrap();
+            let np = py_arr.borrow().numpy(py, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'f');
         });
@@ -272,7 +519,7 @@ mod tests {
         let original: ArrayD<i32> = array![1i32, 2, 3].into_dyn();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.borrow().numpy(py).unwrap();
+            let np = py_arr.borrow().numpy(py, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'i');
         });
@@ -297,7 +544,7 @@ mod tests {
     {
         Python::attach(|py| {
             py_arr
-                .numpy(py)
+                .numpy(py, None)
                 .unwrap()
                 .cast_into::<PyArrayDyn<T>>()
                 .unwrap()
@@ -312,7 +559,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::__add__(&a, py, &b).unwrap())
+            eval::<f32>(Array::__add__(&a, &b).unwrap())
         });
         assert_eq!(result, a + b);
     }
@@ -324,7 +571,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::__sub__(&a, py, &b).unwrap())
+            eval::<f32>(Array::__sub__(&a, &b).unwrap())
         });
         assert_eq!(result, a - b);
     }
@@ -336,7 +583,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::__mul__(&a, py, &b).unwrap())
+            eval::<f32>(Array::__mul__(&a, &b).unwrap())
         });
         assert_eq!(result, a * b);
     }
@@ -348,7 +595,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f32>(Array::__truediv__(&a, py, &b).unwrap())
+            eval::<f32>(Array::__truediv__(&a, &b).unwrap())
         });
         assert_eq!(result, a / b);
     }
@@ -360,7 +607,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<f64>(Array::__add__(&a, py, &b).unwrap())
+            eval::<f64>(Array::__add__(&a, &b).unwrap())
         });
         assert_eq!(result, a + b);
     }
@@ -372,7 +619,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<i32>(Array::__add__(&a, py, &b).unwrap())
+            eval::<i32>(Array::__add__(&a, &b).unwrap())
         });
         assert_eq!(result, a + b);
     }
@@ -384,7 +631,7 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<i32>(Array::__sub__(&a, py, &b).unwrap())
+            eval::<i32>(Array::__sub__(&a, &b).unwrap())
         });
         assert_eq!(result, a - b);
     }
@@ -396,9 +643,344 @@ mod tests {
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
-            eval::<i32>(Array::__mul__(&a, py, &b).unwrap())
+            eval::<i32>(Array::__mul__(&a, &b).unwrap())
         });
         assert_eq!(result, a * b);
+    }
+
+    fn getitem<T>(py_arr: &Bound<'_, Array>, key: &Bound<'_, PyAny>) -> ArrayD<T>
+    where
+        T: Dtyped + numpy::Element + Copy,
+    {
+        Array::__getitem__(py_arr, key)
+            .unwrap()
+            .cast_into::<PyArrayDyn<T>>()
+            .unwrap()
+            .to_owned_array()
+    }
+
+    // --- __getitem__: integer indexing ---
+
+    #[test]
+    fn test_getitem_int_positive() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = 2i64.into_pyobject(py).unwrap().into_any();
+            let result = getitem::<i32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[] as &[usize]);
+            assert_eq!(result.first().copied().unwrap(), 2);
+        });
+    }
+
+    #[test]
+    fn test_getitem_int_negative() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = (-1i64).into_pyobject(py).unwrap().into_any();
+            let result = getitem::<i32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[] as &[usize]);
+            assert_eq!(result.first().copied().unwrap(), 4);
+        });
+    }
+
+    #[test]
+    fn test_getitem_int_out_of_bounds() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = 5i64.into_pyobject(py).unwrap().into_any();
+            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            assert!(err.is_instance_of::<PyIndexError>(py));
+        });
+    }
+
+    #[test]
+    fn test_getitem_int_negative_out_of_bounds() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = (-6i64).into_pyobject(py).unwrap().into_any();
+            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            assert!(err.is_instance_of::<PyIndexError>(py));
+        });
+    }
+
+    // --- __getitem__: slice indexing ---
+
+    #[test]
+    fn test_getitem_slice_start_stop() {
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = PySlice::new(py, 1, 4, 1).into_any();
+            let result = getitem::<f32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[3usize]);
+            assert_eq!(result.as_slice().unwrap(), &[1.0f32, 2.0, 3.0]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_slice_no_start() {
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = py.eval(c"slice(None, 3, None)", None, None).unwrap();
+            let result = getitem::<f32>(&py_arr, &key);
+            assert_eq!(result.shape(), &[3usize]);
+            assert_eq!(result.as_slice().unwrap(), &[0.0f32, 1.0, 2.0]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_slice_no_stop() {
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = py.eval(c"slice(2, None, None)", None, None).unwrap();
+            let result = getitem::<f32>(&py_arr, &key);
+            assert_eq!(result.shape(), &[3usize]);
+            assert_eq!(result.as_slice().unwrap(), &[2.0f32, 3.0, 4.0]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_slice_full() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = PySlice::full(py).into_any();
+            let result = getitem::<i32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[5usize]);
+            assert_eq!(result.as_slice().unwrap(), &[0i32, 1, 2, 3, 4]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_slice_negative_start() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = py.eval(c"slice(-3, None, None)", None, None).unwrap();
+            let result = getitem::<i32>(&py_arr, &key);
+            assert_eq!(result.shape(), &[3usize]);
+            assert_eq!(result.as_slice().unwrap(), &[2i32, 3, 4]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_slice_empty() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = PySlice::new(py, 2, 2, 1).into_any();
+            let result = getitem::<i32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[0usize]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_slice_step_not_one_err() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = py.eval(c"slice(None, None, 2)", None, None).unwrap();
+            let err = Array::__getitem__(&py_arr, &key).unwrap_err();
+            assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+
+    // --- __getitem__: 2-D indexing ---
+
+    #[test]
+    fn test_getitem_2d_row_int() {
+        // arr[0] on shape [2, 3] → first row, shape [3]
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = 0i64.into_pyobject(py).unwrap().into_any();
+            let result = getitem::<f32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[3usize]);
+            assert_eq!(result.as_slice().unwrap(), &[0.0f32, 1.0, 2.0]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_2d_element() {
+        // arr[1, 2] on shape [2, 3] → scalar, shape []
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let items: Vec<Bound<'_, PyAny>> = vec![
+                1i64.into_pyobject(py).unwrap().into_any(),
+                2i64.into_pyobject(py).unwrap().into_any(),
+            ];
+            let key = PyTuple::new(py, items).unwrap().into_any();
+            let result = getitem::<f32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[] as &[usize]);
+            assert_eq!(result.first().copied().unwrap(), 5.0f32);
+        });
+    }
+
+    #[test]
+    fn test_getitem_2d_col() {
+        // arr[:, 1] on shape [2, 3] → column 1, shape [2]
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let items: Vec<Bound<'_, PyAny>> = vec![
+                PySlice::full(py).into_any(),
+                1i64.into_pyobject(py).unwrap().into_any(),
+            ];
+            let key = PyTuple::new(py, items).unwrap().into_any();
+            let result = getitem::<f32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[2usize]);
+            assert_eq!(result.as_slice().unwrap(), &[1.0f32, 4.0]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_2d_subarray() {
+        // arr[0:2, 1:3] on shape [3, 3] → shape [2, 2]
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[3, 3]), (0..9).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let items: Vec<Bound<'_, PyAny>> = vec![
+                PySlice::new(py, 0, 2, 1).into_any(),
+                PySlice::new(py, 1, 3, 1).into_any(),
+            ];
+            let key = PyTuple::new(py, items).unwrap().into_any();
+            let result = getitem::<f32>(&py_arr, key.as_any());
+            // [[0,1,2],[3,4,5],[6,7,8]] → rows 0-1, cols 1-2 → [[1,2],[4,5]]
+            let expected =
+                ndarray::Array::from_shape_vec(IxDyn(&[2, 2]), vec![1.0f32, 2.0, 4.0, 5.0])
+                    .unwrap();
+            assert_eq!(result, expected);
+        });
+    }
+
+    // --- __getitem__: ellipsis ---
+
+    #[test]
+    fn test_getitem_ellipsis_full() {
+        // arr[...] → entire array unchanged
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = PyEllipsis::get(py).to_owned().into_any();
+            let result = getitem::<i32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[2usize, 3]);
+            assert_eq!(result, data);
+        });
+    }
+
+    #[test]
+    fn test_getitem_ellipsis_prefix() {
+        // arr[0, ...] on shape [2, 3] → row 0, shape [3]
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let items: Vec<Bound<'_, PyAny>> = vec![
+                0i64.into_pyobject(py).unwrap().into_any(),
+                PyEllipsis::get(py).to_owned().into_any(),
+            ];
+            let key = PyTuple::new(py, items).unwrap().into_any();
+            let result = getitem::<f32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[3usize]);
+            assert_eq!(result.as_slice().unwrap(), &[0.0f32, 1.0, 2.0]);
+        });
+    }
+
+    #[test]
+    fn test_getitem_ellipsis_suffix() {
+        // arr[..., 0] on shape [2, 3] → column 0, shape [2]
+        let data: ArrayD<f32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
+                .unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let items: Vec<Bound<'_, PyAny>> = vec![
+                PyEllipsis::get(py).to_owned().into_any(),
+                0i64.into_pyobject(py).unwrap().into_any(),
+            ];
+            let key = PyTuple::new(py, items).unwrap().into_any();
+            let result = getitem::<f32>(&py_arr, key.as_any());
+            assert_eq!(result.shape(), &[2usize]);
+            assert_eq!(result.as_slice().unwrap(), &[0.0f32, 3.0]);
+        });
+    }
+
+    // --- __getitem__: error cases ---
+
+    #[test]
+    fn test_getitem_too_many_indices_err() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let items: Vec<Bound<'_, PyAny>> = vec![
+                0i64.into_pyobject(py).unwrap().into_any(),
+                1i64.into_pyobject(py).unwrap().into_any(),
+                2i64.into_pyobject(py).unwrap().into_any(),
+            ];
+            let key = PyTuple::new(py, items).unwrap().into_any();
+            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            assert!(err.is_instance_of::<PyIndexError>(py));
+        });
+    }
+
+    #[test]
+    fn test_getitem_multiple_ellipses_err() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let items: Vec<Bound<'_, PyAny>> = vec![
+                PyEllipsis::get(py).to_owned().into_any(),
+                PyEllipsis::get(py).to_owned().into_any(),
+            ];
+            let key = PyTuple::new(py, items).unwrap().into_any();
+            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            assert!(err.is_instance_of::<PyIndexError>(py));
+        });
+    }
+
+    #[test]
+    fn test_getitem_invalid_type_err() {
+        let data: ArrayD<i32> =
+            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        Python::attach(|py| {
+            let py_arr = make_py_array(py, &data);
+            let key = "bad".into_pyobject(py).unwrap().into_any();
+            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
     }
 
     #[test]
@@ -413,8 +995,7 @@ mod tests {
             let c = make_py_array(py, &c);
             eval::<f32>(
                 Array::__mul__(
-                    &Bound::new(py, Array::__add__(&a, py, &b).unwrap()).unwrap(),
-                    py,
+                    &Bound::new(py, Array::__add__(&a, &b).unwrap()).unwrap(),
                     &c,
                 )
                 .unwrap(),

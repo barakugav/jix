@@ -13,11 +13,11 @@ use crate::Array;
     copy=true,
 ))]
 pub fn broadcast<'py>(
-    py: Python<'py>,
     array: &Bound<'py, Array>,
     new_shape: Vec<u64>,
     copy: bool,
 ) -> PyResult<Array> {
+    let py = array.py();
     let array = array.borrow().to_core_array();
     let ret = zix_core::ops::Broadcast::new(array, &new_shape).into_py_result()?;
     if !copy {
@@ -63,12 +63,8 @@ pub fn permute_axes<'py>(array: &Bound<'py, Array>, axes: Vec<usize>) -> PyResul
     new_shape,
     copy=true,
 ))]
-pub fn reshape<'py>(
-    py: Python<'py>,
-    array: &Bound<'py, Array>,
-    new_shape: Vec<u64>,
-    copy: bool,
-) -> PyResult<Array> {
+pub fn reshape<'py>(array: &Bound<'py, Array>, new_shape: Vec<u64>, copy: bool) -> PyResult<Array> {
+    let py = array.py();
     let array = array.borrow().to_core_array();
     let ret = zix_core::ops::Reshape::new(array, &new_shape).into_py_result()?;
     if !copy {
@@ -83,14 +79,10 @@ pub fn reshape<'py>(
 
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn concatenate<'py>(
-    py: Python<'py>,
-    arrays: Vec<Bound<'py, PyAny>>,
-    axis: usize,
-) -> PyResult<Array> {
+pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: usize) -> PyResult<Array> {
     let arrays = arrays
         .into_iter()
-        .map(|arr| as_core_array(py, &arr))
+        .map(|arr| as_core_array(&arr))
         .collect::<Result<Vec<_>, _>>()?;
     let ret = zix_core::ops::Concatenate::new(arrays, axis).into_py_result()?;
     Ok(Array::from_core_storage(ret))
@@ -98,10 +90,10 @@ pub fn concatenate<'py>(
 
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn stack<'py>(py: Python<'py>, arrays: Vec<Bound<'py, PyAny>>, axis: usize) -> PyResult<Array> {
+pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: usize) -> PyResult<Array> {
     let arrays = arrays
         .into_iter()
-        .map(|arr| as_core_array(py, &arr))
+        .map(|arr| as_core_array(&arr))
         .collect::<Result<Vec<_>, _>>()?;
     let ret = zix_core::ops::Stack::new(arrays, axis).into_py_result()?;
     Ok(Array::from_core_storage(ret))

@@ -64,13 +64,12 @@ macro_rules! define_reduction_op {
             $($($extra_arg=$extra_default,)+)?
         ))]
         pub fn $name<'py>(
-            py: pyo3::Python<'py>,
             array: &pyo3::Bound<'py, pyo3::PyAny>,
             axes: Option<Vec<usize>>,
             keepdims: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
-            let array = crate::ops::as_array::as_core_array(py, array)?;
+            let array = crate::ops::as_array::as_core_array(array)?;
             let axes = axes.unwrap_or_else(|| (0..array.ndim()).collect());
             let res = zix_core::ops::$core_op::new(array, &axes, keepdims $($(, $extra_arg)+)?);
             let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
@@ -87,12 +86,11 @@ macro_rules! define_reduction_op {
             keepdims=false,
         ))]
         pub fn $name<'py>(
-            py: pyo3::Python<'py>,
             array: &pyo3::Bound<'py, pyo3::PyAny>,
             axis: Option<usize>,
             keepdims: bool,
         ) -> pyo3::PyResult<crate::Array> {
-            let array = crate::ops::as_array::as_core_array(py, array)?;
+            let array = crate::ops::as_array::as_core_array(array)?;
             let axis = match axis {
                 Some(axis) => axis,
                 None => {
@@ -124,13 +122,9 @@ define_reduction_op!(any, Any);
 
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn astype<'py>(
-    py: Python<'py>,
-    array: &Bound<'py, Array>,
-    dtype: &Bound<'py, PyAny>,
-) -> PyResult<Array> {
+pub fn astype<'py>(array: &Bound<'py, Array>, dtype: &Bound<'py, PyAny>) -> PyResult<Array> {
     let array = array.borrow().to_core_array();
-    let dtype = dtype_from_any(py, dtype)?;
+    let dtype = dtype_from_any(dtype)?;
     let ret = zix_core::ops::AsType::new(array, dtype).into_py_result()?;
     Ok(Array::from_core_storage(ret))
 }

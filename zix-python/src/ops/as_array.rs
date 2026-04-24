@@ -31,13 +31,14 @@ use crate::util::{check_ndim, DimArray, IntoPyResult};
 /// - If the array has negative strides (e.g. a reversed slice `a[::-1]`).
 #[gen_stub_pyfunction]
 #[pyfunction]
-pub fn asarray<'py>(py: Python<'py>, value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     // already a zix array
     if let Ok(s) = value.cast::<Array>() {
         return Ok(s.clone());
     };
 
     // convert to numpy array
+    let py = value.py();
     let numpy_asarray = numpy::get_array_module(py)?.getattr("asarray")?;
     let array = numpy_asarray.call1((value,))?;
     let array = array.cast::<PyUntypedArray>()?;
@@ -111,10 +112,9 @@ pub fn asarray<'py>(py: Python<'py>, value: &Bound<'py, PyAny>) -> PyResult<Boun
 }
 
 pub(crate) fn as_core_array<'py>(
-    py: Python<'py>,
     value: &Bound<'py, PyAny>,
 ) -> PyResult<zix_core::Array<DynStorage>> {
-    Ok(asarray(py, value)?.borrow().to_core_array())
+    Ok(asarray(value)?.borrow().to_core_array())
 }
 #[cfg(test)]
 mod tests {
@@ -126,8 +126,8 @@ mod tests {
     use super::asarray;
 
     /// Call `asarray` and read back the data as an ndarray.
-    fn collect<T: Dtyped>(py: Python<'_>, val: &Bound<'_, PyAny>) -> ArrayD<T> {
-        asarray(py, val)
+    fn collect<T: Dtyped>(val: &Bound<'_, PyAny>) -> ArrayD<T> {
+        asarray(val)
             .unwrap()
             .borrow()
             .arr
@@ -142,7 +142,7 @@ mod tests {
     fn test_python_int() {
         Python::attach(|py| {
             let val = 42i64.into_pyobject(py).unwrap();
-            let data = collect::<i64>(py, val.as_any());
+            let data = collect::<i64>(val.as_any());
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), 42);
         });
@@ -152,7 +152,7 @@ mod tests {
     fn test_python_float() {
         Python::attach(|py| {
             let val = 2.5f64.into_pyobject(py).unwrap();
-            let data = collect::<f64>(py, val.as_any());
+            let data = collect::<f64>(val.as_any());
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), 2.5);
         });
@@ -162,7 +162,7 @@ mod tests {
     fn test_python_bool() {
         Python::attach(|py| {
             let val = true.into_pyobject(py).unwrap();
-            let data = collect::<bool>(py, val.as_any());
+            let data = collect::<bool>(val.as_any());
             assert_eq!(data.ndim(), 0);
             assert!(*data.first().unwrap());
         });
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn test_0d_i8() {
         Python::attach(|py| {
-            let data = collect::<i8>(py, &np0(py, -5i8));
+            let data = collect::<i8>(&np0(py, -5i8));
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), -5i8);
         });
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn test_0d_i32() {
         Python::attach(|py| {
-            let data = collect::<i32>(py, &np0(py, -7i32));
+            let data = collect::<i32>(&np0(py, -7i32));
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), -7i32);
         });
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn test_0d_u8() {
         Python::attach(|py| {
-            let data = collect::<u8>(py, &np0(py, 255u8));
+            let data = collect::<u8>(&np0(py, 255u8));
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), 255u8);
         });
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn test_0d_f32() {
         Python::attach(|py| {
-            let data = collect::<f32>(py, &np0(py, 1.5f32));
+            let data = collect::<f32>(&np0(py, 1.5f32));
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), 1.5f32);
         });
@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn test_0d_f64() {
         Python::attach(|py| {
-            let data = collect::<f64>(py, &np0(py, -3.14f64));
+            let data = collect::<f64>(&np0(py, -3.14f64));
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), -3.14f64);
         });
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn test_0d_bool() {
         Python::attach(|py| {
-            let data = collect::<bool>(py, &np0(py, false));
+            let data = collect::<bool>(&np0(py, false));
             assert_eq!(data.ndim(), 0);
             assert!(!*data.first().unwrap());
         });
@@ -243,7 +243,7 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            let data = collect::<Complex<f32>>(py, &val);
+            let data = collect::<Complex<f32>>(&val);
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), Complex::new(1.0f32, -2.0f32));
         });
@@ -255,7 +255,7 @@ mod tests {
             let val = py
                 .eval(cr#"__import__('numpy').array(complex(3, 4))"#, None, None)
                 .unwrap();
-            let data = collect::<Complex<f64>>(py, &val);
+            let data = collect::<Complex<f64>>(&val);
             assert_eq!(data.ndim(), 0);
             assert_eq!(*data.first().unwrap(), Complex::new(3.0f64, 4.0f64));
         });
@@ -274,7 +274,7 @@ mod tests {
     fn test_1d_f32() {
         Python::attach(|py| {
             let orig = array![1.0f32, 2.0, 3.0, 4.0].into_dyn();
-            let data = collect::<f32>(py, &npd(py, orig.clone()));
+            let data = collect::<f32>(&npd(py, orig.clone()));
             assert_eq!(data, orig);
         });
     }
@@ -283,7 +283,7 @@ mod tests {
     fn test_1d_i64() {
         Python::attach(|py| {
             let orig = array![10i64, 20, 30].into_dyn();
-            let data = collect::<i64>(py, &npd(py, orig.clone()));
+            let data = collect::<i64>(&npd(py, orig.clone()));
             assert_eq!(data, orig);
         });
     }
@@ -292,7 +292,7 @@ mod tests {
     fn test_2d_f64() {
         Python::attach(|py| {
             let orig = array![[1.0f64, 2.0], [3.0, 4.0], [5.0, 6.0]].into_dyn();
-            let data = collect::<f64>(py, &npd(py, orig.clone()));
+            let data = collect::<f64>(&npd(py, orig.clone()));
             assert_eq!(data, orig);
         });
     }
@@ -302,7 +302,7 @@ mod tests {
         Python::attach(|py| {
             let orig: ArrayD<u8> =
                 ArrayD::from_shape_vec(IxDyn(&[3, 4]), (0u8..12).collect()).unwrap();
-            let data = collect::<u8>(py, &npd(py, orig.clone()));
+            let data = collect::<u8>(&npd(py, orig.clone()));
             assert_eq!(data, orig);
         });
     }
@@ -312,7 +312,7 @@ mod tests {
         Python::attach(|py| {
             let orig: ArrayD<i32> =
                 ArrayD::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
-            let data = collect::<i32>(py, &npd(py, orig.clone()));
+            let data = collect::<i32>(&npd(py, orig.clone()));
             assert_eq!(data, orig);
         });
     }
@@ -323,7 +323,7 @@ mod tests {
             let orig: ArrayD<f32> =
                 ArrayD::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).map(|x| x as f32).collect())
                     .unwrap();
-            let arr = asarray(py, &npd(py, orig)).unwrap();
+            let arr = asarray(&npd(py, orig)).unwrap();
             assert_eq!(arr.borrow().arr.shape(), &[2u64, 3, 4]);
         });
     }
@@ -334,9 +334,9 @@ mod tests {
     fn test_passthrough() {
         Python::attach(|py| {
             let orig = array![1.0f32, 2.0].into_dyn();
-            let arr1 = asarray(py, &npd(py, orig)).unwrap();
+            let arr1 = asarray(&npd(py, orig)).unwrap();
             let ptr1 = arr1.as_ptr();
-            let arr2 = asarray(py, arr1.as_any()).unwrap();
+            let arr2 = asarray(arr1.as_any()).unwrap();
             assert_eq!(arr2.as_ptr(), ptr1);
         });
     }
@@ -349,7 +349,7 @@ mod tests {
             let val = py
                 .eval(cr#"__import__('numpy').array([1, 2, 3])[::-1]"#, None, None)
                 .unwrap();
-            assert!(asarray(py, &val)
+            assert!(asarray(&val)
                 .unwrap_err()
                 .is_instance_of::<pyo3::exceptions::PyOverflowError>(py));
         });
