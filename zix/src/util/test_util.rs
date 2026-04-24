@@ -22,7 +22,7 @@ pub(crate) fn arr_params(block_shape: &[usize]) -> ArrayParams {
 /// Used by codec filter roundtrip tests that receive values from proptest strategies.
 pub(crate) fn gen_data_bytes_from_slice<T: Dtyped>(items: &[T]) -> AlignedBytes {
     let bytes = unsafe { crate::util::cast_slice::<T, u8>(items) };
-    AlignedBytes::from_slice(T::DTYPE.alignment() as usize, bytes)
+    AlignedBytes::from_slice(T::DTYPE.alignment().as_usize(), bytes)
 }
 
 // ---------------------------------------------------------------------------

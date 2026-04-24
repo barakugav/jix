@@ -117,7 +117,7 @@ impl FilterImpl for BitShuffleFilter {
         let n_full = (n / 8) * 8;
         let full_bytes = n_full * typesize;
 
-        let mut tmp = tmp_buffers.get(full_bytes, 16);
+        let mut tmp = tmp_buffers.get(full_bytes, 16.try_into().unwrap());
         let tmp = tmp.as_mut_slice();
 
         // Pass 1: byte shuffle, `(N, B) → (B, N)`. After this, `dst` holds per
@@ -160,7 +160,7 @@ impl FilterImpl for BitShuffleFilter {
         let n_full = (n / 8) * 8;
         let full_bytes = n_full * typesize;
 
-        let mut tmp = tmp_buffers.get(full_bytes, 16);
+        let mut tmp = tmp_buffers.get(full_bytes, 16.try_into().unwrap());
         let tmp = tmp.as_mut_slice();
 
         // Pass 1: invert encode pass 3. `(B, 8, G) → (8, B, G)`. Length-`G`

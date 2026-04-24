@@ -110,7 +110,7 @@ where
             (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
 
         let in_place = src_itemsize == dst_itemsize
-            && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment() as usize);
+            && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment().as_usize());
         let mut tmp_buf;
         let (read_buf, dst) = if in_place {
             let ptr = buf.as_mut_ptr();

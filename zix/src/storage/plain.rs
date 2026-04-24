@@ -91,7 +91,7 @@ impl<S> Plain<S> {
         );
         let strides: DimArray<_> = strides.try_into().unwrap();
 
-        let alignment = dtype.alignment() as usize;
+        let alignment = dtype.alignment().as_usize();
         ensure!(
             data as usize % alignment == 0 && strides.iter().all(|&s| s % alignment == 0),
             InvalidArgument,

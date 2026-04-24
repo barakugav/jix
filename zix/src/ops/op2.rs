@@ -146,9 +146,9 @@ where
         );
 
         let a_in_place = src_a_itemsize == dst_itemsize
-            && (buf.as_ptr() as usize).is_multiple_of(a_dtype.alignment() as usize);
+            && (buf.as_ptr() as usize).is_multiple_of(a_dtype.alignment().as_usize());
         let b_in_place = src_b_itemsize == dst_itemsize
-            && (buf.as_ptr() as usize).is_multiple_of(b_dtype.alignment() as usize);
+            && (buf.as_ptr() as usize).is_multiple_of(b_dtype.alignment().as_usize());
         let mut a_tmp_buf;
         let mut b_tmp_buf;
         let (a_buf, b_buf, dst) = if a_in_place {

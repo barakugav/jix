@@ -75,7 +75,7 @@ pub(crate) fn dtype_to_numpy<'py>(
     let shape = PyTuple::new(py, shape).unwrap();
     let numpy_dtype = PyArrayDescr::new(py, (numpy_dtype, shape))?;
 
-    let dtype_layout = (itemsize as usize, dtype.alignment() as usize);
+    let dtype_layout = (itemsize as usize, dtype.alignment().as_usize());
     let numpy_layout = (numpy_dtype.itemsize(), numpy_dtype.alignment());
     if dtype_layout != numpy_layout {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -176,7 +176,7 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: Bound<PyArrayDescr>) -> PyResult<Zix
     };
 
     assert_eq!(dtype.itemsize() as usize, numpy_dtype.itemsize());
-    assert_eq!(dtype.alignment() as usize, numpy_dtype.alignment());
+    assert_eq!(dtype.alignment().as_usize(), numpy_dtype.alignment());
     assert_eq!(
         dtype.is_aligned() && dtype.fields().is_some(),
         numpy_dtype.is_aligned_struct()
@@ -381,7 +381,7 @@ mod tests {
             let dtype = dtype_from_numpy(np_dtype).unwrap();
 
             assert!(!dtype.is_aligned());
-            assert_eq!(dtype.alignment(), 1);
+            assert_eq!(dtype.alignment().as_usize(), 1);
             assert_eq!(dtype.itemsize(), 7);
             let fields = dtype.fields().unwrap();
             assert_eq!(fields.len(), 3);
@@ -420,7 +420,7 @@ mod tests {
             let dtype = dtype_from_numpy(np).unwrap();
 
             assert!(dtype.is_aligned());
-            assert_eq!(dtype.alignment(), 4);
+            assert_eq!(dtype.alignment().as_usize(), 4);
             assert_eq!(dtype.itemsize(), 8);
             let fields = dtype.fields().unwrap();
             assert_eq!(fields.len(), 2);
@@ -454,7 +454,7 @@ mod tests {
             let dtype = dtype_from_numpy(np).unwrap();
 
             assert!(dtype.is_aligned());
-            assert_eq!(dtype.alignment(), 8);
+            assert_eq!(dtype.alignment().as_usize(), 8);
             // u8@0, pad1, i16@2, pad4, f64@8 → itemsize=16
             assert_eq!(dtype.itemsize(), 16);
             let fields = dtype.fields().unwrap();
@@ -640,7 +640,7 @@ mod tests {
                     ZixDtype::of_scalar(DtypeScalarKind::U32),
                 ),
             ];
-            let dtype = ZixDtype::new_struct(fields, &[], 7, 1).unwrap();
+            let dtype = ZixDtype::new_struct(fields, &[], 7, 1.try_into().unwrap()).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 7);
             assert_eq!(np.alignment(), 1);
@@ -676,7 +676,7 @@ mod tests {
                     ZixDtype::of_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = ZixDtype::new_struct(fields, &[], 8, 4).unwrap();
+            let dtype = ZixDtype::new_struct(fields, &[], 8, 4.try_into().unwrap()).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 8);
             assert_eq!(np.alignment(), 4);
@@ -705,7 +705,7 @@ mod tests {
                     ZixDtype::of_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = ZixDtype::new_struct(fields, &[3], 24, 4).unwrap();
+            let dtype = ZixDtype::new_struct(fields, &[3], 24, 4.try_into().unwrap()).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 24);
             assert_eq!(np.shape(), vec![3]);
@@ -772,7 +772,7 @@ mod tests {
                     ZixDtype::of_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = ZixDtype::new_struct(fields, &[], 7, 1).unwrap();
+            let dtype = ZixDtype::new_struct(fields, &[], 7, 1.try_into().unwrap()).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }
@@ -792,7 +792,7 @@ mod tests {
                     ZixDtype::of_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = ZixDtype::new_struct(fields, &[], 8, 4).unwrap();
+            let dtype = ZixDtype::new_struct(fields, &[], 8, 4.try_into().unwrap()).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }
@@ -817,7 +817,7 @@ mod tests {
                     ZixDtype::of_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = ZixDtype::new_struct(fields, &[4], 48, 4).unwrap();
+            let dtype = ZixDtype::new_struct(fields, &[4], 48, 4.try_into().unwrap()).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }
@@ -837,7 +837,7 @@ mod tests {
                     ZixDtype::of_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let inner = ZixDtype::new_struct(inner_fields, &[], 8, 4).unwrap();
+            let inner = ZixDtype::new_struct(inner_fields, &[], 8, 4.try_into().unwrap()).unwrap();
             let outer_fields = vec![
                 ("pos".to_string(), 0u16, inner),
                 (
@@ -846,7 +846,7 @@ mod tests {
                     ZixDtype::of_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = ZixDtype::new_struct(outer_fields, &[], 12, 4).unwrap();
+            let dtype = ZixDtype::new_struct(outer_fields, &[], 12, 4.try_into().unwrap()).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }

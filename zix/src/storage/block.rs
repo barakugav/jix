@@ -459,7 +459,7 @@ mod tests {
     {
         let mut context = ReadContext::new(&DecoderParams::default()).unwrap();
         let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
-        let mut buf = AlignedBytes::with_capacity(T::DTYPE.alignment() as usize, block_bytes);
+        let mut buf = AlignedBytes::with_capacity(T::DTYPE.alignment().as_usize(), block_bytes);
         unsafe { buf.set_len(block_bytes) };
         storage
             .read_block(idx as u64, &mut buf, &mut context)

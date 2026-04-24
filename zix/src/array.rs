@@ -204,7 +204,7 @@ impl ArrayBuilder {
         let mut builder =
             BlockTableBuilder::new(self.dtype.clone(), block_size as BlockSize, encoder)?;
         let mut tmp_block_data = AlignedBytes::with_capacity(
-            self.dtype.alignment() as usize,
+            self.dtype.alignment().as_usize(),
             block_capacity_bytes as usize,
         );
         while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
@@ -340,7 +340,7 @@ impl<'a, S: ArrayStorage> ArrayData<'a, S> {
         let ndim = self.ndim();
         let dtype = self.dtype().clone();
         let itemsize = dtype.itemsize() as usize;
-        let mut tmp_block_data = AlignedBytes::new(dtype.alignment() as usize);
+        let mut tmp_block_data = AlignedBytes::new(dtype.alignment().as_usize());
         let builder = ArrayBuilder::new(self.shape(), dtype, params)?;
         builder.build(
             |builder, block_idx, block_inner_offset, block_size, output_block| {

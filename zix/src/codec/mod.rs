@@ -50,7 +50,7 @@ pub(crate) enum Compressor {
 }
 impl Encoder {
     pub(crate) fn new(params: &EncoderParams, dtype: Dtype) -> Result<Self> {
-        let tmp_buf1 = AlignedBytes::new(dtype.alignment() as usize);
+        let tmp_buf1 = AlignedBytes::new(dtype.alignment().as_usize());
         let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {
             dtype,
@@ -254,7 +254,7 @@ impl TmpBufferPool {
         let pool = unsafe { &mut *pool };
         let tmp_buf = pool
             .pop()
-            .unwrap_or_else(|| AlignedBytes::with_capacity(pool_align as usize, size));
+            .unwrap_or_else(|| AlignedBytes::with_capacity(pool_align.as_usize(), size));
         let mut buf = TmpBuf {
             buf: tmp_buf,
             buffers: self,
@@ -265,14 +265,14 @@ impl TmpBufferPool {
 
     fn return_buf(&self, mut buf: AlignedBytes) {
         buf.clear();
-        let (pool, _) = self.get_pool(buf.alignment() as Alignment);
+        let (pool, _) = self.get_pool(buf.alignment().try_into().unwrap());
         let pool = unsafe { &mut *pool };
         pool.push(buf);
     }
 
     fn get_pool(&self, alignment: Alignment) -> (*mut Vec<AlignedBytes>, Alignment) {
-        match alignment {
-            1 | 2 | 4 | 8 | 16 => (self.align16.get(), 16),
+        match alignment.as_usize() {
+            1 | 2 | 4 | 8 | 16 => (self.align16.get(), 16.try_into().unwrap()),
             _ => {
                 let align_other = unsafe { &mut *self.align_other.get() };
                 debug_assert!(align_other

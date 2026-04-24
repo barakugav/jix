@@ -140,7 +140,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                         offset
                     };
 
-                    const #var_field_end_offset: #zix_crate::dtype::Itemsize = #var_field_offset + size_of::<#field_types>()  as #zix_crate::dtype::Itemsize;
+                    const #var_field_end_offset: #zix_crate::dtype::Itemsize = #var_field_offset + size_of::<#field_types>() as #zix_crate::dtype::Itemsize;
                 )*
 
                 const FIELDS: &'static [(std::borrow::Cow<'static, str>, #zix_crate::dtype::Itemsize, #zix_crate::dtype::Dtype)] = &[
@@ -161,7 +161,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 
                     total_size = ceil_to_multiple(total_size, alignment as #zix_crate::dtype::Itemsize);
                 }
-                let alignment = alignment as #zix_crate::dtype::Alignment;
+                let alignment = #zix_crate::dtype::Alignment::new(alignment as usize).unwrap();
 
                 let dtype = unsafe { #zix_crate::dtype::Dtype::new_struct_borrowed_unchecked(
                     FIELDS,
@@ -171,7 +171,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                 ) };
 
                 assert!(dtype.itemsize() as usize == size_of::<Self>());
-                assert!(dtype.alignment() as usize == align_of::<Self>());
+                assert!(dtype.alignment().as_usize() == align_of::<Self>());
                 dtype
             }
         }

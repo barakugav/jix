@@ -7,13 +7,10 @@ use crate::util::{DimArray, IxIterExt};
 
 impl crate::dtype::Dtype {
     pub(crate) fn from_proto(dtype: &schema::Dtype) -> Result<Self> {
-        let alignment: Alignment = dtype.alignment.try_into().map_err(|_| {
+        let alignment = Alignment::new(dtype.alignment as usize).ok_or_else(|| {
             Error::new(
                 ErrorKind::InvalidArchive,
-                format!(
-                    "dtype alignment exceeds maximum supported alignment: {}",
-                    dtype.alignment
-                ),
+                format!("invalid dtype alignment: {}", dtype.alignment),
             )
         })?;
         let itemsize: Itemsize = dtype.itemsize.try_into().map_err(|_| {
@@ -187,7 +184,7 @@ impl crate::dtype::Dtype {
         schema::Dtype {
             shape: self.shape().iter().map(|&d| d as u64).collect(),
             itemsize: self.itemsize() as u32,
-            alignment: self.alignment() as u32,
+            alignment: self.alignment().as_usize() as u32,
             kind: Some(kind),
         }
     }

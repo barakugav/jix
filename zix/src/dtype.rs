@@ -1,13 +1,61 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::hint::assert_unchecked;
 use std::mem::MaybeUninit;
+use std::num::NonZero;
 use std::ops::Deref;
 
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::util::{Idx, IxIterExt};
 
 /// The type used to represent dtype alignment in bytes.
-pub type Alignment = u8;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Alignment(NonZero<u8>);
+
+impl Alignment {
+    /// Creates a new `Alignment` from an integer value in bytes.
+    ///
+    /// The value must be a non zero, power of two, and less than the supported maximum
+    /// alignment (currently 128 bytes, may change in the future).
+    pub const fn new(value: usize) -> Option<Self> {
+        if 1 <= value && value <= 128 && value.is_power_of_two() {
+            Some(Self(NonZero::new(value as u8).unwrap()))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the underlying value of the alignment in bytes.
+    pub const fn as_usize(self) -> usize {
+        let align = self.0.get() as usize;
+        unsafe { assert_unchecked(align != 0 && align.is_power_of_two()) };
+        align
+    }
+}
+impl std::fmt::Debug for Alignment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl std::fmt::Display for Alignment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl TryFrom<usize> for Alignment {
+    type Error = Error;
+
+    fn try_from(value: usize) -> Result<Self> {
+        Self::new(value).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "invalid alignment {value}: must be a non-zero power of two, and less than or equal to 128"
+                ),
+            )
+        })
+    }
+}
 
 /// The type used to represent dtype itemsize in bytes.
 ///
@@ -140,7 +188,7 @@ impl Dtype {
             let is_aligned = fields.iter().all({
                 |(_f_name, offset, dtype)| {
                     expected_offset =
-                        expected_offset.ceil_to_multiple(dtype.alignment() as Itemsize);
+                        expected_offset.ceil_to_multiple(dtype.alignment().as_usize() as Itemsize);
                     let aligned = *offset == expected_offset;
                     expected_offset += dtype.itemsize();
                     aligned
@@ -151,8 +199,9 @@ impl Dtype {
                     .iter()
                     .map(|(_name, _offset, dtype)| dtype.alignment())
                     .max()
-                    .unwrap_or(1);
-                let itemsize = expected_offset.ceil_to_multiple(max_alignment as Itemsize);
+                    .unwrap_or(Alignment(NonZero::new(1).unwrap()));
+                let itemsize =
+                    expected_offset.ceil_to_multiple(max_alignment.as_usize() as Itemsize);
                 return Ok((itemsize, (max_alignment, true)));
             }
 
@@ -166,7 +215,7 @@ impl Dtype {
             });
             if is_packed {
                 let itemsize = expected_offset;
-                return Ok((itemsize, (1, false)));
+                return Ok((itemsize, (Alignment(NonZero::new(1).unwrap()), false)));
             }
 
             bail!(
@@ -266,7 +315,7 @@ impl Dtype {
             .iter()
             .map(|(_name, _offset, dtype)| dtype.alignment())
             .max()
-            .unwrap_or(1);
+            .unwrap_or(Alignment(NonZero::new(1).unwrap()));
         if alignment != max_alignment {
             return false;
         }
@@ -274,7 +323,8 @@ impl Dtype {
         let mut expected_offset = 0;
         let is_aligned = fields.iter().all({
             |(_name, offset, dtype)| {
-                expected_offset = expected_offset.ceil_to_multiple(dtype.alignment() as Itemsize);
+                expected_offset =
+                    expected_offset.ceil_to_multiple(dtype.alignment().as_usize() as Itemsize);
                 let aligned = *offset == expected_offset;
                 expected_offset += dtype.itemsize();
                 aligned
@@ -284,7 +334,8 @@ impl Dtype {
             return false;
         }
 
-        let expected_itemsize = expected_offset.ceil_to_multiple(max_alignment as Itemsize);
+        let expected_itemsize =
+            expected_offset.ceil_to_multiple(max_alignment.as_usize() as Itemsize);
         if expected_itemsize != itemsize {
             return false;
         }
@@ -297,7 +348,7 @@ impl Dtype {
         itemsize: Itemsize,
         alignment: Alignment,
     ) -> bool {
-        if alignment != 1 {
+        if alignment.as_usize() != 1 {
             return false;
         }
 
@@ -490,7 +541,7 @@ impl DtypeScalarKind {
     }
     /// Get the alignment of the scalar in bytes.
     pub const fn alignment(&self) -> Alignment {
-        match self {
+        let align = match self {
             Self::I8 => 1,
             Self::I16 => 2,
             Self::I32 => 4,
@@ -505,7 +556,8 @@ impl DtypeScalarKind {
             Self::ComplexF32 => 4,
             Self::ComplexF64 => 8,
             Self::Bool => 1,
-        }
+        };
+        Alignment::new(align).unwrap()
     }
 }
 #[allow(unused)]
@@ -724,7 +776,7 @@ mod tests {
 
     #[test]
     fn scalar_itemsize_and_alignment() {
-        let cases: &[(DtypeScalarKind, Itemsize, Alignment)] = &[
+        let cases: &[(DtypeScalarKind, Itemsize, /* alignment */ usize)] = &[
             (DtypeScalarKind::I8, 1, 1),
             (DtypeScalarKind::I16, 2, 2),
             (DtypeScalarKind::I32, 4, 4),
@@ -741,6 +793,7 @@ mod tests {
             (DtypeScalarKind::Bool, 1, 1),
         ];
         for &(kind, expected_size, expected_align) in cases {
+            let expected_align = Alignment::new(expected_align).unwrap();
             let d = Dtype::of_scalar(kind);
             assert_eq!(d.itemsize(), expected_size, "{kind:?} itemsize");
             assert_eq!(d.alignment(), expected_align, "{kind:?} alignment");
@@ -765,7 +818,7 @@ mod tests {
         let d = <[f64; 77] as Dtyped>::DTYPE;
         assert_eq!(d.shape(), &[77]);
         assert_eq!(d.itemsize(), 77 * 8);
-        assert_eq!(d.alignment(), 8);
+        assert_eq!(d.alignment().as_usize(), 8);
         assert_eq!(d.scalar_kind(), Some(DtypeScalarKind::F64));
     }
 
@@ -775,7 +828,7 @@ mod tests {
         let d = <[[i32; 3]; 2] as Dtyped>::DTYPE;
         assert_eq!(d.shape(), &[2, 3]);
         assert_eq!(d.itemsize(), 2 * 3 * 4);
-        assert_eq!(d.alignment(), 4);
+        assert_eq!(d.alignment().as_usize(), 4);
     }
 
     #[test]
@@ -796,7 +849,7 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(dtype.itemsize(), 9);
-        assert_eq!(dtype.alignment(), 1);
+        assert_eq!(dtype.alignment().as_usize(), 1);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields[0], ("a".into(), 0, u8::DTYPE));
         assert_eq!(fields[1], ("b".into(), 1, f64::DTYPE));
@@ -811,7 +864,7 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(dtype.itemsize(), 16); // total padded to alignment 8
-        assert_eq!(dtype.alignment(), 8);
+        assert_eq!(dtype.alignment().as_usize(), 8);
     }
 
     #[test]
@@ -820,7 +873,7 @@ mod tests {
         // from_fields tries aligned first, so it always returns the aligned layout.
         let dtype = Dtype::from_fields(vec![("x".to_string(), 0, f64::DTYPE)]).unwrap();
         assert_eq!(dtype.itemsize(), 8);
-        assert_eq!(dtype.alignment(), 8);
+        assert_eq!(dtype.alignment().as_usize(), 8);
     }
 
     #[test]
@@ -833,7 +886,7 @@ mod tests {
             ("b".to_string(), 4, u8::DTYPE),
         ])
         .unwrap();
-        assert_eq!(dtype.alignment(), 4);
+        assert_eq!(dtype.alignment().as_usize(), 4);
         assert_eq!(dtype.itemsize(), 8);
     }
 
@@ -883,11 +936,11 @@ mod tests {
             ],
             &[],
             5,
-            1,
+            1.try_into().unwrap(),
         )
         .unwrap();
         assert_eq!(dtype.itemsize(), 5);
-        assert_eq!(dtype.alignment(), 1);
+        assert_eq!(dtype.alignment().as_usize(), 1);
     }
 
     #[test]
@@ -900,11 +953,11 @@ mod tests {
             ],
             &[],
             8,
-            4,
+            4.try_into().unwrap(),
         )
         .unwrap();
         assert_eq!(dtype.itemsize(), 8);
-        assert_eq!(dtype.alignment(), 4);
+        assert_eq!(dtype.alignment().as_usize(), 4);
     }
 
     #[test]
@@ -913,7 +966,7 @@ mod tests {
             vec![("a".to_string(), 0, u8::DTYPE)],
             &[2, 3],
             6, // 2*3*1
-            1,
+            1.try_into().unwrap(),
         )
         .unwrap();
         assert_eq!(dtype.shape(), &[2, 3]);
@@ -922,7 +975,13 @@ mod tests {
 
     #[test]
     fn new_struct_shape_zero_errors() {
-        assert!(Dtype::new_struct(vec![("a".to_string(), 0, u8::DTYPE)], &[0], 0, 1).is_err());
+        assert!(Dtype::new_struct(
+            vec![("a".to_string(), 0, u8::DTYPE)],
+            &[0],
+            0,
+            1.try_into().unwrap()
+        )
+        .is_err());
     }
 
     #[test]
@@ -932,7 +991,7 @@ mod tests {
             vec![("a".to_string(), 0, u8::DTYPE)],
             &[1, 1, 1, 1, 1],
             1,
-            1,
+            1.try_into().unwrap(),
         )
         .is_err());
     }
@@ -944,7 +1003,7 @@ mod tests {
             vec![("a".to_string(), 0, u8::DTYPE)],
             &[1, 2, 3, 4],
             24, // 1*2*3*4
-            1,
+            1.try_into().unwrap(),
         )
         .unwrap();
         assert_eq!(dtype.shape(), &[1, 2, 3, 4]);
@@ -954,14 +1013,26 @@ mod tests {
     #[test]
     fn new_struct_itemsize_not_multiple_of_shape_errors() {
         // shape=[3], element must be 4 bytes (i32), total must be 12; 10 is not valid.
-        assert!(Dtype::new_struct(vec![("a".to_string(), 0, i32::DTYPE)], &[3], 10, 4).is_err());
+        assert!(Dtype::new_struct(
+            vec![("a".to_string(), 0, i32::DTYPE)],
+            &[3],
+            10,
+            4.try_into().unwrap()
+        )
+        .is_err());
     }
 
     #[test]
     fn new_struct_wrong_alignment_errors() {
         // f64 field requires alignment 8; declaring alignment 4 is rejected as invalid offsets
         // (alignment 4 matches neither packed=1 nor aligned=8 layout).
-        assert!(Dtype::new_struct(vec![("a".to_string(), 0, f64::DTYPE)], &[], 8, 4).is_err());
+        assert!(Dtype::new_struct(
+            vec![("a".to_string(), 0, f64::DTYPE)],
+            &[],
+            8,
+            4.try_into().unwrap()
+        )
+        .is_err());
     }
 
     #[test]
@@ -974,7 +1045,7 @@ mod tests {
             ],
             &[],
             6,
-            1,
+            1.try_into().unwrap(),
         )
         .is_err());
     }
@@ -990,7 +1061,7 @@ mod tests {
             ],
             &[],
             4,
-            1,
+            1.try_into().unwrap(),
         )
         .is_err());
     }
@@ -1013,11 +1084,11 @@ mod tests {
             std::mem::size_of::<SimpleStruct>()
         );
         assert_eq!(
-            dtype.alignment() as usize,
+            dtype.alignment().as_usize(),
             std::mem::align_of::<SimpleStruct>()
         );
         assert_eq!(dtype.itemsize(), 12);
-        assert_eq!(dtype.alignment(), 4);
+        assert_eq!(dtype.alignment().as_usize(), 4);
         assert_eq!(dtype.shape(), &[]);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields.len(), 3);
@@ -1042,11 +1113,11 @@ mod tests {
             std::mem::size_of::<PackedStruct>()
         );
         assert_eq!(
-            dtype.alignment() as usize,
+            dtype.alignment().as_usize(),
             std::mem::align_of::<PackedStruct>()
         );
         assert_eq!(dtype.itemsize(), 7);
-        assert_eq!(dtype.alignment(), 1);
+        assert_eq!(dtype.alignment().as_usize(), 1);
         assert_eq!(dtype.shape(), &[]);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields.len(), 3);
@@ -1083,13 +1154,13 @@ mod tests {
             std::mem::size_of::<NestedStruct>()
         );
         assert_eq!(
-            dtype.alignment() as usize,
+            dtype.alignment().as_usize(),
             std::mem::align_of::<NestedStruct>()
         );
         // SimpleStruct: 12 bytes, align 4. f64: 8 bytes, align 8.
         // a at 0, b at ceil(12, 8)=16, total ceil(24, 8)=24
         assert_eq!(dtype.itemsize(), 24);
-        assert_eq!(dtype.alignment(), 8);
+        assert_eq!(dtype.alignment().as_usize(), 8);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields[0], ("a".into(), 0, SimpleStruct::DTYPE));
         assert_eq!(fields[1], ("b".into(), 16, f64::DTYPE));
@@ -1109,11 +1180,11 @@ mod tests {
             std::mem::size_of::<ArrayFieldStruct>()
         );
         assert_eq!(
-            dtype.alignment() as usize,
+            dtype.alignment().as_usize(),
             std::mem::align_of::<ArrayFieldStruct>()
         );
         assert_eq!(dtype.itemsize(), 12);
-        assert_eq!(dtype.alignment(), 4);
+        assert_eq!(dtype.alignment().as_usize(), 4);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].0, "a");
@@ -1136,13 +1207,13 @@ mod tests {
         let dtype = DeepNested::DTYPE;
         assert_eq!(dtype.itemsize() as usize, std::mem::size_of::<DeepNested>());
         assert_eq!(
-            dtype.alignment() as usize,
+            dtype.alignment().as_usize(),
             std::mem::align_of::<DeepNested>()
         );
         // NestedStruct: 24 bytes, align 8. u32: 4 bytes, align 4.
         // inner at 0, x at ceil(24,4)=24, total ceil(28,8)=32
         assert_eq!(dtype.itemsize(), 32);
-        assert_eq!(dtype.alignment(), 8);
+        assert_eq!(dtype.alignment().as_usize(), 8);
         let fields = dtype.fields().unwrap();
         assert_eq!(fields[0], ("inner".into(), 0, NestedStruct::DTYPE));
         assert_eq!(fields[1], ("x".into(), 24, u32::DTYPE));
@@ -1158,7 +1229,7 @@ mod tests {
         d.set_shape(&[3, 2]).unwrap();
         assert_eq!(d.shape(), &[3, 2]);
         assert_eq!(d.itemsize(), 4 * 3 * 2);
-        assert_eq!(d.alignment(), 4);
+        assert_eq!(d.alignment().as_usize(), 4);
         assert_eq!(d.scalar_kind(), Some(DtypeScalarKind::I32));
     }
 
