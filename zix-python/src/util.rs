@@ -1,6 +1,7 @@
 use numpy::npyffi::npy_intp;
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray};
 use pyo3::prelude::*;
+use pyo3_stub_gen::impl_stub_type;
 use zix_core::NDIM_MAX;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
@@ -46,6 +47,41 @@ pub(crate) fn numpy_empty<'py>(
     };
     Ok(unsafe { Bound::from_owned_ptr(py, np_arr).cast_into_unchecked() })
 }
+
+pub(crate) fn normalize_axis(axis: i32, ndim: usize) -> pyo3::PyResult<usize> {
+    let ndim = ndim as i32;
+    if axis < -ndim || axis >= ndim {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "axis {axis} is out of bounds for array of dimension {ndim}"
+        )));
+    }
+    Ok(if axis < 0 {
+        (ndim + axis) as usize
+    } else {
+        axis as usize
+    })
+}
+
+pub(crate) fn normalize_axes(axes: Vec<i32>, ndim: usize) -> pyo3::PyResult<Vec<usize>> {
+    axes.into_iter().map(|a| normalize_axis(a, ndim)).collect()
+}
+
+#[derive(FromPyObject)]
+pub enum ItemOrSequence<T> {
+    Item(T),
+    Sequence(Vec<T>),
+}
+impl<T> ItemOrSequence<T> {
+    pub fn into_vec(self) -> Vec<T> {
+        match self {
+            ItemOrSequence::Item(item) => vec![item],
+            ItemOrSequence::Sequence(seq) => seq,
+        }
+    }
+}
+impl_stub_type!(ItemOrSequence<i32> = i32 | Vec<i32>);
+impl_stub_type!(ItemOrSequence<i64> = i64 | Vec<i64>);
+impl_stub_type!(ItemOrSequence<u64> = u64 | Vec<u64>);
 
 #[cfg(test)]
 mod tests {

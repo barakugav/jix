@@ -65,12 +65,15 @@ macro_rules! define_reduction_op {
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            axes: Option<Vec<usize>>,
+            axes: Option<Vec<i32>>,
             keepdims: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
             let array = crate::ops::as_array::as_core_array(array)?;
-            let axes = axes.unwrap_or_else(|| (0..array.ndim()).collect());
+            let axes = match axes {
+                Some(axes) => crate::util::normalize_axes(axes, array.ndim())?,
+                None => (0..array.ndim()).collect(),
+            };
             let res = zix_core::ops::$core_op::new(array, &axes, keepdims $($(, $extra_arg)+)?);
             let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
             Ok(crate::Array::from_core_storage(ret))
@@ -87,12 +90,12 @@ macro_rules! define_reduction_op {
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            axis: Option<usize>,
+            axis: Option<i32>,
             keepdims: bool,
         ) -> pyo3::PyResult<crate::Array> {
             let array = crate::ops::as_array::as_core_array(array)?;
             let axis = match axis {
-                Some(axis) => axis,
+                Some(axis) => crate::util::normalize_axis(axis, array.ndim())?,
                 None => {
                     if array.ndim() != 1 {
                         return Err(pyo3::exceptions::PyValueError::new_err(
