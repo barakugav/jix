@@ -46,7 +46,6 @@ use crate::Array;
 /// explicitly and call `copy_with` instead of `copy` after shape-changing ops.
 ///
 /// ```
-/// # fn main() -> zix::error::Result<()> {
 /// use zix::{Array, ArrayParams};
 ///
 /// // Construct an array with a specific block shape.
@@ -58,9 +57,9 @@ use crate::Array;
 /// // After a shape-changing op, pin the block shape explicitly.
 /// let mut out_params = ArrayParams::new();
 /// out_params.block_shape(&[128, 128]);
-/// let transposed = za.permute_axes(&[1, 0])?.copy_with(out_params, &za.read_ctx())?;
-/// # Ok(())
-/// # }
+/// let ctx = za.read_ctx();
+/// let transposed = za.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
+/// # Ok::<(), zix::error::Error>(())
 /// ```
 #[derive(Clone, Default, Debug)]
 pub struct ArrayParams {
@@ -237,7 +236,6 @@ impl ArrayParams {
     /// # Example
     ///
     /// ```
-    /// # fn main() -> zix::error::Result<()> {
     /// use zix::{Array, ArrayParams};
     ///
     /// let data = ndarray::array![1i32, 2, 3, 4, 5, 6, 7, 8];
@@ -249,8 +247,7 @@ impl ArrayParams {
     /// params.override_from_array(&source);
     ///
     /// let copy = source.copy_with(params, &source.read_ctx())?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), zix::error::Error>(())
     /// ```
     pub fn override_from_array<S>(&mut self, array: &Array<S>)
     where

@@ -1,3 +1,50 @@
+//! Encoder-decoder configuration and implementation for the block-compressed storage backends.
+//!
+//! Each block of array data is encoded through a two-stage pipeline before being stored:
+//!
+//! ```text
+//! raw block bytes
+//!     │
+//!     ▼
+//! [ Filter 0 ] → [ Filter 1 ] → …   (optional pre-compression transforms)
+//!     │
+//!     ▼
+//! [ Codec (e.g. Zstd) ]              (lossless compression)
+//!     │
+//!     ▼
+//! stored block bytes
+//! ```
+//!
+//! Decoding reverses the pipeline exactly: decompress first, then apply the filters in reverse
+//! order.
+//!
+//! # Configuration
+//!
+//! The pipeline is split across two separate configuration objects with different lifetimes:
+//!
+//! - **[`EncoderParams`]** — chosen by the user at write time. Selects the [`Codec`], compression
+//!   level, and [`Filter`] pipeline. Stored alongside the data so that the correct decoder can be
+//!   reconstructed later.
+//!
+//! - **[`DecoderParams`]** — chosen by the caller at read time. Currently carries no options, but
+//!   is the extension point for future read-time tunables (thread count, cache budget, etc.).
+//!
+//! The codec, filters, and dtype that were used during encoding are derived from the stored array
+//! metadata and passed to the internal decoder; users do not configure it directly.
+//!
+//! # Filters
+//!
+//! [`Filter`]s are byte-level transforms that rearrange element data into a layout that compresses
+//! more efficiently, then reverse the transform after decompression. For most numeric workloads
+//! [`Filter::ByteShuffle`] is the right default. [`Filter::BitShuffle`] can squeeze out more
+//! compression for low-entropy data at higher CPU cost.
+//!
+//! # Read context
+//!
+//! [`ReadContext`] holds a long-lived decompressor instance and reusable scratch buffers. Create
+//! one per thread and pass it to every read call to amortize initialization overhead across many
+//! block reads. The preferred way to obtain one is [`Array::read_ctx()`](crate::Array::read_ctx).
+
 mod filter;
 pub use filter::*;
 
@@ -8,11 +55,58 @@ use crate::dtype::{Alignment, Dtype};
 use crate::error::{ensure, Error, ErrorKind, Result};
 use crate::util::{AlignedBytes, AlternatingBuffers};
 
+/// The compression algorithm applied to each block.
 #[derive(Clone, Debug)]
 pub enum Codec {
+    /// [Zstandard](https://facebook.github.io/zstd/) — a fast general-purpose compressor.
+    /// Compression level is controlled by [`EncoderParams::level`].
     Zstd,
 }
 
+/// Compression configuration used when encoding array blocks.
+///
+/// Controls the codec, compression level, and the pre-compression filter pipeline. Filters
+/// are applied to the raw element bytes **before** compression and reversed in **after**
+/// decompression. For numeric data, filters significantly improve the compression ratio by
+/// rearranging bytes or bits into a more compressible layout.
+///
+/// # Defaults
+///
+/// [`EncoderParams::default()`] uses Zstd level 3 with [`Filter::ByteShuffle`], which is a
+/// good baseline for most numeric workloads: fast encoding, reasonable ratio, and effective
+/// at exploiting the byte-level regularity of uniform-dtype arrays.
+///
+/// # Examples
+///
+/// Use the defaults (most common case):
+///
+/// ```
+/// use zix::{Array, ArrayParams};
+/// use zix::codec::EncoderParams;
+///
+/// let data = ndarray::array![1.0f32, 2.0, 3.0, 4.0];
+/// let mut params = ArrayParams::new();
+/// // EncoderParams::default() is equivalent to EncoderParams::new()
+/// params.encoder_params(EncoderParams::new());
+/// let za = Array::from_ndarray(&data, params)?;
+/// # Ok::<(), zix::error::Error>(())
+/// ```
+///
+/// Increase compression level for archival data:
+///
+/// ```
+/// use zix::{Array, ArrayParams};
+/// use zix::codec::{EncoderParams, Filter};
+///
+/// let data = ndarray::array![1.0f64, 2.0, 3.0, 4.0];
+/// let mut enc = EncoderParams::new();
+/// enc.level(15)?;  // slower encode, better ratio
+/// enc.filters(&[Filter::ByteShuffle])?;
+/// let mut params = ArrayParams::new();
+/// params.encoder_params(enc);
+/// let za = Array::from_ndarray(&data, params)?;
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 #[derive(Clone, Debug)]
 pub struct EncoderParams {
     codec: Codec,
@@ -29,6 +123,73 @@ impl Default for EncoderParams {
     }
 }
 impl EncoderParams {
+    /// Create a new `EncoderParams` with the default configuration.
+    ///
+    /// The default configuration is Zstd level 3 with byte shuffle.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the compression codec.
+    pub fn codec(&mut self, codec: Codec) -> &mut Self {
+        self.codec = codec;
+        self
+    }
+
+    /// Get the compression codec.
+    pub fn get_codec(&self) -> &Codec {
+        &self.codec
+    }
+
+    /// Set the compression level (0–19).
+    ///
+    /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the default.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if `level` is out of the valid range (0–19 for zstd).
+    pub fn level(&mut self, level: u32) -> Result<&mut Self> {
+        ensure!(
+            level <= 19,
+            InvalidArgument,
+            "Codec level must be between 0 and 19"
+        );
+        self.level = level.try_into().unwrap();
+        Ok(self)
+    }
+
+    /// Get the compression level.
+    pub fn get_level(&self) -> u8 {
+        self.level
+    }
+
+    /// Set the pre-compression filter pipeline (up to 4 filters).
+    ///
+    /// Filters are applied in order before compression and reversed after decompression.
+    /// For most numeric dtypes, [`Filter::ByteShuffle`] (the default) provides a good
+    /// compression ratio improvement with low overhead. [`Filter::BitShuffle`] can yield
+    /// better ratios for low-entropy data at the cost of higher CPU usage. Pass an empty
+    /// slice to disable filtering entirely.
+    ///
+    /// Not all combinations of filters make sense; for example,a byte shuffle followed by a bit
+    /// shuffle doesn't make sense because the bit shuffle will operate of the byte-shuffled data,
+    /// and the bti shuffle filter will incorrectly assume the data is in the original byte order -
+    /// it will not yield incorrect results, but its probably won't improve the compression ratio.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if `filters` contains more than 4 elements.
+    pub fn filters(&mut self, filters: &[Filter]) -> Result<&mut Self> {
+        ensure!(
+            filters.len() <= 4,
+            InvalidArgument,
+            "At most 4 filters are supported"
+        );
+        self.filters = filters.try_into().unwrap();
+        Ok(self)
+    }
+
+    /// Returns the filter pipeline.
     pub fn get_filters(&self) -> &[Filter] {
         &self.filters
     }
@@ -124,12 +285,35 @@ impl Encoder {
     }
 }
 
+/// Decoder configuration supplied by the caller at read time.
+///
+/// Unlike the codec type, filters, and dtype of a compressed block, which are determined by how the
+/// data was written and cannot be changed, `DecoderParams` holds settings that the caller can
+/// freely choose for each read session. These parameters apply regardless of the codec stored in
+/// the data.
+///
+/// Currently no configuration options are exposed, but future versions may add settings such
+/// as:
+/// - Number of threads to use for parallel block decompression.
+/// - Memory budget for the block cache.
+///
+/// Use [`DecoderParams::default()`] in the meantime. Pass an explicit instance to
+/// [`ReadContext::new`] if you want forward-compatible control over these settings.
 #[derive(Clone, Debug, Default)]
 pub struct DecoderParams {
     _phantom: PhantomData<()>,
 }
+
+/// The codec configuration encoded alongside the array data, required to decode it.
+///
+/// Every field in `DecoderCodecConfig` is fixed at write time and must match exactly what was
+/// used when the data was encoded — none of it can be chosen or overridden at read time.
+///
+/// This struct is populated from the stored array metadata and passed to [`Decoder`] internally.
+/// Users do not construct it directly; it is derived from the array's on-disk representation
+/// when a compressed array is read back from an archive.
 #[derive(Clone, Debug)]
-pub struct DecoderCodecConfig {
+pub(crate) struct DecoderCodecConfig {
     pub(crate) codec: Codec,
     pub(crate) filters: Vec<Filter>,
     pub(crate) dtype: Dtype,
@@ -208,14 +392,64 @@ impl<'a> Decoder<'a> {
     }
 }
 
+/// A context with reusable buffers and a long-lived decoder instance.
+///
+/// Allocating temporary buffers on demand and initializing a codec decoder on every block read
+/// internally in the array storage can be expensive, especially for small blocks.
+/// `ReadContext` holds reusable buffers and decoder instances that can be shared across multiple
+/// reads to amortize these costs.
+///
+/// A `ReadContext` is tied to a single thread — it is `!Sync`.
+/// For concurrent reads from multiple threads, create one `ReadContext` per thread.
+///
+/// # Obtaining a `ReadContext`
+///
+/// The preferred way is [`Array::read_ctx()`](crate::Array::read_ctx), which picks up the decoder
+/// parameters stored alongside the array data:
+///
+/// ```
+/// use zix::{Array, ArrayParams};
+///
+/// let data = ndarray::array![1i32, 2, 3, 4];
+/// let za = Array::from_ndarray(&data, ArrayParams::new())?;
+///
+/// // read_ctx() inherits the decoder config from the array.
+/// let ctx = za.read_ctx();
+/// let out = za.to_ndarray_sub::<i32>(&[1..3], &ctx)?;
+/// assert_eq!(out.as_slice().unwrap(), &[2, 3]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
+///
+/// `ReadContext::default()` (or `ReadContext::new(decoder_params)`) is available for if you need
+/// more control over the decoder parameters or want to create a context independently of a specific
+/// array.
+/// ```
+/// use zix::Array;
+/// use zix::codec::ReadContext;
+///
+/// let za = Array::from_scalar(42i32, &[5])?;
+/// let out = za.to_ndarray_sub::<i32>(&[0..3], &ReadContext::default())?;
+/// assert_eq!(out.as_slice().unwrap(), &[42, 42, 42]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
+///
+/// # Reusing a context
+///
+/// A single `ReadContext` can be passed to multiple successive reads. Reusing it avoids
+/// reinitializing the decompressor and keeps the scratch buffer allocations warm:
 pub struct ReadContext {
     tmp_buffers: TmpBufferPool,
+    /// Two alternating scratch buffers used by the filter pipeline (encode and decode paths).
     tmp_buf1: UnsafeCell<AlignedBytes>,
     tmp_buf2: UnsafeCell<AlignedBytes>,
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
 }
 impl ReadContext {
+    /// Creates a new `ReadContext` configured with the given decoder parameters.
+    ///
+    /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly — it
+    /// automatically uses the decoder parameters that match the array's stored codec configuration.
     pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         let tmp_buf1 = AlignedBytes::new(16);
         let tmp_buf2 = tmp_buf1.clone();
@@ -237,13 +471,29 @@ impl ReadContext {
     }
 }
 impl Default for ReadContext {
+    /// Creates a `ReadContext` with default [`DecoderParams`].
+    ///
+    /// Equivalent to `ReadContext::new(&DecoderParams::default()).unwrap()`.
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()
     }
 }
 
+/// A pool of aligned bytes buffers.
+///
+/// Many components of a storage system (byte shuffle, bit shuffle, arithmetic lazy ops storage views, etc.)
+/// need temporary working memory. Allocating fresh buffers on every block is expensive, so
+/// `TmpBufferPool` keeps a small free list per alignment class and returns previously allocated
+/// buffers when possible.
+///
+/// Buffers are vended as [`TmpBuf`] RAII guards. When a `TmpBuf` is dropped, its underlying
+/// allocation is cleared and pushed back into the pool for reuse.
+///
+/// The pool is not thread-safe, it is intended to be owned and used by a single thread.
 pub(crate) struct TmpBufferPool {
+    /// Free list for alignments ≤ 16; all buffers are allocated at 16-byte alignment.
     align16: UnsafeCell<Vec<AlignedBytes>>,
+    /// Free lists for alignments > 16, sorted by alignment value.
     align_other: UnsafeCell<Vec<(Alignment, Vec<AlignedBytes>)>>,
 }
 impl TmpBufferPool {
@@ -254,6 +504,11 @@ impl TmpBufferPool {
         }
     }
 
+    /// Borrows a buffer of `size` bytes with at least `alignment` byte alignment.
+    ///
+    /// Returns a [`TmpBuf`] guard whose contents are initialized to `size` uninitialized bytes.
+    /// The buffer is popped from the free list when one is available; otherwise a fresh allocation
+    /// is made. The allocation is returned to the pool when the `TmpBuf` is dropped.
     fn get(&self, size: usize, alignment: Alignment) -> TmpBuf<'_> {
         let (pool, pool_align) = self.get_pool(alignment);
         let pool = unsafe { &mut *pool };
@@ -268,6 +523,7 @@ impl TmpBufferPool {
         buf
     }
 
+    /// Returns `buf` to the appropriate free list after clearing its length.
     fn return_buf(&self, mut buf: AlignedBytes) {
         buf.clear();
         let (pool, _) = self.get_pool(buf.alignment().try_into().unwrap());
@@ -275,6 +531,11 @@ impl TmpBufferPool {
         pool.push(buf);
     }
 
+    /// Returns a raw pointer to the free list for `alignment` together with the actual alignment
+    /// that will be used for allocations from that list.
+    ///
+    /// Alignments ≤ 16 are folded into the single `align16` list (allocated at 16 bytes).
+    /// Larger alignments are looked up (or inserted) in the sorted `align_other` list.
     fn get_pool(&self, alignment: Alignment) -> (*mut Vec<AlignedBytes>, Alignment) {
         match alignment.as_usize() {
             1 | 2 | 4 | 8 | 16 => (self.align16.get(), 16.try_into().unwrap()),
@@ -303,11 +564,18 @@ impl TmpBufferPool {
         }
     }
 }
+
+/// An RAII guard for a temporary scratch buffer borrowed from a [`TmpBufferPool`].
+///
+/// Obtained via [`TmpBufferPool::get`] (or [`ReadContext::tmp_buf`]). The buffer is
+/// pre-sized to the requested length on creation. When `TmpBuf` is dropped, the underlying
+/// allocation is cleared and returned to the pool for reuse.
 pub(crate) struct TmpBuf<'a> {
     buf: AlignedBytes,
     buffers: &'a TmpBufferPool,
 }
 impl TmpBuf<'_> {
+    /// Resizes the buffer to `new_len` bytes. The new contents are uninitialized.
     pub(crate) fn set_len(&mut self, new_len: usize) {
         self.buf.clear();
         self.buf.reserve(new_len);
@@ -320,7 +588,7 @@ impl TmpBuf<'_> {
 }
 impl Drop for TmpBuf<'_> {
     fn drop(&mut self) {
-        // take self.buf
+        // Swap out self.buf so we can pass ownership to return_buf.
         let mut buf = AlignedBytes::new(self.buf.alignment());
         std::mem::swap(&mut self.buf, &mut buf);
 

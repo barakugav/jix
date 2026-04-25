@@ -6,9 +6,35 @@ use crate::dtype::Dtype;
 mod bit_shuffle;
 mod byte_shuffle;
 
+/// A pre-compression byte transform applied to block data before encoding.
+///
+/// Filters rearrange the raw element bytes into a layout that compresses more efficiently,
+/// then reverse the transform after decompression. They are applied in pipeline order during
+/// encoding and reversed during decoding.
+///
+/// For most numeric workloads [`ByteShuffle`](Filter::ByteShuffle) is the right default.
+/// It is fast and reliably improves compression ratios for uniform-dtype arrays by grouping
+/// bytes of the same significance across consecutive elements (e.g. all the low bytes
+/// together, then all the high bytes).
+///
+/// [`BitShuffle`](Filter::BitShuffle) applies the same idea at the bit level, which can
+/// squeeze out more compression for data with low bit entropy, at the cost of higher CPU
+/// usage.
 #[derive(Clone, Debug)]
 pub enum Filter {
+    /// Groups bytes by their position within each element across a block.
+    ///
+    /// For a block of `n` elements with itemsize `k`, byte `i` of element `j` is placed at
+    /// position `i * n + j` in the output. This makes runs of similar values in the same
+    /// byte position contiguous, which Zstd can exploit for much better compression ratios
+    /// on numeric data.
     ByteShuffle,
+    /// Groups bits by their position within each element across a block.
+    ///
+    /// Analogous to byte shuffle but operating at the bit level. Yields better compression
+    /// ratios than byte shuffle for data with low bit entropy (e.g. arrays of small integers
+    /// stored in a wider type, or arrays with many repeated values), at the cost of higher
+    /// CPU usage for both encode and decode.
     BitShuffle,
 }
 impl Filter {
