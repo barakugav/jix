@@ -131,14 +131,14 @@ impl<S: ArrayStorage> InsertAxes<S> {
             } else {
                 hint.push(inner_layout.block_shape_hint[input_dim]);
                 tag.push(inner_layout.block_shape_tag[input_dim]);
-                preferred.push(inner_layout.preferred_read_block_shape[input_dim]);
+                preferred.push(inner_layout.preferred_read_shape[input_dim]);
                 input_dim += 1;
             }
         }
         let mut b_layout = inner_layout.clone();
         b_layout.block_shape_hint = hint;
         b_layout.block_shape_tag = tag;
-        b_layout.preferred_read_block_shape = preferred;
+        b_layout.preferred_read_shape = preferred;
 
         let dtype = array.dtype().clone();
         Ok(Self {

@@ -85,12 +85,12 @@ impl<Op, S> ReductionOp<Op, S> {
                 }
             })
             .collect();
-        b_layout.preferred_read_block_shape = (0..input_ndim)
+        b_layout.preferred_read_shape = (0..input_ndim)
             .filter_map(|d| {
                 if is_reduced[d] {
                     keepdims.then_some(1)
                 } else {
-                    Some(b_layout.preferred_read_block_shape[d])
+                    Some(b_layout.preferred_read_shape[d])
                 }
             })
             .collect();

@@ -87,8 +87,7 @@ impl<S: ArrayStorage> PermuteAxes<S> {
         let mut b_layout = array.blocks_layout().clone();
         b_layout.block_shape_hint = dim_arr(ndim, |i| b_layout.block_shape_hint[axes[i]]);
         b_layout.block_shape_tag = dim_arr(ndim, |i| b_layout.block_shape_tag[axes[i]]);
-        b_layout.preferred_read_block_shape =
-            dim_arr(ndim, |i| b_layout.preferred_read_block_shape[axes[i]]);
+        b_layout.preferred_read_shape = dim_arr(ndim, |i| b_layout.preferred_read_shape[axes[i]]);
 
         let dtype = array.dtype().clone();
         Ok(Self {
@@ -204,10 +203,7 @@ mod tests {
     fn test_i32_3d_axes_2_0_1() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
-        let actual = za
-            .permute_axes(&[2, 0, 1])
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = za.permute_axes(&[2, 0, 1]).to_ndarray::<i32>().unwrap();
         let expected = a
             .view()
             .permuted_axes([2, 0, 1])
@@ -222,10 +218,7 @@ mod tests {
     fn test_i32_3d_axes_0_2_1() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
-        let actual = za
-            .permute_axes(&[0, 2, 1])
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = za.permute_axes(&[0, 2, 1]).to_ndarray::<i32>().unwrap();
         let expected = a
             .view()
             .permuted_axes([0, 2, 1])
@@ -240,10 +233,7 @@ mod tests {
     fn test_i32_3d_identity() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
-        let actual = za
-            .permute_axes(&[0, 1, 2])
-            .to_ndarray::<i32>()
-            .unwrap();
+        let actual = za.permute_axes(&[0, 1, 2]).to_ndarray::<i32>().unwrap();
         assert_eq!(actual, a.into_dyn());
     }
 

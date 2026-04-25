@@ -100,11 +100,11 @@ impl<S: ArrayStorage> Broadcast<S> {
                 b_layout.block_shape_tag[d]
             }
         });
-        b_layout.preferred_read_block_shape = dim_arr(ndim, |d| {
+        b_layout.preferred_read_shape = dim_arr(ndim, |d| {
             if is_broadcast[d] {
                 new_shape[d] as u32
             } else {
-                b_layout.preferred_read_block_shape[d]
+                b_layout.preferred_read_shape[d]
             }
         });
 

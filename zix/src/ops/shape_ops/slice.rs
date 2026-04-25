@@ -102,8 +102,8 @@ impl<S: ArrayStorage> Slice<S> {
             b_layout.block_shape_hint[dim] =
                 b_layout.block_shape_hint[dim].min(shape[dim] as BlockSize);
             b_layout.block_shape_tag[dim] = BlockShapeTag::Any;
-            b_layout.preferred_read_block_shape[dim] =
-                b_layout.preferred_read_block_shape[dim].min(shape[dim] as BlockSize);
+            b_layout.preferred_read_shape[dim] =
+                b_layout.preferred_read_shape[dim].min(shape[dim] as BlockSize);
         }
 
         Ok(Self {

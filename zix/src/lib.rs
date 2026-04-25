@@ -5,7 +5,10 @@
 // See the `NOTICE` file in the repository root for full attribution and license text.
 
 mod array;
-pub use array::{Array, ArrayParams};
+pub use array::Array;
+
+mod params;
+pub use params::ArrayParams;
 
 pub mod codec;
 pub mod dtype;

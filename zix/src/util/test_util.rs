@@ -1,5 +1,5 @@
-use crate::array::ArrayParams;
 use crate::dtype::Dtyped;
+use crate::params::ArrayParams;
 use crate::storage::block::BlockSize;
 use crate::util::AlignedBytes;
 

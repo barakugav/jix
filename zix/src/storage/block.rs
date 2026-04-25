@@ -12,7 +12,7 @@ const _: () = const {
     );
 };
 
-pub(crate) type BlockSize = u32;
+pub type BlockSize = u32;
 
 /// Compressed 1D storage of typed items, divided into independently-encoded fixed-size blocks.
 ///

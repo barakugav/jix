@@ -97,7 +97,7 @@ impl<ArraysT> Stack<ArraysT> {
         let mut b_layout = arrays.spec(0).blocks_layout.clone();
         b_layout.block_shape_hint.insert(axis, 1);
         b_layout.block_shape_tag.insert(axis, BlockShapeTag::Any);
-        b_layout.preferred_read_block_shape.insert(axis, 1);
+        b_layout.preferred_read_shape.insert(axis, 1);
 
         Ok(Self {
             dtype: dtype.clone(),

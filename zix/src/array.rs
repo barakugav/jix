@@ -5,14 +5,11 @@ use crate::codec::{DecoderParams, Encoder, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::{BlockSize, BlockTableBuilder};
-use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlockShapeTag, BlocksLayout, Compact, Ref,
-};
+use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
-use crate::util::{
-    cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray,
-};
+use crate::util::{cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray};
+use crate::ArrayParams;
 
 #[derive(Clone)]
 pub struct Array<S> {
@@ -35,54 +32,18 @@ impl Array<Compact> {
             params.block_shape,
             params.block_shape_tag,
             params.block_size_hint,
-            params.preferred_read_block_shape,
-            params.preferred_read_block_size_hint,
+            params.preferred_read_shape,
+            params.preferred_read_size_hint,
             array.shape(),
             array.dtype().itemsize() as _,
         )?;
         params.block_shape = Some(b_layout.block_shape_hint);
         params.block_shape_tag = Some(b_layout.block_shape_tag);
         params.block_size_hint = Some(b_layout.block_size_hint);
-        params.preferred_read_block_shape = Some(b_layout.preferred_read_block_shape);
-        params.preferred_read_block_size_hint = Some(b_layout.preferred_read_block_size_hint);
+        params.preferred_read_shape = Some(b_layout.preferred_read_shape);
+        params.preferred_read_size_hint = Some(b_layout.preferred_read_size_hint);
 
         array.copy_with(params, &array.read_ctx())
-    }
-}
-
-#[derive(Clone, Default, Debug)]
-pub struct ArrayParams {
-    pub(crate) block_shape: Option<DimArray<BlockSize>>,
-    pub(crate) block_shape_tag: Option<DimArray<BlockShapeTag>>,
-    pub(crate) block_size_hint: Option<u64>,
-    pub(crate) preferred_read_block_shape: Option<DimArray<BlockSize>>,
-    pub(crate) preferred_read_block_size_hint: Option<u64>,
-    pub(crate) encoder_params: Option<EncoderParams>,
-    pub(crate) decoder_params: Option<DecoderParams>,
-}
-impl ArrayParams {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn override_from_storage(&mut self, storage: &impl ArrayStorage) {
-        let spec = storage.spec();
-        self.encoder_params
-            .get_or_insert_with(|| spec.encoder_params.cloned().unwrap_or_default());
-        self.decoder_params
-            .get_or_insert_with(|| spec.decoder_params.cloned().unwrap_or_default());
-
-        let blocks_layout = spec.blocks_layout;
-        self.block_shape
-            .get_or_insert_with(|| blocks_layout.block_shape_hint.clone());
-        self.block_shape_tag
-            .get_or_insert_with(|| blocks_layout.block_shape_tag.clone());
-        self.block_size_hint
-            .get_or_insert(blocks_layout.block_size_hint);
-        self.preferred_read_block_shape
-            .get_or_insert_with(|| blocks_layout.preferred_read_block_shape.clone());
-        self.preferred_read_block_size_hint
-            .get_or_insert(blocks_layout.preferred_read_block_size_hint);
     }
 }
 
@@ -274,8 +235,8 @@ impl ArrayBuilder {
             params.block_shape,
             params.block_shape_tag,
             params.block_size_hint,
-            params.preferred_read_block_shape,
-            params.preferred_read_block_size_hint,
+            params.preferred_read_shape,
+            params.preferred_read_size_hint,
             shape.as_slice(),
             dtype.itemsize() as _,
         )?;
@@ -411,8 +372,8 @@ mod tests {
             block_shape_hint: block_shape_hint.clone(),
             block_shape_tag: dim_arr(ndim, |_| BlockShapeTag::Fixed),
             block_size_hint: 0,
-            preferred_read_block_shape: block_shape_hint,
-            preferred_read_block_size_hint: 0,
+            preferred_read_shape: block_shape_hint,
+            preferred_read_size_hint: 0,
         };
         Array {
             storage: Compact(ArrayBlockTableStorageBase::new(

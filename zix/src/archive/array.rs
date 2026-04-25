@@ -137,8 +137,8 @@ where
             Some(block_shape),
             params.block_shape_tag,
             params.block_size_hint,
-            params.preferred_read_block_shape,
-            params.preferred_read_block_size_hint,
+            params.preferred_read_shape,
+            params.preferred_read_size_hint,
             &shape,
             blocks.dtype().itemsize(),
         )?;

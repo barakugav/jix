@@ -91,14 +91,14 @@ impl<S> Reshape<S> {
         let mut b_layout = array.blocks_layout().clone();
         let mut block_shape_hint = DimArray::new();
         let mut block_shape_tag = DimArray::new();
-        let mut preferred_read_block_shape = DimArray::new();
+        let mut preferred_read_shape = DimArray::new();
         // TODO: finalize the logic here, we can find a good heuristic
         for dim in 0..new_shape.len() {
             if let Some(orig_dim) = same_logical_stride[dim] {
                 let orig_dim = orig_dim as usize;
                 let same_dim_len = orig_shape[orig_dim] == new_shape[dim];
                 block_shape_hint.push(b_layout.block_shape_hint[orig_dim]);
-                preferred_read_block_shape.push(b_layout.preferred_read_block_shape[orig_dim]);
+                preferred_read_shape.push(b_layout.preferred_read_shape[orig_dim]);
                 block_shape_tag.push(match b_layout.block_shape_tag[orig_dim] {
                     BlockShapeTag::Fixed => {
                         if same_dim_len {
@@ -112,13 +112,13 @@ impl<S> Reshape<S> {
                 });
             } else {
                 block_shape_hint.push(1);
-                preferred_read_block_shape.push(1);
+                preferred_read_shape.push(1);
                 block_shape_tag.push(BlockShapeTag::Any);
             }
         }
         b_layout.block_shape_hint = block_shape_hint;
         b_layout.block_shape_tag = block_shape_tag;
-        b_layout.preferred_read_block_shape = preferred_read_block_shape;
+        b_layout.preferred_read_shape = preferred_read_shape;
 
         let dtype = array.dtype();
         Ok(Self {
