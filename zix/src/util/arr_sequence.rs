@@ -6,29 +6,7 @@ use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
 
-pub(crate) trait ArraySequenceItemImpl {
-    type __Storage: ArrayStorage;
-    fn __storage(&self) -> &Self::__Storage;
-}
-#[allow(private_bounds)]
-pub trait ArraySequenceItem: ArraySequenceItemImpl {}
-
-impl<S: ArrayStorage> ArraySequenceItemImpl for Array<S> {
-    type __Storage = S;
-    fn __storage(&self) -> &Self::__Storage {
-        &self.storage
-    }
-}
-impl<S: ArrayStorage> ArraySequenceItem for Array<S> {}
-
-impl<S: ArrayStorage> ArraySequenceItemImpl for &Array<S> {
-    type __Storage = S;
-    fn __storage(&self) -> &Self::__Storage {
-        &self.storage
-    }
-}
-impl<S: ArrayStorage> ArraySequenceItem for &Array<S> {}
-
+/// Private implementation trait for [`ArraySequence`]. Not part of the public API.
 pub(crate) trait ArraySequenceImpl {
     fn narrays(&self) -> usize;
     fn read_data(
@@ -43,12 +21,53 @@ pub(crate) trait ArraySequenceImpl {
     fn spec(&self, arr: usize) -> ArrayStorageSpec<'_>;
 }
 
+/// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
+/// and [`concatenate`](crate::ops::concatenate).
+///
+/// This is a sealed trait — it cannot be implemented outside this crate. It is implemented for the
+/// following collection types, covering both homogeneous and heterogeneous cases:
+///
+/// | Type | Notes |
+/// |------|-------|
+/// | `[Array<S>; N]` | Fixed-length array; all elements share the same storage type. |
+/// | `Vec<Array<S>>` | Dynamic-length list; all elements share the same storage type. |
+/// | `&[Array<S>]` | Borrowed slice; all elements share the same storage type. |
+/// | `(Array<S0>, Array<S1>, …)` | Tuple of up to 10 arrays; each element may have a different storage type. |
+///
+/// # Examples
+///
+/// Stack with a fixed-length array (homogeneous):
+///
+/// ```
+/// use zix::{Array, ArrayParams, ops::stack};
+///
+/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3], ArrayParams::new())?;
+/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6], ArrayParams::new())?;
+/// let stacked = stack([a, b], 0);
+/// assert_eq!(stacked.shape(), &[2, 3]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
+///
+/// Stack a tuple of arrays with different storage types (heterogeneous):
+///
+/// ```
+/// use zix::{Array, ArrayParams, ops::stack};
+///
+/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3], ArrayParams::new())?;
+/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6], ArrayParams::new())?;
+/// // Lazy view has a different storage type from the original Compact arrays,
+/// // but a tuple still implements ArraySequence.
+/// let c = a + 8;
+/// let stacked = stack((b, c), 0);
+/// assert_eq!(stacked.shape(), &[2, 3]);
+/// # Ok::<(), zix::error::Error>(())
+/// ```
 #[allow(private_bounds)]
 pub trait ArraySequence: ArraySequenceImpl {}
 
-impl<A, const N: usize> ArraySequenceImpl for [A; N]
+impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
 where
-    A: ArraySequenceItem,
+    S: ArrayStorage,
 {
     fn narrays(&self) -> usize {
         self.len()
@@ -61,26 +80,26 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> Result<()> {
-        self[arr].__storage().read_data(index, buf, context)
+        self[arr].storage.read_data(index, buf, context)
     }
 
     fn shape(&self, arr: usize) -> &[u64] {
-        self[arr].__storage().shape()
+        self[arr].shape()
     }
 
     fn dtype(&self, arr: usize) -> &Dtype {
-        self[arr].__storage().dtype()
+        self[arr].dtype()
     }
 
     fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].__storage().spec()
+        self[arr].storage.spec()
     }
 }
-impl<A, const N: usize> ArraySequence for [A; N] where A: ArraySequenceItem {}
+impl<S, const N: usize> ArraySequence for [Array<S>; N] where S: ArrayStorage {}
 
-impl<A> ArraySequenceImpl for Vec<A>
+impl<S> ArraySequenceImpl for Vec<Array<S>>
 where
-    A: ArraySequenceItem,
+    S: ArrayStorage,
 {
     fn narrays(&self) -> usize {
         self.len()
@@ -93,26 +112,26 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> Result<()> {
-        self[arr].__storage().read_data(index, buf, context)
+        self[arr].storage.read_data(index, buf, context)
     }
 
     fn shape(&self, arr: usize) -> &[u64] {
-        self[arr].__storage().shape()
+        self[arr].shape()
     }
 
     fn dtype(&self, arr: usize) -> &Dtype {
-        self[arr].__storage().dtype()
+        self[arr].dtype()
     }
 
     fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].__storage().spec()
+        self[arr].storage.spec()
     }
 }
-impl<A: ArraySequenceItem> ArraySequence for Vec<A> {}
+impl<S: ArrayStorage> ArraySequence for Vec<Array<S>> {}
 
-impl<A> ArraySequenceImpl for &[A]
+impl<S> ArraySequenceImpl for &[Array<S>]
 where
-    A: ArraySequenceItem,
+    S: ArrayStorage,
 {
     fn narrays(&self) -> usize {
         self.len()
@@ -125,32 +144,32 @@ where
         buf: &mut [u8],
         context: &ReadContext,
     ) -> Result<()> {
-        self[arr].__storage().read_data(index, buf, context)
+        self[arr].storage.read_data(index, buf, context)
     }
 
     fn shape(&self, arr: usize) -> &[u64] {
-        self[arr].__storage().shape()
+        self[arr].shape()
     }
 
     fn dtype(&self, arr: usize) -> &Dtype {
-        self[arr].__storage().dtype()
+        self[arr].dtype()
     }
 
     fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].__storage().spec()
+        self[arr].storage.spec()
     }
 }
-impl<A: ArraySequenceItem> ArraySequence for &[A] {}
+impl<S: ArrayStorage> ArraySequence for &[Array<S>] {}
 
 macro_rules! impl_array_sequence_for_tuple {
-    ($($idx:tt : $A:ident),+ $(,)?) => {
-        impl<$($A),+> ArraySequence for ($($A,)+)
+    ($($idx:tt : $S:ident),+ $(,)?) => {
+        impl<$($S),+> ArraySequence for ($(Array<$S>,)+)
         where
-            $($A: ArraySequenceItem,)+
+            $($S: ArrayStorage,)+
         {}
-        impl<$($A),+> ArraySequenceImpl for ($($A,)+)
+        impl<$($S),+> ArraySequenceImpl for ($(Array<$S>,)+)
         where
-            $($A: ArraySequenceItem,)+
+            $($S: ArrayStorage,)+
         {
             fn narrays(&self) -> usize {
                 impl_array_sequence_for_tuple!(@count $($idx)+)
@@ -164,28 +183,28 @@ macro_rules! impl_array_sequence_for_tuple {
                 context: &ReadContext,
             ) -> Result<()> {
                 match arr {
-                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).read_data(index, buf, context),)+
+                    $($idx => self.$idx.storage.read_data(index, buf, context),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }
 
             fn shape(&self, arr: usize) -> &[u64] {
                 match arr {
-                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).shape(),)+
+                    $($idx => self.$idx.shape(),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }
 
             fn dtype(&self, arr: usize) -> &Dtype {
                 match arr {
-                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).dtype(),)+
+                    $($idx => self.$idx.dtype(),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }
 
             fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
                 match arr {
-                    $($idx => ArraySequenceItemImpl::__storage(&self.$idx).spec(),)+
+                    $($idx => self.$idx.storage.spec(),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }
@@ -198,16 +217,16 @@ macro_rules! impl_array_sequence_for_tuple {
     (@replace $_t:tt $sub:expr) => { $sub };
 }
 
-impl_array_sequence_for_tuple!(0: A0);
-impl_array_sequence_for_tuple!(0: A0, 1: A1);
-impl_array_sequence_for_tuple!(0: A0, 1: A1, 2: A2);
-impl_array_sequence_for_tuple!(0: A0, 1: A1, 2: A2, 3: A3);
-impl_array_sequence_for_tuple!(0: A0, 1: A1, 2: A2, 3: A3, 4: A4);
-impl_array_sequence_for_tuple!(0: A0, 1: A1, 2: A2, 3: A3, 4: A4, 5: A5);
-impl_array_sequence_for_tuple!(0: A0, 1: A1, 2: A2, 3: A3, 4: A4, 5: A5, 6: A6);
-impl_array_sequence_for_tuple!(0: A0, 1: A1, 2: A2, 3: A3, 4: A4, 5: A5, 6: A6, 7: A7);
-impl_array_sequence_for_tuple!(0: A0, 1: A1, 2: A2, 3: A3, 4: A4, 5: A5, 6: A6, 7: A7, 8: A8);
-impl_array_sequence_for_tuple!(0: A0, 1: A1, 2: A2, 3: A3, 4: A4, 5: A5, 6: A6, 7: A7, 8: A8, 9: A9);
+impl_array_sequence_for_tuple!(0: S0);
+impl_array_sequence_for_tuple!(0: S0, 1: S1);
+impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2);
+impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3);
+impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4);
+impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5);
+impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5, 6: S6);
+impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5, 6: S6, 7: S7);
+impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5, 6: S6, 7: S7, 8: S8);
+impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5, 6: S6, 7: S7, 8: S8, 9: S9);
 
 #[cold]
 #[inline(never)]

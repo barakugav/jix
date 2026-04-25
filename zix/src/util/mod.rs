@@ -2,7 +2,7 @@ mod aligned_vec;
 pub(crate) use aligned_vec::AlignedBytes;
 
 mod arr_sequence;
-pub use arr_sequence::{ArraySequence, ArraySequenceItem};
+pub use arr_sequence::ArraySequence;
 
 pub(crate) mod cache_size;
 pub(crate) mod iter;
@@ -121,18 +121,18 @@ where
     }
 }
 
-pub(crate) enum MaybeOwned<'a, T> {
-    Owned(T),
-    Borrowed(&'a T),
-}
-impl<'a, T> AsRef<T> for MaybeOwned<'a, T> {
-    fn as_ref(&self) -> &T {
-        match self {
-            MaybeOwned::Owned(t) => t,
-            MaybeOwned::Borrowed(t) => t,
-        }
-    }
-}
+// pub(crate) enum MaybeOwned<'a, T> {
+//     Owned(T),
+//     Borrowed(&'a T),
+// }
+// impl<'a, T> AsRef<T> for MaybeOwned<'a, T> {
+//     fn as_ref(&self) -> &T {
+//         match self {
+//             MaybeOwned::Owned(t) => t,
+//             MaybeOwned::Borrowed(t) => t,
+//         }
+//     }
+// }
 
 // pub(crate) enum CowMut<'a, T> {
 //     Owned(T),
