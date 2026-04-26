@@ -167,6 +167,16 @@ where
         debug_assert_eq!(nbytes, b_size_bytes);
         Ok(())
     }
+
+    pub(crate) fn as_ref(&self) -> BlockTable<Borrowed<'_>> {
+        BlockTable {
+            block_data: self.block_data.as_ref(),
+            block_offsets: self.block_offsets.as_ref(),
+            nitems: self.nitems,
+            block_size: self.block_size,
+            decoder_config: self.decoder_config.clone(),
+        }
+    }
 }
 
 impl BlockTable<Owned> {

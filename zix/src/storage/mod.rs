@@ -124,7 +124,6 @@ pub trait ArrayStorage {
     /// parameters through lazy view operations and when re-encoding via `copy` / `copy_with`.
     /// Not intended to be called directly.
     #[doc(hidden)]
-    #[allow(private_interfaces)]
     fn _spec(&self) -> ArrayStorageSpec<'_>;
 }
 
@@ -146,6 +145,11 @@ pub struct ArrayStorageSpec<'a> {
 /// from `&Array<S>` without cloning the underlying storage.
 pub struct Ref<'a, S>(pub(crate) &'a S);
 impl_array_storage_forward!(Ref<'a, S> where S: ArrayStorage);
+impl<'a, S: Compacted> Compacted for Ref<'a, S> {
+    fn as_compact(&self) -> CompactBorrowed<'_> {
+        self.0.as_compact()
+    }
+}
 
 macro_rules! impl_array_storage_forward {
     ($wrapper:ident $(<$($gen:tt),*>)? $(where $($wh:tt)*)?) => {

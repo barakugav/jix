@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
@@ -9,45 +9,35 @@ use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Compact, CompactMmap};
+use crate::storage::{
+    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, CompactMmap, Compacted,
+};
 use crate::util::{dim_arr, DimArray, Idx};
 use crate::{Array, ArrayParams};
 
 impl Array<Compact> {
-    pub fn write_to<W>(&self, writer: W) -> Result<()>
-    where
-        W: Write + Seek,
-    {
-        let mut writer =
-            ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1).map_err(Error::io)?;
-
-        let header = schema::ArrayHeader {
-            shape: self.shape().to_vec(),
-            block_shape: self
-                .storage
-                .0
-                .block_shape()
-                .iter()
-                .cloned()
-                .map(|s| s as u64)
-                .collect(),
-        };
-        writer.write_message(&header).map_err(Error::io)?;
-
-        self.storage.0.blocks.write_content(&mut writer)
+    pub fn read_from_file(path: &Path, params: ArrayParams) -> Result<Self> {
+        let len = path.metadata().map_err(Error::io)?.len();
+        Self::read_from_file_section(path, 0, len, params)
     }
 
-    pub fn read_from_file(path: &Path, offset: u64, len: u64, params: ArrayParams) -> Result<Self> {
+    pub fn read_from_file_section(
+        path: &Path,
+        offset: u64,
+        len: u64,
+        params: ArrayParams,
+    ) -> Result<Self> {
         let file = File::open(path).map_err(Error::io)?;
         let mut reader = BufReader::new(file);
         reader.seek(SeekFrom::Start(offset)).map_err(Error::io)?;
-        Self::read_from_reader(reader, len, params)
+        Self::read_from_reader(reader, Some(len), params)
     }
 
-    pub fn read_from_reader<R>(reader: R, len: u64, params: ArrayParams) -> Result<Self>
-    where
-        R: Read + Seek,
-    {
+    pub fn read_from_reader(
+        reader: impl Read + Seek,
+        len: Option<u64>,
+        params: ArrayParams,
+    ) -> Result<Self> {
         let storage = ArrayBlockTableStorageBase::read_from(
             reader,
             len,
@@ -59,6 +49,7 @@ impl Array<Compact> {
         })
     }
 }
+
 impl Array<CompactMmap> {
     /// # Safety
     ///
@@ -76,7 +67,7 @@ impl Array<CompactMmap> {
 
         let storage = ArrayBlockTableStorageBase::read_from(
             reader,
-            len,
+            Some(len),
             crate::storage::block::Mmap(Arc::new(mmap)),
             params,
         )?;
@@ -87,13 +78,73 @@ impl Array<CompactMmap> {
     }
 }
 
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    pub fn write_to(&self, writer: impl Write + Seek) -> Result<()>
+    where
+        S: Compacted,
+    {
+        let storage = self.storage.as_compact();
+
+        let mut writer =
+            ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1).map_err(Error::io)?;
+
+        let header = schema::ArrayHeader {
+            shape: self.shape().to_vec(),
+            block_shape: storage
+                .0
+                .block_shape()
+                .iter()
+                .cloned()
+                .map(|s| s as u64)
+                .collect(),
+        };
+        writer.write_message(&header).map_err(Error::io)?;
+
+        storage.0.blocks.write_content(&mut writer)
+    }
+
+    pub fn write_to_file(self, path: &Path) -> Result<()>
+    where
+        S: Compacted,
+    {
+        let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
+        self.write_to(writer)
+    }
+
+    /// # Safety
+    ///
+    /// Same as `memmap2::Mmap::map`.
+    pub unsafe fn write_to_file_mmap(
+        self,
+        path: &Path,
+        params: ArrayParams,
+    ) -> Result<Array<CompactMmap>> {
+        // TODO: implement this function while avoiding materializing the whole (compressed) array in memory,
+        // by writing each compressed block to disk, one after the other.
+        let array = self.copy_with(params.clone(), &self.read_ctx())?;
+
+        let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
+        array.write_to(writer)?;
+
+        let len = path.metadata().map_err(Error::io)?.len();
+        unsafe { Array::read_from_file_mmap(path, 0, len, params) }
+    }
+}
+
 impl<S> ArrayBlockTableStorageBase<S>
 where
     S: BlockTableStorage,
 {
-    pub(crate) fn read_from<R>(reader: R, len: u64, storage: S, params: ArrayParams) -> Result<Self>
+    pub(crate) fn read_from(
+        reader: impl Read + Seek,
+        len: Option<u64>,
+        storage: S,
+        params: ArrayParams,
+    ) -> Result<Self>
     where
-        R: Read + Seek,
         S: BlockTableStorageRead,
     {
         let mut reader = ArchiveReader::new(reader, len)?;
@@ -192,8 +243,7 @@ mod tests {
         let mut buf = Cursor::new(Vec::<u8>::new());
         a.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
-        let len = bytes.len() as u64;
-        Array::read_from_reader(Cursor::new(bytes), len, ArrayParams::default()).unwrap()
+        Array::read_from_reader(Cursor::new(bytes), None, ArrayParams::default()).unwrap()
     }
 
     #[test]
@@ -278,9 +328,7 @@ mod tests {
         let path = tmp_file.path().to_path_buf();
         a.write_to(std::fs::File::create(&path).unwrap()).unwrap();
 
-        let file = std::fs::File::open(&path).unwrap();
-        let len = file.metadata().unwrap().len();
-        let a2 = Array::read_from_reader(file, len, ArrayParams::default()).unwrap();
+        let a2 = Array::read_from_file(&path, ArrayParams::default()).unwrap();
 
         assert_eq!(a2.shape(), &[12]);
         assert_eq!(a2.dtype(), &u32::DTYPE);
@@ -333,8 +381,8 @@ mod tests {
         let bytes = buf.into_inner();
 
         // Read array 0 (at offset 0).
-        let r0 =
-            Array::read_from_reader(Cursor::new(&bytes), len0, ArrayParams::default()).unwrap();
+        let r0 = Array::read_from_reader(Cursor::new(&bytes), Some(len0), ArrayParams::default())
+            .unwrap();
         assert_eq!(r0.shape(), &[4]);
         assert_eq!(r0.ndim(), 1);
         assert_eq!(r0.dtype(), &u8::DTYPE);
@@ -343,7 +391,7 @@ mod tests {
         // Read array 1 (padded offset, 2D).
         let r1 = Array::read_from_reader(
             Cursor::new(&bytes[off1 as usize..]),
-            len1,
+            Some(len1),
             ArrayParams::default(),
         )
         .unwrap();
@@ -355,7 +403,7 @@ mod tests {
         // Read array 2 (padded offset, 3D).
         let r2 = Array::read_from_reader(
             Cursor::new(&bytes[off2 as usize..]),
-            len2,
+            Some(len2),
             ArrayParams::default(),
         )
         .unwrap();

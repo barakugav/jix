@@ -37,8 +37,7 @@ pub struct Compact(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::
 /// Same layout as [`Compact`] but borrows its compressed bytes from an existing byte slice
 /// instead of owning them. Used internally when constructing temporary views into a
 /// pre-encoded buffer.
-#[allow(unused)]
-pub(crate) struct CompactBorrowed<'a>(
+pub struct CompactBorrowed<'a>(
     pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>>,
 );
 
@@ -60,12 +59,14 @@ macro_rules! impl_array_storage {
             ) -> Result<()> {
                 self.0.read_data(index, buf, context)
             }
+
             fn shape(&self) -> &[u64] {
                 &self.0.shape
             }
             fn dtype(&self) -> &Dtype {
                 self.0.blocks.dtype()
             }
+
             fn _spec(&self) -> ArrayStorageSpec<'_> {
                 ArrayStorageSpec {
                     blocks_layout: &self.0.blocks_layout,
@@ -75,11 +76,30 @@ macro_rules! impl_array_storage {
                 }
             }
         }
+
+        impl Compacted for $ty {
+            fn as_compact(&self) -> CompactBorrowed<'_> {
+                CompactBorrowed(ArrayBlockTableStorageBase {
+                    blocks: self.0.blocks.as_ref(),
+                    shape: self.0.shape.clone(),
+
+                    blocks_layout: self.0.blocks_layout.clone(),
+                    block_grid_shape: self.0.block_grid_shape.clone(),
+
+                    encoder_params: self.0.encoder_params.clone(),
+                    decoder_params: self.0.decoder_params.clone(),
+                })
+            }
+        }
     };
 }
 impl_array_storage!(Compact);
 impl_array_storage!(CompactBorrowed<'_>);
 impl_array_storage!(CompactMmap);
+
+pub trait Compacted {
+    fn as_compact(&self) -> CompactBorrowed<'_>;
+}
 
 /// Nd-array layer on top of [`BlockTable<S>`](crate::storage::block::BlockTable).
 ///

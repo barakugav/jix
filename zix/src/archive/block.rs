@@ -104,7 +104,7 @@ impl BlockTable<Owned> {
     where
         R: Read + Seek,
     {
-        let mut reader = ArchiveReader::new(reader, len)?;
+        let mut reader = ArchiveReader::new(reader, Some(len))?;
         let f_meta = reader.read_file_meta().map_err(Error::io)?;
         ensure!(
             f_meta.archive_type == schema::ArchiveType::BlockTable as i32,

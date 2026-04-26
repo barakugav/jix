@@ -117,19 +117,21 @@ impl<W> DerefMut for ArchiveWriter<W> {
 pub(crate) struct ArchiveReader<R> {
     reader: R,
     base_offset: u64,
-    length: u64,
+    length: Option<u64>, // TODO
     tmp_buf: Vec<u8>,
 }
 impl<R> ArchiveReader<R> {
-    pub(crate) fn new(mut reader: R, length: u64) -> Result<Self>
+    pub(crate) fn new(mut reader: R, length: Option<u64>) -> Result<Self>
     where
         R: Read + Seek,
     {
-        ensure!(
-            length >= size_of::<Header>() as u64,
-            InvalidArchive,
-            "zix file too short: length={length}"
-        );
+        if let Some(length) = length {
+            ensure!(
+                length >= size_of::<Header>() as u64,
+                InvalidArchive,
+                "zix file too short: length={length}"
+            );
+        }
 
         let base_offset = reader.stream_position().map_err(Error::io)?;
 
