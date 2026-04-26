@@ -42,21 +42,19 @@ use crate::Array;
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
-/// let a = ndarray::array![1i32, 2, 3];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// use ndarray::array;
 ///
 /// // [3] → [1, 3]
-/// assert_eq!(za.insert_axes(&[0]).shape(), &[1, 3]);
+/// let a = Array::compact_array(&array![1i32, 2, 3])?;
+/// assert_eq!(a.insert_axes(&[0]).shape(), &[1, 3]);
 ///
 /// // [3] → [3, 1]
-/// let a = ndarray::array![1i32, 2, 3];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-/// assert_eq!(za.insert_axes(&[1]).shape(), &[3, 1]);
+/// let b = Array::compact_array(&array![1i32, 2, 3])?;
+/// assert_eq!(b.insert_axes(&[1]).shape(), &[3, 1]);
 ///
 /// // [2, 3] → [1, 2, 3, 1]
-/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-/// assert_eq!(za.insert_axes(&[0, 2]).shape(), &[1, 2, 3, 1]);
+/// let c = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
+/// assert_eq!(c.insert_axes(&[0, 2]).shape(), &[1, 2, 3, 1]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
 pub struct InsertAxes<S> {
@@ -184,10 +182,10 @@ impl<S: ArrayStorage> ArrayStorage for InsertAxes<S> {
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.storage._spec()
         }
     }
 }
@@ -200,17 +198,17 @@ mod tests {
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(&[block_size])).unwrap()
+        Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(&[rows, cols])).unwrap()
+        Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
     fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(&[d0, d1, d2])).unwrap()
+        Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
     fn seq(n: usize) -> Vec<i32> {

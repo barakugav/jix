@@ -44,23 +44,19 @@ where
 /// ```
 /// use zix::{Array, ArrayParams};
 /// use zix::ops::where_condition;
-/// let cond = ndarray::array![true, false, true, false];
-/// let x = ndarray::array![1i32, 2, 3, 4];
-/// let y = ndarray::array![10i32, 20, 30, 40];
-/// let zcond = Array::from_ndarray(&cond, ArrayParams::new())?;
-/// let zx = Array::from_ndarray(&x, ArrayParams::new())?;
-/// let zy = Array::from_ndarray(&y, ArrayParams::new())?;
-/// let result = where_condition(zcond, zx, zy).to_ndarray::<i32>()?;
+/// use ndarray::array;
+///
+/// let cond = Array::compact_array(&array![true, false, true, false])?;
+/// let x = Array::compact_array(&array![1i32, 2, 3, 4])?;
+/// let y = Array::compact_array(&array![10i32, 20, 30, 40])?;
+/// let result = where_condition(cond, x, y).to_ndarray::<i32>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1, 20, 3, 40]);
 ///
 /// // 2-D arrays
-/// let cond = ndarray::array![[true, false], [false, true]];
-/// let x = ndarray::array![[1.0f64, 2.0], [3.0, 4.0]];
-/// let y = ndarray::array![[10.0f64, 20.0], [30.0, 40.0]];
-/// let zcond = Array::from_ndarray(&cond, ArrayParams::new())?;
-/// let zx = Array::from_ndarray(&x, ArrayParams::new())?;
-/// let zy = Array::from_ndarray(&y, ArrayParams::new())?;
-/// let result = where_condition(zcond, zx, zy).to_ndarray::<f64>()?;
+/// let cond = Array::compact_array(&array![[true, false], [false, true]])?;
+/// let x = Array::compact_array(&array![[1.0f64, 2.0], [3.0, 4.0]])?;
+/// let y = Array::compact_array(&array![[10.0f64, 20.0], [30.0, 40.0]])?;
+/// let result = where_condition(cond, x, y).to_ndarray::<f64>()?;
 /// assert_eq!(result[[0, 0]], 1.0);
 /// assert_eq!(result[[0, 1]], 20.0);
 /// assert_eq!(result[[1, 0]], 30.0);
@@ -179,13 +175,15 @@ where
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.x.storage.spec()
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
+        self.x.storage._spec()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use super::{where_condition, Where};
     use crate::array::Array;
     use crate::util::{arr_params, ScalarStrategy};
@@ -211,15 +209,15 @@ mod tests {
                         let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
                             .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
                             .collect();
-                        let zcond = Array::from_ndarray(
+                        let zcond = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![8], cond).unwrap(),
                             arr_params(&[8]),
                         ).unwrap();
-                        let zx = Array::from_ndarray(
+                        let zx = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![8], x).unwrap(),
                             arr_params(&[8]),
                         ).unwrap();
-                        let zy = Array::from_ndarray(
+                        let zy = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![8], y).unwrap(),
                             arr_params(&[8]),
                         ).unwrap();
@@ -243,15 +241,15 @@ mod tests {
                         let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
                             .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
                             .collect();
-                        let zcond = Array::from_ndarray(
+                        let zcond = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![6], cond).unwrap(),
                             arr_params(&[2]),
                         ).unwrap();
-                        let zx = Array::from_ndarray(
+                        let zx = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![6], x).unwrap(),
                             arr_params(&[2]),
                         ).unwrap();
-                        let zy = Array::from_ndarray(
+                        let zy = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![6], y).unwrap(),
                             arr_params(&[2]),
                         ).unwrap();
@@ -275,15 +273,15 @@ mod tests {
                         let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
                             .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
                             .collect();
-                        let zcond = Array::from_ndarray(
+                        let zcond = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![3, 4], cond).unwrap(),
                             arr_params(&[3, 4]),
                         ).unwrap();
-                        let zx = Array::from_ndarray(
+                        let zx = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![3, 4], x).unwrap(),
                             arr_params(&[3, 4]),
                         ).unwrap();
-                        let zy = Array::from_ndarray(
+                        let zy = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![3, 4], y).unwrap(),
                             arr_params(&[3, 4]),
                         ).unwrap();
@@ -307,15 +305,15 @@ mod tests {
                         let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
                             .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
                             .collect();
-                        let zcond = Array::from_ndarray(
+                        let zcond = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![4, 4], cond).unwrap(),
                             arr_params(&[2, 2]),
                         ).unwrap();
-                        let zx = Array::from_ndarray(
+                        let zx = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![4, 4], x).unwrap(),
                             arr_params(&[2, 2]),
                         ).unwrap();
-                        let zy = Array::from_ndarray(
+                        let zy = Array::compact_array_with(
                             &ndarray::ArrayD::from_shape_vec(vec![4, 4], y).unwrap(),
                             arr_params(&[2, 2]),
                         ).unwrap();
@@ -355,50 +353,33 @@ mod tests {
 
     #[test]
     fn condition_not_bool_fails() {
-        let cond = Array::from_ndarray(
-            &ndarray::array![0i32, 1, 0].into_dyn(),
-            arr_params(&[3]),
-        )
-        .unwrap();
-        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3].into_dyn(), arr_params(&[3])).unwrap();
-        let y = Array::from_ndarray(&ndarray::array![4i32, 5, 6].into_dyn(), arr_params(&[3])).unwrap();
+        let cond = Array::compact_array(&array![0i32, 1, 0]).unwrap();
+        let x = Array::compact_array(&array![1i32, 2, 3]).unwrap();
+        let y = Array::compact_array(&array![4i32, 5, 6]).unwrap();
         assert!(Where::new(cond, x, y).is_err());
     }
 
     #[test]
     fn x_y_dtype_mismatch_fails() {
-        let cond = Array::from_ndarray(
-            &ndarray::array![true, false, true].into_dyn(),
-            arr_params(&[3]),
-        )
-        .unwrap();
-        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3].into_dyn(), arr_params(&[3])).unwrap();
-        let y =
-            Array::from_ndarray(&ndarray::array![4.0f64, 5.0, 6.0].into_dyn(), arr_params(&[3])).unwrap();
+        let cond = Array::compact_array(&array![true, false, true]).unwrap();
+        let x = Array::compact_array(&array![1i32, 2, 3]).unwrap();
+        let y = Array::compact_array(&array![4.0f64, 5.0, 6.0]).unwrap();
         assert!(Where::new(cond, x, y).is_err());
     }
 
     #[test]
     fn shape_mismatch_condition_vs_x_fails() {
-        let cond = Array::from_ndarray(
-            &ndarray::array![true, false].into_dyn(),
-            arr_params(&[2]),
-        )
-        .unwrap();
-        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3].into_dyn(), arr_params(&[3])).unwrap();
-        let y = Array::from_ndarray(&ndarray::array![4i32, 5, 6].into_dyn(), arr_params(&[3])).unwrap();
+        let cond = Array::compact_array(&array![true, false]).unwrap();
+        let x = Array::compact_array(&array![1i32, 2, 3]).unwrap();
+        let y = Array::compact_array(&array![4i32, 5, 6]).unwrap();
         assert!(Where::new(cond, x, y).is_err());
     }
 
     #[test]
     fn shape_mismatch_x_vs_y_fails() {
-        let cond = Array::from_ndarray(
-            &ndarray::array![true, false, true].into_dyn(),
-            arr_params(&[3]),
-        )
-        .unwrap();
-        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3].into_dyn(), arr_params(&[3])).unwrap();
-        let y = Array::from_ndarray(&ndarray::array![4i32, 5].into_dyn(), arr_params(&[2])).unwrap();
+        let cond = Array::compact_array(&array![true, false, true]).unwrap();
+        let x = Array::compact_array(&array![1i32, 2, 3]).unwrap();
+        let y = Array::compact_array(&array![4i32, 5]).unwrap();
         assert!(Where::new(cond, x, y).is_err());
     }
 
@@ -406,28 +387,18 @@ mod tests {
 
     #[test]
     fn all_true_selects_x() {
-        let cond = Array::from_ndarray(
-            &ndarray::array![true, true, true, true].into_dyn(),
-            arr_params(&[4]),
-        )
-        .unwrap();
-        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3, 4].into_dyn(), arr_params(&[4])).unwrap();
-        let y =
-            Array::from_ndarray(&ndarray::array![10i32, 20, 30, 40].into_dyn(), arr_params(&[4])).unwrap();
+        let cond = Array::compact_array(&array![true, true, true, true]).unwrap();
+        let x = Array::compact_array(&array![1i32, 2, 3, 4]).unwrap();
+        let y = Array::compact_array(&array![10i32, 20, 30, 40]).unwrap();
         let result = where_condition(cond, x, y).to_ndarray::<i32>().unwrap();
         assert_eq!(result.as_slice().unwrap(), &[1, 2, 3, 4]);
     }
 
     #[test]
     fn all_false_selects_y() {
-        let cond = Array::from_ndarray(
-            &ndarray::array![false, false, false, false].into_dyn(),
-            arr_params(&[4]),
-        )
-        .unwrap();
-        let x = Array::from_ndarray(&ndarray::array![1i32, 2, 3, 4].into_dyn(), arr_params(&[4])).unwrap();
-        let y =
-            Array::from_ndarray(&ndarray::array![10i32, 20, 30, 40].into_dyn(), arr_params(&[4])).unwrap();
+        let cond = Array::compact_array(&array![false, false, false, false]).unwrap();
+        let x = Array::compact_array(&array![1i32, 2, 3, 4]).unwrap();
+        let y = Array::compact_array(&array![10i32, 20, 30, 40]).unwrap();
         let result = where_condition(cond, x, y).to_ndarray::<i32>().unwrap();
         assert_eq!(result.as_slice().unwrap(), &[10, 20, 30, 40]);
     }
@@ -442,29 +413,22 @@ mod tests {
             b: i32,
         }
 
-        let cond = Array::from_ndarray(
-            &ndarray::array![true, false, true].into_dyn(),
-            arr_params(&[3]),
-        )
+        let cond = Array::compact_array(&array![true, false, true]).unwrap();
+        let x = Array::compact_array(&array![
+            Pair { a: 1, b: 2 },
+            Pair { a: 3, b: 4 },
+            Pair { a: 5, b: 6 }
+        ])
         .unwrap();
-        let x = Array::from_ndarray(
-            &ndarray::array![Pair { a: 1, b: 2 }, Pair { a: 3, b: 4 }, Pair { a: 5, b: 6 }].into_dyn(),
-            arr_params(&[3]),
-        )
-        .unwrap();
-        let y = Array::from_ndarray(
-            &ndarray::array![
-                Pair { a: 10, b: 20 },
-                Pair { a: 30, b: 40 },
-                Pair { a: 50, b: 60 }
-            ]
-            .into_dyn(),
-            arr_params(&[3]),
-        )
+        let y = Array::compact_array(&array![
+            Pair { a: 10, b: 20 },
+            Pair { a: 30, b: 40 },
+            Pair { a: 50, b: 60 }
+        ])
         .unwrap();
         let result = where_condition(cond, x, y).to_ndarray::<Pair>().unwrap();
-        assert_eq!(result[0], Pair { a: 1, b: 2 });   // cond=true  → x
+        assert_eq!(result[0], Pair { a: 1, b: 2 }); // cond=true  → x
         assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false → y
-        assert_eq!(result[2], Pair { a: 5, b: 6 });   // cond=true  → x
+        assert_eq!(result[2], Pair { a: 5, b: 6 }); // cond=true  → x
     }
 }

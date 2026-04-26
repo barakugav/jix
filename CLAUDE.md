@@ -48,7 +48,7 @@ cargo run -p zix-pyo3 --bin gen_pyi
 
 The central type is `Array<S>` where `S` implements `ArrayStorage`:
 - `read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>`
-- `shape() -> &[u64]`, `dtype() -> &Dtype`, `spec() -> ArrayStorageSpec`
+- `shape() -> &[u64]`, `dtype() -> &Dtype`
 
 Storage backends: `PlainStorage`, `ScalarStorage`, `CompressedStorage`, `BlockStorage`.
 

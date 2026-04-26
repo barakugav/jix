@@ -83,12 +83,13 @@ pub enum Codec {
 /// ```
 /// use zix::{Array, ArrayParams};
 /// use zix::codec::EncoderParams;
+/// use ndarray::array;
 ///
-/// let data = ndarray::array![1.0f32, 2.0, 3.0, 4.0];
+/// let data = array![1.0f32, 2.0, 3.0, 4.0];
 /// let mut params = ArrayParams::new();
 /// // EncoderParams::default() is equivalent to EncoderParams::new()
 /// params.encoder_params(EncoderParams::new());
-/// let za = Array::from_ndarray(&data, params)?;
+/// let za = Array::compact_array_with(&data, params)?;
 /// # Ok::<(), zix::error::Error>(())
 /// ```
 ///
@@ -97,14 +98,15 @@ pub enum Codec {
 /// ```
 /// use zix::{Array, ArrayParams};
 /// use zix::codec::{EncoderParams, Filter};
+/// use ndarray::array;
 ///
-/// let data = ndarray::array![1.0f64, 2.0, 3.0, 4.0];
+/// let data = array![1.0f64, 2.0, 3.0, 4.0];
 /// let mut enc = EncoderParams::new();
 /// enc.level(15)?;  // slower encode, better ratio
 /// enc.filters(&[Filter::ByteShuffle])?;
 /// let mut params = ArrayParams::new();
 /// params.encoder_params(enc);
-/// let za = Array::from_ndarray(&data, params)?;
+/// let za = Array::compact_array_with(&data, params)?;
 /// # Ok::<(), zix::error::Error>(())
 /// ```
 #[derive(Clone, Debug)]
@@ -409,9 +411,9 @@ impl<'a> Decoder<'a> {
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
+/// use ndarray::array;
 ///
-/// let data = ndarray::array![1i32, 2, 3, 4];
-/// let za = Array::from_ndarray(&data, ArrayParams::new())?;
+/// let za = Array::compact_array(&array![1i32, 2, 3, 4])?;
 ///
 /// // read_ctx() inherits the decoder config from the array.
 /// let ctx = za.read_ctx();
@@ -427,7 +429,7 @@ impl<'a> Decoder<'a> {
 /// use zix::Array;
 /// use zix::codec::ReadContext;
 ///
-/// let za = Array::from_scalar(42i32, &[5])?;
+/// let za = Array::plain_scalar(42i32, &[5])?;
 /// let out = za.to_ndarray_sub::<i32>(&[0..3], &ReadContext::default())?;
 /// assert_eq!(out.as_slice().unwrap(), &[42, 42, 42]);
 /// # Ok::<(), zix::error::Error>(())

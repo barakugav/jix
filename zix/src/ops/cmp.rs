@@ -20,19 +20,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1i32, 2, 3];
-    /// let b = ndarray::array![1i32, 0, 3];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.equal(zb).to_ndarray::<bool>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1i32, 2, 3])?;
+    /// let b = Array::compact_array(&array![1i32, 0, 3])?;
+    /// let result = a.equal(b).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, true]);
     ///
     /// // NaN != NaN per IEEE 754.
-    /// let c = ndarray::array![f32::NAN, 1.0f32];
-    /// let d = ndarray::array![f32::NAN, 1.0f32];
-    /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
-    /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.equal(zd).to_ndarray::<bool>()?;
+    /// let c = Array::compact_array(&array![f32::NAN, 1.0f32])?;
+    /// let d = Array::compact_array(&array![f32::NAN, 1.0f32])?;
+    /// let result = c.equal(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -57,19 +55,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1i32, 2, 3];
-    /// let b = ndarray::array![1i32, 0, 3];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.not_equal(zb).to_ndarray::<bool>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1i32, 2, 3])?;
+    /// let b = Array::compact_array(&array![1i32, 0, 3])?;
+    /// let result = a.not_equal(b).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
     ///
     /// // NaN != NaN is true per IEEE 754.
-    /// let c = ndarray::array![f32::NAN, 1.0f32];
-    /// let d = ndarray::array![f32::NAN, 2.0f32];
-    /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
-    /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.not_equal(zd).to_ndarray::<bool>()?;
+    /// let c = Array::compact_array(&array![f32::NAN, 1.0f32])?;
+    /// let d = Array::compact_array(&array![f32::NAN, 2.0f32])?;
+    /// let result = c.not_equal(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -94,19 +90,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![3i32, 1, 2];
-    /// let b = ndarray::array![1i32, 1, 3];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.greater(zb).to_ndarray::<bool>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![3i32, 1, 2])?;
+    /// let b = Array::compact_array(&array![1i32, 1, 3])?;
+    /// let result = a.greater(b).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     ///
     /// // true > false for bool dtype.
-    /// let c = ndarray::array![true, false, true];
-    /// let d = ndarray::array![false, false, true];
-    /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
-    /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.greater(zd).to_ndarray::<bool>()?;
+    /// let c = Array::compact_array(&array![true, false, true])?;
+    /// let d = Array::compact_array(&array![false, false, true])?;
+    /// let result = c.greater(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -131,19 +125,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![3i32, 1, 2];
-    /// let b = ndarray::array![1i32, 1, 3];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.greater_equal(zb).to_ndarray::<bool>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![3i32, 1, 2])?;
+    /// let b = Array::compact_array(&array![1i32, 1, 3])?;
+    /// let result = a.greater_equal(b).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
     ///
     /// // true >= false and false >= false hold.
-    /// let c = ndarray::array![true, false, true];
-    /// let d = ndarray::array![false, false, true];
-    /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
-    /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.greater_equal(zd).to_ndarray::<bool>()?;
+    /// let c = Array::compact_array(&array![true, false, true])?;
+    /// let d = Array::compact_array(&array![false, false, true])?;
+    /// let result = c.greater_equal(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -168,19 +160,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1i32, 1, 3];
-    /// let b = ndarray::array![3i32, 1, 2];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.less(zb).to_ndarray::<bool>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1i32, 1, 3])?;
+    /// let b = Array::compact_array(&array![3i32, 1, 2])?;
+    /// let result = a.less(b).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     ///
     /// // false < true for bool dtype.
-    /// let c = ndarray::array![false, false, true];
-    /// let d = ndarray::array![true, false, true];
-    /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
-    /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.less(zd).to_ndarray::<bool>()?;
+    /// let c = Array::compact_array(&array![false, false, true])?;
+    /// let d = Array::compact_array(&array![true, false, true])?;
+    /// let result = c.less(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -205,19 +195,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1i32, 1, 3];
-    /// let b = ndarray::array![3i32, 1, 2];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.less_equal(zb).to_ndarray::<bool>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1i32, 1, 3])?;
+    /// let b = Array::compact_array(&array![3i32, 1, 2])?;
+    /// let result = a.less_equal(b).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
     ///
     /// // false <= true and true <= true hold.
-    /// let c = ndarray::array![false, false, true];
-    /// let d = ndarray::array![true, false, true];
-    /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
-    /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.less_equal(zd).to_ndarray::<bool>()?;
+    /// let c = Array::compact_array(&array![false, false, true])?;
+    /// let d = Array::compact_array(&array![true, false, true])?;
+    /// let result = c.less_equal(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -244,19 +232,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1i32, 5, 3];
-    /// let b = ndarray::array![4i32, 2, 3];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.maximum(zb).to_ndarray::<i32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1i32, 5, 3])?;
+    /// let b = Array::compact_array(&array![4i32, 2, 3])?;
+    /// let result = a.maximum(b).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 5, 3]);
     ///
     /// // NaN is propagated: if either operand is NaN the result is NaN.
-    /// let c = ndarray::array![f32::NAN, 1.0f32];
-    /// let d = ndarray::array![2.0f32, 3.0f32];
-    /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
-    /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.maximum(zd).to_ndarray::<f32>()?;
+    /// let c = Array::compact_array(&array![f32::NAN, 1.0f32])?;
+    /// let d = Array::compact_array(&array![2.0f32, 3.0f32])?;
+    /// let result = c.maximum(d).to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 3.0);
     /// # Ok::<(), zix::error::Error>(())
@@ -283,19 +269,17 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1i32, 5, 3];
-    /// let b = ndarray::array![4i32, 2, 3];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = za.minimum(zb).to_ndarray::<i32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1i32, 5, 3])?;
+    /// let b = Array::compact_array(&array![4i32, 2, 3])?;
+    /// let result = a.minimum(b).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
     ///
     /// // NaN is propagated: if either operand is NaN the result is NaN.
-    /// let c = ndarray::array![f32::NAN, 1.0f32];
-    /// let d = ndarray::array![2.0f32, 3.0f32];
-    /// let zc = Array::from_ndarray(&c, ArrayParams::new())?;
-    /// let zd = Array::from_ndarray(&d, ArrayParams::new())?;
-    /// let result = zc.minimum(zd).to_ndarray::<f32>()?;
+    /// let c = Array::compact_array(&array![f32::NAN, 1.0f32])?;
+    /// let d = Array::compact_array(&array![2.0f32, 3.0f32])?;
+    /// let result = c.minimum(d).to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 1.0);
     /// # Ok::<(), zix::error::Error>(())

@@ -33,17 +33,18 @@ where
 /// # Examples
 /// ```rust,ignore
 /// use zix::{Array, ArrayParams};
+/// use ndarray::array;
 ///
 /// #[derive(Copy, Clone, zix::dtype::Dtyped)]
 /// #[repr(C)]
 /// struct Point { x: i32, y: i32 }
 ///
-/// let pts = ndarray::array![
+/// let pts = array![
 ///     Point { x: 1, y: 10 },
 ///     Point { x: 2, y: 20 },
 ///     Point { x: 3, y: 30 },
-/// ].into_dyn();
-/// let za = Array::from_ndarray(&pts, ArrayParams::new())?;
+/// ];
+/// let za = Array::compact_array(&pts)?;
 /// let xs = za.dtype_sub_field("x").to_ndarray::<i32>()?;
 /// assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
 /// # Ok::<(), zix::error::Error>(())
@@ -116,7 +117,7 @@ where
     fn dtype(&self) -> &Dtype {
         &self.dst_dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.array.storage.spec()
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
+        self.array.storage._spec()
     }
 }

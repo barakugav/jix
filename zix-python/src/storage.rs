@@ -25,7 +25,7 @@ impl ArrayStorage for DynStorage {
         self.0.dtype()
     }
 
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.0.spec()
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
+        self.0._spec()
     }
 }

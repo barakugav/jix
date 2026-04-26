@@ -41,19 +41,19 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
-/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// use ndarray::array;
+///
+/// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
 ///
 /// // First two rows, last two columns
-/// let result = za.slice((0..2, 1..)).to_ndarray::<i32>()?;
+/// let result = a.slice((0..2, 1..)).to_ndarray::<i32>()?;
 /// assert_eq!(result.shape(), &[2, 2]);
 /// assert_eq!(result[[0, 0]], 2);
 /// assert_eq!(result[[1, 1]], 6);
 ///
 /// // Negative index: last row only
-/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-/// let result = za.slice(((-1i64..), ..)).to_ndarray::<i32>()?;
+/// let b = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
+/// let result = b.slice(((-1i64..), ..)).to_ndarray::<i32>()?;
 /// assert_eq!(result.shape(), &[1, 3]);
 /// assert_eq!(result[[0, 1]], 8);
 /// # Ok::<(), zix::error::Error>(())
@@ -250,10 +250,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.storage._spec()
         }
     }
 }
@@ -424,12 +424,12 @@ mod tests {
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<crate::storage::Compact> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(&[rows, cols])).unwrap()
+        Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
     fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<crate::storage::Compact> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(&[d0, d1, d2])).unwrap()
+        Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
     fn seq(n: usize) -> Vec<i32> {

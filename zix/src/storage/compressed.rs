@@ -66,7 +66,7 @@ macro_rules! impl_array_storage {
             fn dtype(&self) -> &Dtype {
                 self.0.blocks.dtype()
             }
-            fn spec(&self) -> ArrayStorageSpec<'_> {
+            fn _spec(&self) -> ArrayStorageSpec<'_> {
                 ArrayStorageSpec {
                     blocks_layout: &self.0.blocks_layout,
                     encoder_params: Some(&self.0.encoder_params),

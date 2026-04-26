@@ -30,18 +30,18 @@ use crate::NDIM_MAX;
 /// # Examples
 /// ```
 /// use zix::{Array, ArrayParams};
-/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
+/// use ndarray::array;
+///
+/// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
 ///
 /// // Flatten [2, 3] → [6]
-/// let flat = za.reshape_view(&[6]);
+/// let flat = a.reshape_view(&[6]);
 /// assert_eq!(flat.shape(), &[6]);
 /// assert_eq!(flat.to_ndarray::<i32>()?.as_slice().unwrap(), &[1, 2, 3, 4, 5, 6]);
 ///
 /// // Reshape [6] → [3, 2]
-/// let b = ndarray::array![1i32, 2, 3, 4, 5, 6];
-/// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-/// let result = zb.reshape_view(&[3, 2]).to_ndarray::<i32>()?;
+/// let b = Array::compact_array(&array![1i32, 2, 3, 4, 5, 6])?;
+/// let result = b.reshape_view(&[3, 2]).to_ndarray::<i32>()?;
 /// assert_eq!(result.shape(), &[3, 2]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -354,10 +354,10 @@ where
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.storage._spec()
         }
     }
 }
@@ -379,7 +379,7 @@ mod tests {
         block_size: usize,
     ) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(&[block_size])).unwrap()
+        Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
     /// Create a 2-D Array<Compact>.
@@ -390,7 +390,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(block_shape)).unwrap()
+        Array::compact_array_with(&nd, arr_params(block_shape)).unwrap()
     }
 
     /// Create a 3-D Array<Compact>.
@@ -402,7 +402,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(block_shape)).unwrap()
+        Array::compact_array_with(&nd, arr_params(block_shape)).unwrap()
     }
 
     fn u8s(n: usize) -> Vec<u8> {

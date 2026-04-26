@@ -394,19 +394,26 @@ mod tests {
     use pyo3::{Bound, IntoPyObject, Python};
     use zix_core::dtype::Dtyped;
     use zix_core::storage::Compact;
-    use zix_core::{Array as ZixArray, ArrayParams};
+    use zix_core::Array as ZixArray;
 
     use super::{Array, DynStorage};
 
-    fn make_py_array<'py, T: Dtyped>(py: Python<'py>, ndarray: &ArrayD<T>) -> Bound<'py, Array> {
-        let core = ZixArray::<Compact>::from_ndarray(ndarray, ArrayParams::default()).unwrap();
+    fn make_py_array<'py, T: Dtyped, D>(
+        py: Python<'py>,
+        ndarray: &ndarray::Array<T, D>,
+    ) -> Bound<'py, Array>
+    where
+        D: ndarray::Dimension,
+    {
+        let core = ZixArray::<Compact>::compact_array(ndarray).unwrap();
         let dyn_storage = DynStorage(Arc::new(core.into_storage()));
         Bound::new(py, Array::from_storage(dyn_storage)).unwrap()
     }
 
-    fn roundtrip<T>(original: &ArrayD<T>) -> ArrayD<T>
+    fn roundtrip<T, D>(original: &ndarray::Array<T, D>) -> ArrayD<T>
     where
         T: Dtyped + numpy::Element + Copy,
+        D: ndarray::Dimension,
     {
         // ndarray::Array -> zix_core::Array -> zix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
@@ -419,21 +426,20 @@ mod tests {
 
     #[test]
     fn test_numpy_f32_1d() {
-        let original: ArrayD<f32> = array![1.0f32, 2.0, 3.0, 4.0].into_dyn();
-        assert_eq!(roundtrip(&original), original);
+        let original = array![1.0f32, 2.0, 3.0, 4.0];
+        assert_eq!(roundtrip(&original), original.into_dyn());
     }
 
     #[test]
     fn test_numpy_f32_2d() {
-        let original: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
-        assert_eq!(roundtrip(&original), original);
+        let original = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
+        assert_eq!(roundtrip(&original), original.into_dyn());
     }
 
     #[test]
     fn test_numpy_f32_3d() {
         let data: Vec<f32> = (0..24).map(|x| x as f32).collect();
-        let original: ArrayD<f32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[2, 3, 4]), data).unwrap();
+        let original = ndarray::Array::from_shape_vec(IxDyn(&[2, 3, 4]), data).unwrap();
         assert_eq!(roundtrip(&original), original);
     }
 
@@ -447,8 +453,7 @@ mod tests {
 
     #[test]
     fn test_numpy_i32_2d() {
-        let original: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[4, 5]), (0..20).collect()).unwrap();
+        let original = ndarray::Array::from_shape_vec(IxDyn(&[4, 5]), (0..20).collect()).unwrap();
         assert_eq!(roundtrip(&original), original);
     }
 
@@ -476,21 +481,20 @@ mod tests {
 
     #[test]
     fn test_numpy_bool_1d() {
-        let original: ArrayD<bool> = array![true, false, true, true, false, true].into_dyn();
-        assert_eq!(roundtrip(&original), original);
+        let original = array![true, false, true, true, false, true];
+        assert_eq!(roundtrip(&original), original.into_dyn());
     }
 
     #[test]
     fn test_numpy_large_values_f64() {
         // Verify large/negative values are transferred without corruption.
-        let original: ArrayD<f64> =
-            array![[f64::MAX, f64::MIN, -1.0], [0.0, 1.0, f64::INFINITY]].into_dyn();
-        assert_eq!(roundtrip(&original), original);
+        let original = array![[f64::MAX, f64::MIN, -1.0], [0.0, 1.0, f64::INFINITY]];
+        assert_eq!(roundtrip(&original), original.into_dyn());
     }
 
     #[test]
     fn test_numpy_shape_preserved() {
-        let original: ArrayD<f32> =
+        let original =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).map(|x| x as f32).collect())
                 .unwrap();
         Python::attach(|py| {
@@ -503,7 +507,7 @@ mod tests {
     #[test]
     fn test_numpy_dtype_preserved_f32() {
         use numpy::PyArrayDescrMethods;
-        let original: ArrayD<f32> = array![1.0f32, 2.0].into_dyn();
+        let original = array![1.0f32, 2.0];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
             let np = py_arr.borrow().numpy(py, None).unwrap();
@@ -515,7 +519,7 @@ mod tests {
     #[test]
     fn test_numpy_dtype_preserved_i32() {
         use numpy::PyArrayDescrMethods;
-        let original: ArrayD<i32> = array![1i32, 2, 3].into_dyn();
+        let original = array![1i32, 2, 3];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
             let np = py_arr.borrow().numpy(py, None).unwrap();
@@ -526,14 +530,14 @@ mod tests {
 
     #[test]
     fn test_numpy_single_element() {
-        let original: ArrayD<f64> = array![42.0f64].into_dyn();
-        assert_eq!(roundtrip(&original), original);
+        let original = array![42.0f64];
+        assert_eq!(roundtrip(&original), original.into_dyn());
     }
 
     #[test]
     fn test_numpy_non_square_2d() {
         let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
-        let original: ArrayD<f32> = ndarray::Array::from_shape_vec(IxDyn(&[10, 10]), data).unwrap();
+        let original = ndarray::Array::from_shape_vec(IxDyn(&[10, 10]), data).unwrap();
         assert_eq!(roundtrip(&original), original);
     }
 
@@ -553,98 +557,98 @@ mod tests {
 
     #[test]
     fn test_add_f32() {
-        let a: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
-        let b: ArrayD<f32> = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]].into_dyn();
+        let a = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
+        let b = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]];
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
             eval::<f32>(Array::__add__(&a, &b).unwrap())
         });
-        assert_eq!(result, a + b);
+        assert_eq!(result, (a + b).into_dyn());
     }
 
     #[test]
     fn test_sub_f32() {
-        let a: ArrayD<f32> = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]].into_dyn();
-        let b: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
+        let a = array![[10.0f32, 20.0, 30.0], [40.0, 50.0, 60.0]];
+        let b = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
             eval::<f32>(Array::__sub__(&a, &b).unwrap())
         });
-        assert_eq!(result, a - b);
+        assert_eq!(result, (a - b).into_dyn());
     }
 
     #[test]
     fn test_mul_f32() {
-        let a: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
-        let b: ArrayD<f32> = array![[2.0f32, 3.0, 4.0], [5.0, 6.0, 7.0]].into_dyn();
+        let a = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
+        let b = array![[2.0f32, 3.0, 4.0], [5.0, 6.0, 7.0]];
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
             eval::<f32>(Array::__mul__(&a, &b).unwrap())
         });
-        assert_eq!(result, a * b);
+        assert_eq!(result, (a * b).into_dyn());
     }
 
     #[test]
     fn test_div_f32() {
-        let a: ArrayD<f32> = array![[2.0f32, 6.0, 12.0], [20.0, 30.0, 42.0]].into_dyn();
-        let b: ArrayD<f32> = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]].into_dyn();
+        let a = array![[2.0f32, 6.0, 12.0], [20.0, 30.0, 42.0]];
+        let b = array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]];
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
             eval::<f32>(Array::__truediv__(&a, &b).unwrap())
         });
-        assert_eq!(result, a / b);
+        assert_eq!(result, (a / b).into_dyn());
     }
 
     #[test]
     fn test_add_f64() {
-        let a: ArrayD<f64> = array![1.0f64, 2.0, 3.0].into_dyn();
-        let b: ArrayD<f64> = array![0.5f64, 1.5, 2.5].into_dyn();
+        let a = array![1.0f64, 2.0, 3.0];
+        let b = array![0.5f64, 1.5, 2.5];
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
             eval::<f64>(Array::__add__(&a, &b).unwrap())
         });
-        assert_eq!(result, a + b);
+        assert_eq!(result, (a + b).into_dyn());
     }
 
     #[test]
     fn test_add_i32() {
-        let a: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
-        let b: ArrayD<i32> = array![[10i32, 20], [30, 40]].into_dyn();
+        let a = array![[1i32, 2], [3, 4]];
+        let b = array![[10i32, 20], [30, 40]];
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
             eval::<i32>(Array::__add__(&a, &b).unwrap())
         });
-        assert_eq!(result, a + b);
+        assert_eq!(result, (a + b).into_dyn());
     }
 
     #[test]
     fn test_sub_i32() {
-        let a: ArrayD<i32> = array![[10i32, 20], [30, 40]].into_dyn();
-        let b: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
+        let a = array![[10i32, 20], [30, 40]];
+        let b = array![[1i32, 2], [3, 4]];
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
             eval::<i32>(Array::__sub__(&a, &b).unwrap())
         });
-        assert_eq!(result, a - b);
+        assert_eq!(result, (a - b).into_dyn());
     }
 
     #[test]
     fn test_mul_i32() {
-        let a: ArrayD<i32> = array![[1i32, 2], [3, 4]].into_dyn();
-        let b: ArrayD<i32> = array![[5i32, 6], [7, 8]].into_dyn();
+        let a = array![[1i32, 2], [3, 4]];
+        let b = array![[5i32, 6], [7, 8]];
         let result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
             eval::<i32>(Array::__mul__(&a, &b).unwrap())
         });
-        assert_eq!(result, a * b);
+        assert_eq!(result, (a * b).into_dyn());
     }
 
     fn getitem<T>(py_arr: &Bound<'_, Array>, key: &Bound<'_, PyAny>) -> ArrayD<T>
@@ -662,8 +666,7 @@ mod tests {
 
     #[test]
     fn test_getitem_int_positive() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = 2i64.into_pyobject(py).unwrap().into_any();
@@ -675,8 +678,7 @@ mod tests {
 
     #[test]
     fn test_getitem_int_negative() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = (-1i64).into_pyobject(py).unwrap().into_any();
@@ -688,8 +690,7 @@ mod tests {
 
     #[test]
     fn test_getitem_int_out_of_bounds() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = 5i64.into_pyobject(py).unwrap().into_any();
@@ -700,8 +701,7 @@ mod tests {
 
     #[test]
     fn test_getitem_int_negative_out_of_bounds() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = (-6i64).into_pyobject(py).unwrap().into_any();
@@ -714,9 +714,8 @@ mod tests {
 
     #[test]
     fn test_getitem_slice_start_stop() {
-        let data: ArrayD<f32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
-                .unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
+            .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = PySlice::new(py, 1, 4, 1).into_any();
@@ -728,9 +727,8 @@ mod tests {
 
     #[test]
     fn test_getitem_slice_no_start() {
-        let data: ArrayD<f32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
-                .unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
+            .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = py.eval(c"slice(None, 3, None)", None, None).unwrap();
@@ -742,9 +740,8 @@ mod tests {
 
     #[test]
     fn test_getitem_slice_no_stop() {
-        let data: ArrayD<f32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
-                .unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).map(|x| x as f32).collect())
+            .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = py.eval(c"slice(2, None, None)", None, None).unwrap();
@@ -756,8 +753,7 @@ mod tests {
 
     #[test]
     fn test_getitem_slice_full() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = PySlice::full(py).into_any();
@@ -769,8 +765,7 @@ mod tests {
 
     #[test]
     fn test_getitem_slice_negative_start() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = py.eval(c"slice(-3, None, None)", None, None).unwrap();
@@ -782,8 +777,7 @@ mod tests {
 
     #[test]
     fn test_getitem_slice_empty() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = PySlice::new(py, 2, 2, 1).into_any();
@@ -794,8 +788,7 @@ mod tests {
 
     #[test]
     fn test_getitem_slice_step_not_one_err() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = py.eval(c"slice(None, None, 2)", None, None).unwrap();
@@ -809,7 +802,7 @@ mod tests {
     #[test]
     fn test_getitem_2d_row_int() {
         // arr[0] on shape [2, 3] → first row, shape [3]
-        let data: ArrayD<f32> =
+        let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
         Python::attach(|py| {
@@ -824,7 +817,7 @@ mod tests {
     #[test]
     fn test_getitem_2d_element() {
         // arr[1, 2] on shape [2, 3] → scalar, shape []
-        let data: ArrayD<f32> =
+        let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
         Python::attach(|py| {
@@ -843,7 +836,7 @@ mod tests {
     #[test]
     fn test_getitem_2d_col() {
         // arr[:, 1] on shape [2, 3] → column 1, shape [2]
-        let data: ArrayD<f32> =
+        let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
         Python::attach(|py| {
@@ -862,7 +855,7 @@ mod tests {
     #[test]
     fn test_getitem_2d_subarray() {
         // arr[0:2, 1:3] on shape [3, 3] → shape [2, 2]
-        let data: ArrayD<f32> =
+        let data =
             ndarray::Array::from_shape_vec(IxDyn(&[3, 3]), (0..9).map(|x| x as f32).collect())
                 .unwrap();
         Python::attach(|py| {
@@ -886,8 +879,7 @@ mod tests {
     #[test]
     fn test_getitem_ellipsis_full() {
         // arr[...] → entire array unchanged
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = PyEllipsis::get(py).to_owned().into_any();
@@ -900,7 +892,7 @@ mod tests {
     #[test]
     fn test_getitem_ellipsis_prefix() {
         // arr[0, ...] on shape [2, 3] → row 0, shape [3]
-        let data: ArrayD<f32> =
+        let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
         Python::attach(|py| {
@@ -919,7 +911,7 @@ mod tests {
     #[test]
     fn test_getitem_ellipsis_suffix() {
         // arr[..., 0] on shape [2, 3] → column 0, shape [2]
-        let data: ArrayD<f32> =
+        let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
         Python::attach(|py| {
@@ -939,8 +931,7 @@ mod tests {
 
     #[test]
     fn test_getitem_too_many_indices_err() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let items: Vec<Bound<'_, PyAny>> = vec![
@@ -956,8 +947,7 @@ mod tests {
 
     #[test]
     fn test_getitem_multiple_ellipses_err() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let items: Vec<Bound<'_, PyAny>> = vec![
@@ -972,8 +962,7 @@ mod tests {
 
     #[test]
     fn test_getitem_invalid_type_err() {
-        let data: ArrayD<i32> =
-            ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
+        let data = ndarray::Array::from_shape_vec(IxDyn(&[5]), (0..5).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = "bad".into_pyobject(py).unwrap().into_any();
@@ -985,9 +974,9 @@ mod tests {
     #[test]
     fn test_ops_chained() {
         // (a + b) * c  computed both in zix and ndarray
-        let a: ArrayD<f32> = array![1.0f32, 2.0, 3.0, 4.0].into_dyn();
-        let b: ArrayD<f32> = array![4.0f32, 3.0, 2.0, 1.0].into_dyn();
-        let c: ArrayD<f32> = array![2.0f32, 2.0, 2.0, 2.0].into_dyn();
+        let a = array![1.0f32, 2.0, 3.0, 4.0];
+        let b = array![4.0f32, 3.0, 2.0, 1.0];
+        let c = array![2.0f32, 2.0, 2.0, 2.0];
         let zix_result = Python::attach(|py| {
             let a = make_py_array(py, &a);
             let b = make_py_array(py, &b);
@@ -1000,6 +989,6 @@ mod tests {
                 .unwrap(),
             )
         });
-        assert_eq!(zix_result, (a + b) * c);
+        assert_eq!(zix_result, ((a + b) * c).into_dyn());
     }
 }

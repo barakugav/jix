@@ -119,7 +119,7 @@ pub(crate) fn as_core_array<'py>(
 #[cfg(test)]
 mod tests {
     use ndarray::{array, Array0, ArrayD, IxDyn};
-    use numpy::{PyArray, PyArrayDyn};
+    use numpy::PyArray;
     use pyo3::prelude::*;
     use zix_core::dtype::{Complex, Dtyped};
 
@@ -262,37 +262,38 @@ mod tests {
 
     // ── multi-dimensional arrays ─────────────────────────────────────────────
 
-    fn npd<T>(py: Python<'_>, arr: ArrayD<T>) -> Bound<'_, PyAny>
+    fn npd<T, D>(py: Python<'_>, arr: ndarray::Array<T, D>) -> Bound<'_, PyAny>
     where
         T: numpy::Element,
+        D: ndarray::Dimension,
     {
-        PyArrayDyn::<T>::from_array(py, &arr).into_any()
+        PyArray::<T, D>::from_array(py, &arr).into_any()
     }
 
     #[test]
     fn test_1d_f32() {
         Python::attach(|py| {
-            let orig = array![1.0f32, 2.0, 3.0, 4.0].into_dyn();
+            let orig = array![1.0f32, 2.0, 3.0, 4.0];
             let data = collect::<f32>(&npd(py, orig.clone()));
-            assert_eq!(data, orig);
+            assert_eq!(data, orig.into_dyn());
         });
     }
 
     #[test]
     fn test_1d_i64() {
         Python::attach(|py| {
-            let orig = array![10i64, 20, 30].into_dyn();
+            let orig = array![10i64, 20, 30];
             let data = collect::<i64>(&npd(py, orig.clone()));
-            assert_eq!(data, orig);
+            assert_eq!(data, orig.into_dyn());
         });
     }
 
     #[test]
     fn test_2d_f64() {
         Python::attach(|py| {
-            let orig = array![[1.0f64, 2.0], [3.0, 4.0], [5.0, 6.0]].into_dyn();
+            let orig = array![[1.0f64, 2.0], [3.0, 4.0], [5.0, 6.0]];
             let data = collect::<f64>(&npd(py, orig.clone()));
-            assert_eq!(data, orig);
+            assert_eq!(data, orig.into_dyn());
         });
     }
 
@@ -332,7 +333,7 @@ mod tests {
     #[test]
     fn test_passthrough() {
         Python::attach(|py| {
-            let orig = array![1.0f32, 2.0].into_dyn();
+            let orig = array![1.0f32, 2.0];
             let arr1 = asarray(&npd(py, orig)).unwrap();
             let ptr1 = arr1.as_ptr();
             let arr2 = asarray(arr1.as_any()).unwrap();

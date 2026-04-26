@@ -39,15 +39,15 @@ where
 /// # Examples
 /// ```
 /// use zix::{Array, ArrayParams};
-/// let a = ndarray::array![1i32, 2, 3, 4];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-/// let result = za.map(|x: i32| x * x).to_ndarray::<i32>()?;
+/// use ndarray::array;
+///
+/// let a = Array::compact_array(&array![1i32, 2, 3, 4])?;
+/// let result = a.map(|x: i32| x * x).to_ndarray::<i32>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1, 4, 9, 16]);
 ///
 /// // Change element type in the mapping function
-/// let b = ndarray::array![0.0f32, 1.5, -2.0];
-/// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-/// let result = zb.map(|x: f32| x > 0.0).to_ndarray::<bool>()?;
+/// let b = Array::compact_array(&array![0.0f32, 1.5, -2.0])?;
+/// let result = b.map(|x: f32| x > 0.0).to_ndarray::<bool>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -131,65 +131,65 @@ where
     fn dtype(&self) -> &Dtype {
         &self.output_dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.array.storage.spec()
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
+        self.array.storage._spec()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use crate::array::Array;
     use crate::util::arr_params;
 
     #[test]
     fn map_same_type_1d() {
-        let a = ndarray::array![1i32, 2, 3, 4].into_dyn();
-        let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
+        let a = array![1i32, 2, 3, 4];
+        let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: i32| x * 2).to_ndarray::<i32>().unwrap();
-        assert_eq!(actual, a.mapv(|x| x * 2));
+        assert_eq!(actual, a.mapv(|x| x * 2).into_dyn());
     }
 
     #[test]
     fn map_same_type_multi_block() {
-        let a = ndarray::array![1i32, 2, 3, 4, 5, 6].into_dyn();
-        let za = Array::from_ndarray(&a, arr_params(&[2])).unwrap();
+        let a = array![1i32, 2, 3, 4, 5, 6];
+        let za = Array::compact_array_with(&a, arr_params(&[2])).unwrap();
         let actual = za.map(|x: i32| x + 10).to_ndarray::<i32>().unwrap();
-        assert_eq!(actual, a.mapv(|x| x + 10));
+        assert_eq!(actual, a.mapv(|x| x + 10).into_dyn());
     }
 
     #[test]
     fn map_type_change_i32_to_f64() {
-        let a = ndarray::array![1i32, 2, 3, 4].into_dyn();
-        let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
+        let a = array![1i32, 2, 3, 4];
+        let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: i32| x as f64 * 0.5).to_ndarray::<f64>().unwrap();
         let expected = a.mapv(|x| x as f64 * 0.5);
-        assert_eq!(actual, expected);
+        assert_eq!(actual, expected.into_dyn());
     }
 
     #[test]
     fn map_type_change_f32_to_bool() {
-        let a = ndarray::array![0.0f32, 1.0, -1.0, 0.0].into_dyn();
-        let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
+        let a = array![0.0f32, 1.0, -1.0, 0.0];
+        let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: f32| x != 0.0).to_ndarray::<bool>().unwrap();
         let expected = a.mapv(|x| x != 0.0);
-        assert_eq!(actual, expected);
+        assert_eq!(actual, expected.into_dyn());
     }
 
     #[test]
     fn map_2d_multi_block() {
-        let a = ndarray::Array::from_shape_fn(ndarray::IxDyn(&[3, 4]), |idx| {
-            (idx[0] * 4 + idx[1]) as i32
-        });
-        let za = Array::from_ndarray(&a, arr_params(&[2, 2])).unwrap();
+        let a = ndarray::Array::from_shape_fn((3, 4), |idx| (idx.0 * 4 + idx.1) as i32);
+        let za = Array::compact_array_with(&a, arr_params(&[2, 2])).unwrap();
         let actual = za.map(|x: i32| x * x).to_ndarray::<i32>().unwrap();
         let expected = a.mapv(|x| x * x);
-        assert_eq!(actual, expected);
+        assert_eq!(actual, expected.into_dyn());
     }
 
     #[test]
     fn map_output_dtype_is_r() {
-        let a = ndarray::array![1i32, 2, 3].into_dyn();
-        let za = Array::from_ndarray(&a, arr_params(&[3])).unwrap();
+        let a = array![1i32, 2, 3];
+        let za = Array::compact_array_with(&a, arr_params(&[3])).unwrap();
         let mapped = za.map(|x: i32| x as f64);
         use crate::dtype::Dtyped;
         assert_eq!(mapped.dtype(), &f64::DTYPE);
@@ -204,20 +204,19 @@ mod tests {
             y: i32,
         }
 
-        let a = ndarray::array![1i32, 2, 3, 4].into_dyn();
-        let za = Array::from_ndarray(&a, arr_params(&[4])).unwrap();
+        let a = array![1i32, 2, 3, 4];
+        let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
         let actual = za
             .map(|v: i32| Point { x: v, y: v * 10 })
             .to_ndarray::<Point>()
             .unwrap();
-        let expected = ndarray::array![
+        let expected = array![
             Point { x: 1, y: 10 },
             Point { x: 2, y: 20 },
             Point { x: 3, y: 30 },
             Point { x: 4, y: 40 },
-        ]
-        .into_dyn();
-        assert_eq!(actual, expected);
+        ];
+        assert_eq!(actual, expected.into_dyn());
     }
 
     #[test]
@@ -237,8 +236,8 @@ mod tests {
             norm_sq: i64,
         }
 
-        let a = ndarray::array![1i32, 2, 3, 4].into_dyn();
-        let za = Array::from_ndarray(&a, arr_params(&[2])).unwrap();
+        let a = array![1i32, 2, 3, 4];
+        let za = Array::compact_array_with(&a, arr_params(&[2])).unwrap();
         let actual = za
             .map(|v: i32| Small { x: v, y: v + 1 })
             .map(|s: Small| Big {
@@ -248,7 +247,7 @@ mod tests {
             })
             .to_ndarray::<Big>()
             .unwrap();
-        let expected = ndarray::array![
+        let expected = array![
             Big {
                 x: 1,
                 y: 2,
@@ -269,15 +268,14 @@ mod tests {
                 y: 5,
                 norm_sq: 41
             },
-        ]
-        .into_dyn();
-        assert_eq!(actual, expected);
+        ];
+        assert_eq!(actual, expected.into_dyn());
     }
 
     #[test]
     fn map_wrong_dtype_panics() {
-        let a = ndarray::array![1i32, 2, 3].into_dyn();
-        let za = Array::from_ndarray(&a, arr_params(&[3])).unwrap();
+        let a = array![1i32, 2, 3];
+        let za = Array::compact_array_with(&a, arr_params(&[3])).unwrap();
         // Constructing directly with wrong T should return Err
         let result = super::Map::new(za, |x: f32| x + 1.0);
         assert!(result.is_err());

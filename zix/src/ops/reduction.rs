@@ -220,10 +220,10 @@ where
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.storage._spec()
         }
     }
 }
@@ -421,20 +421,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Reduce all axes → scalar
-    /// let scalar = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let scalar = Array::compact_array(&nd)?
     ///     .max(&[0, 1], false).to_ndarray::<i32>()?;
     /// assert_eq!(scalar[[]], 6);
     ///
     /// // Reduce axis 0, keepdims=false → shape [3]
-    /// let col_max = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_max = Array::compact_array(&nd)?
     ///     .max(&[0], false).to_ndarray::<i32>()?;
     /// assert_eq!(col_max.as_slice().unwrap(), &[4, 5, 6]);
     ///
     /// // Reduce axis 0, keepdims=true → shape [1, 3]
-    /// let col_max_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_max_k = Array::compact_array(&nd)?
     ///     .max(&[0], true).to_ndarray::<i32>()?;
     /// assert_eq!(col_max_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
@@ -463,20 +465,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Reduce all axes → scalar
-    /// let scalar = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let scalar = Array::compact_array(&nd)?
     ///     .min(&[0, 1], false).to_ndarray::<i32>()?;
     /// assert_eq!(scalar[[]], 1);
     ///
     /// // Reduce axis 0, keepdims=false → shape [3]
-    /// let col_min = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_min = Array::compact_array(&nd)?
     ///     .min(&[0], false).to_ndarray::<i32>()?;
     /// assert_eq!(col_min.as_slice().unwrap(), &[1, 2, 3]);
     ///
     /// // Reduce axis 0, keepdims=true → shape [1, 3]
-    /// let col_min_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_min_k = Array::compact_array(&nd)?
     ///     .min(&[0], true).to_ndarray::<i32>()?;
     /// assert_eq!(col_min_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
@@ -505,20 +509,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 5, 3], [4, 2, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
     ///
     /// // Index of max along axis 1 (per row), keepdims=false → shape [2]
-    /// let idx = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let idx = Array::compact_array(&nd)?
     ///     .argmax(1, false).to_ndarray::<u64>()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[1, 2]); // max of row 0 at col 1, row 1 at col 2
     ///
     /// // Index of max along axis 0 (per column), keepdims=false → shape [3]
-    /// let col_idx = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_idx = Array::compact_array(&nd)?
     ///     .argmax(0, false).to_ndarray::<u64>()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[1, 0, 1]); // max of col 0 at row 1, col 1 at row 0, col 2 at row 1
     ///
     /// // keepdims=true → shape [2, 1]
-    /// let idx_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let idx_k = Array::compact_array(&nd)?
     ///     .argmax(1, true).to_ndarray::<u64>()?;
     /// assert_eq!(idx_k.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
@@ -554,20 +560,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 5, 3], [4, 2, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
     ///
     /// // Index of min along axis 1 (per row), keepdims=false → shape [2]
-    /// let idx = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let idx = Array::compact_array(&nd)?
     ///     .argmin(1, false).to_ndarray::<u64>()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[0, 1]); // min of row 0 at col 0, row 1 at col 1
     ///
     /// // Index of min along axis 0 (per column), keepdims=false → shape [3]
-    /// let col_idx = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_idx = Array::compact_array(&nd)?
     ///     .argmin(0, false).to_ndarray::<u64>()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[0, 1, 0]); // min of col 0 at row 0, col 1 at row 1, col 2 at row 0
     ///
     /// // keepdims=true → shape [2, 1]
-    /// let idx_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let idx_k = Array::compact_array(&nd)?
     ///     .argmin(1, true).to_ndarray::<u64>()?;
     /// assert_eq!(idx_k.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
@@ -607,20 +615,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Sum all elements → i64
-    /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let total = Array::compact_array(&nd)?
     ///     .sum(&[0, 1], false).to_ndarray::<i64>()?;
     /// assert_eq!(total[[]], 21);
     ///
     /// // Sum along axis 0, keepdims=false → shape [3]
-    /// let col_sums = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_sums = Array::compact_array(&nd)?
     ///     .sum(&[0], false).to_ndarray::<i64>()?;
     /// assert_eq!(col_sums.as_slice().unwrap(), &[5, 7, 9]);
     ///
     /// // Sum along axis 1, keepdims=true → shape [2, 1]
-    /// let row_sums = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let row_sums = Array::compact_array(&nd)?
     ///     .sum(&[1], true).to_ndarray::<i64>()?;
     /// assert_eq!(row_sums.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
@@ -655,20 +665,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Product of all elements → i64
-    /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let total = Array::compact_array(&nd)?
     ///     .product(&[0, 1], false).to_ndarray::<i64>()?;
     /// assert_eq!(total[[]], 720);
     ///
     /// // Product along axis 0, keepdims=false → shape [3]
-    /// let col_products = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_products = Array::compact_array(&nd)?
     ///     .product(&[0], false).to_ndarray::<i64>()?;
     /// assert_eq!(col_products.as_slice().unwrap(), &[4, 10, 18]);
     ///
     /// // Product along axis 1, keepdims=true → shape [2, 1]
-    /// let row_products = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let row_products = Array::compact_array(&nd)?
     ///     .product(&[1], true).to_ndarray::<i64>()?;
     /// assert_eq!(row_products.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
@@ -696,20 +708,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Mean of all elements → f64
-    /// let total = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let total = Array::compact_array(&nd)?
     ///     .mean(&[0, 1], false).to_ndarray::<f64>()?;
     /// assert_eq!(total[[]], 3.5);
     ///
     /// // Mean along axis 0, keepdims=false → shape [3]
-    /// let col_means = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_means = Array::compact_array(&nd)?
     ///     .mean(&[0], false).to_ndarray::<f64>()?;
     /// assert_eq!(col_means.as_slice().unwrap(), &[2.5, 3.5, 4.5]);
     ///
     /// // Mean along axis 0, keepdims=true → shape [1, 3]
-    /// let col_means_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_means_k = Array::compact_array(&nd)?
     ///     .mean(&[0], true).to_ndarray::<f64>()?;
     /// assert_eq!(col_means_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
@@ -750,20 +764,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Population variance (ddof=0) of all elements → f64
-    /// let var_all = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let var_all = Array::compact_array(&nd)?
     ///     .var(&[0, 1], false, 0.0).to_ndarray::<f64>()?;
     /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
     ///
     /// // Sample variance (ddof=1) along axis 0, keepdims=false → shape [3]
-    /// let col_vars = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_vars = Array::compact_array(&nd)?
     ///     .var(&[0], false, 1.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_vars.as_slice().unwrap(), &[4.5, 4.5, 4.5]);
     ///
     /// // Population variance along axis 0, keepdims=true → shape [1, 3]
-    /// let col_vars_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_vars_k = Array::compact_array(&nd)?
     ///     .var(&[0], true, 0.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_vars_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
@@ -793,20 +809,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Population std (ddof=0) of all elements → f64
-    /// let std_all = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let std_all = Array::compact_array(&nd)?
     ///     .std(&[0, 1], false, 0.0).to_ndarray::<f64>()?;
     /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
     ///
     /// // Sample std (ddof=1) along axis 0, keepdims=false → shape [3]
-    /// let col_stds = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_stds = Array::compact_array(&nd)?
     ///     .std(&[0], false, 1.0).to_ndarray::<f64>()?;
     /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
     ///
     /// // Population std along axis 0, keepdims=true → shape [1, 3]
-    /// let col_stds_k = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_stds_k = Array::compact_array(&nd)?
     ///     .std(&[0], true, 0.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_stds_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::error::Error>(())
@@ -907,20 +925,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[1i32, 0, 3], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[1i32, 0, 3], [4, 5, 6]];
     ///
     /// // All elements truthy? → false (contains a zero)
-    /// let all_true = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let all_true = Array::compact_array(&nd)?
     ///     .all(&[0, 1], false).to_ndarray::<bool>()?;
     /// assert_eq!(all_true[[]], false);
     ///
     /// // All truthy along axis 0, keepdims=false → shape [3]
-    /// let col_all = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_all = Array::compact_array(&nd)?
     ///     .all(&[0], false).to_ndarray::<bool>()?;
     /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
     ///
     /// // All truthy along axis 1, keepdims=true → shape [2, 1]
-    /// let row_all = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let row_all = Array::compact_array(&nd)?
     ///     .all(&[1], true).to_ndarray::<bool>()?;
     /// assert_eq!(row_all.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
@@ -949,20 +969,22 @@ define_reduction_op!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let nd = ndarray::array![[0i32, 0, 0], [4, 5, 6]];
+    /// use ndarray::array;
+    ///
+    /// let nd = array![[0i32, 0, 0], [4, 5, 6]];
     ///
     /// // Any element truthy? → true
-    /// let any_true = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let any_true = Array::compact_array(&nd)?
     ///     .any(&[0, 1], false).to_ndarray::<bool>()?;
     /// assert_eq!(any_true[[]], true);
     ///
     /// // Any truthy along axis 0, keepdims=false → shape [3]
-    /// let col_any = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let col_any = Array::compact_array(&nd)?
     ///     .any(&[0], false).to_ndarray::<bool>()?;
     /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
     ///
     /// // Any truthy along axis 1, keepdims=true → shape [2, 1]
-    /// let row_any = Array::from_ndarray(&nd, ArrayParams::new())?
+    /// let row_any = Array::compact_array(&nd)?
     ///     .any(&[1], true).to_ndarray::<bool>()?;
     /// assert_eq!(row_any.shape(), &[2, 1]);
     /// # Ok::<(), zix::error::Error>(())
@@ -1022,14 +1044,13 @@ mod tests {
     use crate::dtype::f16;
     #[cfg(feature = "num-complex")]
     use crate::dtype::Complex;
-    use crate::util::arr_params;
 
     fn make<T>(vals: Vec<T>, shape: &[usize]) -> Array<crate::storage::Compact>
     where
         T: Clone + crate::dtype::Dtyped,
     {
         let nd = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(shape)).unwrap()
+        Array::compact_array(&nd).unwrap()
     }
 
     fn seq(n: usize) -> Vec<i32> {
@@ -1053,7 +1074,7 @@ mod tests {
                 let n = row0.len();
                 let input: Vec<$in_ty> = row0.into_iter().chain(row1).collect();
                 let nd = ArrayD::<$in_ty>::from_shape_vec(vec![2, n], input).unwrap();
-                let a = Array::from_ndarray(&nd, crate::util::arr_params(&[2, n])).unwrap();
+                let a = Array::compact_array_with(&nd, crate::util::arr_params(&[2, n])).unwrap();
                 let got: ArrayD<$out_ty> = a.$method(&[0], false).to_ndarray().unwrap();
                 assert_eq!(
                     got,
@@ -1068,8 +1089,6 @@ mod tests {
     // -----------------------------------------------------------------------
 
     mod max {
-        use crate::util::arr_params;
-
         use super::*;
 
         #[test]
@@ -1093,7 +1112,7 @@ mod tests {
         #[test]
         fn shape_middle_axis_3d() {
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let a = Array::compact_array(&nd).unwrap();
             assert_eq!(a.max(&[1], false).shape(), &[2, 4]);
         }
 
@@ -1116,7 +1135,7 @@ mod tests {
         #[test]
         fn keepdims_shape_middle_3d() {
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let a = Array::compact_array(&nd).unwrap();
             assert_eq!(a.max(&[1], true).shape(), &[2, 1, 4]);
         }
 
@@ -1153,7 +1172,7 @@ mod tests {
         #[test]
         fn keepdims_read_3d_middle_axis() {
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let a = Array::compact_array(&nd).unwrap();
             let got: ArrayD<i32> = a.max(&[1], true).to_ndarray().unwrap();
             // same values as no-keepdims but shape [2,1,4]
             let expected: Vec<i32> = (0..2)
@@ -1204,7 +1223,7 @@ mod tests {
         fn read_3d_middle_axis() {
             // a[i,j,k] = i*12 + j*4 + k; max over j → i*12 + 8 + k
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let a = Array::compact_array(&nd).unwrap();
             let got: ArrayD<i32> = a.max(&[1], false).to_ndarray().unwrap();
             let expected: Vec<i32> = (0..2)
                 .flat_map(|i| (0..4).map(move |k| i * 12 + 8 + k))
@@ -1247,8 +1266,6 @@ mod tests {
     // -----------------------------------------------------------------------
 
     mod min {
-        use crate::util::arr_params;
-
         use super::*;
 
         #[test]
@@ -1287,7 +1304,7 @@ mod tests {
         fn read_3d_middle_axis() {
             // a[i,j,k] = i*12 + j*4 + k; min over j → i*12 + k  (j=0 is min)
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let a = Array::compact_array(&nd).unwrap();
             let got: ArrayD<i32> = a.min(&[1], false).to_ndarray().unwrap();
             let expected: Vec<i32> = (0..2)
                 .flat_map(|i| (0..4).map(move |k| i * 12 + k))
@@ -1783,7 +1800,7 @@ mod tests {
         #[test]
         fn keepdims_shape_middle_3d() {
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let a = Array::compact_array(&nd).unwrap();
             assert_eq!(a.argmax(1, true).shape(), &[2, 1, 4]);
         }
 
@@ -1853,7 +1870,7 @@ mod tests {
         fn read_3d_middle_axis() {
             // a[i,j,k] = i*12+j*4+k; max is always at j=2 → argmax=2
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let a = Array::compact_array(&nd).unwrap();
             let got: ArrayD<u64> = a.argmax(1, false).to_ndarray().unwrap();
             let expected = vec![2u64; 8];
             assert_eq!(got, ArrayD::from_shape_vec(vec![2, 4], expected).unwrap());
@@ -2093,7 +2110,7 @@ mod tests {
         fn read_3d_middle_axis() {
             // a[i,j,k] = i*12+j*4+k; min is always at j=0 → argmin=0
             let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::from_ndarray(&nd, arr_params(&[2, 3, 4])).unwrap();
+            let a = Array::compact_array(&nd).unwrap();
             let got: ArrayD<u64> = a.argmin(1, false).to_ndarray().unwrap();
             let expected = vec![0u64; 8];
             assert_eq!(got, ArrayD::from_shape_vec(vec![2, 4], expected).unwrap());

@@ -18,7 +18,7 @@ pub(crate) trait ArraySequenceImpl {
     ) -> Result<()>;
     fn shape(&self, arr: usize) -> &[u64];
     fn dtype(&self, arr: usize) -> &Dtype;
-    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_>;
+    fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_>;
 }
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
@@ -39,11 +39,12 @@ pub(crate) trait ArraySequenceImpl {
 /// Stack with a fixed-length array (homogeneous):
 ///
 /// ```
-/// use zix::{Array, ArrayParams, ops::stack};
+/// use zix::{Array, ArrayParams};
+/// use ndarray::array;
 ///
-/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3], ArrayParams::new())?;
-/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6], ArrayParams::new())?;
-/// let stacked = stack([a, b], 0);
+/// let a = Array::compact_array(&array![1i32, 2, 3])?;
+/// let b = Array::compact_array(&array![4i32, 5, 6])?;
+/// let stacked = zix::ops::stack([a, b], 0);
 /// assert_eq!(stacked.shape(), &[2, 3]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -51,14 +52,15 @@ pub(crate) trait ArraySequenceImpl {
 /// Stack a tuple of arrays with different storage types (heterogeneous):
 ///
 /// ```
-/// use zix::{Array, ArrayParams, ops::stack};
+/// use zix::{Array, ArrayParams};
+/// use ndarray::array;
 ///
-/// let a = Array::from_ndarray(&ndarray::array![1i32, 2, 3], ArrayParams::new())?;
-/// let b = Array::from_ndarray(&ndarray::array![4i32, 5, 6], ArrayParams::new())?;
+/// let a = Array::compact_array(&array![1i32, 2, 3])?;
+/// let b = Array::compact_array(&array![4i32, 5, 6])?;
 /// // Lazy view has a different storage type from the original Compact arrays,
 /// // but a tuple still implements ArraySequence.
 /// let c = a + 8;
-/// let stacked = stack((b, c), 0);
+/// let stacked = zix::ops::stack((b, c), 0);
 /// assert_eq!(stacked.shape(), &[2, 3]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -91,8 +93,8 @@ where
         self[arr].dtype()
     }
 
-    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].storage.spec()
+    fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].storage._spec()
     }
 }
 impl<S, const N: usize> ArraySequence for [Array<S>; N] where S: ArrayStorage {}
@@ -123,8 +125,8 @@ where
         self[arr].dtype()
     }
 
-    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].storage.spec()
+    fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].storage._spec()
     }
 }
 impl<S: ArrayStorage> ArraySequence for Vec<Array<S>> {}
@@ -155,8 +157,8 @@ where
         self[arr].dtype()
     }
 
-    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].storage.spec()
+    fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].storage._spec()
     }
 }
 impl<S: ArrayStorage> ArraySequence for &[Array<S>] {}
@@ -202,9 +204,9 @@ macro_rules! impl_array_sequence_for_tuple {
                 }
             }
 
-            fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+            fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
                 match arr {
-                    $($idx => self.$idx.storage.spec(),)+
+                    $($idx => self.$idx.storage._spec(),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }

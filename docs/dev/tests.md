@@ -215,7 +215,7 @@ mod tests {
                             <$dtype as ScalarStrategy>::op_safe_strategy(), 4usize,
                         )
                     ) {
-                        let a = Array::from_ndarray(
+                        let a = Array::compact_array_with(
                             &ArrayD::from_shape_vec(vec![4], vals.clone()).unwrap(),
                             arr_params(&[4]),
                         ).unwrap();
@@ -249,7 +249,7 @@ in `ops/reduction.rs` and `ops/shape_ops/`:
 ```rust
 fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Compact> {
     let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
-    Array::from_ndarray(&nd, arr_params(shape)).unwrap()
+    Array::compact_array(&nd).unwrap()
 }
 
 fn seq(n: usize) -> Vec<i32> {

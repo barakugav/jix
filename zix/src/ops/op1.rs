@@ -142,8 +142,8 @@ where
     fn dtype(&self) -> &Dtype {
         &self.output_dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.array.storage.spec()
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
+        self.array.storage._spec()
     }
 }
 
@@ -335,15 +335,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1.0f32, -2.5, 3.0];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = (-za).to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1.0f32, -2.5, 3.0])?;
+    /// let result = (-a).to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-1.0, 2.5, -3.0]);
     ///
     /// // Negating i8::MIN wraps in release builds (two's complement overflow).
-    /// let b = ndarray::array![0i8, 1, -1];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = (-zb).to_ndarray::<i8>()?;
+    /// let b = Array::compact_array(&array![0i8, 1, -1])?;
+    /// let result = (-b).to_ndarray::<i8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0, -1, 1]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -367,15 +367,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1.1f32, 2.9, 3.0];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.floor().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1.1f32, 2.9, 3.0])?;
+    /// let result = a.floor().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, 2.0, 3.0]);
     ///
     /// // Floor rounds towards −∞, so negative values floor down.
-    /// let b = ndarray::array![-1.1f32, -2.9, -3.0];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.floor().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![-1.1f32, -2.9, -3.0])?;
+    /// let result = b.floor().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-2.0, -3.0, -3.0]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -397,15 +397,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1.1f32, 2.0, 3.9];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.ceil().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1.1f32, 2.0, 3.9])?;
+    /// let result = a.ceil().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[2.0, 2.0, 4.0]);
     ///
     /// // Ceil rounds towards +∞, so negative values ceil up.
-    /// let b = ndarray::array![-1.7f32, -2.0, -0.1];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.ceil().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![-1.7f32, -2.0, -0.1])?;
+    /// let result = b.ceil().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-1.0, -2.0, 0.0]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -431,15 +431,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1.4f32, 1.6, 2.0];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.round().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1.4f32, 1.6, 2.0])?;
+    /// let result = a.round().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, 2.0, 2.0]);
     ///
     /// // Ties are broken away from zero: 0.5 → 1.0, -0.5 → -1.0.
-    /// let b = ndarray::array![0.5f32, -0.5];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.round().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![0.5f32, -0.5])?;
+    /// let result = b.round().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -462,15 +462,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![4.0f32, 9.0, 16.0];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.sqrt().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![4.0f32, 9.0, 16.0])?;
+    /// let result = a.sqrt().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[2.0, 3.0, 4.0]);
     ///
     /// // Negative input produces NaN.
-    /// let b = ndarray::array![-1.0f32];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.sqrt().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![-1.0f32])?;
+    /// let result = b.sqrt().to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -492,15 +492,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1.0f32, 2.0, 3.0];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.exp().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1.0f32, 2.0, 3.0])?;
+    /// let result = a.exp().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - std::f32::consts::E).abs() < 1e-5);
     ///
     /// // exp(0.0) = 1.0 and exp(1.0) ≈ e.
-    /// let b = ndarray::array![0.0f32, 1.0];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.exp().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![0.0f32, 1.0])?;
+    /// let result = b.exp().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 1.0);
     /// assert!((result[[1]] - std::f32::consts::E).abs() < 1e-5);
     /// # Ok::<(), zix::error::Error>(())
@@ -527,16 +527,16 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.ln().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E])?;
+    /// let result = a.ln().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - 0.0).abs() < 1e-5);
     /// assert!((result[[1]] - 1.0).abs() < 1e-5);
     ///
     /// // Zero produces -inf; negative input produces NaN.
-    /// let b = ndarray::array![0.0f32, -1.0];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.ln().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![0.0f32, -1.0])?;
+    /// let result = b.ln().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], f32::NEG_INFINITY);
     /// assert!(result[[1]].is_nan());
     /// # Ok::<(), zix::error::Error>(())
@@ -559,15 +559,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![std::f32::consts::FRAC_PI_2, std::f32::consts::PI];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.sin().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![std::f32::consts::FRAC_PI_2, std::f32::consts::PI])?;
+    /// let result = a.sin().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - 1.0).abs() < 1e-5);
     ///
     /// // sin(0.0) = 0.0.
-    /// let b = ndarray::array![0.0f32];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.sin().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![0.0f32])?;
+    /// let result = b.sin().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 0.0);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -589,16 +589,16 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![0.0f32, std::f32::consts::PI];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.cos().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![0.0f32, std::f32::consts::PI])?;
+    /// let result = a.cos().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - 1.0).abs() < 1e-5);
     /// assert!((result[[1]] - (-1.0)).abs() < 1e-5);
     ///
     /// // cos(0.0) = 1.0.
-    /// let b = ndarray::array![0.0f32];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.cos().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![0.0f32])?;
+    /// let result = b.cos().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 1.0);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -620,15 +620,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_2 * 0.5];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.tan().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_2 * 0.5])?;
+    /// let result = a.tan().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - 1.0).abs() < 1e-5);
     ///
     /// // tan(0.0) = 0.0.
-    /// let b = ndarray::array![0.0f32];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.tan().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![0.0f32])?;
+    /// let result = b.tan().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 0.0);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -651,16 +651,16 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![0.0f32, 1.0, -1.0];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.asin().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![0.0f32, 1.0, -1.0])?;
+    /// let result = a.asin().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 0.0);
     /// assert!((result[[1]] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
     ///
     /// // Input outside [-1, 1] produces NaN.
-    /// let b = ndarray::array![2.0f32];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.asin().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![2.0f32])?;
+    /// let result = b.asin().to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -683,16 +683,16 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1.0f32, 0.0, -1.0];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.acos().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1.0f32, 0.0, -1.0])?;
+    /// let result = a.acos().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 0.0);
     /// assert!((result[[1]] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
     ///
     /// // Input outside [-1, 1] produces NaN.
-    /// let b = ndarray::array![2.0f32];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.acos().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![2.0f32])?;
+    /// let result = b.acos().to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -714,15 +714,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![0.0f32, -1.0, 1.0];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.atan().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![0.0f32, -1.0, 1.0])?;
+    /// let result = a.atan().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 0.0);
     ///
     /// // atan(1.0) = π/4.
-    /// let b = ndarray::array![1.0f32];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.atan().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![1.0f32])?;
+    /// let result = b.atan().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - std::f32::consts::FRAC_PI_4).abs() < 1e-5);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -747,15 +747,15 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![3.0f32, -5.0, -0.1];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.signum().to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![3.0f32, -5.0, -0.1])?;
+    /// let result = a.signum().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0, -1.0]);
     ///
     /// // Positive zero returns +1.0.
-    /// let b = ndarray::array![0.0f32];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.signum().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![0.0f32])?;
+    /// let result = b.signum().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 1.0);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -793,9 +793,10 @@ define_op1!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![-3i32, 0, 5, -7];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = za.abs().to_ndarray::<i32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![-3i32, 0, 5, -7])?;
+    /// let result = a.abs().to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[3, 0, 5, 7]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -804,11 +805,12 @@ define_op1!(
     /// # #[cfg(feature = "num-complex")]
     /// # {
     /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
     /// // For complex input the result is the modulus sqrt(re² + im²).
     /// use zix::dtype::Complex;
-    /// let b = ndarray::array![Complex { re: 3.0f32, im: 4.0 }];
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = zb.abs().to_ndarray::<f32>()?;
+    /// let b = Array::compact_array(&array![Complex { re: 3.0f32, im: 4.0 }])?;
+    /// let result = b.abs().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - 5.0).abs() < 1e-5);
     /// # }
     /// # Ok::<(), zix::error::Error>(())

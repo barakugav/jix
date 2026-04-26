@@ -123,9 +123,12 @@ pub trait ArrayStorage {
     /// Used internally by [`Array`](crate::Array) to propagate block geometry and codec
     /// parameters through lazy view operations and when re-encoding via `copy` / `copy_with`.
     /// Not intended to be called directly.
-    fn spec(&self) -> ArrayStorageSpec<'_>;
+    #[doc(hidden)]
+    #[allow(private_interfaces)]
+    fn _spec(&self) -> ArrayStorageSpec<'_>;
 }
-/// Metadata returned by [`ArrayStorage::spec`].
+
+/// Internal metadata of ArrayStorage.
 ///
 /// Carries the information [`Array`](crate::Array) needs when creating a new storage
 /// from an existing one — such as during `copy`, `copy_with`, and lazy view operations.
@@ -164,8 +167,8 @@ macro_rules! impl_array_storage_forward {
             fn dtype(&self) -> &crate::dtype::Dtype {
                 self.0.dtype()
             }
-            fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
-                self.0.spec()
+            fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
+                self.0._spec()
             }
         }
     };

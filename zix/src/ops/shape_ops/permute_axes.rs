@@ -22,10 +22,11 @@ use crate::Array;
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
+/// use ndarray::array;
+///
 /// // 2-D transpose: [2, 3] → [3, 2]
-/// let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-/// let t = za.permute_axes(&[1, 0]);
+/// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
+/// let t = a.permute_axes(&[1, 0]);
 /// assert_eq!(t.shape(), &[3, 2]);
 /// let result = t.to_ndarray::<i32>()?;
 /// assert_eq!(result[[0, 0]], 1);
@@ -33,9 +34,9 @@ use crate::Array;
 /// assert_eq!(result[[2, 1]], 6);
 ///
 /// // 3-D cyclic permutation [2, 3, 4] → [4, 2, 3]
-/// let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-/// let p = za.permute_axes(&[2, 0, 1]);
+/// let b = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
+/// let zb = Array::compact_array(&b)?;
+/// let p = zb.permute_axes(&[2, 0, 1]);
 /// assert_eq!(p.shape(), &[4, 2, 3]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -155,24 +156,25 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.storage._spec()
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use crate::array::Array;
-    use crate::util::arr_params;
 
     // 2D i32: transpose (axes=[1,0])
     #[test]
     fn test_i32_2d_transpose() {
-        let a = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
-        let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3])).unwrap();
+        let a = array![[1i32, 2, 3], [4, 5, 6]];
+        let za = Array::compact_array(&a).unwrap();
         let actual = za.permute_axes(&[1, 0]).to_ndarray::<i32>().unwrap();
         let expected = a
             .view()
@@ -186,8 +188,8 @@ mod tests {
     // 2D f32: transpose
     #[test]
     fn test_f32_2d_transpose() {
-        let a = ndarray::array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
-        let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[3, 2])).unwrap();
+        let a = array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
+        let za = Array::compact_array(&a).unwrap();
         let actual = za.permute_axes(&[1, 0]).to_ndarray::<f32>().unwrap();
         let expected = a
             .view()
@@ -202,7 +204,7 @@ mod tests {
     #[test]
     fn test_i32_3d_axes_2_0_1() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
-        let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
+        let za = Array::compact_array(&a).unwrap();
         let actual = za.permute_axes(&[2, 0, 1]).to_ndarray::<i32>().unwrap();
         let expected = a
             .view()
@@ -217,7 +219,7 @@ mod tests {
     #[test]
     fn test_i32_3d_axes_0_2_1() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
-        let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
+        let za = Array::compact_array(&a).unwrap();
         let actual = za.permute_axes(&[0, 2, 1]).to_ndarray::<i32>().unwrap();
         let expected = a
             .view()
@@ -232,7 +234,7 @@ mod tests {
     #[test]
     fn test_i32_3d_identity() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
-        let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 3, 4])).unwrap();
+        let za = Array::compact_array(&a).unwrap();
         let actual = za.permute_axes(&[0, 1, 2]).to_ndarray::<i32>().unwrap();
         assert_eq!(actual, a.into_dyn());
     }
@@ -241,8 +243,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_wrong_axes_length_panics() {
-        let a = ndarray::array![[1i32, 2], [3, 4]];
-        let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 2])).unwrap();
+        let a = array![[1i32, 2], [3, 4]];
+        let za = Array::compact_array(&a).unwrap();
         let _ = za.permute_axes(&[0, 1, 2]);
     }
 
@@ -250,8 +252,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_axis_out_of_bounds_panics() {
-        let a = ndarray::array![[1i32, 2], [3, 4]];
-        let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 2])).unwrap();
+        let a = array![[1i32, 2], [3, 4]];
+        let za = Array::compact_array(&a).unwrap();
         let _ = za.permute_axes(&[0, 5]);
     }
 
@@ -259,8 +261,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_duplicate_axis_panics() {
-        let a = ndarray::array![[1i32, 2], [3, 4]];
-        let za = Array::from_ndarray(&a.view().into_dyn(), arr_params(&[2, 2])).unwrap();
+        let a = array![[1i32, 2], [3, 4]];
+        let za = Array::compact_array(&a).unwrap();
         let _ = za.permute_axes(&[0, 0]);
     }
 }

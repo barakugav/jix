@@ -37,6 +37,13 @@ impl Array<Compact> {
         self.storage.0.blocks.write_content(&mut writer)
     }
 
+    pub fn read_from_file(path: &Path, offset: u64, len: u64, params: ArrayParams) -> Result<Self> {
+        let file = File::open(path).map_err(Error::io)?;
+        let mut reader = BufReader::new(file);
+        reader.seek(SeekFrom::Start(offset)).map_err(Error::io)?;
+        Self::read_from_reader(reader, len, params)
+    }
+
     pub fn read_from_reader<R>(reader: R, len: u64, params: ArrayParams) -> Result<Self>
     where
         R: Read + Seek,
@@ -157,13 +164,15 @@ where
 mod tests {
     use std::io::{Cursor, Seek, Write};
 
+    use ndarray::array;
+
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::arr_params;
     use crate::{Array, ArrayParams};
 
     // -----------------------------------------------------------------------
-    // from_ndarray roundtrip helper
+    // compact_array roundtrip helper
     // -----------------------------------------------------------------------
 
     // -----------------------------------------------------------------------
@@ -179,7 +188,7 @@ mod tests {
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension,
     {
-        let a = Array::from_ndarray(&src, arr_params(block_shape)).unwrap();
+        let a = Array::compact_array_with(&src, arr_params(block_shape)).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
         a.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
@@ -189,7 +198,7 @@ mod tests {
 
     #[test]
     fn write_read_1d_single_block() {
-        let src = ndarray::array![0u8, 1, 2, 3];
+        let src = array![0u8, 1, 2, 3];
         let a2 = array_round_trip::<u8, _, _>(&src, &[4]);
         assert_eq!(a2.shape(), &[4]);
         assert_eq!(a2.ndim(), 1);
@@ -199,7 +208,7 @@ mod tests {
 
     #[test]
     fn write_read_1d_multi_block() {
-        let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
+        let src = array![0u8, 1, 2, 3, 4, 5];
         let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
         assert_eq!(a2.shape(), &[6]);
         assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
@@ -208,7 +217,7 @@ mod tests {
     #[test]
     fn write_read_1d_with_padding() {
         // size 5, block 3 → padded to 6; shape is preserved as 5
-        let src = ndarray::array![0u8, 1, 2, 3, 4];
+        let src = array![0u8, 1, 2, 3, 4];
         let a2 = array_round_trip::<u8, _, _>(&src, &[3]);
         assert_eq!(a2.shape(), &[5]);
         assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
@@ -216,7 +225,7 @@ mod tests {
 
     #[test]
     fn write_read_1d_i32() {
-        let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
+        let src = array![0i32, 10, 20, 30, 40, 50, 60, 70];
         let a2 = array_round_trip::<i32, _, _>(&src, &[4]);
         assert_eq!(a2.dtype(), &i32::DTYPE);
         assert_eq!(a2.to_ndarray::<i32>().unwrap(), src.into_dyn());
@@ -224,7 +233,7 @@ mod tests {
 
     #[test]
     fn write_read_1d_f32() {
-        let src = ndarray::array![0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5];
+        let src = array![0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5];
         let a2 = array_round_trip::<f32, _, _>(&src, &[3]);
         assert_eq!(a2.dtype(), &f32::DTYPE);
         assert_eq!(a2.to_ndarray::<f32>().unwrap(), src.into_dyn());
@@ -233,7 +242,7 @@ mod tests {
     #[test]
     fn write_read_2d() {
         #[rustfmt::skip]
-        let src = ndarray::array![
+        let src = array![
             [0u8,  1,  2,  3,  4,  5],
             [6,    7,  8,  9, 10, 11],
             [12,  13, 14, 15, 16, 17],
@@ -249,7 +258,7 @@ mod tests {
     fn write_read_2d_with_padding() {
         // shape [3,5], block [2,3] → padded to [4,6]; shape preserved as [3,5]
         #[rustfmt::skip]
-        let src = ndarray::array![
+        let src = array![
             [0i32,  1,  2,  3,  4],
             [5,     6,  7,  8,  9],
             [10,   11, 12, 13, 14],
@@ -262,8 +271,8 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn write_read_file() {
-        let src = ndarray::array![0u32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-        let a = Array::from_ndarray(&src, arr_params(&[4])).unwrap();
+        let src = array![0u32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        let a = Array::compact_array_with(&src, arr_params(&[4])).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
         let path = tmp_file.path().to_path_buf();
@@ -283,10 +292,10 @@ mod tests {
         // Write three arrays with padding between them; read each back by seeking to its recorded offset.
         const PAD: usize = 177;
         // src0: 1D u8
-        let src0 = ndarray::array![0u8, 1, 2, 3];
+        let src0 = array![0u8, 1, 2, 3];
         // src1: 2D i32, shape [3, 4]
         #[rustfmt::skip]
-        let src1 = ndarray::array![
+        let src1 = array![
             [10i32, 20, 30, 40],
             [50,    60, 70, 80],
             [90,   100, 110, 120],
@@ -301,7 +310,7 @@ mod tests {
         let mut buf = Cursor::new(Vec::<u8>::new());
 
         // arr 0
-        let a0 = Array::from_ndarray(&src0, arr_params(&[4])).unwrap();
+        let a0 = Array::compact_array_with(&src0, arr_params(&[4])).unwrap();
         a0.write_to(&mut buf).unwrap();
         let len0 = buf.stream_position().unwrap();
         // pad
@@ -309,7 +318,7 @@ mod tests {
         let off1 = buf.stream_position().unwrap();
 
         // arr 1
-        let a1 = Array::from_ndarray(&src1, arr_params(&[2, 2])).unwrap();
+        let a1 = Array::compact_array_with(&src1, arr_params(&[2, 2])).unwrap();
         a1.write_to(&mut buf).unwrap();
         let len1 = buf.stream_position().unwrap() - off1;
         // pad
@@ -317,7 +326,7 @@ mod tests {
         let off2 = buf.stream_position().unwrap();
 
         // arr 2
-        let a2 = Array::from_ndarray(&src2, arr_params(&[1, 2, 3])).unwrap();
+        let a2 = Array::compact_array_with(&src2, arr_params(&[1, 2, 3])).unwrap();
         a2.write_to(&mut buf).unwrap();
         let len2 = buf.stream_position().unwrap() - off2;
 
@@ -370,7 +379,7 @@ mod tests {
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension,
     {
-        let a = Array::from_ndarray(&src, arr_params(block_shape)).unwrap();
+        let a = Array::compact_array_with(&src, arr_params(block_shape)).unwrap();
         let path = tmp_file.path().to_path_buf();
         a.write_to(std::fs::File::create(&path).unwrap()).unwrap();
         let len = std::fs::metadata(&path).unwrap().len();
@@ -389,7 +398,7 @@ mod tests {
     #[test]
     fn mmap_read_1d_single_block() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let src = ndarray::array![0u8, 1, 2, 3];
+        let src = array![0u8, 1, 2, 3];
         let a2 = array_mmap_round_trip::<u8, _, _>(&src, &[4], &tmp);
         assert_eq!(a2.shape(), &[4]);
         assert_eq!(a2.ndim(), 1);
@@ -401,7 +410,7 @@ mod tests {
     #[test]
     fn mmap_read_1d_multi_block() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let src = ndarray::array![0u8, 1, 2, 3, 4, 5];
+        let src = array![0u8, 1, 2, 3, 4, 5];
         let a2 = array_mmap_round_trip::<u8, _, _>(&src, &[3], &tmp);
         assert_eq!(a2.shape(), &[6]);
         assert_eq!(a2.to_ndarray::<u8>().unwrap(), src.into_dyn());
@@ -411,7 +420,7 @@ mod tests {
     #[test]
     fn mmap_read_1d_i32() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let src = ndarray::array![0i32, 10, 20, 30, 40, 50, 60, 70];
+        let src = array![0i32, 10, 20, 30, 40, 50, 60, 70];
         let a2 = array_mmap_round_trip::<i32, _, _>(&src, &[4], &tmp);
         assert_eq!(a2.dtype(), &i32::DTYPE);
         assert_eq!(a2.to_ndarray::<i32>().unwrap(), src.into_dyn());
@@ -422,7 +431,7 @@ mod tests {
     fn mmap_read_2d() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         #[rustfmt::skip]
-        let src = ndarray::array![
+        let src = array![
             [0u8,  1,  2,  3,  4,  5],
             [6,    7,  8,  9, 10, 11],
             [12,  13, 14, 15, 16, 17],
@@ -438,10 +447,10 @@ mod tests {
     #[test]
     fn mmap_read_nonzero_offset() {
         // Write two arrays back-to-back; read the second via its offset.
-        let src1 = ndarray::array![0u8, 1, 2, 3];
-        let src2 = ndarray::array![10u8, 11, 12, 13, 14, 15];
-        let a1 = Array::from_ndarray(&src1, arr_params(&[4])).unwrap();
-        let a2_arr = Array::from_ndarray(&src2, arr_params(&[3])).unwrap();
+        let src1 = array![0u8, 1, 2, 3];
+        let src2 = array![10u8, 11, 12, 13, 14, 15];
+        let a1 = Array::compact_array_with(&src1, arr_params(&[4])).unwrap();
+        let a2_arr = Array::compact_array_with(&src2, arr_params(&[3])).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
         let path = tmp_file.path().to_path_buf();

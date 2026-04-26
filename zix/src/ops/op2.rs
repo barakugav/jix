@@ -4,6 +4,7 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{f16, Complex, Dtype, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::ops::common::define_array_op2_method;
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
 use crate::util::DimArray;
 
@@ -195,8 +196,8 @@ where
     fn dtype(&self) -> &Dtype {
         &self.output_dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.a.storage.spec()
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
+        self.a.storage._spec()
     }
 }
 
@@ -238,7 +239,7 @@ macro_rules! define_op2 {
             #[doc = concat!("Applies the [`", stringify!($Name), "`] operation by broadcasting the scalar, see the op struct docs for details.")]
             #[track_caller]
             fn $op_fn(self, b: T) -> Array<$Name<S, crate::storage::Scalar<T>>> {
-                let b = Array::from_scalar(b, self.shape()).unwrap();
+                let b = Array::plain_scalar(b, self.shape()).unwrap();
                 let op = $Name::new(self, b).unwrap();
                 Array::from_storage(op)
             }
@@ -411,15 +412,15 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1i32, 2, 3];
-    /// let b = ndarray::array![10i32, 20, 30];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = (za + zb).to_ndarray::<i32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1i32, 2, 3])?;
+    /// let b = Array::compact_array(&array![10i32, 20, 30])?;
+    /// let result = (a + b).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[11, 22, 33]);
     ///
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = (za + 10i32).to_ndarray::<i32>()?;
+    /// let a = Array::compact_array(&array![1i32, 2, 3])?;
+    /// let result = (a + 10i32).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[11, 12, 13]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -449,15 +450,15 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![10i32, 20, 30];
-    /// let b = ndarray::array![1i32, 2, 3];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = (za - zb).to_ndarray::<i32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![10i32, 20, 30])?;
+    /// let b = Array::compact_array(&array![1i32, 2, 3])?;
+    /// let result = (a - b).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[9, 18, 27]);
     ///
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = (za - 5i32).to_ndarray::<i32>()?;
+    /// let a = Array::compact_array(&array![10i32, 20, 30])?;
+    /// let result = (a - 5i32).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[5, 15, 25]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -487,15 +488,15 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![1i32, 2, 3];
-    /// let b = ndarray::array![4i32, 5, 6];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = (za * zb).to_ndarray::<i32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![1i32, 2, 3])?;
+    /// let b = Array::compact_array(&array![4i32, 5, 6])?;
+    /// let result = (a * b).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 10, 18]);
     ///
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = (za * 3i32).to_ndarray::<i32>()?;
+    /// let a = Array::compact_array(&array![1i32, 2, 3])?;
+    /// let result = (a * 3i32).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[3, 6, 9]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -526,15 +527,15 @@ define_op2!(
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
-    /// let a = ndarray::array![10i32, 20, 30];
-    /// let b = ndarray::array![2i32, 4, 5];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = (za / zb).to_ndarray::<i32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![10i32, 20, 30])?;
+    /// let b = Array::compact_array(&array![2i32, 4, 5])?;
+    /// let result = (a / b).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[5, 5, 6]);
     ///
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let result = (za / 10i32).to_ndarray::<i32>()?;
+    /// let a = Array::compact_array(&array![10i32, 20, 30])?;
+    /// let result = (a / 10i32).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -559,19 +560,17 @@ define_op2!(
     /// ```
     /// use zix::{Array, ArrayParams};
     /// use zix::ops::Power;
-    /// let a = ndarray::array![2.0f32, 3.0, 4.0];
-    /// let b = ndarray::array![3.0f32, 2.0, 0.5];
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-    /// let result = Array::from_storage(Power::new(za, zb)?)
-    ///     .to_ndarray::<f32>()?;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![2.0f32, 3.0, 4.0])?;
+    /// let b = Array::compact_array(&array![3.0f32, 2.0, 0.5])?;
+    /// let result = a.powf(b).to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[8.0, 9.0, 2.0]);
     ///
     /// // Raise each element to a scalar exponent by broadcasting a scalar array.
-    /// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-    /// let exp = Array::from_scalar(2.0f32, &[3])?;
-    /// let result = Array::from_storage(Power::new(za, exp)?)
-    ///     .to_ndarray::<f32>()?;
+    /// let a = Array::compact_array(&array![2.0f32, 3.0, 4.0])?;
+    /// let exp = Array::plain_scalar(2.0f32, &[3])?;
+    /// let result = a.powf(exp).to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4.0, 9.0, 16.0]);
     /// # Ok::<(), zix::error::Error>(())
     /// ```
@@ -581,6 +580,13 @@ define_op2!(
     [f32, f64],
     output_type = "same"
 );
+
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    define_array_op2_method!(powf: Power);
+}
 
 #[cfg(test)]
 mod tests {
@@ -602,8 +608,8 @@ mod tests {
                         use crate::array::Array;
                         let b = ndarray::ArrayD::from_shape_vec(vec![4], b_vals).unwrap();
                         let a = ndarray::ArrayD::from_shape_vec(vec![4], a_extra_vals).unwrap() + &b;
-                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[4])).unwrap();
-                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[4])).unwrap();
+                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[4])).unwrap();
+                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[4])).unwrap();
                         let actual = (za $op zb).to_ndarray::<$dtype>().unwrap();
                         proptest::prop_assert_eq!(actual, &a $op &b);
                     }
@@ -620,8 +626,8 @@ mod tests {
                         use crate::array::Array;
                         let b = ndarray::ArrayD::from_shape_vec(vec![6], b_vals).unwrap();
                         let a = ndarray::ArrayD::from_shape_vec(vec![6], a_extra_vals).unwrap() + &b;
-                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[2])).unwrap();
-                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[2])).unwrap();
+                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[2])).unwrap();
+                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[2])).unwrap();
                         let actual = (za $op zb).to_ndarray::<$dtype>().unwrap();
                         proptest::prop_assert_eq!(actual, &a $op &b);
                     }
@@ -638,8 +644,8 @@ mod tests {
                         use crate::array::Array;
                         let b = ndarray::ArrayD::from_shape_vec(vec![2, 3], b_vals).unwrap();
                         let a = ndarray::ArrayD::from_shape_vec(vec![2, 3], a_extra_vals).unwrap() + &b;
-                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[2, 3])).unwrap();
-                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[2, 3])).unwrap();
+                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[2, 3])).unwrap();
+                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[2, 3])).unwrap();
                         let actual = (za $op zb).to_ndarray::<$dtype>().unwrap();
                         proptest::prop_assert_eq!(actual, &a $op &b);
                     }
@@ -656,8 +662,8 @@ mod tests {
                         use crate::array::Array;
                         let b = ndarray::ArrayD::from_shape_vec(vec![4, 4], b_vals).unwrap();
                         let a = ndarray::ArrayD::from_shape_vec(vec![4, 4], a_extra_vals).unwrap() + &b;
-                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[2, 2])).unwrap();
-                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[2, 2])).unwrap();
+                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[2, 2])).unwrap();
+                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[2, 2])).unwrap();
                         let actual = (za $op zb).to_ndarray::<$dtype>().unwrap();
                         proptest::prop_assert_eq!(actual, &a $op &b);
                     }
@@ -686,9 +692,9 @@ mod tests {
                         let c = ndarray::ArrayD::from_shape_vec(vec![4], c_vals).unwrap();
                         let b = ndarray::ArrayD::from_shape_vec(vec![4], b_vals).unwrap();
                         let a = ndarray::ArrayD::from_shape_vec(vec![4], a_extra_vals).unwrap() + &b + &c;
-                        let za = Array::from_ndarray(&a, crate::util::arr_params(&[4])).unwrap();
-                        let zb = Array::from_ndarray(&b, crate::util::arr_params(&[4])).unwrap();
-                        let zc = Array::from_ndarray(&c, crate::util::arr_params(&[4])).unwrap();
+                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[4])).unwrap();
+                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[4])).unwrap();
+                        let zc = Array::compact_array_with(&c, crate::util::arr_params(&[4])).unwrap();
                         let zab = za $op zb.as_ref();
                         let actual = (zab $op zc).to_ndarray::<$dtype>().unwrap();
                         proptest::prop_assert_eq!(actual, (&(&a $op &b) $op &c));
@@ -752,7 +758,7 @@ mod tests {
         ) {
             use crate::array::Array;
             let a = ndarray::ArrayD::from_shape_vec(vec![10, 10], vals).unwrap();
-            let za = Array::from_ndarray(&a, crate::util::arr_params(&[10, 10])).unwrap();
+            let za = Array::compact_array_with(&a, crate::util::arr_params(&[10, 10])).unwrap();
             let zb = za * 2.0f32 + 1.0f32;
             let actual = zb.to_ndarray::<f32>().unwrap();
             let expected = &a * 2.0 + 1.0;

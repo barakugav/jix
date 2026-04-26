@@ -10,6 +10,11 @@ use crate::Array;
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
+/// `Plain` is an adapter that allows non-compressed data to be used as the storage of an `Array`,
+/// in contrast to the main library [`Compact`](crate::storage::Compact) block-compressed storage.
+/// This storage is useful when regular ndarray objects need to behave like `Array`, for example
+/// to participate in math operations with compressed arrays.
+///
 /// `Plain<S>` holds a raw `*const u8` pointer into a buffer owned by `S`,
 /// together with a per-dimension shape and byte-stride description.  The
 /// buffer may be laid out in any order (C-contiguous, Fortran-contiguous,
@@ -20,9 +25,9 @@ use crate::Array;
 /// `S` alive alongside the pointer ensures the data remains valid.  Two
 /// concrete owners are provided:
 ///
-/// * `Plain<Vec<T>>` — owns the data (see [`Array::from_ndarray_plain`]).
+/// * `Plain<Vec<T>>` — owns the data (see [`Array::plain_ndarray`]).
 /// * `Plain<PlainRef<'a, T>>` — borrows from an `ndarray` view
-///   (see [`Array::from_ndarray_view_plain`]).
+///   (see [`Array::plain_ndarray_view`]).
 ///
 /// # Examples
 ///
@@ -30,15 +35,17 @@ use crate::Array;
 ///
 /// ```
 /// # use zix::{Array, ArrayParams};
-/// let nd_compact = ndarray::array![[1.0f32, 2.0], [3.0, 4.0]].into_dyn();
-/// let compact = Array::from_ndarray(&nd_compact, ArrayParams::new())?;
+/// use ndarray::array;
 ///
-/// let nd_plain = ndarray::array![[10.0f32, 20.0], [30.0, 40.0]].into_dyn();
-/// let plain = Array::from_ndarray_plain(nd_plain)?;
+/// let nd_compact = array![[1.0f32, 2.0], [3.0, 4.0]];
+/// let compact = Array::compact_array(&nd_compact)?;
+///
+/// let nd_plain = array![[10.0f32, 20.0], [30.0, 40.0]];
+/// let plain = Array::plain_ndarray(nd_plain)?;
 ///
 /// // The result is computed lazily — no data is read until to_ndarray() is called.
 /// let result = (compact + plain).to_ndarray::<f32>()?;
-/// assert_eq!(result, ndarray::array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
+/// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
 /// # Ok::<(), zix::error::Error>(())
 /// ```
 pub struct Plain<S> {
@@ -139,11 +146,14 @@ impl<T> Array<Plain<Vec<T>>> {
     /// memory layout (C-order, Fortran-order, transposed, etc.) and can handle
     /// non-contiguous strides.
     ///
+    /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
+    /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
+    ///
     /// # Errors
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim.
-    pub fn from_ndarray_plain<D>(arr: ndarray::Array<T, D>) -> Result<Self>
+    pub fn plain_ndarray<D>(arr: ndarray::Array<T, D>) -> Result<Self>
     where
         T: Dtyped,
         D: ndarray::Dimension,
@@ -177,7 +187,12 @@ impl<T> Array<Plain<Vec<T>>> {
 /// The lifetime `'a` ties the [`Plain`] storage to the ndarray it was created
 /// from, so the borrow checker prevents the underlying data from being freed
 /// while the `Plain` array is still alive.
-pub struct PlainRef<'a, T>(PhantomData<&'a T>);
+pub struct PlainRef<'a, A>(PhantomData<&'a A>);
+impl<'a, A> PlainRef<'a, A> {
+    pub(crate) fn new() -> Self {
+        Self(PhantomData)
+    }
+}
 
 impl<'a, T> Array<Plain<PlainRef<'a, T>>> {
     /// Create a [`Plain`] array that borrows from an ndarray view.
@@ -187,15 +202,18 @@ impl<'a, T> Array<Plain<PlainRef<'a, T>>> {
     /// ndarray (C-order, Fortran-order, non-contiguous slices, transposed
     /// views, etc.) is handled correctly.
     ///
+    /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
+    /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
+    ///
     /// # Errors
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim.
-    pub fn from_ndarray_view_plain<S, D>(arr: &ndarray::ArrayBase<S, D>) -> Result<Self>
+    pub fn plain_ndarray_view<S, D>(arr: &ndarray::ArrayBase<S, D>) -> Result<Self>
     where
-        T: Dtyped,
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension,
+        T: Dtyped,
     {
         let shape = arr.shape();
         check_ndim(shape.len())?;
@@ -209,7 +227,7 @@ impl<'a, T> Array<Plain<PlainRef<'a, T>>> {
             .collect::<DimArray<_>>();
 
         let data_ptr = arr.as_ptr().cast::<u8>();
-        let allocation = PlainRef(PhantomData);
+        let allocation = PlainRef::new();
 
         let storage = unsafe { Plain::new(allocation, data_ptr, &shape, &strides, T::DTYPE) }?;
         Ok(Self::from_storage(storage))
@@ -257,7 +275,7 @@ impl<S> ArrayStorage for Plain<S> {
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
             encoder_params: None,
@@ -269,54 +287,54 @@ impl<S> ArrayStorage for Plain<S> {
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{s, ArrayD, IxDyn};
+    use ndarray::{array, s, ArrayD};
 
     use crate::codec::ReadContext;
     use crate::Array;
 
     // -----------------------------------------------------------------------
-    // from_ndarray_plain (owned)
+    // plain_ndarray (owned)
     // -----------------------------------------------------------------------
 
     #[test]
     fn owned_1d_shape() {
-        let a = Array::from_ndarray_plain(ndarray::array![1i32, 2, 3].into_dyn()).unwrap();
+        let a = Array::plain_ndarray(array![1i32, 2, 3]).unwrap();
         assert_eq!(a.shape(), &[3u64]);
     }
 
     #[test]
     fn owned_1d_dtype_i32() {
         use crate::dtype::DtypeScalarKind;
-        let a = Array::from_ndarray_plain(ndarray::array![0i32].into_dyn()).unwrap();
+        let a = Array::plain_ndarray(array![0i32]).unwrap();
         assert_eq!(a.dtype().try_to_scalar(), Some(DtypeScalarKind::I32));
     }
 
     #[test]
     fn owned_1d_read_i32() {
-        let nd = ndarray::array![10i32, 20, 30].into_dyn();
-        let got: ArrayD<i32> = Array::from_ndarray_plain(nd.clone())
+        let nd = array![10i32, 20, 30];
+        let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray()
+            .to_ndarray::<i32>()
             .unwrap();
-        assert_eq!(got, nd);
+        assert_eq!(got, nd.into_dyn());
     }
 
     #[test]
     fn owned_2d_read_i32() {
-        let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]].into_dyn();
-        let got: ArrayD<i32> = Array::from_ndarray_plain(nd.clone())
+        let nd = array![[1i32, 2, 3], [4, 5, 6]];
+        let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray()
+            .to_ndarray::<i32>()
             .unwrap();
-        assert_eq!(got, nd);
+        assert_eq!(got, nd.into_dyn());
     }
 
     #[test]
     fn owned_2d_subregion_read() {
-        let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]].into_dyn();
-        let got: ArrayD<i32> = Array::from_ndarray_plain(nd.clone())
+        let nd = array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
+        let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
+            .to_ndarray_sub::<i32>(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
         assert_eq!(
             got,
@@ -326,83 +344,81 @@ mod tests {
 
     #[test]
     fn owned_3d_read_f32() {
-        let vals: Vec<f32> = (0..24).map(|x| x as f32).collect();
+        let vals = (0..24).map(|x| x as f32).collect::<Vec<_>>();
         let nd = ArrayD::from_shape_vec(vec![2, 3, 4], vals.clone()).unwrap();
-        let got: ArrayD<f32> = Array::from_ndarray_plain(nd.clone())
+        let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray()
+            .to_ndarray::<f32>()
             .unwrap();
         assert_eq!(got, nd);
     }
 
     #[test]
     fn owned_read_f64() {
-        let nd = ndarray::array![[1.0f64, 2.0], [3.0, 4.0]].into_dyn();
-        let got: ArrayD<f64> = Array::from_ndarray_plain(nd.clone())
+        let nd = array![[1.0f64, 2.0], [3.0, 4.0]];
+        let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray()
+            .to_ndarray::<f64>()
             .unwrap();
-        assert_eq!(got, nd);
+        assert_eq!(got, nd.into_dyn());
     }
 
     #[test]
     fn owned_read_bool() {
-        let nd = ndarray::array![[true, false], [false, true]].into_dyn();
-        let got: ArrayD<bool> = Array::from_ndarray_plain(nd.clone())
+        let nd = array![[true, false], [false, true]];
+        let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray()
+            .to_ndarray::<bool>()
             .unwrap();
-        assert_eq!(got, nd);
+        assert_eq!(got, nd.into_dyn());
     }
 
     // Non-contiguous (transposed) array — column-major strides
     #[test]
     fn owned_non_contiguous_transposed() {
-        let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]].into_dyn();
+        let nd = array![[1i32, 2, 3], [4, 5, 6]];
         let transposed = nd.clone().reversed_axes(); // shape [3,2], strides swapped
-        let got: ArrayD<i32> = Array::from_ndarray_plain(transposed.clone())
+        let got = Array::plain_ndarray(transposed.clone())
             .unwrap()
-            .to_ndarray()
+            .to_ndarray::<i32>()
             .unwrap();
-        assert_eq!(got, transposed);
+        assert_eq!(got, transposed.into_dyn());
     }
 
     // -----------------------------------------------------------------------
-    // from_ndarray_view_plain (borrowed)
+    // plain_ndarray_view (borrowed)
     // -----------------------------------------------------------------------
 
     #[test]
     fn view_1d_shape() {
-        let nd = ndarray::array![1i32, 2, 3].into_dyn();
-        let a =
-            Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&nd).unwrap();
+        let nd = array![1i32, 2, 3];
+        let a = Array::plain_ndarray_view(&nd).unwrap();
         assert_eq!(a.shape(), &[3u64]);
     }
 
     #[test]
     fn view_1d_read_i32() {
-        let nd = ndarray::array![10i32, 20, 30].into_dyn();
-        let a =
-            Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&nd).unwrap();
-        let got: ArrayD<i32> = a.to_ndarray().unwrap();
-        assert_eq!(got, nd);
+        let nd = array![10i32, 20, 30];
+        let a = Array::plain_ndarray_view(&nd).unwrap();
+        let got = a.to_ndarray::<i32>().unwrap();
+        assert_eq!(got, nd.into_dyn());
     }
 
     #[test]
     fn view_2d_read_i32() {
-        let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]].into_dyn();
-        let a =
-            Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&nd).unwrap();
-        let got: ArrayD<i32> = a.to_ndarray().unwrap();
-        assert_eq!(got, nd);
+        let nd = array![[1i32, 2, 3], [4, 5, 6]];
+        let a = Array::plain_ndarray_view(&nd).unwrap();
+        let got = a.to_ndarray::<i32>().unwrap();
+        assert_eq!(got, nd.into_dyn());
     }
 
     #[test]
     fn view_2d_subregion_read() {
-        let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]].into_dyn();
-        let a =
-            Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&nd).unwrap();
-        let got: ArrayD<i32> = a.to_ndarray_sub(&[1..3, 1..3], &a.read_ctx()).unwrap();
+        let nd = array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
+        let a = Array::plain_ndarray_view(&nd).unwrap();
+        let got = a
+            .to_ndarray_sub::<i32>(&[1..3, 1..3], &a.read_ctx())
+            .unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 2], vec![5i32, 6, 8, 9]).unwrap()
@@ -412,10 +428,9 @@ mod tests {
     #[test]
     fn view_non_contiguous_slice() {
         // Take every-other column via an ndarray slice, then read it back.
-        let nd = ndarray::array![[1i32, 2, 3, 4], [5, 6, 7, 8]].into_dyn();
-        let sliced = nd.slice(s![.., ..;2]).into_dyn(); // columns 0 and 2: [[1,3],[5,7]]
-        let a = Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&sliced)
-            .unwrap();
+        let nd = array![[1i32, 2, 3, 4], [5, 6, 7, 8]];
+        let sliced = nd.slice(s![.., ..;2]); // columns 0 and 2: [[1,3],[5,7]]
+        let a = Array::plain_ndarray_view(&sliced).unwrap();
         let got: ArrayD<i32> = a.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -425,9 +440,9 @@ mod tests {
 
     #[test]
     fn view_transposed_read() {
-        let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]].into_dyn();
-        let t = nd.t().into_dyn(); // shape [3, 2]
-        let a = Array::<crate::storage::Plain<_>>::from_ndarray_view_plain::<_, IxDyn>(&t).unwrap();
+        let nd = array![[1i32, 2, 3], [4, 5, 6]];
+        let t = nd.t(); // shape [3, 2]
+        let a = Array::plain_ndarray_view(&t).unwrap();
         let got: ArrayD<i32> = a.to_ndarray().unwrap();
         // t[[0,0]]=1, t[[0,1]]=4, t[[1,0]]=2, t[[1,1]]=5, t[[2,0]]=3, t[[2,1]]=6
         assert_eq!(
@@ -442,8 +457,8 @@ mod tests {
 
     #[test]
     fn max_over_plain_2d() {
-        let nd = ndarray::array![[1i32, 5, 3], [4, 2, 6]].into_dyn();
-        let got: ArrayD<i32> = Array::from_ndarray_plain(nd)
+        let nd = array![[1i32, 5, 3], [4, 2, 6]];
+        let got: ArrayD<i32> = Array::plain_ndarray(nd)
             .unwrap()
             .max(&[0], false)
             .to_ndarray()
@@ -456,8 +471,8 @@ mod tests {
 
     #[test]
     fn sum_over_plain_2d() {
-        let nd = ndarray::array![[1i32, 2, 3], [4, 5, 6]].into_dyn();
-        let got: ArrayD<i64> = Array::from_ndarray_plain(nd)
+        let nd = array![[1i32, 2, 3], [4, 5, 6]];
+        let got: ArrayD<i64> = Array::plain_ndarray(nd)
             .unwrap()
             .sum(&[1], false)
             .to_ndarray()

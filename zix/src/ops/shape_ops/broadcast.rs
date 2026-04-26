@@ -22,17 +22,17 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
+/// use ndarray::array;
+///
 /// // Row vector [1, 3] → matrix [2, 3]: every row is identical
-/// let a = ndarray::array![[1i32, 2, 3]];
-/// let za = Array::from_ndarray(&a, ArrayParams::new())?;
-/// let result = za.broadcast_view(&[2, 3]).to_ndarray::<i32>()?;
+/// let a = Array::compact_array(&array![[1i32, 2, 3]])?;
+/// let result = a.broadcast_view(&[2, 3]).to_ndarray::<i32>()?;
 /// assert_eq!(result[[0, 0]], result[[1, 0]]);
 /// assert_eq!(result[[0, 2]], result[[1, 2]]);
 ///
 /// // Column vector [3, 1] → matrix [3, 2]: every column is identical
-/// let b = ndarray::array![[10i32], [20], [30]];
-/// let zb = Array::from_ndarray(&b, ArrayParams::new())?;
-/// let result = zb.broadcast_view(&[3, 2]).to_ndarray::<i32>()?;
+/// let b = Array::compact_array(&array![[10i32], [20], [30]])?;
+/// let result = b.broadcast_view(&[3, 2]).to_ndarray::<i32>()?;
 /// assert_eq!(result[[0, 0]], 10);
 /// assert_eq!(result[[0, 1]], 10);
 /// assert_eq!(result[[2, 0]], 30);
@@ -185,10 +185,10 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.storage._spec()
         }
     }
 }
@@ -199,11 +199,10 @@ mod tests {
 
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::util::arr_params;
 
     fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Compact> {
         let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
-        Array::from_ndarray(&nd, arr_params(shape)).unwrap()
+        Array::compact_array(&nd).unwrap()
     }
 
     fn seq(n: usize) -> Vec<i32> {

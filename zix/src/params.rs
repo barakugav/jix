@@ -1,7 +1,8 @@
 use crate::codec::{DecoderParams, EncoderParams};
-use crate::error::check_ndim;
+use crate::dtype::Dtype;
+use crate::error::{check_ndim, Result};
 use crate::storage::block::BlockSize;
-use crate::storage::{ArrayStorage, BlockShapeTag};
+use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
 use crate::util::DimArray;
 use crate::Array;
 
@@ -21,7 +22,7 @@ use crate::Array;
 ///
 /// # When are params applied?
 ///
-/// - When a new array is constructed, such as via [`Array::from_ndarray`]: the data is split into
+/// - When a new array is constructed, such as via [`Array::compact_array`]: the data is split into
 ///   blocks according to the block layout params, and each block is compressed using the encoder
 ///   params before being written to storage.
 /// - When an array is accessed for read, such as via [`Array::to_ndarray`]: each compressed block
@@ -52,13 +53,13 @@ use crate::Array;
 /// let data = ndarray::Array2::<f32>::zeros((1024, 1024));
 /// let mut params = ArrayParams::new();
 /// params.block_shape(&[64, 64]);
-/// let za = Array::from_ndarray(&data, params)?;
+/// let za = Array::compact_array_with(&data, params)?;
 ///
 /// // After a shape-changing op, pin the block shape explicitly.
 /// let mut out_params = ArrayParams::new();
 /// out_params.block_shape(&[128, 128]);
 /// let ctx = za.read_ctx();
-/// let transposed = za.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
+/// let transposed = a.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
 /// # Ok::<(), zix::error::Error>(())
 /// ```
 #[derive(Clone, Default, Debug)]
@@ -237,9 +238,9 @@ impl ArrayParams {
     ///
     /// ```
     /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
     ///
-    /// let data = ndarray::array![1i32, 2, 3, 4, 5, 6, 7, 8];
-    /// let source = Array::from_ndarray(&data, ArrayParams::new())?;
+    /// let source = Array::compact_array(&array![1i32, 2, 3, 4, 5, 6, 7, 8])?;
     ///
     /// // Override just the block shape; inherit codec params from `source`.
     /// let mut params = ArrayParams::new();
@@ -257,7 +258,7 @@ impl ArrayParams {
     }
 
     pub(crate) fn override_from_storage(&mut self, storage: &impl ArrayStorage) {
-        let spec = storage.spec();
+        let spec = storage._spec();
         self.encoder_params
             .get_or_insert_with(|| spec.encoder_params.cloned().unwrap_or_default());
         self.decoder_params
@@ -274,5 +275,23 @@ impl ArrayParams {
             .get_or_insert_with(|| blocks_layout.preferred_read_shape.clone());
         self.preferred_read_size_hint
             .get_or_insert(blocks_layout.preferred_read_size_hint);
+    }
+
+    pub(crate) fn tune(&mut self, shape: &[u64], dtype: &Dtype) -> Result<()> {
+        let b_layout = BlocksLayout::new(
+            self.block_shape.clone(),
+            self.block_shape_tag.clone(),
+            self.block_size_hint,
+            self.preferred_read_shape.clone(),
+            self.preferred_read_size_hint,
+            shape,
+            dtype.itemsize() as _,
+        )?;
+        self.block_shape = Some(b_layout.block_shape_hint);
+        self.block_shape_tag = Some(b_layout.block_shape_tag);
+        self.block_size_hint = Some(b_layout.block_size_hint);
+        self.preferred_read_shape = Some(b_layout.preferred_read_shape);
+        self.preferred_read_size_hint = Some(b_layout.preferred_read_size_hint);
+        Ok(())
     }
 }
