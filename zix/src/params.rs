@@ -59,7 +59,7 @@ use crate::Array;
 /// let mut out_params = ArrayParams::new();
 /// out_params.block_shape(&[128, 128]);
 /// let ctx = za.read_ctx();
-/// let transposed = a.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
+/// let transposed = za.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
 /// # Ok::<(), zix::error::Error>(())
 /// ```
 #[derive(Clone, Default, Debug)]

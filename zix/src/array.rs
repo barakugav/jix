@@ -11,12 +11,192 @@ use crate::util::iter::NdIter;
 use crate::util::{cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray};
 use crate::ArrayParams;
 
+/// A multi-dimensional array, usually compressed, backed by a generic storage.
+///
+/// `Array<S>` is the central type in zix. It behave like a regular n-dimensional array, but
+/// its data is stored in a compressed format and decoded on demand. Its core functionality is
+/// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype),
+/// and [`to_ndarray_buf()`](Array::to_ndarray_buf), all other functions are built on top of those.
+///
+/// An array is generic over `S: ArrayStorage`, which provides the implementation of the three core
+/// methods. The main concrete storage backend is the block-compressed [`Compact`] type, which
+/// divides the array into n-dimensional blocks and compresses each block independently, and its
+/// the return type of the common creation methods for arrays
+/// (e.g.[`compact_array()`](Array::compact_array) and [`copy()`](Array::copy)).
+///
+/// # Storage variants
+///
+/// The primary concrete storages are:
+///
+/// | Type | Description |
+/// |------|-------------|
+/// | [`Array<Compact>`](crate::storage::Compact) | Heap-allocated block-compressed array. The main storage backend. |
+/// | [`Array<Add<S1, S2>> or Array<Neg<S>> ...`](crate::ops) | Lazy operations views that wrap one or more arrays and apply a transformation at read time. Created by methods in [`ops`](crate::ops). |
+/// | [`Array<Ref<'a, S>>`](crate::storage::Ref) | A reference to another storage, used to let multiple operations consume an array without cloning its storage. Created by [`as_ref`](Array::as_ref). |
+/// | [`Array<Plain<…>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_view`](Array::plain_ndarray_view). |
+/// | [`Array<Scalar<T>>`](crate::storage::Scalar) | A single scalar broadcast to any shape, used as the operand in expressions like `array + 1.0`. |
+///
+/// # Operations and lazy evaluation
+///
+/// Every operation on an `Array<S>` returns a new `Array` whose type encodes the full operation
+/// chain:
+///
+/// ```text
+/// Array<Compact>
+///   .neg()                 -> Array<Neg<Compact>>
+///   .reshape_view(…)       -> Array<Reshape<Neg<Compact>>>
+///   .permute_axes(axes)    -> Array<PermuteAxes<Reshape<…>>>
+///   .add(other_array)      -> Array<Add<PermuteAxes<…>, Compact>>
+///   .sum(axis, false)      -> Array<Sum<Add<…>>>
+///   .copy();               -> Array<Compact> - materialize the pipeline
+/// ```
+///
+/// Data is never copied or computed at construction time. An operation only runs when the result
+/// is materialized via [`to_ndarray()`](Array::to_ndarray), [`copy()`](Array::copy), and their variants.
+/// At that point the read request propagates inward through the storage
+/// chain, and only the minimum required data is read from the innermost backend.
+///
+/// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations incur zero
+/// virtual dispatch overhead. The full static type of an expression —
+/// e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` — is resolved by the compiler, which can inline the
+/// entire pipeline into a single read loop. The type system *is* the execution plan.
+///
+/// Operations accept an owned `Array<S>` and return a new `Array<Op<S>>` that wraps the original.
+/// To reuse an array in multiple operations, use [`as_ref()`](Array::as_ref) to create a reference.
+///
+/// # Examples
+///
+/// Create arrays from various sources:
+/// ```
+/// use zix::{Array, ArrayParams};
+/// use ndarray::array;
+///
+/// // Compress an ndarray into a block-compressed Array<Compact>.
+/// let compact = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
+///
+/// // Zero-copy view of an existing ndarray (any layout).
+/// let plain = Array::plain_ndarray_view(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
+///
+/// // Read a previously serialized array back from a file.
+/// let tmp_dir = tempfile::tempdir()?;
+/// let path = tmp_dir.path().join("array.zix");
+/// compact.write_to_file(&path)?;
+/// let from_file = Array::read_from_file(&path, ArrayParams::default())?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// Apply operations on compressed arrays, creating lazy views, writing the result to a file:
+/// ```
+/// use zix::Array;
+/// use zix::dtype::Dtyped;
+/// use ndarray::array;
+///
+/// // Compress a 2-D f32 ndarray.
+/// let array = Array::compact_array(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
+/// assert_eq!(array.shape(), &[2, 3]);
+/// assert_eq!(array.dtype(), &f32::DTYPE);
+///
+/// // Decompress and compare.
+/// let decompressed = array.to_ndarray::<f32>()?;
+/// assert_eq!(decompressed[[0, 0]], 1.5);
+/// assert_eq!(decompressed[[1, 1]], 6.17);
+///
+/// // Apply operations on a compressed array, creating lazy views
+/// let ones = Array::compact_array(&ndarray::Array2::<f32>::ones((2, 3)))?;
+/// let scaled = array                               // Array<Compact>
+///     .exp()                                       // Array<Exp<Compact>>
+///     .floor()                                     // Array<Floor<Exp<Compact>>>
+///     * 2.0f32                                     // Array<Mul<Floor<...>, Scalar<f32>>>
+///     + ones;                                      // Array<Add<Mul<...>, Compact>>
+/// // lazy view arrays are still functional arrays
+/// // access to data execute the pipeline on demand, possibly on a sub set of the original array
+/// assert_eq!(scaled.shape(), &[2, 3]);
+/// assert_eq!(scaled.dtype(), &f32::DTYPE);
+/// assert_eq!(scaled.to_ndarray::<f32>()?[[1, 1]], 957.0);
+///
+/// // Materialize the result and write to a file.
+/// let result = scaled
+///     .argmax(/* axis */ 1, /* keepdims */ false)  // Array<ArgMax<Add<Mul<...>, Compact>>>
+///     .astype(i16::DTYPE)                          // Array<AsType<ArgMax<Add<...>>>>
+///     // materialize the pipeline with a copy
+///     .copy()?;                                    // Array<Compact>
+/// assert_eq!(result.shape(), &[2]);
+/// assert_eq!(result.dtype(), &i16::DTYPE);
+/// let tmp_dir = tempfile::tempdir()?;
+/// result.write_to_file(tmp_dir.path().join("result.zix").as_ref())?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Performance notes
+///
+/// The n-dimensional block shape used by `Array<Compact>` has a huge effect on both compression
+/// ratio and read performance. If the access pattern is known in advance, providing a matching
+/// block shape can improve the performance of the library significantly. If not provided, the
+/// block shape is chosen automatically to fit within the L1 data cache, by starting with a block
+/// shape of all ones and iteratively increasing each dimension greedily, in order from last to first
+/// dim, as long the block size in bytes does not exceed the target size.
+/// Additional arrays that are created from existing arrays (`.copy()`, `.reshape()`, result
+/// of operations, etc.) choose their block shape with a heuristic, trying to preserve the original
+/// user block shape as much as possible while respecting the new shape and layout.
+///
+/// Shape-changing operations — [`reshape_view`](Array::reshape_view),
+/// [`broadcast_view`](Array::broadcast_view), [`permute_axes`](Array::permute_axes) — remap how
+/// output indices translate to positions in the underlying blocks. When the new layout crosses
+/// block boundaries that the original respected, a single read may decompress many more blocks
+/// than necessary. To avoid this, materialize with [`copy`](Array::copy) (automatic block shape)
+/// or [`copy_with`](Array::copy_with) (explicit [`ArrayParams`]) after a shape change. The eager
+/// variants [`reshape`](Array::reshape) and [`broadcast`](Array::broadcast) call `copy`
+/// internally. To ensure a well-aligned block layout, pass explicit `ArrayParams` with a block
+/// shape that matches the expected access pattern.
 #[derive(Clone)]
 pub struct Array<S> {
     pub(crate) storage: S,
 }
 
 impl Array<Compact> {
+    /// Compress an ndarray into a block-compressed `Array<Compact>` with default encoding settings.
+    ///
+    /// The array is partitioned into n-dimensional blocks, each independently compressed. The
+    /// block shape is derived automatically to fit within the L1 data cache. Use
+    /// [`compact_array_with`](Array::compact_array_with) for explicit control over block shape,
+    /// compression level, and other codec settings. If the access pattern is known in advance,
+    /// providing a matching block shape can improve read performance significantly.
+    ///
+    /// # Errors
+    ///
+    /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) — `array.ndim()` exceeds
+    ///   [`NDIM_MAX`](crate::NDIM_MAX).
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — compression fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::Array;
+    /// use zix::dtype::Dtyped;
+    /// use ndarray::array;
+    ///
+    /// // Compress a 2-D f32 ndarray.
+    /// let array = Array::compact_array(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
+    /// assert_eq!(array.shape(), &[2, 3]);
+    /// assert_eq!(array.dtype(), &f32::DTYPE);
+    ///
+    /// // Decompress and compare.
+    /// let decompressed = array.to_ndarray::<f32>()?;
+    /// assert_eq!(decompressed[[0, 0]], 1.5);
+    /// assert_eq!(decompressed[[1, 1]], 6.17);
+    ///
+    /// // Apply operations on a compressed array, creating lazy views
+    /// let ones = Array::compact_array(&ndarray::Array2::<f32>::ones((2, 3)))?;
+    /// let scaled = array                               // Array<Compact>
+    ///     .exp()                                       // Array<Exp<Compact>>
+    ///     .floor()                                     // Array<Floor<Exp<Compact>>>
+    ///     * 2.0f32                                     // Array<Mul<Floor<...>, Scalar<f32>>>
+    ///     + ones;                                      // Array<Add<Mul<...>, Compact>>
+    /// assert_eq!(scaled.shape(), &[2, 3]);
+    /// assert_eq!(scaled.dtype(), &f32::DTYPE);
+    /// assert_eq!(scaled.to_ndarray::<f32>()?[[1, 1]], 957.0);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn compact_array<S, D>(array: &ndarray::ArrayBase<S, D>) -> Result<Self>
     where
         D: ndarray::Dimension,
@@ -25,6 +205,38 @@ impl Array<Compact> {
         Array::compact_array_with(array, ArrayParams::default())
     }
 
+    /// Compress an ndarray into a block-compressed `Array<Compact>` with explicit `ArrayParams`.
+    ///
+    /// See [`compact_array`](Array::compact_array) for the default-parameter version, which has more
+    /// documentation and examples.
+    ///
+    /// Use this method to specify encoding parameters such as block shape, compression level, etc.
+    /// See [`ArrayParams`] for details on the available parameters and their effects on performance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    ///
+    /// let data = ndarray::Array2::<f32>::zeros((512, 512));
+    ///
+    /// // Store with 64×64 blocks — good for tile-at-a-time access patterns.
+    /// let mut params = ArrayParams::new();
+    /// params.block_shape(&[64, 64]);
+    /// let array = Array::compact_array_with(&data, params)?;
+    ///
+    /// // Read tiles of 128×128 by decompressing 2×2 blocks at a time.
+    /// let context = array.read_ctx();
+    /// for tile_row in 0..7 {
+    ///   for tile_col in 0..7 {
+    ///     let row_range = (tile_row * 64)..((tile_row + 2) * 64);
+    ///     let col_range = (tile_col * 64)..((tile_col + 2) * 64);
+    ///     let tile = array.to_ndarray_sub::<f32>(&[row_range, col_range], &context)?;
+    ///     println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
+    ///   }
+    /// }
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn compact_array_with<S, D>(
         array: &ndarray::ArrayBase<S, D>,
         mut params: ArrayParams,
@@ -39,6 +251,29 @@ impl Array<Compact> {
         array.copy_with(params, &context)
     }
 
+    /// Compress a raw n-dimensional buffer into a block-compressed `Array<Compact>`.
+    ///
+    /// Same as [`compact_array_with`](Array::compact_array_with) but takes a raw pointer and
+    /// explicit shape and strides.
+    ///
+    /// # Arguments
+    ///
+    /// - `ptr`: pointer to the beginning of the buffer. Must be aligned to `dtype.alignment()`.
+    /// - `shape`: shape of the n-dimensional array. At most [`NDIM_MAX`](crate::NDIM_MAX)
+    ///    dimensions are allowed.
+    /// - `strides`: strides of the n-dimensional array, in bytes. Must be the same length as
+    ///   `shape`.
+    /// - `dtype`: element type of the array. The buffer is interpreted as containing elements of
+    ///    this type.
+    /// - `params`: block layout and codec parameters. See [`ArrayParams`] for details.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must point to a readable buffer, laid out with the given
+    /// `strides` (in bytes, one per dimension).
+    /// The buffer should contains elements of the given `dtype`.
+    /// Accessing the buffer according to the shape, strides and dtype must be memory-safe and yield
+    /// valid elements.
     pub unsafe fn compact_nd_ptr(
         ptr: *const u8,
         shape: &[u64],
@@ -63,18 +298,51 @@ impl Array<Compact> {
 }
 
 impl<S: ArrayStorage> Array<S> {
+    /// Get the shape of the array, one element per dimension.
     pub fn shape(&self) -> &[u64] {
         self.storage.shape()
     }
 
+    /// Get the number of dimensions.
     pub fn ndim(&self) -> usize {
         self.storage.shape().len()
     }
 
+    /// Get the element dtype of the array.
+    ///
+    /// See [`Dtype`] for details on the supported dtypes and their properties.
+    ///
+    /// ```rust,ignore
+    /// use zix::Array;
+    /// use zix::dtype::Dtyped;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
+    /// assert_eq!(a.dtype(), &f32::DTYPE);
+    ///
+    /// let b = Array::plain_ndarray_view(&array![[false, true]])?;
+    /// assert_eq!(b.dtype(), &bool::DTYPE);
+    ///
+    /// #[derive(Dtyped, Copy, Clone)]
+    /// struct Point { x: f32, y: f32 }
+    /// let c = Array::plain_ndarray_view(&array![Point { x: 1.0, y: 2.0 }])?;
+    /// assert_eq!(c.dtype(), &Point::DTYPE);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn dtype(&self) -> &Dtype {
         self.storage.dtype()
     }
 
+    /// Decode the full array into a heap-allocated [`ndarray::Array`].
+    ///
+    /// Decompresses all blocks and returns the elements in a contiguous row-major ndarray.
+    /// `T` must match [`self.dtype()`](Array::dtype).
+    ///
+    /// # Errors
+    ///
+    /// - [`UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) — `T` does not match
+    ///   `self.dtype()`.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — block decompression fails.
     pub fn to_ndarray<T>(&self) -> Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
@@ -84,6 +352,43 @@ impl<S: ArrayStorage> Array<S> {
         self.to_ndarray_sub(&full_range, &self.read_ctx())
     }
 
+    /// Decode a rectangular sub-region into a heap-allocated [`ndarray::Array`].
+    ///
+    /// Only the compressed blocks overlapping `range` are decompressed. When `range` aligns to
+    /// block boundaries no extra data is read; for unaligned ranges, the overlapping boundary
+    /// blocks are fully decompressed and only the requested slice is returned.
+    ///
+    /// `range` must contain one half-open `start..end` per dimension within
+    /// `0..self.shape()[dim]`. `T` must match [`self.dtype()`](Array::dtype). Obtain a
+    /// [`ReadContext`] via [`read_ctx`](Array::read_ctx).
+    ///
+    /// # Errors
+    ///
+    /// - [`UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) — `T` does not match
+    ///   `self.dtype()`.
+    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) — `range` is out of bounds or
+    ///   has a different number of dimensions than the array.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — block decompression fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
+    ///
+    /// let context = a.read_ctx();
+    /// assert_eq!(
+    ///     a.to_ndarray_sub::<i32>(&[1..3, 1..3], &context)?,
+    ///     array![[5, 6], [8, 9]].into_dyn()
+    /// );
+    /// assert_eq!(
+    ///    a.to_ndarray_sub::<i32>(&[0..2, 0..2], &context)?,
+    ///    array![[1, 2], [4, 5]].into_dyn()
+    /// );
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn to_ndarray_sub<T>(
         &self,
         range: &[Range<u64>],
@@ -109,6 +414,38 @@ impl<S: ArrayStorage> Array<S> {
         Ok(unsafe { array.assume_init() })
     }
 
+    /// Decode a rectangular sub-region into a caller-supplied byte buffer.
+    ///
+    /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub). `buf` must be exactly
+    /// `range.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes and aligned to
+    /// `self.dtype().alignment()`. Elements are written in row-major (C-contiguous) order.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidBufferSize`](crate::error::ErrorKind::InvalidBufferSize) — `buf` has the wrong
+    ///   length for the requested range and dtype.
+    /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) — `buf` is insufficiently
+    ///   aligned for the dtype.
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — block decompression fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
+    ///
+    /// let context = a.read_ctx();
+    /// let mut buf = vec![0u32; 4];
+    /// {
+    ///     let buf = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 4) };
+    ///     a.to_ndarray_buf(&[1..3, 1..3], buf, &context)?;
+    /// }
+    /// assert_eq!(buf, vec![5, 6, 8, 9]);
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn to_ndarray_buf(
         &self,
         range: &[Range<u64>],
@@ -119,11 +456,80 @@ impl<S: ArrayStorage> Array<S> {
         self.storage.read_data(range, buf, context)
     }
 
+    /// Copy the data of this array into a new `Array<Compact>` by compressing it into new blocks.
+    ///
+    /// The primary use of `copy` is to materialize a lazy operation chain:
+    /// An `Array<S>` can have an arbitrary storage implementation, often a lazy view of some one or
+    /// more computation, for example `Array<Floor<Mul<Compact, Scalar<f32>>>>` (see the examples).
+    /// Reads to such lazy view arrays always perform the whole computation pipeline on the fly,
+    /// which is very flexible but can be inefficient for repeated access. Coping the data and
+    /// re-compressing it into a new array with `copy` breaks the lazy storage chain and materializes
+    /// the result as a standalone `Array<Compact>`.
+    ///
+    /// In contrast to "simple" views such as unary element-wise operations, lazy ops that change the
+    /// shape of the array (e.g. `reshape`, `broadcast`, `permute_axes`) can cause block boundaries
+    /// to no longer align with the logical layout of the array, causing reads to decompress excess
+    /// data. Calling `copy` on the result of such an operation re-encodes the data with a freshly
+    /// derived block shape that matches the new layout. The block shape of copied arrays is
+    /// automatically derived and tuned from the underlying storage(s), using a heuristic that aims
+    /// to preserve user choices (that may depend on the user knowledge of the access pattern), but
+    /// its not perfect - you want want to explicitly pass some parameters via
+    /// [`copy_with`](Array::copy_with).
+    ///
+    /// Codec settings (compression level, filters, etc.) are also inherited from the source storage.
+    ///
+    /// # Errors
+    ///
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — compression or decompression fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
+    /// let result =
+    ///     (a * 7.399_f32)  // Array<Mul<Compact, Scalar<f32>>>
+    ///    .floor()       // Array<Floor<Mul<Compact, Scalar<f32>>>>
+    ///    .copy()?;      // Array<Compact> - materialize the pipeline
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn copy(&self) -> Result<Array<Compact>> {
         let context = self.read_ctx();
         self.copy_with(ArrayParams::default(), &context)
     }
 
+    /// Copy the data of this array into a new `Array<Compact>` with explicit control over parameters.
+    ///
+    /// Like [`copy`](Array::copy) (see its documentation), but with explicit [`ArrayParams`].
+    /// Any optional field in `params` that is not set will be inherited from the source storage
+    /// if possible.
+    ///
+    /// # Errors
+    ///
+    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — compression or decompression fails.
+    ///
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let mut a_params = ArrayParams::default();
+    /// a_params.block_shape(&[1, 2]);
+    /// let a = Array::compact_array_with(&array![[1.5f32, 2.0], [3.14, 6.17]], a_params)?;
+    ///
+    /// // Let's say a is given to us, and we prepare to access it many times with a specific access
+    /// // pattern. We copy it and re-compress it with a matching block shape.
+    /// let mut b_params = ArrayParams::default();
+    /// b_params.block_shape(&[2, 1]);
+    /// let b = a.copy_with(b_params, &a.read_ctx())?;
+    ///
+    /// assert_eq!(
+    ///     b.to_ndarray_sub::<f32>(&[0..2, 0..1],
+    ///     &b.read_ctx())?, array![[1.5], [3.14]].into_dyn()
+    /// );
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn copy_with(
         &self,
         mut params: ArrayParams,
@@ -183,6 +589,34 @@ impl<S: ArrayStorage> Array<S> {
         )
     }
 
+    /// Create a [`ReadContext`] with parameters derived from this array's storage.
+    ///
+    /// A context encapsulates reusable buffers and codec decompressor instance. Use it for
+    /// repeated reads, sharing the allocation and initialization overhead.
+    ///
+    /// [`to_ndarray`](Array::to_ndarray) builds a context internally. Call this when using
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub) or [`to_ndarray_buf`](Array::to_ndarray_buf)
+    /// directly.
+    ///
+    /// Using a context created in other ways (e.g. `ReadContext::default()`) is also valid, and will
+    /// yield correct results. Using this method allows an easy way to ensure all reads from an array
+    /// use the same decoding configuration (see [`DecoderParams`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
+    /// let context = a.read_ctx();
+    /// // Reuse the same context for multiple reads, sharing buffers.
+    /// for row in 0..3 {
+    ///     let row_data = a.to_ndarray_sub::<i32>(&[row..(row + 1), 0..3], &context)?;
+    ///     println!("row sum: {}", row_data.sum());
+    /// }
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn read_ctx(&self) -> ReadContext {
         let params = self.storage._spec().decoder_params;
         let context = match params {
@@ -192,20 +626,48 @@ impl<S: ArrayStorage> Array<S> {
         context.expect("failed to create read context")
     }
 
+    /// Create an array with a storage reference to this array, without cloning the underlying data.
+    ///
+    /// Almost all ops on arrays accept ownership of an `Array<S>` rather than a reference, for
+    /// example `a + b` for two arrays consume `a` and `b`. To reuse an array without cloning its
+    /// storage, call `as_ref` to get an `Array<Ref<'_, S>>`, which doesn't own the storage but can
+    /// be used in any API that accepts an owned `Array<S>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
+    /// let b = a.as_ref() + 1.0f32; // Array<Add<Ref<Compact>, Scalar<f32>>>
+    /// let c = a.as_ref() * b; // we can use `a` again here because we called as_ref()
+    /// assert_eq!(c.to_ndarray::<f32>()?[[1, 1]], 6.17 * (6.17 + 1.0));
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn as_ref(&self) -> Array<Ref<'_, S>> {
         Array {
             storage: Ref(self.storage()),
         }
     }
 
+    /// Return a reference to the underlying storage backend.
+    ///
+    /// Rarely needed to be used directly by users.
     pub fn storage(&self) -> &S {
         &self.storage
     }
 
+    /// Construct an `Array` by wrapping a storage backend directly.
+    ///
+    /// Rarely needed to be used directly by users.
     pub fn from_storage(storage: S) -> Self {
         Self { storage }
     }
 
+    /// Consume this array and return the underlying storage backend.
+    ///
+    /// Rarely needed to be used directly by users.
     pub fn into_storage(self) -> S {
         self.storage
     }
@@ -265,6 +727,16 @@ impl ArrayBuilder {
         })
     }
 
+    /// Iterate over every block in row-major grid order, call `block_fn` to fill each block's
+    /// uncompressed bytes, compress each block, and return the finished [`Array<Compact>`].
+    ///
+    /// `block_fn` receives `(builder, block_idx, block_inner_offset, block_size, output_block)`:
+    /// - `block_idx` — grid coordinates of the block.
+    /// - `block_inner_offset` — offset within the block where valid data starts (non-zero for
+    ///   boundary blocks when the grid is sub-divided).
+    /// - `block_size` — number of elements along each dimension for this block.
+    /// - `output_block` — byte buffer of capacity `block_shape.product() * itemsize` to fill;
+    ///   padding elements outside `block_size` are pre-zeroed.
     fn build(
         self,
         mut block_fn: impl FnMut(&Self, &[u64], &[u64], &[u64], &mut [u8]) -> Result<()>,
