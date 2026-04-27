@@ -166,8 +166,10 @@ pub(crate) trait NdIterExtension<Ix> {
 }
 
 /// A plain index-only iterator; a thin wrapper around [`NdIter`] with a `()` extension.
+#[allow(unused)]
 pub(crate) struct IdxIter<Ix>(NdIter<Ix, ()>);
 
+#[allow(unused)]
 impl<Ix> IdxIter<Ix>
 where
     Ix: Idx,

@@ -1,0 +1,46 @@
+use std::path::{Path, PathBuf};
+use std::{fs, io};
+
+fn main() {
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let proto_dir = crate_dir.join("proto");
+    let gen_dir = crate_dir
+        .parent()
+        .unwrap()
+        .join("src")
+        .join("archive")
+        .join("schema")
+        .join("_proto_gen");
+    if gen_dir.exists() {
+        std::fs::remove_dir_all(&gen_dir).unwrap();
+    }
+
+    let proto_files = find_files_recursively(&proto_dir, "proto").unwrap();
+    fs::create_dir_all(&gen_dir).unwrap();
+    prost_build::Config::new()
+        .out_dir(&gen_dir)
+        .include_file("_includes.rs")
+        .compile_protos(
+            &proto_files
+                .iter()
+                .map(|p| p.strip_prefix(&proto_dir).unwrap())
+                .collect::<Vec<_>>(),
+            &[&proto_dir],
+        )
+        .expect("Failed to compile protos");
+}
+
+fn find_files_recursively(dir: &Path, extension: &str) -> io::Result<Vec<PathBuf>> {
+    assert!(dir.is_dir(), "Expected a directory: {}", dir.display());
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(find_files_recursively(&path, extension)?);
+        } else if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some(extension) {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}

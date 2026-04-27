@@ -1,6 +1,7 @@
 {
     "rust-analyzer.linkedProjects": [
         "zix/Cargo.toml",
+        "zix/schema/Cargo.toml",
         "zix-macros/Cargo.toml",
         "zix-python/Cargo.toml"
     ],

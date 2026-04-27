@@ -6,12 +6,12 @@ import "zix/v1/codec.proto";
 import "zix/v1/dtype.proto";
 
 message BlockTableHeader {
-  Dtype dtype = 1;
+  zix.v1.Dtype dtype = 1;
   uint64 nitems = 2;
   uint64 block_size = 3;
 
-  Codec codec = 4;
-  repeated Filter filters = 5;
+  zix.v1.Codec codec = 4;
+  repeated zix.v1.Filter filters = 5;
 
   // The sections that exist in the table of contents of the block table.
   //

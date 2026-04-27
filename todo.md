@@ -7,8 +7,9 @@
     - clip
     - split
     - sort
-    - full/zeros/ones/
-    - array::from_fn
-    - to_ndarray_sub should accept IntoSlice
-    - Add "available as Array::any" for Any, and others
+- full/zeros/ones/
+- array::from_fn
+- to_ndarray_sub should accept IntoSlice
+- Add "available as Array::any" for Any, and others
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
+- cast types automatically in python bindings
