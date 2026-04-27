@@ -552,8 +552,7 @@ impl TmpBufferPool {
                     .iter()
                     .map(|(align, _pool)| *align)
                     .enumerate()
-                    .filter(|(_idx, align)| *align >= alignment)
-                    .next()
+                    .find(|(_idx, align)| *align >= alignment)
                     .map(|(idx, align)| (idx, align == alignment))
                     .unwrap_or((align_other.len(), false));
 

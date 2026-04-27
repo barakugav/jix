@@ -148,7 +148,7 @@ pub(crate) fn check_get_buffer_size(
         "Buffer size {buf_len} is too small for requested index {index:?} with dtype {dtype:?} (required size: {required_size})"
     );
     ensure!(
-        (buf.as_ptr() as usize) % dtype.alignment().as_usize() == 0,
+        (buf.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize()),
         InvalidArgument,
         "Buffer pointer is not aligned to required alignment {} for dtype {dtype:?}",
         dtype.alignment(),

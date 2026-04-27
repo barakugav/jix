@@ -16,6 +16,12 @@ pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
     (0..ndim).map(f).collect()
 }
+pub(crate) fn try_dim_arr<T, E>(
+    ndim: usize,
+    f: impl FnMut(usize) -> Result<T, E>,
+) -> Result<DimArray<T>, E> {
+    (0..ndim).map(f).collect()
+}
 
 pub(crate) trait Idx:
     Clone

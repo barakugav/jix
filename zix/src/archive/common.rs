@@ -19,7 +19,9 @@ struct Header {
 #[derive(Default, Clone, Copy, FromBytes, IntoBytes, Immutable)]
 #[repr(C)]
 pub(crate) struct Section {
+    /// Offsets in bytes from the beginning of the archive.
     pub(crate) offset: i64,
+    /// Size of the section in bytes.
     pub(crate) size: u64,
 }
 
@@ -64,21 +66,6 @@ impl<W> ArchiveWriter<W> {
         Ok(msg_len)
     }
 
-    // pub(crate) fn into_inner(self) -> W {
-    //     self.writer
-    // }
-
-    // pub(crate) fn inner_mut(&mut self) -> &mut W {
-    //     &mut self.writer
-    // }
-
-    // pub(crate) fn offset_from_base(&mut self) -> io::Result<u64>
-    // where
-    //     W: Seek,
-    // {
-    //     Ok(self.stream_position()? - self.base_offset)
-    // }
-
     pub(crate) fn write_section(&mut self, data: &[u8], alignment: usize) -> io::Result<Section>
     where
         W: Write + Seek,
@@ -115,25 +102,23 @@ impl<W> DerefMut for ArchiveWriter<W> {
 }
 
 pub(crate) struct ArchiveReader<R> {
-    reader: R,
-    base_offset: u64,
-    length: Option<u64>, // TODO
+    reader: std::io::Take<R>,
+    total_size: u64,
     tmp_buf: Vec<u8>,
 }
 impl<R> ArchiveReader<R> {
-    pub(crate) fn new(mut reader: R, length: Option<u64>) -> Result<Self>
+    pub(crate) fn new(reader: R, length: Option<u64>) -> Result<Self>
     where
         R: Read + Seek,
     {
-        if let Some(length) = length {
-            ensure!(
-                length >= size_of::<Header>() as u64,
-                InvalidArchive,
-                "zix file too short: length={length}"
-            );
-        }
-
-        let base_offset = reader.stream_position().map_err(Error::io)?;
+        let total_size = length.unwrap_or(u64::MAX);
+        let mut reader = reader.take(total_size);
+        ensure!(
+            reader.limit() >= size_of::<Header>() as u64,
+            InvalidArchive,
+            "zix file too short: length={}",
+            reader.limit()
+        );
 
         let header = Header::read_from_io(&mut reader).map_err(Error::io)?;
         ensure!(
@@ -145,8 +130,7 @@ impl<R> ArchiveReader<R> {
 
         Ok(Self {
             reader,
-            base_offset,
-            length,
+            total_size,
             tmp_buf: Vec::new(),
         })
     }
@@ -228,30 +212,25 @@ impl<R> ArchiveReader<R> {
         Ok(self.tmp_buf.as_slice())
     }
 
-    // pub(crate) fn into_inner(self) -> R {
-    //     self.reader
-    // }
-
-    pub(crate) fn inner_mut(&mut self) -> &mut R {
+    pub(crate) fn reader_mut(&mut self) -> &mut impl Read
+    where
+        R: Read,
+    {
         &mut self.reader
     }
 
-    pub(crate) fn base_offset(&self) -> u64 {
-        self.base_offset
-    }
-
-    pub(crate) fn read_section(&mut self, section: &Section) -> io::Result<Vec<u8>>
-    where
-        R: Read + Seek,
-    {
-        let mut buf = Vec::with_capacity(section.size as usize);
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            buf.set_len(section.size as usize)
-        };
-        self.read_section_into(section, buf.as_mut_slice())?;
-        Ok(buf)
-    }
+    // pub(crate) fn read_section(&mut self, section: &Section) -> io::Result<Vec<u8>>
+    // where
+    //     R: Read + Seek,
+    // {
+    //     let mut buf = Vec::with_capacity(section.size as usize);
+    //     #[allow(clippy::uninit_vec)]
+    //     unsafe {
+    //         buf.set_len(section.size as usize)
+    //     };
+    //     self.read_section_into(section, buf.as_mut_slice())?;
+    //     Ok(buf)
+    // }
 
     pub(crate) fn read_section_into(&mut self, section: &Section, buf: &mut [u8]) -> io::Result<()>
     where
@@ -259,7 +238,7 @@ impl<R> ArchiveReader<R> {
     {
         assert_eq!(buf.len() as u64, section.size);
         self.seek_relative_to_base(section.offset)?;
-        self.read_exact(buf)?;
+        self.reader.read_exact(buf)?;
         Ok(())
     }
 
@@ -274,20 +253,17 @@ impl<R> ArchiveReader<R> {
     where
         R: Seek,
     {
-        let pos = self.base_offset as i64 + offset;
         // Prefer seek_relative over seek as BufReader always discard its buffer on seek
-        let pos_relative = pos - self.stream_position()? as i64;
-        self.seek_relative(pos_relative)
+        let pos_relative = offset - self.reader.stream_position()? as i64;
+        self.reader.seek_relative(pos_relative)
     }
-}
-impl<R> Deref for ArchiveReader<R> {
-    type Target = R;
-    fn deref(&self) -> &R {
-        &self.reader
-    }
-}
-impl<R> DerefMut for ArchiveReader<R> {
-    fn deref_mut(&mut self) -> &mut R {
-        &mut self.reader
+
+    pub(crate) fn check_section_bounds(&self, section: &Section) -> Result<()> {
+        ensure!(
+            0 <= section.offset && section.offset as u64 + section.size <= self.total_size,
+            InvalidArchive,
+            "section is out of archive bounds"
+        );
+        Ok(())
     }
 }

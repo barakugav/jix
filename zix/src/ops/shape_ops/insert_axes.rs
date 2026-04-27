@@ -163,14 +163,14 @@ impl<S: ArrayStorage> ArrayStorage for InsertAxes<S> {
         // remaining ranges to the inner storage unchanged.  No temporary buffer or
         // element rearrangement is needed.
         let mut inner_index = DimArray::new();
-        for dim in 0..self.shape().len() {
+        for (dim, index) in index.iter().enumerate() {
             if !self.is_inserted[dim] {
-                inner_index.push(index[dim].clone());
+                inner_index.push(index.clone());
             } else {
-                if index[dim].start == index[dim].end {
+                if index.start == index.end {
                     return Ok(()); // empty read
                 }
-                debug_assert_eq!(index[dim], 0..1);
+                debug_assert_eq!(*index, 0..1);
             }
         }
         self.array.storage.read_data(&inner_index, buf, context)

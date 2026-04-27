@@ -119,7 +119,7 @@ where
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(&self.shape, index)?;
         let dtype = self.dtype();
-        let nitems = check_get_buffer_size(index, &dtype, buf)?;
+        let nitems = check_get_buffer_size(index, dtype, buf)?;
 
         let mut condition_buf =
             context.tmp_buf(nitems * size_of::<bool>(), bool::DTYPE.alignment());
@@ -141,7 +141,7 @@ where
         {
             let x = unsafe { cast_slice_mut::<_, T>(buf) };
             let y = unsafe { cast_slice::<_, T>(y_buf) };
-            for (cond, (x, y)) in condition.iter().zip(x.into_iter().zip(y)) {
+            for (cond, (x, y)) in condition.iter().zip(x.iter_mut().zip(y)) {
                 if !cond {
                     *x = *y;
                 }

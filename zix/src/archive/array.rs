@@ -68,7 +68,10 @@ impl Array<CompactMmap> {
         let storage = ArrayBlockTableStorageBase::read_from(
             reader,
             Some(len),
-            crate::storage::block::Mmap(Arc::new(mmap)),
+            crate::storage::block::Mmap {
+                mmap: Arc::new(mmap),
+                base_offset: offset,
+            },
             params,
         )?;
 

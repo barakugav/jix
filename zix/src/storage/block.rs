@@ -249,7 +249,10 @@ pub struct Owned(pub(crate) PhantomData<()>);
 #[doc(hidden)]
 pub struct Borrowed<'a>(pub(crate) PhantomData<&'a ()>);
 #[doc(hidden)]
-pub struct Mmap(pub(crate) Arc<memmap2::Mmap>);
+pub struct Mmap {
+    pub(crate) mmap: Arc<memmap2::Mmap>,
+    pub(crate) base_offset: u64,
+}
 impl BlockTableStorage for Owned {
     type Data<T: 'static> = Vec<T>;
 }

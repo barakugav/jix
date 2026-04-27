@@ -112,7 +112,8 @@ impl<S> Plain<S> {
 
         let alignment = dtype.alignment().as_usize();
         ensure!(
-            data as usize % alignment == 0 && strides.iter().all(|&s| s % alignment == 0),
+            (data as usize).is_multiple_of(alignment)
+                && strides.iter().all(|&s| s.is_multiple_of(alignment)),
             InvalidArgument,
             "Data pointer or strides are not aligned to required alignment {alignment}"
         );

@@ -1,5 +1,6 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -12,7 +13,7 @@ use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage, Mmap, Mmap
 use crate::util::{cast_slice, cast_slice_mut};
 
 pub trait BlockTableStorageRead: BlockTableStorage {
-    fn read_content<T, R>(
+    fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
         section: Section,
@@ -162,7 +163,7 @@ where
             header.table_of_contents.len()
         );
 
-        let toc = <[Section; 2]>::read_from_io(reader.inner_mut()).map_err(Error::io)?;
+        let toc = <[Section; 2]>::read_from_io(reader.reader_mut()).map_err(Error::io)?;
         let mut block_data_section = None;
         let mut block_offsets_section = None;
         for (toc_idx, toc_entry) in header.table_of_contents().enumerate() {
@@ -183,8 +184,8 @@ where
         };
 
         // Read body data sections
-        let block_data = storage.read_content(reader, block_data_section)?;
-        let block_offsets = storage.read_content(reader, block_offsets_section)?;
+        let block_data = storage.read_section(reader, block_data_section)?;
+        let block_offsets = storage.read_section(reader, block_offsets_section)?;
 
         let decoder_config = DecoderCodecConfig {
             codec,
@@ -203,7 +204,7 @@ where
 }
 
 impl BlockTableStorageRead for Owned {
-    fn read_content<T, R>(
+    fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
         section: Section,
@@ -212,28 +213,28 @@ impl BlockTableStorageRead for Owned {
         T: Copy + 'static,
         R: Read + Seek,
     {
+        reader.check_section_bounds(&section)?;
+
         ensure!(
             section.size.is_multiple_of(size_of::<T>() as u64),
             InvalidArchive,
             "section size is not a multiple of item size"
         );
         let len = section.size as usize / std::mem::size_of::<T>();
-        let mut data = Vec::<T>::with_capacity(len);
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            data.set_len(len)
-        };
+
+        let mut data = Vec::<MaybeUninit<T>>::with_capacity(len);
+        unsafe { data.set_len(len) };
         reader
             .read_section_into(&section, unsafe {
-                cast_slice_mut::<T, u8>(data.as_mut_slice())
+                cast_slice_mut::<MaybeUninit<T>, u8>(data.as_mut_slice())
             })
             .map_err(Error::io)?;
-        Ok(data)
+        Ok(unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(data) })
     }
 }
 
 impl BlockTableStorageRead for Mmap {
-    fn read_content<T, R>(
+    fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
         section: Section,
@@ -242,23 +243,26 @@ impl BlockTableStorageRead for Mmap {
         T: Copy + 'static,
         R: Read + Seek,
     {
+        reader.check_section_bounds(&section)?;
+
         ensure!(
             section.size.is_multiple_of(size_of::<T>() as u64),
             InvalidArchive,
             "section size is not a multiple of item size"
         );
         let len = section.size as usize / std::mem::size_of::<T>();
-        let offset = reader.base_offset() as i64 + section.offset;
+
+        let offset = self.base_offset as i64 + section.offset;
         let offset = offset as usize;
-        let data = self.0[offset..].as_ptr().cast::<T>();
+        let data = self.mmap[offset..].as_ptr().cast::<T>();
         ensure!(
             data.is_aligned(),
             InvalidArchive,
-            "data offset is not properly aligned"
+            "data section offset is not properly aligned"
         );
 
         Ok(MmapData {
-            mmap: self.0.clone(),
+            mmap: self.mmap.clone(),
             data: (data, len),
         })
     }

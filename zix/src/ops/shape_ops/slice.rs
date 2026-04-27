@@ -7,7 +7,7 @@ use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -82,13 +82,9 @@ impl<S: ArrayStorage> Slice<S> {
             slice.slice.len()
         );
 
-        let slice = {
-            let mut resolved = DimArray::new();
-            for d in 0..ndim {
-                resolved.push(DimSlice::resolve(&slice.slice[d], input_shape[d])?);
-            }
-            resolved
-        };
+        let slice = try_dim_arr(ndim, |dim| {
+            DimSlice::resolve(&slice.slice[dim], input_shape[dim])
+        })?;
         let no_steps = slice.iter().all(|ds| ds.is_contiguous());
 
         let shape = dim_arr(ndim, |d| slice[d].len());

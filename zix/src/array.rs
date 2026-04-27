@@ -260,11 +260,11 @@ impl Array<Compact> {
     ///
     /// - `ptr`: pointer to the beginning of the buffer. Must be aligned to `dtype.alignment()`.
     /// - `shape`: shape of the n-dimensional array. At most [`NDIM_MAX`](crate::NDIM_MAX)
-    ///    dimensions are allowed.
+    ///   dimensions are allowed.
     /// - `strides`: strides of the n-dimensional array, in bytes. Must be the same length as
     ///   `shape`.
     /// - `dtype`: element type of the array. The buffer is interpreted as containing elements of
-    ///    this type.
+    ///   this type.
     /// - `params`: block layout and codec parameters. See [`ArrayParams`] for details.
     ///
     /// # Safety

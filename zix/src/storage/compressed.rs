@@ -189,16 +189,17 @@ where
     ///      element-space start offset within the block and the active nd extent, both clipped
     ///      to the requested `index` at the array boundaries.
     ///
+    ///    \
     ///    For each block:
-    ///    a. Decompress the full block into `tmp_buf` (a scratch buffer from `context`,
-    ///       sized for one full block, reused across iterations).
-    ///    b. Compute `active_start`: byte offset into `tmp_buf` of the active region's first
-    ///       element, using the block's row-major strides and `block_inner_offset`.
-    ///    c. Compute `out_start`: byte offset into `buf` where this region's first element
-    ///       belongs, using the output array's row-major strides and the element-space
-    ///       position of the active region relative to `index`.
-    ///    d. Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
-    ///       respecting both strides.
+    ///    - Decompress the full block into `tmp_buf` (a scratch buffer from `context`,
+    ///      sized for one full block, reused across iterations).
+    ///    - Compute `active_start`: byte offset into `tmp_buf` of the active region's first
+    ///      element, using the block's row-major strides and `block_inner_offset`.
+    ///    - Compute `out_start`: byte offset into `buf` where this region's first element
+    ///      belongs, using the output array's row-major strides and the element-space
+    ///      position of the active region relative to `index`.
+    ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
+    ///      respecting both strides.
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(&self.shape, index)?;
         let _nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
