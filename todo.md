@@ -13,3 +13,4 @@
 - Add "available as Array::any" for Any, and others
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
 - cast types automatically in python bindings
+- support string index in python array, accessing sub field by name

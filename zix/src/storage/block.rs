@@ -1,7 +1,8 @@
 use std::marker::PhantomData;
+use std::ops::Range;
 use std::sync::Arc;
 
-use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, ReadContext};
+use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::error::{ensure, Result};
 
@@ -69,7 +70,6 @@ where
     ///   Block `i`'s compressed bytes are `block_data[block_offsets[i]..block_offsets[i+1]]`.
     ///   Must have length `nblocks + 1` when `nblocks > 0`, or length `0` when `nblocks == 0`.
     ///   Entries must be strictly increasing and the last entry must not exceed `block_data.len()`.
-    /// - `nitems` — total number of items across all blocks. Must be a multiple of `block_size`.
     /// - `block_size` — number of items per block (must be `> 0`).
     /// - `decoder_config` — codec and dtype configuration used when decoding blocks.
     ///
@@ -77,27 +77,15 @@ where
     ///
     /// Returns `InvalidArgument` if:
     /// - `block_size == 0`
-    /// - `nitems` is not a multiple of `block_size`
-    /// - `block_offsets.len()` does not equal `nblocks + 1` (or `0` for an empty table)
     pub(crate) fn new(
         block_data: S::Data<u8>,
         block_offsets: S::Data<u64>,
-        nitems: u64,
         block_size: BlockSize,
         decoder_config: DecoderCodecConfig,
     ) -> Result<Self> {
         ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
-        ensure!(
-            nitems.is_multiple_of(block_size as u64),
-            InvalidArgument,
-            "nitems must be a multiple of block_size"
-        );
-        let nblocks = nitems / block_size as u64;
-        ensure!(
-            block_offsets.as_ref().len() as u64 == if nblocks == 0 { 0 } else { nblocks + 1 },
-            InvalidArgument,
-            "block_offsets length mismatch"
-        );
+        let nblocks = block_offsets.as_ref().len().saturating_sub(1);
+        let nitems = nblocks as u64 * block_size as u64;
         if nblocks > 0 {
             debug_assert!(block_offsets.as_ref().windows(2).all(|w| w[0] < w[1]));
             debug_assert!(
@@ -179,6 +167,56 @@ where
     }
 }
 
+pub(crate) fn build_block_table(
+    nblocks: u64,
+    block_size: BlockSize,
+    decoder_config: DecoderCodecConfig,
+    compressed_block_size_bound: usize,
+    block_fn: &mut impl BlockFn,
+) -> Result<BlockTable<Owned>> {
+    let mut block_data = Vec::<u8>::new();
+    let mut block_offsets = Vec::<u64>::new();
+
+    let mut block_data_total_len = 0;
+    let chunk = (64 * 1024 / compressed_block_size_bound).max(1) as u64; // try to write 64KB at a time
+
+    for block_index in (0..nblocks).step_by(chunk as usize) {
+        let blocks = block_index..(block_index + chunk).min(nblocks);
+        let base_offset = block_data_total_len;
+
+        // Get blocks data
+        let (data, offsets) = block_fn.get_compressed_blocks(blocks.clone(), base_offset)?;
+        debug_assert_eq!(offsets.len(), (blocks.end - blocks.start) as usize);
+
+        // Write compressed data
+        block_data.extend_from_slice(data);
+
+        // Record offsets
+        if block_index == 0 {
+            block_offsets.push(0);
+        }
+        let x = *offsets.last().unwrap();
+        debug_assert!(block_data_total_len <= x);
+        if !(offsets.windows(2).all(|w| w[0] <= w[1])) {
+            println!("Offsets are not non-decreasing: {offsets:?}");
+        }
+        debug_assert!(offsets.windows(2).all(|w| w[0] <= w[1]));
+        block_offsets.extend_from_slice(offsets);
+
+        block_data_total_len = *offsets.last().unwrap();
+    }
+
+    debug_assert_eq!(
+        block_offsets.len(),
+        if nblocks == 0 {
+            0
+        } else {
+            nblocks as usize + 1
+        }
+    );
+    BlockTable::new(block_data, block_offsets, block_size, decoder_config)
+}
+
 impl BlockTable<Owned> {
     /// Build a `BlockTable` by encoding raw item bytes in one shot.
     ///
@@ -192,7 +230,7 @@ impl BlockTable<Owned> {
     ///   `nitems * dtype.itemsize()`.
     /// - `dtype` — element type of the stored items.
     /// - `block_size` — number of items per block (must be `> 0`).
-    /// - `encoder` — codec pipeline (filters + compressor) applied to each block.
+    /// - `encoder` — codec pipeline (filters + compressor) applied to each block. TODO
     ///
     /// # Errors
     ///
@@ -206,7 +244,7 @@ impl BlockTable<Owned> {
         data: &[u8],
         dtype: Dtype,
         block_size: BlockSize,
-        encoder: Encoder,
+        encoder_params: &EncoderParams,
     ) -> Result<Self> {
         let itemsize = dtype.itemsize();
         ensure!(itemsize > 0, InvalidArgument, "itemsize must be > 0");
@@ -224,11 +262,51 @@ impl BlockTable<Owned> {
         );
 
         let b_size_bytes = block_size as usize * itemsize as usize;
-        let mut builder = BlockTableBuilder::new(dtype, block_size, encoder)?;
-        for b_data in data.chunks(b_size_bytes) {
-            builder.add_block(b_data)?;
+
+        ensure!(
+            dtype.itemsize() > 0,
+            InvalidArgument,
+            "itemsize must be > 0"
+        );
+        ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
+        let b_size_bytes = block_size as usize * dtype.itemsize() as usize;
+        let mut encoder = Encoder::new(encoder_params, dtype.clone())?;
+        let max_blk_cdata_len = encoder.encode_bound(b_size_bytes);
+
+        let mut block_data = Vec::<u8>::new();
+        let mut block_offsets = Vec::<u64>::new();
+        for plain_data in data.chunks(b_size_bytes) {
+            let b_size_bytes = block_size as usize * dtype.itemsize() as usize;
+            ensure!(
+                plain_data.len() == b_size_bytes,
+                InvalidArgument,
+                "Block data size does not match block size: got {}, expected {b_size_bytes}",
+                plain_data.len()
+            );
+            let block_data_len = block_data.len();
+            block_data.reserve(max_blk_cdata_len);
+            #[allow(clippy::uninit_vec)]
+            unsafe {
+                block_data.set_len(block_data_len + max_blk_cdata_len)
+            };
+            let blk_buf = &mut block_data[block_data_len..];
+            let blk_cdata_len = encoder.encode(plain_data, blk_buf)?;
+            debug_assert!(blk_cdata_len <= max_blk_cdata_len);
+            unsafe { block_data.set_len(block_data_len + blk_cdata_len) };
+            if block_offsets.is_empty() {
+                block_offsets.push(0);
+            }
+            block_offsets.push(block_data.len() as u64);
         }
-        builder.finish()
+
+        let decoder_config = DecoderCodecConfig {
+            codec: match &encoder.compressor {
+                Compressor::Zstd(_) => Codec::Zstd,
+            },
+            filters: encoder.filters.clone(),
+            dtype: dtype.clone(),
+        };
+        BlockTable::new(block_data, block_offsets, block_size, decoder_config)
     }
 }
 
@@ -278,111 +356,85 @@ impl BlockTableStorage for Mmap {
     type Data<T: 'static> = MmapData<T>;
 }
 
-/// Incremental builder for [`BlockTable<Owned>`].
-///
-/// Use this when blocks are produced one at a time (e.g. while encoding an nd-array block by
-/// block). Call [`add_block`](Self::add_block) once per block in order, then call
-/// [`finish`](Self::finish) to obtain the completed [`BlockTable`].
-///
-/// For the single-shot case where all data is already in memory, prefer
-/// [`BlockTable::build_from_data`].
-pub(crate) struct BlockTableBuilder {
-    dtype: Dtype,
-    block_size: BlockSize,
-    encoder: Encoder,
-    block_data: Vec<u8>,
-    block_offsets: Vec<u64>,
-    max_blk_cdata_len: usize,
+pub(crate) trait BlockFn {
+    fn get_compressed_blocks(
+        &mut self,
+        blocks: Range<u64>,
+        base_offset: u64,
+    ) -> Result<(&[u8], &[u64])>;
 }
-impl BlockTableBuilder {
-    /// Create an empty builder for a `BlockTable` with the given element type, block size,
-    /// and compression configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns `InvalidArgument` if `dtype.itemsize() == 0` or `block_size == 0`.
-    pub(crate) fn new(dtype: Dtype, block_size: BlockSize, encoder: Encoder) -> Result<Self> {
-        ensure!(
-            dtype.itemsize() > 0,
-            InvalidArgument,
-            "itemsize must be > 0"
-        );
-        ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
-        let b_size_bytes = block_size as usize * dtype.itemsize() as usize;
-        let max_blk_cdata_len = encoder.encode_bound(b_size_bytes);
-        Ok(Self {
-            dtype,
-            block_size,
-            encoder,
-            block_data: Vec::new(),
-            block_offsets: Vec::new(),
-            max_blk_cdata_len,
-        })
+
+pub(crate) struct BlockFnWithState<F, E> {
+    impl_fn: F,
+    extension: E,
+}
+impl<F, E> BlockFnWithState<F, E> {
+    pub(crate) fn from_fn(extension: E, impl_fn: F) -> Self
+    where
+        F: for<'a> FnMut(Range<u64>, u64, &'a mut E) -> Result<(&'a [u8], &'a [u64])>,
+    {
+        Self { impl_fn, extension }
     }
+}
+impl<F, E> BlockFn for BlockFnWithState<F, E>
+where
+    F: for<'a> FnMut(Range<u64>, u64, &'a mut E) -> Result<(&'a [u8], &'a [u64])>,
+{
+    fn get_compressed_blocks(
+        &mut self,
+        blocks: Range<u64>,
+        base_offset: u64,
+    ) -> Result<(&[u8], &[u64])> {
+        (self.impl_fn)(blocks, base_offset, &mut self.extension)
+    }
+}
 
-    /// Compress one block of raw item bytes and append it to the table being built.
-    ///
-    /// Blocks must be added in order; each call appends the next block.
-    ///
-    /// # Arguments
-    ///
-    /// - `block_data` — raw (uncompressed) bytes for one block.
-    ///   Must be exactly `block_size * dtype.itemsize()` bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns `InvalidArgument` if `block_data.len()` does not match the expected size.
-    /// Propagates any codec error returned by the encoder.
-    pub(crate) fn add_block(&mut self, block_data: &[u8]) -> Result<()> {
-        let b_size_bytes = self.block_size as usize * self.dtype.itemsize() as usize;
-        ensure!(
-            block_data.len() == b_size_bytes,
-            InvalidArgument,
-            "Block data size does not match block size: got {}, expected {b_size_bytes}",
-            block_data.len()
-        );
+impl<S> BlockTable<S>
+where
+    S: BlockTableStorage,
+{
+    pub(crate) fn to_block_fn<'a>(&'a self) -> (impl BlockFn + 'a, usize) {
+        assert!(self.nitems.is_multiple_of(self.block_size as u64));
+        let compressed_block_size_bound = self
+            .block_offsets
+            .as_ref()
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .max()
+            .unwrap_or(0);
 
-        let block_data_len = self.block_data.len();
-        self.block_data.reserve(self.max_blk_cdata_len);
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            self.block_data
-                .set_len(block_data_len + self.max_blk_cdata_len)
-        };
-        let blk_buf = &mut self.block_data[block_data_len..];
-
-        let blk_cdata_len = self.encoder.encode(block_data, blk_buf)?;
-        debug_assert!(blk_cdata_len <= self.max_blk_cdata_len);
-        unsafe { self.block_data.set_len(block_data_len + blk_cdata_len) };
-
-        if self.block_offsets.is_empty() {
-            self.block_offsets.push(0);
+        struct BlockFnImpl<'a, S>
+        where
+            S: BlockTableStorage,
+        {
+            table: &'a BlockTable<S>,
         }
-        self.block_offsets.push(self.block_data.len() as u64);
-        Ok(())
-    }
+        impl<'a, S> BlockFn for BlockFnImpl<'a, S>
+        where
+            S: BlockTableStorage,
+        {
+            fn get_compressed_blocks(
+                &mut self,
+                blocks: Range<u64>,
+                base_offset: u64,
+            ) -> Result<(&[u8], &[u64])> {
+                let start = blocks.start as usize;
+                let end = blocks.end as usize;
+                let all_offsets = self.table.block_offsets.as_ref();
 
-    /// Finalise the builder and return the completed [`BlockTable`].
-    ///
-    /// Derives the decoder configuration from the encoder used during building
-    /// and constructs the table from the accumulated compressed data.
-    /// The builder is consumed and cannot be used after this call.
-    pub(crate) fn finish(self) -> Result<BlockTable<Owned>> {
-        let nblocks = self.block_offsets.len().saturating_sub(1);
-        let nitems = nblocks * self.block_size as usize;
-        let decoder_config = DecoderCodecConfig {
-            codec: match &self.encoder.compressor {
-                Compressor::Zstd(_) => Codec::Zstd,
-            },
-            filters: self.encoder.filters.clone(),
-            dtype: self.dtype.clone(),
-        };
-        BlockTable::new(
-            self.block_data,
-            self.block_offsets,
-            nitems as u64,
-            self.block_size,
-            decoder_config,
+                assert_eq!(base_offset, all_offsets[start]);
+
+                let data_start = all_offsets[start] as usize;
+                let data_end = all_offsets[end] as usize;
+                let data = &self.table.block_data.as_ref()[data_start..data_end];
+                let offsets = &all_offsets[start + 1..=end];
+
+                Ok((data, offsets))
+            }
+        }
+        (
+            BlockFnImpl { table: self },
+            compressed_block_size_bound as usize,
         )
     }
 }
@@ -392,15 +444,11 @@ mod tests {
     use std::io::Cursor;
 
     use super::{BlockSize, BlockTable};
-    use crate::codec::{Encoder, EncoderParams, ReadContext};
-    use crate::dtype::{Dtype, Dtyped};
+    use crate::codec::{EncoderParams, ReadContext};
+    use crate::dtype::Dtyped;
     use crate::error::Result;
     use crate::storage::block::{BlockTableStorage, Owned};
     use crate::util::{cast_slice, AlignedBytes};
-
-    fn make_encoder(dtype: Dtype, params: &EncoderParams) -> Encoder {
-        Encoder::new(params, dtype).unwrap()
-    }
 
     fn decode_block<S>(table: &BlockTable<S>, idx: usize, context: &mut ReadContext) -> Vec<u8>
     where
@@ -415,7 +463,7 @@ mod tests {
     fn build_from_items<T>(
         items: &[T],
         block_size: BlockSize,
-        encoder: Encoder,
+        encoder_params: &EncoderParams,
     ) -> Result<BlockTable<Owned>>
     where
         T: Dtyped,
@@ -424,16 +472,14 @@ mod tests {
             unsafe { cast_slice::<T, u8>(items) },
             T::DTYPE,
             block_size,
-            encoder,
+            &encoder_params,
         )
     }
 
     #[test]
     fn build_single_block() {
         let items: Vec<u8> = (0u8..8).collect();
-        let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u8::DTYPE, &encoder_params);
-        let table = build_from_items(&items, 8, encoder).unwrap();
+        let table = build_from_items(&items, 8, &EncoderParams::default()).unwrap();
         assert_eq!(table.block_offsets.len(), 2);
         assert_eq!(table.nitems, 8);
         let mut context = ReadContext::default();
@@ -444,9 +490,7 @@ mod tests {
     fn build_multiple_blocks_exact_divisor() {
         // 12 items, block_size=4 → 3 full blocks
         let items: Vec<u8> = (0u8..12).collect();
-        let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u8::DTYPE, &encoder_params);
-        let table = build_from_items(&items, 4, encoder).unwrap();
+        let table = build_from_items(&items, 4, &EncoderParams::default()).unwrap();
         assert_eq!(table.block_offsets.len(), 4);
         assert_eq!(table.nitems, 12);
         let mut context = ReadContext::default();
@@ -459,10 +503,8 @@ mod tests {
     fn build_multiple_blocks_non_divisible_panics() {
         // 10 items, block_size=4 → not divisible, should panic
         let items: Vec<u8> = (0u8..10).collect();
-        let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u8::DTYPE, &encoder_params);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            build_from_items(&items, 4, encoder).unwrap();
+            build_from_items(&items, 4, &EncoderParams::default()).unwrap();
         }));
         assert!(result.is_err());
     }
@@ -471,9 +513,7 @@ mod tests {
     fn build_with_itemsize_greater_than_one() {
         // 4 u32 values, block_size=2
         let items: Vec<u32> = vec![10, 20, 30, 40];
-        let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u32::DTYPE, &encoder_params);
-        let table = build_from_items(&items, 2, encoder).unwrap();
+        let table = build_from_items(&items, 2, &EncoderParams::default()).unwrap();
         assert_eq!(table.block_offsets.len(), 3);
         assert_eq!(table.nitems, 4);
         let mut context = ReadContext::default();
@@ -490,9 +530,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<Owned> {
-        let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(T::DTYPE, &encoder_params);
-        let table = build_from_items(items, block_size, encoder).unwrap();
+        let table = build_from_items(items, block_size, &EncoderParams::default()).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
         table.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
@@ -541,9 +579,7 @@ mod tests {
     #[test]
     fn round_trip_file() {
         let items: Vec<u32> = (0u32..18).collect();
-        let encoder_params = EncoderParams::default();
-        let encoder = make_encoder(u32::DTYPE, &encoder_params);
-        let table = build_from_items(&items, 3, encoder).unwrap();
+        let table = build_from_items(&items, 3, &EncoderParams::default()).unwrap();
 
         let tmp_file = tempfile::NamedTempFile::new().unwrap();
         let path = tmp_file.path();
@@ -568,13 +604,13 @@ mod tests {
     fn make_storage<T: Dtyped>(
         items: &[T],
         block_len: BlockSize,
-        params: &EncoderParams,
+        encoder_params: &EncoderParams,
     ) -> BlockTable<Owned> {
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
             T::DTYPE,
             block_len,
-            make_encoder(T::DTYPE, params),
+            &encoder_params,
         )
         .unwrap()
     }
@@ -597,8 +633,7 @@ mod tests {
     #[test]
     fn single_block_u8_round_trips() {
         let items: Vec<u8> = (0..8).collect();
-        let encoder_params = EncoderParams::default();
-        let s = make_storage(&items, 8, &encoder_params);
+        let s = make_storage(&items, 8, &EncoderParams::default());
         assert_eq!(s.nitems(), 8);
         assert_eq!(s.block_len(), 8);
         assert_eq!(s.dtype(), &u8::DTYPE);
@@ -608,8 +643,7 @@ mod tests {
     #[test]
     fn two_blocks_i32_round_trips() {
         let items: Vec<i32> = (0..8).collect();
-        let encoder_params = EncoderParams::default();
-        let s = make_storage(&items, 4, &encoder_params);
+        let s = make_storage(&items, 4, &EncoderParams::default());
         assert_eq!(s.nitems(), 8);
         assert_eq!(s.block_len(), 4);
         assert_eq!(read_block_items::<i32, _>(&s, 0), items[..4]);
@@ -619,8 +653,7 @@ mod tests {
     #[test]
     fn multiple_blocks_f32_round_trips() {
         let items: Vec<f32> = (0..12).map(|x| x as f32 * 0.5).collect();
-        let encoder_params = EncoderParams::default();
-        let s = make_storage(&items, 4, &encoder_params);
+        let s = make_storage(&items, 4, &EncoderParams::default());
         assert_eq!(s.nitems(), 12);
         assert_eq!(s.block_len(), 4);
         for b in 0..3 {
@@ -631,8 +664,7 @@ mod tests {
     #[test]
     fn buffer_too_small_returns_error() {
         let items: Vec<u8> = (0..4).collect();
-        let encoder_params = EncoderParams::default();
-        let s = make_storage(&items, 4, &encoder_params);
+        let s = make_storage(&items, 4, &EncoderParams::default());
         let mut buf = vec![0u8; 3]; // one byte short
         let mut context = ReadContext::default();
         assert!(s.read_block(0, &mut buf, &mut context).is_err());

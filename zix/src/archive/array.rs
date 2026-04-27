@@ -7,12 +7,13 @@ use std::sync::Arc;
 use crate::archive::block::BlockTableStorageRead;
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
+use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, CompactMmap, Compacted,
+    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, CompactMmap,
 };
-use crate::util::{dim_arr, DimArray, Idx};
+use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
 use crate::{Array, ArrayParams};
 
 impl Array<Compact> {
@@ -85,55 +86,68 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    pub fn write_to(&self, writer: impl Write + Seek) -> Result<()>
-    where
-        S: Compacted,
-    {
-        let storage = self.storage.as_compact();
-
-        let mut writer =
-            ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1).map_err(Error::io)?;
-
-        let header = schema::ArrayHeader {
-            shape: self.shape().to_vec(),
-            block_shape: storage
-                .0
-                .block_shape()
-                .iter()
-                .cloned()
-                .map(|s| s as u64)
-                .collect(),
-        };
-        writer.write_message(&header).map_err(Error::io)?;
-
-        storage.0.blocks.write_content(&mut writer)
-    }
-
-    pub fn write_to_file(self, path: &Path) -> Result<()>
-    where
-        S: Compacted,
-    {
+    pub fn write_to_file(&self, path: &Path) -> Result<()> {
         let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
         self.write_to(writer)
     }
 
-    /// # Safety
-    ///
-    /// Same as `memmap2::Mmap::map`.
-    pub unsafe fn write_to_file_mmap(
-        self,
-        path: &Path,
-        params: ArrayParams,
-    ) -> Result<Array<CompactMmap>> {
-        // TODO: implement this function while avoiding materializing the whole (compressed) array in memory,
-        // by writing each compressed block to disk, one after the other.
-        let array = self.copy_with(params.clone(), &self.read_ctx())?;
+    pub fn write_to(&self, writer: impl Write + Seek) -> Result<()> {
+        self.write_to_with(writer, ArrayParams::default(), &self.read_ctx())
+    }
 
-        let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
-        array.write_to(writer)?;
+    pub fn write_to_with(
+        &self,
+        writer: impl Write + Seek,
+        mut params: ArrayParams,
+        context: &ReadContext,
+    ) -> Result<()> {
+        let shape = self.shape();
+        let ndim = shape.len();
+        let dtype = self.dtype();
+        params.override_from_storage(&self.storage);
+        params.tune(shape, dtype)?;
+        let block_shape: DimArray<_> = if let Some(storage) = self.storage.as_compact() {
+            storage.0.block_shape().try_into().unwrap()
+        } else {
+            params.block_shape.clone().unwrap()
+        };
 
-        let len = path.metadata().map_err(Error::io)?.len();
-        unsafe { Array::read_from_file_mmap(path, 0, len, params) }
+        let mut writer =
+            ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1).map_err(Error::io)?;
+        let header = schema::ArrayHeader {
+            shape: shape.to_vec(),
+            block_shape: block_shape.iter().cloned().map(|s| s as u64).collect(),
+        };
+        writer.write_message(&header).map_err(Error::io)?;
+
+        if let Some(storage) = self.storage.as_compact() {
+            storage.0.blocks.write_content(&mut writer)?;
+            return writer.flush().map_err(Error::io);
+        }
+
+        let block_shape = params.block_shape.as_ref().unwrap();
+        let block_size = block_shape.iter().cloned().try_product().unwrap();
+        let grid_shape = dim_arr(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
+        let nblocks = grid_shape.iter().cloned().product::<u64>();
+
+        let encoder_cfg = params.encoder_params.as_ref().unwrap();
+        let decoder_cfg = DecoderCodecConfig {
+            codec: encoder_cfg.codec.clone(),
+            filters: encoder_cfg.filters.clone(),
+            dtype: dtype.clone(),
+        };
+
+        let (mut block_fn, block_compressed_bound) = self.to_block_fn(&params, context)?;
+        crate::archive::block::write_content_impl(
+            nblocks,
+            block_size,
+            &decoder_cfg,
+            &mut writer,
+            block_compressed_bound,
+            &mut block_fn,
+        )?;
+
+        writer.flush().map_err(Error::io)
     }
 }
 

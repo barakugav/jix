@@ -9,8 +9,10 @@ use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter};
 use crate::dtype::Dtype;
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
-use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned};
-use crate::util::{cast_slice, cast_slice_mut};
+use crate::storage::block::{
+    BlockFn, BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned,
+};
+use crate::util::{cast_slice, cast_slice_mut, Idx};
 
 pub trait BlockTableStorageRead: BlockTableStorage {
     fn read_section<T, R>(
@@ -41,64 +43,167 @@ where
     where
         W: Write + Seek,
     {
-        // Write header
-        let header = schema::BlockTableHeader {
-            dtype: Some(self.dtype().to_proto()),
-            nitems: self.nitems,
-            block_size: self.block_size as u64,
-            codec: Some(schema::Codec {
-                kind: Some(match self.decoder_config.codec {
-                    Codec::Zstd => schema::codec::Kind::Zstd(()),
-                }),
-            }),
-            filters: self
-                .decoder_config
-                .filters
-                .iter()
-                .map(|f| schema::Filter {
-                    kind: Some(match f {
-                        Filter::ByteShuffle => schema::filter::Kind::ByteShuffle(()),
-                        Filter::BitShuffle => schema::filter::Kind::BitShuffle(()),
-                    }),
-                })
-                .collect(),
-            table_of_contents: vec![
-                schema::block_table_header::TableOfContents::BlockOffsets as i32,
-                schema::block_table_header::TableOfContents::BlockDataContinuous as i32,
-            ],
-        };
-        writer.write_message(&header).map_err(Error::io)?;
+        assert!(self.nitems.is_multiple_of(self.block_size as u64));
+        let nblocks = self.nitems / self.block_size as u64;
 
-        // Write table of contents (placeholder for now, will be overwritten later)
-        let mut toc = [Section::default(); 2];
-        let toc_offset = writer.stream_position().map_err(Error::io)?;
-        writer.write_all(toc.as_bytes()).map_err(Error::io)?;
-
-        // Write body data sections
-        let block_data = writer
-            .write_section(self.block_data.as_ref(), align_of::<u8>())
-            .map_err(Error::io)?;
-        let block_offsets = writer
-            .write_section(
-                unsafe { cast_slice::<u64, u8>(self.block_offsets.as_ref()) },
-                align_of::<u64>(),
-            )
-            .map_err(Error::io)?;
-
-        // Go back and write table of contents
-        toc = [block_offsets, block_data];
-        let current_pos = writer.stream_position().map_err(Error::io)?;
-        writer
-            .seek(SeekFrom::Start(toc_offset))
-            .map_err(Error::io)?;
-        writer.write_all(toc.as_bytes()).map_err(Error::io)?;
-        writer
-            .seek(SeekFrom::Start(current_pos))
-            .map_err(Error::io)?;
-
-        Ok(())
+        let (mut block_fn, compressed_block_size_bound) = self.to_block_fn();
+        write_content_impl(
+            nblocks,
+            self.block_size,
+            &self.decoder_config,
+            writer,
+            compressed_block_size_bound,
+            &mut block_fn,
+        )
     }
 }
+
+pub(crate) fn write_content_impl<W>(
+    nblocks: u64,
+    block_size: BlockSize,
+    decoder_config: &DecoderCodecConfig,
+    writer: &mut ArchiveWriter<W>,
+    compressed_block_size_bound: usize,
+    block_fn: &mut impl BlockFn,
+) -> Result<()>
+where
+    W: Write + Seek,
+{
+    let nitems = nblocks * block_size as u64;
+
+    // Write header
+    let header = schema::BlockTableHeader {
+        dtype: Some(decoder_config.dtype.to_proto()),
+        nitems,
+        block_size: block_size as u64,
+        codec: Some(schema::Codec {
+            kind: Some(match decoder_config.codec {
+                Codec::Zstd => schema::codec::Kind::Zstd(()),
+            }),
+        }),
+        filters: decoder_config
+            .filters
+            .iter()
+            .map(|f| schema::Filter {
+                kind: Some(match f {
+                    Filter::ByteShuffle => schema::filter::Kind::ByteShuffle(()),
+                    Filter::BitShuffle => schema::filter::Kind::BitShuffle(()),
+                }),
+            })
+            .collect(),
+        table_of_contents: vec![
+            schema::block_table_header::TableOfContents::BlockOffsets as i32,
+            schema::block_table_header::TableOfContents::BlockDataContinuous as i32,
+        ],
+    };
+    writer.write_message(&header).map_err(Error::io)?;
+
+    // Write table of contents (placeholder for now, will be overwritten later)
+    let mut toc = [Section::default(); 2];
+    let toc_offset = writer.stream_position().map_err(Error::io)?;
+    writer.write_all(toc.as_bytes()).map_err(Error::io)?;
+
+    let block_offsets_offset = {
+        let current_offset = writer.stream_position().map_err(Error::io)?;
+        let block_offsets_offset = current_offset.ceil_to_multiple(align_of::<u64>() as u64);
+        let padding = (block_offsets_offset - current_offset) as usize;
+        if padding > 0 {
+            let padding_buf = [0u8; size_of::<u64>()];
+            writer
+                .write_all(&padding_buf[..padding])
+                .map_err(Error::io)?;
+        }
+        block_offsets_offset
+    };
+    let block_offsets_num = if nblocks == 0 { 0 } else { nblocks + 1 };
+    let block_data_offset = block_offsets_offset + block_offsets_num * size_of::<u64>() as u64;
+
+    let mut offsets_write_buf = Vec::<u64>::new();
+    let mut written_offsets_num = 0;
+
+    let mut block_data_total_len = 0;
+    let chunk = (64 * 1024 / compressed_block_size_bound).max(1) as u64; // try to write 64KB at a time
+
+    // seek to data section, as we dont seek inside the loop and assume we are already at the data section
+    writer
+        .seek(SeekFrom::Start(block_data_offset))
+        .map_err(Error::io)?;
+
+    for block_index in (0..nblocks).step_by(chunk as usize) {
+        let blocks = block_index..(block_index + chunk).min(nblocks);
+        let base_offset = block_data_total_len;
+
+        // Get blocks data
+        let (data, offsets) = block_fn.get_compressed_blocks(blocks, base_offset)?;
+
+        // Write compressed data
+        // Write without seek, assuming we already in the data section
+        writer.write_all(data).map_err(Error::io)?;
+
+        // Record offsets
+        if block_index == 0 {
+            offsets_write_buf.push(0);
+        }
+        debug_assert!(block_data_total_len <= *offsets.first().unwrap());
+        debug_assert!(offsets.windows(2).all(|w| w[0] <= w[1]));
+        offsets_write_buf.extend_from_slice(offsets);
+
+        // Actually persist the offsets from time to time
+        if offsets_write_buf.len() > 8192 {
+            let offsets_offset =
+                block_offsets_offset + written_offsets_num * size_of::<u64>() as u64;
+            let current_offset = writer.stream_position().map_err(Error::io)?;
+            // seek to correct position in offsets section
+            writer
+                .seek(SeekFrom::Start(offsets_offset))
+                .map_err(Error::io)?;
+            // write offsets
+            writer
+                .write_all(unsafe { cast_slice::<u64, u8>(offsets_write_buf.as_slice()) })
+                .map_err(Error::io)?;
+            written_offsets_num += offsets_write_buf.len() as u64;
+            offsets_write_buf.clear();
+            // seek back to data section
+            writer
+                .seek(SeekFrom::Start(current_offset))
+                .map_err(Error::io)?;
+        }
+
+        block_data_total_len = *offsets.last().unwrap();
+    }
+    let current_pos = writer.stream_position().map_err(Error::io)?;
+
+    // Flush offsets write buf
+    let offsets_offset = block_offsets_offset + written_offsets_num * size_of::<u64>() as u64;
+    writer
+        .seek(SeekFrom::Start(offsets_offset))
+        .map_err(Error::io)?;
+    writer
+        .write_all(unsafe { cast_slice::<u64, u8>(offsets_write_buf.as_slice()) })
+        .map_err(Error::io)?;
+
+    // Go back and write table of contents
+    toc = [
+        Section {
+            offset: block_offsets_offset as i64 - writer.base_offset as i64,
+            size: (block_offsets_num * size_of::<u64>() as u64) as u64,
+        },
+        Section {
+            offset: block_data_offset as i64 - writer.base_offset as i64,
+            size: block_data_total_len,
+        },
+    ];
+    writer
+        .seek(SeekFrom::Start(toc_offset))
+        .map_err(Error::io)?;
+    writer.write_all(toc.as_bytes()).map_err(Error::io)?;
+    writer
+        .seek(SeekFrom::Start(current_pos))
+        .map_err(Error::io)?;
+
+    Ok(())
+}
+
 impl BlockTable<Owned> {
     #[allow(unused)]
     pub(crate) fn read_from<R>(reader: R, len: u64) -> Result<Self>
@@ -189,14 +294,16 @@ where
 
         let decoder_config = DecoderCodecConfig {
             codec,
-            filters,
+            filters: filters
+                .as_slice()
+                .try_into()
+                .map_err(|_| Error::new(ErrorKind::InvalidArchive, "too many filters in header"))?,
             dtype: Dtype::from_proto(header.dtype.as_ref().unwrap()).unwrap(),
         };
 
         Self::new(
             block_data,
             block_offsets,
-            header.nitems,
             header.block_size as BlockSize,
             decoder_config,
         )

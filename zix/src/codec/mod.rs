@@ -111,9 +111,9 @@ pub enum Codec {
 /// ```
 #[derive(Clone, Debug)]
 pub struct EncoderParams {
-    codec: Codec,
-    level: u8,
-    filters: arrayvec::ArrayVec<Filter, 4>,
+    pub(crate) codec: Codec,
+    pub(crate) level: u8,
+    pub(crate) filters: arrayvec::ArrayVec<Filter, 4>,
 }
 impl Default for EncoderParams {
     fn default() -> Self {
@@ -199,7 +199,7 @@ impl EncoderParams {
 
 pub(crate) struct Encoder {
     pub(crate) dtype: Dtype,
-    pub(crate) filters: Vec<Filter>,
+    pub(crate) filters: arrayvec::ArrayVec<Filter, 4>,
     pub(crate) compressor: Compressor,
     tmp_buf1: AlignedBytes,
     tmp_buf2: AlignedBytes,
@@ -217,7 +217,7 @@ impl Encoder {
         let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {
             dtype,
-            filters: params.filters.to_vec(),
+            filters: params.filters.clone(),
             tmp_buf1,
             tmp_buf2,
             tmp_buffers: TmpBufferPool::new(),
@@ -317,7 +317,7 @@ pub struct DecoderParams {
 #[derive(Clone, Debug)]
 pub(crate) struct DecoderCodecConfig {
     pub(crate) codec: Codec,
-    pub(crate) filters: Vec<Filter>,
+    pub(crate) filters: arrayvec::ArrayVec<Filter, 4>,
     pub(crate) dtype: Dtype,
 }
 

@@ -27,7 +27,7 @@ pub(crate) struct Section {
 
 pub(crate) struct ArchiveWriter<W> {
     writer: W,
-    base_offset: u64,
+    pub(crate) base_offset: u64,
     tmp_buf: Vec<u8>,
 }
 impl<W> ArchiveWriter<W> {

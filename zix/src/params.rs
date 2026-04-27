@@ -295,3 +295,27 @@ impl ArrayParams {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{Array, ArrayParams};
+
+    #[test]
+    fn example() {
+        // Construct an array with a specific block shape.
+        let data = ndarray::Array2::<f32>::zeros((1024, 1024));
+        let mut params = ArrayParams::new();
+        params.block_shape(&[64, 64]);
+        let za = Array::compact_array_with(&data, params).unwrap();
+
+        // After a shape-changing op, pin the block shape explicitly.
+        let mut out_params = ArrayParams::new();
+        out_params.block_shape(&[128, 128]);
+        let ctx = za.read_ctx();
+        let transposed = za
+            .permute_axes(&[1, 0])
+            .copy_with(out_params, &ctx)
+            .unwrap();
+        assert_eq!(transposed.shape(), &[1024, 1024]);
+    }
+}

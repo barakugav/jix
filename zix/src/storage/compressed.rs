@@ -75,11 +75,9 @@ macro_rules! impl_array_storage {
                     // decoder_config: Some(&self.0.blocks.decoder_config),
                 }
             }
-        }
 
-        impl Compacted for $ty {
-            fn as_compact(&self) -> CompactBorrowed<'_> {
-                CompactBorrowed(ArrayBlockTableStorageBase {
+            fn as_compact(&self) -> Option<CompactBorrowed<'_>> {
+                Some(CompactBorrowed(ArrayBlockTableStorageBase {
                     blocks: self.0.blocks.as_ref(),
                     shape: self.0.shape.clone(),
 
@@ -88,7 +86,7 @@ macro_rules! impl_array_storage {
 
                     encoder_params: self.0.encoder_params.clone(),
                     decoder_params: self.0.decoder_params.clone(),
-                })
+                }))
             }
         }
     };
@@ -96,10 +94,6 @@ macro_rules! impl_array_storage {
 impl_array_storage!(Compact);
 impl_array_storage!(CompactBorrowed<'_>);
 impl_array_storage!(CompactMmap);
-
-pub trait Compacted {
-    fn as_compact(&self) -> CompactBorrowed<'_>;
-}
 
 /// Nd-array layer on top of [`BlockTable<S>`](crate::storage::block::BlockTable).
 ///

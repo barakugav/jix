@@ -125,6 +125,11 @@ pub trait ArrayStorage {
     /// Not intended to be called directly.
     #[doc(hidden)]
     fn _spec(&self) -> ArrayStorageSpec<'_>;
+
+    #[doc(hidden)]
+    fn as_compact(&self) -> Option<CompactBorrowed<'_>> {
+        None
+    }
 }
 
 /// Internal metadata of ArrayStorage.
@@ -145,11 +150,6 @@ pub struct ArrayStorageSpec<'a> {
 /// from `&Array<S>` without cloning the underlying storage.
 pub struct Ref<'a, S>(pub(crate) &'a S);
 impl_array_storage_forward!(Ref<'a, S> where S: ArrayStorage);
-impl<'a, S: Compacted> Compacted for Ref<'a, S> {
-    fn as_compact(&self) -> CompactBorrowed<'_> {
-        self.0.as_compact()
-    }
-}
 
 macro_rules! impl_array_storage_forward {
     ($wrapper:ident $(<$($gen:tt),*>)? $(where $($wh:tt)*)?) => {
@@ -173,6 +173,9 @@ macro_rules! impl_array_storage_forward {
             }
             fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
                 self.0._spec()
+            }
+            fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_>> {
+                self.0.as_compact()
             }
         }
     };
