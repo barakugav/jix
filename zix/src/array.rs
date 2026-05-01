@@ -4,6 +4,7 @@ use std::ops::Range;
 use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, ensure, Result};
+use crate::ops::IntoCompact;
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
 use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
@@ -646,6 +647,21 @@ impl<S: ArrayStorage> Array<S> {
         Array {
             storage: Ref(self.storage()),
         }
+    }
+
+    pub fn into_compact(self) -> Result<Array<IntoCompact<S>>> {
+        let context = self.read_ctx();
+        self.into_compact_with(ArrayParams::default(), &context)
+    }
+
+    pub fn into_compact_with(
+        self,
+        params: ArrayParams,
+        context: &ReadContext,
+    ) -> Result<Array<IntoCompact<S>>> {
+        Ok(Array::from_storage(IntoCompact::new(
+            self, params, context,
+        )?))
     }
 
     /// Return a reference to the underlying storage backend.
