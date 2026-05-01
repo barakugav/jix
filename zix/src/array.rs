@@ -479,6 +479,10 @@ impl<S: ArrayStorage> Array<S> {
     /// its not perfect - you want want to explicitly pass some parameters via
     /// [`copy_with`](Array::copy_with).
     ///
+    /// Its also possible to materialize a lazy operation chain directly into a file without holding
+    /// the whole result (compressed or decompressed) in memory.
+    /// See [`write_to_file`](Array::write_to_file) and its variants for details and examples.
+    ///
     /// Codec settings (compression level, filters, etc.) are also inherited from the source storage.
     ///
     /// # Errors
@@ -700,6 +704,29 @@ impl<S: ArrayStorage> Array<S> {
         Ok(())
     }
 
+    /// Build a [`BlockFn`] that reads and compresses this array's data block by block.
+    ///
+    /// Called by [`Array::into_compact`] (and its variants) to feed [`build_block_table`] with
+    /// compressed block data without materializing all blocks at once.
+    ///
+    /// # Block layout
+    ///
+    /// `params.block_shape` divides the array into an N-dimensional grid of blocks. Blocks are
+    /// visited in C order (last axis varies fastest). Boundary blocks — those that extend beyond
+    /// the array's shape — are zero-padded to fill the full `block_shape` before compression.
+    ///
+    /// # Returned value
+    ///
+    /// Returns `(block_fn, bound)` where:
+    /// - `block_fn` — a [`BlockFnWithState`] closure that, per batch, reads each block from
+    ///   storage, compresses it with the encoder from `params`, and appends the result to an
+    ///   internal `AlignedBytes` buffer. Returns the buffer slice and the absolute end-offsets.
+    /// - `bound` — the encoder's compressed-size upper bound for one block, used by the caller
+    ///   to choose a batch size that targets ~64 KB of compressed output per call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the encoder cannot be constructed from `params`.
     pub(crate) fn to_block_fn<'a>(
         &'a self,
         params: &ArrayParams,

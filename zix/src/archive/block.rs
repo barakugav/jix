@@ -14,7 +14,26 @@ use crate::storage::block::{
 };
 use crate::util::{cast_slice, cast_slice_mut, Idx};
 
-pub trait BlockTableStorageRead: BlockTableStorage {
+/// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
+///
+/// [`BlockTable::read_content`] calls `read_section` twice — once for `block_data` (`T = u8`)
+/// and once for `block_offsets` (`T = u64`) — delegating all I/O and lifetime management to the
+/// storage-specific implementation:
+///
+/// - [`Owned`] — reads the section bytes into a freshly allocated `Vec<T>`.
+/// - [`Mmap`] — returns a zero-copy [`MmapData<T>`] pointer into the already-mapped region.
+pub(crate) trait BlockTableStorageRead: BlockTableStorage {
+    /// Read one archive section into a typed array appropriate for this storage backend.
+    ///
+    /// # Arguments
+    ///
+    /// - `reader` — the open archive reader; the section is located via `section.offset`.
+    /// - `section` — byte offset and length of the section within the archive.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArchive` if the section size is not a multiple of `size_of::<T>()` or if
+    /// the data pointer is not properly aligned (mmap only). Propagates I/O errors.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
@@ -29,6 +48,11 @@ impl<S> BlockTable<S>
 where
     S: BlockTableStorage,
 {
+    /// Write this `BlockTable` as a self-contained archive to `writer`.
+    ///
+    /// Wraps `writer` in a fresh [`ArchiveWriter`] with type `BlockTable`, then delegates to
+    /// [`write_content`](Self::write_content). Use this when writing a standalone `.zix` file;
+    /// use `write_content` when embedding into a larger archive.
     #[allow(unused)]
     pub(crate) fn write_to<W>(&self, writer: W) -> Result<()>
     where
@@ -39,6 +63,11 @@ where
         self.write_content(&mut writer)
     }
 
+    /// Write this `BlockTable`'s content into an already-opened [`ArchiveWriter`].
+    ///
+    /// Obtains a zero-copy [`BlockFn`] via [`BlockTable::to_block_fn`] and forwards to
+    /// [`write_content_impl`]. Use this when embedding into a larger archive that already has an
+    /// open writer; use [`write_to`](Self::write_to) for standalone files.
     pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> Result<()>
     where
         W: Write + Seek,
@@ -58,6 +87,41 @@ where
     }
 }
 
+/// Serialize a block table's content into an already-opened [`ArchiveWriter`].
+///
+/// This is the shared inner implementation used by both [`BlockTable::write_content`] (which
+/// serializes an existing in-memory table) and the array compaction path (which compresses on the
+/// fly via a closure-backed [`BlockFn`]).
+///
+/// # Wire layout (within the writer's section)
+///
+/// ```text
+/// [ protobuf BlockTableHeader ]
+/// [ TOC placeholder: 2 × Section (overwritten at end) ]
+/// [ alignment padding to u64 boundary ]
+/// [ block_offsets: (nblocks + 1) × u64, or 0 entries when nblocks == 0 ]
+/// [ block_data:    concatenated compressed block bytes ]
+/// ```
+///
+/// The function seeks between the offsets section and the data section during the loop
+/// to flush accumulated offsets every ~8 192 entries, bounding memory use regardless of
+/// `nblocks`. After all blocks are written, it seeks back to overwrite the placeholder TOC
+/// with the real section positions and sizes, then restores the stream position to the end
+/// of the data.
+///
+/// # Arguments
+///
+/// - `nblocks` — total block count; may be zero.
+/// - `block_size` — items per block, written verbatim into the header.
+/// - `decoder_config` — codec, filters, and dtype written into the header.
+/// - `writer` — destination; must support `Seek` for the deferred TOC write-back.
+/// - `compressed_block_size_bound` — passed straight through to the batch-sizing logic
+///   (targets ~64 KB of compressed data per `block_fn` call).
+/// - `block_fn` — data source; called once per batch of blocks.
+///
+/// # Errors
+///
+/// Returns an I/O or codec error on any failure.
 pub(crate) fn write_content_impl<W>(
     nblocks: u64,
     block_size: BlockSize,
@@ -205,6 +269,22 @@ where
 }
 
 impl BlockTable<Owned> {
+    /// Read a `BlockTable` from a self-contained archive, allocating storage on the heap.
+    ///
+    /// Wraps `reader` in an [`ArchiveReader`], validates the archive type, then delegates to
+    /// [`read_content`](BlockTable::read_content) with [`Owned`] storage. Use this for standalone
+    /// `.zix` files; use `read_content` when reading from a larger archive.
+    ///
+    /// # Arguments
+    ///
+    /// - `reader` — the source; must be positioned at the start of the archive.
+    /// - `len` — total byte length of the archive section passed to `ArchiveReader` for bounds
+    ///   checking.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArchive` if the archive type header does not match `BlockTable`.
+    /// Propagates any I/O or parse error from `read_content`.
     #[allow(unused)]
     pub(crate) fn read_from<R>(reader: R, len: u64) -> Result<Self>
     where
@@ -227,6 +307,19 @@ impl<S> BlockTable<S>
 where
     S: BlockTableStorage,
 {
+    /// Deserialize a `BlockTable` from an already-opened [`ArchiveReader`].
+    ///
+    /// Reads the protobuf `BlockTableHeader`, resolves the codec and filters, validates the TOC,
+    /// then dispatches to `storage.read_section()` for the raw block-data and block-offsets
+    /// sections. The `storage` parameter determines how those sections are held in memory:
+    /// [`Owned`] copies them into heap `Vec`s; [`Mmap`] returns zero-copy pointers into the
+    /// mapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArchive` if the header is malformed (missing codec, unknown filter, wrong
+    /// TOC section count, missing required sections, or bad dtype). Propagates I/O errors from
+    /// `reader` and errors from [`BlockTable::new`].
     pub(crate) fn read_content<R>(reader: &mut ArchiveReader<R>, storage: S) -> Result<Self>
     where
         R: Read + Seek,
@@ -311,6 +404,10 @@ where
 }
 
 impl BlockTableStorageRead for Owned {
+    /// Read `section` into a heap-allocated `Vec<T>`.
+    ///
+    /// Allocates uninitialised capacity, reads the raw bytes from `reader` directly into the
+    /// buffer, then transmutes `Vec<MaybeUninit<T>>` to `Vec<T>` after the read succeeds.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,
@@ -341,6 +438,11 @@ impl BlockTableStorageRead for Owned {
 }
 
 impl BlockTableStorageRead for Mmap {
+    /// Return a zero-copy [`MmapData<T>`] pointing into the memory-mapped region.
+    ///
+    /// No bytes are copied; `mmap` is cloned (an `Arc` bump) to keep the mapping alive for the
+    /// lifetime of the returned `MmapData`. Fails if the section's byte offset within the mapping
+    /// is not aligned to `T`.
     fn read_section<T, R>(
         &self,
         reader: &mut ArchiveReader<R>,

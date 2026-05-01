@@ -167,6 +167,24 @@ where
     }
 }
 
+/// Build a [`BlockTable<Owned>`] by pulling compressed blocks from `block_fn`.
+///
+/// Iterates over all `nblocks` blocks in batches sized to produce roughly 64 KB of compressed
+/// output per call, delegating each batch to [`BlockFn::get_compressed_blocks`]. The returned
+/// bytes and end-offsets are accumulated into the final `BlockTable`.
+///
+/// # Arguments
+///
+/// - `nblocks` — total number of blocks to build; may be zero.
+/// - `block_size` — items per block (passed through to [`BlockTable::new`]).
+/// - `decoder_config` — codec/dtype configuration stored in the table.
+/// - `compressed_block_size_bound` — upper bound on a single block's compressed byte size;
+///   used only to size the iteration chunk (no correctness requirement, just a performance hint).
+/// - `block_fn` — the data source; called once per batch.
+///
+/// # Errors
+///
+/// Propagates any error returned by `block_fn` or by [`BlockTable::new`].
 pub(crate) fn build_block_table(
     nblocks: u64,
     block_size: BlockSize,
@@ -356,7 +374,35 @@ impl BlockTableStorage for Mmap {
     type Data<T: 'static> = MmapData<T>;
 }
 
+/// A source of pre-compressed block data consumed by [`build_block_table`] and
+/// `write_content_impl`.
+///
+/// Both consumers iterate over blocks in batches and call `get_compressed_blocks` once per batch.
+/// The implementor is responsible for compressing the requested blocks and returning them together
+/// with their cumulative end-offsets.
+///
+/// Two implementations are provided in this module:
+/// - [`BlockFnWithState`] — closure-based, used when encoding an [`Array`](crate::Array) into a
+///   new `BlockTable`.
+/// - The inner `BlockFnImpl` returned by [`BlockTable::to_block_fn`] — zero-copy slice into an
+///   existing `BlockTable`, used when re-serializing already-compressed data.
 pub(crate) trait BlockFn {
+    /// Produce compressed data for a contiguous range of block indices.
+    ///
+    /// # Arguments
+    ///
+    /// - `blocks` — half-open range of block indices to compress, e.g. `4..8`.
+    /// - `base_offset` — the caller's accumulated byte count *before* this batch; equal to the
+    ///   absolute byte offset where `blocks.start`'s compressed data begins. Used by
+    ///   implementations that need to produce absolute offsets.
+    ///
+    /// # Returns
+    ///
+    /// A pair `(data, offsets)` where:
+    /// - `data` — concatenated compressed bytes for all blocks in `blocks`.
+    /// - `offsets` — cumulative end-offsets of each block within the *entire* data stream
+    ///   (not relative to this batch). `offsets[i]` is the absolute byte position immediately
+    ///   after block `blocks.start + i`. Length must equal `blocks.end - blocks.start`.
     fn get_compressed_blocks(
         &mut self,
         blocks: Range<u64>,
@@ -364,6 +410,14 @@ pub(crate) trait BlockFn {
     ) -> Result<(&[u8], &[u64])>;
 }
 
+/// Closure-based [`BlockFn`] implementation that carries its own mutable state.
+///
+/// Wraps a closure `F` of the form
+/// `FnMut(Range<u64>, u64, &mut E) -> Result<(&[u8], &[u64])>` together with a mutable extension
+/// value `E` that can hold reusable scratch buffers (e.g., pre-allocated compressed-data and
+/// offset vectors). This avoids per-call allocations while keeping the closure signature clean.
+///
+/// Construct with [`BlockFnWithState::from_fn`].
 pub(crate) struct BlockFnWithState<F, E> {
     impl_fn: F,
     extension: E,
@@ -393,6 +447,12 @@ impl<S> BlockTable<S>
 where
     S: BlockTableStorage,
 {
+    /// Adapt this `BlockTable` into a [`BlockFn`] for use with [`build_block_table`] or
+    /// `write_content_impl`.
+    ///
+    /// The returned `BlockFn` slices directly into `self.block_data` and `self.block_offsets`
+    /// with no copying or re-compression. The second return value is the maximum compressed size
+    /// of any single block, used by callers to compute a batch size that targets ~64 KB per call.
     pub(crate) fn to_block_fn<'a>(&'a self) -> (impl BlockFn + 'a, usize) {
         assert!(self.nitems.is_multiple_of(self.block_size as u64));
         let compressed_block_size_bound = self

@@ -17,11 +17,77 @@ use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
 use crate::{Array, ArrayParams};
 
 impl Array<Compact> {
+    /// Load a compressed array from a `.zix` file, allocating storage on the heap.
+    ///
+    /// This is the most common way to read an array that was previously saved with
+    /// [`write_to_file`](Array::write_to_file) or [`write_to`](Array::write_to).
+    ///
+    /// Use [`read_from_file_section`](Array::read_from_file_section) if the array occupies only
+    /// part of a larger file, or [`read_from_file_mmap`](Array::read_from_file_mmap) for
+    /// memory-mapped (zero-copy) loading.
+    ///
+    /// # Arguments
+    ///
+    /// - `path`: path to the `.zix` file containing the array.
+    /// - `params`: parameters controlling how the array is read and decoded. See
+    ///   [`ArrayParams`] for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let tmp_dir = tempfile::tempdir()?;
+    /// let path = tmp_dir.path().join("data.zix");
+    ///
+    /// Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?.write_to_file(&path)?;
+    /// let array = Array::read_from_file(&path, ArrayParams::default())?;
+    /// assert_eq!(array.shape(), &[2, 2]);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn read_from_file(path: &Path, params: ArrayParams) -> Result<Self> {
         let len = path.metadata().map_err(Error::io)?.len();
         Self::read_from_file_section(path, 0, len, params)
     }
 
+    /// Load a compressed array from a byte range within a file.
+    ///
+    /// Use this when multiple arrays are packed into a single file and you know the byte `offset`
+    /// and `len` of the array you want to read. This avoids opening separate files per array and
+    /// lets a container format embed arrays alongside other data.
+    ///
+    /// # Arguments
+    ///
+    /// - `path`: path to the `.zix` file containing the array.
+    /// - `offset`: byte offset of the start of the array's archive section within the file.
+    /// - `len`: byte length of the array's archive section.
+    /// - `params`: parameters controlling how the array is read and decoded. See
+    ///   [`ArrayParams`] for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let tmp_dir = tempfile::tempdir()?;
+    /// let path = tmp_dir.path().join("packed.zix");
+    ///
+    /// // Write two arrays back-to-back into a single file and record their positions.
+    /// let a = Array::compact_array(&array![0u8, 1, 2, 3])?;
+    /// let b = Array::compact_array(&array![10u8, 20, 30, 40, 50, 60])?;
+    /// let mut f = std::fs::File::create(&path)?;
+    /// a.write_to(&mut f)?;
+    /// let offset = f.metadata()?.len();
+    /// b.write_to(&mut f)?;
+    /// let total = f.metadata()?.len();
+    ///
+    /// // Read the second array back using its offset.
+    /// let b2 = Array::read_from_file_section(&path, offset, total - offset, ArrayParams::default())?;
+    /// assert_eq!(b2.shape(), &[6]);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn read_from_file_section(
         path: &Path,
         offset: u64,
@@ -34,6 +100,36 @@ impl Array<Compact> {
         Self::read_from_reader(reader, Some(len), params)
     }
 
+    /// Load a compressed array from a generic reader.
+    ///
+    /// `len` is the byte length of the archive within the reader. When provided, it enables
+    /// bounds checking on section offsets; pass `None` to skip bounds checking.
+    ///
+    /// # Arguments
+    ///
+    /// - `reader`: any source implementing `Read` + `Seek` containing the array's archive section.
+    /// - `len`: byte length of the archive section within the reader, used for bounds checking.
+    ///    Pass `None` to skip bounds checking.
+    /// - `params`: parameters controlling how the array is read and decoded. See
+    ///   [`ArrayParams`] for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// // Serialize to an in-memory buffer and read it back.
+    /// let original = Array::compact_array(&array![1i32, 2, 3, 4])?;
+    /// let mut buf = Cursor::new(Vec::new());
+    /// original.write_to(&mut buf)?;
+    ///
+    /// let bytes = buf.into_inner();
+    /// let loaded = Array::read_from_reader(Cursor::new(bytes), None, ArrayParams::default())?;
+    /// assert_eq!(loaded.to_ndarray::<i32>()?, array![1i32, 2, 3, 4].into_dyn());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn read_from_reader(
         reader: impl Read + Seek,
         len: Option<u64>,
@@ -52,9 +148,50 @@ impl Array<Compact> {
 }
 
 impl Array<CompactMmap> {
+    /// Load a compressed array from a file using memory mapping (zero-copy).
+    ///
+    /// Instead of copying the file's bytes into heap memory, this maps the file into virtual
+    /// address space. The OS pages data in on demand, so startup is fast and only the blocks you
+    /// actually read are loaded into physical memory. The mapping stays alive for as long as the
+    /// returned array (or any clone/view of it) exists.
+    ///
+    /// This is particularly useful for large arrays when you only access a subset of blocks, or
+    /// when you want to build a lazy pipeline over the raw data without first copying it to heap.
+    /// See [`write_to_with`](Array::write_to_with) for how to use a memory-mapped array as the
+    /// source of a streaming write pipeline.
+    ///
+    /// # Arguments
+    ///
+    /// - `path`: path to the `.zix` file containing the array.
+    /// - `offset`: byte offset of the start of the array's archive section within the file.
+    /// - `len`: byte length of the array's archive section.
+    /// - `params`: parameters controlling how the array is read and decoded. See
+    ///   [`ArrayParams`] for details.
+    ///
     /// # Safety
     ///
-    /// Same as `memmap2::Mmap::map`.
+    /// This function is marked `unsafe` because of the potential for *Undefined Behavior* (UB)
+    /// using the mmap array if the underlying file is subsequently modified, in or
+    /// out of process. Applications must consider the risk and take appropriate precautions when using
+    /// file-backed array. Solutions such as file permissions, locks or process-private (e.g. unlinked)
+    /// files exist but are platform specific and limited.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let tmp_dir = tempfile::tempdir()?;
+    /// let path = tmp_dir.path().join("data.zix");
+    /// Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?.write_to_file(&path)?;
+    ///
+    /// let len = std::fs::metadata(&path)?.len();
+    /// // Safety: the file is not modified after this point.
+    /// let array = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
+    /// assert_eq!(array.shape(), &[2, 2]);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub unsafe fn read_from_file_mmap(
         path: &Path,
         offset: u64,
@@ -86,15 +223,128 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
+    /// Save the array to a new file at `path`.
+    ///
+    /// This is the most common way to persist an array. Works for any array type: a
+    /// `Array<Compact>` streams its already-compressed blocks directly to disk without
+    /// decompressing; a lazy view (slice, op chain, etc.) compresses on the fly, so the full
+    /// decompressed data is never held in memory.
+    ///
+    /// # Arguments
+    ///
+    /// `path`: path to the new `.zix` file to create. Must not already exist.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let array = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
+    ///
+    /// let tmp_dir = tempfile::tempdir()?;
+    /// let path = tmp_dir.path().join("output.zix");
+    /// array.write_to_file(&path)?;
+    ///
+    /// let loaded = Array::read_from_file(&path, ArrayParams::default())?;
+    /// assert_eq!(loaded.to_ndarray::<f32>()?, array![[1.0f32, 2.0], [3.0, 4.0]].into_dyn());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn write_to_file(&self, path: &Path) -> Result<()> {
         let writer = BufWriter::new(std::fs::File::create_new(path).map_err(Error::io)?);
         self.write_to(writer)
     }
 
+    /// Write the array to generic writer.
+    ///
+    /// Like [`write_to_file`](Array::write_to_file) but accepts an arbitrary writer — useful for
+    /// writing into an in-memory buffer, writing multiple arrays into a single open file handle,
+    /// or integrating into a custom container format.
+    ///
+    /// Encoding parameters are chosen automatically. Use
+    /// [`write_to_with`](Array::write_to_with) for explicit control.
+    ///
+    /// # Arguments
+    ///
+    /// - `writer`: any destination implementing `Write` + `Seek` to which the array's archive section
+    ///   will be written.
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// // Write two arrays into a single buffer and record their byte positions.
+    /// let a = Array::compact_array(&array![1u8, 2, 3, 4])?;
+    /// let b = Array::compact_array(&array![10u8, 20, 30])?;
+    ///
+    /// let mut buf = Cursor::new(Vec::new());
+    /// a.write_to(&mut buf)?;
+    /// let offset = buf.position();
+    /// b.write_to(&mut buf)?;
+    ///
+    /// // Read back the second array by seeking to its offset.
+    /// let bytes = buf.into_inner();
+    /// let b2 = Array::read_from_reader(
+    ///     Cursor::new(&bytes[offset as usize..]),
+    ///     None,
+    ///     ArrayParams::default(),
+    /// )?;
+    /// assert_eq!(b2.to_ndarray::<u8>()?, array![10u8, 20, 30].into_dyn());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn write_to(&self, writer: impl Write + Seek) -> Result<()> {
         self.write_to_with(writer, ArrayParams::default(), &self.read_ctx())
     }
 
+    /// Write the array to a writer with explicit encoding parameters and read context.
+    ///
+    /// This is the right choice when you need control over the block shape or codec, or when you
+    /// are building a streaming pipeline that reads compressed data from one place and writes it
+    /// elsewhere without materializing the full array in memory.
+    ///
+    /// **When the array is already compact** (`Array<Compact>` or `Array<CompactMmap>`), its
+    /// existing compressed blocks are streamed directly to the writer — `params` is ignored
+    /// entirely. No decompression or re-compression takes place.
+    ///
+    /// **For any other array** (lazy views, op chains, plain buffers), each block is read from
+    /// the source and compressed according to `params` before being written.
+    ///
+    /// # Streaming pipeline example
+    ///
+    /// The following reads a large array from disk via mmap, applies a lazy slice and a
+    /// negation, and writes the result directly to a new file — without ever holding the full
+    /// array (compressed or decompressed) in memory:
+    ///
+    /// ```
+    /// use std::io::BufWriter;
+    /// use std::fs::File;
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let tmp_dir = tempfile::tempdir()?;
+    /// let path = tmp_dir.path().join("large.zix");
+    /// Array::compact_array(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
+    /// let len = std::fs::metadata(&path)?.len();
+    ///
+    /// // Map the file — compressed blocks are paged in on demand, no heap copy.
+    /// // Safety: the file is not modified while `src` is live.
+    /// let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
+    /// let context = src.read_ctx();
+    ///
+    /// // Build a lazy view — no data is read yet.
+    /// let view = src.exp() + 1.0f32;
+    ///
+    /// // Write to a new file: blocks are decompressed, modified by ops, and re-compressed one at
+    /// // a time.
+    /// view.write_to_with(
+    ///     BufWriter::new(File::create(tmp_dir.path().join("modified.zix"))?),
+    ///     ArrayParams::default(),
+    ///     &context,
+    /// )?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn write_to_with(
         &self,
         writer: impl Write + Seek,
