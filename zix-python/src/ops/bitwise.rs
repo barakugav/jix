@@ -10,6 +10,8 @@ define_op2!(bitwise_xor, BitwiseXor);
 define_op1!(bitwise_not, BitwiseNot);
 define_op2!(bitwise_shift_left, BitwiseShiftLeft);
 define_op2!(bitwise_shift_right, BitwiseShiftRight);
+define_op2!(bitwise_rotate_left, BitwiseRotateLeft);
+define_op2!(bitwise_rotate_right, BitwiseRotateRight);
 define_op1!(count_ones, CountOnes);
 define_op1!(leading_zeros, LeadingZeros);
 define_op1!(trailing_zeros, TrailingZeros);

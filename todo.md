@@ -7,7 +7,6 @@
     - clip
     - split
     - sort
-    - shift left/right wrapping, rotate_left/right
 - full/zeros/ones/
 - array::from_fn
 - to_ndarray_sub should accept IntoSlice

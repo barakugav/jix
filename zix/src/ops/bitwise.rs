@@ -356,6 +356,78 @@ define_op2!(
     [i8, i16, i32, i64, u8, u16, u32, u64],
     output_type = "same"
 );
+define_op2!(
+    /// Element-wise bitwise left rotation (`a.rotate_left(b as u32)`).
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    /// Output dtype and shape equal the input.
+    ///
+    /// Rotates the bits of each element of `a` left by the corresponding value in `b`
+    /// cast to `u32`. Unlike a left shift, bits shifted out of the most-significant
+    /// position wrap around to the least-significant position, so no bits are lost.
+    /// The rotation amount is taken modulo the bit width of the type.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![0b10000001u8, 0b00000001u8, 0b11110000u8])?;
+    /// let b = Array::compact_array(&array![1u8, 3, 4])?;
+    /// let result = a.bitwise_rotate_left(b).to_ndarray::<u8>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[0b00000011, 0b00001000, 0b00001111]);
+    ///
+    /// // Rotating by 0 is a no-op.
+    /// let c = Array::compact_array(&array![0xABu8])?;
+    /// let d = Array::compact_array(&array![0u8])?;
+    /// let result = c.bitwise_rotate_left(d).to_ndarray::<u8>()?;
+    /// assert_eq!(result[[0]], 0xABu8);
+    /// # Ok::<(), zix::Error>(())
+    /// ```
+    BitwiseRotateLeft,
+    BitwiseRotateLeftKernel,
+    |a, b| a.rotate_left(b as u32),
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = "same"
+);
+define_op2!(
+    /// Element-wise bitwise right rotation (`a.rotate_right(b as u32)`).
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    /// Output dtype and shape equal the input.
+    ///
+    /// Rotates the bits of each element of `a` right by the corresponding value in `b`
+    /// cast to `u32`. Unlike a right shift, bits shifted out of the least-significant
+    /// position wrap around to the most-significant position, so no bits are lost.
+    /// The rotation amount is taken modulo the bit width of the type.
+    ///
+    /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// # Examples
+    /// ```
+    /// use zix::{Array, ArrayParams};
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![0b10000001u8, 0b00001000u8, 0b00001111u8])?;
+    /// let b = Array::compact_array(&array![1u8, 3, 4])?;
+    /// let result = a.bitwise_rotate_right(b).to_ndarray::<u8>()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[0b11000000, 0b00000001, 0b11110000]);
+    ///
+    /// // Rotating by 0 is a no-op.
+    /// let c = Array::compact_array(&array![0xABu8])?;
+    /// let d = Array::compact_array(&array![0u8])?;
+    /// let result = c.bitwise_rotate_right(d).to_ndarray::<u8>()?;
+    /// assert_eq!(result[[0]], 0xABu8);
+    /// # Ok::<(), zix::Error>(())
+    /// ```
+    BitwiseRotateRight,
+    BitwiseRotateRightKernel,
+    |a, b| a.rotate_right(b as u32),
+    [i8, i16, i32, i64, u8, u16, u32, u64],
+    output_type = "same"
+);
 define_op1!(
     /// Counts the number of set bits (`1`s) in each element.
     ///
@@ -565,6 +637,8 @@ where
     define_array_op1_method!(bitwise_not: BitwiseNot);
     define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft);
     define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight);
+    define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft);
+    define_array_op2_method!(bitwise_rotate_right: BitwiseRotateRight);
     define_array_op1_method!(count_ones: CountOnes);
     define_array_op1_method!(count_zeros: CountZeros);
     define_array_op1_method!(leading_zeros: LeadingZeros);
@@ -676,6 +750,19 @@ mod tests {
         |a, b| a.unbounded_shr(b as u32),
         [i8, i16, i32, i64, u8, u16, u32, u64],
         shift_safe_strategy
+    );
+    // rotate ops: rotation wraps modulo bit width, so any value of b is valid
+    test_op2!(
+        bitwise_rotate_left,
+        |a, b| a.rotate_left(b as u32),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
+    test_op2!(
+        bitwise_rotate_right,
+        |a, b| a.rotate_right(b as u32),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
     );
 
     // logical ops: bool output; reference uses != Default::default() to match cast::<T, bool>
