@@ -16,6 +16,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::is_nan()`](crate::Array::is_nan).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -50,6 +53,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::is_finite()`](crate::Array::is_finite).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -83,6 +89,9 @@ define_op1!(
     /// Semantics follow [`f32::is_infinite`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::is_infinite()`](crate::Array::is_infinite).
     ///
     /// # Examples
     /// ```

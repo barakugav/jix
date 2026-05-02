@@ -418,11 +418,13 @@ impl DimSlice {
 #[cfg(test)]
 mod tests {
     use ndarray::ArrayD;
+    use proptest::prelude::*;
 
     use super::SliceItem;
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::util::arr_params;
+    use crate::storage::Compact;
+    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<crate::storage::Compact> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
@@ -733,5 +735,63 @@ mod tests {
         assert!(
             super::Slice::new(a.as_ref(), (SliceItem::new(None, None, -1), ..).into()).is_err()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: arbitrary shape, per-dim start/end/step, ndarray oracle
+    // -----------------------------------------------------------------------
+
+    fn slice_strategy<T>(
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<SliceItem>)>
+    where
+        T: ScalarStrategy,
+    {
+        shape_strategy()
+            .prop_flat_map(|shape| {
+                let ndim = shape.len();
+                // Generate (a, b, step) per dim using a fixed range; clamped to dim size below.
+                let raw_slices =
+                    prop::collection::vec((0usize..=100, 0usize..=100, 1i64..=5), ndim);
+                let array_strat = crate::util::carray_strategy_from_shape::<T>(
+                    Just(shape.clone()),
+                    T::any_strategy(),
+                );
+                (array_strat, raw_slices, Just(shape))
+            })
+            .prop_map(|((nd, za), raw_slices, shape)| {
+                let items: Vec<SliceItem> = shape
+                    .iter()
+                    .zip(raw_slices.iter())
+                    .map(|(&dim_size, &(a, b, step))| {
+                        let start = a.min(b).min(dim_size) as i64;
+                        let end = a.max(b).min(dim_size) as i64;
+                        SliceItem::new(Some(start), Some(end), step)
+                    })
+                    .collect();
+                (nd, za, items)
+            })
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_slice((nd, za, items) in slice_strategy::<i32>()) {
+            // Oracle: apply each SliceItem via ndarray's slice_axis_inplace.
+            let mut expected = nd.clone();
+            for (axis, item) in items.iter().enumerate() {
+                expected.slice_axis_inplace(
+                    ndarray::Axis(axis),
+                    ndarray::Slice {
+                        start: item.start.unwrap() as isize,
+                        end: item.end.map(|e| e as isize),
+                        step: item.step as isize,
+                    },
+                );
+            }
+            let expected = expected.as_standard_layout().into_owned();
+            crate::util::assert_array_matches(
+                &za.slice(super::SliceSpec::new(&items)),
+                &expected,
+            );
+        }
     }
 }

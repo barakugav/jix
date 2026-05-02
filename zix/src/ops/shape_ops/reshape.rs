@@ -252,7 +252,9 @@ where
                         && orig_shape[*orig_dim_idx] >= new_shape[new_dim_idx]
                     // TODO: its possible to remove the dim length conditions
                     {
-                        break Some(*orig_dim_idx as u8);
+                        let matched = *orig_dim_idx as u8;
+                        *orig_dim_idx += 1;
+                        break Some(matched);
                     }
                     *orig_dim_idx += 1;
                 })
@@ -366,9 +368,11 @@ where
 #[cfg(test)]
 mod tests {
     use ndarray::ArrayD;
+    use proptest::prelude::*;
 
     use crate::array::Array;
-    use crate::util::arr_params;
+    use crate::storage::Compact;
+    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -983,5 +987,64 @@ mod tests {
         let flat_34: ArrayD<u8> = r34.reshape_view(&[12]).to_ndarray().unwrap();
         assert_eq!(flat_43, flat_34);
         assert_eq!(flat_43, ArrayD::from_shape_vec(vec![12], u8s(12)).unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: arbitrary input shape, arbitrary output factorization
+    // -----------------------------------------------------------------------
+
+    fn divisors(n: usize) -> Vec<usize> {
+        let mut divs = Vec::new();
+        let mut d = 1;
+        while d * d <= n {
+            if n % d == 0 {
+                divs.push(d);
+                if d != n / d {
+                    divs.push(n / d);
+                }
+            }
+            d += 1;
+        }
+        divs.sort_unstable();
+        divs
+    }
+
+    fn reshape_strategy<T>(
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<u64>)>
+    where
+        T: ScalarStrategy,
+    {
+        shape_strategy()
+            .prop_flat_map(|input_shape| {
+                let n: usize = input_shape.iter().product();
+                let n_u64 = n as u64;
+                let array_strat = crate::util::carray_strategy_from_shape::<T>(
+                    Just(input_shape),
+                    T::any_strategy(),
+                );
+                // Candidate output shapes: [n] (flatten) and [d, n/d] for every divisor d.
+                let out_options: Vec<Vec<u64>> = if n == 0 {
+                    vec![vec![0u64]]
+                } else {
+                    std::iter::once(vec![n_u64])
+                        .chain(divisors(n).iter().map(|&d| vec![d as u64, n_u64 / d as u64]))
+                        .collect()
+                };
+                (array_strat, proptest::sample::select(out_options))
+            })
+            .prop_map(|((nd, za), out_shape)| (nd, za, out_shape))
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_reshape((nd, za, out_shape) in reshape_strategy::<i32>()) {
+            // Oracle: reshape preserves flat element order.
+            let expected = ndarray::ArrayD::from_shape_vec(
+                out_shape.iter().map(|&d| d as usize).collect::<Vec<_>>(),
+                nd.iter().cloned().collect::<Vec<_>>(),
+            )
+            .unwrap();
+            crate::util::assert_array_matches(&za.reshape_view(&out_shape), &expected);
+        }
     }
 }

@@ -332,6 +332,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::neg()`](core::ops::Neg::neg).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -364,6 +367,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::floor()`](crate::Array::floor).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -393,6 +399,9 @@ define_op1!(
     /// Semantics follow [`f32::ceil`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::ceil()`](crate::Array::ceil).
     ///
     /// # Examples
     /// ```
@@ -428,6 +437,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::round()`](crate::Array::round).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -459,6 +471,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::sqrt()`](crate::Array::sqrt).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -488,6 +503,9 @@ define_op1!(
     /// Semantics follow [`f32::exp`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::exp()`](crate::Array::exp).
     ///
     /// # Examples
     /// ```
@@ -520,9 +538,10 @@ define_op1!(
     /// Negative inputs produce `NaN`; zero produces `-∞`.
     /// Semantics follow [`f32::ln`].
     ///
-    /// Available as the `.ln()` method on [`Array`](crate::Array).
-    ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::ln()`](crate::Array::ln).
     ///
     /// # Examples
     /// ```
@@ -556,6 +575,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::sin()`](crate::Array::sin).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -585,6 +607,9 @@ define_op1!(
     /// Semantics follow [`f32::cos`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::cos()`](crate::Array::cos).
     ///
     /// # Examples
     /// ```
@@ -617,6 +642,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::tan()`](crate::Array::tan).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -647,6 +675,9 @@ define_op1!(
     /// Inputs outside `[-1, 1]` produce `NaN`. Semantics follow [`f32::asin`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::asin()`](crate::Array::asin).
     ///
     /// # Examples
     /// ```
@@ -680,6 +711,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::acos()`](crate::Array::acos).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -710,6 +744,9 @@ define_op1!(
     /// Semantics follow [`f32::atan`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::atan()`](crate::Array::atan).
     ///
     /// # Examples
     /// ```
@@ -743,6 +780,9 @@ define_op1!(
     /// Semantics follow [`f32::signum`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::signum()`](crate::Array::signum).
     ///
     /// # Examples
     /// ```
@@ -789,6 +829,9 @@ define_op1!(
     /// Floating-point semantics follow [`f32::abs`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::abs()`](crate::Array::abs).
     ///
     /// # Examples
     /// ```

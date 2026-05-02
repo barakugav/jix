@@ -194,8 +194,13 @@ impl<S: ArrayStorage> ArrayStorage for InsertAxes<S> {
 #[cfg(test)]
 mod tests {
     use ndarray::ArrayD;
+    use proptest::prelude::*;
 
-    use crate::{array::Array, codec::ReadContext, util::arr_params};
+    use crate::array::Array;
+    use crate::codec::ReadContext;
+    use crate::storage::Compact;
+    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
+    use crate::NDIM_MAX;
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<crate::storage::Compact> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
@@ -384,5 +389,51 @@ mod tests {
         let a = make1d(arange(4), 4);
         // orig_ndim=1, valid gaps are 0..=1; axis 2 is out of bounds
         assert!(super::InsertAxes::new(a, &[2]).is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: arbitrary shape, arbitrary gap multiset, order-independent
+    // -----------------------------------------------------------------------
+
+    fn insert_axes_strategy<T>(
+    ) -> impl proptest::strategy::Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<usize>)>
+    where
+        T: ScalarStrategy,
+    {
+        shape_strategy()
+            .prop_flat_map(|shape| {
+                let max_to_insert = NDIM_MAX - shape.len();
+                (Just(shape), 0..=max_to_insert)
+            })
+            .prop_flat_map(|(shape, n_insert)| {
+                let ndim = shape.len();
+                let gaps = prop::collection::vec(0..=ndim, n_insert);
+                (Just(shape), gaps)
+            })
+            .prop_flat_map(|(shape, axes)| {
+                let array_strat =
+                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                (array_strat, Just(axes).prop_shuffle())
+            })
+            .prop_map(|((nd, za), axes)| (nd, za, axes))
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_insert_axes((nd, za, axes) in insert_axes_strategy::<i32>()) {
+            // Oracle: inserting size-1 axes is a pure reshape — flat order is unchanged.
+            let mut sorted_axes = axes.clone();
+            sorted_axes.sort_unstable();
+            let mut expected_shape: Vec<usize> = nd.shape().to_vec();
+            for (i, &gap) in sorted_axes.iter().enumerate() {
+                expected_shape.insert(gap + i, 1);
+            }
+            let expected = ndarray::ArrayD::from_shape_vec(
+                expected_shape,
+                nd.iter().cloned().collect::<Vec<_>>(),
+            )
+            .unwrap();
+            crate::util::assert_array_matches(&za.insert_axes(&axes), &expected);
+        }
     }
 }

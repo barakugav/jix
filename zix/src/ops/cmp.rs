@@ -17,6 +17,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::equal()`](crate::Array::equal).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -51,6 +54,9 @@ define_op2!(
     /// For **complex** types, returns `true` if either the real or imaginary component differs.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::not_equal()`](crate::Array::not_equal).
     ///
     /// # Examples
     /// ```
@@ -87,6 +93,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::greater()`](crate::Array::greater).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -121,6 +130,9 @@ define_op2!(
     /// For **bool**: `true >= false`, and both `true >= true` and `false >= false` hold.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::greater_equal()`](crate::Array::greater_equal).
     ///
     /// # Examples
     /// ```
@@ -157,6 +169,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::less()`](crate::Array::less).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -191,6 +206,9 @@ define_op2!(
     /// For **bool**: `false <= true`, and both `false <= false` and `true <= true` hold.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::less_equal()`](crate::Array::less_equal).
     ///
     /// # Examples
     /// ```
@@ -229,6 +247,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::maximum()`](crate::Array::maximum).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -265,6 +286,9 @@ define_op2!(
     /// operand when exactly one is `NaN`, but matches the behaviour of `numpy.minimum`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::minimum()`](crate::Array::minimum).
     ///
     /// # Examples
     /// ```

@@ -115,7 +115,10 @@ where
 {
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(&self.shape, index)?;
-        check_get_buffer_size(index, &self.dtype, buf)?;
+        let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
+        if nitems == 0 {
+            return Ok(());
+        }
 
         let in_place = self.shape.iter().take(self.stack_axis).all(|&s| s <= 1);
         let arr_range = index[..self.stack_axis]
@@ -196,10 +199,13 @@ where
 #[cfg(test)]
 mod tests {
     use ndarray::array;
+    use proptest::prelude::*;
 
     use crate::array::Array;
     use crate::ops::stack;
-    use crate::util::arr_params;
+    use crate::storage::Compact;
+    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
+    use crate::NDIM_MAX;
 
     // stack two 1D i32 arrays along axis 0 → shape [2, N]
     #[test]
@@ -325,5 +331,43 @@ mod tests {
     #[should_panic]
     fn test_empty_panics() {
         let _ = stack(Vec::<Array<crate::storage::Compact>>::new(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: arbitrary ndim, arbitrary axis, arbitrary number of arrays
+    // -----------------------------------------------------------------------
+
+    fn stack_strategy<T>(
+    ) -> impl Strategy<Value = (Vec<ndarray::ArrayD<T>>, Vec<Array<Compact>>, usize)>
+    where
+        T: ScalarStrategy,
+    {
+        // Output ndim = input ndim + 1, so input ndim must be < NDIM_MAX.
+        shape_strategy()
+            .prop_filter("stack needs ndim < NDIM_MAX", |s| s.len() < NDIM_MAX)
+            .prop_flat_map(|shape| {
+                let axis = 0..=shape.len();
+                let n_arrays = 1usize..=5;
+                (Just(shape), axis, n_arrays)
+            })
+            .prop_flat_map(|(shape, axis, n_arrays)| {
+                // All arrays share the same shape; only elements and block shapes vary.
+                let per_array_strat =
+                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                (prop::collection::vec(per_array_strat, n_arrays), Just(axis))
+            })
+            .prop_map(|(arrays, axis)| {
+                let (nds, zas): (Vec<_>, Vec<_>) = arrays.into_iter().unzip();
+                (nds, zas, axis)
+            })
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_stack((nds, zas, axis) in stack_strategy::<i32>()) {
+            let nd_views: Vec<_> = nds.iter().map(|nd| nd.view()).collect();
+            let expected = ndarray::stack(ndarray::Axis(axis), &nd_views).unwrap();
+            crate::util::assert_array_matches(&stack(zas, axis), &expected);
+        }
     }
 }

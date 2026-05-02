@@ -146,7 +146,10 @@ where
     /// sub-array strides for dimensions at and after it.
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(&self.shape, index)?;
-        check_get_buffer_size(index, &self.dtype, buf)?;
+        let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
+        if nitems == 0 {
+            return Ok(());
+        }
 
         const BINARY_SEARCH_THRESHOLD: usize = 32;
 
@@ -259,9 +262,12 @@ where
 #[cfg(test)]
 mod tests {
     use ndarray::array;
+    use proptest::prelude::*;
 
     use crate::array::Array;
     use crate::ops::concatenate;
+    use crate::storage::Compact;
+    use crate::util::{shape_strategy, ScalarStrategy};
 
     // 1D i32: concatenate two arrays of equal size along axis 0 (in-place path)
     #[test]
@@ -385,5 +391,51 @@ mod tests {
     #[should_panic]
     fn test_empty_panics() {
         let _ = concatenate(Vec::<Array<crate::storage::Compact>>::new(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: arbitrary ndim, arbitrary axis, arbitrary number of arrays
+    // -----------------------------------------------------------------------
+
+    fn concat_strategy<T>(
+    ) -> impl Strategy<Value = (Vec<ndarray::ArrayD<T>>, Vec<Array<Compact>>, usize)>
+    where
+        T: ScalarStrategy,
+    {
+        shape_strategy()
+            .prop_filter("concat needs ndim >= 1", |s| !s.is_empty())
+            .prop_flat_map(|shape| {
+                let ndim = shape.len();
+                (Just(shape), 0..ndim, 1usize..=5usize)
+            })
+            .prop_flat_map(|(shape, axis, n_arrays)| {
+                let prefix = shape[..axis].to_vec();
+                let suffix = shape[axis + 1..].to_vec();
+                // Each array gets the same non-axis dims but an independently drawn axis size.
+                let per_array_strat = (0usize..=5).prop_map(move |axis_size| {
+                    let mut s = prefix.clone();
+                    s.push(axis_size);
+                    s.extend_from_slice(&suffix);
+                    s
+                });
+                let per_array_strat = crate::util::carray_strategy_from_shape::<T>(
+                    per_array_strat,
+                    T::any_strategy(),
+                );
+                (prop::collection::vec(per_array_strat, n_arrays), Just(axis))
+            })
+            .prop_map(|(arrays, axis)| {
+                let (nds, zas): (Vec<_>, Vec<_>) = arrays.into_iter().unzip();
+                (nds, zas, axis)
+            })
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_concatenate((nds, zas, axis) in concat_strategy::<i32>()) {
+            let nd_views: Vec<_> = nds.iter().map(|nd| nd.view()).collect();
+            let expected = ndarray::concatenate(ndarray::Axis(axis), &nd_views).unwrap();
+            crate::util::assert_array_matches(&concatenate(zas, axis), &expected);
+        }
     }
 }

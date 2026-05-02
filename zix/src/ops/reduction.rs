@@ -447,6 +447,9 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::max()`](crate::Array::max).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -492,6 +495,9 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::min()`](crate::Array::min).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -536,6 +542,9 @@ define_reduction_op!(
     /// so they are never selected unless all elements are `NaN`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::argmax()`](crate::Array::argmax).
     ///
     /// # Examples
     /// ```
@@ -588,6 +597,9 @@ define_reduction_op!(
     /// so they are never selected unless all elements are `NaN`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::argmin()`](crate::Array::argmin).
     ///
     /// # Examples
     /// ```
@@ -645,6 +657,9 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::sum()`](crate::Array::sum).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -696,6 +711,9 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::product()`](crate::Array::product).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -739,6 +757,9 @@ define_reduction_op!(
     /// Reducing an empty slice (zero elements) panics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::mean()`](crate::Array::mean).
     ///
     /// # Examples
     /// ```
@@ -797,6 +818,9 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::var()`](crate::Array::var).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -842,6 +866,9 @@ define_reduction_op!(
     /// [`Variance`]: use `ddof=0` for population std and `ddof=1` for sample std.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::std()`](crate::Array::std).
     ///
     /// # Examples
     /// ```
@@ -960,6 +987,9 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::all()`](crate::Array::all).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -993,7 +1023,7 @@ define_reduction_op!(
     }
 );
 define_reduction_op!(
-    /// Reduces one or more axes by testing whether any element is truthy.
+    /// Reduces one or more axes by testing whether any element is truthy,
     ///
     /// Supported dtypes: all numeric types, `bool`, `Complex<f32>`, `Complex<f64>`.
     /// Output dtype is `bool`.
@@ -1004,6 +1034,9 @@ define_reduction_op!(
     /// An empty reduction returns `false`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::any()`](crate::Array::any).
     ///
     /// # Examples
     /// ```

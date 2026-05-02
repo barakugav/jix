@@ -153,10 +153,13 @@ impl<S: ArrayStorage> ArrayStorage for RemoveAxes<S> {
 #[cfg(test)]
 mod tests {
     use ndarray::ArrayD;
+    use proptest::prelude::*;
 
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::util::arr_params;
+    use crate::storage::Compact;
+    use crate::util::{arr_params, shape_strategy, ScalarStrategy};
+    use crate::NDIM_MAX;
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<crate::storage::Compact> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
@@ -327,5 +330,56 @@ mod tests {
         let a = make3d(arange(6), 1, 2, 3);
         // axis 0 appears twice
         assert!(super::RemoveAxes::new(a, &[0, 0]).is_err());
+    }
+
+    fn remove_axes_strategy<T>(
+    ) -> impl proptest::strategy::Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<usize>)>
+    where
+        T: ScalarStrategy,
+    {
+        shape_strategy()
+            .prop_flat_map(|shape| {
+                let max_dims_to_remove = NDIM_MAX - shape.len();
+                (Just(shape), 0..=max_dims_to_remove)
+            })
+            .prop_flat_map(|(shape, ndims_to_remove)| {
+                let dims_to_remove = prop::collection::vec(0..=shape.len(), ndims_to_remove);
+                (Just(shape), dims_to_remove)
+            })
+            .prop_flat_map(|(mut shape, mut dims_to_remove)| {
+                dims_to_remove.sort_unstable();
+                for (i, dim) in dims_to_remove.iter_mut().enumerate() {
+                    let shift = i;
+                    shape.insert(shift + *dim, 1);
+                    *dim += shift;
+                }
+                (Just(shape), Just(dims_to_remove).prop_shuffle())
+            })
+            .prop_flat_map(|(shape, axes)| {
+                let array_strat =
+                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                (array_strat, Just(axes))
+            })
+            .prop_map(|((nd, za), axes)| (nd, za, axes))
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_remove_axes((nd, za, axes) in remove_axes_strategy::<i32>()) {
+            // Oracle: removing size-1 axes is a pure reshape — flat order is unchanged.
+            let expected_shape: Vec<usize> = nd
+                .shape()
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !axes.contains(i))
+                .map(|(_, &s)| s)
+                .collect();
+            let expected = ndarray::ArrayD::from_shape_vec(
+                expected_shape,
+                nd.iter().cloned().collect::<Vec<_>>(),
+            )
+            .unwrap();
+            crate::util::assert_array_matches(&za.remove_axes(&axes), &expected);
+        }
     }
 }

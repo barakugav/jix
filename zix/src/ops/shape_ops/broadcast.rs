@@ -200,6 +200,9 @@ mod tests {
 
     use crate::array::Array;
     use crate::codec::ReadContext;
+    use crate::storage::Compact;
+    use crate::util::{shape_strategy, ScalarStrategy};
+    use crate::NDIM_MAX;
 
     fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Compact> {
         let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
@@ -409,5 +412,149 @@ mod tests {
         let a = make(arange(6), &[2, 3]);
         // axis 0 has length 2, cannot broadcast to 5
         assert!(super::Broadcast::new(a.as_ref(), &[5, 3]).is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: random data, representative broadcast patterns
+    // -----------------------------------------------------------------------
+
+    fn broadcast_2d_axis0_strategy() -> impl proptest::strategy::Strategy<
+        Value = (
+            ndarray::ArrayD<i32>,
+            Array<crate::storage::Compact>,
+            usize,
+            usize,
+        ),
+    > {
+        use proptest::prelude::*;
+        (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
+            crate::util::carray_strategy_from_shape::<i32>(
+                proptest::strategy::Just(vec![1, m]),
+                <i32 as crate::util::ScalarStrategy>::any_strategy(),
+            )
+            .prop_map(move |(nd, za)| (nd, za, n, m))
+        })
+    }
+
+    fn broadcast_2d_axis1_strategy() -> impl proptest::strategy::Strategy<
+        Value = (
+            ndarray::ArrayD<i32>,
+            Array<crate::storage::Compact>,
+            usize,
+            usize,
+        ),
+    > {
+        use proptest::prelude::*;
+        (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
+            crate::util::carray_strategy_from_shape::<i32>(
+                proptest::strategy::Just(vec![n, 1]),
+                <i32 as crate::util::ScalarStrategy>::any_strategy(),
+            )
+            .prop_map(move |(nd, za)| (nd, za, n, m))
+        })
+    }
+
+    proptest::proptest! {
+        // [1] → [N]
+        #[test]
+        fn proptest_broadcast_1d(
+            n in 1usize..=30,
+            (nd, za) in crate::util::carray_strategy_from_shape::<i32>(
+                proptest::strategy::Just(vec![1]),
+                <i32 as crate::util::ScalarStrategy>::any_strategy(),
+            )
+        ) {
+            let expected = nd.broadcast(ndarray::IxDyn(&[n])).unwrap().to_owned();
+            crate::util::assert_array_matches(&za.broadcast_view(&[n as u64]), &expected);
+        }
+
+        // [1, M] → [N, M]: broadcast axis 0
+        #[test]
+        fn proptest_broadcast_2d_axis0(
+            (nd, za, n, m) in broadcast_2d_axis0_strategy()
+        ) {
+            let expected = nd.broadcast(ndarray::IxDyn(&[n, m])).unwrap().to_owned();
+            crate::util::assert_array_matches(&za.broadcast_view(&[n as u64, m as u64]), &expected);
+        }
+
+        // [N, 1] → [N, M]: broadcast axis 1
+        #[test]
+        fn proptest_broadcast_2d_axis1(
+            (nd, za, n, m) in broadcast_2d_axis1_strategy()
+        ) {
+            let expected = nd.broadcast(ndarray::IxDyn(&[n, m])).unwrap().to_owned();
+            crate::util::assert_array_matches(&za.broadcast_view(&[n as u64, m as u64]), &expected);
+        }
+
+        // [N, M] → [N, M]: identity (no broadcast)
+        #[test]
+        fn proptest_broadcast_identity(
+            (nd, za) in crate::util::carray_strategy_from_shape::<i32>(
+                proptest::collection::vec(1usize..=15, 2usize),
+                <i32 as crate::util::ScalarStrategy>::any_strategy(),
+            )
+        ) {
+            let shape: Vec<u64> = nd.shape().iter().map(|&s| s as u64).collect();
+            let expected = nd.clone();
+            crate::util::assert_array_matches(&za.broadcast_view(&shape), &expected);
+        }
+
+        #[test]
+        fn broadcast_generic(
+            (nd, za, broadcast_shape) in broadcast_axes_strategy::<i32>()
+        ) {
+            let expected = nd.broadcast(ndarray::IxDyn(&broadcast_shape)).unwrap().to_owned();
+            let broadcast_shape = broadcast_shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
+            let actual = za.broadcast_view(&broadcast_shape);
+            crate::util::assert_array_matches(&actual, &expected);
+        }
+    }
+
+    use proptest::prelude::*;
+
+    fn broadcast_axes_strategy<T>(
+    ) -> impl proptest::strategy::Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<usize>)>
+    where
+        T: ScalarStrategy,
+    {
+        shape_strategy()
+            .prop_flat_map(|shape| {
+                let max_dims_to_broadcast = NDIM_MAX - shape.len();
+                (Just(shape), 0..=max_dims_to_broadcast)
+            })
+            .prop_flat_map(|(shape, ndims_to_broadcast)| {
+                let dims_to_broadcast = prop::collection::vec(0..=shape.len(), ndims_to_broadcast);
+                (Just(shape), dims_to_broadcast)
+            })
+            .prop_flat_map(|(mut shape, mut dims_to_broadcast)| {
+                dims_to_broadcast.sort_unstable();
+                for (i, dim) in dims_to_broadcast.iter_mut().enumerate() {
+                    let shift = i;
+                    shape.insert(shift + *dim, 1);
+                    *dim += shift;
+                }
+
+                let broadcasted_dims_sizes =
+                    prop::collection::vec(1usize..=5, dims_to_broadcast.len());
+                let broadcast_shape = shape.clone();
+                let broadcast_shape =
+                    broadcasted_dims_sizes.prop_map(move |broadcasted_dims_sizes| {
+                        let mut broadcast_shape = broadcast_shape.clone();
+                        for (&dim, &size) in
+                            dims_to_broadcast.iter().zip(broadcasted_dims_sizes.iter())
+                        {
+                            broadcast_shape[dim] = size;
+                        }
+                        broadcast_shape
+                    });
+
+                (Just(shape), broadcast_shape)
+            })
+            .prop_flat_map(|(shape, broadcast_shape)| {
+                let array_strat =
+                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                (array_strat, Just(broadcast_shape))
+            })
+            .prop_map(|((nd, za), broadcast_shape)| (nd, za, broadcast_shape))
     }
 }

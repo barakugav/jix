@@ -404,7 +404,7 @@ define_op2!(
     /// For **complex** types each component is added independently:
     /// `(a + bi) + (c + di) = (a+c) + (b+d)i`.
     ///
-    /// Available via the `+` operator. A raw scalar can be used as the right-hand
+    /// Available via the `+` operator on arrays. A raw scalar can be used as the right-hand
     /// side and is broadcast to the array's shape: `arr + 1i32`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -442,7 +442,7 @@ define_op2!(
     /// For **complex** types each component is subtracted independently:
     /// `(a + bi) - (c + di) = (a-c) + (b-d)i`.
     ///
-    /// Available via the `-` operator. A raw scalar can be used as the right-hand
+    /// Available via the `-` operator on arrays. A raw scalar can be used as the right-hand
     /// side and is broadcast to the array's shape: `arr - 1i32`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -480,7 +480,7 @@ define_op2!(
     /// For **complex** types this is full complex multiplication:
     /// `(a + bi) * (c + di) = (ac - bd) + (ad + bc)i`.
     ///
-    /// Available via the `*` operator. A raw scalar can be used as the right-hand
+    /// Available via the `*` operator on arrays. A raw scalar can be used as the right-hand
     /// side and is broadcast to the array's shape: `arr * 2i32`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -519,7 +519,7 @@ define_op2!(
     /// For **float** types semantics follow `f32::div`.
     /// For **complex** types this is full complex division.
     ///
-    /// Available via the `/` operator. A raw scalar can be used as the right-hand
+    /// Available via the `/` operator on arrays. A raw scalar can be used as the right-hand
     /// side and is broadcast to the array's shape: `arr / 2i32`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -555,6 +555,9 @@ define_op2!(
     /// Semantics follow [`f32::powf`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::powf()`](crate::Array::powf).
     ///
     /// # Examples
     /// ```

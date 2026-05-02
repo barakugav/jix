@@ -28,13 +28,16 @@ where
     }
 }
 
-/// Applies a function element-wise to an array, returned by [`Array::map`].
+/// Applies a function element-wise to an array.
 ///
 /// `T` must match the array's element dtype at runtime; each element is passed to
 /// `F: Fn(T) -> R` and the result written as `R`. The output dtype is `R::DTYPE` and the output
 /// shape equals the input shape.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation, but the operation is also available as
+/// [`Array::map()`](crate::Array::map).
 ///
 /// # Examples
 /// ```
@@ -280,5 +283,32 @@ mod tests {
         // Constructing directly with wrong T should return Err
         let result = super::Map::new(za, |x: f32| x + 1.0);
         assert!(result.is_err());
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_map_i32(
+            (nd, za) in crate::util::carray_strategy_from_shape::<i32>(
+                crate::util::shape_strategy(),
+                <i32 as crate::util::ScalarStrategy>::any_strategy(),
+            )
+        ) {
+            let expected = nd.mapv(|x| x.wrapping_mul(2).wrapping_add(1));
+            crate::util::assert_array_matches(
+                &za.map(|x: i32| x.wrapping_mul(2).wrapping_add(1)),
+                &expected,
+            );
+        }
+
+        #[test]
+        fn proptest_map_i32_to_f64(
+            (nd, za) in crate::util::carray_strategy_from_shape::<i32>(
+                crate::util::shape_strategy(),
+                <i32 as crate::util::ScalarStrategy>::any_strategy(),
+            )
+        ) {
+            let expected = nd.mapv(|x| x as f64 * 0.5);
+            crate::util::assert_array_matches(&za.map(|x: i32| x as f64 * 0.5), &expected);
+        }
     }
 }

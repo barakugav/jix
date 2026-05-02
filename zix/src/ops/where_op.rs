@@ -28,8 +28,7 @@ where
     Array::from_storage(Where::new(condition, x, y).unwrap())
 }
 
-/// Selects elements element-wise from `x` or `y` depending on `condition`, returned by
-/// [`where_condition`].
+/// Selects elements element-wise from `x` or `y` depending on `condition`
 ///
 /// For each index `i`, the output is `x[i]` if `condition[i]` is `true`, otherwise `y[i]`.
 /// Semantics match `numpy.where(condition, x, y)`.
@@ -39,6 +38,9 @@ where
 /// the input shape.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation, but the operation is also available as
+/// [`where_condition()`].
 ///
 /// # Examples
 /// ```
@@ -183,146 +185,89 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
     use ndarray::array;
+    use proptest::prelude::*;
 
     use super::{where_condition, Where};
     use crate::array::Array;
-    use crate::util::{arr_params, ScalarStrategy};
+    use crate::storage::Compact;
+    use crate::util::ScalarStrategy;
 
-    // Proptest macro: covers all four layout cases for one dtype.
-    // Tests correctness against the scalar reference: result[i] = x[i] if cond[i] else y[i].
+    #[cfg(feature = "half")]
+    use crate::dtype::f16;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f32 = crate::dtype::Complex<f32>;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f64 = crate::dtype::Complex<f64>;
+
+    fn strategy2<T>() -> impl Strategy<
+        Value = (
+            ndarray::ArrayD<bool>,
+            ndarray::ArrayD<T>,
+            ndarray::ArrayD<T>,
+            Array<Compact>,
+            Array<Compact>,
+            Array<Compact>,
+        ),
+    >
+    where
+        T: ScalarStrategy + Debug,
+    {
+        crate::util::shape_strategy()
+            .prop_flat_map(|shape| {
+                (
+                    crate::util::carray_strategy_from_shape::<bool>(
+                        Just(shape.clone()),
+                        <bool as ScalarStrategy>::any_strategy(),
+                    ),
+                    crate::util::carray_strategy_from_shape::<T>(
+                        Just(shape.clone()),
+                        <T as ScalarStrategy>::any_strategy(),
+                    ),
+                    crate::util::carray_strategy_from_shape::<T>(
+                        Just(shape),
+                        <T as ScalarStrategy>::any_strategy(),
+                    ),
+                )
+            })
+            .prop_map(|((nd_cond, za_cond), (nd_x, za_x), (nd_y, za_y))| {
+                (nd_cond, nd_x, nd_y, za_cond, za_x, za_y)
+            })
+    }
+
+    // Proptest macro: one test per dtype covering random shapes, random block shapes,
+    // full reads, and random sub-range reads via assert_array_matches.
+    // The condition, x, and y arrays all share the same random shape.
     macro_rules! test_where_dtype {
-        ($mod_name:ident, $dtype:ty) => {
-            mod $mod_name {
-                use super::*;
+        ($dtype:ty) => {
+            // use super::where_condition;
+            // use crate::storage::Compact;
+            // use crate::util::ScalarStrategy;
+            // use crate::Array;
+            // use proptest::prelude::*;
 
+            paste::paste! {
                 proptest::proptest! {
                     #[test]
-                    fn where_1d(
-                        cond in proptest::collection::vec(proptest::bool::ANY, 8usize),
-                        x in proptest::collection::vec(
-                            <$dtype as ScalarStrategy>::any_strategy(), 8usize,
-                        ),
-                        y in proptest::collection::vec(
-                            <$dtype as ScalarStrategy>::any_strategy(), 8usize,
-                        ),
+                    fn [<where_op_ $dtype>](
+                        (nd_cond, nd_x, nd_y, za_cond, za_x, za_y) in strategy2::<$dtype>()
                     ) {
-                        let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
+                        let expected_vals: Vec<$dtype> = nd_cond
+                            .iter()
+                            .zip(nd_x.iter().zip(nd_y.iter()))
                             .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
                             .collect();
-                        let zcond = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![8], cond).unwrap(),
-                            arr_params(&[8]),
-                        ).unwrap();
-                        let zx = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![8], x).unwrap(),
-                            arr_params(&[8]),
-                        ).unwrap();
-                        let zy = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![8], y).unwrap(),
-                            arr_params(&[8]),
-                        ).unwrap();
-                        let actual = where_condition(zcond, zx, zy).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(
-                            actual,
-                            ndarray::ArrayD::from_shape_vec(vec![8], exp).unwrap()
-                        );
-                    }
-
-                    #[test]
-                    fn where_1d_multi_block(
-                        cond in proptest::collection::vec(proptest::bool::ANY, 6usize),
-                        x in proptest::collection::vec(
-                            <$dtype as ScalarStrategy>::any_strategy(), 6usize,
-                        ),
-                        y in proptest::collection::vec(
-                            <$dtype as ScalarStrategy>::any_strategy(), 6usize,
-                        ),
-                    ) {
-                        let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
-                            .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
-                            .collect();
-                        let zcond = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![6], cond).unwrap(),
-                            arr_params(&[2]),
-                        ).unwrap();
-                        let zx = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![6], x).unwrap(),
-                            arr_params(&[2]),
-                        ).unwrap();
-                        let zy = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![6], y).unwrap(),
-                            arr_params(&[2]),
-                        ).unwrap();
-                        let actual = where_condition(zcond, zx, zy).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(
-                            actual,
-                            ndarray::ArrayD::from_shape_vec(vec![6], exp).unwrap()
-                        );
-                    }
-
-                    #[test]
-                    fn where_2d(
-                        cond in proptest::collection::vec(proptest::bool::ANY, 12usize),
-                        x in proptest::collection::vec(
-                            <$dtype as ScalarStrategy>::any_strategy(), 12usize,
-                        ),
-                        y in proptest::collection::vec(
-                            <$dtype as ScalarStrategy>::any_strategy(), 12usize,
-                        ),
-                    ) {
-                        let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
-                            .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
-                            .collect();
-                        let zcond = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![3, 4], cond).unwrap(),
-                            arr_params(&[3, 4]),
-                        ).unwrap();
-                        let zx = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![3, 4], x).unwrap(),
-                            arr_params(&[3, 4]),
-                        ).unwrap();
-                        let zy = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![3, 4], y).unwrap(),
-                            arr_params(&[3, 4]),
-                        ).unwrap();
-                        let actual = where_condition(zcond, zx, zy).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(
-                            actual,
-                            ndarray::ArrayD::from_shape_vec(vec![3, 4], exp).unwrap()
-                        );
-                    }
-
-                    #[test]
-                    fn where_2d_multi_block(
-                        cond in proptest::collection::vec(proptest::bool::ANY, 16usize),
-                        x in proptest::collection::vec(
-                            <$dtype as ScalarStrategy>::any_strategy(), 16usize,
-                        ),
-                        y in proptest::collection::vec(
-                            <$dtype as ScalarStrategy>::any_strategy(), 16usize,
-                        ),
-                    ) {
-                        let exp: Vec<$dtype> = cond.iter().zip(x.iter().zip(y.iter()))
-                            .map(|(&c, (&xi, &yi))| if c { xi } else { yi })
-                            .collect();
-                        let zcond = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![4, 4], cond).unwrap(),
-                            arr_params(&[2, 2]),
-                        ).unwrap();
-                        let zx = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![4, 4], x).unwrap(),
-                            arr_params(&[2, 2]),
-                        ).unwrap();
-                        let zy = Array::compact_array_with(
-                            &ndarray::ArrayD::from_shape_vec(vec![4, 4], y).unwrap(),
-                            arr_params(&[2, 2]),
-                        ).unwrap();
-                        let actual = where_condition(zcond, zx, zy).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(
-                            actual,
-                            ndarray::ArrayD::from_shape_vec(vec![4, 4], exp).unwrap()
-                        );
+                        let expected = ndarray::ArrayD::from_shape_vec(
+                            nd_cond.shape().to_vec(),
+                            expected_vals,
+                        )
+                        .unwrap();
+                        let result = where_condition(za_cond, za_x, za_y);
+                        crate::util::assert_array_matches(&result, &expected);
                     }
                 }
             }
@@ -330,25 +275,25 @@ mod tests {
     }
 
     // Covers where_impl branches: (1,1)=u8, (2,2)=u16, (4,4)=u32, (8,8)=u64
-    test_where_dtype!(i8, i8);
-    test_where_dtype!(u8, u8);
-    test_where_dtype!(bool_dtype, bool);
-    test_where_dtype!(i16, i16);
-    test_where_dtype!(u16, u16);
-    test_where_dtype!(i32, i32);
-    test_where_dtype!(u32, u32);
-    test_where_dtype!(f32, f32);
-    test_where_dtype!(i64, i64);
-    test_where_dtype!(u64, u64);
-    test_where_dtype!(f64, f64);
+    test_where_dtype!(i8);
+    test_where_dtype!(u8);
+    test_where_dtype!(bool);
+    test_where_dtype!(i16);
+    test_where_dtype!(u16);
+    test_where_dtype!(i32);
+    test_where_dtype!(u32);
+    test_where_dtype!(f32);
+    test_where_dtype!(i64);
+    test_where_dtype!(u64);
+    test_where_dtype!(f64);
 
     #[cfg(feature = "half")]
-    test_where_dtype!(f16, crate::dtype::f16);
+    test_where_dtype!(f16);
 
     #[cfg(feature = "num-complex")]
-    test_where_dtype!(complex_f32, crate::dtype::Complex<f32>); // (8, 4) branch
+    test_where_dtype!(complex_f32); // (8, 4) branch
     #[cfg(feature = "num-complex")]
-    test_where_dtype!(complex_f64, crate::dtype::Complex<f64>); // (16, 8) branch
+    test_where_dtype!(complex_f64); // (16, 8) branch
 
     // --- error cases ---
 

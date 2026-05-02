@@ -400,12 +400,12 @@ pub(crate) fn shape_strategy() -> impl Strategy<Value = Vec<usize>> {
     ])
 }
 
-pub(crate) fn ndarray_strategy<T>() -> impl Strategy<Value = ndarray::ArrayD<T>>
-where
-    T: ScalarStrategy + Debug,
-{
-    ndarray_strategy_generic(shape_strategy(), T::any_strategy())
-}
+// pub(crate) fn ndarray_strategy<T>() -> impl Strategy<Value = ndarray::ArrayD<T>>
+// where
+//     T: ScalarStrategy + Debug,
+// {
+//     ndarray_strategy_generic(shape_strategy(), T::any_strategy())
+// }
 
 pub(crate) fn ndarray_strategy_generic<T>(
     shape: impl Strategy<Value = Vec<usize>>,
@@ -466,17 +466,17 @@ where
     })
 }
 
-pub(crate) fn carrays2_strategy<T>() -> impl Strategy<
-    Value = (
-        (ndarray::ArrayD<T>, crate::Array<Compact>),
-        (ndarray::ArrayD<T>, crate::Array<Compact>),
-    ),
->
-where
-    T: ScalarStrategy + Debug,
-{
-    carrays2_strategy_generic(shape_strategy(), T::any_strategy())
-}
+// pub(crate) fn carrays2_strategy<T>() -> impl Strategy<
+//     Value = (
+//         (ndarray::ArrayD<T>, crate::Array<Compact>),
+//         (ndarray::ArrayD<T>, crate::Array<Compact>),
+//     ),
+// >
+// where
+//     T: ScalarStrategy + Debug,
+// {
+//     carrays2_strategy_generic(shape_strategy(), T::any_strategy())
+// }
 
 pub(crate) fn carrays2_strategy_generic<T>(
     shape: impl Strategy<Value = Vec<usize>>,
@@ -530,6 +530,7 @@ where
     let shape = actual.shape();
     let mut runner = TestRunner::new(Config {
         cases: 16,
+        failure_persistence: None,
         ..Config::default()
     });
     runner

@@ -50,6 +50,9 @@ where
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
+/// This struct is the bare storage implementation, but the operation is also available as
+/// [`Array::astype()`](crate::Array::astype) and [`Array::astype_dyn()`](crate::Array::astype_dyn).
+///
 /// # Examples
 /// ```
 /// use zix::{Array, ArrayParams};
@@ -406,6 +409,10 @@ mod tests {
     use crate::dtype::f16;
     use crate::dtype::Complex;
     use crate::util::arr_params;
+    #[allow(non_camel_case_types)]
+    type complex_f32 = crate::dtype::Complex<f32>;
+    #[allow(non_camel_case_types)]
+    type complex_f64 = crate::dtype::Complex<f64>;
 
     // --- element-wise conversion for expected values ---
     trait CastTo<D>: Copy {
@@ -523,63 +530,22 @@ mod tests {
     }
 
     // --- test generation macro ---
-    // Generates 4 proptest functions for a (src → dst) cast pair.
+    // One proptest function per (src → dst) cast pair: random shape, random block shape,
+    // full read + random sub-range reads via assert_array_matches.
     macro_rules! test_cast_pair {
-        ($mod_name:ident, $src:ty, $dst:ty) => {
-            mod $mod_name {
-                use super::*;
-
+        ($src:ty, $dst:ty) => {
+            paste::paste! {
                 proptest::proptest! {
                     #[test]
-                    fn cast_1d(
-                        vals in proptest::collection::vec(
-                            <$src as crate::util::ScalarStrategy>::any_strategy(), 8usize
+                    fn [<cast_ $src:lower _to_ $dst:lower>](
+                        (nd, za) in crate::util::carray_strategy_from_shape::<$src>(
+                            crate::util::shape_strategy(),
+                            <$src as crate::util::ScalarStrategy>::any_strategy(),
                         )
                     ) {
-                        let a = ndarray::ArrayD::from_shape_vec(vec![8], vals).unwrap();
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[8])).unwrap();
-                        let actual = za.astype::<$dst>().to_ndarray::<$dst>().unwrap();
-                        let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
-                        proptest::prop_assert_eq!(actual, expected);
-                    }
-
-                    #[test]
-                    fn cast_1d_multi_block(
-                        vals in proptest::collection::vec(
-                            <$src as crate::util::ScalarStrategy>::any_strategy(), 6usize
-                        )
-                    ) {
-                        let a = ndarray::ArrayD::from_shape_vec(vec![6], vals).unwrap();
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[2])).unwrap();
-                        let actual = za.astype::<$dst>().to_ndarray::<$dst>().unwrap();
-                        let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
-                        proptest::prop_assert_eq!(actual, expected);
-                    }
-
-                    #[test]
-                    fn cast_2d(
-                        vals in proptest::collection::vec(
-                            <$src as crate::util::ScalarStrategy>::any_strategy(), 12usize
-                        )
-                    ) {
-                        let a = ndarray::ArrayD::from_shape_vec(vec![3, 4], vals).unwrap();
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[3, 4])).unwrap();
-                        let actual = za.astype::<$dst>().to_ndarray::<$dst>().unwrap();
-                        let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
-                        proptest::prop_assert_eq!(actual, expected);
-                    }
-
-                    #[test]
-                    fn cast_2d_multi_block(
-                        vals in proptest::collection::vec(
-                            <$src as crate::util::ScalarStrategy>::any_strategy(), 16usize
-                        )
-                    ) {
-                        let a = ndarray::ArrayD::from_shape_vec(vec![4, 4], vals).unwrap();
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[2, 2])).unwrap();
-                        let actual = za.astype::<$dst>().to_ndarray::<$dst>().unwrap();
-                        let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
-                        proptest::prop_assert_eq!(actual, expected);
+                        let result = za.astype::<$dst>();
+                        let expected = nd.mapv(|x| CastTo::<$dst>::cast_to(x));
+                        crate::util::assert_array_matches(&result, &expected);
                     }
                 }
             }
@@ -587,49 +553,49 @@ mod tests {
     }
 
     // numeric widening / narrowing
-    test_cast_pair!(u8_to_f32, u8, f32); // smaller → larger itemsize
-    test_cast_pair!(f32_to_u8, f32, u8); // larger → smaller itemsize
-    test_cast_pair!(i32_to_f64, i32, f64);
-    test_cast_pair!(f64_to_i32, f64, i32);
-    test_cast_pair!(f32_to_f64, f32, f64);
-    test_cast_pair!(f64_to_f32, f64, f32);
-    test_cast_pair!(i8_to_u8, i8, u8);
-    test_cast_pair!(u8_to_i8, u8, i8);
+    test_cast_pair!(u8, f32); // smaller → larger itemsize
+    test_cast_pair!(f32, u8); // larger → smaller itemsize
+    test_cast_pair!(i32, f64);
+    test_cast_pair!(f64, i32);
+    test_cast_pair!(f32, f64);
+    test_cast_pair!(f64, f32);
+    test_cast_pair!(i8, u8);
+    test_cast_pair!(u8, i8);
     // identity cast (same src and dst dtype)
-    test_cast_pair!(i32_to_i32, i32, i32);
-    test_cast_pair!(f64_to_f64, f64, f64);
+    test_cast_pair!(i32, i32);
+    test_cast_pair!(f64, f64);
     // bool
-    test_cast_pair!(i8_to_bool, i8, bool);
-    test_cast_pair!(bool_to_i8, bool, i8);
-    test_cast_pair!(u8_to_bool, u8, bool);
-    test_cast_pair!(bool_to_u8, bool, u8);
-    test_cast_pair!(i32_to_bool, i32, bool);
-    test_cast_pair!(bool_to_i32, bool, i32);
-    test_cast_pair!(f32_to_bool, f32, bool);
-    test_cast_pair!(bool_to_f32, bool, f32);
+    test_cast_pair!(i8, bool);
+    test_cast_pair!(bool, i8);
+    test_cast_pair!(u8, bool);
+    test_cast_pair!(bool, u8);
+    test_cast_pair!(i32, bool);
+    test_cast_pair!(bool, i32);
+    test_cast_pair!(f32, bool);
+    test_cast_pair!(bool, f32);
     // f16 (feature-gated)
     #[cfg(feature = "half")]
-    test_cast_pair!(i32_to_f16, i32, f16);
+    test_cast_pair!(i32, f16);
     #[cfg(feature = "half")]
-    test_cast_pair!(f16_to_i32, f16, i32);
+    test_cast_pair!(f16, i32);
     #[cfg(feature = "half")]
-    test_cast_pair!(f32_to_f16, f32, f16);
+    test_cast_pair!(f32, f16);
     #[cfg(feature = "half")]
-    test_cast_pair!(f16_to_f32, f16, f32);
+    test_cast_pair!(f16, f32);
     #[cfg(feature = "half")]
-    test_cast_pair!(f64_to_f16, f64, f16);
+    test_cast_pair!(f64, f16);
     #[cfg(feature = "half")]
-    test_cast_pair!(f16_to_f64, f16, f64);
+    test_cast_pair!(f16, f64);
     #[cfg(feature = "half")]
-    test_cast_pair!(f16_to_f16, f16, f16);
+    test_cast_pair!(f16, f16);
     // complex (feature-gated)
-    test_cast_pair!(cf32_to_cf64, Complex<f32>, Complex<f64>);
+    test_cast_pair!(complex_f32, complex_f64);
     #[cfg(feature = "num-complex")]
-    test_cast_pair!(cf64_to_cf32, Complex<f64>, Complex<f32>);
+    test_cast_pair!(complex_f64, complex_f32);
     #[cfg(feature = "num-complex")]
-    test_cast_pair!(cf32_to_cf32, Complex<f32>, Complex<f32>);
+    test_cast_pair!(complex_f32, complex_f32);
     #[cfg(feature = "num-complex")]
-    test_cast_pair!(cf64_to_cf64, Complex<f64>, Complex<f64>);
+    test_cast_pair!(complex_f64, complex_f64);
 
     // --- error cases ---
     #[test]
@@ -658,6 +624,7 @@ mod tests {
         let _ = a.astype::<f16>(); // no-op cast must not panic
     }
 
+    #[cfg(not(feature = "half"))]
     #[test]
     fn cast_f16_to_f16() {
         // must work even without the "half" feature, since it's a no-op cast

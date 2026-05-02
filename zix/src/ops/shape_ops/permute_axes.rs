@@ -168,8 +168,11 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
 #[cfg(test)]
 mod tests {
     use ndarray::array;
+    use proptest::prelude::*;
 
     use crate::array::Array;
+    use crate::storage::Compact;
+    use crate::util::{shape_strategy, ScalarStrategy};
 
     // 2D i32: transpose (axes=[1,0])
     #[test]
@@ -265,5 +268,40 @@ mod tests {
         let a = array![[1i32, 2], [3, 4]];
         let za = Array::compact_array(&a).unwrap();
         let _ = za.permute_axes(&[0, 0]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Proptest: arbitrary ndim, arbitrary permutation, verified against ndarray
+    // -----------------------------------------------------------------------
+
+    fn permute_axes_strategy<T>(
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<usize>)>
+    where
+        T: ScalarStrategy,
+    {
+        shape_strategy()
+            .prop_flat_map(|shape| {
+                let ndim = shape.len();
+                let perm = Just((0..ndim).collect::<Vec<_>>()).prop_shuffle();
+                (Just(shape), perm)
+            })
+            .prop_flat_map(|(shape, perm)| {
+                let array_strat =
+                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                (array_strat, Just(perm))
+            })
+            .prop_map(|((nd, za), perm)| (nd, za, perm))
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_permute_axes((nd, za, perm) in permute_axes_strategy::<i32>()) {
+            let expected = nd
+                .view()
+                .permuted_axes(perm.clone())
+                .as_standard_layout()
+                .into_owned();
+            crate::util::assert_array_matches(&za.permute_axes(&perm), &expected);
+        }
     }
 }

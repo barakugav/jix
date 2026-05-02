@@ -19,6 +19,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::logical_and()`](crate::Array::logical_and).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -54,6 +57,9 @@ define_op2!(
     /// is truthy.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::logical_or()`](crate::Array::logical_or).
     ///
     /// # Examples
     /// ```
@@ -91,6 +97,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::logical_xor()`](crate::Array::logical_xor).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -127,6 +136,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::logical_not()`](crate::Array::logical_not).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -159,6 +171,9 @@ define_op2!(
     /// equivalent to logical AND.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::bitwise_and()`](crate::Array::bitwise_and).
     ///
     /// # Examples
     /// ```
@@ -194,6 +209,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::bitwise_or()`](crate::Array::bitwise_or).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -227,6 +245,9 @@ define_op2!(
     /// equivalent to logical XOR.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::bitwise_xor()`](crate::Array::bitwise_xor).
     ///
     /// # Examples
     /// ```
@@ -262,6 +283,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::bitwise_not()`](crate::Array::bitwise_not).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -295,6 +319,9 @@ define_op2!(
     /// the bit width of the type is defined to produce zero, matching `u32::unbounded_shl`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::bitwise_shift_left()`](crate::Array::bitwise_shift_left).
     ///
     /// # Examples
     /// ```
@@ -333,6 +360,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::bitwise_shift_right()`](crate::Array::bitwise_shift_right).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -368,6 +398,9 @@ define_op2!(
     /// The rotation amount is taken modulo the bit width of the type.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::bitwise_rotate_left()`](crate::Array::bitwise_rotate_left).
     ///
     /// # Examples
     /// ```
@@ -405,6 +438,9 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::bitwise_rotate_right()`](crate::Array::bitwise_rotate_right).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -439,6 +475,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::count_ones()`](crate::Array::count_ones).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -470,6 +509,9 @@ define_op1!(
     /// representation (including the sign bit) is used.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::count_zeros()`](crate::Array::count_zeros).
     ///
     /// # Examples
     /// ```
@@ -504,6 +546,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::leading_zeros()`](crate::Array::leading_zeros).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -536,6 +581,9 @@ define_op1!(
     /// `0u32`).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::trailing_zeros()`](crate::Array::trailing_zeros).
     ///
     /// # Examples
     /// ```
@@ -570,6 +618,9 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::swap_bytes()`](crate::Array::swap_bytes).
+    ///
     /// # Examples
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -600,6 +651,9 @@ define_op1!(
     /// The most-significant bit becomes the least-significant and vice versa.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
+    ///
+    /// This struct is the bare storage implementation, but the operation is also available as
+    /// [`Array::reverse_bits()`](crate::Array::reverse_bits).
     ///
     /// # Examples
     /// ```
