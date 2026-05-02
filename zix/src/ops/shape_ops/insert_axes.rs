@@ -55,7 +55,7 @@ use crate::Array;
 /// // [2, 3] → [1, 2, 3, 1]
 /// let c = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
 /// assert_eq!(c.insert_axes(&[0, 2]).shape(), &[1, 2, 3, 1]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct InsertAxes<S> {
     array: Array<S>,

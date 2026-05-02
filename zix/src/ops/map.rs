@@ -49,7 +49,7 @@ where
 /// let b = Array::compact_array(&array![0.0f32, 1.5, -2.0])?;
 /// let result = b.map(|x: f32| x > 0.0).to_ndarray::<bool>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Map<S, I, O, F> {
     array: Array<S>,

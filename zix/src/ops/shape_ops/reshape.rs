@@ -43,7 +43,7 @@ use crate::NDIM_MAX;
 /// let b = Array::compact_array(&array![1i32, 2, 3, 4, 5, 6])?;
 /// let result = b.reshape_view(&[3, 2]).to_ndarray::<i32>()?;
 /// assert_eq!(result.shape(), &[3, 2]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Reshape<S> {
     array: Array<S>,

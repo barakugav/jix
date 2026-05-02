@@ -32,7 +32,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![f32::NAN, 1.0f32])?;
     /// let result = c.equal(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Equal,
     EqualKernel,
@@ -67,7 +67,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![f32::NAN, 2.0f32])?;
     /// let result = c.not_equal(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     NotEqual,
     NotEqualKernel,
@@ -102,7 +102,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![false, false, true])?;
     /// let result = c.greater(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Greater,
     GreaterKernel,
@@ -137,7 +137,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![false, false, true])?;
     /// let result = c.greater_equal(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     GreaterEqual,
     GreaterEqualKernel,
@@ -172,7 +172,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![true, false, true])?;
     /// let result = c.less(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Less,
     LessKernel,
@@ -207,7 +207,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![true, false, true])?;
     /// let result = c.less_equal(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     LessEqual,
     LessEqualKernel,
@@ -245,7 +245,7 @@ define_op2!(
     /// let result = c.maximum(d).to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 3.0);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Maximum,
     MaximumKernel,
@@ -282,7 +282,7 @@ define_op2!(
     /// let result = c.minimum(d).to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 1.0);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Minimum,
     MinimumKernel,

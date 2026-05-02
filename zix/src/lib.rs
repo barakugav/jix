@@ -21,7 +21,8 @@ pub mod ops;
 mod util;
 pub use util::ArraySequence;
 
-pub mod error;
+mod error;
+pub use error::{Error, ErrorKind};
 
 /// Maximum number of dimensions supported by the library for an array.
 pub const NDIM_MAX: usize = 8;

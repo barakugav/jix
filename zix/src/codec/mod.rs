@@ -90,7 +90,7 @@ pub enum Codec {
 /// // EncoderParams::default() is equivalent to EncoderParams::new()
 /// params.encoder_params(EncoderParams::new());
 /// let za = Array::compact_array_with(&data, params)?;
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 ///
 /// Increase compression level for archival data:
@@ -107,7 +107,7 @@ pub enum Codec {
 /// let mut params = ArrayParams::new();
 /// params.encoder_params(enc);
 /// let za = Array::compact_array_with(&data, params)?;
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 #[derive(Clone, Debug)]
 pub struct EncoderParams {
@@ -419,7 +419,7 @@ impl<'a> Decoder<'a> {
 /// let ctx = za.read_ctx();
 /// let out = za.to_ndarray_sub::<i32>(&[1..3], &ctx)?;
 /// assert_eq!(out.as_slice().unwrap(), &[2, 3]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 ///
 /// `ReadContext::default()` (or `ReadContext::new(decoder_params)`) is available for if you need
@@ -432,7 +432,7 @@ impl<'a> Decoder<'a> {
 /// let za = Array::plain_scalar(42i32, &[5])?;
 /// let out = za.to_ndarray_sub::<i32>(&[0..3], &ReadContext::default())?;
 /// assert_eq!(out.as_slice().unwrap(), &[42, 42, 42]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 ///
 /// # Reusing a context

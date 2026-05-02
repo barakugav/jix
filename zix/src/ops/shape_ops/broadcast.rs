@@ -37,7 +37,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 /// assert_eq!(result[[0, 1]], 10);
 /// assert_eq!(result[[2, 0]], 30);
 /// assert_eq!(result[[2, 1]], 30);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Broadcast<S> {
     array: Array<S>,

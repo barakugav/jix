@@ -345,7 +345,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0i8, 1, -1])?;
     /// let result = (-b).to_ndarray::<i8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0, -1, 1]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Neg,
     NegKernel,
@@ -377,7 +377,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![-1.1f32, -2.9, -3.0])?;
     /// let result = b.floor().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-2.0, -3.0, -3.0]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Floor,
     FloorKernel,
@@ -407,7 +407,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![-1.7f32, -2.0, -0.1])?;
     /// let result = b.ceil().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-1.0, -2.0, 0.0]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Ceil,
     CeilKernel,
@@ -441,7 +441,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0.5f32, -0.5])?;
     /// let result = b.round().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Round,
     RoundKernel,
@@ -472,7 +472,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![-1.0f32])?;
     /// let result = b.sqrt().to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Sqrt,
     SqrtKernel,
@@ -503,7 +503,7 @@ define_op1!(
     /// let result = b.exp().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 1.0);
     /// assert!((result[[1]] - std::f32::consts::E).abs() < 1e-5);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Exp,
     ExpKernel,
@@ -539,7 +539,7 @@ define_op1!(
     /// let result = b.ln().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], f32::NEG_INFINITY);
     /// assert!(result[[1]].is_nan());
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Ln,
     LnKernel,
@@ -569,7 +569,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0.0f32])?;
     /// let result = b.sin().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 0.0);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Sin,
     SinKernel,
@@ -600,7 +600,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0.0f32])?;
     /// let result = b.cos().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 1.0);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Cos,
     CosKernel,
@@ -630,7 +630,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0.0f32])?;
     /// let result = b.tan().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 0.0);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Tan,
     TanKernel,
@@ -662,7 +662,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![2.0f32])?;
     /// let result = b.asin().to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Asin,
     AsinKernel,
@@ -694,7 +694,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![2.0f32])?;
     /// let result = b.acos().to_ndarray::<f32>()?;
     /// assert!(result[[0]].is_nan());
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Acos,
     AcosKernel,
@@ -724,7 +724,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![1.0f32])?;
     /// let result = b.atan().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - std::f32::consts::FRAC_PI_4).abs() < 1e-5);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Atan,
     AtanKernel,
@@ -757,7 +757,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0.0f32])?;
     /// let result = b.signum().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 1.0);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Signum,
     SignumKernel,
@@ -798,7 +798,7 @@ define_op1!(
     /// let a = Array::compact_array(&array![-3i32, 0, 5, -7])?;
     /// let result = a.abs().to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[3, 0, 5, 7]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     ///
     /// ```
@@ -813,7 +813,7 @@ define_op1!(
     /// let result = b.abs().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - 5.0).abs() < 1e-5);
     /// # }
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Abs,
     AbsKernel,

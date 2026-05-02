@@ -40,7 +40,7 @@ use crate::Array;
 /// // [1, 2, 1] → [2]: remove both size-1 dims at once
 /// let b = Array::compact_array(&array![[[10i32], [20]]])?; // shape [1, 2, 1]
 /// assert_eq!(b.remove_axes(&[0, 2]).shape(), &[2]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct RemoveAxes<S> {
     array: Array<S>,

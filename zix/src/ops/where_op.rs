@@ -61,7 +61,7 @@ where
 /// assert_eq!(result[[0, 1]], 20.0);
 /// assert_eq!(result[[1, 0]], 30.0);
 /// assert_eq!(result[[1, 1]], 4.0);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Where<S1, S2, S3> {
     condition: Array<S1>,

@@ -53,7 +53,7 @@ where
 /// let b = Array::compact_array(&array![[5i32, 6, 7], [8, 9, 10]])?;
 /// let c = zix::ops::concatenate((a, b), 1);
 /// assert_eq!(c.shape(), &[2, 5]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Concatenate<ArraysT> {
     arrays: ArraysT,

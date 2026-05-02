@@ -46,7 +46,7 @@ pub(crate) trait ArraySequenceImpl {
 /// let b = Array::compact_array(&array![4i32, 5, 6])?;
 /// let stacked = zix::ops::stack([a, b], 0);
 /// assert_eq!(stacked.shape(), &[2, 3]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 ///
 /// Stack a tuple of arrays with different storage types (heterogeneous):
@@ -62,7 +62,7 @@ pub(crate) trait ArraySequenceImpl {
 /// let c = a + 8;
 /// let stacked = zix::ops::stack((b, c), 0);
 /// assert_eq!(stacked.shape(), &[2, 3]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 #[allow(private_bounds)]
 pub trait ArraySequence: ArraySequenceImpl {}

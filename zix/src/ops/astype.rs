@@ -64,7 +64,7 @@ where
 /// let zb = Array::compact_array(&array![0i32, 1, -2, 0])?;
 /// let result = zb.astype::<bool>().to_ndarray::<bool>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, true, false]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct AsType<S> {
     array: Array<S>,

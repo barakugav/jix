@@ -46,7 +46,7 @@ where
 /// let b = Array::compact_array(&array![4i32, 5, 6])?;
 /// let c = zix::ops::stack((a, b), 1);
 /// assert_eq!(c.shape(), &[3, 2]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Stack<ArraysT> {
     arrays: ArraysT,

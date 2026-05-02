@@ -38,7 +38,7 @@ use crate::Array;
 /// let zb = Array::compact_array(&b)?;
 /// let p = zb.permute_axes(&[2, 0, 1]);
 /// assert_eq!(p.shape(), &[4, 2, 3]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct PermuteAxes<S> {
     array: Array<S>,

@@ -46,7 +46,7 @@ use crate::Array;
 /// // The result is computed lazily — no data is read until to_ndarray() is called.
 /// let result = (compact + plain).to_ndarray::<f32>()?;
 /// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Plain<S> {
     #[allow(unused)]

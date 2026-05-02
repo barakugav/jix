@@ -22,7 +22,7 @@ pub(crate) fn check_ndim(ndim: usize) -> PyResult<()> {
 pub(crate) trait IntoPyResult<T> {
     fn into_py_result(self) -> PyResult<T>;
 }
-impl<T> IntoPyResult<T> for Result<T, zix_core::error::Error> {
+impl<T> IntoPyResult<T> for Result<T, zix_core::Error> {
     fn into_py_result(self) -> PyResult<T> {
         self.map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))
     }

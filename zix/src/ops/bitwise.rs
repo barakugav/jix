@@ -34,7 +34,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![true, true, false])?;
     /// let result = c.logical_and(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     LogicalAnd,
     LogicalAndKernel,
@@ -70,7 +70,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![false, true, false])?;
     /// let result = c.logical_or(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     LogicalOr,
     LogicalOrKernel,
@@ -106,7 +106,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![true, false, false])?;
     /// let result = c.logical_xor(d).to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, false, true]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     LogicalXor,
     LogicalXorKernel,
@@ -140,7 +140,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![true, false, true])?;
     /// let result = b.logical_not().to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     LogicalNot,
     LogicalNotKernel,
@@ -175,7 +175,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![0xF0u8, 0xF0u8])?;
     /// let result = c.bitwise_and(d).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xA0, 0xC0]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     BitwiseAnd,
     BitwiseAndKernel,
@@ -209,7 +209,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![0xF0u8, 0xF0u8])?;
     /// let result = c.bitwise_or(d).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xFF, 0xF0]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     BitwiseOr,
     BitwiseOrKernel,
@@ -243,7 +243,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![0x0Fu8, 0x0Fu8])?;
     /// let result = c.bitwise_xor(d).to_ndarray::<u8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xF0, 0x00]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     BitwiseXor,
     BitwiseXorKernel,
@@ -275,7 +275,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![true, false])?;
     /// let result = b.bitwise_not().to_ndarray::<bool>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     BitwiseNot,
     BitwiseNotKernel,
@@ -312,7 +312,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![3i8, 1i8])?;
     /// let result = c.bitwise_shift_left(d).to_ndarray::<i8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[8, -2]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     BitwiseShiftLeft,
     BitwiseShiftLeftKernel,
@@ -349,7 +349,7 @@ define_op2!(
     /// let d = Array::compact_array(&array![2i8, 1i8])?;
     /// let result = c.bitwise_shift_right(d).to_ndarray::<i8>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-2, -1]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     BitwiseShiftRight,
     BitwiseShiftRightKernel,
@@ -381,7 +381,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0u8, 0u8])?;
     /// let result = b.count_ones().to_ndarray::<u32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0, 0]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     CountOnes,
     CountOnesKernel,
@@ -413,7 +413,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0u8])?;
     /// let result = b.count_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result[[0]], 8); // u8 has 8 bits
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     CountZeros,
     CountZerosKernel,
@@ -446,7 +446,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0u32])?;
     /// let result = b.leading_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result[[0]], 32);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     LeadingZeros,
     LeadingZerosKernel,
@@ -479,7 +479,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0u32])?;
     /// let result = b.trailing_zeros().to_ndarray::<u32>()?;
     /// assert_eq!(result[[0]], 32);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     TrailingZeros,
     TrailingZerosKernel,
@@ -512,7 +512,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0x12345678u32])?;
     /// let result = b.swap_bytes().to_ndarray::<u32>()?;
     /// assert_eq!(result[[0]], 0x78563412u32);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     SwapBytes,
     SwapBytesKernel,
@@ -543,7 +543,7 @@ define_op1!(
     /// let b = Array::compact_array(&array![0u8])?;
     /// let result = b.reverse_bits().to_ndarray::<u8>()?;
     /// assert_eq!(result[[0]], 0u8);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     ReverseBits,
     ReverseBitsKernel,

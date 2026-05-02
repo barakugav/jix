@@ -167,9 +167,9 @@ impl Array<Compact> {
     ///
     /// # Errors
     ///
-    /// - [`TooManyDimensions`](crate::error::ErrorKind::TooManyDimensions) — `array.ndim()` exceeds
+    /// - [`TooManyDimensions`](crate::ErrorKind::TooManyDimensions) — `array.ndim()` exceeds
     ///   [`NDIM_MAX`](crate::NDIM_MAX).
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — compression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) — compression fails.
     ///
     /// # Examples
     ///
@@ -238,7 +238,7 @@ impl Array<Compact> {
     ///     println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
     ///   }
     /// }
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn compact_array_with<S, D>(
         array: &ndarray::ArrayBase<S, D>,
@@ -330,7 +330,7 @@ impl<S: ArrayStorage> Array<S> {
     /// struct Point { x: f32, y: f32 }
     /// let c = Array::plain_ndarray_view(&array![Point { x: 1.0, y: 2.0 }])?;
     /// assert_eq!(c.dtype(), &Point::DTYPE);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn dtype(&self) -> &Dtype {
         self.storage.dtype()
@@ -343,9 +343,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) — `T` does not match
+    /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) — `T` does not match
     ///   `self.dtype()`.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — block decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) — block decompression fails.
     pub fn to_ndarray<T>(&self) -> Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
@@ -367,11 +367,11 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`UnsupportedDtype`](crate::error::ErrorKind::UnsupportedDtype) — `T` does not match
+    /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) — `T` does not match
     ///   `self.dtype()`.
-    /// - [`InvalidIndex`](crate::error::ErrorKind::InvalidIndex) — `range` is out of bounds or
+    /// - [`InvalidIndex`](crate::ErrorKind::InvalidIndex) — `range` is out of bounds or
     ///   has a different number of dimensions than the array.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — block decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) — block decompression fails.
     ///
     /// # Examples
     ///
@@ -390,7 +390,7 @@ impl<S: ArrayStorage> Array<S> {
     ///    a.to_ndarray_sub::<i32>(&[0..2, 0..2], &context)?,
     ///    array![[1, 2], [4, 5]].into_dyn()
     /// );
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn to_ndarray_sub<T>(
         &self,
@@ -426,11 +426,11 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`InvalidBufferSize`](crate::error::ErrorKind::InvalidBufferSize) — `buf` has the wrong
+    /// - [`InvalidBufferSize`](crate::ErrorKind::InvalidBufferSize) — `buf` has the wrong
     ///   length for the requested range and dtype.
-    /// - [`InvalidArgument`](crate::error::ErrorKind::InvalidArgument) — `buf` is insufficiently
+    /// - [`InvalidArgument`](crate::ErrorKind::InvalidArgument) — `buf` is insufficiently
     ///   aligned for the dtype.
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — block decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) — block decompression fails.
     ///
     /// # Examples
     ///
@@ -447,7 +447,7 @@ impl<S: ArrayStorage> Array<S> {
     ///     a.to_ndarray_buf(&[1..3, 1..3], buf, &context)?;
     /// }
     /// assert_eq!(buf, vec![5, 6, 8, 9]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn to_ndarray_buf(
         &self,
@@ -487,7 +487,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — compression or decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) — compression or decompression fails.
     ///
     /// # Examples
     ///
@@ -500,7 +500,7 @@ impl<S: ArrayStorage> Array<S> {
     ///     (a * 7.399_f32)  // Array<Mul<Compact, Scalar<f32>>>
     ///    .floor()       // Array<Floor<Mul<Compact, Scalar<f32>>>>
     ///    .copy()?;      // Array<Compact> - materialize the pipeline
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn copy(&self) -> Result<Array<Compact>> {
         let context = self.read_ctx();
@@ -515,7 +515,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::error::ErrorKind::CodecError) — compression or decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) — compression or decompression fails.
     ///
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -535,7 +535,7 @@ impl<S: ArrayStorage> Array<S> {
     ///     b.to_ndarray_sub::<f32>(&[0..2, 0..1],
     ///     &b.read_ctx())?, array![[1.5], [3.14]].into_dyn()
     /// );
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn copy_with(
         &self,
@@ -617,7 +617,7 @@ impl<S: ArrayStorage> Array<S> {
     ///     let row_data = a.to_ndarray_sub::<i32>(&[row..(row + 1), 0..3], &context)?;
     ///     println!("row sum: {}", row_data.sum());
     /// }
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn read_ctx(&self) -> ReadContext {
         let params = self.storage._spec().decoder_params;
@@ -645,7 +645,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let b = a.as_ref() + 1.0f32; // Array<Add<Ref<Compact>, Scalar<f32>>>
     /// let c = a.as_ref() * b; // we can use `a` again here because we called as_ref()
     /// assert_eq!(c.to_ndarray::<f32>()?[[1, 1]], 6.17 * (6.17 + 1.0));
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn as_ref(&self) -> Array<Ref<'_, S>> {
         Array {
@@ -671,7 +671,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// let b = a * 2.0f32; // Array<Mul<Compact, Scalar<f32>>>
     /// assert!(!b.is_compact()); // b is a lazy view
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn is_compact(&self) -> bool {
         self.storage().as_compact().is_some()
@@ -701,7 +701,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert!(!b.is_compact()); // b is a lazy view
     /// let b = b.into_compact()?; // materialize b into compact form
     /// assert!(b.is_compact());
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn into_compact(self) -> Result<Array<IntoCompact<S>>> {
         let context = self.read_ctx();

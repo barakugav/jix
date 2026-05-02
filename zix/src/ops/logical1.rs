@@ -31,7 +31,7 @@ define_op1!(
     /// assert_eq!(result.shape(), &[2, 2]);
     /// assert_eq!(result[[0, 0]], true);
     /// assert_eq!(result[[1, 1]], true);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     IsNan,
     IsNanKernel,
@@ -65,7 +65,7 @@ define_op1!(
     /// assert_eq!(result.shape(), &[2, 2]);
     /// assert_eq!(result[[0, 0]], true);
     /// assert_eq!(result[[0, 1]], false);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     IsFinite,
     IsFiniteKernel,
@@ -99,7 +99,7 @@ define_op1!(
     /// assert_eq!(result.shape(), &[2, 2]);
     /// assert_eq!(result[[0, 0]], true);
     /// assert_eq!(result[[1, 1]], true);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     IsInfinite,
     IsInfiniteKernel,

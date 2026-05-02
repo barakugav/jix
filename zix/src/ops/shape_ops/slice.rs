@@ -56,7 +56,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 /// let result = b.slice(((-1i64..), ..)).to_ndarray::<i32>()?;
 /// assert_eq!(result.shape(), &[1, 3]);
 /// assert_eq!(result[[0, 1]], 8);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Slice<S> {
     array: Array<S>,

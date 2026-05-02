@@ -47,7 +47,7 @@ where
 /// let za = Array::compact_array(&pts)?;
 /// let xs = za.dtype_sub_field("x").to_ndarray::<i32>()?;
 /// assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct SubDtype<S> {
     array: Array<S>,

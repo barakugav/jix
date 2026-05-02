@@ -439,7 +439,7 @@ define_reduction_op!(
     /// let col_max_k = Array::compact_array(&nd)?
     ///     .max(&[0], true).to_ndarray::<i32>()?;
     /// assert_eq!(col_max_k.shape(), &[1, 3]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Max,
     MaxKernel,
@@ -483,7 +483,7 @@ define_reduction_op!(
     /// let col_min_k = Array::compact_array(&nd)?
     ///     .min(&[0], true).to_ndarray::<i32>()?;
     /// assert_eq!(col_min_k.shape(), &[1, 3]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Min,
     MinKernel,
@@ -527,7 +527,7 @@ define_reduction_op!(
     /// let idx_k = Array::compact_array(&nd)?
     ///     .argmax(1, true).to_ndarray::<u64>()?;
     /// assert_eq!(idx_k.shape(), &[2, 1]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     ArgMax,
     ArgMaxKernel,
@@ -578,7 +578,7 @@ define_reduction_op!(
     /// let idx_k = Array::compact_array(&nd)?
     ///     .argmin(1, true).to_ndarray::<u64>()?;
     /// assert_eq!(idx_k.shape(), &[2, 1]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     ArgMin,
     ArgMinKernel,
@@ -633,7 +633,7 @@ define_reduction_op!(
     /// let row_sums = Array::compact_array(&nd)?
     ///     .sum(&[1], true).to_ndarray::<i64>()?;
     /// assert_eq!(row_sums.shape(), &[2, 1]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Sum,
     SumKernel,
@@ -683,7 +683,7 @@ define_reduction_op!(
     /// let row_products = Array::compact_array(&nd)?
     ///     .product(&[1], true).to_ndarray::<i64>()?;
     /// assert_eq!(row_products.shape(), &[2, 1]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Product,
     ProductKernel,
@@ -726,7 +726,7 @@ define_reduction_op!(
     /// let col_means_k = Array::compact_array(&nd)?
     ///     .mean(&[0], true).to_ndarray::<f64>()?;
     /// assert_eq!(col_means_k.shape(), &[1, 3]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Mean,
     MeanKernel,
@@ -782,7 +782,7 @@ define_reduction_op!(
     /// let col_vars_k = Array::compact_array(&nd)?
     ///     .var(&[0], true, 0.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_vars_k.shape(), &[1, 3]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Variance,
     VarianceKernel,
@@ -827,7 +827,7 @@ define_reduction_op!(
     /// let col_stds_k = Array::compact_array(&nd)?
     ///     .std(&[0], true, 0.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_stds_k.shape(), &[1, 3]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     StandardDeviation,
     StandardDeviationKernel,
@@ -943,7 +943,7 @@ define_reduction_op!(
     /// let row_all = Array::compact_array(&nd)?
     ///     .all(&[1], true).to_ndarray::<bool>()?;
     /// assert_eq!(row_all.shape(), &[2, 1]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     All,
     AllKernel,
@@ -987,7 +987,7 @@ define_reduction_op!(
     /// let row_any = Array::compact_array(&nd)?
     ///     .any(&[1], true).to_ndarray::<bool>()?;
     /// assert_eq!(row_any.shape(), &[2, 1]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Any,
     AnyKernel,

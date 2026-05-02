@@ -422,7 +422,7 @@ define_op2!(
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
     /// let result = (a + 10i32).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[11, 12, 13]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Add,
     AddKernel,
@@ -460,7 +460,7 @@ define_op2!(
     /// let a = Array::compact_array(&array![10i32, 20, 30])?;
     /// let result = (a - 5i32).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[5, 15, 25]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Sub,
     SubKernel,
@@ -498,7 +498,7 @@ define_op2!(
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
     /// let result = (a * 3i32).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[3, 6, 9]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Mul,
     MulKernel,
@@ -537,7 +537,7 @@ define_op2!(
     /// let a = Array::compact_array(&array![10i32, 20, 30])?;
     /// let result = (a / 10i32).to_ndarray::<i32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Div,
     DivKernel,
@@ -572,7 +572,7 @@ define_op2!(
     /// let exp = Array::plain_scalar(2.0f32, &[3])?;
     /// let result = a.powf(exp).to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4.0, 9.0, 16.0]);
-    /// # Ok::<(), zix::error::Error>(())
+    /// # Ok::<(), zix::Error>(())
     /// ```
     Power,
     PowerKernel,

@@ -31,7 +31,7 @@ use crate::Array;
 ///
 /// let result = (arr * 5.0f32).to_ndarray::<f32>()?; // the scalar is broadcast automatically
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]].into_dyn());
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 ///
 /// **Explicit** — construct a `Scalar` array first, then apply the operation:
@@ -45,7 +45,7 @@ use crate::Array;
 /// let scalar_arr = Array::plain_scalar(5.0f32, &[2, 2])?;
 /// let result = (arr * scalar_arr).to_ndarray::<f32>()?;
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]].into_dyn());
-/// # Ok::<(), zix::error::Error>(())
+/// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Scalar<T> {
     data: T,
