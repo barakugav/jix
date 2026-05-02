@@ -73,6 +73,7 @@ pub struct AsType<S> {
     shape: DimArray<u64>,
 }
 impl<S> AsType<S> {
+    /// Constructs an `AsType` storage. See [`AsType`] for semantics, supported casts, and examples.
     pub fn new(array: Array<S>, dtype: Dtype) -> Result<Self>
     where
         S: ArrayStorage,

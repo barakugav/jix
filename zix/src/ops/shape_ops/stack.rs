@@ -57,6 +57,7 @@ pub struct Stack<ArraysT> {
     blocks_layout: BlocksLayout,
 }
 impl<ArraysT> Stack<ArraysT> {
+    /// Constructs a `Stack` storage. See [`Stack`] for semantics and examples.
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self>
     where
         ArraysT: ArraySequence,

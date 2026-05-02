@@ -71,6 +71,7 @@ pub struct Slice<S> {
 }
 
 impl<S: ArrayStorage> Slice<S> {
+    /// Constructs a `Slice` storage. See [`Slice`] for slice conventions, semantics, and examples.
     pub fn new(array: Array<S>, slice: SliceSpec) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
@@ -260,6 +261,7 @@ pub struct SliceSpec {
 }
 
 impl SliceSpec {
+    /// Constructs a `SliceSpec` from a slice of [`SliceItem`]s, one per dimension.
     pub fn new(slice: &[SliceItem]) -> Self {
         Self {
             slice: slice.iter().cloned().collect(),
@@ -308,12 +310,16 @@ impl_from_tuple_for_slice_spec!(I1, I2, I3, I4, I5, I6, I7, I8 ; 8 ; 0, 1, 2, 3,
 /// `step` must be ≥ 1 (negative steps are not supported).
 #[derive(Debug, Clone, Copy)]
 pub struct SliceItem {
+    /// First element to include. Negative values count from the end; `None` means the start of the dimension.
     pub start: Option<i64>,
+    /// First element to exclude. Negative values count from the end; `None` means past the end of the dimension.
     pub end: Option<i64>,
+    /// Step between selected elements. Must be ≥ 1.
     pub step: i64,
 }
 
 impl SliceItem {
+    /// Constructs a [`SliceItem`] from explicit `start`, `end`, and `step`. See [`Slice`] for conventions.
     pub fn new(start: Option<i64>, end: Option<i64>, step: i64) -> Self {
         Self { start, end, step }
     }

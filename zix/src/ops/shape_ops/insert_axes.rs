@@ -69,6 +69,7 @@ pub struct InsertAxes<S> {
 }
 
 impl<S: ArrayStorage> InsertAxes<S> {
+    /// Constructs an `InsertAxes` storage. See [`InsertAxes`] for semantics and examples.
     pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
         let orig_ndim = array.shape().len();
         let new_ndim = orig_ndim + axes.len();

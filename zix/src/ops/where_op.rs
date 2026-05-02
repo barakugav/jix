@@ -72,6 +72,7 @@ pub struct Where<S1, S2, S3> {
     shape: DimArray<u64>,
 }
 impl<S1, S2, S3> Where<S1, S2, S3> {
+    /// Constructs a `Where` storage. See [`Where`] for semantics and examples.
     pub fn new(condition: Array<S1>, x: Array<S2>, y: Array<S3>) -> Result<Self>
     where
         S1: ArrayStorage,

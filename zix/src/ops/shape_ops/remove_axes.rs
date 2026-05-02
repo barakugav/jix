@@ -53,6 +53,7 @@ pub struct RemoveAxes<S> {
 }
 
 impl<S: ArrayStorage> RemoveAxes<S> {
+    /// Constructs a `RemoveAxes` storage. See [`RemoveAxes`] for semantics and examples.
     pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
         let input_ndim = array.shape().len();
 

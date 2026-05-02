@@ -6,7 +6,6 @@ use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::archive::schema::{self, ArchiveType};
 use crate::error::{ensure, Error, Result};
-use crate::util::Idx;
 
 const MAGIC: &[u8; 4] = b"ZIX1";
 
@@ -66,28 +65,28 @@ impl<W> ArchiveWriter<W> {
         Ok(msg_len)
     }
 
-    pub(crate) fn write_section(&mut self, data: &[u8], alignment: usize) -> io::Result<Section>
-    where
-        W: Write + Seek,
-    {
-        let offset = self.stream_position()?;
-        let padded_offset = offset.ceil_to_multiple(alignment as u64);
-        let padding = padded_offset - offset;
-        if padding > 0 {
-            self.tmp_buf.clear();
-            self.tmp_buf.resize(padding as usize, 0);
-            self.writer.write_all(self.tmp_buf.as_slice())?;
-            self.tmp_buf.clear();
-        }
-        let offset = padded_offset;
+    // pub(crate) fn write_section(&mut self, data: &[u8], alignment: usize) -> io::Result<Section>
+    // where
+    //     W: Write + Seek,
+    // {
+    //     let offset = self.stream_position()?;
+    //     let padded_offset = offset.ceil_to_multiple(alignment as u64);
+    //     let padding = padded_offset - offset;
+    //     if padding > 0 {
+    //         self.tmp_buf.clear();
+    //         self.tmp_buf.resize(padding as usize, 0);
+    //         self.writer.write_all(self.tmp_buf.as_slice())?;
+    //         self.tmp_buf.clear();
+    //     }
+    //     let offset = padded_offset;
 
-        self.write_all(data)?;
-        let size = data.len() as u64;
-        Ok(Section {
-            offset: offset as i64 - self.base_offset as i64,
-            size,
-        })
-    }
+    //     self.write_all(data)?;
+    //     let size = data.len() as u64;
+    //     Ok(Section {
+    //         offset: offset as i64 - self.base_offset as i64,
+    //         size,
+    //     })
+    // }
 }
 impl<W> Deref for ArchiveWriter<W> {
     type Target = W;

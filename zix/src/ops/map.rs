@@ -61,6 +61,7 @@ pub struct Map<S, I, O, F> {
     shape: DimArray<u64>,
 }
 impl<S, I, O, F> Map<S, I, O, F> {
+    /// Constructs a `Map` storage. See [`Map`] for semantics and examples.
     pub fn new(array: Array<S>, map_fn: F) -> Result<Self>
     where
         S: ArrayStorage,

@@ -65,6 +65,7 @@ pub struct Concatenate<ArraysT> {
     blocks_layout: BlocksLayout,
 }
 impl<ArraysT> Concatenate<ArraysT> {
+    /// Constructs a `Concatenate` storage. See [`Concatenate`] for semantics and examples.
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self>
     where
         ArraysT: ArraySequence,

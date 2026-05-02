@@ -57,6 +57,7 @@ pub struct SubDtype<S> {
     shape: DimArray<u64>,
 }
 impl<S> SubDtype<S> {
+    /// Constructs a `SubDtype` storage. See [`SubDtype`] for semantics and examples.
     pub fn new(array: Array<S>, sub_field: &str) -> Result<Self>
     where
         S: ArrayStorage,
