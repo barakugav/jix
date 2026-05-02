@@ -364,3 +364,130 @@ where
     define_array_op2_method!(maximum: Maximum);
     define_array_op2_method!(minimum: Minimum);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{MaximumTrait, MinimumTrait};
+    #[cfg(feature = "half")]
+    use crate::dtype::f16;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f32 = crate::dtype::Complex<f32>;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f64 = crate::dtype::Complex<f64>;
+    use crate::ops::op2::tests::test_op2;
+
+    // equal / not_equal: comparable_strategy gives ~33 % equal pairs and exercises NaN != NaN.
+    // Output is bool, so NaN in float inputs is safe for assert_array_matches.
+    test_op2!(
+        equal,
+        |a, b| a == b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        comparable_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_op2!(
+        not_equal,
+        |a, b| a != b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        comparable_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+
+    // Ordering ops: output is bool, so NaN inputs are safe.
+    // Integers: any_strategy (no overflow). Floats: maybe_non_finite covers NaN → false paths.
+    test_op2!(
+        greater,
+        |a, b| a > b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        greater,
+        |a, b| a > b,
+        [f32, f64],
+        maybe_non_finite_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+    test_op2!(
+        greater_equal,
+        |a, b| a >= b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        greater_equal,
+        |a, b| a >= b,
+        [f32, f64],
+        maybe_non_finite_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+    test_op2!(
+        less,
+        |a, b| a < b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        less,
+        |a, b| a < b,
+        [f32, f64],
+        maybe_non_finite_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+    test_op2!(
+        less_equal,
+        |a, b| a <= b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        less_equal,
+        |a, b| a <= b,
+        [f32, f64],
+        maybe_non_finite_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+
+    // maximum / minimum: NaN propagates to the float *output*, which breaks assert_eq via PartialEq.
+    // Use op_safe_strategy for floats to keep all outputs finite.
+    test_op2!(
+        maximum,
+        |a, b| MaximumTrait::maximum(a, b),
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        maximum,
+        |a, b| MaximumTrait::maximum(a, b),
+        [f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+    test_op2!(
+        minimum,
+        |a, b| MinimumTrait::minimum(a, b),
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        minimum,
+        |a, b| MinimumTrait::minimum(a, b),
+        [f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+}

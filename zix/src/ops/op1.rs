@@ -892,7 +892,8 @@ pub(crate) mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<$op_method _ $dtype>](
-                        (nd, za) in crate::util::compact_array_strategy_generic::<$dtype>(
+                        (nd, za) in crate::util::carray_strategy_from_shape::<$dtype>(
+                            crate::util::shape_strategy(),
                             <$dtype as crate::util::ScalarStrategy>::$strategy()
                         )
                     ) {

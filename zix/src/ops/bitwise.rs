@@ -292,8 +292,7 @@ define_op2!(
     ///
     /// Shifts the bits of each element of `a` left by the corresponding value in `b`.
     /// Vacated bits are filled with zeros. Shifting by a value greater than or equal to
-    /// the bit width of the type is a panic in debug builds and implementation-defined
-    /// in release builds.
+    /// the bit width of the type is defined to produce zero, matching `u32::unbounded_shl`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -329,8 +328,8 @@ define_op2!(
     /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
     /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
     /// sign bit (the result preserves the sign of the value).
-    /// Shifting by a value greater than or equal to the bit width of the type is a panic
-    /// in debug builds and implementation-defined in release builds.
+    /// Shifting by a value greater than or equal to the bit width of the type is
+    /// defined to produce zero, matching `u32::unbounded_shr`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -584,7 +583,8 @@ mod tests {
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::dtype::Complex<f64>;
-    use crate::ops::tests::test_op1;
+    use crate::ops::op1::tests::test_op1;
+    use crate::ops::op2::tests::test_op2;
 
     // any_strategy: need zeros in the sample to exercise the true branch of logical_not.
     // Reference: a == Default::default() is equivalent to !cast::<_, bool>(a) for all types.
@@ -592,9 +592,11 @@ mod tests {
         logical_not,
         |a| a == Default::default(),
         [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        any_strategy,
-        #[cfg(feature = "half")] [f16],
-        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
+        logical_op_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
     );
     // bitwise_not: !a, full range is valid (no overflow for bitwise complement)
     test_op1!(
@@ -604,10 +606,30 @@ mod tests {
         any_strategy
     );
     // bit-counting ops: full range is valid, output is u32
-    test_op1!(count_ones,    |a| a.count_ones(),    [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy);
-    test_op1!(count_zeros,   |a| a.count_zeros(),   [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy);
-    test_op1!(leading_zeros, |a| a.leading_zeros(), [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy);
-    test_op1!(trailing_zeros, |a| a.trailing_zeros(), [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy);
+    test_op1!(
+        count_ones,
+        |a| a.count_ones(),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
+    test_op1!(
+        count_zeros,
+        |a| a.count_zeros(),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
+    test_op1!(
+        leading_zeros,
+        |a| a.leading_zeros(),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
+    test_op1!(
+        trailing_zeros,
+        |a| a.trailing_zeros(),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
     // byte/bit permutation ops: same output type, full range is valid
     test_op1!(
         swap_bytes,
@@ -620,5 +642,71 @@ mod tests {
         |a| a.reverse_bits(),
         [i8, i16, i32, i64, u8, u16, u32, u64],
         any_strategy
+    );
+
+    // bitwise_and/or/xor: same output type, full range valid
+    test_op2!(
+        bitwise_and,
+        |a, b| a & b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        bitwise_or,
+        |a, b| a | b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    test_op2!(
+        bitwise_xor,
+        |a, b| a ^ b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+
+    // shift ops: shift amount b must be in [0, bit_width) to avoid debug panic
+    test_op2!(
+        bitwise_shift_left,
+        |a, b| a.unbounded_shl(b as u32),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        shift_safe_strategy
+    );
+    test_op2!(
+        bitwise_shift_right,
+        |a, b| a.unbounded_shr(b as u32),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        shift_safe_strategy
+    );
+
+    // logical ops: bool output; reference uses != Default::default() to match cast::<T, bool>
+    test_op2!(
+        logical_and,
+        |a, b| (a != Default::default()) && (b != Default::default()),
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        logical_op_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_op2!(
+        logical_or,
+        |a, b| (a != Default::default()) || (b != Default::default()),
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        logical_op_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_op2!(
+        logical_xor,
+        |a, b| (a != Default::default()) ^ (b != Default::default()),
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        logical_op_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
     );
 }

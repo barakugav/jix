@@ -486,7 +486,7 @@ mod tests {
 
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
-    use crate::util::{arr_params, compact_array_strategy};
+    use crate::util::{arr_params, carray_strategy_any};
     use crate::{Array, ArrayParams};
 
     // -----------------------------------------------------------------------
@@ -524,7 +524,7 @@ mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<roundtrip_ $dtype>](
-                        (src, a) in compact_array_strategy::<$dtype>()
+                        (src, a) in carray_strategy_any::<$dtype>()
                     ) {
                         proptest::prop_assert_eq!(write_read::<$dtype>(&a), src);
                     }

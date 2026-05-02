@@ -87,7 +87,7 @@ mod tests {
 
     use crate::dtype::Dtyped;
     use crate::storage::{ArrayStorage, Compact};
-    use crate::util::{arr_params, compact_array_strategy};
+    use crate::util::{arr_params, carray_strategy_any};
     use crate::{Array, ArrayParams};
 
     // -----------------------------------------------------------------------
@@ -120,7 +120,7 @@ mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<passthrough_compact_ $dtype>](
-                        (src, a) in compact_array_strategy::<$dtype>()
+                        (src, a) in carray_strategy_any::<$dtype>()
                     ) {
                         let original_bytes = to_bytes(&a);
                         let result = a.into_compact().unwrap();
@@ -159,7 +159,7 @@ mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<neg_view_ $dtype>](
-                        (src, a) in compact_array_strategy::<$dtype>()
+                        (src, a) in carray_strategy_any::<$dtype>()
                     ) {
                         let expected = -&src;
                         let ctx = a.read_ctx();

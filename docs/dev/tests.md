@@ -30,20 +30,31 @@ Always use this rather than constructing `ArrayParams` by hand in tests.
 ### `ScalarStrategy`
 
 ```rust
-pub(crate) trait ScalarStrategy: Dtyped + Debug + Clone + 'static {
-    fn any_strategy() -> BoxedStrategy<Self>;
-    fn op_safe_strategy() -> BoxedStrategy<Self> { Self::any_strategy() }
-    fn unit_strategy() -> BoxedStrategy<Self>    { Self::op_safe_strategy() }
+pub(crate) trait ScalarStrategy: Dtyped + Default + Debug + Clone + 'static {
+    fn any_strategy()          -> BoxedStrategy<Self>;
+    fn op_safe_strategy()      -> BoxedStrategy<Self> { Self::any_strategy() }
+    fn unit_strategy()         -> BoxedStrategy<Self> { Self::op_safe_strategy() }
+    fn shift_safe_strategy()   -> BoxedStrategy<Self> { Self::any_strategy() }
+    fn comparable_strategy()   -> BoxedStrategy<Self> { Self::any_strategy() }
+    fn maybe_non_finite_strategy() -> BoxedStrategy<Self> { Self::any_strategy() }
 }
 ```
 
 Implemented for every scalar dtype (including feature-gated `f16` and `Complex`).
 
-| Method | When to use |
-|---|---|
-| `any_strategy()` | Codec roundtrip tests — full value domain. |
-| `op_safe_strategy()` | Arithmetic ops — restricted range that prevents overflow. |
-| `unit_strategy()` | Ops whose domain is `[-1, 1]` (e.g. `asin`, `acos`) — avoids NaN comparison failures. Overridden for `f32`/`f64`; falls back to `op_safe_strategy` elsewhere. |
+| Method | Integer types | Float types | When to use |
+|---|---|---|---|
+| `any_strategy()` | full `u8`/`i32`/… range | arbitrary bits (rarely NaN/∞) | Codec roundtrip tests, logical/bitwise ops. |
+| `op_safe_strategy()` | small positive range (e.g. `1..=100`) | `1.0..=100.0` | Arithmetic ops where values combine (`a + b`, `a * b`) — prevents overflow. |
+| `unit_strategy()` | (falls back to `op_safe_strategy`) | `[-1.0, 1.0]` | Domain-restricted ops (`asin`, `acos`) — values outside the domain produce NaN which breaks `==`. |
+| `shift_safe_strategy()` | `0..bit_width` (e.g. `0u8..8`) | n/a | Shift amounts for `<<`/`>>` — prevents debug-mode panic on out-of-range shifts. |
+| `comparable_strategy()` | `{1, 2, 3}` | `{1.0, 2.0, NaN}` | Equality/comparison ops (`equal`, `not_equal`) — small set ensures ~33 % of pairs are equal and NaN semantics are exercised. |
+| `maybe_non_finite_strategy()` | (falls back to `any_strategy`) | 7/8 `any_strategy` + 1/8 `{NaN, ∞, -∞}` | Ops whose *bool* output is well-defined for NaN inputs (`greater`, `less`, `is_nan`, `is_finite`) — tests edge-case branches without breaking `assert_eq`. |
+
+**Key rule:** `assert_array_matches` uses `PartialEq`. For ops whose *float output* may be NaN
+(e.g. `maximum`, `sqrt` with negative input), use `op_safe_strategy` to keep outputs finite.
+For ops whose output is `bool`, `maybe_non_finite_strategy` is safe even with NaN inputs
+because the reference closure computes the same `false`/`true` and `bool: Eq`.
 
 ### Array strategies
 
@@ -59,16 +70,16 @@ pub(crate) fn ndarray_strategy_generic<T>(
 ) -> impl Strategy<Value = ndarray::ArrayD<T>>
 
 // Pairs (ndarray, compact Array) sharing the same data. Uses any_strategy().
-pub(crate) fn compact_array_strategy<T: ScalarStrategy>()
+pub(crate) fn carray_strategy_any<T: ScalarStrategy>()
     -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>)>
 
 // Same, but caller supplies the element strategy — used in op1 tests.
-pub(crate) fn compact_array_strategy_generic<T: ScalarStrategy>(
+pub(crate) fn carray_strategy_from_shape<T: ScalarStrategy>(
     element: impl Strategy<Value = T> + Clone,
 ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>)>
 
 // Two independent same-shape pairs — used in op2 tests.
-pub(crate) fn compact_arrays2_strategy<T: ScalarStrategy>()
+pub(crate) fn carrays2_strategy<T: ScalarStrategy>()
     -> impl Strategy<Value = (
         (ndarray::ArrayD<T>, Array<Compact>),
         (ndarray::ArrayD<T>, Array<Compact>),
@@ -125,7 +136,7 @@ macro_rules! test_op1_dtype {
             proptest::proptest! {
                 #[test]
                 fn [<$op_method _ $in_dtype>](
-                    (nd, za) in crate::util::compact_array_strategy_generic::<$in_dtype>(
+                    (nd, za) in crate::util::carray_strategy_from_shape::<$in_dtype>(
                         <$in_dtype as crate::util::ScalarStrategy>::$strategy()
                     )
                 ) {
@@ -205,7 +216,7 @@ mod tests {
   both full reads and random sub-range reads in one call.
 - The strategy shape is fully random (from `shape_strategy()`), covering 1D through 8D,
   small and large sizes, and zero-length dimensions. No need to add separate 1D/2D/multi-block
-  tests; `compact_array_strategy_generic` handles this via random block shapes.
+  tests; `carray_strategy_from_shape` handles this via random block shapes.
 
 ---
 
@@ -214,10 +225,33 @@ mod tests {
 | Op kind | Strategy | Reason |
 |---|---|---|
 | Codec roundtrip | `any_strategy()` | Full domain is valid input. |
+| Logical / bitwise ops (bool output) | `any_strategy()` | No overflow; any input is valid. |
 | Arithmetic / unary with overflow risk | `op_safe_strategy()` | Prevents wrap on integer types. |
 | Float transcendentals (floor, exp, ln, sin…) | `op_safe_strategy()` | Gives finite positive values; both sides compute identically so inf/NaN comparisons don't arise. |
 | Domain-restricted (`asin`, `acos`) | `unit_strategy()` | Inputs outside `[-1, 1]` produce NaN; `NaN != NaN` under `PartialEq`. |
-| Two-array ops (op2) | `op_safe_strategy()` | Same overflow avoidance. |
+| Arithmetic binary ops (op2) | `op_safe_strategy()` | Same overflow avoidance. |
+| Bit shifts | `shift_safe_strategy()` for the shift amount | Keeps shift in `[0, bit_width)` to avoid debug-mode panic. |
+| Equality / comparison with bool output | `comparable_strategy()` | Ensures ~33 % equal pairs so both `true`/`false` branches are hit; float variant includes NaN for IEEE edge cases. |
+| Ordering / logical ops with bool output and float input | `maybe_non_finite_strategy()` | Exercises NaN → `false` paths without breaking `assert_array_matches` (output is `bool`, not float). |
+| Float ops where NaN/∞ propagates to the *output* (`maximum`, `minimum`, `sqrt`) | `op_safe_strategy()` | Avoids NaN in the output, which would break `assert_eq` via `PartialEq`. |
+
+### Deciding what strategy to use
+
+1. **Will the op ever output NaN/∞ given these inputs?**
+   - Yes (float arithmetic output): use `op_safe_strategy` or `unit_strategy`.
+   - No (bool output, or integer output): you can use `any_strategy` or stronger.
+
+2. **Do you need to test NaN/∞ edge cases?**
+   - Inputs produce NaN in the output → doc-test it explicitly; proptest with `op_safe_strategy`.
+   - Bool output with NaN inputs → `maybe_non_finite_strategy` is safe.
+
+3. **Do you need to test the equality branch?**
+   - Equality / `not_equal` → `comparable_strategy` ensures ~33 % hits.
+   - For integers with `any_strategy`, collisions are astronomically rare (e.g. 1/2³² for `i32`).
+
+4. **Can values overflow when combined?**
+   - Arithmetic (`+`, `*`, `-`) on integers → `op_safe_strategy`.
+   - Bitwise / logical → no overflow, `any_strategy` is fine.
 
 ---
 
@@ -225,9 +259,9 @@ mod tests {
 
 `ops/op2.rs` uses a similar but distinct macro structure because it needs two arrays of the
 same shape and because it tests chaining (`(a op b) op c`). It still uses proptest and
-`op_safe_strategy`, but builds arrays from fixed sizes rather than `compact_array_strategy`.
+`op_safe_strategy`, but builds arrays from fixed sizes rather than `carray_strategy_any`.
 That module predates the op1 refactor; future binary op tests should be considered for
-migration to the `compact_arrays2_strategy` + `assert_array_matches` pattern.
+migration to the `carrays2_strategy` + `assert_array_matches` pattern.
 
 ---
 

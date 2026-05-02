@@ -589,159 +589,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    // Generates 5 test functions per (op, dtype).
-    // op_safe_strategy() controls the sampling range per type to avoid overflow.
-    macro_rules! test_op_dtype {
-        ($op:tt, $dtype:ident) => {
-            paste::paste! {
-                proptest::proptest! {
-                    #[test]
-                    fn [<test_ $dtype _1d>](
-                        b_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
-                        ),
-                        a_extra_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
-                        ),
-                    ) {
-                        use crate::array::Array;
-                        let b = ndarray::ArrayD::from_shape_vec(vec![4], b_vals).unwrap();
-                        let a = ndarray::ArrayD::from_shape_vec(vec![4], a_extra_vals).unwrap() + &b;
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[4])).unwrap();
-                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[4])).unwrap();
-                        let actual = (za $op zb).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(actual, &a $op &b);
-                    }
-
-                    #[test]
-                    fn [<test_ $dtype _1d_multi_block>](
-                        b_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize
-                        ),
-                        a_extra_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize
-                        ),
-                    ) {
-                        use crate::array::Array;
-                        let b = ndarray::ArrayD::from_shape_vec(vec![6], b_vals).unwrap();
-                        let a = ndarray::ArrayD::from_shape_vec(vec![6], a_extra_vals).unwrap() + &b;
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[2])).unwrap();
-                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[2])).unwrap();
-                        let actual = (za $op zb).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(actual, &a $op &b);
-                    }
-
-                    #[test]
-                    fn [<test_ $dtype _2d>](
-                        b_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize
-                        ),
-                        a_extra_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize
-                        ),
-                    ) {
-                        use crate::array::Array;
-                        let b = ndarray::ArrayD::from_shape_vec(vec![2, 3], b_vals).unwrap();
-                        let a = ndarray::ArrayD::from_shape_vec(vec![2, 3], a_extra_vals).unwrap() + &b;
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[2, 3])).unwrap();
-                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[2, 3])).unwrap();
-                        let actual = (za $op zb).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(actual, &a $op &b);
-                    }
-
-                    #[test]
-                    fn [<test_ $dtype _2d_multi_block>](
-                        b_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 16usize
-                        ),
-                        a_extra_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 16usize
-                        ),
-                    ) {
-                        use crate::array::Array;
-                        let b = ndarray::ArrayD::from_shape_vec(vec![4, 4], b_vals).unwrap();
-                        let a = ndarray::ArrayD::from_shape_vec(vec![4, 4], a_extra_vals).unwrap() + &b;
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[2, 2])).unwrap();
-                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[2, 2])).unwrap();
-                        let actual = (za $op zb).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(actual, &a $op &b);
-                    }
-                }
-
-                // three_arrays: `a = a_extra + b + c` ensures a >= b+c for sub/div.
-                // Skipped for size_of < 2 because chaining e.g. mul on i8 overflows:
-                // max of (a*b)*c = (a_extra+b+c)*b*c can exceed i8::MAX even with small ranges.
-                #[test]
-                fn [<test_ $dtype _three_arrays>]() {
-                    if size_of::<$dtype>() < 2 {
-                        return;
-                    }
-                    proptest::proptest!(|(
-                        c_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
-                        ),
-                        b_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
-                        ),
-                        a_extra_vals in proptest::collection::vec(
-                            <$dtype as crate::util::ScalarStrategy>::op_safe_strategy(), 4usize
-                        ),
-                    )| {
-                        use crate::array::Array;
-                        let c = ndarray::ArrayD::from_shape_vec(vec![4], c_vals).unwrap();
-                        let b = ndarray::ArrayD::from_shape_vec(vec![4], b_vals).unwrap();
-                        let a = ndarray::ArrayD::from_shape_vec(vec![4], a_extra_vals).unwrap() + &b + &c;
-                        let za = Array::compact_array_with(&a, crate::util::arr_params(&[4])).unwrap();
-                        let zb = Array::compact_array_with(&b, crate::util::arr_params(&[4])).unwrap();
-                        let zc = Array::compact_array_with(&c, crate::util::arr_params(&[4])).unwrap();
-                        let zab = za $op zb.as_ref();
-                        let actual = (zab $op zc).to_ndarray::<$dtype>().unwrap();
-                        proptest::prop_assert_eq!(actual, (&(&a $op &b) $op &c));
-                    });
-                }
-            }
-        };
-    }
-
-    // Creates a module named $mod_name with one test set per dtype, all using $op.
-    // Optional trailing groups add feature-gated dtypes: #[cfg(feature = "...")] [dtype, ...]
-    macro_rules! test_op {
-        ($mod_name:ident, $op:tt, [$($dtype:ident),+] $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+])*) => {
-            mod $mod_name {
-                // Import feature-gated type aliases defined in the parent tests module.
-                $(#[cfg($cfg)] use super::{$($cfg_dtype),+};)*
-                $(test_op_dtype!($op, $dtype);)+
-                $($(
-                    #[cfg($cfg)]
-                    test_op_dtype!($op, $cfg_dtype);
-                )+)*
-            }
-        };
-    }
-
-    test_op!(add, +,
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
-        #[cfg(feature = "half")] [f16],
-        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
-    );
-    test_op!(sub, -,
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
-        #[cfg(feature = "half")] [f16],
-        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
-    );
-    test_op!(mul, *,
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
-        #[cfg(feature = "half")] [f16],
-        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
-    );
-    test_op!(div, /,
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
-        #[cfg(feature = "half")] [f16],
-        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
-    );
-
-    // Bring half::f16 into scope under the name `f16` so the macro ident resolves correctly.
+pub(crate) mod tests {
     #[cfg(feature = "half")]
     use crate::dtype::f16;
     #[cfg(feature = "num-complex")]
@@ -751,9 +599,128 @@ mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::dtype::Complex<f64>;
 
+    macro_rules! test_op2_dtype {
+        ($op_method:ident, |$a:ident, $b:ident| $body:expr, $dtype:ident, $strategy:ident) => {
+            paste::paste! {
+                proptest::proptest! {
+                    #[test]
+                    fn [<$op_method _ $dtype>](
+                        ((nd_a, za), (nd_b, zb)) in crate::util::carrays2_strategy_generic::<$dtype>(
+                            crate::util::shape_strategy(),
+                            <$dtype as crate::util::ScalarStrategy>::$strategy()
+                        )
+                    ) {
+                        #[allow(unused_imports)] use core::ops::{Add, Sub, Mul, Div};
+
+                        let result = za.$op_method(zb);
+                        let expected = ndarray::Zip::from(&nd_a).and(&nd_b).map_collect(|& $a, & $b| $body);
+                        crate::util::assert_array_matches(&result, &expected);
+                    }
+                }
+            }
+        };
+    }
+
+    macro_rules! test_op2 {
+        (
+            $op_method:ident, |$a:ident, $b:ident| $body:expr,
+            [$($dtype:ident),+ $(,)?], $strategy:ident
+            $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+ $(,)?])*
+        ) => {
+            $(crate::ops::op2::tests::test_op2_dtype!($op_method, |$a, $b| $body, $dtype, $strategy);)+
+            $($(
+                #[cfg($cfg)]
+                crate::ops::op2::tests::test_op2_dtype!($op_method, |$a, $b| $body, $cfg_dtype, $strategy);
+            )+)*
+        };
+    }
+
+    pub(crate) use {test_op2, test_op2_dtype};
+
+    // Pairwise tests: one proptest per (op, dtype) using random shapes and block sizes.
+    // sub excludes unsigned types: independent random arrays don't guarantee a >= b,
+    // and unsigned underflow panics in debug mode. See sub_u32 below.
+    test_op2!(
+        add,
+        |a, b| a + b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_op2!(
+        sub,
+        |a, b| a - b,
+        [i8, i16, i32, i64, f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_op2!(
+        mul,
+        |a, b| a * b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_op2!(
+        div,
+        |a, b| a / b,
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+
+    // sub_u32: a = c + b guarantees a - b == c with no unsigned underflow.
     proptest::proptest! {
         #[test]
-        fn test_add_mul_scalar(
+        fn sub_u32(
+            ((nd_c, _zc), (nd_b, zb)) in crate::util::carrays2_strategy_generic::<u32>(
+                crate::util::shape_strategy(),
+                <u32 as crate::util::ScalarStrategy>::op_safe_strategy()
+            )
+        ) {
+            let nd_a = &nd_c + &nd_b;
+            let za = crate::Array::compact_array(&nd_a).unwrap();
+            crate::util::assert_array_matches(&(za - zb), &nd_c);
+        }
+    }
+
+    // three_arrays_f32: (za + zb) * zc lazy chain equals (&a + &b) * &c.
+    // Fixed 2×3 shape with two different block shapes to exercise block-boundary handling.
+    proptest::proptest! {
+        #[test]
+        fn three_arrays_f32(
+            a_vals in proptest::collection::vec(<f32 as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize),
+            b_vals in proptest::collection::vec(<f32 as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize),
+            c_vals in proptest::collection::vec(<f32 as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize),
+        ) {
+            use crate::array::Array;
+            let nd_a = ndarray::ArrayD::from_shape_vec(vec![2, 3], a_vals).unwrap();
+            let nd_b = ndarray::ArrayD::from_shape_vec(vec![2, 3], b_vals).unwrap();
+            let nd_c = ndarray::ArrayD::from_shape_vec(vec![2, 3], c_vals).unwrap();
+            let za = Array::compact_array_with(&nd_a, crate::util::arr_params(&[2, 3])).unwrap();
+            let zb = Array::compact_array_with(&nd_b, crate::util::arr_params(&[2, 3])).unwrap();
+            let zc = Array::compact_array_with(&nd_c, crate::util::arr_params(&[1, 2])).unwrap();
+            let result = (za + zb) * zc;
+            let expected = (&nd_a + &nd_b) * &nd_c;
+            crate::util::assert_array_matches(&result, &expected);
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn add_mul_scalar(
             vals in proptest::collection::vec(<f32 as crate::util::ScalarStrategy>::op_safe_strategy(), 100usize)
         ) {
             use crate::array::Array;

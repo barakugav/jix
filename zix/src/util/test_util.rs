@@ -42,8 +42,18 @@ use proptest::strategy::BoxedStrategy;
 ///   combined arithmetically (used for op2, astype tests). For integer types,
 ///   values are small and positive so that e.g. `a = a_extra + b` still fits
 ///   in the type. Floats default to `any_strategy()`.
-pub(crate) trait ScalarStrategy: Dtyped + core::fmt::Debug + Clone + 'static {
+pub(crate) trait ScalarStrategy:
+    Dtyped + Default + core::fmt::Debug + Clone + 'static
+{
     fn any_strategy() -> BoxedStrategy<Self>;
+    fn logical_op_strategy() -> BoxedStrategy<Self> {
+        Self::any_strategy()
+            .prop_union(Just(Self::default()).boxed())
+            .boxed()
+    }
+    fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
+        Self::any_strategy()
+    }
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         Self::any_strategy()
     }
@@ -52,6 +62,20 @@ pub(crate) trait ScalarStrategy: Dtyped + core::fmt::Debug + Clone + 'static {
     /// `op_safe_strategy` for all other types (where the method is not expected to be called).
     fn unit_strategy() -> BoxedStrategy<Self> {
         Self::op_safe_strategy()
+    }
+    /// Values in `[0, bit_width)`. Used as shift amounts so that `a << b` / `a >> b` never
+    /// panic in debug mode. Overridden for all integer types; falls back to `any_strategy`
+    /// for non-integer types (not expected to be called for those).
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        Self::any_strategy()
+    }
+    /// Small set of 3 distinct values used for equality/comparison tests. Ensures that
+    /// ~33 % of generated pairs are equal, so both the `true` and `false` branches of
+    /// `equal`/`not_equal` are exercised. For float types the set includes `NaN` to cover
+    /// the `NaN != NaN` (IEEE 754) edge case. Defaults to `any_strategy` for types where
+    /// equal pairs happen naturally (e.g. `bool` has only 2 values → 50 % hit rate).
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        Self::any_strategy()
     }
 }
 
@@ -64,6 +88,12 @@ impl ScalarStrategy for u8 {
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1u8..=4).boxed()
     }
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        (0u8..8).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0u8), Just(1u8), Just(2u8)].boxed()
+    }
 }
 impl ScalarStrategy for u16 {
     fn any_strategy() -> BoxedStrategy<Self> {
@@ -74,6 +104,12 @@ impl ScalarStrategy for u16 {
         // max (3r)·r·r = 3r³ ≤ u16::MAX=65535 → r ≤ 27.
         (1u16..=27).boxed()
     }
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        (0u16..16).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0u16), Just(1u16), Just(2u16)].boxed()
+    }
 }
 impl ScalarStrategy for u32 {
     fn any_strategy() -> BoxedStrategy<Self> {
@@ -81,6 +117,12 @@ impl ScalarStrategy for u32 {
     }
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1u32..=30).boxed()
+    }
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        (0u32..32).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0u32), Just(1u32), Just(2u32)].boxed()
     }
 }
 impl ScalarStrategy for u64 {
@@ -90,6 +132,12 @@ impl ScalarStrategy for u64 {
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1u64..=30).boxed()
     }
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        (0u64..64).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0u64), Just(1u64), Just(2u64)].boxed()
+    }
 }
 impl ScalarStrategy for i8 {
     fn any_strategy() -> BoxedStrategy<Self> {
@@ -97,6 +145,12 @@ impl ScalarStrategy for i8 {
     }
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1i8..=4).boxed()
+    }
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        (0i8..8).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0i8), Just(1i8), Just(2i8)].boxed()
     }
 }
 impl ScalarStrategy for i16 {
@@ -108,6 +162,12 @@ impl ScalarStrategy for i16 {
         // max (3r)·r·r = 3r³ ≤ i16::MAX=32767 → r ≤ 22.
         (1i16..=22).boxed()
     }
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        (0i16..16).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0i16), Just(1i16), Just(2i16)].boxed()
+    }
 }
 impl ScalarStrategy for i32 {
     fn any_strategy() -> BoxedStrategy<Self> {
@@ -115,6 +175,12 @@ impl ScalarStrategy for i32 {
     }
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1i32..=100).boxed()
+    }
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        (0i32..32).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0i32), Just(1i32), Just(2i32)].boxed()
     }
 }
 impl ScalarStrategy for i64 {
@@ -124,27 +190,63 @@ impl ScalarStrategy for i64 {
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1i64..=100).boxed()
     }
+    fn shift_safe_strategy() -> BoxedStrategy<Self> {
+        (0i64..64).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0i64), Just(1i64), Just(2i64)].boxed()
+    }
 }
 impl ScalarStrategy for f32 {
     fn any_strategy() -> BoxedStrategy<Self> {
         any::<f32>().boxed()
     }
+
+    fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
+        prop::strategy::Union::new_weighted(vec![
+            (7, any::<f32>().boxed()),
+            (
+                1,
+                prop_oneof![Just(f32::INFINITY), Just(f32::NEG_INFINITY), Just(f32::NAN)].boxed(),
+            ),
+        ])
+        .boxed()
+    }
+
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1u8..=100).prop_map(|x| x as f32).boxed()
     }
     fn unit_strategy() -> BoxedStrategy<Self> {
         (-100i8..=100).prop_map(|x| x as f32 / 100.0).boxed()
     }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0.0f32), Just(1.0f32), Just(2.0f32), Just(f32::NAN)].boxed()
+    }
 }
 impl ScalarStrategy for f64 {
     fn any_strategy() -> BoxedStrategy<Self> {
         any::<f64>().boxed()
     }
+
+    fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
+        prop::strategy::Union::new_weighted(vec![
+            (7, any::<f64>().boxed()),
+            (
+                1,
+                prop_oneof![Just(f64::INFINITY), Just(f64::NEG_INFINITY), Just(f64::NAN)].boxed(),
+            ),
+        ])
+        .boxed()
+    }
+
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1u8..=100).prop_map(|x| x as f64).boxed()
     }
     fn unit_strategy() -> BoxedStrategy<Self> {
         (-100i8..=100).prop_map(|x| x as f64 / 100.0).boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![Just(0.0f64), Just(1.0f64), Just(2.0f64), Just(f64::NAN)].boxed()
     }
 }
 impl ScalarStrategy for bool {
@@ -158,9 +260,21 @@ impl ScalarStrategy for crate::dtype::f16 {
     fn any_strategy() -> BoxedStrategy<Self> {
         any::<f32>().prop_map(crate::dtype::f16::from_f32).boxed()
     }
+
+    fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
+        f32::maybe_non_finite_strategy()
+            .prop_map(crate::dtype::f16::from_f32)
+            .boxed()
+    }
+
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1u8..=15)
             .prop_map(|x| crate::dtype::f16::from_f32(x as f32))
+            .boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        f32::comparable_strategy()
+            .prop_map(crate::dtype::f16::from_f32)
             .boxed()
     }
 }
@@ -171,6 +285,16 @@ impl ScalarStrategy for crate::dtype::Complex<f32> {
             .prop_map(|(re, im)| crate::dtype::Complex { re, im })
             .boxed()
     }
+
+    fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
+        (
+            f32::maybe_non_finite_strategy(),
+            f32::maybe_non_finite_strategy(),
+        )
+            .prop_map(|(re, im)| crate::dtype::Complex { re, im })
+            .boxed()
+    }
+
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1u8..=15)
             .prop_map(|x| crate::dtype::Complex {
@@ -178,6 +302,31 @@ impl ScalarStrategy for crate::dtype::Complex<f32> {
                 im: 0.0,
             })
             .boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![
+            Just(crate::dtype::Complex {
+                re: 0.0f32,
+                im: 0.0
+            }),
+            Just(crate::dtype::Complex {
+                re: 1.0f32,
+                im: 0.0
+            }),
+            Just(crate::dtype::Complex {
+                re: 0.0f32,
+                im: 1.0
+            }),
+            Just(crate::dtype::Complex {
+                re: f32::NAN,
+                im: 0.0
+            }),
+            Just(crate::dtype::Complex {
+                re: 0.0,
+                im: f32::NAN
+            }),
+        ]
+        .boxed()
     }
 }
 
@@ -187,6 +336,16 @@ impl ScalarStrategy for crate::dtype::Complex<f64> {
             .prop_map(|(re, im)| crate::dtype::Complex { re, im })
             .boxed()
     }
+
+    fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
+        (
+            f64::maybe_non_finite_strategy(),
+            f64::maybe_non_finite_strategy(),
+        )
+            .prop_map(|(re, im)| crate::dtype::Complex { re, im })
+            .boxed()
+    }
+
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (1u8..=15)
             .prop_map(|x| crate::dtype::Complex {
@@ -194,6 +353,31 @@ impl ScalarStrategy for crate::dtype::Complex<f64> {
                 im: 0.0,
             })
             .boxed()
+    }
+    fn comparable_strategy() -> BoxedStrategy<Self> {
+        prop_oneof![
+            Just(crate::dtype::Complex {
+                re: 0.0f64,
+                im: 0.0
+            }),
+            Just(crate::dtype::Complex {
+                re: 1.0f64,
+                im: 0.0
+            }),
+            Just(crate::dtype::Complex {
+                re: 0.0f64,
+                im: 1.0
+            }),
+            Just(crate::dtype::Complex {
+                re: f64::NAN,
+                im: 0.0
+            }),
+            Just(crate::dtype::Complex {
+                re: 0.0,
+                im: f64::NAN
+            }),
+        ]
+        .boxed()
     }
 }
 
@@ -245,35 +429,44 @@ pub(crate) fn block_shape_strategy(ndim: usize) -> impl Strategy<Value = Vec<Blo
     prop::collection::vec(1u32..=4, ndim)
 }
 
-pub(crate) fn compact_array_strategy<T>(
+pub(crate) fn carray_strategy_any<T>(
 ) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact>)>
 where
     T: ScalarStrategy + Debug,
 {
-    compact_array_strategy_generic(T::any_strategy())
+    carray_strategy_from_shape(shape_strategy(), T::any_strategy())
 }
 
-pub(crate) fn compact_array_strategy_generic<T>(
+pub(crate) fn carray_strategy_from_shape<T>(
+    shape: impl Strategy<Value = Vec<usize>>,
     element: impl Strategy<Value = T> + Clone,
 ) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact>)>
 where
     T: ScalarStrategy + Debug,
 {
-    ndarray_strategy_generic::<T>(shape_strategy(), element)
-        .prop_flat_map(|arr| {
-            let block_shape = block_shape_strategy(arr.ndim());
-            (Just(arr), block_shape)
-        })
-        .prop_map(|(arr, block_shape)| {
-            let block_shape = block_shape;
-            let mut params = ArrayParams::default();
-            params.block_shape(&block_shape);
-            let compact = crate::Array::compact_array_with(&arr, params).unwrap();
-            (arr, compact)
-        })
+    carray_strategy_from_data(ndarray_strategy_generic::<T>(shape, element))
 }
 
-pub(crate) fn compact_arrays2_strategy<T>() -> impl Strategy<
+pub(crate) fn carray_strategy_from_data<T>(
+    data: impl Strategy<Value = ndarray::ArrayD<T>>,
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact>)>
+where
+    T: ScalarStrategy + Debug,
+{
+    data.prop_flat_map(|arr| {
+        let block_shape = block_shape_strategy(arr.ndim());
+        (Just(arr), block_shape)
+    })
+    .prop_map(|(arr, block_shape)| {
+        let block_shape = block_shape;
+        let mut params = ArrayParams::default();
+        params.block_shape(&block_shape);
+        let compact = crate::Array::compact_array_with(&arr, params).unwrap();
+        (arr, compact)
+    })
+}
+
+pub(crate) fn carrays2_strategy<T>() -> impl Strategy<
     Value = (
         (ndarray::ArrayD<T>, crate::Array<Compact>),
         (ndarray::ArrayD<T>, crate::Array<Compact>),
@@ -282,37 +475,27 @@ pub(crate) fn compact_arrays2_strategy<T>() -> impl Strategy<
 where
     T: ScalarStrategy + Debug,
 {
-    let element = T::any_strategy();
-    shape_strategy()
-        .prop_flat_map(move |shape| {
-            let total_len: usize = shape.iter().product();
-            let elements1 = prop::collection::vec(element.clone(), total_len);
-            let elements2 = prop::collection::vec(element.clone(), total_len);
-            let block_shape1 = block_shape_strategy(shape.len());
-            let block_shape2 = block_shape_strategy(shape.len());
-            (
-                Just(shape),
-                elements1,
-                elements2,
-                block_shape1,
-                block_shape2,
-            )
-        })
-        .prop_map(|(shape, data1, data2, block_shape1, block_shape2)| {
-            let arr1 = ndarray::ArrayD::<T>::from_shape_vec(shape.as_slice(), data1).unwrap();
-            let arr2 = ndarray::ArrayD::<T>::from_shape_vec(shape.as_slice(), data2).unwrap();
-            let compact1 = crate::Array::compact_array_with(
-                &arr1,
-                ArrayParams::default().block_shape(&block_shape1).clone(),
-            )
-            .unwrap();
-            let compact2 = crate::Array::compact_array_with(
-                &arr2,
-                ArrayParams::default().block_shape(&block_shape2).clone(),
-            )
-            .unwrap();
-            ((arr1, compact1), (arr2, compact2))
-        })
+    carrays2_strategy_generic(shape_strategy(), T::any_strategy())
+}
+
+pub(crate) fn carrays2_strategy_generic<T>(
+    shape: impl Strategy<Value = Vec<usize>>,
+    element: impl Strategy<Value = T> + Clone,
+) -> impl Strategy<
+    Value = (
+        (ndarray::ArrayD<T>, crate::Array<Compact>),
+        (ndarray::ArrayD<T>, crate::Array<Compact>),
+    ),
+>
+where
+    T: ScalarStrategy + Debug,
+{
+    shape.prop_flat_map(move |shape| {
+        (
+            carray_strategy_from_shape(Just(shape.clone()), element.clone()),
+            carray_strategy_from_shape(Just(shape.clone()), element.clone()),
+        )
+    })
 }
 
 /// Generates a random sub-range for an array of the given shape.

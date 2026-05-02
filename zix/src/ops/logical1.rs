@@ -121,13 +121,31 @@ where
 mod tests {
     #[cfg(feature = "half")]
     use crate::dtype::f16;
-    use crate::ops::tests::test_op1;
+    use crate::ops::op1::tests::test_op1;
 
     // full domain is valid; output is bool so NaN inputs produce well-defined bool results
-    test_op1!(is_nan, |a| a.is_nan(), [f32, f64], any_strategy,
-        #[cfg(feature = "half")] [f16]);
-    test_op1!(is_finite, |a| a.is_finite(), [f32, f64], any_strategy,
-        #[cfg(feature = "half")] [f16]);
-    test_op1!(is_infinite, |a| a.is_infinite(), [f32, f64], any_strategy,
-        #[cfg(feature = "half")] [f16]);
+    test_op1!(
+        is_nan,
+        |a| a.is_nan(),
+        [f32, f64],
+        maybe_non_finite_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+    test_op1!(
+        is_finite,
+        |a| a.is_finite(),
+        [f32, f64],
+        maybe_non_finite_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+    test_op1!(
+        is_infinite,
+        |a| a.is_infinite(),
+        [f32, f64],
+        maybe_non_finite_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
 }
