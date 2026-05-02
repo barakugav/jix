@@ -212,7 +212,7 @@ mod tests {
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
-    fn seq(n: usize) -> Vec<i32> {
+    fn arange(n: usize) -> Vec<i32> {
         (0..n as i32).collect()
     }
 
@@ -223,32 +223,38 @@ mod tests {
     #[test]
     fn shape_insert_before_first_dim() {
         // gap 0 on [6] → [1, 6]
-        assert_eq!(make1d(seq(6), 6).insert_axes(&[0]).shape(), &[1, 6]);
+        assert_eq!(make1d(arange(6), 6).insert_axes(&[0]).shape(), &[1, 6]);
     }
 
     #[test]
     fn shape_insert_after_last_dim() {
         // gap 1 (=orig_ndim) on [6] → [6, 1]
-        assert_eq!(make1d(seq(6), 6).insert_axes(&[1]).shape(), &[6, 1]);
+        assert_eq!(make1d(arange(6), 6).insert_axes(&[1]).shape(), &[6, 1]);
     }
 
     #[test]
     fn shape_insert_between_dims() {
         // gap 1 on [3, 4] → [3, 1, 4]
-        assert_eq!(make2d(seq(12), 3, 4).insert_axes(&[1]).shape(), &[3, 1, 4]);
+        assert_eq!(
+            make2d(arange(12), 3, 4).insert_axes(&[1]).shape(),
+            &[3, 1, 4]
+        );
     }
 
     #[test]
     fn shape_insert_front_and_back() {
         // gaps 0 and 1 on [6] → [1, 6, 1]
-        assert_eq!(make1d(seq(6), 6).insert_axes(&[0, 1]).shape(), &[1, 6, 1]);
+        assert_eq!(
+            make1d(arange(6), 6).insert_axes(&[0, 1]).shape(),
+            &[1, 6, 1]
+        );
     }
 
     #[test]
     fn shape_insert_duplicates_same_gap() {
         // gaps 0, 0 on [3, 4] → [1, 1, 3, 4]
         assert_eq!(
-            make2d(seq(12), 3, 4).insert_axes(&[0, 0]).shape(),
+            make2d(arange(12), 3, 4).insert_axes(&[0, 0]).shape(),
             &[1, 1, 3, 4]
         );
     }
@@ -256,7 +262,7 @@ mod tests {
     #[test]
     fn shape_insert_user_example() {
         // axes=(0,1,1,1,3) on (N=2, M=3, K=4) → (1, 2, 1, 1, 1, 3, 4, 1)
-        let a = make3d(seq(24), 2, 3, 4);
+        let a = make3d(arange(24), 2, 3, 4);
         assert_eq!(
             a.insert_axes(&[0, 1, 1, 1, 3]).shape(),
             &[1, 2, 1, 1, 1, 3, 4, 1]
@@ -266,14 +272,14 @@ mod tests {
     #[test]
     fn shape_insert_unsorted_axes_same_result() {
         // Order of axes values should not matter; only the multiset matters.
-        let a1 = make3d(seq(24), 2, 3, 4).insert_axes(&[0, 1, 1, 1, 3]);
-        let a2 = make3d(seq(24), 2, 3, 4).insert_axes(&[3, 1, 0, 1, 1]);
+        let a1 = make3d(arange(24), 2, 3, 4).insert_axes(&[0, 1, 1, 1, 3]);
+        let a2 = make3d(arange(24), 2, 3, 4).insert_axes(&[3, 1, 0, 1, 1]);
         assert_eq!(a1.shape(), a2.shape());
     }
 
     #[test]
     fn shape_empty_axes_is_identity() {
-        assert_eq!(make2d(seq(12), 3, 4).insert_axes(&[]).shape(), &[3, 4]);
+        assert_eq!(make2d(arange(12), 3, 4).insert_axes(&[]).shape(), &[3, 4]);
     }
 
     // -----------------------------------------------------------------------
@@ -282,48 +288,60 @@ mod tests {
 
     #[test]
     fn full_read_insert_before_first() {
-        let got: ArrayD<i32> = make1d(seq(6), 6).insert_axes(&[0]).to_ndarray().unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![1, 6], seq(6)).unwrap());
+        let got: ArrayD<i32> = make1d(arange(6), 6).insert_axes(&[0]).to_ndarray().unwrap();
+        assert_eq!(got, ArrayD::from_shape_vec(vec![1, 6], arange(6)).unwrap());
     }
 
     #[test]
     fn full_read_insert_after_last() {
-        let got: ArrayD<i32> = make1d(seq(6), 6).insert_axes(&[1]).to_ndarray().unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![6, 1], seq(6)).unwrap());
+        let got: ArrayD<i32> = make1d(arange(6), 6).insert_axes(&[1]).to_ndarray().unwrap();
+        assert_eq!(got, ArrayD::from_shape_vec(vec![6, 1], arange(6)).unwrap());
     }
 
     #[test]
     fn full_read_insert_between_dims() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .insert_axes(&[1])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 1, 4], seq(12)).unwrap());
+        assert_eq!(
+            got,
+            ArrayD::from_shape_vec(vec![3, 1, 4], arange(12)).unwrap()
+        );
     }
 
     #[test]
     fn full_read_insert_front_and_back() {
-        let got: ArrayD<i32> = make1d(seq(6), 6).insert_axes(&[0, 1]).to_ndarray().unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![1, 6, 1], seq(6)).unwrap());
+        let got: ArrayD<i32> = make1d(arange(6), 6)
+            .insert_axes(&[0, 1])
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(
+            got,
+            ArrayD::from_shape_vec(vec![1, 6, 1], arange(6)).unwrap()
+        );
     }
 
     #[test]
     fn full_read_insert_user_example() {
         // axes=(0,1,1,1,3) on (2,3,4) → (1,2,1,1,1,3,4,1), elements unchanged
-        let got: ArrayD<i32> = make3d(seq(24), 2, 3, 4)
+        let got: ArrayD<i32> = make3d(arange(24), 2, 3, 4)
             .insert_axes(&[0, 1, 1, 1, 3])
             .to_ndarray()
             .unwrap();
         assert_eq!(
             got,
-            ArrayD::from_shape_vec(vec![1, 2, 1, 1, 1, 3, 4, 1], seq(24)).unwrap()
+            ArrayD::from_shape_vec(vec![1, 2, 1, 1, 1, 3, 4, 1], arange(24)).unwrap()
         );
     }
 
     #[test]
     fn full_read_identity_empty_axes() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4).insert_axes(&[]).to_ndarray().unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+            .insert_axes(&[])
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
     }
 
     // -----------------------------------------------------------------------
@@ -333,7 +351,7 @@ mod tests {
     #[test]
     fn sub_read_inserted_dim_is_stripped() {
         // [1, 6]: read [0..1, 2..5] → same as reading [2..5] from the 1D inner
-        let got: ArrayD<i32> = make1d(seq(6), 6)
+        let got: ArrayD<i32> = make1d(arange(6), 6)
             .insert_axes(&[0])
             .to_ndarray_sub(&[0..1, 2..5], &ReadContext::default())
             .unwrap();
@@ -346,7 +364,7 @@ mod tests {
     #[test]
     fn sub_read_2d_with_inserted_middle() {
         // [3, 1, 4]: read rows 1..3, inserted dim 0..1, cols 0..2
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .insert_axes(&[1])
             .to_ndarray_sub(&[1..3, 0..1, 0..2], &ReadContext::default())
             .unwrap();
@@ -363,7 +381,7 @@ mod tests {
 
     #[test]
     fn error_axis_out_of_bounds() {
-        let a = make1d(seq(4), 4);
+        let a = make1d(arange(4), 4);
         // orig_ndim=1, valid gaps are 0..=1; axis 2 is out of bounds
         assert!(super::InsertAxes::new(a, &[2]).is_err());
     }

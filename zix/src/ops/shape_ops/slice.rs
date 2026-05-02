@@ -434,7 +434,7 @@ mod tests {
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
-    fn seq(n: usize) -> Vec<i32> {
+    fn arange(n: usize) -> Vec<i32> {
         (0..n as i32).collect()
     }
 
@@ -445,23 +445,23 @@ mod tests {
     #[test]
     fn shape_slice_rows() {
         // tuple syntax: (1..3, ..) keeps rows 1 and 2
-        assert_eq!(make2d(seq(12), 3, 4).slice((1..3, ..)).shape(), &[2, 4]);
+        assert_eq!(make2d(arange(12), 3, 4).slice((1..3, ..)).shape(), &[2, 4]);
     }
 
     #[test]
     fn shape_slice_cols() {
-        assert_eq!(make2d(seq(12), 3, 4).slice((.., 1..3)).shape(), &[3, 2]);
+        assert_eq!(make2d(arange(12), 3, 4).slice((.., 1..3)).shape(), &[3, 2]);
     }
 
     #[test]
     fn shape_slice_identity_rangefull() {
-        assert_eq!(make2d(seq(12), 3, 4).slice((.., ..)).shape(), &[3, 4]);
+        assert_eq!(make2d(arange(12), 3, 4).slice((.., ..)).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_slice_empty_dim() {
         // empty range on axis 0
-        assert_eq!(make2d(seq(12), 3, 4).slice((1..1, ..)).shape(), &[0, 4]);
+        assert_eq!(make2d(arange(12), 3, 4).slice((1..1, ..)).shape(), &[0, 4]);
     }
 
     // -----------------------------------------------------------------------
@@ -472,7 +472,7 @@ mod tests {
     fn shape_strided_step2_both_axes() {
         // [3, 8], step 2 on both → ceil(3/2)=2, ceil(8/2)=4
         assert_eq!(
-            make2d(seq(24), 3, 8)
+            make2d(arange(24), 3, 8)
                 .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
                 .shape(),
             &[2, 4]
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn full_read_slice_rows() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .slice((1..3, ..))
             .to_ndarray()
             .unwrap();
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn full_read_slice_cols() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .slice((.., 1..3))
             .to_ndarray()
             .unwrap();
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn full_read_slice_subblock() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .slice((1..3, 1..3))
             .to_ndarray()
             .unwrap();
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn full_read_3d_slice() {
         // [2,3,4] → (0..2, 1..3, 1..3)
-        let got: ArrayD<i32> = make3d(seq(24), 2, 3, 4)
+        let got: ArrayD<i32> = make3d(arange(24), 2, 3, 4)
             .slice((0..2, 1..3, 1..3))
             .to_ndarray()
             .unwrap();
@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn full_read_strided_axis1_step2() {
         // [3, 8], step 2 on axis 1 → cols 0,2,4,6
-        let got: ArrayD<i32> = make2d(seq(24), 3, 8)
+        let got: ArrayD<i32> = make2d(arange(24), 3, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray()
             .unwrap();
@@ -553,7 +553,7 @@ mod tests {
     #[test]
     fn full_read_strided_axis0_step2() {
         // [6, 4], step 2 on axis 0 → rows 0, 2, 4
-        let got: ArrayD<i32> = make2d(seq(24), 6, 4)
+        let got: ArrayD<i32> = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(None, None, 2), ..))
             .to_ndarray()
             .unwrap();
@@ -567,7 +567,7 @@ mod tests {
     #[test]
     fn full_read_strided_both_axes() {
         // [4, 6], step 2 on both → rows 0,2; cols 0,2,4
-        let got: ArrayD<i32> = make2d(seq(24), 4, 6)
+        let got: ArrayD<i32> = make2d(arange(24), 4, 6)
             .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
             .to_ndarray()
             .unwrap();
@@ -580,7 +580,7 @@ mod tests {
     #[test]
     fn full_read_strided_with_start_offset() {
         // [6, 8]: axis 1 from index 1, step 2 → indices 1,3,5,7
-        let got: ArrayD<i32> = make2d(seq(48), 6, 8)
+        let got: ArrayD<i32> = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(Some(1), None, 2)))
             .to_ndarray()
             .unwrap();
@@ -592,7 +592,7 @@ mod tests {
     #[test]
     fn full_read_strided_3d() {
         // [4, 4, 4], step 2 on middle axis
-        let got: ArrayD<i32> = make3d(seq(64), 4, 4, 4)
+        let got: ArrayD<i32> = make3d(arange(64), 4, 4, 4)
             .slice((.., SliceItem::new(None, None, 2), ..))
             .to_ndarray()
             .unwrap();
@@ -618,7 +618,7 @@ mod tests {
     #[test]
     fn negative_start_last_two_rows() {
         // (-2..) on axis 0 of [5, 4] → rows 3 and 4
-        let got: ArrayD<i32> = make2d(seq(20), 5, 4)
+        let got: ArrayD<i32> = make2d(arange(20), 5, 4)
             .slice((-2.., ..))
             .to_ndarray()
             .unwrap();
@@ -631,7 +631,7 @@ mod tests {
     #[test]
     fn negative_end_all_but_last_col() {
         // (..-1) on axis 1 of [3, 4] → cols 0,1,2
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .slice((.., ..-1))
             .to_ndarray()
             .unwrap();
@@ -644,7 +644,7 @@ mod tests {
     #[test]
     fn negative_start_and_end() {
         // [3, 6]: axis 1 with (-4..-1) → indices 2,3,4
-        let got: ArrayD<i32> = make2d(seq(18), 3, 6)
+        let got: ArrayD<i32> = make2d(arange(18), 3, 6)
             .slice((.., -4..-1))
             .to_ndarray()
             .unwrap();
@@ -659,7 +659,7 @@ mod tests {
     fn negative_start_strided() {
         // [6, 4]: axis 0 from -6 (= 0) step 2 → rows 0, 2, 4
         // negative start + step requires SliceItem since range syntax has no step
-        let got: ArrayD<i32> = make2d(seq(24), 6, 4)
+        let got: ArrayD<i32> = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(Some(-6), None, 2), ..))
             .to_ndarray()
             .unwrap();
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn sub_read_within_contiguous_slice() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .slice((1..3, ..))
             .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
             .unwrap();
@@ -689,7 +689,7 @@ mod tests {
     #[test]
     fn sub_read_within_strided_slice() {
         // [6, 8] step 2 on axis 1 → shape [6, 4]; then read only row 0
-        let got: ArrayD<i32> = make2d(seq(48), 6, 8)
+        let got: ArrayD<i32> = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
             .unwrap();
@@ -705,14 +705,14 @@ mod tests {
 
     #[test]
     fn no_steps_flag_set_for_contiguous() {
-        let a = make2d(seq(12), 3, 4);
+        let a = make2d(arange(12), 3, 4);
         let s = super::Slice::new(a.as_ref(), (1..3, ..).into()).unwrap();
         assert!(s.no_steps);
     }
 
     #[test]
     fn no_steps_flag_unset_for_strided() {
-        let a = make2d(seq(12), 3, 4);
+        let a = make2d(arange(12), 3, 4);
         let s = super::Slice::new(a.as_ref(), (.., SliceItem::new(None, None, 2)).into()).unwrap();
         assert!(!s.no_steps);
     }
@@ -723,13 +723,13 @@ mod tests {
 
     #[test]
     fn error_wrong_number_of_items() {
-        let a = make2d(seq(12), 3, 4);
+        let a = make2d(arange(12), 3, 4);
         assert!(super::Slice::new(a.as_ref(), (0..3,).into()).is_err());
     }
 
     #[test]
     fn error_negative_step() {
-        let a = make2d(seq(12), 3, 4);
+        let a = make2d(arange(12), 3, 4);
         assert!(
             super::Slice::new(a.as_ref(), (SliceItem::new(None, None, -1), ..).into()).is_err()
         );

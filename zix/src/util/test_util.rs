@@ -527,7 +527,7 @@ where
     assert_eq!(&full, expected);
 
     let ctx = actual.read_ctx();
-    let shape: Vec<u64> = actual.shape().to_vec();
+    let shape = actual.shape();
     let mut runner = TestRunner::new(Config {
         cases: 16,
         ..Config::default()

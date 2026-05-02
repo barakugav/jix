@@ -206,7 +206,7 @@ mod tests {
         Array::compact_array(&nd).unwrap()
     }
 
-    fn seq(n: usize) -> Vec<i32> {
+    fn arange(n: usize) -> Vec<i32> {
         (0..n as i32).collect()
     }
 
@@ -218,7 +218,7 @@ mod tests {
     fn shape_broadcast_axis0() {
         // [1, 4] → [3, 4]
         assert_eq!(
-            make(seq(4), &[1, 4]).broadcast_view(&[3, 4]).shape(),
+            make(arange(4), &[1, 4]).broadcast_view(&[3, 4]).shape(),
             &[3, 4]
         );
     }
@@ -227,7 +227,7 @@ mod tests {
     fn shape_broadcast_axis1() {
         // [3, 1] → [3, 4]
         assert_eq!(
-            make(seq(3), &[3, 1]).broadcast_view(&[3, 4]).shape(),
+            make(arange(3), &[3, 1]).broadcast_view(&[3, 4]).shape(),
             &[3, 4]
         );
     }
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn shape_no_broadcast_is_identity() {
         assert_eq!(
-            make(seq(12), &[3, 4]).broadcast_view(&[3, 4]).shape(),
+            make(arange(12), &[3, 4]).broadcast_view(&[3, 4]).shape(),
             &[3, 4]
         );
     }
@@ -253,7 +253,9 @@ mod tests {
     fn shape_broadcast_3d_middle() {
         // [2, 1, 4] → [2, 3, 4]
         assert_eq!(
-            make(seq(8), &[2, 1, 4]).broadcast_view(&[2, 3, 4]).shape(),
+            make(arange(8), &[2, 1, 4])
+                .broadcast_view(&[2, 3, 4])
+                .shape(),
             &[2, 3, 4]
         );
     }
@@ -265,7 +267,7 @@ mod tests {
     #[test]
     fn full_read_broadcast_axis0() {
         // [1, 4] → [3, 4]: each row is [0,1,2,3]
-        let got: ArrayD<i32> = make(seq(4), &[1, 4])
+        let got: ArrayD<i32> = make(arange(4), &[1, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray()
             .unwrap();
@@ -277,7 +279,7 @@ mod tests {
     #[test]
     fn full_read_broadcast_axis1() {
         // [3, 1] → [3, 4]: each col is [0,1,2]
-        let got: ArrayD<i32> = make(seq(3), &[3, 1])
+        let got: ArrayD<i32> = make(arange(3), &[3, 1])
             .broadcast_view(&[3, 4])
             .to_ndarray()
             .unwrap();
@@ -299,17 +301,17 @@ mod tests {
 
     #[test]
     fn full_read_no_broadcast() {
-        let got: ArrayD<i32> = make(seq(12), &[3, 4])
+        let got: ArrayD<i32> = make(arange(12), &[3, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
+        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
     }
 
     #[test]
     fn full_read_broadcast_3d_middle() {
         // [2, 1, 3] → [2, 4, 3]: axis 1 repeats 4 times
-        let got: ArrayD<i32> = make(seq(6), &[2, 1, 3])
+        let got: ArrayD<i32> = make(arange(6), &[2, 1, 3])
             .broadcast_view(&[2, 4, 3])
             .to_ndarray()
             .unwrap();
@@ -331,7 +333,7 @@ mod tests {
     #[test]
     fn sub_read_broadcast_axis0() {
         // [1, 4] → [3, 4]: read rows 1..3, cols 1..3
-        let got: ArrayD<i32> = make(seq(4), &[1, 4])
+        let got: ArrayD<i32> = make(arange(4), &[1, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
@@ -343,7 +345,7 @@ mod tests {
     #[test]
     fn sub_read_broadcast_axis1() {
         // [3, 1] → [3, 5]: read rows 0..2, cols 2..5 (all same element per row)
-        let got: ArrayD<i32> = make(seq(3), &[3, 1])
+        let got: ArrayD<i32> = make(arange(3), &[3, 1])
             .broadcast_view(&[3, 5])
             .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
             .unwrap();
@@ -358,30 +360,30 @@ mod tests {
 
     #[test]
     fn identity_flag_set_when_no_broadcast() {
-        let a = make(seq(12), &[3, 4]);
+        let a = make(arange(12), &[3, 4]);
         let b = super::Broadcast::new(a.as_ref(), &[3, 4]).unwrap();
         assert!(b.is_identity);
     }
 
     #[test]
     fn identity_flag_not_set_when_broadcast() {
-        let a = make(seq(4), &[1, 4]);
+        let a = make(arange(4), &[1, 4]);
         let b = super::Broadcast::new(a.as_ref(), &[3, 4]).unwrap();
         assert!(!b.is_identity);
     }
 
     #[test]
     fn identity_full_read_correct() {
-        let got: ArrayD<i32> = make(seq(12), &[3, 4])
+        let got: ArrayD<i32> = make(arange(12), &[3, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
+        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
     }
 
     #[test]
     fn identity_sub_read_correct() {
-        let got: ArrayD<i32> = make(seq(12), &[3, 4])
+        let got: ArrayD<i32> = make(arange(12), &[3, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
@@ -398,13 +400,13 @@ mod tests {
 
     #[test]
     fn error_ndim_mismatch() {
-        let a = make(seq(6), &[2, 3]);
+        let a = make(arange(6), &[2, 3]);
         assert!(super::Broadcast::new(a.as_ref(), &[2, 3, 1]).is_err());
     }
 
     #[test]
     fn error_non_unit_dim_broadcast() {
-        let a = make(seq(6), &[2, 3]);
+        let a = make(arange(6), &[2, 3]);
         // axis 0 has length 2, cannot broadcast to 5
         assert!(super::Broadcast::new(a.as_ref(), &[5, 3]).is_err());
     }

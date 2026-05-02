@@ -79,7 +79,7 @@ macro_rules! define_reduction_op {
             Ok(crate::Array::from_core_storage(ret))
         }
     };
-    ($(#[$meta:meta])* $name:ident, $core_op:ident, single_axis = "true") => {
+    ($(#[$meta:meta])* $name:ident, $core_op:ident, single_axis = true) => {
         $(#[$meta])*
         #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
@@ -113,8 +113,8 @@ macro_rules! define_reduction_op {
 }
 define_reduction_op!(max, Max);
 define_reduction_op!(min, Min);
-define_reduction_op!(argmax, ArgMax, single_axis = "true");
-define_reduction_op!(argmin, ArgMin, single_axis = "true");
+define_reduction_op!(argmax, ArgMax, single_axis = true);
+define_reduction_op!(argmin, ArgMin, single_axis = true);
 define_reduction_op!(sum, Sum);
 define_reduction_op!(product, Product);
 define_reduction_op!(mean, Mean);

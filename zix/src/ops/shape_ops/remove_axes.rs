@@ -173,7 +173,7 @@ mod tests {
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
-    fn seq(n: usize) -> Vec<i32> {
+    fn arange(n: usize) -> Vec<i32> {
         (0..n as i32).collect()
     }
 
@@ -184,40 +184,40 @@ mod tests {
     #[test]
     fn shape_remove_leading() {
         // [1, 6] remove axis 0 → [6]
-        let a = make1d(seq(6), 6).insert_axes(&[0]);
+        let a = make1d(arange(6), 6).insert_axes(&[0]);
         assert_eq!(a.remove_axes(&[0]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_trailing() {
         // [6, 1] remove axis 1 → [6]
-        let a = make1d(seq(6), 6).insert_axes(&[1]);
+        let a = make1d(arange(6), 6).insert_axes(&[1]);
         assert_eq!(a.remove_axes(&[1]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_middle() {
         // [3, 1, 4] remove axis 1 → [3, 4]
-        let a = make2d(seq(12), 3, 4).insert_axes(&[1]);
+        let a = make2d(arange(12), 3, 4).insert_axes(&[1]);
         assert_eq!(a.remove_axes(&[1]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_remove_multiple() {
         // [1, 2, 1, 3, 1] remove axes [0, 2, 4] → [2, 3]
-        let a = make2d(seq(6), 2, 3).insert_axes(&[0, 1, 2]);
+        let a = make2d(arange(6), 2, 3).insert_axes(&[0, 1, 2]);
         assert_eq!(a.remove_axes(&[0, 2, 4]).shape(), &[2, 3]);
     }
 
     #[test]
     fn shape_remove_empty_axes_is_identity() {
-        assert_eq!(make2d(seq(12), 3, 4).remove_axes(&[]).shape(), &[3, 4]);
+        assert_eq!(make2d(arange(12), 3, 4).remove_axes(&[]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_remove_unsorted_axes_same_result() {
-        let a1 = make3d(seq(6), 1, 2, 3).remove_axes(&[0]);
-        let a2 = make3d(seq(6), 1, 2, 3).remove_axes(&[0]);
+        let a1 = make3d(arange(6), 1, 2, 3).remove_axes(&[0]);
+        let a2 = make3d(arange(6), 1, 2, 3).remove_axes(&[0]);
         assert_eq!(a1.shape(), a2.shape());
     }
 
@@ -227,48 +227,51 @@ mod tests {
 
     #[test]
     fn full_read_remove_leading() {
-        let got: ArrayD<i32> = make1d(seq(6), 6)
+        let got: ArrayD<i32> = make1d(arange(6), 6)
             .insert_axes(&[0])
             .remove_axes(&[0])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![6], seq(6)).unwrap());
+        assert_eq!(got, ArrayD::from_shape_vec(vec![6], arange(6)).unwrap());
     }
 
     #[test]
     fn full_read_remove_trailing() {
-        let got: ArrayD<i32> = make1d(seq(6), 6)
+        let got: ArrayD<i32> = make1d(arange(6), 6)
             .insert_axes(&[1])
             .remove_axes(&[1])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![6], seq(6)).unwrap());
+        assert_eq!(got, ArrayD::from_shape_vec(vec![6], arange(6)).unwrap());
     }
 
     #[test]
     fn full_read_remove_middle() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .insert_axes(&[1])
             .remove_axes(&[1])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
+        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
     }
 
     #[test]
     fn full_read_remove_multiple() {
-        let got: ArrayD<i32> = make2d(seq(6), 2, 3)
+        let got: ArrayD<i32> = make2d(arange(6), 2, 3)
             .insert_axes(&[0, 1, 2])
             .remove_axes(&[0, 2, 4])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![2, 3], seq(6)).unwrap());
+        assert_eq!(got, ArrayD::from_shape_vec(vec![2, 3], arange(6)).unwrap());
     }
 
     #[test]
     fn full_read_identity_empty_axes() {
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4).remove_axes(&[]).to_ndarray().unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], seq(12)).unwrap());
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+            .remove_axes(&[])
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
     }
 
     // -----------------------------------------------------------------------
@@ -278,7 +281,7 @@ mod tests {
     #[test]
     fn sub_read_after_remove_leading() {
         // [1, 6] → remove axis 0 → [6]; read elements 2..5
-        let got: ArrayD<i32> = make1d(seq(6), 6)
+        let got: ArrayD<i32> = make1d(arange(6), 6)
             .insert_axes(&[0])
             .remove_axes(&[0])
             .to_ndarray_sub(&[2..5], &ReadContext::default())
@@ -289,7 +292,7 @@ mod tests {
     #[test]
     fn sub_read_after_remove_middle() {
         // [3, 1, 4] → remove axis 1 → [3, 4]; read rows 1..3, cols 0..2
-        let got: ArrayD<i32> = make2d(seq(12), 3, 4)
+        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .insert_axes(&[1])
             .remove_axes(&[1])
             .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
@@ -307,21 +310,21 @@ mod tests {
 
     #[test]
     fn error_axis_out_of_bounds() {
-        let a = make2d(seq(4), 2, 2);
+        let a = make2d(arange(4), 2, 2);
         // ndim=2, valid axes are 0..2; axis 3 is out of bounds
         assert!(super::RemoveAxes::new(a, &[3]).is_err());
     }
 
     #[test]
     fn error_axis_not_size_one() {
-        let a = make2d(seq(12), 3, 4);
+        let a = make2d(arange(12), 3, 4);
         // axis 0 has size 3, cannot remove
         assert!(super::RemoveAxes::new(a, &[0]).is_err());
     }
 
     #[test]
     fn error_duplicate_axis() {
-        let a = make3d(seq(6), 1, 2, 3);
+        let a = make3d(arange(6), 1, 2, 3);
         // axis 0 appears twice
         assert!(super::RemoveAxes::new(a, &[0, 0]).is_err());
     }

@@ -19,6 +19,7 @@ pub(crate) trait ReductionOpKernel {
     ) -> Result<()>;
 
     fn output_dtype(&self, input_dtype: &Dtype) -> Result<Dtype>;
+    fn supports_empty(&self) -> bool;
 }
 
 pub(crate) struct ReductionOp<Op, S> {
@@ -51,6 +52,19 @@ impl<Op, S> ReductionOp<Op, S> {
 
             ensure!(!is_reduced[ax], InvalidArgument, "duplicate axis {ax}");
             is_reduced[ax] = true;
+        }
+
+        if !op.supports_empty()
+            && array
+                .shape()
+                .iter()
+                .zip(&is_reduced)
+                .any(|(&s, &reduced)| reduced && s == 0)
+        {
+            bail!(
+                InvalidArgument,
+                "reduction on empty dimension not supported"
+            );
         }
 
         let shape = array
@@ -233,9 +247,10 @@ macro_rules! define_reduction_op {
         $(#[$meta:meta])*
         $Name:ident,
         $NameKernel:ident,
+        support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = $types:tt,
-        single_axis = "true"
+        single_axis = true
     ) => {
         $(#[$meta])*
         pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
@@ -255,6 +270,7 @@ macro_rules! define_reduction_op {
 
         define_reduction_op_kernel!(
             $NameKernel,
+            support_empty = $support_empty,
             |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = $types
         );
@@ -264,6 +280,7 @@ macro_rules! define_reduction_op {
         $(#[$meta:meta])*
         $Name:ident,
         $NameKernel:ident,
+        support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = $types:tt
     ) => {
@@ -285,6 +302,7 @@ macro_rules! define_reduction_op {
 
         define_reduction_op_kernel!(
             $NameKernel,
+            support_empty = $support_empty,
             |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = $types
         );
@@ -294,6 +312,7 @@ macro_rules! define_reduction_op {
 macro_rules! define_reduction_op_kernel {
     (
         $NameKernel:ident,
+        support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = {
             input = [$($scalar:tt),* $(,)?],
@@ -302,6 +321,7 @@ macro_rules! define_reduction_op_kernel {
     ) => {
         define_reduction_op_kernel!(
             $NameKernel,
+            support_empty = $support_empty,
             |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = {$($scalar => $scalar),*}
         );
@@ -309,6 +329,7 @@ macro_rules! define_reduction_op_kernel {
 
     (
         $NameKernel:ident,
+        support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = {
             input = [$($scalar:tt),* $(,)?],
@@ -317,6 +338,7 @@ macro_rules! define_reduction_op_kernel {
     ) => {
         define_reduction_op_kernel!(
             $NameKernel,
+            support_empty = $support_empty,
             |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = {$($scalar => $output_type),*}
         );
@@ -324,11 +346,13 @@ macro_rules! define_reduction_op_kernel {
 
     (
         $NameKernel:ident,
+        support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = {$([$($scalar:tt),*] => $output_type:tt),* $(,)?}
     ) => {
         define_reduction_op_kernel!(
             $NameKernel,
+            support_empty = $support_empty,
             |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
             types = {$($($scalar => $output_type),*),*}
         );
@@ -336,6 +360,7 @@ macro_rules! define_reduction_op_kernel {
 
     (
         $NameKernel:ident,
+        support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
         types = {$($scalar:tt => $reduction_type:tt),* $(,)?}
     ) => {
@@ -400,6 +425,10 @@ macro_rules! define_reduction_op_kernel {
                 };
                 bail!(UnsupportedDtype, "Reduction op not supported for dtype {input_dtype:#?}");
             }
+
+            fn supports_empty(&self) -> bool {
+                $support_empty
+            }
         }
     };
 }
@@ -443,6 +472,7 @@ define_reduction_op!(
     /// ```
     Max,
     MaxKernel,
+    support_empty = false,
     |items| { items.reduce(|m, x| m.max(x)).unwrap() },
     types = {
         input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
@@ -487,6 +517,7 @@ define_reduction_op!(
     /// ```
     Min,
     MinKernel,
+    support_empty = false,
     |items| { items.reduce(|m, x| m.min(x)).unwrap() },
     types = {
         input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
@@ -531,6 +562,7 @@ define_reduction_op!(
     /// ```
     ArgMax,
     ArgMaxKernel,
+    support_empty = false,
     |items| {
         items
             .enumerate()
@@ -542,7 +574,7 @@ define_reduction_op!(
         input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
         output = u64
     },
-    single_axis = "true"
+    single_axis = true
 );
 define_reduction_op!(
     /// Reduces a single axis by returning the index of the minimum element.
@@ -582,6 +614,7 @@ define_reduction_op!(
     /// ```
     ArgMin,
     ArgMinKernel,
+    support_empty = false,
     |items| {
         items
             .enumerate()
@@ -593,7 +626,7 @@ define_reduction_op!(
         input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
         output = u64
     },
-    single_axis = "true"
+    single_axis = true
 );
 define_reduction_op!(
     /// Reduces one or more axes by summing all elements along those axes.
@@ -637,6 +670,7 @@ define_reduction_op!(
     /// ```
     Sum,
     SumKernel,
+    support_empty = true,
     |items| { items.fold(crate::ops::astype::cast(0), |m, x| m + crate::ops::astype::cast_as(x, &m)) },
     types = {
         [i8, i16, i32, i64] => i64,
@@ -687,6 +721,7 @@ define_reduction_op!(
     /// ```
     Product,
     ProductKernel,
+    support_empty = true,
     |items| { items.fold(crate::ops::astype::cast(1), |m, x| m * crate::ops::astype::cast_as(x, &m)) },
     types = {
         [i8, i16, i32, i64] => i64,
@@ -730,6 +765,7 @@ define_reduction_op!(
     /// ```
     Mean,
     MeanKernel,
+    support_empty = false,
     |items| {{
         let (size, size_high) = items.size_hint();
         assert_eq!(Some(size), size_high);
@@ -786,6 +822,7 @@ define_reduction_op!(
     /// ```
     Variance,
     VarianceKernel,
+    support_empty = false,
     |items, ddof: f64| { variance_impl(items, ddof) },
     types = {
         [i8, i16, i32, i64] => f64,
@@ -831,6 +868,7 @@ define_reduction_op!(
     /// ```
     StandardDeviation,
     StandardDeviationKernel,
+    support_empty = false,
     |items, ddof: f64| { variance_impl(items, ddof).sqrt() },
     types = {
         [i8, i16, i32, i64] => f64,
@@ -947,6 +985,7 @@ define_reduction_op!(
     /// ```
     All,
     AllKernel,
+    support_empty = true,
     |items| { items.fold(true, |m, x| m && crate::ops::astype::cast::<_, bool>(x)) },
     types = {
         input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
@@ -991,6 +1030,7 @@ define_reduction_op!(
     /// ```
     Any,
     AnyKernel,
+    support_empty = true,
     |items| { items.fold(false, |m, x| m || crate::ops::astype::cast::<_, bool>(x)) },
     types = {
         input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
@@ -999,7 +1039,7 @@ define_reduction_op!(
 );
 
 macro_rules! define_array_reduction_method {
-    ($op:ident : $Name:ident, single_axis = "true" $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
+    ($op:ident : $Name:ident, single_axis = true $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
         #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
         #[track_caller]
         pub fn $op(self, axis: usize, keepdims: bool $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
@@ -1024,8 +1064,8 @@ where
 {
     define_array_reduction_method!(max: Max);
     define_array_reduction_method!(min: Min);
-    define_array_reduction_method!(argmax: ArgMax, single_axis = "true");
-    define_array_reduction_method!(argmin: ArgMin, single_axis = "true");
+    define_array_reduction_method!(argmax: ArgMax, single_axis = true);
+    define_array_reduction_method!(argmin: ArgMin, single_axis = true);
     define_array_reduction_method!(sum: Sum);
     define_array_reduction_method!(product: Product);
     define_array_reduction_method!(mean: Mean);
@@ -1036,1388 +1076,818 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use ndarray::ArrayD;
+pub(crate) mod tests {
+    use ::std::rc::Rc;
 
-    use crate::array::Array;
+    use ndarray::{array, ArrayD};
+
     #[cfg(feature = "half")]
     use crate::dtype::f16;
     #[cfg(feature = "num-complex")]
     use crate::dtype::Complex;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f32 = crate::dtype::Complex<f32>;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f64 = crate::dtype::Complex<f64>;
 
-    fn make<T>(vals: Vec<T>, shape: &[usize]) -> Array<crate::storage::Compact>
-    where
-        T: Clone + crate::dtype::Dtyped,
+    use crate::{array::Array, storage::Compact};
+
+    use proptest::prelude::*;
+
+    pub(crate) fn axis_strategy(ndim: usize) -> impl proptest::strategy::Strategy<Value = usize> {
+        0..ndim
+    }
+
+    pub(crate) fn axes_strategy(ndim: usize) -> proptest::strategy::BoxedStrategy<Vec<usize>> {
+        if ndim == 0 {
+            return proptest::strategy::Just(vec![]).boxed();
+        }
+        let axis_strategy = axis_strategy(ndim).prop_map(|axis| vec![axis]);
+        let multi_axes_strategy = prop::collection::vec(0..ndim, 1..=ndim).prop_map(|mut axes| {
+            axes.sort_unstable();
+            axes.dedup();
+            axes
+        });
+        prop::strategy::Union::new_weighted(vec![
+            (3, axis_strategy.boxed()),
+            (1, multi_axes_strategy.boxed()),
+        ])
+        .boxed()
+    }
+
+    fn reduction_shape_strategy() -> impl proptest::strategy::Strategy<Value = Vec<usize>> {
+        prop::strategy::Union::new_weighted(vec![
+            // 1D
+            (8, proptest::collection::vec(1usize..=100, 1)),
+            (2, proptest::collection::vec(100..=1000, 1)),
+            // 2D
+            (8, proptest::collection::vec(1..=16, 2)),
+            (2, proptest::collection::vec(16..=37, 2)),
+            // 3D
+            (5, proptest::collection::vec(1..=12, 3)),
+            // 4D
+            (5, proptest::collection::vec(1..=8, 4)),
+            // Many dims
+            (3, proptest::collection::vec(1..=4, 1..=8)),
+        ])
+    }
+
+    pub(crate) fn carray_strategy_for_reduction<T: crate::util::ScalarStrategy>(
+        elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, Vec<usize>, bool)>
     {
-        let nd = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
-        Array::compact_array(&nd).unwrap()
+        let shape = reduction_shape_strategy();
+        let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
+        array
+            .prop_map(|(nd, za)| (nd, Rc::new(za)))
+            .prop_flat_map(|(nd, za)| {
+                let axes = axes_strategy(nd.ndim());
+                let keepdims = proptest::bool::ANY;
+                (Just(nd), Just(za), axes, keepdims)
+            })
     }
 
-    fn seq(n: usize) -> Vec<i32> {
-        (0..n as i32).collect()
+    pub(crate) fn carray_strategy_for_reduction_single_axis<T: crate::util::ScalarStrategy>(
+        elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, usize, bool)>
+    {
+        let shape = reduction_shape_strategy();
+        let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
+        array
+            .prop_map(|(nd, za)| (nd, Rc::new(za)))
+            .prop_flat_map(|(nd, za)| {
+                let axis = axis_strategy(nd.ndim());
+                let keepdims = proptest::bool::ANY;
+                (Just(nd), Just(za), axis, keepdims)
+            })
     }
 
-    /// Test a reduction along axis 0 for a 2×N array.
-    /// `$method` is the reduction method name (max/min/sum/product/all/any).
-    /// `$in_ty` is the element type of the input array.
-    /// `$out_ty` is the expected element type of the output array.
-    /// `rows` gives the two rows of input values; `expected` gives the N expected output values.
-    macro_rules! test_reduce_axis0 {
-        ($test_name:ident, $method:ident,
-         in = $in_ty:ty, out = $out_ty:ty,
-         rows: [[$($a:expr),+], [$($b:expr),+]],
-         expected: [$($e:expr),+]) => {
-            #[test]
-            fn $test_name() {
-                let row0: Vec<$in_ty> = vec![$($a),+];
-                let row1: Vec<$in_ty> = vec![$($b),+];
-                let n = row0.len();
-                let input: Vec<$in_ty> = row0.into_iter().chain(row1).collect();
-                let nd = ArrayD::<$in_ty>::from_shape_vec(vec![2, n], input).unwrap();
-                let a = Array::compact_array_with(&nd, crate::util::arr_params(&[2, n])).unwrap();
-                let got: ArrayD<$out_ty> = a.$method(&[0], false).to_ndarray().unwrap();
-                assert_eq!(
-                    got,
-                    ArrayD::<$out_ty>::from_shape_vec(vec![n], vec![$($e),+]).unwrap()
-                );
+    pub(crate) fn carray_strategy_for_reduction_small<T: crate::util::ScalarStrategy>(
+        elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, Vec<usize>, bool)>
+    {
+        let shape = prop::strategy::Union::new_weighted(vec![
+            // 1D
+            (8, proptest::collection::vec(1usize..=4, 1)),
+            // 2D
+            (8, proptest::collection::vec(1..=2, 2)),
+        ]);
+        let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
+        array
+            .prop_map(|(nd, za)| (nd, Rc::new(za)))
+            .prop_flat_map(|(nd, za)| {
+                let axes = axes_strategy(nd.ndim());
+                let keepdims = proptest::bool::ANY;
+                (Just(nd), Just(za), axes, keepdims)
+            })
+    }
+
+    macro_rules! test_reduction_dtype {
+        (
+            $op_method:ident,
+            |$items:ident| { $body:expr },
+            $dtype:ident,
+            $strategy:ident
+        ) => {
+            paste::paste! {
+                proptest::proptest! {
+                    #[test]
+                    fn [<$op_method _ $dtype>](
+                        (nd, za, axes, keepdims) in crate::ops::reduction::tests::carray_strategy_for_reduction::<$dtype>(
+                            <$dtype as crate::util::ScalarStrategy>::$strategy()
+                        )
+                    ) {
+                        let result = (*za).as_ref().$op_method(&axes, keepdims);
+                        let expected = crate::ops::reduction::tests::ndarray_reduce(
+                            &nd, &axes, keepdims,
+                            |arr| {
+                                let $items = arr.iter().cloned();
+                                $body
+                            }
+                        );
+                        crate::util::assert_array_matches(&result, &expected);
+                    }
+                }
             }
+        };
+
+        (
+            $op_method:ident,
+            |$items:ident| { $body:expr },
+            $dtype:ident,
+            $strategy:ident,
+            small_data = true
+        ) => {
+            paste::paste! {
+                proptest::proptest! {
+                    #[test]
+                    fn [<$op_method _ $dtype>](
+                        (nd, za, axes, keepdims) in crate::ops::reduction::tests::carray_strategy_for_reduction_small::<$dtype>(
+                            <$dtype as crate::util::ScalarStrategy>::$strategy()
+                        )
+                    ) {
+                        let result = (*za).as_ref().$op_method(&axes, keepdims);
+                        let expected = crate::ops::reduction::tests::ndarray_reduce(
+                            &nd, &axes, keepdims,
+                            |arr| {
+                                let $items = arr.iter().cloned();
+                                $body
+                            }
+                        );
+                        crate::util::assert_array_matches(&result, &expected);
+                    }
+                }
+            }
+        };
+
+        (
+            $op_method:ident,
+            single_axis = true,
+            |$items:ident| { $body:expr },
+            $dtype:ident,
+            $strategy:ident
+        ) => {
+            paste::paste! {
+                proptest::proptest! {
+                    #[test]
+                    fn [<$op_method _ $dtype>](
+                        (nd, za, axis, keepdims) in crate::ops::reduction::tests::carray_strategy_for_reduction_single_axis::<$dtype>(
+                            <$dtype as crate::util::ScalarStrategy>::$strategy()
+                        )
+                    ) {
+                        let result = (*za).as_ref().$op_method(axis, keepdims);
+                        let expected = crate::ops::reduction::tests::ndarray_reduce(
+                            &nd, &[axis], keepdims,
+                            |arr| {
+                                let $items = arr.iter().cloned();
+                                $body
+                            }
+                        );
+                        crate::util::assert_array_matches(&result, &expected);
+                    }
+                }
+            }
+        };
+
+    }
+
+    macro_rules! test_reduction {
+        (
+            $op_method:ident,
+            |$items:ident| { $body:expr },
+            [$($dtype:ident),+ $(,)?], $strategy:ident
+            $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+ $(,)?])*
+        ) => {
+            $(crate::ops::reduction::tests::test_reduction_dtype!(
+                $op_method,
+                |$items| { $body },
+                $dtype,
+                $strategy
+            );)+
+            $($(
+                #[cfg($cfg)]
+                crate::ops::reduction::tests::test_reduction_dtype!(
+                    $op_method,
+                    |$items| { $body },
+                    $cfg_dtype,
+                    $strategy
+                );
+            )+)*
+        };
+
+        (
+            $op_method:ident,
+            |$items:ident| { $body:expr },
+            [$($dtype:ident),+ $(,)?], $strategy:ident
+            $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+ $(,)?])*,
+            small_data = true
+        ) => {
+            $(crate::ops::reduction::tests::test_reduction_dtype!(
+                $op_method,
+                |$items| { $body },
+                $dtype,
+                $strategy,
+                small_data = true
+            );)+
+            $($(
+                #[cfg($cfg)]
+                crate::ops::reduction::tests::test_reduction_dtype!(
+                    $op_method,
+                    |$items| { $body },
+                    $cfg_dtype,
+                    $strategy,
+                    small_data = true
+                );
+            )+)*
+        };
+
+        (
+            $op_method:ident,
+            single_axis = true,
+            |$items:ident| { $body:expr },
+            [$($dtype:ident),+ $(,)?], $strategy:ident
+            $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+ $(,)?])*
+        ) => {
+            $(crate::ops::reduction::tests::test_reduction_dtype!(
+                $op_method,
+                single_axis = true,
+                |$items| { $body },
+                $dtype,
+                $strategy
+            );)+
+            $($(
+                #[cfg($cfg)]
+                crate::ops::reduction::tests::test_reduction_dtype!(
+                    $op_method,
+                    single_axis = true,
+                    |$items| { $body },
+                    $cfg_dtype,
+                    $strategy
+                );
+            )+)*
         };
     }
 
-    // -----------------------------------------------------------------------
-    // max
-    // -----------------------------------------------------------------------
+    #[allow(unused_imports)]
+    pub(crate) use {test_reduction, test_reduction_dtype};
 
-    mod max {
-        use super::*;
-
-        #[test]
-        fn shape_axis0() {
-            assert_eq!(make(seq(12), &[3, 4]).max(&[0], false).shape(), &[4]);
-        }
-
-        #[test]
-        fn shape_axis1() {
-            assert_eq!(make(seq(12), &[3, 4]).max(&[1], false).shape(), &[3]);
-        }
-
-        #[test]
-        fn shape_both_axes() {
-            assert_eq!(
-                make(seq(12), &[3, 4]).max(&[0, 1], false).shape(),
-                &[] as &[u64]
-            );
-        }
-
-        #[test]
-        fn shape_middle_axis_3d() {
-            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::compact_array(&nd).unwrap();
-            assert_eq!(a.max(&[1], false).shape(), &[2, 4]);
-        }
-
-        // keepdims shape tests
-        #[test]
-        fn keepdims_shape_axis0() {
-            assert_eq!(make(seq(12), &[3, 4]).max(&[0], true).shape(), &[1, 4]);
-        }
-
-        #[test]
-        fn keepdims_shape_axis1() {
-            assert_eq!(make(seq(12), &[3, 4]).max(&[1], true).shape(), &[3, 1]);
-        }
-
-        #[test]
-        fn keepdims_shape_both_axes() {
-            assert_eq!(make(seq(12), &[3, 4]).max(&[0, 1], true).shape(), &[1, 1]);
-        }
-
-        #[test]
-        fn keepdims_shape_middle_3d() {
-            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::compact_array(&nd).unwrap();
-            assert_eq!(a.max(&[1], true).shape(), &[2, 1, 4]);
-        }
-
-        // keepdims value tests
-        #[test]
-        fn keepdims_read_axis0_i32() {
-            // [[0..3],[4..7],[8..11]] → max per col = [[8,9,10,11]] shape [1,4]
-            let got: ArrayD<i32> = make(seq(12), &[3, 4]).max(&[0], true).to_ndarray().unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![1, 4], vec![8, 9, 10, 11]).unwrap()
-            );
-        }
-
-        #[test]
-        fn keepdims_read_axis1_i32() {
-            // max per row = [[3],[7],[11]] shape [3,1]
-            let got: ArrayD<i32> = make(seq(12), &[3, 4]).max(&[1], true).to_ndarray().unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3, 1], vec![3, 7, 11]).unwrap()
-            );
-        }
-
-        #[test]
-        fn keepdims_read_both_axes_i32() {
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .max(&[0, 1], true)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![1, 1], vec![11]).unwrap());
-        }
-
-        #[test]
-        fn keepdims_read_3d_middle_axis() {
-            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::compact_array(&nd).unwrap();
-            let got: ArrayD<i32> = a.max(&[1], true).to_ndarray().unwrap();
-            // same values as no-keepdims but shape [2,1,4]
-            let expected: Vec<i32> = (0..2)
-                .flat_map(|i| (0..4).map(move |k| i * 12 + 8 + k))
-                .collect();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2, 1, 4], expected).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis0_i32() {
-            // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → max per col
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .max(&[0], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![4], vec![8, 9, 10, 11]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_i32() {
-            // max per row
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .max(&[1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3], vec![3, 7, 11]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_all_axes_i32() {
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .max(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![11]).unwrap());
-        }
-
-        #[test]
-        fn read_3d_middle_axis() {
-            // a[i,j,k] = i*12 + j*4 + k; max over j → i*12 + 8 + k
-            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::compact_array(&nd).unwrap();
-            let got: ArrayD<i32> = a.max(&[1], false).to_ndarray().unwrap();
-            let expected: Vec<i32> = (0..2)
-                .flat_map(|i| (0..4).map(move |k| i * 12 + 8 + k))
-                .collect();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2, 4], expected).unwrap());
-        }
-
-        #[test]
-        #[should_panic]
-        fn error_axis_out_of_bounds() {
-            make(seq(6), &[2, 3]).max(&[2], false);
-        }
-
-        #[test]
-        #[should_panic]
-        fn error_duplicate_axis() {
-            make(seq(6), &[2, 3]).max(&[0, 0], false);
-        }
-
-        // dtype coverage: rows [[1,4],[3,2]] → max [3,4]
-        test_reduce_axis0!(i8,   max, in = i8,   out = i8,   rows: [[1i8,  4i8 ], [3i8,  2i8 ]], expected: [3i8,  4i8 ]);
-        test_reduce_axis0!(u8,   max, in = u8,   out = u8,   rows: [[1u8,  4u8 ], [3u8,  2u8 ]], expected: [3u8,  4u8 ]);
-        test_reduce_axis0!(i16,  max, in = i16,  out = i16,  rows: [[1i16, 4i16], [3i16, 2i16]], expected: [3i16, 4i16]);
-        test_reduce_axis0!(u16,  max, in = u16,  out = u16,  rows: [[1u16, 4u16], [3u16, 2u16]], expected: [3u16, 4u16]);
-        test_reduce_axis0!(i32,  max, in = i32,  out = i32,  rows: [[1i32, 4i32], [3i32, 2i32]], expected: [3i32, 4i32]);
-        test_reduce_axis0!(u32,  max, in = u32,  out = u32,  rows: [[1u32, 4u32], [3u32, 2u32]], expected: [3u32, 4u32]);
-        test_reduce_axis0!(i64,  max, in = i64,  out = i64,  rows: [[1i64, 4i64], [3i64, 2i64]], expected: [3i64, 4i64]);
-        test_reduce_axis0!(u64,  max, in = u64,  out = u64,  rows: [[1u64, 4u64], [3u64, 2u64]], expected: [3u64, 4u64]);
-        test_reduce_axis0!(f32,  max, in = f32,  out = f32,  rows: [[1f32, 4f32], [3f32, 2f32]], expected: [3f32, 4f32]);
-        test_reduce_axis0!(f64,  max, in = f64,  out = f64,  rows: [[1f64, 4f64], [3f64, 2f64]], expected: [3f64, 4f64]);
-        test_reduce_axis0!(bool, max, in = bool, out = bool, rows: [[false, true], [true, false]], expected: [true, true]);
+    test_reduction!(
+        max,
+        |items| { items.reduce(|m, x| if x > m { x } else { m }).unwrap() },
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        any_strategy,
         #[cfg(feature = "half")]
-        test_reduce_axis0!(f16, max, in = f16, out = f16,
-            rows: [[f16::from_f32(1.0), f16::from_f32(4.0)], [f16::from_f32(3.0), f16::from_f32(2.0)]],
-            expected: [f16::from_f32(3.0), f16::from_f32(4.0)]);
-    }
-
-    // -----------------------------------------------------------------------
-    // min
-    // -----------------------------------------------------------------------
-
-    mod min {
-        use super::*;
-
-        #[test]
-        fn read_axis0_i32() {
-            // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → min per col = [0,1,2,3]
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .min(&[0], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![4], vec![0, 1, 2, 3]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_i32() {
-            // min per row = [0, 4, 8]
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .min(&[1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![0, 4, 8]).unwrap());
-        }
-
-        #[test]
-        fn read_all_axes_i32() {
-            let got: ArrayD<i32> = make(seq(12), &[3, 4])
-                .min(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![0]).unwrap());
-        }
-
-        #[test]
-        fn read_3d_middle_axis() {
-            // a[i,j,k] = i*12 + j*4 + k; min over j → i*12 + k  (j=0 is min)
-            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::compact_array(&nd).unwrap();
-            let got: ArrayD<i32> = a.min(&[1], false).to_ndarray().unwrap();
-            let expected: Vec<i32> = (0..2)
-                .flat_map(|i| (0..4).map(move |k| i * 12 + k))
-                .collect();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2, 4], expected).unwrap());
-        }
-
-        #[test]
-        fn output_dtype_same_as_input() {
-            let a: Array<_> = make(seq(6), &[2, 3]);
-            let dtype = a.dtype().clone();
-            assert_eq!(a.min(&[0], false).dtype(), &dtype);
-        }
-
-        // dtype coverage: rows [[1,4],[3,2]] → min [1,2]
-        test_reduce_axis0!(i8,   min, in = i8,   out = i8,   rows: [[1i8,  4i8 ], [3i8,  2i8 ]], expected: [1i8,  2i8 ]);
-        test_reduce_axis0!(u8,   min, in = u8,   out = u8,   rows: [[1u8,  4u8 ], [3u8,  2u8 ]], expected: [1u8,  2u8 ]);
-        test_reduce_axis0!(i16,  min, in = i16,  out = i16,  rows: [[1i16, 4i16], [3i16, 2i16]], expected: [1i16, 2i16]);
-        test_reduce_axis0!(u16,  min, in = u16,  out = u16,  rows: [[1u16, 4u16], [3u16, 2u16]], expected: [1u16, 2u16]);
-        test_reduce_axis0!(i32,  min, in = i32,  out = i32,  rows: [[1i32, 4i32], [3i32, 2i32]], expected: [1i32, 2i32]);
-        test_reduce_axis0!(u32,  min, in = u32,  out = u32,  rows: [[1u32, 4u32], [3u32, 2u32]], expected: [1u32, 2u32]);
-        test_reduce_axis0!(i64,  min, in = i64,  out = i64,  rows: [[1i64, 4i64], [3i64, 2i64]], expected: [1i64, 2i64]);
-        test_reduce_axis0!(u64,  min, in = u64,  out = u64,  rows: [[1u64, 4u64], [3u64, 2u64]], expected: [1u64, 2u64]);
-        test_reduce_axis0!(f32,  min, in = f32,  out = f32,  rows: [[1f32, 4f32], [3f32, 2f32]], expected: [1f32, 2f32]);
-        test_reduce_axis0!(f64,  min, in = f64,  out = f64,  rows: [[1f64, 4f64], [3f64, 2f64]], expected: [1f64, 2f64]);
-        test_reduce_axis0!(bool, min, in = bool, out = bool, rows: [[false, true], [true, false]], expected: [false, false]);
+        [f16]
+    );
+    test_reduction!(
+        min,
+        |items| { items.reduce(|m, x| if x < m { x } else { m }).unwrap() },
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        any_strategy,
         #[cfg(feature = "half")]
-        test_reduce_axis0!(f16, min, in = f16, out = f16,
-            rows: [[f16::from_f32(1.0), f16::from_f32(4.0)], [f16::from_f32(3.0), f16::from_f32(2.0)]],
-            expected: [f16::from_f32(1.0), f16::from_f32(2.0)]);
-    }
-
-    // -----------------------------------------------------------------------
-    // sum
-    // -----------------------------------------------------------------------
-
-    mod sum {
-        use super::*;
-
-        #[test]
-        fn output_dtype_i32_to_i64() {
-            use crate::dtype::DtypeScalarKind;
-            let a: Array<_> = make(seq(6), &[2, 3]);
-            assert_eq!(
-                a.sum(&[0], false).dtype().try_to_scalar(),
-                Some(DtypeScalarKind::I64)
-            );
-        }
-
-        #[test]
-        fn read_axis0_i32() {
-            // [[0,1,2],[3,4,5]] sum over rows → [3,5,7] (as i64)
-            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
-                .sum(&[0], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3], vec![3i64, 5, 7]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_i32() {
-            // [[0,1,2],[3,4,5]] sum over cols → [3, 12] (as i64)
-            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
-                .sum(&[1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![3i64, 12]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_all_axes_i32() {
-            // sum of 0..6 = 15
-            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
-                .sum(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![15i64]).unwrap());
-        }
-
-        #[test]
-        fn read_f64_input() {
-            // f64 input → f64 output
-            let got: ArrayD<f64> = make(vec![1.0f64, 2.0, 3.0, 4.0], &[2, 2])
-                .sum(&[1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![3.0f64, 7.0]).unwrap()
-            );
-        }
-
-        #[test]
-        fn keepdims_read_axis0_i32() {
-            // [[0,1,2],[3,4,5]] sum over rows with keepdims → [[3,5,7]] shape [1,3]
-            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
-                .sum(&[0], true)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![1, 3], vec![3i64, 5, 7]).unwrap()
-            );
-        }
-
-        #[test]
-        fn keepdims_read_axis1_i32() {
-            // [[0,1,2],[3,4,5]] sum over cols with keepdims → [[3],[12]] shape [2,1]
-            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
-                .sum(&[1], true)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2, 1], vec![3i64, 12]).unwrap()
-            );
-        }
-
-        #[test]
-        fn keepdims_read_both_axes_i32() {
-            // sum of 0..6 = 15, shape [1,1]
-            let got: ArrayD<i64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
-                .sum(&[0, 1], true)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![1, 1], vec![15i64]).unwrap()
-            );
-        }
-
-        // dtype coverage: rows [[1,2],[3,4]] → sum [4,6]
-        // signed integers widen to i64
-        test_reduce_axis0!(i8,  sum, in = i8,  out = i64, rows: [[1i8,  2i8 ], [3i8,  4i8 ]], expected: [4i64, 6i64]);
-        test_reduce_axis0!(i16, sum, in = i16, out = i64, rows: [[1i16, 2i16], [3i16, 4i16]], expected: [4i64, 6i64]);
-        test_reduce_axis0!(i32, sum, in = i32, out = i64, rows: [[1i32, 2i32], [3i32, 4i32]], expected: [4i64, 6i64]);
-        test_reduce_axis0!(i64, sum, in = i64, out = i64, rows: [[1i64, 2i64], [3i64, 4i64]], expected: [4i64, 6i64]);
-        // unsigned integers widen to u64
-        test_reduce_axis0!(u8,  sum, in = u8,  out = u64, rows: [[1u8,  2u8 ], [3u8,  4u8 ]], expected: [4u64, 6u64]);
-        test_reduce_axis0!(u16, sum, in = u16, out = u64, rows: [[1u16, 2u16], [3u16, 4u16]], expected: [4u64, 6u64]);
-        test_reduce_axis0!(u32, sum, in = u32, out = u64, rows: [[1u32, 2u32], [3u32, 4u32]], expected: [4u64, 6u64]);
-        test_reduce_axis0!(u64, sum, in = u64, out = u64, rows: [[1u64, 2u64], [3u64, 4u64]], expected: [4u64, 6u64]);
-        // floats widen to f64
-        test_reduce_axis0!(f32, sum, in = f32, out = f64, rows: [[1f32, 2f32], [3f32, 4f32]], expected: [4f64, 6f64]);
-        test_reduce_axis0!(f64, sum, in = f64, out = f64, rows: [[1f64, 2f64], [3f64, 4f64]], expected: [4f64, 6f64]);
-        // bool widens to u64
-        test_reduce_axis0!(bool, sum, in = bool, out = u64, rows: [[true, false], [true, true]], expected: [2u64, 1u64]);
+        [f16]
+    );
+    test_reduction!(
+        argmax,
+        single_axis = true,
+        |items| {
+            items
+                .enumerate()
+                .reduce(|(m_i, m), (i, x)| if x > m { (i, x) } else { (m_i, m) })
+                .unwrap()
+                .0 as u64
+        },
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        any_strategy,
         #[cfg(feature = "half")]
-        test_reduce_axis0!(f16, sum, in = f16, out = f64,
-            rows: [[f16::from_f32(1.0), f16::from_f32(2.0)], [f16::from_f32(3.0), f16::from_f32(4.0)]],
-            expected: [4f64, 6f64]);
-        #[cfg(feature = "num-complex")]
-        test_reduce_axis0!(complex_f32, sum, in = Complex<f32>, out = Complex<f64>,
-            rows: [[Complex { re: 1f32, im: 0f32 }, Complex { re: 0f32, im: 2f32 }],
-                   [Complex { re: 3f32, im: 0f32 }, Complex { re: 0f32, im: 4f32 }]],
-            expected: [Complex { re: 4f64, im: 0f64 }, Complex { re: 0f64, im: 6f64 }]);
-        #[cfg(feature = "num-complex")]
-        test_reduce_axis0!(complex_f64, sum, in = Complex<f64>, out = Complex<f64>,
-            rows: [[Complex { re: 1f64, im: 0f64 }, Complex { re: 0f64, im: 2f64 }],
-                   [Complex { re: 3f64, im: 0f64 }, Complex { re: 0f64, im: 4f64 }]],
-            expected: [Complex { re: 4f64, im: 0f64 }, Complex { re: 0f64, im: 6f64 }]);
-    }
-
-    // -----------------------------------------------------------------------
-    // product
-    // -----------------------------------------------------------------------
-
-    mod product {
-        use super::*;
-
-        #[test]
-        fn output_dtype_i32_to_i64() {
-            use crate::dtype::DtypeScalarKind;
-            let a: Array<_> = make(seq(6), &[2, 3]);
-            assert_eq!(
-                a.product(&[0], false).dtype().try_to_scalar(),
-                Some(DtypeScalarKind::I64)
-            );
-        }
-
-        #[test]
-        fn read_axis0_i32() {
-            // [[1,2,3],[4,5,6]] product over rows → [4,10,18]
-            let got: ArrayD<i64> = make(vec![1i32, 2, 3, 4, 5, 6], &[2, 3])
-                .product(&[0], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3], vec![4i64, 10, 18]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_i32() {
-            // [[1,2,3],[4,5,6]] product over cols → [6, 120]
-            let got: ArrayD<i64> = make(vec![1i32, 2, 3, 4, 5, 6], &[2, 3])
-                .product(&[1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![6i64, 120]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_all_axes_i32() {
-            // product of 1..5 = 24
-            let got: ArrayD<i64> = make(vec![1i32, 2, 3, 4], &[2, 2])
-                .product(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![24i64]).unwrap());
-        }
-
-        // dtype coverage: rows [[2,3],[4,5]] → product [8,15]
-        // signed integers widen to i64
-        test_reduce_axis0!(i8,  product, in = i8,  out = i64, rows: [[2i8,  3i8 ], [4i8,  5i8 ]], expected: [8i64, 15i64]);
-        test_reduce_axis0!(i16, product, in = i16, out = i64, rows: [[2i16, 3i16], [4i16, 5i16]], expected: [8i64, 15i64]);
-        test_reduce_axis0!(i32, product, in = i32, out = i64, rows: [[2i32, 3i32], [4i32, 5i32]], expected: [8i64, 15i64]);
-        test_reduce_axis0!(i64, product, in = i64, out = i64, rows: [[2i64, 3i64], [4i64, 5i64]], expected: [8i64, 15i64]);
-        // unsigned integers widen to u64
-        test_reduce_axis0!(u8,  product, in = u8,  out = u64, rows: [[2u8,  3u8 ], [4u8,  5u8 ]], expected: [8u64, 15u64]);
-        test_reduce_axis0!(u16, product, in = u16, out = u64, rows: [[2u16, 3u16], [4u16, 5u16]], expected: [8u64, 15u64]);
-        test_reduce_axis0!(u32, product, in = u32, out = u64, rows: [[2u32, 3u32], [4u32, 5u32]], expected: [8u64, 15u64]);
-        test_reduce_axis0!(u64, product, in = u64, out = u64, rows: [[2u64, 3u64], [4u64, 5u64]], expected: [8u64, 15u64]);
-        // floats widen to f64
-        test_reduce_axis0!(f32, product, in = f32, out = f64, rows: [[2f32, 3f32], [4f32, 5f32]], expected: [8f64, 15f64]);
-        test_reduce_axis0!(f64, product, in = f64, out = f64, rows: [[2f64, 3f64], [4f64, 5f64]], expected: [8f64, 15f64]);
+        [f16]
+    );
+    test_reduction!(
+        argmin,
+        single_axis = true,
+        |items| {
+            items
+                .enumerate()
+                .reduce(|(m_i, m), (i, x)| if x < m { (i, x) } else { (m_i, m) })
+                .unwrap()
+                .0 as u64
+        },
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        any_strategy,
         #[cfg(feature = "half")]
-        test_reduce_axis0!(f16, product, in = f16, out = f64,
-            rows: [[f16::from_f32(2.0), f16::from_f32(3.0)], [f16::from_f32(4.0), f16::from_f32(5.0)]],
-            expected: [8f64, 15f64]);
-        #[cfg(feature = "num-complex")]
-        test_reduce_axis0!(complex_f32, product, in = Complex<f32>, out = Complex<f64>,
-            rows: [[Complex { re: 2f32, im: 0f32 }, Complex { re: 3f32, im: 0f32 }],
-                   [Complex { re: 4f32, im: 0f32 }, Complex { re: 5f32, im: 0f32 }]],
-            expected: [Complex { re: 8f64, im: 0f64 }, Complex { re: 15f64, im: 0f64 }]);
-        #[cfg(feature = "num-complex")]
-        test_reduce_axis0!(complex_f64, product, in = Complex<f64>, out = Complex<f64>,
-            rows: [[Complex { re: 2f64, im: 0f64 }, Complex { re: 3f64, im: 0f64 }],
-                   [Complex { re: 4f64, im: 0f64 }, Complex { re: 5f64, im: 0f64 }]],
-            expected: [Complex { re: 8f64, im: 0f64 }, Complex { re: 15f64, im: 0f64 }]);
-    }
-
-    // -----------------------------------------------------------------------
-    // all
-    // -----------------------------------------------------------------------
-
-    mod all {
-        use super::*;
-
-        #[test]
-        fn output_dtype_is_bool() {
-            use crate::dtype::DtypeScalarKind;
-            let a: Array<_> = make(seq(6), &[2, 3]);
-            assert_eq!(
-                a.all(&[0], false).dtype().try_to_scalar(),
-                Some(DtypeScalarKind::Bool)
-            );
-        }
-
-        #[test]
-        fn read_axis0_with_zero_i32() {
-            // [[1,0,1],[1,1,1]] all over rows → [true, false, true]
-            let got: ArrayD<bool> = make(vec![1i32, 0, 1, 1, 1, 1], &[2, 3])
-                .all(&[0], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3], vec![true, false, true]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_with_zero_i32() {
-            // [[1,1,1],[0,1,1]] all over cols → [true, false]
-            let got: ArrayD<bool> = make(vec![1i32, 1, 1, 0, 1, 1], &[2, 3])
-                .all(&[1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![true, false]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_all_axes_true_i32() {
-            let got: ArrayD<bool> = make(vec![1i32, 2, 3, 4], &[2, 2])
-                .all(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![true]).unwrap());
-        }
-
-        #[test]
-        fn read_all_axes_false_i32() {
-            let got: ArrayD<bool> = make(vec![1i32, 0, 1, 1], &[2, 2])
-                .all(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![false]).unwrap());
-        }
-
-        #[test]
-        fn keepdims_read_axis0_i32() {
-            // [[1,0,1],[1,1,1]] all over rows with keepdims → [[true,false,true]] shape [1,3]
-            let got: ArrayD<bool> = make(vec![1i32, 0, 1, 1, 1, 1], &[2, 3])
-                .all(&[0], true)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![1, 3], vec![true, false, true]).unwrap()
-            );
-        }
-
-        #[test]
-        fn keepdims_read_axis1_i32() {
-            // [[1,1,1],[0,1,1]] all over cols with keepdims → [[true],[false]] shape [2,1]
-            let got: ArrayD<bool> = make(vec![1i32, 1, 1, 0, 1, 1], &[2, 3])
-                .all(&[1], true)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2, 1], vec![true, false]).unwrap()
-            );
-        }
-
-        // dtype coverage: rows [[1,0],[1,1]] → all [true,false]
-        test_reduce_axis0!(i8,   all, in = i8,   out = bool, rows: [[1i8,  0i8 ], [1i8,  1i8 ]], expected: [true, false]);
-        test_reduce_axis0!(u8,   all, in = u8,   out = bool, rows: [[1u8,  0u8 ], [1u8,  1u8 ]], expected: [true, false]);
-        test_reduce_axis0!(i16,  all, in = i16,  out = bool, rows: [[1i16, 0i16], [1i16, 1i16]], expected: [true, false]);
-        test_reduce_axis0!(u16,  all, in = u16,  out = bool, rows: [[1u16, 0u16], [1u16, 1u16]], expected: [true, false]);
-        test_reduce_axis0!(i32,  all, in = i32,  out = bool, rows: [[1i32, 0i32], [1i32, 1i32]], expected: [true, false]);
-        test_reduce_axis0!(u32,  all, in = u32,  out = bool, rows: [[1u32, 0u32], [1u32, 1u32]], expected: [true, false]);
-        test_reduce_axis0!(i64,  all, in = i64,  out = bool, rows: [[1i64, 0i64], [1i64, 1i64]], expected: [true, false]);
-        test_reduce_axis0!(u64,  all, in = u64,  out = bool, rows: [[1u64, 0u64], [1u64, 1u64]], expected: [true, false]);
-        test_reduce_axis0!(f32,  all, in = f32,  out = bool, rows: [[1f32, 0f32], [1f32, 1f32]], expected: [true, false]);
-        test_reduce_axis0!(f64,  all, in = f64,  out = bool, rows: [[1f64, 0f64], [1f64, 1f64]], expected: [true, false]);
-        test_reduce_axis0!(bool, all, in = bool, out = bool, rows: [[true, false], [true, true]], expected: [true, false]);
+        [f16]
+    );
+    test_reduction!(
+        sum,
+        |items| { items.fold(0u64, |m, x| m + x as u64) },
+        [u8, u16, u32, u64, bool],
+        op_safe_strategy
+    );
+    test_reduction!(
+        sum,
+        |items| { items.fold(0i64, |m, x| m + x as i64) },
+        [i8, i16, i32, i64],
+        op_safe_strategy
+    );
+    test_reduction!(
+        sum,
+        |items| { items.fold(0.0f64, |m, x| m + crate::ops::astype::cast::<_, f64>(x)) },
+        [f32, f64],
+        op_safe_strategy,
         #[cfg(feature = "half")]
-        test_reduce_axis0!(f16, all, in = f16, out = bool,
-            rows: [[f16::from_f32(1.0), f16::from_f32(0.0)], [f16::from_f32(1.0), f16::from_f32(1.0)]],
-            expected: [true, false]);
-        #[cfg(feature = "num-complex")]
-        test_reduce_axis0!(complex_f32, all, in = Complex<f32>, out = bool,
-            rows: [[Complex { re: 1f32, im: 0f32 }, Complex { re: 0f32, im: 0f32 }],
-                   [Complex { re: 1f32, im: 0f32 }, Complex { re: 1f32, im: 0f32 }]],
-            expected: [true, false]);
-        #[cfg(feature = "num-complex")]
-        test_reduce_axis0!(complex_f64, all, in = Complex<f64>, out = bool,
-            rows: [[Complex { re: 1f64, im: 0f64 }, Complex { re: 0f64, im: 0f64 }],
-                   [Complex { re: 1f64, im: 0f64 }, Complex { re: 1f64, im: 0f64 }]],
-            expected: [true, false]);
-    }
-
-    // -----------------------------------------------------------------------
-    // any
-    // -----------------------------------------------------------------------
-
-    mod any {
-        use super::*;
-
-        #[test]
-        fn output_dtype_is_bool() {
-            use crate::dtype::DtypeScalarKind;
-            let a: Array<_> = make(seq(6), &[2, 3]);
-            assert_eq!(
-                a.any(&[0], false).dtype().try_to_scalar(),
-                Some(DtypeScalarKind::Bool)
-            );
-        }
-
-        #[test]
-        fn read_axis0_i32() {
-            // [[0,0,1],[0,0,0]] any over rows → [false, false, true]
-            let got: ArrayD<bool> = make(vec![0i32, 0, 1, 0, 0, 0], &[2, 3])
-                .any(&[0], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3], vec![false, false, true]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_i32() {
-            // [[0,0,0],[0,0,1]] any over cols → [false, true]
-            let got: ArrayD<bool> = make(vec![0i32, 0, 0, 0, 0, 1], &[2, 3])
-                .any(&[1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![false, true]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_all_axes_false_i32() {
-            let got: ArrayD<bool> = make(vec![0i32, 0, 0, 0], &[2, 2])
-                .any(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![false]).unwrap());
-        }
-
-        #[test]
-        fn read_all_axes_true_i32() {
-            let got: ArrayD<bool> = make(vec![0i32, 0, 0, 1], &[2, 2])
-                .any(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![true]).unwrap());
-        }
-
-        // dtype coverage: rows [[0,0],[1,0]] → any [true,false]
-        test_reduce_axis0!(i8,   any, in = i8,   out = bool, rows: [[0i8,  0i8 ], [1i8,  0i8 ]], expected: [true, false]);
-        test_reduce_axis0!(u8,   any, in = u8,   out = bool, rows: [[0u8,  0u8 ], [1u8,  0u8 ]], expected: [true, false]);
-        test_reduce_axis0!(i16,  any, in = i16,  out = bool, rows: [[0i16, 0i16], [1i16, 0i16]], expected: [true, false]);
-        test_reduce_axis0!(u16,  any, in = u16,  out = bool, rows: [[0u16, 0u16], [1u16, 0u16]], expected: [true, false]);
-        test_reduce_axis0!(i32,  any, in = i32,  out = bool, rows: [[0i32, 0i32], [1i32, 0i32]], expected: [true, false]);
-        test_reduce_axis0!(u32,  any, in = u32,  out = bool, rows: [[0u32, 0u32], [1u32, 0u32]], expected: [true, false]);
-        test_reduce_axis0!(i64,  any, in = i64,  out = bool, rows: [[0i64, 0i64], [1i64, 0i64]], expected: [true, false]);
-        test_reduce_axis0!(u64,  any, in = u64,  out = bool, rows: [[0u64, 0u64], [1u64, 0u64]], expected: [true, false]);
-        test_reduce_axis0!(f32,  any, in = f32,  out = bool, rows: [[0f32, 0f32], [1f32, 0f32]], expected: [true, false]);
-        test_reduce_axis0!(f64,  any, in = f64,  out = bool, rows: [[0f64, 0f64], [1f64, 0f64]], expected: [true, false]);
-        test_reduce_axis0!(bool, any, in = bool, out = bool, rows: [[false, false], [true, false]], expected: [true, false]);
+        [f16]
+    );
+    #[cfg(feature = "num-complex")]
+    test_reduction!(
+        sum,
+        |items| {
+            items.fold(Complex::<f64>::default(), |m, x| {
+                m + crate::ops::astype::cast::<_, Complex<f64>>(x)
+            })
+        },
+        [complex_f32, complex_f64],
+        op_safe_strategy
+    );
+    test_reduction!(
+        product,
+        |items| { items.fold(1u64, |m, x| m * x as u64) },
+        [u8, u16, u32, u64],
+        op_safe_strategy,
+        small_data = true
+    );
+    test_reduction!(
+        product,
+        |items| { items.fold(1i64, |m, x| m * x as i64) },
+        [i8, i16, i32, i64],
+        op_safe_strategy,
+        small_data = true
+    );
+    test_reduction!(
+        product,
+        |items| { items.fold(1.0f64, |m, x| m * crate::ops::astype::cast::<_, f64>(x)) },
+        [f32, f64],
+        op_safe_strategy,
         #[cfg(feature = "half")]
-        test_reduce_axis0!(f16, any, in = f16, out = bool,
-            rows: [[f16::from_f32(0.0), f16::from_f32(0.0)], [f16::from_f32(1.0), f16::from_f32(0.0)]],
-            expected: [true, false]);
-        #[cfg(feature = "num-complex")]
-        test_reduce_axis0!(complex_f32, any, in = Complex<f32>, out = bool,
-            rows: [[Complex { re: 0f32, im: 0f32 }, Complex { re: 0f32, im: 0f32 }],
-                   [Complex { re: 1f32, im: 0f32 }, Complex { re: 0f32, im: 0f32 }]],
-            expected: [true, false]);
-        #[cfg(feature = "num-complex")]
-        test_reduce_axis0!(complex_f64, any, in = Complex<f64>, out = bool,
-            rows: [[Complex { re: 0f64, im: 0f64 }, Complex { re: 0f64, im: 0f64 }],
-                   [Complex { re: 1f64, im: 0f64 }, Complex { re: 0f64, im: 0f64 }]],
-            expected: [true, false]);
-    }
-
-    // -----------------------------------------------------------------------
-    // argmax
-    // -----------------------------------------------------------------------
-
-    mod argmax {
-        use super::*;
-
-        // --- shape ---
-
-        #[test]
-        fn shape_axis0() {
-            // [3,4] reduced on axis 0 → [4]
-            assert_eq!(make(seq(12), &[3, 4]).argmax(0, false).shape(), &[4]);
-        }
-
-        #[test]
-        fn shape_axis1() {
-            // [3,4] reduced on axis 1 → [3]
-            assert_eq!(make(seq(12), &[3, 4]).argmax(1, false).shape(), &[3]);
-        }
-
-        #[test]
-        fn shape_1d() {
-            assert_eq!(make(seq(5), &[5]).argmax(0, false).shape(), &[] as &[u64]);
-        }
-
-        #[test]
-        fn keepdims_shape_axis0() {
-            assert_eq!(make(seq(12), &[3, 4]).argmax(0, true).shape(), &[1, 4]);
-        }
-
-        #[test]
-        fn keepdims_shape_axis1() {
-            assert_eq!(make(seq(12), &[3, 4]).argmax(1, true).shape(), &[3, 1]);
-        }
-
-        #[test]
-        fn keepdims_shape_middle_3d() {
-            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::compact_array(&nd).unwrap();
-            assert_eq!(a.argmax(1, true).shape(), &[2, 1, 4]);
-        }
-
-        // --- output dtype is always u64 ---
-
-        #[test]
-        fn output_dtype_is_u64() {
-            use crate::dtype::DtypeScalarKind;
-            assert_eq!(
-                make(seq(6), &[2, 3])
-                    .argmax(0, false)
-                    .dtype()
-                    .try_to_scalar(),
-                Some(DtypeScalarKind::U64)
-            );
-        }
-
-        // --- values ---
-
-        #[test]
-        fn read_axis0_i32() {
-            // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → argmax per col = [2,2,2,2]
-            let got: ArrayD<u64> = make(seq(12), &[3, 4])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![4], vec![2u64, 2, 2, 2]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_i32() {
-            // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → argmax per row = [3,3,3]
-            let got: ArrayD<u64> = make(seq(12), &[3, 4])
-                .argmax(1, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3], vec![3u64, 3, 3]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis0_not_last_row() {
-            // [[5,1],[2,8],[3,4]] → argmax per col: col0→0(5), col1→1(8)
-            let got: ArrayD<u64> = make(vec![5i32, 1, 2, 8, 3, 4], &[3, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
-        }
-
-        #[test]
-        fn read_1d() {
-            // [3,1,4,1,5] → argmax = 4
-            let got: ArrayD<u64> = make(vec![3i32, 1, 4, 1, 5], &[5])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![4u64]).unwrap());
-        }
-
-        #[test]
-        fn read_3d_middle_axis() {
-            // a[i,j,k] = i*12+j*4+k; max is always at j=2 → argmax=2
-            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::compact_array(&nd).unwrap();
-            let got: ArrayD<u64> = a.argmax(1, false).to_ndarray().unwrap();
-            let expected = vec![2u64; 8];
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2, 4], expected).unwrap());
-        }
-
-        #[test]
-        fn keepdims_read_axis0_i32() {
-            let got: ArrayD<u64> = make(seq(12), &[3, 4]).argmax(0, true).to_ndarray().unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![1, 4], vec![2u64, 2, 2, 2]).unwrap()
-            );
-        }
-
-        #[test]
-        fn keepdims_read_axis1_i32() {
-            let got: ArrayD<u64> = make(seq(12), &[3, 4]).argmax(1, true).to_ndarray().unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3, 1], vec![3u64, 3, 3]).unwrap()
-            );
-        }
-
-        // --- dtype coverage ---
-
-        #[test]
-        fn dtype_i8() {
-            let got: ArrayD<u64> = make(vec![1i8, 4i8, 3i8, 2i8], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            // col0: max(1,3)=3 at idx 1; col1: max(4,2)=4 at idx 0
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_u8() {
-            let got: ArrayD<u64> = make(vec![1u8, 4u8, 3u8, 2u8], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_i16() {
-            let got: ArrayD<u64> = make(vec![1i16, 4i16, 3i16, 2i16], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_u16() {
-            let got: ArrayD<u64> = make(vec![1u16, 4u16, 3u16, 2u16], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_u32() {
-            let got: ArrayD<u64> = make(vec![1u32, 4u32, 3u32, 2u32], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_i64() {
-            let got: ArrayD<u64> = make(vec![1i64, 4i64, 3i64, 2i64], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_u64() {
-            let got: ArrayD<u64> = make(vec![1u64, 4u64, 3u64, 2u64], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_f32() {
-            let got: ArrayD<u64> = make(vec![1f32, 4f32, 3f32, 2f32], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_f64() {
-            let got: ArrayD<u64> = make(vec![1f64, 4f64, 3f64, 2f64], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[test]
-        fn dtype_bool() {
-            // [[false, true], [true, false]] → argmax per col: col0→1(true), col1→0(true)
-            let got: ArrayD<u64> = make(vec![false, true, true, false], &[2, 2])
-                .argmax(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[cfg(feature = "half")]
-        #[test]
-        fn dtype_f16() {
-            let got: ArrayD<u64> = make(
-                vec![
-                    f16::from_f32(1.0),
-                    f16::from_f32(4.0),
-                    f16::from_f32(3.0),
-                    f16::from_f32(2.0),
-                ],
-                &[2, 2],
+        [f16],
+        small_data = true
+    );
+    #[cfg(feature = "num-complex")]
+    test_reduction!(
+        product,
+        |items| {
+            items.fold(
+                Complex::<f64>::default() + Complex::<f64>::new(1.0, 1.0),
+                |m, x| m * crate::ops::astype::cast::<_, Complex<f64>>(x),
             )
-            .argmax(0, false)
-            .to_ndarray()
-            .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        // --- error cases ---
-
-        #[test]
-        #[should_panic]
-        fn error_axis_out_of_bounds() {
-            make(seq(6), &[2, 3]).argmax(2, false);
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // argmin
-    // -----------------------------------------------------------------------
-
-    mod argmin {
-        use super::*;
-
-        // --- shape ---
-
-        #[test]
-        fn shape_axis0() {
-            assert_eq!(make(seq(12), &[3, 4]).argmin(0, false).shape(), &[4]);
-        }
-
-        #[test]
-        fn shape_axis1() {
-            assert_eq!(make(seq(12), &[3, 4]).argmin(1, false).shape(), &[3]);
-        }
-
-        #[test]
-        fn keepdims_shape_axis0() {
-            assert_eq!(make(seq(12), &[3, 4]).argmin(0, true).shape(), &[1, 4]);
-        }
-
-        #[test]
-        fn keepdims_shape_axis1() {
-            assert_eq!(make(seq(12), &[3, 4]).argmin(1, true).shape(), &[3, 1]);
-        }
-
-        // --- output dtype is always u64 ---
-
-        #[test]
-        fn output_dtype_is_u64() {
-            use crate::dtype::DtypeScalarKind;
-            assert_eq!(
-                make(seq(6), &[2, 3])
-                    .argmin(0, false)
-                    .dtype()
-                    .try_to_scalar(),
-                Some(DtypeScalarKind::U64)
-            );
-        }
-
-        // --- values ---
-
-        #[test]
-        fn read_axis0_i32() {
-            // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → argmin per col = [0,0,0,0]
-            let got: ArrayD<u64> = make(seq(12), &[3, 4])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![4], vec![0u64, 0, 0, 0]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_i32() {
-            // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] → argmin per row = [0,0,0]
-            let got: ArrayD<u64> = make(seq(12), &[3, 4])
-                .argmin(1, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3], vec![0u64, 0, 0]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis0_not_first_row() {
-            // [[5,8],[2,1],[3,4]] → argmin per col: col0→1(2), col1→1(1)
-            let got: ArrayD<u64> = make(vec![5i32, 8, 2, 1, 3, 4], &[3, 2])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 1]).unwrap());
-        }
-
-        #[test]
-        fn read_1d() {
-            // [3,1,4,1,5] → argmin = 1
-            let got: ArrayD<u64> = make(vec![3i32, 1, 4, 1, 5], &[5])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![1u64]).unwrap());
-        }
-
-        #[test]
-        fn read_3d_middle_axis() {
-            // a[i,j,k] = i*12+j*4+k; min is always at j=0 → argmin=0
-            let nd = ArrayD::from_shape_vec(vec![2, 3, 4], seq(24)).unwrap();
-            let a = Array::compact_array(&nd).unwrap();
-            let got: ArrayD<u64> = a.argmin(1, false).to_ndarray().unwrap();
-            let expected = vec![0u64; 8];
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2, 4], expected).unwrap());
-        }
-
-        #[test]
-        fn keepdims_read_axis0_i32() {
-            let got: ArrayD<u64> = make(seq(12), &[3, 4]).argmin(0, true).to_ndarray().unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![1, 4], vec![0u64, 0, 0, 0]).unwrap()
-            );
-        }
-
-        #[test]
-        fn keepdims_read_axis1_i32() {
-            let got: ArrayD<u64> = make(seq(12), &[3, 4]).argmin(1, true).to_ndarray().unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3, 1], vec![0u64, 0, 0]).unwrap()
-            );
-        }
-
-        // --- dtype coverage ---
-
-        #[test]
-        fn dtype_i8() {
-            let got: ArrayD<u64> = make(vec![1i8, 4i8, 3i8, 2i8], &[2, 2])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            // col0: min(1,3)=1 at idx 0; col1: min(4,2)=2 at idx 1
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
-        }
-
-        #[test]
-        fn dtype_u8() {
-            let got: ArrayD<u64> = make(vec![1u8, 4u8, 3u8, 2u8], &[2, 2])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
-        }
-
-        #[test]
-        fn dtype_i16() {
-            let got: ArrayD<u64> = make(vec![1i16, 4i16, 3i16, 2i16], &[2, 2])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
-        }
-
-        #[test]
-        fn dtype_u32() {
-            let got: ArrayD<u64> = make(vec![1u32, 4u32, 3u32, 2u32], &[2, 2])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
-        }
-
-        #[test]
-        fn dtype_f32() {
-            let got: ArrayD<u64> = make(vec![1f32, 4f32, 3f32, 2f32], &[2, 2])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
-        }
-
-        #[test]
-        fn dtype_f64() {
-            let got: ArrayD<u64> = make(vec![1f64, 4f64, 3f64, 2f64], &[2, 2])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
-        }
-
-        #[test]
-        fn dtype_bool() {
-            // [[true, false], [false, true]] → argmin per col: col0→1(false), col1→0(false)
-            let got: ArrayD<u64> = make(vec![true, false, false, true], &[2, 2])
-                .argmin(0, false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![1u64, 0]).unwrap());
-        }
-
-        #[cfg(feature = "half")]
-        #[test]
-        fn dtype_f16() {
-            let got: ArrayD<u64> = make(
-                vec![
-                    f16::from_f32(1.0),
-                    f16::from_f32(4.0),
-                    f16::from_f32(3.0),
-                    f16::from_f32(2.0),
-                ],
-                &[2, 2],
-            )
-            .argmin(0, false)
-            .to_ndarray()
-            .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![2], vec![0u64, 1]).unwrap());
-        }
-
-        // --- error cases ---
-
-        #[test]
-        #[should_panic]
-        fn error_axis_out_of_bounds() {
-            make(seq(6), &[2, 3]).argmin(2, false);
-        }
-    }
-
-    // -----------------------------------------------------------------------
+        },
+        [complex_f32, complex_f64],
+        op_safe_strategy,
+        small_data = true
+    );
     // mean
-    // -----------------------------------------------------------------------
+    test_reduction!(
+        mean,
+        |items| {
+            {
+                let mut sum: f64 = 0.0;
+                let mut count: usize = 0;
+                for x in items {
+                    sum += crate::ops::astype::cast::<_, f64>(x);
+                    count += 1;
+                }
+                sum / count as f64
+            }
+        },
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+    #[cfg(feature = "num-complex")]
+    test_reduction!(
+        mean,
+        |items| {
+            {
+                let mut sum: Complex<f64> = Complex::default();
+                let mut count: usize = 0;
+                for x in items {
+                    sum += crate::ops::astype::cast::<_, Complex<f64>>(x);
+                    count += 1;
+                }
+                sum / Complex::new(count as f64, 0.0)
+            }
+        },
+        [complex_f32, complex_f64],
+        op_safe_strategy
+    );
+    #[test]
+    fn variance() {
+        let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
+        let var_all = a
+            .as_ref()
+            .var(&[0, 1], false, 0.0)
+            .to_ndarray::<f64>()
+            .unwrap();
+        assert!((var_all[[]] - 2.9166).abs() < 0.001);
+        let var_col = a
+            .as_ref()
+            .var(&[0], false, 0.0)
+            .to_ndarray::<f64>()
+            .unwrap();
+        assert!((var_col[[0]] - 2.25).abs() < 0.001);
+        let var_row = a.as_ref().var(&[1], true, 0.0).to_ndarray::<f64>().unwrap();
+        assert!((var_row[[0, 0]] - 0.6666).abs() < 0.001);
+    }
+    #[test]
+    fn std() {
+        let a = Array::compact_array(&array![[7i32, 8, 9], [4, 5, 6]]).unwrap();
+        let std_all = a
+            .as_ref()
+            .std(&[0, 1], false, 0.0)
+            .to_ndarray::<f64>()
+            .unwrap();
+        assert!((std_all[[]] - 1.7078).abs() < 0.001);
+        let std_col = a
+            .as_ref()
+            .std(&[0], false, 0.0)
+            .to_ndarray::<f64>()
+            .unwrap();
+        assert!((std_col[[0]] - 1.5).abs() < 0.001);
+        let std_row = a.as_ref().std(&[1], true, 0.0).to_ndarray::<f64>().unwrap();
+        assert!((std_row[[0, 0]] - 0.8164).abs() < 0.001);
+    }
+    test_reduction!(
+        all,
+        |items| { items.fold(true, |m, x| m && crate::ops::astype::cast::<_, bool>(x)) },
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        logical_op_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_reduction!(
+        any,
+        |items| { items.fold(false, |m, x| m || crate::ops::astype::cast::<_, bool>(x)) },
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        logical_op_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
 
-    mod mean {
-        use super::*;
+    fn ndarray_reduce<'a, S, D, O>(
+        array: &'a ndarray::ArrayBase<S, D>,
+        axes: &[usize],
+        keepdims: bool,
+        f: impl Fn(&ndarray::ArrayViewD<'a, S::Elem>) -> O,
+    ) -> ndarray::ArrayD<O>
+    where
+        S: ndarray::Data,
+        D: ndarray::Dimension,
+    {
+        // Output shape = original with reduction axes removed
+        let mut axes = axes.to_vec();
+        axes.sort_unstable();
+        axes.dedup();
 
-        #[test]
-        fn output_dtype_i32_to_f64() {
-            use crate::dtype::DtypeScalarKind;
-            let a: Array<_> = make(seq(6), &[2, 3]);
-            assert_eq!(
-                a.mean(&[0], false).dtype().try_to_scalar(),
-                Some(DtypeScalarKind::F64)
-            );
+        let out_shape: Vec<usize> = array
+            .shape()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !axes.contains(i))
+            .map(|(_, &s)| s)
+            .collect();
+
+        // Iterate over kept axes, each view spans the reduction axes → f collapses it to scalar
+        let values: Vec<O> = ndarray_reduction_iter(array, &axes)
+            .map(|(_, view)| f(&view))
+            .collect();
+
+        let mut result =
+            ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&out_shape), values).unwrap();
+        if keepdims {
+            // Insert singleton dimensions at the reduced axes
+            let mut final_shape = result.shape().to_vec();
+            for &ax in axes.iter() {
+                final_shape.insert(ax, 1);
+            }
+            result = result.into_shape_with_order(final_shape).unwrap();
         }
-
-        #[test]
-        fn read_axis0_f64() {
-            // [[0,2,4],[2,4,6]] mean over rows → [1,3,5]
-            let got: ArrayD<f64> = make(vec![0.0f64, 2.0, 4.0, 2.0, 4.0, 6.0], &[2, 3])
-                .mean(&[0], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![3], vec![1.0f64, 3.0, 5.0]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_axis1_f64() {
-            // [[0,2,4],[2,4,6]] mean over cols → [2,4]
-            let got: ArrayD<f64> = make(vec![0.0f64, 2.0, 4.0, 2.0, 4.0, 6.0], &[2, 3])
-                .mean(&[1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![2.0f64, 4.0]).unwrap()
-            );
-        }
-
-        #[test]
-        fn read_all_axes_i32() {
-            // mean of [0..5] = 2.5
-            let got: ArrayD<f64> = make(vec![0i32, 1, 2, 3, 4, 5], &[2, 3])
-                .mean(&[0, 1], false)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![], vec![2.5f64]).unwrap());
-        }
-
-        #[test]
-        fn keepdims_shape() {
-            assert_eq!(make(seq(12), &[3, 4]).mean(&[0], true).shape(), &[1, 4]);
-        }
+        result
     }
 
-    // -----------------------------------------------------------------------
-    // var
-    // -----------------------------------------------------------------------
+    /// Iterates over all index combinations of the **kept** axes (i.e. axes NOT in `axes`),
+    /// yielding for each combination the multi-index into the kept axes and a view spanning
+    /// the reduction axes.
+    fn ndarray_reduction_iter<'a, S, D>(
+        array: &'a ndarray::ArrayBase<S, D>,
+        axes: &[usize],
+    ) -> impl Iterator<Item = (Vec<usize>, ndarray::ArrayViewD<'a, S::Elem>)> + 'a
+    where
+        S: ndarray::Data,
+        D: ndarray::Dimension,
+    {
+        let mut axes = axes.to_vec();
+        axes.sort_unstable();
+        axes.dedup();
 
-    mod var {
-        use super::*;
+        // Kept axes = all axes not being reduced
+        let ndim = array.ndim();
+        let kept_axes: Vec<usize> = (0..ndim).filter(|i| !axes.contains(i)).collect();
 
-        #[test]
-        fn output_dtype_i32_to_f64() {
-            use crate::dtype::DtypeScalarKind;
-            let a: Array<_> = make(seq(4), &[2, 2]);
-            assert_eq!(
-                a.var(&[0], false, 0.0).dtype().try_to_scalar(),
-                Some(DtypeScalarKind::F64)
-            );
-        }
+        // Shape of the kept axes — this is what we iterate over
+        let kept_shape: Vec<usize> = kept_axes.iter().map(|&ax| array.shape()[ax]).collect();
+        let total: usize = kept_shape.iter().product();
 
-        #[test]
-        fn population_variance_1d() {
-            // [1,3]: mean=2, var_0 = 1.0
-            let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
-                .var(&[1], false, 0.0)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1.0f64]).unwrap());
-        }
+        (0..total).map(move |flat_idx| {
+            // Convert flat index to multi-index over the kept axes
+            let mut remaining = flat_idx;
+            let mut kept_indices: Vec<usize> = Vec::with_capacity(kept_axes.len());
+            for &dim_size in kept_shape.iter().rev() {
+                kept_indices.push(remaining % dim_size);
+                remaining /= dim_size;
+            }
+            kept_indices.reverse();
 
-        #[test]
-        fn sample_variance_1d() {
-            // [1,3]: mean=2, var_1 = 2.0
-            let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
-                .var(&[1], false, 1.0)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![2.0f64]).unwrap());
-        }
+            // Fix each kept axis to its index, remove in descending order.
+            // We remove kept axes (which are the non-reduction axes), leaving
+            // a view over the reduction axes.
+            let mut view = array.view().into_dyn();
 
-        #[test]
-        fn read_axis0_f64() {
-            // [[1,3],[3,7]]: col means=[2,5], var_0 per col = [1,4]
-            let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
-                .var(&[0], false, 0.0)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![1.0f64, 4.0]).unwrap()
-            );
-        }
+            // We must track axis offset: as we remove axes, remaining axis
+            // indices shift down. Process kept axes in descending order.
+            let mut pairs: Vec<(usize, usize)> = kept_axes
+                .iter()
+                .copied()
+                .zip(kept_indices.iter().copied())
+                .collect();
+            pairs.sort_unstable_by(|a, b| b.0.cmp(&a.0));
 
-        #[test]
-        fn read_axis1_f64() {
-            // [[1,3],[3,7]]: row means=[2,5], var_0 per row = [1,4]
-            let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
-                .var(&[1], false, 0.0)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![1.0f64, 4.0]).unwrap()
-            );
-        }
+            for (ax, idx) in &pairs {
+                view = view.index_axis_move(ndarray::Axis(*ax), *idx);
+            }
 
-        #[test]
-        fn ddof_exceeds_n_gives_nan() {
-            // ddof=2 with n=1 → NAN
-            let got: ArrayD<f64> = make(vec![1.0f64], &[1, 1])
-                .var(&[1], false, 2.0)
-                .to_ndarray()
-                .unwrap();
-            assert!(got.iter().all(|v| v.is_nan()));
-        }
+            (kept_indices, view)
+        })
     }
 
-    // -----------------------------------------------------------------------
-    // std
-    // -----------------------------------------------------------------------
+    mod ndarray_reduce_tests {
+        use super::{ndarray_reduce, ndarray_reduction_iter};
+        use ndarray::*;
 
-    mod std {
-        use super::*;
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            use ndarray::{array, Array, ArrayD, IxDyn};
 
-        #[test]
-        fn output_dtype_i32_to_f64() {
-            use crate::dtype::DtypeScalarKind;
-            let a: Array<_> = make(seq(4), &[2, 2]);
-            assert_eq!(
-                a.std(&[0], false, 0.0).dtype().try_to_scalar(),
-                Some(DtypeScalarKind::F64)
-            );
-        }
+            #[test]
+            fn single_axis_0() {
+                // Shape [2, 3], reduce axis 0 → 3 views of shape [2]
+                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let views: Vec<_> = ndarray_reduction_iter(&a, &[0]).collect();
 
-        #[test]
-        fn population_std_1d() {
-            // [1,3]: mean=2, std_0 = 1.0
-            let got: ArrayD<f64> = make(vec![1.0f64, 3.0], &[1, 2])
-                .std(&[1], false, 0.0)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1.0f64]).unwrap());
-        }
+                assert_eq!(views.len(), 3);
+                for (_, v) in &views {
+                    assert_eq!(v.shape(), &[2]);
+                }
 
-        #[test]
-        fn read_axis0_f64() {
-            // [[1,3],[3,7]]: var_0 per col = [1,4], std = [1,2]
-            let got: ArrayD<f64> = make(vec![1.0f64, 3.0, 3.0, 7.0], &[2, 2])
-                .std(&[0], false, 0.0)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(
-                got,
-                ArrayD::from_shape_vec(vec![2], vec![1.0f64, 2.0]).unwrap()
-            );
-        }
+                // kept axis is 1, so indices are [0], [1], [2]
+                // view[0] = a[:, 0] = [1, 4]
+                assert_eq!(views[0].0, vec![0]);
+                assert_eq!(views[0].1, array![1, 4].into_dyn());
+                // view[1] = a[:, 1] = [2, 5]
+                assert_eq!(views[1].0, vec![1]);
+                assert_eq!(views[1].1, array![2, 5].into_dyn());
+                // view[2] = a[:, 2] = [3, 6]
+                assert_eq!(views[2].0, vec![2]);
+                assert_eq!(views[2].1, array![3, 6].into_dyn());
+            }
 
-        #[test]
-        fn classic_8_elements() {
-            // [2,4,4,4,5,5,7,9]: mean=5, var=4, std=2 (ddof=0)
-            let got: ArrayD<f64> = make(vec![2.0f64, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0], &[1, 8])
-                .std(&[1], false, 0.0)
-                .to_ndarray()
-                .unwrap();
-            assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![2.0f64]).unwrap());
-        }
+            #[test]
+            fn single_axis_1() {
+                // Shape [2, 3], reduce axis 1 → 2 views of shape [3]
+                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let views: Vec<_> = ndarray_reduction_iter(&a, &[1]).collect();
 
-        #[test]
-        fn ddof_exceeds_n_gives_nan() {
-            let got: ArrayD<f64> = make(vec![1.0f64], &[1, 1])
-                .std(&[1], false, 2.0)
-                .to_ndarray()
-                .unwrap();
-            assert!(got.iter().all(|v| v.is_nan()));
+                assert_eq!(views.len(), 2);
+                for (_, v) in &views {
+                    assert_eq!(v.shape(), &[3]);
+                }
+
+                // kept axis is 0, so indices are [0], [1]
+                // view[0] = a[0, :] = [1, 2, 3]
+                assert_eq!(views[0].0, vec![0]);
+                assert_eq!(views[0].1, array![1, 2, 3].into_dyn());
+                // view[1] = a[1, :] = [4, 5, 6]
+                assert_eq!(views[1].0, vec![1]);
+                assert_eq!(views[1].1, array![4, 5, 6].into_dyn());
+            }
+
+            #[test]
+            fn multi_axis_3d() {
+                // Shape [2, 3, 4], reduce axes [0, 2] → 3 views of shape [2, 4]
+                let a = Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+                let views: Vec<_> = ndarray_reduction_iter(&a, &[0, 2]).collect();
+
+                assert_eq!(views.len(), 3);
+                for (_, v) in &views {
+                    assert_eq!(v.shape(), &[2, 4]);
+                }
+
+                // kept axis is 1, indices are [0], [1], [2]
+                // view[0] = a[:, 0, :] = [[0,1,2,3],[12,13,14,15]]
+                assert_eq!(views[0].0, vec![0]);
+                assert_eq!(
+                    views[0].1,
+                    array![[0, 1, 2, 3], [12, 13, 14, 15]].into_dyn()
+                );
+                // view[1] = a[:, 1, :] = [[4,5,6,7],[16,17,18,19]]
+                assert_eq!(views[1].0, vec![1]);
+                assert_eq!(
+                    views[1].1,
+                    array![[4, 5, 6, 7], [16, 17, 18, 19]].into_dyn()
+                );
+                // view[2] = a[:, 2, :] = [[8,9,10,11],[20,21,22,23]]
+                assert_eq!(views[2].0, vec![2]);
+                assert_eq!(
+                    views[2].1,
+                    array![[8, 9, 10, 11], [20, 21, 22, 23]].into_dyn()
+                );
+            }
+
+            #[test]
+            fn reduce_all_axes() {
+                // Shape [2, 3], reduce both → 1 view of shape [2, 3] (no kept axes)
+                let a =
+                    Array::from_shape_vec(IxDyn(&[2, 3]), vec![10, 20, 30, 40, 50, 60]).unwrap();
+                let views: Vec<_> = ndarray_reduction_iter(&a, &[0, 1]).collect();
+
+                assert_eq!(views.len(), 1);
+                assert_eq!(views[0].0, Vec::<usize>::new());
+                assert_eq!(views[0].1, array![[10, 20, 30], [40, 50, 60]].into_dyn());
+            }
+
+            #[test]
+            fn no_axes_returns_scalar_views() {
+                // Reduce no axes → 6 scalar views (iterate over everything)
+                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let views: Vec<_> = ndarray_reduction_iter(&a, &[]).collect();
+
+                assert_eq!(views.len(), 6);
+                for (_, v) in &views {
+                    assert_eq!(v.shape(), &[] as &[usize]);
+                }
+
+                assert_eq!(views[0].0, vec![0, 0]);
+                assert_eq!(*views[0].1.first().unwrap(), 1);
+                assert_eq!(views[1].0, vec![0, 1]);
+                assert_eq!(*views[1].1.first().unwrap(), 2);
+                assert_eq!(views[5].0, vec![1, 2]);
+                assert_eq!(*views[5].1.first().unwrap(), 6);
+            }
+
+            #[test]
+            fn axes_order_independent() {
+                // [0, 2] and [2, 0] should yield identical results
+                let a = Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+
+                let v1: Vec<_> = ndarray_reduction_iter(&a, &[0, 2]).collect();
+                let v2: Vec<_> = ndarray_reduction_iter(&a, &[2, 0]).collect();
+
+                assert_eq!(v1.len(), v2.len());
+                for ((idx1, view1), (idx2, view2)) in v1.iter().zip(v2.iter()) {
+                    assert_eq!(idx1, idx2);
+                    assert_eq!(view1, view2);
+                }
+            }
+
+            #[test]
+            fn dim_1_reduce_axis_0() {
+                // Shape [5], reduce axis 0 → 1 view of shape [5] (no kept axes)
+                let a = Array::from_shape_vec(IxDyn(&[5]), vec![10, 20, 30, 40, 50]).unwrap();
+                let views: Vec<_> = ndarray_reduction_iter(&a, &[0]).collect();
+
+                assert_eq!(views.len(), 1);
+                assert_eq!(views[0].0, Vec::<usize>::new());
+                assert_eq!(views[0].1, array![10, 20, 30, 40, 50].into_dyn());
+            }
+
+            #[test]
+            fn reduce_middle_axis() {
+                // Shape [2, 3, 4], reduce axis 1 → 2*4=8 views of shape [3]
+                let a = Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+                let views: Vec<_> = ndarray_reduction_iter(&a, &[1]).collect();
+
+                assert_eq!(views.len(), 8);
+                for (_, v) in &views {
+                    assert_eq!(v.shape(), &[3]);
+                }
+
+                // kept axes are [0, 2]
+                // view[0]: kept=[0,0] → a[0, :, 0] = [0, 4, 8]
+                assert_eq!(views[0].0, vec![0, 0]);
+                assert_eq!(views[0].1, array![0, 4, 8].into_dyn());
+                // view[3]: kept=[0,3] → a[0, :, 3] = [3, 7, 11]
+                assert_eq!(views[3].0, vec![0, 3]);
+                assert_eq!(views[3].1, array![3, 7, 11].into_dyn());
+                // view[4]: kept=[1,0] → a[1, :, 0] = [12, 16, 20]
+                assert_eq!(views[4].0, vec![1, 0]);
+                assert_eq!(views[4].1, array![12, 16, 20].into_dyn());
+                // view[7]: kept=[1,3] → a[1, :, 3] = [15, 19, 23]
+                assert_eq!(views[7].0, vec![1, 3]);
+                assert_eq!(views[7].1, array![15, 19, 23].into_dyn());
+            }
+
+            // --- ndarray_reduce tests ---
+
+            #[test]
+            fn reduce_sum_axis_0() {
+                // np.sum(a, axis=0) for shape [2, 3]
+                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let result = ndarray_reduce(&a, &[0], false, |v| v.iter().sum::<i32>());
+
+                assert_eq!(result.shape(), &[3]);
+                assert_eq!(result, array![5, 7, 9].into_dyn());
+            }
+
+            #[test]
+            fn reduce_sum_axis_1() {
+                // np.sum(a, axis=1) for shape [2, 3]
+                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let result = ndarray_reduce(&a, &[1], false, |v| v.iter().sum::<i32>());
+
+                assert_eq!(result.shape(), &[2]);
+                assert_eq!(result, array![6, 15].into_dyn());
+            }
+
+            #[test]
+            fn reduce_sum_multi_axis() {
+                // np.sum(a, axis=(0, 2)) for shape [2, 3, 4]
+                let a: ArrayD<i32> =
+                    Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+                let result = ndarray_reduce(&a, &[0, 2], false, |v| v.iter().sum::<i32>());
+
+                assert_eq!(result.shape(), &[3]);
+                // axis 1 index 0: sum of a[:, 0, :] = sum(0..4) + sum(12..16) = 6 + 54 = 60
+                // axis 1 index 1: sum of a[:, 1, :] = sum(4..8) + sum(16..20) = 22 + 70 = 92
+                // axis 1 index 2: sum of a[:, 2, :] = sum(8..12) + sum(20..24) = 38 + 86 = 124
+                assert_eq!(result, array![60, 92, 124].into_dyn());
+            }
+
+            #[test]
+            fn reduce_all_axes_to_scalar() {
+                // np.sum(a) — reduce everything
+                let a: ArrayBase<OwnedRepr<i32>, Dim<IxDynImpl>, i32> =
+                    Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let result = ndarray_reduce(&a, &[0, 1], false, |v| v.iter().sum::<i32>());
+
+                assert_eq!(result.shape(), &[] as &[usize]);
+                assert_eq!(*result.first().unwrap(), 21);
+            }
+
+            #[test]
+            fn reduce_no_axes_identity() {
+                // Reducing no axes → same shape, each element passed through f
+                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let result = ndarray_reduce(&a, &[], false, |v| *v.first().unwrap());
+
+                assert_eq!(result.shape(), &[2, 3]);
+                assert_eq!(result, array![[1, 2, 3], [4, 5, 6]].into_dyn());
+            }
+
+            #[test]
+            fn reduce_max_axis() {
+                // np.max(a, axis=0)
+                let a = Array::from_shape_vec(IxDyn(&[3, 2]), vec![5, 1, 3, 8, 7, 2]).unwrap();
+                let result = ndarray_reduce(&a, &[0], false, |v| *v.iter().max().unwrap());
+
+                assert_eq!(result.shape(), &[2]);
+                assert_eq!(result, array![7, 8].into_dyn());
+            }
         }
     }
 }

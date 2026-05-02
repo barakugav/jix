@@ -90,7 +90,7 @@ pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 
 macro_rules! bail {
     ($kind:ident, $($arg:tt)*) => {
-        return Err(crate::Error::new(crate::ErrorKind::$kind, format!($($arg)*)));
+        return Err(crate::Error::new(crate::ErrorKind::$kind, format!($($arg)*)))
     };
 }
 macro_rules! ensure {
