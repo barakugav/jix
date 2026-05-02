@@ -1,8 +1,297 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
-// This crate is a Rust port and independent evolution of ideas and
-//
-// See the `NOTICE` file in the repository root for full attribution and license text.
+//! A high-performance multi-dimensional array library with block-compressed, lazy-evaluated
+//! storage.
+//!
+//! Zix arrays behave like regular n-dimensional arrays, but store their data in independently
+//! compressed blocks and decode on demand. The library is designed around two ideas:
+//!
+//! - **Block-based compression** — the array is divided into an n-dimensional grid of fixed-size
+//!   blocks, each compressed independently. Only the blocks touched by a read request are
+//!   decompressed, enabling efficient random-access into large arrays without loading everything
+//!   into memory.
+//!
+//! - **Lazy operation chains** — every operation (arithmetic, shape manipulation, type cast,
+//!   reduction, ...) returns a new [`Array<OpStorage<...>>`](Array), rather than a materialized result.
+//!   Computation only runs when data is explicitly requested (e.g. via
+//!   [`.to_ndarray()`](Array::to_ndarray) or [`.copy()`](Array::copy)). Because the full
+//!   operation chain is encoded in the static type, the compiler can inline the entire pipeline
+//!   into a single read loop with no virtual dispatch very efficiently.
+//!
+//! # Quick start
+//!
+//! ```
+//! use zix::{Array, ArrayParams};
+//! use zix::dtype::Dtyped;
+//! use ndarray::array;
+//!
+//! // Compress a 2-D f32 ndarray into a block-compressed Array<Compact>.
+//! let a = Array::compact_array(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
+//! assert_eq!(a.shape(), &[2, 3]);
+//! assert_eq!(a.dtype(), &f32::DTYPE);
+//!
+//! // Decompress into a regular `ndarray::Array<f32>` array.
+//! let decompressed = a.to_ndarray::<f32>()?;
+//! assert_eq!(decompressed[[0, 0]], 1.5);
+//!
+//! // Build a lazy operation pipeline — no data is read yet.
+//! let ones = Array::compact_array(&ndarray::Array2::<f32>::ones((2, 3)))?;
+//! let result = a             // Array<Compact>
+//!     .exp()                 // Array<Exp<Compact>>
+//!     .floor()               // Array<Floor<Exp<Compact>>>
+//!     * 2.0f32               // Array<Mul<Floor<...>, Scalar<f32>>>
+//!     + ones;                // Array<Add<Mul<...>, Compact>>
+//!
+//! // Materialize the pipeline with a copy and persist to disk.
+//! let tmp_dir = tempfile::tempdir()?;
+//! result.copy()?.write_to_file(&tmp_dir.path().join("result.zix"))?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! # Core type: `Array<S>`
+//!
+//! [`Array<S>`](Array) is generic over its storage backend `S: ArrayStorage`. The storage
+//! trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else — slicing,
+//! arithmetic, reductions, serialization — is implemented on top of those three.
+//!
+//! The type parameter `S` carries the full operation chain at compile time:
+//!
+//! ```text
+//! Array<Compact>
+//!   .neg()                 -> Array<Neg<Compact>>
+//!   .reshape_view(...)       -> Array<Reshape<Neg<Compact>>>
+//!   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
+//!   .add(other)            -> Array<Add<PermuteAxes<...>, Compact>>
+//!   .sum(&[0], false)      -> Array<Sum<Add<...>>>
+//!   .copy()?               -> Array<Compact>  — materialize
+//! ```
+//!
+//! There is no runtime evaluation graph or scheduler. The type system *is* the execution plan.
+//!
+//! # Storage backends
+//!
+//! | Type | Description |
+//! |------|-------------|
+//! | [`Array<Compact>`](storage::Compact) | Heap-allocated block-compressed array. The main backend. |
+//! | [`Array<Op<...>>`](ops) | Lazy operation views defined in [`ops`]. Wrap one or more arrays; apply their transformation on each read. |
+//! | [`Array<Ref<'_, S>>`](storage::Ref) | Borrow of a storage without cloning. Created by [`Array::as_ref`]. |
+//! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray_view`]. |
+//! | [`Array<Scalar<T>>`](storage::Scalar) | A single scalar broadcast to any shape, used as an operand in expressions like `array + 1.0`. |
+//!
+//! # Operations
+//!
+//! All operations live in [`ops`] and are also available as methods on [`Array<S>`](Array).
+//! The support list of operations is still growing, but includes:
+//!
+//! **Element-wise unary** — `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
+//! `round`, `sign`, `sin`, `cos`, `tan`, ...
+//!
+//! **Element-wise binary** (array op array, or array op scalar, via `+`, `-`, `*`, `/`,
+//! operator overloads and named methods) — `add`, `sub`, `mul`, `div`, `powf`, `minimum`,
+//! `maximum`, ...
+//!
+//! **Comparisons** — `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
+//!
+//! **Logical** — `not`, `logical_and`, `logical_or`, `logical_xor`
+//!
+//! **Bitwise** — `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_not`
+//!
+//! **Reductions** — `sum`, `mean`, `min`, `max`, `argmin`, `argmax`, `any`, `all`, ...
+//!
+//! **Shape operations** — `reshape`, `slice`, `permute_axes`, `broadcast`,
+//! `insert_axes`, `remove_axes`, `concatenate`, `stack`
+//!
+//! ## Shape-changing operations and performance
+//!
+//! Shape-changing operations (`reshape`, `permute_axes`, `broadcast`) remap how output indices
+//! translate to positions in the underlying blocks. When the new layout crosses block boundaries
+//! that the original layout respected, a single read may decompress many more blocks than
+//! needed.
+//!
+//! To avoid this, call [`.copy()`](Array::copy) (or the eager variants `reshape`,
+//! `broadcast`) after a shape change to re-encode with a freshly derived block shape:
+//!
+//! ```
+//! use zix::{Array, ArrayParams};
+//!
+//! // Compress with column-friendly blocks.
+//! let mut params = ArrayParams::new();
+//! params.block_shape(&[64, 64]);
+//! let a = Array::compact_array_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
+//!
+//! // Transpose and re-encode with row-friendly blocks.
+//! let mut out_params = ArrayParams::new();
+//! out_params.block_shape(&[128, 128]);
+//! let ctx = a.read_ctx();
+//! let transposed = a.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
+//! # Ok::<(), zix::Error>(())
+//! ```
+//!
+//! # Element types (`Dtype`)
+//!
+//! The element type of an array is described at runtime by a [`Dtype`](dtype::Dtype), which
+//! records the kind, `itemsize`, and alignment of each element. Dtypes come in two flavors:
+//!
+//! **Scalar dtypes** cover all primitive numeric and boolean types:
+//! `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
+//! `Complex<f32>`, `Complex<f64>`, `bool`.
+//!
+//! **Struct dtypes** group named fields with explicit byte offsets, matching either C aligned
+//! (`#[repr(C)]`) or packed (`#[repr(C, packed)]`) layout. Fields can themselves be struct
+//! dtypes, enabling arbitrary nesting. This is similar to NumPy's structured dtypes.
+//!
+//! Both flavors support an *inner shape*: a small fixed-size sub-array baked into each logical
+//! element (e.g. `[f32; 3]` has dtype shape `[3]` and itemsize `12`). This is how Rust
+//! fixed-size arrays and NumPy sub-array dtypes are represented.
+//!
+//! The [`Dtyped`](dtype::Dtyped) trait (and its derive macro) maps a Rust type to its `Dtype`
+//! at compile time. Implement it for your own `#[repr(C)]` structs:
+//!
+//! ```rust,ignore
+//! use zix::dtype::{Dtype, Dtyped};
+//!
+//! #[derive(Copy, Clone, Dtyped)]
+//! #[repr(C)]
+//! struct Pixel { r: u8, g: u8, b: u8 }
+//!
+//! assert_eq!(Pixel::DTYPE.itemsize(), 3);
+//! let fields = Pixel::DTYPE.fields().unwrap();
+//! assert_eq!(fields[0].0, "r");
+//! ```
+//!
+//! # Codec pipeline
+//!
+//! Each compressed block passes through the following pipeline on write:
+//!
+//! ```text
+//! raw element bytes  →  [ByteShuffle filter]  →  Zstd compress  →  stored bytes
+//! ```
+//!
+//! On read, the pipeline is reversed. The byte-shuffle filter (enabled by default) rearranges
+//! bytes by significance before compression, improving Zstd's ratio on numerical data.
+//!
+//! Codec settings are controlled via [`ArrayParams`]:
+//!
+//! - [`encoder_params`](ArrayParams::encoder_params) — codec choice, compression level, filter.
+//! - [`decoder_params`](ArrayParams::decoder_params) — decoder configuration.
+//!
+//! The codec and filter configuration is serialized into the array archive, so readers never need
+//! to know ahead of time which settings were used.
+//!
+//! # Block layout and performance
+//!
+//! The n-dimensional block shape has a large impact on both compression ratio and read
+//! performance. If the access pattern is known in advance, providing a matching block shape can
+//! improve performance significantly.
+//!
+//! When no block shape is specified, the library automatically selects one that fits within the
+//! L1 data cache: starting from a block shape of all-ones, it greedily increases each dimension
+//! (from last to first) as long as the block byte-size does not exceed the target size.
+//!
+//! [`ArrayParams`] groups all layout and codec settings. Unset fields are inherited from the
+//! source array when copying.
+//!
+//! For tile-at-a-time access patterns:
+//!
+//! ```
+//! use zix::{Array, ArrayParams};
+//!
+//! let data = ndarray::Array2::<f32>::zeros((512, 512));
+//!
+//! // Store with 64×64 blocks — one decompression per tile.
+//! let mut params = ArrayParams::new();
+//! params.block_shape(&[64, 64]);
+//! let array = Array::compact_array_with(&data, params)?;
+//!
+//! let context = array.read_ctx();
+//! for tile_row in 0..7 {
+//!   for tile_col in 0..7 {
+//!     let row_range = (tile_row * 64)..((tile_row + 2) * 64);
+//!     let col_range = (tile_col * 64)..((tile_col + 2) * 64);
+//!     let tile = array.to_ndarray_sub::<f32>(&[row_range, col_range], &context)?;
+//!     println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
+//!   }
+//! }
+//! # Ok::<(), zix::Error>(())
+//! ```
+//!
+//! # Serialization (`.zix` files)
+//!
+//! Arrays are serialized to a binary archive format (`.zix`). The format is defined via Protocol
+//! Buffers and stores the array shape, block shape, codec configuration, and the compressed block
+//! data. Multiple arrays can be packed into a single file back-to-back; each is read back
+//! independently using a byte offset and length.
+//!
+//! The primary I/O methods are on [`Array`]:
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | [`write_to_file`](Array::write_to_file) | Write to a new file. |
+//! | [`read_from_file`](Array::read_from_file) | Load from file into heap-allocated storage. |
+//! | [`read_from_file_mmap`](Array::read_from_file_mmap) | Memory-map a file for zero-copy block access. |
+//!
+//! A key property: **a lazy view array can be written directly to a file without ever
+//! materializing the full result in memory**. The write path compresses block by block, reading
+//! from the source lazily:
+//!
+//! ```
+//! use std::io::BufWriter;
+//! use std::fs::File;
+//! use zix::{Array, ArrayParams};
+//! use ndarray::array;
+//!
+//! let tmp_dir = tempfile::tempdir()?;
+//! let path = tmp_dir.path().join("large.zix");
+//! Array::compact_array(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
+//! let len = std::fs::metadata(&path)?.len();
+//!
+//! // Memory-map the source — blocks are paged in on demand.
+//! // Safety: the file is not modified while `src` is live.
+//! let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
+//! let context = src.read_ctx();
+//!
+//! // Build a lazy pipeline over the mmap'd data.
+//! let processed = src.exp() + 1.0f32;
+//!
+//! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
+//! processed.write_to_with(
+//!     BufWriter::new(File::create(tmp_dir.path().join("modified.zix"))?),
+//!     ArrayParams::default(),
+//!     &context,
+//! )?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! # Reusing arrays with `as_ref`
+//!
+//! Most operations consume ownership of the array. To use an array in multiple operations
+//! without cloning its storage, call [`as_ref`](Array::as_ref) to create a borrow:
+//!
+//! ```
+//! use zix::Array;
+//! use ndarray::array;
+//!
+//! let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
+//! let b = a.as_ref() + 1.0f32;     // Array<Add<Ref<Compact>, Scalar<f32>>>
+//! let c = a.as_ref() * b;          // reuse a without cloning
+//! assert_eq!(c.to_ndarray::<f32>()?[[1, 1]], 6.17 * (6.17 + 1.0));
+//! # Ok::<(), zix::Error>(())
+//! ```
+//!
+//! # Limits
+//!
+//! - Maximum array dimensions: [`NDIM_MAX`] (8).
+//! - Maximum dtype inner-shape dimensions: [`dtype::DTYPE_MAX_NDIM`] (4).
+//! - Little-endian targets only — enforced by a compile-time assertion.
+//! - Element types must implement [`Dtyped`](dtype::Dtyped); they must be `Copy + Send + Sync +
+//!   'static` and must not implement `Drop`.
+//!
+//! # Disclaimer
+//!
+//! This project would not exist without the work of several upstream authors and communities.
+//! Specifically, this project was greatly inspired by the [C-Blosc2](https://github.com/Blosc/c-blosc2) library.
+//! This crate can almost be seen as a port of ideas and natural Rust evolution of C-Blosc2.
+//! See the `THANKS.md` at the repository root for a more complete list of contributors and inspirations,
+//! and the `NOTICE` file for full attribution and license text.
 
 mod array;
 pub use array::Array;
