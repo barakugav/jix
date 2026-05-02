@@ -126,7 +126,7 @@ pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()>
             "Index range {range:?} has start greater than end at dimension {dim}"
         );
         ensure!(
-            range.start < dim_size && range.end <= dim_size,
+            range.end <= dim_size,
             InvalidIndex,
             "Index range {range:?} out of bounds for shape {shape:?} at dimension {dim}"
         );

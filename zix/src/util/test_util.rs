@@ -1,6 +1,9 @@
+use std::fmt::Debug;
+
 use crate::dtype::Dtyped;
 use crate::params::ArrayParams;
 use crate::storage::block::BlockSize;
+use crate::storage::Compact;
 use crate::util::AlignedBytes;
 
 // ---------------------------------------------------------------------------
@@ -179,4 +182,66 @@ impl ScalarStrategy for crate::dtype::Complex<f64> {
             })
             .boxed()
     }
+}
+
+pub(crate) fn ndarray_strategy<T>() -> impl Strategy<Value = ndarray::ArrayD<T>>
+where
+    T: ScalarStrategy + Debug,
+{
+    ndarray_strategy_generic(
+        prop::strategy::Union::new_weighted(vec![
+            // 1D
+            (8, proptest::collection::vec(1usize..=100, 1)),
+            (2, proptest::collection::vec(100..=1000, 1)),
+            // 2D
+            (8, proptest::collection::vec(1..=20, 2)),
+            (2, proptest::collection::vec(20..=50, 2)),
+            // 3D
+            (5, proptest::collection::vec(1..=16, 3)),
+            // 4D
+            (5, proptest::collection::vec(1..=10, 4)),
+            // Many dims
+            (3, proptest::collection::vec(1..=4, 1..=8)),
+            // Zero-length dims
+            (1, proptest::collection::vec(0..=3, 0..=8)),
+        ]),
+        T::any_strategy(),
+    )
+}
+
+pub(crate) fn ndarray_strategy_generic<T>(
+    shape: impl Strategy<Value = Vec<usize>>,
+    element: impl Strategy<Value = T> + Clone,
+) -> impl Strategy<Value = ndarray::ArrayD<T>>
+where
+    T: Debug,
+{
+    shape
+        .prop_flat_map(move |shape| {
+            let total_len: usize = shape.iter().product();
+            let elements = prop::collection::vec(element.clone(), total_len);
+            (Just(shape), elements)
+        })
+        .prop_map(|(shape, data)| {
+            ndarray::ArrayD::<T>::from_shape_vec(shape.as_slice(), data).unwrap()
+        })
+}
+
+pub(crate) fn compact_array_strategy<T>(
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact>)>
+where
+    T: ScalarStrategy + Debug,
+{
+    ndarray_strategy::<T>()
+        .prop_flat_map(|arr| {
+            let block_shape = prop::collection::vec(1u32..=4, arr.ndim());
+            (Just(arr), block_shape)
+        })
+        .prop_map(|(arr, block_shape)| {
+            let block_shape = block_shape;
+            let mut params = ArrayParams::default();
+            params.block_shape(&block_shape);
+            let compact = crate::Array::compact_array_with(&arr, params).unwrap();
+            (arr, compact)
+        })
 }

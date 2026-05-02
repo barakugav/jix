@@ -186,7 +186,7 @@ where
     let mut written_offsets_num = 0;
 
     let mut block_data_total_len = 0;
-    let chunk = (64 * 1024 / compressed_block_size_bound).max(1) as u64; // try to write 64KB at a time
+    let chunk = (64 * 1024 / compressed_block_size_bound.max(1)).max(1) as u64; // try to write 64KB at a time
 
     // seek to data section, as we dont seek inside the loop and assume we are already at the data section
     writer

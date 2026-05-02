@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 251ab8156d69584c3db32423b15a1cf70b77005519c52cc120338e788fcf9e43 # shrinks to (src, a) = ([[]], shape=[0, 1], strides=[0, 0], layout=CFcf (0xf), dynamic ndim=2, Array { shape: [0, 1], dtype: Dtype::Scalar { scalar: U8, shape: [], itemsize: 1, alignment: 1 } })
+cc cdd80c4086a42636df5dc9dc8c9b5fb2fd2f953b9dd1d6df34892bd0fe5eee66 # shrinks to (src, a) = ([], shape=[0], strides=[0], layout=CFcf (0xf), dynamic ndim=1, Array { shape: [0], dtype: Dtype::Scalar { scalar: F32, shape: [], itemsize: 4, alignment: 4 } })
+cc f5020f247a27692c44c3572328811e0f60fd9bd464b1f9a66ebf28f297fd2d8f # shrinks to (src, a) = ([[]], shape=[0, 1], strides=[0, 0], layout=CFcf (0xf), dynamic ndim=2, Array { shape: [0, 1], dtype: Dtype::Scalar { scalar: F64, shape: [], itemsize: 8, alignment: 8 } })
+cc 0d8f89c6790dc04ebcaea168a6659a83d7ed5cc703e0f3f5c831dd14749523d6 # shrinks to (src, a) = ([], shape=[0], strides=[0], layout=CFcf (0xf), dynamic ndim=1, Array { shape: [0], dtype: Dtype::Scalar { scalar: I32, shape: [], itemsize: 4, alignment: 4 } })

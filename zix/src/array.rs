@@ -864,6 +864,15 @@ impl<S: ArrayStorage> Array<S> {
     }
 }
 
+impl<S: ArrayStorage> std::fmt::Debug for Array<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Array")
+            .field("shape", &self.shape())
+            .field("dtype", &self.dtype())
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::{array, ArrayD};
