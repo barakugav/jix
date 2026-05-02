@@ -1,3 +1,4 @@
+
 use crate::util::{dim_arr, DimArray, Idx};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.

@@ -573,3 +573,52 @@ where
     define_array_op1_method!(swap_bytes: SwapBytes);
     define_array_op1_method!(reverse_bits: ReverseBits);
 }
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "half")]
+    use crate::dtype::f16;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f32 = crate::dtype::Complex<f32>;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f64 = crate::dtype::Complex<f64>;
+    use crate::ops::tests::test_op1;
+
+    // any_strategy: need zeros in the sample to exercise the true branch of logical_not.
+    // Reference: a == Default::default() is equivalent to !cast::<_, bool>(a) for all types.
+    test_op1!(
+        logical_not,
+        |a| a == Default::default(),
+        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+        any_strategy,
+        #[cfg(feature = "half")] [f16],
+        #[cfg(feature = "num-complex")] [complex_f32, complex_f64]
+    );
+    // bitwise_not: !a, full range is valid (no overflow for bitwise complement)
+    test_op1!(
+        bitwise_not,
+        |a| !a,
+        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
+        any_strategy
+    );
+    // bit-counting ops: full range is valid, output is u32
+    test_op1!(count_ones,    |a| a.count_ones(),    [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy);
+    test_op1!(count_zeros,   |a| a.count_zeros(),   [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy);
+    test_op1!(leading_zeros, |a| a.leading_zeros(), [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy);
+    test_op1!(trailing_zeros, |a| a.trailing_zeros(), [i8, i16, i32, i64, u8, u16, u32, u64], any_strategy);
+    // byte/bit permutation ops: same output type, full range is valid
+    test_op1!(
+        swap_bytes,
+        |a| a.swap_bytes(),
+        [i16, i32, i64, u16, u32, u64],
+        any_strategy
+    );
+    test_op1!(
+        reverse_bits,
+        |a| a.reverse_bits(),
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        any_strategy
+    );
+}

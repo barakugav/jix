@@ -874,3 +874,103 @@ where
     define_array_op1_method!(signum: Signum);
     define_array_op1_method!(abs: Abs);
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    #[cfg(feature = "half")]
+    use crate::dtype::f16;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f32 = crate::dtype::Complex<f32>;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f64 = crate::dtype::Complex<f64>;
+
+    macro_rules! test_op1_dtype {
+        ($op_method:ident, |$arg:ident| $body:expr, $dtype:ident, $strategy:ident) => {
+            paste::paste! {
+                proptest::proptest! {
+                    #[test]
+                    fn [<$op_method _ $dtype>](
+                        (nd, za) in crate::util::compact_array_strategy_generic::<$dtype>(
+                            <$dtype as crate::util::ScalarStrategy>::$strategy()
+                        )
+                    ) {
+                        #[allow(unused_imports)] use std::ops::Neg;
+                        let result = za.$op_method();
+                        let expected = nd.mapv(|$arg| $body);
+                        crate::util::assert_array_matches(&result, &expected);
+                    }
+                }
+            }
+        };
+    }
+
+    macro_rules! test_op1 {
+        (
+            $op_method:ident, |$arg:ident| $body:expr,
+            [$($dtype:ident),+ $(,)?], $strategy:ident
+            $(, #[cfg($cfg:meta)] [$($cfg_dtype:ident),+ $(,)?])*
+        ) => {
+            $(crate::ops::op1::tests::test_op1_dtype!($op_method, |$arg| $body, $dtype, $strategy);)+
+            $($(
+                #[cfg($cfg)]
+                crate::ops::op1::tests::test_op1_dtype!($op_method, |$arg| $body, $cfg_dtype, $strategy);
+            )+)*
+        };
+    }
+
+    pub(crate) use {test_op1, test_op1_dtype};
+
+    test_op1!(
+        neg,
+        |a| -a,
+        [i8, i16, i32, i64, f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_op1!(floor, |a| a.floor(), [f32, f64], op_safe_strategy);
+    test_op1!(ceil, |a| a.ceil(), [f32, f64], op_safe_strategy);
+    test_op1!(round, |a| a.round(), [f32, f64], op_safe_strategy);
+    test_op1!(sqrt, |a| a.sqrt(), [f32, f64], op_safe_strategy);
+    test_op1!(exp, |a| a.exp(), [f32, f64], op_safe_strategy);
+    test_op1!(ln, |a| a.ln(), [f32, f64], op_safe_strategy);
+    test_op1!(sin, |a| a.sin(), [f32, f64], op_safe_strategy);
+    test_op1!(cos, |a| a.cos(), [f32, f64], op_safe_strategy);
+    test_op1!(tan, |a| a.tan(), [f32, f64], op_safe_strategy);
+    // asin/acos domain is [-1, 1]: use unit_strategy to avoid NaN comparison failures.
+    test_op1!(asin, |a| a.asin(), [f32, f64], unit_strategy);
+    test_op1!(acos, |a| a.acos(), [f32, f64], unit_strategy);
+    test_op1!(atan, |a| a.atan(), [f32, f64], op_safe_strategy);
+    test_op1!(
+        signum,
+        |a| a.signum(),
+        [f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16]
+    );
+    // abs: same dtype for scalar types; complex types have a different output dtype (see below).
+    test_op1!(
+        abs,
+        |a| a.abs(),
+        [i8, i16, i32, i64, f32, f64],
+        op_safe_strategy
+    );
+    // TODO
+    // #[cfg(feature = "half")]
+    // [f16]
+
+    #[cfg(feature = "num-complex")]
+    mod complex {
+        use super::{complex_f32, complex_f64};
+
+        // abs on complex types: output dtype is the real component type, not the input dtype.
+        // Reference uses hypot to match the AbsImpl kernel exactly.
+        test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f32, op_safe_strategy);
+        test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f64, op_safe_strategy);
+    }
+}
