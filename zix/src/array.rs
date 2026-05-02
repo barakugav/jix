@@ -120,7 +120,7 @@ use crate::ArrayParams;
 /// // Materialize the result and write to a file.
 /// let result = scaled
 ///     .argmax(/* axis */ 1, /* keepdims */ false)  // Array<ArgMax<Add<Mul<...>, Compact>>>
-///     .astype(i16::DTYPE)                          // Array<AsType<ArgMax<Add<...>>>>
+///     .astype::<i16>()                             // Array<AsType<ArgMax<Add<...>>>>
 ///     // materialize the pipeline with a copy
 ///     .copy()?;                                    // Array<Compact>
 /// assert_eq!(result.shape(), &[2]);
@@ -653,11 +653,70 @@ impl<S: ArrayStorage> Array<S> {
         }
     }
 
+    /// Check if this array storage is compact block-compressed storage.
+    ///
+    /// This functions returns `true` for arrays that are stored in compact block-compressed form,
+    /// i.e. those created by [`compact_array`](Array::compact_array), [`copy`](Array::copy),
+    /// [`read_from_file`](Array::read_from_file), etc., and `false` for arrays with storage
+    /// implementations with uncompressed data, such as lazy operation views, plain ndarray views,
+    /// etc.
+    ///
+    /// # Example
+    /// ```
+    /// use zix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
+    /// assert!(a.is_compact());
+    ///
+    /// let b = a * 2.0f32; // Array<Mul<Compact, Scalar<f32>>>
+    /// assert!(!b.is_compact()); // b is a lazy view
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
+    pub fn is_compact(&self) -> bool {
+        self.storage().as_compact().is_some()
+    }
+
+    /// Ensure this array is in compact block-compressed form, re-compressing
+    /// if needed.
+    ///
+    /// If the array is already compact, the storage is kept as-is — no data is
+    /// copied or re-compressed. Otherwise the array is materialized block by
+    /// block into a new [`Compact`](crate::storage::Compact) storage using
+    /// default [`ArrayParams`].
+    ///
+    /// Use [`into_compact_with`](Self::into_compact_with) to control the block
+    /// shape and codec parameters.
+    ///
+    /// # Example
+    /// ```
+    /// use zix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
+    /// assert!(a.is_compact());
+    /// let a = a.into_compact()?; // a is already compact, so this is a no-op
+    ///
+    /// let b = a * 2.0f32; // Array<Mul<Compact, Scalar<f32>>>
+    /// assert!(!b.is_compact()); // b is a lazy view
+    /// let b = b.into_compact()?; // materialize b into compact form
+    /// assert!(b.is_compact());
+    /// # Ok::<(), zix::error::Error>(())
+    /// ```
     pub fn into_compact(self) -> Result<Array<IntoCompact<S>>> {
         let context = self.read_ctx();
         self.into_compact_with(ArrayParams::default(), &context)
     }
 
+    /// Ensure this array is in compact block-compressed form, re-compressing
+    /// if needed, with explicit control over parameters.
+    ///
+    /// Similar to [`into_compact`](Self::into_compact) but with explicit [`ArrayParams`].
+    ///
+    /// `params` controls the target block shape and compression settings. It is
+    /// **only used when the source is not already compact** — if `is_compact()`
+    /// returns `true`, the existing storage is wrapped zero-cost and `params` is
+    /// ignored.
     pub fn into_compact_with(
         self,
         params: ArrayParams,

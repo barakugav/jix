@@ -228,10 +228,47 @@ impl<'a, T> Array<Plain<PlainRef<'a, T>>> {
             .collect::<DimArray<_>>();
 
         let data_ptr = arr.as_ptr().cast::<u8>();
-        let allocation = PlainRef::new();
 
-        let storage = unsafe { Plain::new(allocation, data_ptr, &shape, &strides, T::DTYPE) }?;
+        unsafe { Self::plain_ndarray_ptr_impl(data_ptr, &shape, &strides, T::DTYPE) }
+    }
+
+    unsafe fn plain_ndarray_ptr_impl(
+        data_ptr: *const u8,
+        shape: &[u64],
+        strides: &[usize],
+        dtype: Dtype,
+    ) -> Result<Self> {
+        let allocation = PlainRef::new();
+        let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype) }?;
         Ok(Self::from_storage(storage))
+    }
+}
+impl<'a> Array<Plain<PlainRef<'a, u8>>> {
+    /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an external
+    /// allocation.
+    ///
+    /// No element data is copied.  The resulting array shares memory with the external allocation and is valid for its
+    /// lifetime `'a`. The buffer may be laid out in any order (C-contiguous, Fortran-contiguous, transposed, sliced
+    /// with gaps, etc.) as long as elements are aligned.
+    ///
+    /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
+    /// buffers as `Array`, for example to participate in math operations with compressed arrays.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure:
+    /// * `data_ptr` is a valid, non-dangling pointer for the lifetime of the returned `Array`.
+    /// * The memory region reachable via `data_ptr` and `strides` is valid to read for all index combinations in
+    ///   `0..shape[d]` on each dimension `d`.
+    /// * `data_ptr` and all strides are aligned to `dtype.alignment()`.
+    /// * Elements accessed by the data pointer must be valid for the specified `dtype`.
+    pub unsafe fn plain_ndarray_ptr(
+        data_ptr: *const u8,
+        shape: &[u64],
+        strides: &[usize],
+        dtype: Dtype,
+    ) -> Result<Self> {
+        unsafe { Self::plain_ndarray_ptr_impl(data_ptr, shape, strides, dtype) }
     }
 }
 

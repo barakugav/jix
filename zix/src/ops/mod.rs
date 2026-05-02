@@ -12,7 +12,7 @@
 //!
 //! ```text
 //! let result = array           // Array<Compact>
-//!     .astype(f32::DTYPE)      // Array<AsType<Compact>>
+//!     .astype::<f32>()         // Array<AsType<Compact>>
 //!     .floor()                 // Array<Floor<AsType<Compact>>>
 //!     .exp()                   // Array<Exp<Floor<AsType<Compact>>>>
 //!     .copy();                 // Array<Compact> - materialize the pipeline

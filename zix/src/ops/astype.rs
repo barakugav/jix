@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
-use crate::dtype::{f16, Complex, Dtype, DtypeScalarKind};
+use crate::dtype::{f16, Complex, Dtype, DtypeScalarKind, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
 use crate::util::DimArray;
@@ -11,23 +11,29 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    /// Casts the element type of the array to `dtype`. See [`AsType`] for details and examples.
+    /// Casts the element type of the array to `T`. See [`AsType`] for details and examples.
     ///
     /// # Panics
     ///
-    /// Panics if the cast is unsupported. Use [`try_astype`](Self::try_astype) for a fallible
-    /// version.
+    /// Panics if the cast is unsupported.
     #[track_caller]
-    pub fn astype(self, dtype: Dtype) -> Array<AsType<S>> {
-        self.try_astype(dtype).unwrap()
+    pub fn astype<T>(self) -> Array<AsType<S>>
+    where
+        T: Dtyped,
+    {
+        self.astype_dyn(T::DTYPE)
     }
 
-    /// Fallible version of [`astype`](Self::astype).
+    /// Casts the element type of the array to a runtime `dtype`. See [`AsType`] for details and examples.
     ///
-    /// Returns an error instead of panicking when the cast is unsupported. See [`AsType`] for
-    /// details.
-    pub fn try_astype(self, dtype: Dtype) -> Result<Array<AsType<S>>> {
-        Ok(Array::from_storage(AsType::new(self, dtype)?))
+    /// Prefer `astype::<T>()` when the target dtype is known at compile time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cast is unsupported.
+    #[track_caller]
+    pub fn astype_dyn(self, dtype: Dtype) -> Array<AsType<S>> {
+        Array::from_storage(AsType::new(self, dtype).unwrap())
     }
 }
 /// Casts each element to a new dtype, returned by [`Array::astype`].
@@ -51,12 +57,12 @@ where
 /// use ndarray::array;
 ///
 /// let za = Array::compact_array(&array![1i32, 2, 3, 4])?;
-/// let result = za.astype(f64::DTYPE).to_ndarray::<f64>()?;
+/// let result = za.astype::<f64>().to_ndarray::<f64>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1.0f64, 2.0, 3.0, 4.0]);
 ///
 /// // Zero → false, non-zero → true
 /// let zb = Array::compact_array(&array![0i32, 1, -2, 0])?;
-/// let result = zb.astype(bool::DTYPE).to_ndarray::<bool>()?;
+/// let result = zb.astype::<bool>().to_ndarray::<bool>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, true, false]);
 /// # Ok::<(), zix::error::Error>(())
 /// ```
@@ -397,7 +403,7 @@ mod tests {
     use crate::array::Array;
     #[allow(unused_imports)]
     use crate::dtype::f16;
-    use crate::dtype::{Complex, Dtyped};
+    use crate::dtype::Complex;
     use crate::util::arr_params;
 
     // --- element-wise conversion for expected values ---
@@ -521,7 +527,6 @@ mod tests {
         ($mod_name:ident, $src:ty, $dst:ty) => {
             mod $mod_name {
                 use super::*;
-                use crate::dtype::Dtyped;
 
                 proptest::proptest! {
                     #[test]
@@ -532,7 +537,7 @@ mod tests {
                     ) {
                         let a = ndarray::ArrayD::from_shape_vec(vec![8], vals).unwrap();
                         let za = Array::compact_array_with(&a, crate::util::arr_params(&[8])).unwrap();
-                        let actual = za.astype(<$dst>::DTYPE).to_ndarray::<$dst>().unwrap();
+                        let actual = za.astype::<$dst>().to_ndarray::<$dst>().unwrap();
                         let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
                         proptest::prop_assert_eq!(actual, expected);
                     }
@@ -545,7 +550,7 @@ mod tests {
                     ) {
                         let a = ndarray::ArrayD::from_shape_vec(vec![6], vals).unwrap();
                         let za = Array::compact_array_with(&a, crate::util::arr_params(&[2])).unwrap();
-                        let actual = za.astype(<$dst>::DTYPE).to_ndarray::<$dst>().unwrap();
+                        let actual = za.astype::<$dst>().to_ndarray::<$dst>().unwrap();
                         let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
                         proptest::prop_assert_eq!(actual, expected);
                     }
@@ -558,7 +563,7 @@ mod tests {
                     ) {
                         let a = ndarray::ArrayD::from_shape_vec(vec![3, 4], vals).unwrap();
                         let za = Array::compact_array_with(&a, crate::util::arr_params(&[3, 4])).unwrap();
-                        let actual = za.astype(<$dst>::DTYPE).to_ndarray::<$dst>().unwrap();
+                        let actual = za.astype::<$dst>().to_ndarray::<$dst>().unwrap();
                         let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
                         proptest::prop_assert_eq!(actual, expected);
                     }
@@ -571,7 +576,7 @@ mod tests {
                     ) {
                         let a = ndarray::ArrayD::from_shape_vec(vec![4, 4], vals).unwrap();
                         let za = Array::compact_array_with(&a, crate::util::arr_params(&[2, 2])).unwrap();
-                        let actual = za.astype(<$dst>::DTYPE).to_ndarray::<$dst>().unwrap();
+                        let actual = za.astype::<$dst>().to_ndarray::<$dst>().unwrap();
                         let expected = a.mapv(|x| CastTo::<$dst>::cast_to(x));
                         proptest::prop_assert_eq!(actual, expected);
                     }
@@ -627,33 +632,35 @@ mod tests {
 
     // --- error cases ---
     #[test]
+    #[should_panic]
     fn cast_complex_to_real_fails() {
         let a = Array::compact_array_with(&array![Complex { re: 1.0, im: 2.0 }], arr_params(&[1]))
             .unwrap();
-        assert!(a.try_astype(f32::DTYPE).is_err());
+        let _ = a.astype::<f32>();
     }
 
     #[test]
+    #[should_panic]
     fn cast_real_to_complex_fails() {
         let a = Array::compact_array_with(&array![1.0f32], arr_params(&[1])).unwrap();
-        assert!(a.try_astype(Complex::<f32>::DTYPE).is_err());
+        let _ = a.astype::<Complex<f32>>();
     }
 
     #[cfg(not(feature = "half"))]
     #[test]
     fn cast_f16_without_feature_fails() {
         let a = Array::compact_array_with(&array![1.0f32], arr_params(&[1])).unwrap();
-        assert!(a.try_astype(f16::DTYPE).is_err());
+        assert!(std::panic::catch_unwind(|| a.astype::<f16>()).is_err());
         let a = Array::compact_array_with(&array![f16::from_bits(17)], arr_params(&[1])).unwrap();
-        assert!(a.try_astype(f32::DTYPE).is_err());
+        assert!(std::panic::catch_unwind(|| a.astype::<f32>()).is_err());
         let a = Array::compact_array_with(&array![f16::from_bits(17)], arr_params(&[1])).unwrap();
-        assert!(a.try_astype(f16::DTYPE).is_ok());
+        let _ = a.astype::<f16>(); // no-op cast must not panic
     }
 
     #[test]
     fn cast_f16_to_f16() {
         // must work even without the "half" feature, since it's a no-op cast
         let a = Array::compact_array_with(&array![f16::from_bits(17)], arr_params(&[1])).unwrap();
-        assert!(a.try_astype(f16::DTYPE).is_ok());
+        let _ = a.astype::<f16>();
     }
 }

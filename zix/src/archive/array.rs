@@ -109,7 +109,7 @@ impl Array<Compact> {
     ///
     /// - `reader`: any source implementing `Read` + `Seek` containing the array's archive section.
     /// - `len`: byte length of the archive section within the reader, used for bounds checking.
-    ///    Pass `None` to skip bounds checking.
+    ///   Pass `None` to skip bounds checking.
     /// - `params`: parameters controlling how the array is read and decoded. See
     ///   [`ArrayParams`] for details.
     ///

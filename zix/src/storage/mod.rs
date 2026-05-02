@@ -80,7 +80,7 @@ pub(crate) mod block;
 /// arr.permute_axes(axes)     -> Array<PermuteAxes<S>>
 /// arr1.add(arr2)             -> Array<Add<S1, S2>>
 /// arr.sum(axis)              -> Array<Sum<S>>
-/// arr.astype(f32::DTYPE)     -> Array<AsType<S>>
+/// arr.astype::<f32>()        -> Array<AsType<S>>
 /// ```
 ///
 /// No data is copied or computed until `read_data` is called. At that point the index

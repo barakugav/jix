@@ -88,7 +88,7 @@ This covers:
   for any sequence of values of any dtype.
 - **Arithmetic ops** — `Array(a) op Array(b)` must equal the elementwise ndarray
   result for any pair of arrays.
-- **Type casts** — `Array.astype(D)` must produce the same values as a scalar cast
+- **Type casts** — `Array.astype::<D>()` must produce the same values as a scalar cast
   on each element.
 
 Do **not** use proptest when:
