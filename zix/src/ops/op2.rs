@@ -404,8 +404,8 @@ define_op2!(
     /// For **complex** types each component is added independently:
     /// `(a + bi) + (c + di) = (a+c) + (b+d)i`.
     ///
-    /// Available via the `+` operator on arrays. A raw scalar can be used as the right-hand
-    /// side and is broadcast to the array's shape: `arr + 1i32`.
+    /// Available via the `+` operator on arrays. A raw scalar can be used as one of the operands
+    /// and it will be broadcasted to the array's shape: `arr + 1i32`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///

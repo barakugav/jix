@@ -90,6 +90,11 @@ impl<T> Scalar<T> {
             blocks_layout,
         })
     }
+
+    /// Get the (singular) value of this storage.
+    pub fn data(&self) -> &T {
+        &self.data
+    }
 }
 
 impl<T> Array<Scalar<T>> {

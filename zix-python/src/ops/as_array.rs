@@ -5,7 +5,8 @@ use pyo3::exceptions::PyOverflowError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
 use zix_core::dtype::{f16, Complex, DtypeScalarKind, Dtyped};
-use zix_core::storage::Scalar;
+use zix_core::storage::{Plain, Scalar as ScalarStorage};
+use zix_core::Array as ZixArray;
 
 use crate::array::Array;
 use crate::dtype::dtype_from_numpy;
@@ -32,83 +33,325 @@ use crate::util::{check_ndim, DimArray, IntoPyResult};
 #[gen_stub_pyfunction]
 #[pyfunction]
 pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
-    // already a zix array
-    if let Ok(s) = value.cast::<Array>() {
-        return Ok(s.clone());
-    };
+    asarray_impl(value)?.into_py_array(value.py())
+}
 
-    // convert to numpy array
-    let py = value.py();
-    let numpy_asarray = numpy::get_array_module(py)?.getattr("asarray")?;
-    let array = numpy_asarray.call1((value,))?;
-    let array = array.cast::<PyUntypedArray>()?;
+pub(crate) enum AsArray<'py> {
+    Array(Bound<'py, Array>),
+    Numpy(ZixArray<Plain<Py<PyUntypedArray>>>),
+    Scalar(ScalarAsArray),
+}
+impl<'py> AsArray<'py> {
+    pub(crate) fn into_py_array(self, py: Python<'py>) -> PyResult<Bound<'py, Array>> {
+        let numpy = match self {
+            AsArray::Array(array) => return Ok(array),
+            AsArray::Numpy(numpy) => NumpyAsArray::Numpy(numpy),
+            AsArray::Scalar(scalar) => NumpyAsArray::Scalar(scalar),
+        };
+        Bound::new(py, numpy.into_py_array(None)?)
+    }
+}
 
-    // scalar
-    let dtype = dtype_from_numpy(array.dtype())?;
-    if array.ndim() == 0 {
-        if let Some(scalar) = dtype.try_to_scalar() {
-            let item = array.call_method0("item")?;
+pub(crate) fn asarray_impl<'py>(value: &Bound<'py, PyAny>) -> PyResult<AsArray<'py>> {
+    Ok(if let Ok(value) = value.cast::<Array>() {
+        // already a zix array
+        AsArray::Array(value.clone())
+    } else {
+        // convert to numpy array
+        let array = NumpyAsArray::from_any(value)?;
+        match array {
+            NumpyAsArray::Numpy(array) => AsArray::Numpy(array),
+            NumpyAsArray::Scalar(scalar) => AsArray::Scalar(scalar),
+        }
+    })
+}
 
-            fn scalar_array<'py, T>(py: Python<'py>, item: T) -> PyResult<Bound<'py, Array>>
-            where
-                T: Dtyped,
-            {
-                let storage = Scalar::new(item, &[]).into_py_result()?;
-                Bound::new(py, Array::from_storage(DynStorage(Arc::new(storage))))
-            }
+pub(crate) fn asarray2<'py>(
+    a: &Bound<'py, PyAny>,
+    b: &Bound<'py, PyAny>,
+) -> PyResult<(Bound<'py, Array>, Bound<'py, Array>)> {
+    let py = a.py();
+    let mut a = asarray_impl(a)?;
+    let mut b = asarray_impl(b)?;
 
-            return match scalar {
-                DtypeScalarKind::I8 => scalar_array(py, item.extract::<i8>()?),
-                DtypeScalarKind::I16 => scalar_array(py, item.extract::<i16>()?),
-                DtypeScalarKind::I32 => scalar_array(py, item.extract::<i32>()?),
-                DtypeScalarKind::I64 => scalar_array(py, item.extract::<i64>()?),
-                DtypeScalarKind::U8 => scalar_array(py, item.extract::<u8>()?),
-                DtypeScalarKind::U16 => scalar_array(py, item.extract::<u16>()?),
-                DtypeScalarKind::U32 => scalar_array(py, item.extract::<u32>()?),
-                DtypeScalarKind::U64 => scalar_array(py, item.extract::<u64>()?),
-                DtypeScalarKind::F16 => scalar_array(py, f16::from_f32(item.extract::<f32>()?)),
-                DtypeScalarKind::F32 => scalar_array(py, item.extract::<f32>()?),
-                DtypeScalarKind::F64 => scalar_array(py, item.extract::<f64>()?),
-                DtypeScalarKind::ComplexF32 => {
-                    let re = item.getattr("real")?.extract::<f32>()?;
-                    let im = item.getattr("imag")?.extract::<f32>()?;
-                    scalar_array(py, Complex::new(re, im))
-                }
-                DtypeScalarKind::ComplexF64 => {
-                    let re = item.getattr("real")?.extract::<f64>()?;
-                    let im = item.getattr("imag")?.extract::<f64>()?;
-                    scalar_array(py, Complex::new(re, im))
-                }
-                DtypeScalarKind::Bool => scalar_array(py, item.extract::<bool>()?),
-            };
+    fn get_shape(asarray: &AsArray) -> Option<Vec<u64>> {
+        match asarray {
+            AsArray::Array(array) => Some(array.borrow().arr.shape().to_vec()),
+            AsArray::Numpy(array) => Some(array.shape().to_vec()),
+            AsArray::Scalar(_) => None,
         }
     }
-
-    // array
-    check_ndim(array.ndim())?;
-    let shape = array
-        .shape()
-        .iter()
-        .map(|&d| d as u64)
-        .collect::<DimArray<_>>();
-    let strides = array
-        .strides()
-        .iter()
-        .map(|&s| {
-            usize::try_from(s)
-                .map_err(|_| PyOverflowError::new_err("Negative strides are not supported"))
-        })
-        .collect::<PyResult<DimArray<_>>>()?;
-    let data_ptr = {
-        let arr_ptr = unsafe { &*array.as_array_ptr() };
-        arr_ptr.data.cast_const().cast::<u8>()
+    let shape = if let Some(a) = get_shape(&a) {
+        Some(a)
+    } else if let Some(b) = get_shape(&b) {
+        Some(b)
+    } else {
+        None
     };
-    let array = array.clone().unbind();
-    let storage =
-        unsafe { zix_core::storage::Plain::new(array, data_ptr, &shape, &strides, dtype) };
-    let storage = storage.into_py_result()?;
 
-    Bound::new(py, Array::from_storage(DynStorage(Arc::new(storage))))
+    fn asarray_broadcast_if_scalar<'py>(
+        value: &mut AsArray<'py>,
+        broadcast: &[u64],
+    ) -> Result<(), zix_core::Error> {
+        match value {
+            AsArray::Scalar(scalar_array) => match scalar_array {
+                ScalarAsArray::I8(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::I16(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::I32(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::I64(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::U8(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::U16(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::U32(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::U64(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::F16(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::F32(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::F64(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::ComplexF32(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::ComplexF64(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+                ScalarAsArray::Bool(scalar) => {
+                    *scalar = ZixArray::from_storage(ScalarStorage::new(
+                        *scalar.storage().data(),
+                        broadcast,
+                    )?)
+                }
+            },
+            _ => {}
+        };
+        Ok(())
+    }
+
+    if let Some(shape) = shape {
+        asarray_broadcast_if_scalar(&mut a, &shape).into_py_result()?;
+        asarray_broadcast_if_scalar(&mut b, &shape).into_py_result()?;
+    }
+
+    let a = a.into_py_array(py)?;
+    let b = b.into_py_array(py)?;
+    Ok((a, b))
+}
+
+pub(crate) enum ScalarAsArray {
+    I8(ZixArray<ScalarStorage<i8>>),
+    I16(ZixArray<ScalarStorage<i16>>),
+    I32(ZixArray<ScalarStorage<i32>>),
+    I64(ZixArray<ScalarStorage<i64>>),
+    U8(ZixArray<ScalarStorage<u8>>),
+    U16(ZixArray<ScalarStorage<u16>>),
+    U32(ZixArray<ScalarStorage<u32>>),
+    U64(ZixArray<ScalarStorage<u64>>),
+    F16(ZixArray<ScalarStorage<f16>>),
+    F32(ZixArray<ScalarStorage<f32>>),
+    F64(ZixArray<ScalarStorage<f64>>),
+    ComplexF32(ZixArray<ScalarStorage<Complex<f32>>>),
+    ComplexF64(ZixArray<ScalarStorage<Complex<f64>>>),
+    Bool(ZixArray<ScalarStorage<bool>>),
+}
+
+pub(crate) enum NumpyAsArray {
+    Numpy(ZixArray<Plain<Py<PyUntypedArray>>>),
+    Scalar(ScalarAsArray),
+}
+impl NumpyAsArray {
+    pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let py = value.py();
+        let numpy_asarray = numpy::get_array_module(py)?.getattr("asarray")?;
+        let array = numpy_asarray.call1((value,))?;
+        let array = array.cast::<PyUntypedArray>()?;
+        NumpyAsArray::new(array)
+    }
+    pub(crate) fn new(array: &Bound<numpy::PyUntypedArray>) -> PyResult<Self> {
+        // scalar
+        let dtype = dtype_from_numpy(array.dtype())?;
+        if array.ndim() == 0 {
+            if let Some(scalar) = dtype.try_to_scalar() {
+                let item = array.call_method0("item")?;
+
+                fn scalar_array<T>(item: T) -> PyResult<ZixArray<ScalarStorage<T>>>
+                where
+                    T: Dtyped,
+                {
+                    let storage = ScalarStorage::new(item, &[]).into_py_result()?;
+                    Ok(ZixArray::from_storage(storage))
+                }
+
+                let scalar = match scalar {
+                    DtypeScalarKind::I8 => ScalarAsArray::I8(scalar_array(item.extract::<i8>()?)?),
+                    DtypeScalarKind::I16 => {
+                        ScalarAsArray::I16(scalar_array(item.extract::<i16>()?)?)
+                    }
+                    DtypeScalarKind::I32 => {
+                        ScalarAsArray::I32(scalar_array(item.extract::<i32>()?)?)
+                    }
+                    DtypeScalarKind::I64 => {
+                        ScalarAsArray::I64(scalar_array(item.extract::<i64>()?)?)
+                    }
+                    DtypeScalarKind::U8 => ScalarAsArray::U8(scalar_array(item.extract::<u8>()?)?),
+                    DtypeScalarKind::U16 => {
+                        ScalarAsArray::U16(scalar_array(item.extract::<u16>()?)?)
+                    }
+                    DtypeScalarKind::U32 => {
+                        ScalarAsArray::U32(scalar_array(item.extract::<u32>()?)?)
+                    }
+                    DtypeScalarKind::U64 => {
+                        ScalarAsArray::U64(scalar_array(item.extract::<u64>()?)?)
+                    }
+                    DtypeScalarKind::F16 => {
+                        ScalarAsArray::F16(scalar_array(f16::from_f32(item.extract::<f32>()?))?)
+                    }
+                    DtypeScalarKind::F32 => {
+                        ScalarAsArray::F32(scalar_array(item.extract::<f32>()?)?)
+                    }
+                    DtypeScalarKind::F64 => {
+                        ScalarAsArray::F64(scalar_array(item.extract::<f64>()?)?)
+                    }
+                    DtypeScalarKind::ComplexF32 => {
+                        let re = item.getattr("real")?.extract::<f32>()?;
+                        let im = item.getattr("imag")?.extract::<f32>()?;
+                        ScalarAsArray::ComplexF32(scalar_array(Complex::new(re, im))?)
+                    }
+                    DtypeScalarKind::ComplexF64 => {
+                        let re = item.getattr("real")?.extract::<f64>()?;
+                        let im = item.getattr("imag")?.extract::<f64>()?;
+                        ScalarAsArray::ComplexF64(scalar_array(Complex::new(re, im))?)
+                    }
+                    DtypeScalarKind::Bool => {
+                        ScalarAsArray::Bool(scalar_array(item.extract::<bool>()?)?)
+                    }
+                };
+                return Ok(Self::Scalar(scalar));
+            }
+        }
+
+        // array
+        check_ndim(array.ndim())?;
+        let shape = array
+            .shape()
+            .iter()
+            .map(|&d| d as u64)
+            .collect::<DimArray<_>>();
+        let strides = array
+            .strides()
+            .iter()
+            .map(|&s| {
+                usize::try_from(s)
+                    .map_err(|_| PyOverflowError::new_err("Negative strides are not supported"))
+            })
+            .collect::<PyResult<DimArray<_>>>()?;
+        let data_ptr = {
+            let arr_ptr = unsafe { &*array.as_array_ptr() };
+            arr_ptr.data.cast_const().cast::<u8>()
+        };
+        let array = array.clone().unbind();
+        let storage =
+            unsafe { zix_core::storage::Plain::new(array, data_ptr, &shape, &strides, dtype) };
+        let storage = storage.into_py_result()?;
+
+        Ok(NumpyAsArray::Numpy(ZixArray::from_storage(storage)))
+    }
+
+    pub(crate) fn into_py_array(self, optional_broadcast: Option<&[u64]>) -> PyResult<Array> {
+        fn broadcast_scalar<T>(
+            scalar_array: ZixArray<ScalarStorage<T>>,
+            scalar_shape: Option<&[u64]>,
+        ) -> PyResult<DynStorage>
+        where
+            T: Dtyped,
+        {
+            Ok(match scalar_shape {
+                None => DynStorage(Arc::new(scalar_array.into_storage())),
+                Some(scalar_shape) => {
+                    assert!(scalar_array.shape().is_empty());
+                    let scalar = scalar_array.storage().data();
+                    let storage = ScalarStorage::new(*scalar, scalar_shape).into_py_result()?;
+                    DynStorage(Arc::new(storage))
+                }
+            })
+        }
+        Ok(Array::from_storage(match self {
+            NumpyAsArray::Numpy(array) => DynStorage(Arc::new(array.into_storage())),
+            NumpyAsArray::Scalar(scalar) => match scalar {
+                ScalarAsArray::I8(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::I16(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::I32(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::I64(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::U8(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::U16(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::U32(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::U64(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::F16(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::F32(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::F64(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::ComplexF32(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::ComplexF64(value) => broadcast_scalar(value, optional_broadcast)?,
+                ScalarAsArray::Bool(value) => broadcast_scalar(value, optional_broadcast)?,
+            },
+        }))
+    }
 }
 
 pub(crate) fn as_core_array<'py>(

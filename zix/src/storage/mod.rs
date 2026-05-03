@@ -149,6 +149,12 @@ pub struct ArrayStorageSpec<'a> {
 /// Created by [`Array::as_ref`](crate::Array::as_ref) to produce an `Array<Ref<'_, S>>`
 /// from `&Array<S>` without cloning the underlying storage.
 pub struct Ref<'a, S>(pub(crate) &'a S);
+impl<'a, S> Ref<'a, S> {
+    /// Create a new `Ref` wrapper around the given storage reference.
+    pub fn new(storage: &'a S) -> Self {
+        Self(storage)
+    }
+}
 impl_array_storage_forward!(Ref<'a, S> where S: ArrayStorage);
 
 macro_rules! impl_array_storage_forward {

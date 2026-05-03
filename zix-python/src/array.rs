@@ -3,21 +3,23 @@ use std::sync::Arc;
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyEllipsis, PyTuple};
-use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
+use zix_core::codec::ReadContext;
 use zix_core::ops::SliceItem;
 use zix_core::storage::ArrayStorage;
-use zix_core::Array as ZixArray;
+use zix_core::{Array as ZixArray, ArrayParams};
 
 use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::types::{PyAnyMethods, PySlice};
 use std::ops::Range;
 
 use crate::dtype::dtype_to_numpy;
+use crate::ops::NumpyAsArray;
 use crate::storage::DynStorage;
-use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult};
+use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, UnsafeSend};
 
 #[gen_stub_pyclass]
-#[pyclass]
+#[pyclass(module = "zix")]
 pub struct Array {
     pub(crate) arr: ZixArray<DynStorage>,
 }
@@ -60,7 +62,7 @@ impl Array {
         let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let itemsize = self.arr.dtype().itemsize() as usize;
 
-        let np_arr = numpy_empty(self.dtype_numpy(py)?, &read_shape)?;
+        let np_arr = numpy_empty(self.dtype(py)?, &read_shape)?;
         let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
         let np_arr_data_size = itemsize * read_shape.iter().product::<u64>() as usize;
         let np_arr_data =
@@ -84,34 +86,38 @@ impl Array {
 #[gen_stub_pymethods]
 #[pymethods]
 impl Array {
+    #[new]
+    fn new(value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        compact(value)
+    }
+
+    #[getter]
     pub fn ndim(&self) -> usize {
         self.arr.shape().len()
     }
 
+    #[getter]
     pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.arr.shape().iter().copied())
     }
 
-    #[pyo3(signature = (axis=None))]
-    pub fn size(&self, axis: Option<usize>) -> PyResult<usize> {
-        let shape = self.arr.shape();
-        match axis {
-            Some(axis) => {
-                if axis >= shape.len() {
-                    Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "axis {} is out of bounds for array with ndim {}",
-                        axis,
-                        shape.len()
-                    )))
-                } else {
-                    Ok(shape[axis] as usize)
-                }
-            }
-            None => Ok(shape.iter().map(|&s| s as usize).product()),
-        }
+    pub fn __len__(&self) -> PyResult<usize> {
+        let len = self
+            .arr
+            .shape()
+            .first()
+            .ok_or_else(|| PyValueError::new_err("zero-dimensional arrays have no length"))?;
+        Ok(*len as usize)
     }
 
-    pub fn dtype_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
+    #[getter]
+    pub fn size(&self) -> PyResult<u64> {
+        Ok(self.arr.shape().iter().product::<u64>())
+    }
+
+    #[getter]
+    pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
+        // TODO: cache
         dtype_to_numpy(py, self.arr.dtype())
     }
 
@@ -124,7 +130,7 @@ impl Array {
     ///
     /// # Return value
     ///
-    /// * **dtype** — identical to `self.dtype_numpy()`. No casting is performed.
+    /// * **dtype** — identical to `self.dtype`. No casting is performed.
     /// * **shape** — determined by the `index` argument (see below). When no index is
     ///   supplied the shape equals `self.shape`.
     /// * **memory layout** — always C-contiguous (row-major).
@@ -370,17 +376,162 @@ impl Array {
         crate::ops::add(slf, other)
     }
 
+    pub fn __radd__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::add(other, slf)
+    }
+
     pub fn __sub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(slf, other)
+    }
+
+    pub fn __rsub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::subtract(other, slf)
     }
 
     pub fn __mul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(slf, other)
     }
 
+    pub fn __rmul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::multiply(other, slf)
+    }
+
     pub fn __truediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(slf, other)
     }
+
+    pub fn __rtruediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::divide(other, slf)
+    }
+
+    // TODO: __pow__
+
+    pub fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
+        crate::ops::absolute(slf)
+    }
+
+    pub fn __and__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_and(slf, other)
+    }
+
+    pub fn __rand__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_and(other, slf)
+    }
+
+    pub fn __or__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_or(slf, other)
+    }
+
+    pub fn __ror__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_or(other, slf)
+    }
+
+    pub fn __xor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_xor(slf, other)
+    }
+
+    pub fn __rxor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_xor(other, slf)
+    }
+
+    pub fn __invert__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
+        crate::ops::bitwise_not(slf)
+    }
+
+    pub fn __neg__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
+        crate::ops::negative(slf)
+    }
+
+    pub fn __lshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_shift_left(slf, other)
+    }
+
+    pub fn __rlshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_shift_left(other, slf)
+    }
+
+    pub fn __lt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::less(slf, other)
+    }
+
+    pub fn __le__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::less_equal(slf, other)
+    }
+
+    pub fn __gt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::greater(slf, other)
+    }
+
+    pub fn __ge__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::greater_equal(slf, other)
+    }
+
+    pub fn __eq__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::equal(slf, other)
+    }
+
+    pub fn __ne__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::not_equal(slf, other)
+    }
+}
+
+/// Compact any array-like object to a new zix [`Array`].
+///
+/// Accepts Python scalars, lists, tuples, NumPy arrays, and any other object accepted by
+/// [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
+///
+/// A new zix compact array is created, with all the input data compressed into blocks. The data
+/// is compress even if the input is already a zix array.
+///
+/// # Errors
+///
+/// - If the input is not a zix array and it cannot be converted by `numpy.asarray`.
+/// - If the array has more dimensions than zix supports.
+/// - If the array has negative strides (e.g. a reversed slice `a[::-1]`).
+#[gen_stub_pyfunction]
+#[pyfunction]
+pub fn compact(value: &Bound<'_, PyAny>) -> PyResult<Array> {
+    let py = value.py();
+
+    let params = ArrayParams::default(); // TODO: accept as arg
+    let context = ReadContext::default(); // TODO: accept as arg
+
+    // already a zix array
+    if let Ok(value) = value.cast::<Array>() {
+        let value = value.borrow().to_core_array();
+        let array = py.detach({
+            let context = unsafe { UnsafeSend::new(&context) };
+            || {
+                let context = unsafe { context.into_inner() };
+                value.copy_with(params, &context).into_py_result()
+            }
+        })?;
+        return Ok(Array::from_core_storage(array.into_storage()));
+    }
+
+    // convert to numpy array
+    let py = value.py();
+    let numpy_asarray = numpy::get_array_module(py)?.getattr("asarray")?;
+    let array = numpy_asarray.call1((value,))?;
+    let array = array.cast::<PyUntypedArray>()?;
+    let array = NumpyAsArray::new(array)?;
+
+    let array = py.detach({
+        let context = unsafe { UnsafeSend::new(&context) };
+        || {
+            let context = unsafe { context.into_inner() };
+            let array = match array {
+                NumpyAsArray::Numpy(array) => array.copy_with(params, &context),
+                // scalar
+                _ => array
+                    .into_py_array(None)?
+                    .to_core_array()
+                    .copy_with(params, &context),
+            };
+            array.into_py_result()
+        }
+    })?;
+    return Ok(Array::from_core_storage(array.into_storage()));
 }
 
 #[cfg(test)]
@@ -393,7 +544,6 @@ mod tests {
     use pyo3::types::{PyAny, PyEllipsis, PySlice, PyTuple};
     use pyo3::{Bound, IntoPyObject, Python};
     use zix_core::dtype::Dtyped;
-    use zix_core::storage::Compact;
     use zix_core::Array as ZixArray;
 
     use super::{Array, DynStorage};
@@ -405,7 +555,7 @@ mod tests {
     where
         D: ndarray::Dimension,
     {
-        let core = ZixArray::<Compact>::compact_array(ndarray).unwrap();
+        let core = ZixArray::compact_array(ndarray).unwrap();
         let dyn_storage = DynStorage(Arc::new(core.into_storage()));
         Bound::new(py, Array::from_storage(dyn_storage)).unwrap()
     }

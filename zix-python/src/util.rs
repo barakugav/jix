@@ -83,6 +83,18 @@ impl_stub_type!(ItemOrSequence<i32> = i32 | Vec<i32>);
 impl_stub_type!(ItemOrSequence<i64> = i64 | Vec<i64>);
 impl_stub_type!(ItemOrSequence<u64> = u64 | Vec<u64>);
 
+pub(crate) struct UnsafeSend<T>(T);
+unsafe impl<T> Send for UnsafeSend<T> {}
+impl<T> UnsafeSend<T> {
+    pub(crate) unsafe fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    pub(crate) unsafe fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pyo3::prelude::*;
