@@ -4,7 +4,7 @@ macro_rules! define_op1 {
         #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
         pub fn $name<'py>(array: &pyo3::Bound<'py, pyo3::PyAny>) -> pyo3::PyResult<crate::Array> {
-            let array = crate::ops::as_array::as_core_array(array)?;
+            let array = crate::ops::as_array::any_to_core_array(array)?;
             let res = zix_core::ops::$core_op::new(array);
             let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
             Ok(crate::Array::from_core_storage(ret))

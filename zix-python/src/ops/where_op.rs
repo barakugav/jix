@@ -1,4 +1,4 @@
-use crate::ops::as_core_array;
+use crate::ops::any_to_core_array;
 use crate::util::IntoPyResult;
 use crate::Array;
 
@@ -25,9 +25,9 @@ use crate::Array;
 /// import zix
 /// import numpy as np
 ///
-/// cond = zix.asarray(np.array([True, False, True, False]))
-/// x = zix.asarray(np.array([1, 2, 3, 4], dtype=np.int32))
-/// y = zix.asarray(np.array([10, 20, 30, 40], dtype=np.int32))
+/// cond = zix.compact([True, False, True, False])
+/// x = zix.compact([1, 2, 3, 4], dtype=np.int32)
+/// y = zix.compact([10, 20, 30, 40], dtype=np.int32)
 /// result = zix.where(cond, x, y)
 /// assert np.array_equal(result.numpy(), [1, 20, 3, 40])
 /// ```
@@ -39,9 +39,9 @@ pub fn r#where<'py>(
     x: &pyo3::Bound<'py, pyo3::PyAny>,
     y: &pyo3::Bound<'py, pyo3::PyAny>,
 ) -> pyo3::PyResult<Array> {
-    let condition = as_core_array(condition)?;
-    let x = as_core_array(x)?;
-    let y = as_core_array(y)?;
+    let condition = any_to_core_array(condition)?;
+    let x = any_to_core_array(x)?;
+    let y = any_to_core_array(y)?;
     let ret = zix_core::ops::Where::new(condition, x, y).into_py_result()?;
     Ok(Array::from_core_storage(ret))
 }

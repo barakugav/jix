@@ -26,8 +26,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0, 1, 0, 5], dtype=np.int32))
-    /// b = zix.asarray(np.array([1, 1, 0, 0], dtype=np.int32))
+    /// a = zix.compact([0, 1, 0, 5], dtype=np.int32)
+    /// b = zix.compact([1, 1, 0, 0], dtype=np.int32)
     /// result = zix.logical_and(a, b)
     /// assert np.array_equal(result.numpy(), [False, True, False, False])
     /// ```
@@ -60,8 +60,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0, 1, 0, 5], dtype=np.int32))
-    /// b = zix.asarray(np.array([0, 0, 0, 0], dtype=np.int32))
+    /// a = zix.compact([0, 1, 0, 5], dtype=np.int32)
+    /// b = zix.compact([0, 0, 0, 0], dtype=np.int32)
     /// result = zix.logical_or(a, b)
     /// assert np.array_equal(result.numpy(), [False, True, False, True])
     /// ```
@@ -94,8 +94,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0, 1, 0, 5], dtype=np.int32))
-    /// b = zix.asarray(np.array([0, 1, 1, 0], dtype=np.int32))
+    /// a = zix.compact([0, 1, 0, 5], dtype=np.int32)
+    /// b = zix.compact([0, 1, 1, 0], dtype=np.int32)
     /// result = zix.logical_xor(a, b)
     /// assert np.array_equal(result.numpy(), [False, False, True, True])
     /// ```
@@ -123,7 +123,7 @@ define_op1!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0, 1, -3, 0], dtype=np.int32))
+    /// a = zix.compact([0, 1, -3, 0], dtype=np.int32)
     /// result = zix.logical_not(a)
     /// assert np.array_equal(result.numpy(), [True, False, False, True])
     /// ```
@@ -155,8 +155,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b1100, 0b1010, 0b1111], dtype=np.uint8))
-    /// b = zix.asarray(np.array([0b1010, 0b0101, 0b0000], dtype=np.uint8))
+    /// a = zix.compact([0b1100, 0b1010, 0b1111], dtype=np.uint8)
+    /// b = zix.compact([0b1010, 0b0101, 0b0000], dtype=np.uint8)
     /// result = zix.bitwise_and(a, b)
     /// assert np.array_equal(result.numpy(), [0b1000, 0b0000, 0b0000])
     /// ```
@@ -188,8 +188,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b1100, 0b1010, 0b0000], dtype=np.uint8))
-    /// b = zix.asarray(np.array([0b1010, 0b0101, 0b1111], dtype=np.uint8))
+    /// a = zix.compact([0b1100, 0b1010, 0b0000], dtype=np.uint8)
+    /// b = zix.compact([0b1010, 0b0101, 0b1111], dtype=np.uint8)
     /// result = zix.bitwise_or(a, b)
     /// assert np.array_equal(result.numpy(), [0b1110, 0b1111, 0b1111])
     /// ```
@@ -221,8 +221,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b1100, 0b1010, 0b1111], dtype=np.uint8))
-    /// b = zix.asarray(np.array([0b1010, 0b1010, 0b1111], dtype=np.uint8))
+    /// a = zix.compact([0b1100, 0b1010, 0b1111], dtype=np.uint8)
+    /// b = zix.compact([0b1010, 0b1010, 0b1111], dtype=np.uint8)
     /// result = zix.bitwise_xor(a, b)
     /// assert np.array_equal(result.numpy(), [0b0110, 0b0000, 0b0000])
     /// ```
@@ -248,7 +248,7 @@ define_op1!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b00001111, 0b11110000, 0], dtype=np.uint8))
+    /// a = zix.compact([0b00001111, 0b11110000, 0], dtype=np.uint8)
     /// result = zix.bitwise_not(a)
     /// assert np.array_equal(result.numpy(), [0b11110000, 0b00001111, 0xFF])
     /// ```
@@ -281,8 +281,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b00000001, 0b00000010, 0b00000100], dtype=np.uint8))
-    /// b = zix.asarray(np.array([1, 2, 3], dtype=np.uint8))
+    /// a = zix.compact([0b00000001, 0b00000010, 0b00000100], dtype=np.uint8)
+    /// b = zix.compact([1, 2, 3], dtype=np.uint8)
     /// result = zix.bitwise_shift_left(a, b)
     /// assert np.array_equal(result.numpy(), [0b00000010, 0b00001000, 0b00100000])
     /// ```
@@ -316,8 +316,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b10000000, 0b00100000, 0b00001000], dtype=np.uint8))
-    /// b = zix.asarray(np.array([1, 2, 3], dtype=np.uint8))
+    /// a = zix.compact([0b10000000, 0b00100000, 0b00001000], dtype=np.uint8)
+    /// b = zix.compact([1, 2, 3], dtype=np.uint8)
     /// result = zix.bitwise_shift_right(a, b)
     /// assert np.array_equal(result.numpy(), [0b01000000, 0b00001000, 0b00000001])
     /// ```
@@ -348,8 +348,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b10000001, 0b00000001, 0b11110000], dtype=np.uint8))
-    /// b = zix.asarray(np.array([1, 3, 4], dtype=np.uint8))
+    /// a = zix.compact([0b10000001, 0b00000001, 0b11110000], dtype=np.uint8)
+    /// b = zix.compact([1, 3, 4], dtype=np.uint8)
     /// result = zix.bitwise_rotate_left(a, b)
     /// assert np.array_equal(result.numpy(), [0b00000011, 0b00001000, 0b00001111])
     /// ```
@@ -380,8 +380,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b10000001, 0b00001000, 0b00001111], dtype=np.uint8))
-    /// b = zix.asarray(np.array([1, 3, 4], dtype=np.uint8))
+    /// a = zix.compact([0b10000001, 0b00001000, 0b00001111], dtype=np.uint8)
+    /// b = zix.compact([1, 3, 4], dtype=np.uint8)
     /// result = zix.bitwise_rotate_right(a, b)
     /// assert np.array_equal(result.numpy(), [0b11000000, 0b00000001, 0b11110000])
     /// ```
@@ -407,7 +407,7 @@ define_op1!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b00001111, 0b11001100, 0b11111111], dtype=np.uint8))
+    /// a = zix.compact([0b00001111, 0b11001100, 0b11111111], dtype=np.uint8)
     /// result = zix.count_ones(a)
     /// assert np.array_equal(result.numpy(), [4, 4, 8])
     /// ```
@@ -433,12 +433,12 @@ define_op1!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b11110000, 0b00001111, 0b11111111], dtype=np.uint8))
+    /// a = zix.compact([0b11110000, 0b00001111, 0b11111111], dtype=np.uint8)
     /// result = zix.count_zeros(a)
     /// assert np.array_equal(result.numpy(), [4, 4, 0])
     ///
     /// # Zero has all bits unset: count_zeros == bit width.
-    /// b = zix.asarray(np.array([0], dtype=np.uint8))
+    /// b = zix.compact([0], dtype=np.uint8)
     /// assert zix.count_zeros(b).numpy()[0] == 8  # u8 has 8 bits
     /// ```
     count_zeros,
@@ -464,12 +464,12 @@ define_op1!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0x00010000, 0x80000000, 0x00000001], dtype=np.uint32))
+    /// a = zix.compact([0x00010000, 0x80000000, 0x00000001], dtype=np.uint32)
     /// result = zix.leading_zeros(a)
     /// assert np.array_equal(result.numpy(), [15, 0, 31])
     ///
     /// # Zero returns the bit width of the type (32 for uint32).
-    /// b = zix.asarray(np.array([0], dtype=np.uint32))
+    /// b = zix.compact([0], dtype=np.uint32)
     /// assert zix.leading_zeros(b).numpy()[0] == 32
     /// ```
     leading_zeros,
@@ -495,12 +495,12 @@ define_op1!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0x00010000, 0x80000000, 0x00000001], dtype=np.uint32))
+    /// a = zix.compact([0x00010000, 0x80000000, 0x00000001], dtype=np.uint32)
     /// result = zix.trailing_zeros(a)
     /// assert np.array_equal(result.numpy(), [16, 31, 0])
     ///
     /// # Zero returns the bit width of the type (32 for uint32).
-    /// b = zix.asarray(np.array([0], dtype=np.uint32))
+    /// b = zix.compact([0], dtype=np.uint32)
     /// assert zix.trailing_zeros(b).numpy()[0] == 32
     /// ```
     trailing_zeros,
@@ -526,7 +526,7 @@ define_op1!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0x12345678], dtype=np.uint32))
+    /// a = zix.compact([0x12345678], dtype=np.uint32)
     /// result = zix.swap_bytes(a)
     /// assert result.numpy()[0] == 0x78563412
     /// ```
@@ -551,7 +551,7 @@ define_op1!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([0b00000001, 0b10000000, 0b10101010], dtype=np.uint8))
+    /// a = zix.compact([0b00000001, 0b10000000, 0b10101010], dtype=np.uint8)
     /// result = zix.reverse_bits(a)
     /// assert np.array_equal(result.numpy(), [0b10000000, 0b00000001, 0b01010101])
     /// ```

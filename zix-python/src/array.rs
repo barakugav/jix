@@ -16,22 +16,22 @@ use std::ops::Range;
 use crate::dtype::dtype_to_numpy;
 use crate::ops::NumpyAsArray;
 use crate::storage::DynStorage;
-use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, UnsafeSend};
+use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence, UnsafeSend};
 
 #[gen_stub_pyclass]
 #[pyclass(module = "zix", frozen)]
 pub struct Array {
     pub(crate) arr: ZixArray<DynStorage>,
-    cache: Mutex<ArrayInner>,
+    cache: Mutex<ArrayCache>,
 }
-struct ArrayInner {
+struct ArrayCache {
     numpy_dtype: Option<Py<PyArrayDescr>>,
 }
 impl Array {
     pub(crate) fn from_storage(storage: DynStorage) -> Self {
         Self {
             arr: ZixArray::from_storage(storage),
-            cache: Mutex::new(ArrayInner { numpy_dtype: None }),
+            cache: Mutex::new(ArrayCache { numpy_dtype: None }),
         }
     }
 
@@ -91,37 +91,92 @@ impl Array {
 #[gen_stub_pymethods]
 #[pymethods]
 impl Array {
-    #[getter]
-    pub fn ndim(&self) -> usize {
-        self.arr.shape().len()
-    }
-
+    /// The shape of the array: a tuple of axis lengths.
+    ///
+    /// ```python,ignore
+    /// import zix
+    ///
+    /// a = zix.compact([1, 2, 3, 4])
+    /// assert a.shape == (4,)
+    ///
+    /// b = zix.compact([[1, 2], [3, 4], [5, 6]])
+    /// assert b.shape == (3, 2)
+    /// ```
     #[getter]
     pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.arr.shape().iter().copied())
     }
 
-    pub fn __len__(&self) -> PyResult<usize> {
-        let len = self
-            .arr
-            .shape()
-            .first()
-            .ok_or_else(|| PyValueError::new_err("zero-dimensional arrays have no length"))?;
-        Ok(*len as usize)
+    /// The number of dimensions (axes) of the array.
+    ///
+    /// ```python,ignore
+    /// import zix
+    ///
+    /// a = zix.compact([1, 2, 3, 4])
+    /// assert a.ndim == 1
+    ///
+    /// b = zix.compact([[1, 2], [3, 4], [5, 6]])
+    /// assert b.ndim == 2
+    /// ```
+    #[getter]
+    pub fn ndim(&self) -> usize {
+        self.arr.shape().len()
     }
 
+    /// The total number of elements in the array (the product of the axis lengths).
+    ///
+    /// ```python,ignore
+    /// import zix
+    ///
+    /// a = zix.compact([1, 2, 3, 4])
+    /// assert a.size == 4
+    ///
+    /// b = zix.compact([[1, 2], [3, 4], [5, 6]])
+    /// assert b.size == 6
+    /// ```
     #[getter]
     pub fn size(&self) -> PyResult<u64> {
         Ok(self.arr.shape().iter().product::<u64>())
     }
 
+    /// The length of the array along the first axis (axis 0).
+    ///
+    /// ```python,ignore
+    /// import zix
+    ///
+    /// a = zix.compact([1, 2, 3, 4])
+    /// assert len(a) == 4
+    ///
+    /// b = zix.compact([[1, 2], [3, 4], [5, 6]])
+    /// assert len(b) == 3
+    /// ```
+    pub fn __len__(&self) -> PyResult<usize> {
+        let len = self
+            .arr
+            .shape()
+            .first()
+            .ok_or_else(|| PyValueError::new_err("zero-dimensional array has no length"))?;
+        Ok(*len as usize)
+    }
+
+    /// The data type of the array elements, as a NumPy dtype object.
+    ///
+    /// ```python,ignore
+    /// import zix
+    /// import numpy as np
+    ///
+    /// a = zix.compact([1, 2, 3, 4], dtype='int32')
+    /// assert a.dtype == np.dtype('int32')
+    ///
+    /// b = zix.compact([[1.0, 2.0], [3.0, 4.0]], dtype='float64')
+    /// assert b.dtype == np.dtype('float64')
+    /// ```
     #[getter]
     pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
         let mut cache = self
             .cache
             .lock()
-            // TODO: is it the correct exception type?
-            .map_err(|_| PyRuntimeError::new_err("Negative strides are not supported"))?;
+            .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
 
         if cache.numpy_dtype.is_none() {
             cache.numpy_dtype = Some(dtype_to_numpy(py, self.arr.dtype())?.unbind());
@@ -377,107 +432,374 @@ impl Array {
         self.numpy(key.py(), Some(key))
     }
 
+    // == arithmetic ops ==
+
+    /// Element-wise addition of two arrays. See :func:`zix.add()`.
+    pub fn add(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::add(slf, other)
+    }
+
+    /// Element-wise addition of two arrays. See :func:`zix.add()`.
     pub fn __add__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::add(slf, other)
     }
 
+    /// Element-wise addition of two arrays. See :func:`zix.add()`.
     pub fn __radd__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::add(other, slf)
     }
 
+    /// Element-wise subtraction of two arrays. See :func:`zix.subtract()`.
+    pub fn subtract(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::subtract(slf, other)
+    }
+
+    /// Element-wise subtraction of two arrays. See :func:`zix.subtract()`.
     pub fn __sub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(slf, other)
     }
 
+    /// Element-wise subtraction of two arrays. See :func:`zix.subtract()`.
     pub fn __rsub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(other, slf)
     }
 
+    /// Element-wise multiplication of two arrays. See :func:`zix.multiply()`.
+    pub fn multiply(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::multiply(slf, other)
+    }
+
+    /// Element-wise multiplication of two arrays. See :func:`zix.multiply()`.
     pub fn __mul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(slf, other)
     }
 
+    /// Element-wise multiplication of two arrays. See :func:`zix.multiply()`.
     pub fn __rmul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(other, slf)
     }
 
+    /// Element-wise division of two arrays. See :func:`zix.divide()`.
+    pub fn divide(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::divide(slf, other)
+    }
+
+    /// Element-wise division of two arrays. See :func:`zix.divide()`.
     pub fn __truediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(slf, other)
     }
 
+    /// Element-wise division of two arrays. See :func:`zix.divide()`.
     pub fn __rtruediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(other, slf)
     }
 
     // TODO: __pow__
 
-    pub fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
-        crate::ops::absolute(slf)
+    /// Arithmetic negation applied element-wise. See :func:`zix.negative()`.
+    pub fn negative(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::negative(slf)
     }
 
-    pub fn __and__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_and(slf, other)
-    }
-
-    pub fn __rand__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_and(other, slf)
-    }
-
-    pub fn __or__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_or(slf, other)
-    }
-
-    pub fn __ror__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_or(other, slf)
-    }
-
-    pub fn __xor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_xor(slf, other)
-    }
-
-    pub fn __rxor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_xor(other, slf)
-    }
-
-    pub fn __invert__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
-        crate::ops::bitwise_not(slf)
-    }
-
+    /// Arithmetic negation applied element-wise. See :func:`zix.negative()`.
     pub fn __neg__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::negative(slf)
     }
 
+    /// Computes the absolute value of each element. See :func:`zix.absolute()`.
+    pub fn abs(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::absolute(slf)
+    }
+
+    /// Computes the absolute value of each element. See :func:`zix.absolute()`.
+    pub fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
+        crate::ops::absolute(slf)
+    }
+
+    /// Computes the natural exponential (`e^x`) of each element. See :func:`zix.exp()`.
+    pub fn exp(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::exp(slf)
+    }
+
+    /// Computes the square root of each element. See :func:`zix.sqrt()`.
+    pub fn sqrt(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::sqrt(slf)
+    }
+
+    /// Rounds each element up to the nearest integer (towards +∞). See :func:`zix.ceil()`.
+    pub fn ceil(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::ceil(slf)
+    }
+
+    /// Rounds each element down to the nearest integer (towards −∞). See :func:`zix.floor()`.
+    pub fn floor(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::floor(slf)
+    }
+
+    /// Rounds each element to the nearest integer. See :func:`zix.round()`.
+    pub fn round(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::round(slf)
+    }
+
+    // == bitwise ops ==
+
+    /// Element-wise bitwise AND of two arrays. See :func:`zix.bitwise_and()`.
+    pub fn __and__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_and(slf, other)
+    }
+
+    /// Element-wise bitwise AND of two arrays. See :func:`zix.bitwise_and()`.
+    pub fn __rand__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_and(other, slf)
+    }
+
+    /// Element-wise bitwise OR of two arrays. See :func:`zix.bitwise_or()`.
+    pub fn __or__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_or(slf, other)
+    }
+
+    /// Element-wise bitwise OR of two arrays. See :func:`zix.bitwise_or()`.
+    pub fn __ror__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_or(other, slf)
+    }
+
+    /// Element-wise bitwise XOR of two arrays. See :func:`zix.bitwise_xor()`.
+    pub fn __xor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_xor(slf, other)
+    }
+
+    /// Element-wise bitwise XOR of two arrays. See :func:`zix.bitwise_xor()`.
+    pub fn __rxor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::bitwise_xor(other, slf)
+    }
+
+    /// Element-wise bitwise NOT (one's complement). See :func:`zix.bitwise_not()`.
+    pub fn __invert__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
+        crate::ops::bitwise_not(slf)
+    }
+
+    /// Element-wise left shift (`a << b`). See :func:`zix.bitwise_shift_left()`.
     pub fn __lshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_shift_left(slf, other)
     }
 
+    /// Element-wise left shift (`a << b`). See :func:`zix.bitwise_shift_left()`.
     pub fn __rlshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_shift_left(other, slf)
     }
 
+    // == comparison ops ==
+
+    /// Element-wise less-than test (`a < b`). See :func:`zix.less()`.
     pub fn __lt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::less(slf, other)
     }
 
+    /// Element-wise less-than-or-equal test (`a <= b`). See :func:`zix.less_equal()`.
     pub fn __le__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::less_equal(slf, other)
     }
 
+    /// Element-wise greater-than test (`a > b`). See :func:`zix.greater()`.
     pub fn __gt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::greater(slf, other)
     }
 
+    /// Element-wise greater-than-or-equal test (`a >= b`). See :func:`zix.greater_equal()`.
     pub fn __ge__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::greater_equal(slf, other)
     }
 
+    /// Element-wise equality test (`a == b`). See :func:`zix.equal()`.
     pub fn __eq__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::equal(slf, other)
     }
 
+    /// Element-wise inequality test (`a != b`). See :func:`zix.not_equal()`.
     pub fn __ne__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::not_equal(slf, other)
     }
+
+    // == reduction ops ==
+
+    /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy. See :func:`zix.all()`.
+    #[pyo3(signature = (axes=None, keepdims=false))]
+    pub fn all(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::all(slf, axes, keepdims)
+    }
+
+    /// Reduces one or more axes with logical OR: returns `True` if any element is truthy. See :func:`zix.any()`.
+    #[pyo3(signature = (axes=None, keepdims=false))]
+    pub fn any(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::any(slf, axes, keepdims)
+    }
+
+    /// Reduces one or more axes by taking the maximum element. See :func:`zix.max()`.
+    #[pyo3(signature = (axes=None, keepdims=false))]
+    pub fn max(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::max(slf, axes, keepdims)
+    }
+
+    /// Reduces one or more axes by taking the minimum element. See :func:`zix.min()`.
+    #[pyo3(signature = (axes=None, keepdims=false))]
+    pub fn min(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::min(slf, axes, keepdims)
+    }
+
+    /// Returns the index of the maximum element along a single axis. See :func:`zix.argmax()`.
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn argmax(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::argmax(slf, axis, keepdims)
+    }
+
+    /// Returns the index of the minimum element along a single axis. See :func:`zix.argmin()`.
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn argmin(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::argmin(slf, axis, keepdims)
+    }
+
+    /// Reduces one or more axes by summing all elements. See :func:`zix.sum()`.
+    #[pyo3(signature = (axes=None, keepdims=false))]
+    pub fn sum(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::sum(slf, axes, keepdims)
+    }
+
+    /// Computes the arithmetic mean along one or more axes. See :func:`zix.mean()`.
+    #[pyo3(signature = (axes=None, keepdims=false))]
+    pub fn mean(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::mean(slf, axes, keepdims)
+    }
+
+    /// Reduces one or more axes by multiplying all elements. See :func:`zix.product()`.
+    #[pyo3(signature = (axes=None, keepdims=false))]
+    pub fn prod(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
+        crate::ops::product(slf, axes, keepdims)
+    }
+
+    /// Computes the standard deviation along one or more axes. See :func:`zix.std()`.
+    #[pyo3(signature = (axes=None, keepdims=false, ddof=0.0))]
+    pub fn std(
+        slf: &Bound<'_, Self>,
+        axes: Option<Vec<i32>>,
+        keepdims: bool,
+        ddof: f64,
+    ) -> PyResult<Self> {
+        crate::ops::std(slf, axes, keepdims, ddof)
+    }
+
+    /// Computes the variance along one or more axes. See :func:`zix.var()`.
+    #[pyo3(signature = (axes=None, keepdims=false, ddof=0.0))]
+    pub fn var(
+        slf: &Bound<'_, Self>,
+        axes: Option<Vec<i32>>,
+        keepdims: bool,
+        ddof: f64,
+    ) -> PyResult<Self> {
+        crate::ops::var(slf, axes, keepdims, ddof)
+    }
+
+    /// Casts each element of the array to a new dtype. See :func:`zix.astype()`.
+    pub fn astype<'py>(
+        slf: &Bound<'py, Self>,
+        dtype: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, Self>> {
+        crate::ops::astype(slf, dtype)
+    }
+
+    // == shape ops ==
+
+    /// Reinterprets an array with a different shape. See :func:`zix.reshape()`.
+    #[pyo3(signature = (shape, copy=true))]
+    pub fn reshape<'py>(
+        slf: &Bound<'py, Self>,
+        shape: ItemOrSequence<i64>,
+        copy: bool,
+    ) -> PyResult<Bound<'py, Self>> {
+        crate::ops::reshape(slf, shape, copy)
+    }
+
+    /// Collapses the array into a single dimension. See :func:`zix.flatten()`.
+    #[pyo3(signature = (copy=true))]
+    pub fn flatten<'py>(slf: &Bound<'py, Self>, copy: bool) -> PyResult<Bound<'py, Self>> {
+        crate::ops::flatten(slf, copy)
+    }
+
+    /// Reorders the axes of an array (generalized transpose). See :func:`zix.permute_axes()`.
+    #[pyo3(signature = (axes=None))]
+    pub fn permute_axes<'py>(
+        slf: &Bound<'py, Self>,
+        axes: Option<Vec<usize>>,
+    ) -> PyResult<Bound<'py, Self>> {
+        crate::ops::permute_axes(slf, axes)
+    }
+
+    /// Reverses all axes; shorthand for `permute_axes()` with no arguments. See :func:`zix.permute_axes()`.
+    #[allow(non_snake_case)]
+    #[getter]
+    pub fn T<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
+        crate::ops::permute_axes(slf, None)
+    }
+
+    /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See :func:`zix.broadcast()`.
+    #[pyo3(signature = (new_shape, copy=true))]
+    pub fn broadcast<'py>(
+        slf: &Bound<'py, Array>,
+        new_shape: ItemOrSequence<i64>,
+        copy: bool,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::broadcast(slf, new_shape, copy)
+    }
+
+    /// Removes length-1 dimensions from the array's shape. See :func:`zix.squeeze()`.
+    #[pyo3(signature = (axis=None))]
+    pub fn squeeze<'py>(
+        slf: &Bound<'py, Array>,
+        axis: Option<ItemOrSequence<i32>>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::squeeze(slf, axis)
+    }
+
+    /// Inserts new length-1 dimensions at specified positions in the array's shape. See :func:`zix.unsqueeze()`.
+    pub fn unsqueeze<'py>(
+        slf: &Bound<'py, Array>,
+        axes: ItemOrSequence<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::unsqueeze(slf, axes)
+    }
+
+    // == trigonometric ops ==
+
+    /// Computes the sine of each element (input in radians). See :func:`zix.sin()`.
+    pub fn sin(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::sin(slf)
+    }
+
+    /// Computes the cosine of each element (input in radians). See :func:`zix.cos()`.
+    pub fn cos(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::cos(slf)
+    }
+
+    /// Computes the tangent of each element (input in radians). See :func:`zix.tan()`.
+    pub fn tan(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::tan(slf)
+    }
+
+    /// Computes the arcsine of each element; output is in radians in `[-π/2, π/2]`. See :func:`zix.asin()`.
+    pub fn asin(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::asin(slf)
+    }
+
+    /// Computes the arccosine of each element; output is in radians in `[0, π]`. See :func:`zix.acos()`.
+    pub fn acos(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::acos(slf)
+    }
+
+    /// Computes the arctangent of each element; output is in radians in `(-π/2, π/2)`. See :func:`zix.atan()`.
+    pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::atan(slf)
+    }
+
+    // TODO ['copy', 'tofile']
 }
 
 /// Compact any array-like object to a new zix [`Array`].
@@ -486,7 +808,7 @@ impl Array {
 /// [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
 ///
 /// A new zix compact array is created, with all the input data compressed into blocks. The data
-/// is compress even if the input is already a zix array.
+/// is compressed even if the input is already a zix array.
 ///
 /// # Errors
 ///
@@ -495,15 +817,20 @@ impl Array {
 /// - If the array has negative strides (e.g. a reversed slice `a[::-1]`).
 #[gen_stub_pyfunction]
 #[pyfunction]
-pub fn compact(value: &Bound<'_, PyAny>) -> PyResult<Array> {
-    let py = value.py();
+#[pyo3(signature = (array, dtype=None))]
+pub fn compact(array: &Bound<'_, PyAny>, dtype: Option<&Bound<'_, PyAny>>) -> PyResult<Array> {
+    let py = array.py();
 
     let params = ArrayParams::default(); // TODO: accept as arg
     let context = ReadContext::default(); // TODO: accept as arg
 
     // already a zix array
-    if let Ok(value) = value.cast::<Array>() {
-        let value = &value.get().arr;
+    if let Ok(array) = array.cast::<Array>() {
+        let mut array = array.clone();
+        if let Some(dtype) = dtype {
+            array = crate::ops::astype(&array, dtype)?;
+        }
+        let value = &array.get().arr;
         let array = py.detach({
             let context = unsafe { UnsafeSend::new(&context) };
             || {
@@ -515,9 +842,9 @@ pub fn compact(value: &Bound<'_, PyAny>) -> PyResult<Array> {
     }
 
     // convert to numpy array
-    let py = value.py();
+    let py = array.py();
     let numpy_asarray = numpy::get_array_module(py)?.getattr("asarray")?;
-    let array = numpy_asarray.call1((value,))?;
+    let array = numpy_asarray.call1((array, dtype))?;
     let array = array.cast::<PyUntypedArray>()?;
     let array = NumpyAsArray::new(array)?;
 

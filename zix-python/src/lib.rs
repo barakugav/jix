@@ -25,6 +25,9 @@ mod zix {
     use crate::ops::{asarray, astype};
 
     #[pymodule_export]
+    use crate::ops::copy;
+
+    #[pymodule_export]
     use crate::ops::{add, divide, multiply, power, subtract};
 
     #[pymodule_export]
@@ -45,7 +48,8 @@ mod zix {
 
     #[pymodule_export]
     use crate::ops::{
-        broadcast, concatenate, insert_axes, permute_axes, remove_axes, reshape, stack,
+        broadcast, concatenate, flatten, insert_axes, permute_axes, remove_axes, reshape, squeeze,
+        stack, unsqueeze,
     };
 
     #[pymodule_export]

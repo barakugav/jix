@@ -86,7 +86,7 @@ pub(crate) fn dtype_to_numpy<'py>(
     Ok(numpy_dtype)
 }
 
-pub(crate) fn dtype_from_numpy(numpy_dtype: Bound<PyArrayDescr>) -> PyResult<ZixDtype> {
+pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<ZixDtype> {
     let shape = numpy_dtype.shape();
     if shape.len() > DTYPE_MAX_NDIM {
         return Err(PyValueError::new_err(format!(
@@ -166,7 +166,7 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: Bound<PyArrayDescr>) -> PyResult<Zix
             .map::<PyResult<_>, _>(|field_name| {
                 let (field_dtype, field_offset) = numpy_base.get_field(&field_name).unwrap();
                 let field_offset: Itemsize = field_offset.try_into().unwrap();
-                let field_dtype = dtype_from_numpy(field_dtype)?;
+                let field_dtype = dtype_from_numpy(&field_dtype)?;
                 Ok((field_name, field_offset, field_dtype))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -187,7 +187,7 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: Bound<PyArrayDescr>) -> PyResult<Zix
 }
 
 pub(crate) fn dtype_from_any(dtype: &Bound<PyAny>) -> PyResult<ZixDtype> {
-    dtype_from_numpy(PyArrayDescr::new(dtype.py(), dtype)?)
+    dtype_from_numpy(&PyArrayDescr::new(dtype.py(), dtype)?)
 }
 
 #[cfg(test)]
@@ -199,12 +199,12 @@ mod tests {
     use super::*;
 
     fn from_str(py: Python<'_>, s: &str) -> PyResult<ZixDtype> {
-        dtype_from_numpy(PyArrayDescr::new(py, s)?)
+        dtype_from_numpy(&PyArrayDescr::new(py, s)?)
     }
 
     fn roundtrip(py: Python<'_>, dtype: &ZixDtype) -> ZixDtype {
         let np = dtype_to_numpy(py, dtype).expect("dtype_to_numpy failed");
-        dtype_from_numpy(np).expect("dtype_from_numpy failed")
+        dtype_from_numpy(&np).expect("dtype_from_numpy failed")
     }
 
     // ===== dtype_from_numpy: scalar dtypes =====
@@ -327,7 +327,7 @@ mod tests {
     fn test_from_numpy_scalar_shape_1d() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, ("<f4", (4,))).unwrap();
-            let dtype = dtype_from_numpy(np_dtype).unwrap();
+            let dtype = dtype_from_numpy(&np_dtype).unwrap();
             assert_eq!(dtype.scalar_kind(), Some(DtypeScalarKind::F32));
             assert_eq!(dtype.shape(), &[4]);
             assert_eq!(dtype.itemsize(), 16);
@@ -338,7 +338,7 @@ mod tests {
     fn test_from_numpy_scalar_shape_2d() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, ("<i4", (3, 4))).unwrap();
-            let dtype = dtype_from_numpy(np_dtype).unwrap();
+            let dtype = dtype_from_numpy(&np_dtype).unwrap();
             assert_eq!(dtype.scalar_kind(), Some(DtypeScalarKind::I32));
             assert_eq!(dtype.shape(), &[3, 4]);
             assert_eq!(dtype.itemsize(), 48);
@@ -349,7 +349,7 @@ mod tests {
     fn test_from_numpy_scalar_shape_4d() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, ("<u1", (2, 3, 4, 5))).unwrap();
-            let dtype = dtype_from_numpy(np_dtype).unwrap();
+            let dtype = dtype_from_numpy(&np_dtype).unwrap();
             assert_eq!(dtype.scalar_kind(), Some(DtypeScalarKind::U8));
             assert_eq!(dtype.shape(), &[2, 3, 4, 5]);
             assert_eq!(dtype.itemsize(), 120);
@@ -361,7 +361,7 @@ mod tests {
     fn test_from_numpy_scalar_shape_too_many_dims() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, ("<u1", (2, 3, 4, 5, 6))).unwrap();
-            let result = dtype_from_numpy(np_dtype);
+            let result = dtype_from_numpy(&np_dtype);
             assert!(result.is_err());
         });
     }
@@ -378,7 +378,7 @@ mod tests {
             dict.set_item("offsets", vec![0usize, 1, 3]).unwrap();
             dict.set_item("itemsize", 7usize).unwrap();
             let np_dtype = PyArrayDescr::new(py, dict).unwrap();
-            let dtype = dtype_from_numpy(np_dtype).unwrap();
+            let dtype = dtype_from_numpy(&np_dtype).unwrap();
 
             assert!(!dtype.is_aligned());
             assert_eq!(dtype.alignment().as_usize(), 1);
@@ -417,7 +417,7 @@ mod tests {
                 .unwrap()
                 .cast_into::<PyArrayDescr>()
                 .unwrap();
-            let dtype = dtype_from_numpy(np).unwrap();
+            let dtype = dtype_from_numpy(&np).unwrap();
 
             assert!(dtype.is_aligned());
             assert_eq!(dtype.alignment().as_usize(), 4);
@@ -451,7 +451,7 @@ mod tests {
                 .unwrap()
                 .cast_into::<PyArrayDescr>()
                 .unwrap();
-            let dtype = dtype_from_numpy(np).unwrap();
+            let dtype = dtype_from_numpy(&np).unwrap();
 
             assert!(dtype.is_aligned());
             assert_eq!(dtype.alignment().as_usize(), 8);
@@ -472,7 +472,7 @@ mod tests {
             // struct dtype with shape (2,)
             let struct_dt = PyArrayDescr::new(py, vec![("x", "<f4"), ("y", "<f4")]).unwrap();
             let np_dtype = PyArrayDescr::new(py, (struct_dt, (2,))).unwrap();
-            let dtype = dtype_from_numpy(np_dtype).unwrap();
+            let dtype = dtype_from_numpy(&np_dtype).unwrap();
             assert_eq!(dtype.shape(), &[2]);
             assert_eq!(dtype.itemsize(), 16); // 2 * (4+4)
             let fields = dtype.fields().unwrap();
@@ -486,7 +486,7 @@ mod tests {
     fn test_from_numpy_object_errors() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, "O").unwrap();
-            assert!(dtype_from_numpy(np_dtype).is_err());
+            assert!(dtype_from_numpy(&np_dtype).is_err());
         });
     }
 
@@ -494,7 +494,7 @@ mod tests {
     fn test_from_numpy_unicode_errors() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, "U10").unwrap();
-            assert!(dtype_from_numpy(np_dtype).is_err());
+            assert!(dtype_from_numpy(&np_dtype).is_err());
         });
     }
 
@@ -502,7 +502,7 @@ mod tests {
     fn test_from_numpy_bytes_string_errors() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, "S4").unwrap();
-            assert!(dtype_from_numpy(np_dtype).is_err());
+            assert!(dtype_from_numpy(&np_dtype).is_err());
         });
     }
 
@@ -510,7 +510,7 @@ mod tests {
     fn test_from_numpy_datetime_errors() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, "datetime64").unwrap();
-            assert!(dtype_from_numpy(np_dtype).is_err());
+            assert!(dtype_from_numpy(&np_dtype).is_err());
         });
     }
 
@@ -518,7 +518,7 @@ mod tests {
     fn test_from_numpy_timedelta_errors() {
         Python::attach(|py| {
             let np_dtype = PyArrayDescr::new(py, "timedelta64").unwrap();
-            assert!(dtype_from_numpy(np_dtype).is_err());
+            assert!(dtype_from_numpy(&np_dtype).is_err());
         });
     }
 
@@ -529,7 +529,7 @@ mod tests {
             // V0 is a void dtype with 0 bytes — zero-sized, unsupported
             let np_dtype = PyArrayDescr::new(py, "V0").unwrap();
             // V0 has no fields, kind 'V' — should error as unsupported
-            assert!(dtype_from_numpy(np_dtype).is_err());
+            assert!(dtype_from_numpy(&np_dtype).is_err());
         });
     }
 
@@ -860,7 +860,7 @@ mod tests {
             dict.set_item("offsets", vec![0usize, 1]).unwrap();
             dict.set_item("itemsize", 5usize).unwrap();
             let np_dtype = PyArrayDescr::new(py, dict).unwrap();
-            let dtype = dtype_from_numpy(np_dtype).unwrap();
+            let dtype = dtype_from_numpy(&np_dtype).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }
@@ -884,7 +884,7 @@ mod tests {
                 .unwrap()
                 .cast_into::<PyArrayDescr>()
                 .unwrap();
-            let dtype = dtype_from_numpy(np).unwrap();
+            let dtype = dtype_from_numpy(&np).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }

@@ -1,27 +1,29 @@
 use pyo3::prelude::*;
 use zix_core::Array as ZixArray;
 
-use crate::ops::as_core_array;
+use crate::ops::{any_to_core_array, asarray, copy_impl};
 use crate::util::{normalize_axes, normalize_axis, IntoPyResult, ItemOrSequence};
 use crate::Array;
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
 ///
-/// `new_shape` must have the same number of dimensions as the input. For each dimension `d`,
-/// either `new_shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
-/// the single element is repeated `new_shape[d]` times). Any other combination raises an error.
+/// `shape` must have the same number of dimensions as the input. For each dimension `d`,
+/// either `shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
+/// the single element is repeated `shape[d]` times). Any other combination raises an error.
+/// `shape[d]` may be `-1` as a shorthand for `input_shape[d]` (keeps the dimension size
+/// unchanged regardless of whether that dimension is 1 or larger).
 ///
-/// Output dtype equals the input dtype. Output shape equals `new_shape`.
+/// Output dtype equals the input dtype. Output shape equals `shape`.
 ///
 /// When `copy=True` (the default) the result is an eagerly materialized compact array with a
-/// block layout matched to `new_shape`. When `copy=False` the result is a lazy view; reading
+/// block layout matched to `shape`. When `copy=False` the result is a lazy view; reading
 /// it may decompress many blocks if the original storage is block-based and the new shape
 /// crosses block boundaries.
 ///
 /// The `array` argument must already be a `zix.Array` (no implicit `asarray()` conversion).
 ///
 /// This function deviates from `numpy.broadcast_to`:
-/// - `new_shape` must have the same number of dimensions as the input (numpy pads leading
+/// - `shape` must have the same number of dimensions as the input (numpy pads leading
 ///   dimensions automatically)
 ///
 /// # Examples
@@ -30,13 +32,13 @@ use crate::Array;
 /// import numpy as np
 ///
 /// # Row vector [1, 3] → matrix [2, 3]: every row becomes identical
-/// a = zix.asarray(np.array([[1, 2, 3]], dtype=np.int32))
+/// a = zix.compact([[1, 2, 3]], dtype=np.int32)
 /// result = zix.broadcast(a, [2, 3])
 /// assert result.numpy().shape == (2, 3)
 /// assert np.array_equal(result.numpy()[0], result.numpy()[1])
 ///
 /// # Column vector [3, 1] → matrix [3, 2]: every column becomes identical
-/// b = zix.asarray(np.array([[10], [20], [30]], dtype=np.int32))
+/// b = zix.compact([[10], [20], [30]], dtype=np.int32)
 /// result = zix.broadcast(b, [3, 2])
 /// assert result.numpy()[0, 0] == result.numpy()[0, 1] == 10
 /// ```
@@ -44,26 +46,53 @@ use crate::Array;
 #[pyfunction]
 #[pyo3(signature = (
     array,
-    new_shape,
+    shape,
     copy=true,
 ))]
 pub fn broadcast<'py>(
     array: &Bound<'py, Array>,
-    new_shape: ItemOrSequence<u64>,
+    shape: ItemOrSequence<i64>, // TODO: docs about -1
     copy: bool,
-) -> PyResult<Array> {
-    let py = array.py();
-    let array = array.get().to_core_array();
-    let new_shape = new_shape.into_vec();
-    let ret = zix_core::ops::Broadcast::new(array, &new_shape).into_py_result()?;
-    if !copy {
-        return Ok(Array::from_core_storage(ret));
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = array;
+    let array = &py_arr.get().arr;
+    let new_shape = shape.into_vec();
+    let old_shape = array.shape();
+    if new_shape.len() != old_shape.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Cannot broadcast array of shape {:?} to shape {:?}: different number of dimensions",
+            old_shape, new_shape
+        )));
     }
-    // release the GIL while copying the data
-    py.detach(|| {
-        let ret = ZixArray::from_storage(ret).copy().into_py_result()?;
-        Ok(Array::from_core_storage(ret.into_storage()))
-    })
+    let new_shape = new_shape
+        .into_iter()
+        .zip(old_shape)
+        .map(|(new_len, old_len)| {
+            if new_len >= 0 {
+                Ok(new_len as u64)
+            } else if new_len == -1 {
+                Ok(*old_len)
+            } else {
+                Err(pyo3::exceptions::PyValueError::new_err(format!(""))) // TODO
+            }
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+
+    if new_shape == array.shape() {
+        // no-op if already the right shape
+        return if !copy {
+            Ok(py_arr.clone())
+        } else {
+            copy_impl(py_arr.py(), array)
+        };
+    }
+
+    let ret = zix_core::ops::Broadcast::new(array.clone(), &new_shape).into_py_result()?;
+    if !copy {
+        Bound::new(py_arr.py(), Array::from_core_storage(ret))
+    } else {
+        copy_impl(py_arr.py(), &ZixArray::from_storage(ret))
+    }
 }
 
 // TODO slice
@@ -90,12 +119,12 @@ pub fn broadcast<'py>(
 /// import zix
 /// import numpy as np
 ///
-/// a = zix.asarray(np.array([1, 2, 3], dtype=np.int32))   # shape [3]
+/// a = zix.compact([1, 2, 3], dtype=np.int32)   # shape [3]
 /// assert zix.insert_axes(a, [0]).numpy().shape == (1, 3)  # → [1, 3]
 /// assert zix.insert_axes(a, [1]).numpy().shape == (3, 1)  # → [3, 1]
 /// assert zix.insert_axes(a, [-1]).numpy().shape == (3, 1) # negative: same as [1]
 ///
-/// b = zix.asarray(np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32))  # shape [2, 3]
+/// b = zix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
 /// assert zix.insert_axes(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # → [1, 2, 1, 3]
 ///
 /// # duplicate axes: multiple length-1 dimensions at the same position
@@ -103,13 +132,29 @@ pub fn broadcast<'py>(
 /// ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn insert_axes<'py>(array: &Bound<'py, Array>, axes: ItemOrSequence<i32>) -> PyResult<Array> {
+pub fn insert_axes<'py>(
+    array: &Bound<'py, Array>,
+    axes: ItemOrSequence<i32>,
+) -> PyResult<Bound<'py, Array>> {
     // NOTE: API different than numpy: axes are specified with respect to the original ndim, not the new ndim. Same
     // axis can be specified multiple times to insert multiple axes in the same place.
-    let array = array.get().to_core_array();
+    let py_arr = array;
+    let array = py_arr.get().to_core_array();
     let axes = normalize_axes(axes.into_vec(), array.ndim() + 1)?;
+    if axes.is_empty() {
+        return Ok(py_arr.clone()); // no-op if no axes to insert
+    }
     let ret = zix_core::ops::InsertAxes::new(array, &axes).into_py_result()?;
-    Ok(Array::from_core_storage(ret))
+    Bound::new(py_arr.py(), Array::from_core_storage(ret))
+}
+/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for :func:`zix.insert_axes()`.
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+pub fn unsqueeze<'py>(
+    array: &Bound<'py, Array>,
+    axes: ItemOrSequence<i32>,
+) -> PyResult<Bound<'py, Array>> {
+    insert_axes(array, axes)
 }
 
 /// Removes length-1 dimensions from an array's shape.
@@ -127,20 +172,68 @@ pub fn insert_axes<'py>(array: &Bound<'py, Array>, axes: ItemOrSequence<i32>) ->
 /// import zix
 /// import numpy as np
 ///
-/// a = zix.asarray(np.array([[1, 2, 3]], dtype=np.int32))  # shape [1, 3]
+/// a = zix.compact([[1, 2, 3]], dtype=np.int32)  # shape [1, 3]
 /// assert zix.remove_axes(a, [0]).numpy().shape == (3,)     # → [3]
 ///
-/// b = zix.asarray(np.array([[[10], [20]]], dtype=np.int32))  # shape [1, 2, 1]
+/// b = zix.compact([[[10], [20]]], dtype=np.int32)  # shape [1, 2, 1]
 /// assert zix.remove_axes(b, [0, 2]).numpy().shape == (2,)    # → [2]
 /// assert zix.remove_axes(b, [0, -1]).numpy().shape == (2,)   # negative axis
 /// ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn remove_axes<'py>(array: &Bound<'py, Array>, axes: ItemOrSequence<i32>) -> PyResult<Array> {
-    let array = array.get().to_core_array();
+pub fn remove_axes<'py>(
+    array: &Bound<'py, Array>,
+    axes: ItemOrSequence<i32>,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = array;
+    let array = py_arr.get().to_core_array();
     let axes = normalize_axes(axes.into_vec(), array.ndim())?;
+    if axes.is_empty() {
+        return Ok(py_arr.clone()); // no-op if no axes to remove
+    }
     let ret = zix_core::ops::RemoveAxes::new(array, &axes).into_py_result()?;
-    Ok(Array::from_core_storage(ret))
+    Bound::new(py_arr.py(), Array::from_core_storage(ret))
+}
+
+/// Removes length-1 dimensions from an array's shape.
+///
+/// When `axis=None` (the default), all size-1 dimensions are removed. When `axis` is given,
+/// only the specified axes are removed; each named dimension must have size exactly 1.
+/// Negative axis values are supported and are resolved against `ndim`.
+///
+/// Output dtype and total number of elements equal the input. The result is a lazy view; no
+/// computation occurs until the array is read.
+///
+/// # Examples
+/// ```python,ignore
+/// import zix
+/// import numpy as np
+///
+/// a = zix.compact([[[1, 2, 3]]], dtype=np.int32)  # shape [1, 1, 3]
+/// assert zix.squeeze(a).numpy().shape == (3,)              # remove all size-1 dims
+/// assert zix.squeeze(a, axis=0).numpy().shape == (1, 3)    # remove only axis 0
+/// assert zix.squeeze(a, axis=[0, 1]).numpy().shape == (3,) # remove axes 0 and 1
+/// ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+#[pyo3(signature = (array, axis=None))]
+pub fn squeeze<'py>(
+    array: &Bound<'py, Array>,
+    axis: Option<ItemOrSequence<i32>>,
+) -> PyResult<Bound<'py, Array>> {
+    let axis = axis.unwrap_or_else(|| {
+        ItemOrSequence::Sequence(
+            array
+                .get()
+                .arr
+                .shape()
+                .iter()
+                .enumerate()
+                .filter_map(|(d, len)| (*len == 1).then_some(d as i32))
+                .collect(),
+        )
+    });
+    remove_axes(array, axis)
 }
 
 /// Reorders the axes of an array (generalized transpose).
@@ -177,23 +270,30 @@ pub fn remove_axes<'py>(array: &Bound<'py, Array>, axes: ItemOrSequence<i32>) ->
     array,
     axes=None,
 ))]
-pub fn permute_axes<'py>(array: &Bound<'py, Array>, axes: Option<Vec<usize>>) -> PyResult<Array> {
-    let array = array.get().to_core_array();
+pub fn permute_axes<'py>(
+    array: &Bound<'py, Array>,
+    axes: Option<Vec<usize>>,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = array;
+    let array = py_arr.get().to_core_array();
     let axes = axes.unwrap_or_else(|| (0..array.ndim()).rev().collect());
+    if axes.len() == array.ndim() && axes.iter().enumerate().all(|(i, &ax)| i == ax) {
+        return Ok(py_arr.clone()); // no-op permutation
+    }
     let ret = zix_core::ops::PermuteAxes::new(array, &axes).into_py_result()?;
-    Ok(Array::from_core_storage(ret))
+    Bound::new(py_arr.py(), Array::from_core_storage(ret))
 }
 
 /// Reinterprets an array with a different shape.
 ///
-/// The total number of elements must be preserved: the product of `new_shape` must equal the
-/// product of the original shape. Exactly one dimension in `new_shape` may be `-1`; that
+/// The total number of elements must be preserved: the product of `shape` must equal the
+/// product of the original shape. Exactly one dimension in `shape` may be `-1`; that
 /// dimension is inferred from the others and the total element count.
 ///
 /// Output dtype equals the input dtype.
 ///
 /// When `copy=True` (the default) the result is an eagerly materialized compact array with a
-/// block layout matched to `new_shape`. When `copy=False` the result is a lazy view; reading
+/// block layout matched to `shape`. When `copy=False` the result is a lazy view; reading
 /// it may decompress many blocks if the new shape is not aligned with the original block
 /// boundaries — use with care.
 ///
@@ -218,16 +318,17 @@ pub fn permute_axes<'py>(array: &Bound<'py, Array>, axes: Option<Vec<usize>>) ->
 #[pyfunction]
 #[pyo3(signature = (
     array,
-    new_shape,
+    shape,
     copy=true,
 ))]
 pub fn reshape<'py>(
     array: &Bound<'py, Array>,
-    new_shape: ItemOrSequence<i64>,
+    shape: ItemOrSequence<i64>,
     copy: bool,
-) -> PyResult<Array> {
-    let py = array.py();
-    let array = array.get().to_core_array();
+) -> PyResult<Bound<'py, Array>> {
+    let new_shape = shape;
+    let py_arr = array;
+    let array = &py_arr.get().arr;
 
     // handle -1 in new_shape
     let new_shape = {
@@ -246,7 +347,7 @@ pub fn reshape<'py>(
                 inferred_dim = Some(i);
             } else {
                 return Err(pyo3::exceptions::PyValueError::new_err(
-                    "new_shape must be non negative or -1",
+                    "shape must be non negative or -1",
                 ));
             }
         }
@@ -262,15 +363,48 @@ pub fn reshape<'py>(
         new_shape.iter().map(|&dim| dim as u64).collect::<Vec<_>>()
     };
 
-    let ret = zix_core::ops::Reshape::new(array, &new_shape).into_py_result()?;
-    if !copy {
-        return Ok(Array::from_core_storage(ret));
+    if new_shape == array.shape() {
+        // no-op if already the right shape
+        return if !copy {
+            Ok(py_arr.clone())
+        } else {
+            copy_impl(py_arr.py(), array)
+        };
     }
-    // release the GIL while copying the data
-    py.detach(|| {
-        let ret = ZixArray::from_storage(ret).copy().into_py_result()?;
-        Ok(Array::from_core_storage(ret.into_storage()))
-    })
+
+    let ret = zix_core::ops::Reshape::new(array.clone(), &new_shape).into_py_result()?;
+    if !copy {
+        Bound::new(py_arr.py(), Array::from_core_storage(ret))
+    } else {
+        copy_impl(py_arr.py(), &ZixArray::from_storage(ret))
+    }
+}
+
+/// Collapses an array into a single dimension.
+///
+/// Equivalent to `zix.reshape(array, [n], copy=copy)` where `n` is the total number of
+/// elements. Output dtype equals the input dtype. Output shape is `[n]`.
+///
+/// When `copy=True` (the default) the result is an eagerly materialized compact array.
+/// When `copy=False` the result is a lazy view; reading it may decompress many blocks if the
+/// original storage is block-based and the shape is not aligned with block boundaries.
+///
+/// # Examples
+/// ```python,ignore
+/// import zix
+/// import numpy as np
+///
+/// a = zix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
+/// f = zix.flatten(a)
+/// assert f.numpy().shape == (6,)
+/// assert np.array_equal(f.numpy(), [1, 2, 3, 4, 5, 6])
+/// ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+#[pyo3(signature = (array, copy=true))]
+pub fn flatten<'py>(array: &Bound<'py, Array>, copy: bool) -> PyResult<Bound<'py, Array>> {
+    let size = array.get().arr.shape().iter().product::<u64>();
+    reshape(array, ItemOrSequence::Item(size as i64), copy)
 }
 
 /// Joins a sequence of arrays along an existing axis.
@@ -294,14 +428,14 @@ pub fn reshape<'py>(
 /// import numpy as np
 ///
 /// # 1-D: join end-to-end
-/// a = zix.asarray(np.array([1, 2, 3], dtype=np.int32))
-/// b = zix.asarray(np.array([4, 5], dtype=np.int32))
+/// a = zix.compact([1, 2, 3], dtype=np.int32)
+/// b = zix.compact([4, 5], dtype=np.int32)
 /// c = zix.concatenate([a, b])
 /// assert np.array_equal(c.numpy(), [1, 2, 3, 4, 5])
 ///
 /// # 2-D: append rows (axis 0) or columns (axis 1 / axis -1)
-/// a = zix.asarray(np.array([[1, 2], [3, 4]], dtype=np.int32))
-/// b = zix.asarray(np.array([[5, 6]], dtype=np.int32))
+/// a = zix.compact([[1, 2], [3, 4]], dtype=np.int32)
+/// b = zix.compact([[5, 6]], dtype=np.int32)
 /// assert zix.concatenate([a, b], axis=0).numpy().shape == (3, 2)
 /// assert zix.concatenate([a, b.T], axis=1).numpy().shape == (2, 3)
 /// ```
@@ -311,10 +445,14 @@ pub fn reshape<'py>(
     arrays,
     axis=0,
 ))]
-pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> {
-    let arrays = arrays
-        .into_iter()
-        .map(|arr| as_core_array(&arr))
+pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Bound<'py, Array>> {
+    let py_arrays = arrays
+        .iter()
+        .map(|arr| asarray(arr))
+        .collect::<Result<Vec<_>, _>>()?;
+    let arrays = py_arrays
+        .iter()
+        .map(|arr| any_to_core_array(arr))
         .collect::<Result<Vec<_>, _>>()?;
     if arrays.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
@@ -330,8 +468,14 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<A
         }
     }
     let axis = normalize_axis(axis, ndim)?;
+
+    let py = py_arrays.first().unwrap().py();
+    if arrays.len() == 1 && axis < ndim {
+        let [array] = py_arrays.try_into().unwrap();
+        return Ok(array);
+    }
     let ret = zix_core::ops::Concatenate::new(arrays, axis).into_py_result()?;
-    Ok(Array::from_core_storage(ret))
+    Bound::new(py, Array::from_core_storage(ret))
 }
 
 /// Joins a sequence of arrays along a **new** axis.
@@ -355,8 +499,8 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<A
 /// import zix
 /// import numpy as np
 ///
-/// a = zix.asarray(np.array([1, 2, 3], dtype=np.int32))
-/// b = zix.asarray(np.array([4, 5, 6], dtype=np.int32))
+/// a = zix.compact([1, 2, 3], dtype=np.int32)
+/// b = zix.compact([4, 5, 6], dtype=np.int32)
 ///
 /// # Stack along a new leading axis → shape [2, 3]
 /// c = zix.stack([a, b], axis=0)
@@ -377,7 +521,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<A
 pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> {
     let arrays = arrays
         .into_iter()
-        .map(|arr| as_core_array(&arr))
+        .map(|arr| any_to_core_array(&arr))
         .collect::<Result<Vec<_>, _>>()?;
     if arrays.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(

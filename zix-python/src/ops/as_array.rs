@@ -226,7 +226,7 @@ impl NumpyAsArray {
     }
     pub(crate) fn new(array: &Bound<numpy::PyUntypedArray>) -> PyResult<Self> {
         // scalar
-        let dtype = dtype_from_numpy(array.dtype())?;
+        let dtype = dtype_from_numpy(&array.dtype())?;
         if array.ndim() == 0 {
             if let Some(scalar) = dtype.try_to_scalar() {
                 let item = array.call_method0("item")?;
@@ -354,7 +354,7 @@ impl NumpyAsArray {
     }
 }
 
-pub(crate) fn as_core_array<'py>(
+pub(crate) fn any_to_core_array<'py>(
     value: &Bound<'py, PyAny>,
 ) -> PyResult<zix_core::Array<DynStorage>> {
     Ok(asarray(value)?.get().to_core_array())

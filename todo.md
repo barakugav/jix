@@ -4,9 +4,20 @@
 - remove Borrowed
 - use u8 for dim index everywhere, like axes: DimArray<usize>, and concat_axis: usize
 - ops
-    - clip
+    - clip, clamp
     - split
     - sort
+    - 'cumprod', 'cumsum'
+    - imag, real
+    - flatten
+    - repeat, tile
+    - squeeze, unsqueeze
+    - allclose
+    - isclose
+    - diff
+    - flip, roll, split
+    - log variants, log10, log2, log1p
+    - median
 - full/zeros/ones/
 - array::from_fn
 - to_ndarray_sub should accept IntoSlice
@@ -16,3 +27,4 @@
 - support string index in python array, accessing sub field by name
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
+- name "axes" to "axis" in ops

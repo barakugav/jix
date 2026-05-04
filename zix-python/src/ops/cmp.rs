@@ -25,14 +25,14 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([1, 2, 3], dtype=np.int32))
-    /// b = zix.asarray(np.array([1, 0, 3], dtype=np.int32))
+    /// a = zix.compact([1, 2, 3], dtype=np.int32)
+    /// b = zix.compact([1, 0, 3], dtype=np.int32)
     /// result = zix.equal(a, b)
     /// assert np.array_equal(result.numpy(), [True, False, True])
     ///
     /// # NaN != NaN per IEEE 754.
-    /// c = zix.asarray(np.array([float('nan'), 1.0], dtype=np.float32))
-    /// d = zix.asarray(np.array([float('nan'), 1.0], dtype=np.float32))
+    /// c = zix.compact([float('nan'), 1.0], dtype=np.float32)
+    /// d = zix.compact([float('nan'), 1.0], dtype=np.float32)
     /// result = zix.equal(c, d)
     /// assert np.array_equal(result.numpy(), [False, True])
     /// ```
@@ -65,8 +65,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([1, 2, 3], dtype=np.int32))
-    /// b = zix.asarray(np.array([1, 0, 3], dtype=np.int32))
+    /// a = zix.compact([1, 2, 3], dtype=np.int32)
+    /// b = zix.compact([1, 0, 3], dtype=np.int32)
     /// result = zix.not_equal(a, b)
     /// assert np.array_equal(result.numpy(), [False, True, False])
     /// ```
@@ -99,8 +99,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([3, 1, 2], dtype=np.int32))
-    /// b = zix.asarray(np.array([1, 1, 3], dtype=np.int32))
+    /// a = zix.compact([3, 1, 2], dtype=np.int32)
+    /// b = zix.compact([1, 1, 3], dtype=np.int32)
     /// result = zix.greater(a, b)
     /// assert np.array_equal(result.numpy(), [True, False, False])
     /// ```
@@ -133,8 +133,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([3, 1, 2], dtype=np.int32))
-    /// b = zix.asarray(np.array([1, 1, 3], dtype=np.int32))
+    /// a = zix.compact([3, 1, 2], dtype=np.int32)
+    /// b = zix.compact([1, 1, 3], dtype=np.int32)
     /// result = zix.greater_equal(a, b)
     /// assert np.array_equal(result.numpy(), [True, True, False])
     /// ```
@@ -167,8 +167,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([1, 1, 3], dtype=np.int32))
-    /// b = zix.asarray(np.array([3, 1, 2], dtype=np.int32))
+    /// a = zix.compact([1, 1, 3], dtype=np.int32)
+    /// b = zix.compact([3, 1, 2], dtype=np.int32)
     /// result = zix.less(a, b)
     /// assert np.array_equal(result.numpy(), [True, False, False])
     /// ```
@@ -201,8 +201,8 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([1, 1, 3], dtype=np.int32))
-    /// b = zix.asarray(np.array([3, 1, 2], dtype=np.int32))
+    /// a = zix.compact([1, 1, 3], dtype=np.int32)
+    /// b = zix.compact([3, 1, 2], dtype=np.int32)
     /// result = zix.less_equal(a, b)
     /// assert np.array_equal(result.numpy(), [True, True, False])
     /// ```
@@ -235,14 +235,14 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([1, 5, 3], dtype=np.int32))
-    /// b = zix.asarray(np.array([4, 2, 3], dtype=np.int32))
+    /// a = zix.compact([1, 5, 3], dtype=np.int32)
+    /// b = zix.compact([4, 2, 3], dtype=np.int32)
     /// result = zix.maximum(a, b)
     /// assert np.array_equal(result.numpy(), [4, 5, 3])
     ///
     /// # NaN is propagated: if either operand is NaN the result is NaN.
-    /// c = zix.asarray(np.array([float('nan'), 1.0], dtype=np.float32))
-    /// d = zix.asarray(np.array([2.0, 3.0], dtype=np.float32))
+    /// c = zix.compact([float('nan'), 1.0], dtype=np.float32)
+    /// d = zix.compact([2.0, 3.0], dtype=np.float32)
     /// result = zix.maximum(c, d)
     /// assert np.isnan(result.numpy()[0])
     /// assert result.numpy()[1] == 3.0
@@ -276,14 +276,14 @@ define_op2!(
     /// import zix
     /// import numpy as np
     ///
-    /// a = zix.asarray(np.array([1, 5, 3], dtype=np.int32))
-    /// b = zix.asarray(np.array([4, 2, 3], dtype=np.int32))
+    /// a = zix.compact([1, 5, 3], dtype=np.int32)
+    /// b = zix.compact([4, 2, 3], dtype=np.int32)
     /// result = zix.minimum(a, b)
     /// assert np.array_equal(result.numpy(), [1, 2, 3])
     ///
     /// # NaN is propagated: if either operand is NaN the result is NaN.
-    /// c = zix.asarray(np.array([float('nan'), 1.0], dtype=np.float32))
-    /// d = zix.asarray(np.array([2.0, 3.0], dtype=np.float32))
+    /// c = zix.compact([float('nan'), 1.0], dtype=np.float32)
+    /// d = zix.compact([2.0, 3.0], dtype=np.float32)
     /// result = zix.minimum(c, d)
     /// assert np.isnan(result.numpy()[0])
     /// assert result.numpy()[1] == 1.0
