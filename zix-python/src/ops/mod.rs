@@ -1089,7 +1089,7 @@ define_reduction_op!(
 /// assert np.array_equal(result.numpy(), [False, True, True, False])
 /// ```
 pub fn astype<'py>(array: &Bound<'py, Array>, dtype: &Bound<'py, PyAny>) -> PyResult<Array> {
-    let array = array.borrow().to_core_array();
+    let array = array.get().to_core_array();
     let dtype = dtype_from_any(dtype)?;
     let ret = zix_core::ops::AsType::new(array, dtype).into_py_result()?;
     Ok(Array::from_core_storage(ret))

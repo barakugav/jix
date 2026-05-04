@@ -76,7 +76,7 @@ pub(crate) fn asarray2<'py>(
 
     fn get_shape(asarray: &AsArray) -> Option<Vec<u64>> {
         match asarray {
-            AsArray::Array(array) => Some(array.borrow().arr.shape().to_vec()),
+            AsArray::Array(array) => Some(array.get().arr.shape().to_vec()),
             AsArray::Numpy(array) => Some(array.shape().to_vec()),
             AsArray::Scalar(_) => None,
         }
@@ -357,7 +357,7 @@ impl NumpyAsArray {
 pub(crate) fn as_core_array<'py>(
     value: &Bound<'py, PyAny>,
 ) -> PyResult<zix_core::Array<DynStorage>> {
-    Ok(asarray(value)?.borrow().to_core_array())
+    Ok(asarray(value)?.get().to_core_array())
 }
 #[cfg(test)]
 mod tests {
@@ -370,12 +370,7 @@ mod tests {
 
     /// Call `asarray` and read back the data as an ndarray.
     fn collect<T: Dtyped>(val: &Bound<'_, PyAny>) -> ArrayD<T> {
-        asarray(val)
-            .unwrap()
-            .borrow()
-            .arr
-            .to_ndarray::<T>()
-            .unwrap()
+        asarray(val).unwrap().get().arr.to_ndarray::<T>().unwrap()
     }
 
     // ── 0-D: Python scalars ──────────────────────────────────────────────────
@@ -567,7 +562,7 @@ mod tests {
                 ArrayD::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).map(|x| x as f32).collect())
                     .unwrap();
             let arr = asarray(&npd(py, orig)).unwrap();
-            assert_eq!(arr.borrow().arr.shape(), &[2u64, 3, 4]);
+            assert_eq!(arr.get().arr.shape(), &[2u64, 3, 4]);
         });
     }
 

@@ -7,7 +7,6 @@
     - clip
     - split
     - sort
-    - builtin ops for python
 - full/zeros/ones/
 - array::from_fn
 - to_ndarray_sub should accept IntoSlice
@@ -15,4 +14,5 @@
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
 - cast types automatically in python bindings
 - support string index in python array, accessing sub field by name
-- right hand side operations in python
+- add functions alias in python (abs, pow, concat)
+- move pyi gen to a separate crate

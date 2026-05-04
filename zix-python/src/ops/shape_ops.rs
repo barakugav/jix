@@ -53,7 +53,7 @@ pub fn broadcast<'py>(
     copy: bool,
 ) -> PyResult<Array> {
     let py = array.py();
-    let array = array.borrow().to_core_array();
+    let array = array.get().to_core_array();
     let new_shape = new_shape.into_vec();
     let ret = zix_core::ops::Broadcast::new(array, &new_shape).into_py_result()?;
     if !copy {
@@ -106,7 +106,7 @@ pub fn broadcast<'py>(
 pub fn insert_axes<'py>(array: &Bound<'py, Array>, axes: ItemOrSequence<i32>) -> PyResult<Array> {
     // NOTE: API different than numpy: axes are specified with respect to the original ndim, not the new ndim. Same
     // axis can be specified multiple times to insert multiple axes in the same place.
-    let array = array.borrow().to_core_array();
+    let array = array.get().to_core_array();
     let axes = normalize_axes(axes.into_vec(), array.ndim() + 1)?;
     let ret = zix_core::ops::InsertAxes::new(array, &axes).into_py_result()?;
     Ok(Array::from_core_storage(ret))
@@ -137,7 +137,7 @@ pub fn insert_axes<'py>(array: &Bound<'py, Array>, axes: ItemOrSequence<i32>) ->
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn remove_axes<'py>(array: &Bound<'py, Array>, axes: ItemOrSequence<i32>) -> PyResult<Array> {
-    let array = array.borrow().to_core_array();
+    let array = array.get().to_core_array();
     let axes = normalize_axes(axes.into_vec(), array.ndim())?;
     let ret = zix_core::ops::RemoveAxes::new(array, &axes).into_py_result()?;
     Ok(Array::from_core_storage(ret))
@@ -178,7 +178,7 @@ pub fn remove_axes<'py>(array: &Bound<'py, Array>, axes: ItemOrSequence<i32>) ->
     axes=None,
 ))]
 pub fn permute_axes<'py>(array: &Bound<'py, Array>, axes: Option<Vec<usize>>) -> PyResult<Array> {
-    let array = array.borrow().to_core_array();
+    let array = array.get().to_core_array();
     let axes = axes.unwrap_or_else(|| (0..array.ndim()).rev().collect());
     let ret = zix_core::ops::PermuteAxes::new(array, &axes).into_py_result()?;
     Ok(Array::from_core_storage(ret))
@@ -227,7 +227,7 @@ pub fn reshape<'py>(
     copy: bool,
 ) -> PyResult<Array> {
     let py = array.py();
-    let array = array.borrow().to_core_array();
+    let array = array.get().to_core_array();
 
     // handle -1 in new_shape
     let new_shape = {

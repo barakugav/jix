@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -9,7 +9,7 @@ use zix_core::ops::SliceItem;
 use zix_core::storage::ArrayStorage;
 use zix_core::{Array as ZixArray, ArrayParams};
 
-use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::{PyAnyMethods, PySlice};
 use std::ops::Range;
 
@@ -19,14 +19,19 @@ use crate::storage::DynStorage;
 use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, UnsafeSend};
 
 #[gen_stub_pyclass]
-#[pyclass(module = "zix")]
+#[pyclass(module = "zix", frozen)]
 pub struct Array {
     pub(crate) arr: ZixArray<DynStorage>,
+    cache: Mutex<ArrayInner>,
+}
+struct ArrayInner {
+    numpy_dtype: Option<Py<PyArrayDescr>>,
 }
 impl Array {
     pub(crate) fn from_storage(storage: DynStorage) -> Self {
         Self {
             arr: ZixArray::from_storage(storage),
+            cache: Mutex::new(ArrayInner { numpy_dtype: None }),
         }
     }
 
@@ -86,11 +91,6 @@ impl Array {
 #[gen_stub_pymethods]
 #[pymethods]
 impl Array {
-    #[new]
-    fn new(value: &Bound<'_, PyAny>) -> PyResult<Self> {
-        compact(value)
-    }
-
     #[getter]
     pub fn ndim(&self) -> usize {
         self.arr.shape().len()
@@ -117,8 +117,16 @@ impl Array {
 
     #[getter]
     pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
-        // TODO: cache
-        dtype_to_numpy(py, self.arr.dtype())
+        let mut cache = self
+            .cache
+            .lock()
+            // TODO: is it the correct exception type?
+            .map_err(|_| PyRuntimeError::new_err("Negative strides are not supported"))?;
+
+        if cache.numpy_dtype.is_none() {
+            cache.numpy_dtype = Some(dtype_to_numpy(py, self.arr.dtype())?.unbind());
+        }
+        Ok(cache.numpy_dtype.as_ref().unwrap().bind(py).clone())
     }
 
     /// Decode the array (or a sub-region of it) into a NumPy array.
@@ -365,11 +373,8 @@ impl Array {
     /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.
     ///
     /// This function is identical to `numpy()`, see that method for details.
-    fn __getitem__<'py>(
-        slf: &Bound<'py, Self>,
-        key: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        Self::numpy(&slf.borrow(), slf.py(), Some(key))
+    fn __getitem__<'py>(&self, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyUntypedArray>> {
+        self.numpy(key.py(), Some(key))
     }
 
     pub fn __add__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
@@ -498,7 +503,7 @@ pub fn compact(value: &Bound<'_, PyAny>) -> PyResult<Array> {
 
     // already a zix array
     if let Ok(value) = value.cast::<Array>() {
-        let value = value.borrow().to_core_array();
+        let value = &value.get().arr;
         let array = py.detach({
             let context = unsafe { UnsafeSend::new(&context) };
             || {
@@ -523,10 +528,7 @@ pub fn compact(value: &Bound<'_, PyAny>) -> PyResult<Array> {
             let array = match array {
                 NumpyAsArray::Numpy(array) => array.copy_with(params, &context),
                 // scalar
-                _ => array
-                    .into_py_array(None)?
-                    .to_core_array()
-                    .copy_with(params, &context),
+                _ => array.into_py_array(None)?.arr.copy_with(params, &context),
             };
             array.into_py_result()
         }
@@ -568,7 +570,7 @@ mod tests {
         // ndarray::Array -> zix_core::Array -> zix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.borrow().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array()
         })
@@ -649,7 +651,7 @@ mod tests {
                 .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.borrow().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.shape(), &[2usize, 3, 4]);
         });
     }
@@ -660,7 +662,7 @@ mod tests {
         let original = array![1.0f32, 2.0];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.borrow().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'f');
         });
@@ -672,7 +674,7 @@ mod tests {
         let original = array![1i32, 2, 3];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.borrow().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'i');
         });
@@ -805,7 +807,7 @@ mod tests {
     where
         T: Dtyped + numpy::Element + Copy,
     {
-        Array::__getitem__(py_arr, key)
+        Array::__getitem__(py_arr.get(), key)
             .unwrap()
             .cast_into::<PyArrayDyn<T>>()
             .unwrap()
@@ -844,7 +846,7 @@ mod tests {
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = 5i64.into_pyobject(py).unwrap().into_any();
-            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
             assert!(err.is_instance_of::<PyIndexError>(py));
         });
     }
@@ -855,7 +857,7 @@ mod tests {
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = (-6i64).into_pyobject(py).unwrap().into_any();
-            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
             assert!(err.is_instance_of::<PyIndexError>(py));
         });
     }
@@ -942,7 +944,7 @@ mod tests {
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = py.eval(c"slice(None, None, 2)", None, None).unwrap();
-            let err = Array::__getitem__(&py_arr, &key).unwrap_err();
+            let err = Array::__getitem__(py_arr.get(), &key).unwrap_err();
             assert!(err.is_instance_of::<PyValueError>(py));
         });
     }
@@ -1090,7 +1092,7 @@ mod tests {
                 2i64.into_pyobject(py).unwrap().into_any(),
             ];
             let key = PyTuple::new(py, items).unwrap().into_any();
-            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
             assert!(err.is_instance_of::<PyIndexError>(py));
         });
     }
@@ -1105,7 +1107,7 @@ mod tests {
                 PyEllipsis::get(py).to_owned().into_any(),
             ];
             let key = PyTuple::new(py, items).unwrap().into_any();
-            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
             assert!(err.is_instance_of::<PyIndexError>(py));
         });
     }
@@ -1116,7 +1118,7 @@ mod tests {
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
             let key = "bad".into_pyobject(py).unwrap().into_any();
-            let err = Array::__getitem__(&py_arr, key.as_any()).unwrap_err();
+            let err = Array::__getitem__(py_arr.get(), key.as_any()).unwrap_err();
             assert!(err.is_instance_of::<PyTypeError>(py));
         });
     }

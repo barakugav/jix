@@ -22,8 +22,8 @@ macro_rules! define_op2 {
             b: &pyo3::Bound<'py, pyo3::PyAny>,
         ) -> pyo3::PyResult<crate::Array> {
             let (a, b) = crate::ops::as_array::asarray2(a, b)?;
-            let a = a.borrow().to_core_array();
-            let b = b.borrow().to_core_array();
+            let a = a.get().to_core_array();
+            let b = b.get().to_core_array();
             let res = zix_core::ops::$core_op::new(a, b);
             let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
             Ok(crate::Array::from_core_storage(ret))
