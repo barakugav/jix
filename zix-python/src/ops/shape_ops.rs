@@ -47,11 +47,12 @@ use crate::Array;
 #[pyo3(signature = (
     array,
     shape,
+    *,
     copy=true,
 ))]
 pub fn broadcast<'py>(
     array: &Bound<'py, Array>,
-    shape: ItemOrSequence<i64>, // TODO: docs about -1
+    shape: ItemOrSequence<i64>,
     copy: bool,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = array;
@@ -319,6 +320,7 @@ pub fn permute_axes<'py>(
 #[pyo3(signature = (
     array,
     shape,
+    *,
     copy=true,
 ))]
 pub fn reshape<'py>(
@@ -401,7 +403,7 @@ pub fn reshape<'py>(
 /// ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, copy=true))]
+#[pyo3(signature = (array, *, copy=true))]
 pub fn flatten<'py>(array: &Bound<'py, Array>, copy: bool) -> PyResult<Bound<'py, Array>> {
     let size = array.get().arr.shape().iter().product::<u64>();
     reshape(array, ItemOrSequence::Item(size as i64), copy)

@@ -16,7 +16,7 @@ use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
 use crate::ops::NumpyAsArray;
 use crate::storage::DynStorage;
-use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
+use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence, OrKwargs};
 use crate::ArrayParams;
 
 #[gen_stub_pyclass]
@@ -291,7 +291,7 @@ impl Array {
     /// ctx = zix.ReadContext()
     /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
     /// ```
-    #[pyo3(signature = (index=None, context=None))]
+    #[pyo3(signature = (index=None, *, context=None))]
     pub fn numpy<'py>(
         &self,
         py: Python<'py>,
@@ -479,16 +479,28 @@ impl Array {
     }
 
     /// Copies the data of an array into a new compact array by compressing it into new blocks. See :func:`zix.copy()`.
-    #[pyo3(signature = (params=None, context=None))]
+    #[pyo3(signature = (*, params=None, context=None))]
     fn copy<'py>(
         slf: &Bound<'py, Self>,
-        params: Option<&Bound<'_, PyAny>>,
+        params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
         context: Option<&Bound<'_, ReadContext>>,
     ) -> PyResult<Bound<'py, Array>> {
         crate::ops::copy(slf, params, context)
     }
 
-    // TODO io ops ['tofile']
+    // == archive I/O ==
+
+    /// Write the array to a file or a file-like object. See :func:`zix.write_array`.
+    #[pyo3(signature = (path_or_writer, *, append=false, params=None, context=None))]
+    pub fn write_to(
+        slf: &Bound<'_, Array>,
+        path_or_writer: &Bound<'_, PyAny>,
+        append: bool,
+        params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+        context: Option<&Bound<'_, ReadContext>>,
+    ) -> PyResult<()> {
+        crate::archive::write_array(slf, path_or_writer, append, params, context)
+    }
 
     // == arithmetic ops ==
 
@@ -795,7 +807,7 @@ impl Array {
     // == shape ops ==
 
     /// Reinterprets an array with a different shape. See :func:`zix.reshape()`.
-    #[pyo3(signature = (shape, copy=true))]
+    #[pyo3(signature = (shape, *, copy=true))]
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
         shape: ItemOrSequence<i64>,
@@ -805,7 +817,7 @@ impl Array {
     }
 
     /// Collapses the array into a single dimension. See :func:`zix.flatten()`.
-    #[pyo3(signature = (copy=true))]
+    #[pyo3(signature = (*, copy=true))]
     pub fn flatten<'py>(slf: &Bound<'py, Self>, copy: bool) -> PyResult<Bound<'py, Self>> {
         crate::ops::flatten(slf, copy)
     }
@@ -827,13 +839,13 @@ impl Array {
     }
 
     /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See :func:`zix.broadcast()`.
-    #[pyo3(signature = (new_shape, copy=true))]
+    #[pyo3(signature = (shape, *, copy=true))]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Array>,
-        new_shape: ItemOrSequence<i64>,
+        shape: ItemOrSequence<i64>,
         copy: bool,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::broadcast(slf, new_shape, copy)
+        crate::ops::broadcast(slf, shape, copy)
     }
 
     /// Removes length-1 dimensions from the array's shape. See :func:`zix.squeeze()`.
@@ -905,14 +917,14 @@ impl Array {
 /// - If the array has negative strides (e.g. a reversed slice `a[::-1]`).
 #[gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, dtype=None, params=None))]
+#[pyo3(signature = (array, dtype=None, *, params=None))]
 pub fn compact(
     array: &Bound<'_, PyAny>,
     dtype: Option<&Bound<'_, PyAny>>,
-    params: Option<&Bound<'_, PyAny>>,
+    params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
 ) -> PyResult<Array> {
     let py = array.py();
-    let params = ArrayParams::resolve(params)?;
+    let params = ArrayParams::resolve(py, params)?;
 
     // already a zix array
     if let Ok(array) = array.cast::<Array>() {

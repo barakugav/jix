@@ -1,8 +1,13 @@
+use std::collections::BTreeMap;
+
 use numpy::npyffi::npy_intp;
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use pyo3_stub_gen::impl_stub_type;
 use zix_core::NDIM_MAX;
+
+use crate::ArrayParams;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
@@ -86,6 +91,7 @@ impl_stub_type!(ItemOrSequence<u64> = u64 | Vec<u64>);
 #[allow(unused)]
 pub(crate) struct UnsafeSend<T>(T);
 unsafe impl<T> Send for UnsafeSend<T> {}
+#[allow(unused)]
 impl<T> UnsafeSend<T> {
     pub(crate) unsafe fn new(value: T) -> Self {
         Self(value)
@@ -95,6 +101,14 @@ impl<T> UnsafeSend<T> {
         self.0
     }
 }
+
+#[derive(FromPyObject)]
+pub enum OrKwargs<T> {
+    Value(T),
+    Kwargs(BTreeMap<String, Py<PyAny>>),
+}
+impl_stub_type!(OrKwargs< ArrayParams> = ArrayParams | PyDict);
+impl_stub_type!(OrKwargs< Bound<'_, ArrayParams>> = Bound<'_, ArrayParams> | PyDict);
 
 #[cfg(test)]
 mod tests {

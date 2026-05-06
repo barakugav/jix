@@ -12,7 +12,7 @@ use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::storage::block::{
     BlockFn, BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned,
 };
-use crate::util::{cast_slice, cast_slice_mut, Idx};
+use crate::util::{cast_slice, cast_slice_mut, Idx, SendSyncPtr};
 
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
 ///
@@ -472,7 +472,7 @@ impl BlockTableStorageRead for Mmap {
 
         Ok(MmapData {
             mmap: self.mmap.clone(),
-            data: (data, len),
+            data: (unsafe { SendSyncPtr::new(data) }, len),
         })
     }
 }

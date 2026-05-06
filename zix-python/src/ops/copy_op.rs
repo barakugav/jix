@@ -3,7 +3,7 @@ use zix_core::storage::ArrayStorage;
 use zix_core::Array as ZixArray;
 
 use crate::codec::ReadContext;
-use crate::util::IntoPyResult;
+use crate::util::{IntoPyResult, OrKwargs};
 use crate::{Array, ArrayParams};
 
 /// Copies the data of an array into a new compact array by compressing it into new blocks.
@@ -50,12 +50,13 @@ use crate::{Array, ArrayParams};
 #[pyfunction]
 #[pyo3(signature = (
     array,
+    *,
     params=None,
     context=None,
 ))]
 pub fn copy<'py>(
     array: &Bound<'py, Array>,
-    params: Option<&Bound<'_, PyAny>>,
+    params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
     context: Option<&Bound<'_, ReadContext>>,
 ) -> PyResult<Bound<'py, Array>> {
     copy_impl_with(array.py(), &array.get().arr, params, context)
@@ -70,13 +71,13 @@ where
 pub(crate) fn copy_impl_with<'py, S>(
     py: Python<'py>,
     array: &ZixArray<S>,
-    params: Option<&Bound<'_, PyAny>>,
+    params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
     context: Option<&Bound<'_, ReadContext>>,
 ) -> PyResult<Bound<'py, Array>>
 where
     S: ArrayStorage + Sync,
 {
-    let params = ArrayParams::resolve(params)?;
+    let params = ArrayParams::resolve(py, params)?;
     let context = context.map(|ctx| ctx.get());
 
     let array = py.detach::<PyResult<_>, _>(|| {

@@ -328,9 +328,18 @@ pub(crate) unsafe fn nd_copy<S1, S2, S3>(
     }
 }
 
-pub(crate) struct SendSyncPtr<T>(pub(crate) *const T);
+pub(crate) struct SendSyncPtr<T>(*const T);
 unsafe impl<T> Send for SendSyncPtr<T> {}
 unsafe impl<T> Sync for SendSyncPtr<T> {}
+impl<T> SendSyncPtr<T> {
+    pub unsafe fn new(ptr: *const T) -> Self {
+        Self(ptr)
+    }
+
+    pub fn as_ptr(&self) -> *const T {
+        self.0
+    }
+}
 
 #[cfg(test)]
 mod tests {

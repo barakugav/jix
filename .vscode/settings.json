@@ -13,8 +13,11 @@
         "Dtyped",
         "itemsize",
         "keepdims",
+        "memoryview",
+        "mmap",
         "ndim",
         "nitems",
+        "seekable",
         "strided"
     ]
 }

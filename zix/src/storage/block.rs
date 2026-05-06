@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::error::{ensure, Result};
+use crate::util::SendSyncPtr;
 
 const _: () = const {
     assert!(
@@ -363,11 +364,11 @@ impl<'a> BlockTableStorage for Borrowed<'a> {
 pub struct MmapData<T: 'static> {
     #[allow(unused)]
     pub(crate) mmap: Arc<memmap2::Mmap>,
-    pub(crate) data: (*const T, usize),
+    pub(crate) data: (SendSyncPtr<T>, usize),
 }
 impl<T: 'static> AsRef<[T]> for MmapData<T> {
     fn as_ref(&self) -> &[T] {
-        unsafe { std::slice::from_raw_parts(self.data.0, self.data.1) }
+        unsafe { std::slice::from_raw_parts(self.data.0.as_ptr(), self.data.1) }
     }
 }
 impl BlockTableStorage for Mmap {

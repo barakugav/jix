@@ -1,7 +1,8 @@
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+
+use crate::util::OrKwargs;
 
 /// Parameters controlling the block layout and codec configuration of an array.
 ///
@@ -53,70 +54,70 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 #[pyclass(module = "zix", frozen)]
 pub struct ArrayParams(pub(crate) zix_core::ArrayParams);
 impl ArrayParams {
-    pub(crate) fn from_any<'py>(obj: Bound<'py, PyAny>) -> PyResult<Bound<'py, Self>> {
-        if obj.is_instance_of::<Self>() {
-            Ok(obj.cast_into().unwrap())
-        } else if let Ok(params) = obj.cast::<PyDict>() {
-            let block_shape = params
-                .get_item("block_shape")?
-                .map(|v| {
-                    v.extract::<Vec<u32>>()
-                        .map_err(|_| PyTypeError::new_err("block_shape must be a list of integers"))
-                })
-                .transpose()?;
-            let block_shape_tag = params
-                .get_item("block_shape_tag")?
-                .map(|v| {
-                    v.extract::<Vec<String>>().map_err(|_| {
-                        PyTypeError::new_err("block_shape_tag must be a list of strings")
+    pub(crate) fn resolve(
+        py: Python<'_>,
+        params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+    ) -> PyResult<zix_core::ArrayParams> {
+        match params {
+            None => Ok(zix_core::ArrayParams::default()),
+            Some(OrKwargs::Value(param)) => Ok(param.get().0.clone()),
+            Some(OrKwargs::Kwargs(mut kwargs)) => {
+                let block_shape = kwargs
+                    .remove("block_shape")
+                    .map(|v| {
+                        v.bind(py).extract::<Vec<u32>>().map_err(|_| {
+                            PyTypeError::new_err("block_shape must be a list of integers")
+                        })
                     })
-                })
-                .transpose()?;
-            let block_size_hint = params
-                .get_item("block_size_hint")?
-                .map(|v| {
-                    v.extract::<u64>()
-                        .map_err(|_| PyTypeError::new_err("block_size_hint must be an integer"))
-                })
-                .transpose()?;
-            let preferred_read_shape = params
-                .get_item("preferred_read_shape")?
-                .map(|v| {
-                    v.extract::<Vec<u32>>().map_err(|_| {
-                        PyTypeError::new_err("preferred_read_shape must be a list of integers")
+                    .transpose()?;
+                let block_shape_tag = kwargs
+                    .remove("block_shape_tag")
+                    .map(|v| {
+                        v.bind(py).extract::<Vec<String>>().map_err(|_| {
+                            PyTypeError::new_err("block_shape_tag must be a list of strings")
+                        })
                     })
-                })
-                .transpose()?;
-            let preferred_read_size_hint = params
-                .get_item("preferred_read_size_hint")?
-                .map(|v| {
-                    v.extract::<u64>().map_err(|_| {
-                        PyTypeError::new_err("preferred_read_size_hint must be an integer")
+                    .transpose()?;
+                let block_size_hint = kwargs
+                    .remove("block_size_hint")
+                    .map(|v| {
+                        v.bind(py)
+                            .extract::<u64>()
+                            .map_err(|_| PyTypeError::new_err("block_size_hint must be an integer"))
                     })
-                })
-                .transpose()?;
-            let params = ArrayParams::new(
-                block_shape,
-                block_shape_tag,
-                block_size_hint,
-                preferred_read_shape,
-                preferred_read_size_hint,
-            )?;
-            Bound::new(obj.py(), params)
-        } else {
-            Err(PyTypeError::new_err(format!(
-                "Expected ArrayParams or dict, got {}",
-                obj.get_type().name()?
-            )))
+                    .transpose()?;
+                let preferred_read_shape = kwargs
+                    .remove("preferred_read_shape")
+                    .map(|v| {
+                        v.bind(py).extract::<Vec<u32>>().map_err(|_| {
+                            PyTypeError::new_err("preferred_read_shape must be a list of integers")
+                        })
+                    })
+                    .transpose()?;
+                let preferred_read_size_hint = kwargs
+                    .remove("preferred_read_size_hint")
+                    .map(|v| {
+                        v.bind(py).extract::<u64>().map_err(|_| {
+                            PyTypeError::new_err("preferred_read_size_hint must be an integer")
+                        })
+                    })
+                    .transpose()?;
+                if !kwargs.is_empty() {
+                    return Err(PyTypeError::new_err(format!(
+                        "Unexpected ArrayParams kwargs: {}",
+                        kwargs.into_keys().collect::<Vec<_>>().join(", ")
+                    )));
+                }
+                let params = ArrayParams::new(
+                    block_shape,
+                    block_shape_tag,
+                    block_size_hint,
+                    preferred_read_shape,
+                    preferred_read_size_hint,
+                )?;
+                Ok(params.0.clone())
+            }
         }
-    }
-
-    pub(crate) fn resolve(obj: Option<&Bound<'_, PyAny>>) -> PyResult<zix_core::ArrayParams> {
-        Ok(obj
-            .map(|p| ArrayParams::from_any(p.clone()))
-            .transpose()?
-            .map(|params| params.get().0.clone())
-            .unwrap_or_default())
     }
 }
 

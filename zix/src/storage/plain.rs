@@ -130,7 +130,7 @@ impl<S> Plain<S> {
 
         Ok(Self {
             storage,
-            data: SendSyncPtr(data),
+            data: unsafe { SendSyncPtr::new(data) },
             shape,
             strides,
             dtype,
@@ -290,7 +290,7 @@ impl<S> ArrayStorage for Plain<S> {
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])
             .sum::<usize>();
-        let src_ptr = unsafe { self.data.0.add(in_offset) };
+        let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
         let dst_ptr = buf.as_mut_ptr();
 
         unsafe {

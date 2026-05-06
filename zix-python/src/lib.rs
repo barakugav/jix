@@ -10,6 +10,9 @@ pub use codec::ReadContext;
 mod params;
 pub use params::ArrayParams;
 
+mod archive;
+pub use archive::*;
+
 mod dtype;
 pub mod ops;
 mod storage;
@@ -26,6 +29,9 @@ mod zix {
 
     #[pymodule_export]
     use crate::array::compact;
+
+    #[pymodule_export]
+    use crate::{read_array, write_array};
 
     #[pymodule_export]
     use crate::ops::{asarray, astype};
