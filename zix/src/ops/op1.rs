@@ -359,7 +359,7 @@ define_op1!(
 );
 // TODO f16
 define_op1!(
-    /// Rounds each element down to the nearest integer (towards −∞).
+    /// Rounds each element down to the nearest integer (towards -inf).
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
     /// The output shape equals the input shape.
@@ -379,7 +379,7 @@ define_op1!(
     /// let result = a.floor().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, 2.0, 3.0]);
     ///
-    /// // Floor rounds towards −∞, so negative values floor down.
+    /// // Floor rounds towards -inf, so negative values floor down.
     /// let b = Array::compact_array(&array![-1.1f32, -2.9, -3.0])?;
     /// let result = b.floor().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-2.0, -3.0, -3.0]);
@@ -392,7 +392,7 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
-    /// Rounds each element up to the nearest integer (towards +∞).
+    /// Rounds each element up to the nearest integer (towards +inf).
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
     /// The output shape equals the input shape.
@@ -412,7 +412,7 @@ define_op1!(
     /// let result = a.ceil().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[2.0, 2.0, 4.0]);
     ///
-    /// // Ceil rounds towards +∞, so negative values ceil up.
+    /// // Ceil rounds towards +inf, so negative values ceil up.
     /// let b = Array::compact_array(&array![-1.7f32, -2.0, -0.1])?;
     /// let result = b.ceil().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-1.0, -2.0, 0.0]);
@@ -449,7 +449,7 @@ define_op1!(
     /// let result = a.round().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, 2.0, 2.0]);
     ///
-    /// // Ties are broken away from zero: 0.5 → 1.0, -0.5 → -1.0.
+    /// // Ties are broken away from zero: 0.5 -> 1.0, -0.5 -> -1.0.
     /// let b = Array::compact_array(&array![0.5f32, -0.5])?;
     /// let result = b.round().to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0]);
@@ -516,7 +516,7 @@ define_op1!(
     /// let result = a.exp().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - std::f32::consts::E).abs() < 1e-5);
     ///
-    /// // exp(0.0) = 1.0 and exp(1.0) ≈ e.
+    /// // exp(0.0) = 1.0 and exp(1.0) = e.
     /// let b = Array::compact_array(&array![0.0f32, 1.0])?;
     /// let result = b.exp().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 1.0);
@@ -535,7 +535,7 @@ define_op1!(
     /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
     /// The output shape equals the input shape.
     ///
-    /// Negative inputs produce `NaN`; zero produces `-∞`.
+    /// Negative inputs produce `NaN`; zero produces `-inf`.
     /// Semantics follow [`f32::ln`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -667,7 +667,7 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
-    /// Computes the arcsine of each element; output is in radians in `[-π/2, π/2]`.
+    /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
     /// The output shape equals the input shape.
@@ -702,7 +702,7 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
-    /// Computes the arccosine of each element; output is in radians in `[0, π]`.
+    /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
     /// The output shape equals the input shape.
@@ -737,7 +737,7 @@ define_op1!(
     output_type = "same"
 );
 define_op1!(
-    /// Computes the arctangent of each element; output is in radians in `(-π/2, π/2)`.
+    /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
     /// The output shape equals the input shape.
@@ -757,7 +757,7 @@ define_op1!(
     /// let result = a.atan().to_ndarray::<f32>()?;
     /// assert_eq!(result[[0]], 0.0);
     ///
-    /// // atan(1.0) = π/4.
+    /// // atan(1.0) = pi/4.
     /// let b = Array::compact_array(&array![1.0f32])?;
     /// let result = b.atan().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - std::f32::consts::FRAC_PI_4).abs() < 1e-5);
@@ -819,7 +819,7 @@ define_op1!(
     ///
     /// The output shape equals the input shape.
     ///
-    /// For **complex** types the result is the modulus `sqrt(re² + im²)`, computed
+    /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)`, computed
     /// via `hypot` for numerical stability. The output dtype is the real component type
     /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
     ///
@@ -850,7 +850,7 @@ define_op1!(
     /// use zix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
-    /// // For complex input the result is the modulus sqrt(re² + im²).
+    /// // For complex input the result is the modulus sqrt(re^2 + im^2).
     /// use zix::dtype::Complex;
     /// let b = Array::compact_array(&array![Complex { re: 3.0f32, im: 4.0 }])?;
     /// let result = b.abs().to_ndarray::<f32>()?;

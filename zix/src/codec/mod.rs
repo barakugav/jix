@@ -4,14 +4,14 @@
 //!
 //! ```text
 //! raw block bytes
-//!     │
-//!     ▼
-//! [ Filter 0 ] → [ Filter 1 ] → …   (optional pre-compression transforms)
-//!     │
-//!     ▼
+//!     |
+//!     v
+//! [ Filter 0 ] -> [ Filter 1 ] -> ...   (optional pre-compression transforms)
+//!     |
+//!     v
 //! [ Codec (e.g. Zstd) ]              (lossless compression)
-//!     │
-//!     ▼
+//!     |
+//!     v
 //! stored block bytes
 //! ```
 //!
@@ -22,11 +22,11 @@
 //!
 //! The pipeline is split across two separate configuration objects with different lifetimes:
 //!
-//! - **[`EncoderParams`]** — chosen by the user at write time. Selects the [`Codec`], compression
+//! - **[`EncoderParams`]** - chosen by the user at write time. Selects the [`Codec`], compression
 //!   level, and [`Filter`] pipeline. Stored alongside the data so that the correct decoder can be
 //!   reconstructed later.
 //!
-//! - **[`DecoderParams`]** — chosen by the caller at read time. Currently carries no options, but
+//! - **[`DecoderParams`]** - chosen by the caller at read time. Currently carries no options, but
 //!   is the extension point for future read-time tunables (thread count, cache budget, etc.).
 //!
 //! The codec, filters, and dtype that were used during encoding are derived from the stored array
@@ -58,7 +58,7 @@ use crate::util::{AlignedBytes, AlternatingBuffers};
 /// The compression algorithm applied to each block.
 #[derive(Clone, Debug)]
 pub enum Codec {
-    /// [Zstandard](https://facebook.github.io/zstd/) — a fast general-purpose compressor.
+    /// [Zstandard](https://facebook.github.io/zstd/) - a fast general-purpose compressor.
     /// Compression level is controlled by [`EncoderParams::level`].
     Zstd,
 }
@@ -149,7 +149,7 @@ impl EncoderParams {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if `level` is out of the valid range (0–19 for zstd).
+    /// Returns `InvalidArgument` if `level` is out of the valid range (0-19 for zstd).
     pub fn level(&mut self, level: u32) -> Result<&mut Self> {
         ensure!(
             level <= 19,
@@ -309,7 +309,7 @@ pub struct DecoderParams {
 /// The codec configuration encoded alongside the array data, required to decode it.
 ///
 /// Every field in `DecoderCodecConfig` is fixed at write time and must match exactly what was
-/// used when the data was encoded — none of it can be chosen or overridden at read time.
+/// used when the data was encoded - none of it can be chosen or overridden at read time.
 ///
 /// This struct is populated from the stored array metadata and passed to [`Decoder`] internally.
 /// Users do not construct it directly; it is derived from the array's on-disk representation
@@ -401,7 +401,7 @@ impl<'a> Decoder<'a> {
 /// `ReadContext` holds reusable buffers and decoder instances that can be shared across multiple
 /// reads to amortize these costs.
 ///
-/// A `ReadContext` is tied to a single thread — it is `!Sync`.
+/// A `ReadContext` is tied to a single thread - it is `!Sync`.
 /// For concurrent reads from multiple threads, create one `ReadContext` per thread.
 ///
 /// # Obtaining a `ReadContext`
@@ -450,7 +450,7 @@ pub struct ReadContext {
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
     ///
-    /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly — it
+    /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly - it
     /// automatically uses the decoder parameters that match the array's stored codec configuration.
     pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         let tmp_buf1 = AlignedBytes::new(16);
@@ -493,7 +493,7 @@ impl Default for ReadContext {
 ///
 /// The pool is not thread-safe, it is intended to be owned and used by a single thread.
 pub(crate) struct TmpBufferPool {
-    /// Free list for alignments ≤ 16; all buffers are allocated at 16-byte alignment.
+    /// Free list for alignments <= 16; all buffers are allocated at 16-byte alignment.
     align16: UnsafeCell<Vec<AlignedBytes>>,
     /// Free lists for alignments > 16, sorted by alignment value.
     align_other: UnsafeCell<Vec<(Alignment, Vec<AlignedBytes>)>>,
@@ -536,7 +536,7 @@ impl TmpBufferPool {
     /// Returns a raw pointer to the free list for `alignment` together with the actual alignment
     /// that will be used for allocations from that list.
     ///
-    /// Alignments ≤ 16 are folded into the single `align16` list (allocated at 16 bytes).
+    /// Alignments <= 16 are folded into the single `align16` list (allocated at 16 bytes).
     /// Larger alignments are looked up (or inserted) in the sorted `align_other` list.
     fn get_pool(&self, alignment: Alignment) -> (*mut Vec<AlignedBytes>, Alignment) {
         match alignment.as_usize() {

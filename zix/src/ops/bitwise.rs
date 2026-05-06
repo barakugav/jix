@@ -12,7 +12,7 @@ define_op2!(
     /// Supported dtypes: all numeric types, `bool`, and `Complex<f32>`, `Complex<f64>`.
     /// Output dtype is `bool`. The output shape equals the input shape.
     ///
-    /// Each element is first cast to `bool` (zero → `false`, any non-zero value → `true`;
+    /// Each element is first cast to `bool` (zero -> `false`, any non-zero value -> `true`;
     /// for `bool` this is the identity; for complex, non-zero means at least one component
     /// is non-zero), then the logical AND is applied. Returns `true` only when both elements
     /// are truthy.
@@ -51,7 +51,7 @@ define_op2!(
     /// Supported dtypes: all numeric types, `bool`, and `Complex<f32>`, `Complex<f64>`.
     /// Output dtype is `bool`. The output shape equals the input shape.
     ///
-    /// Each element is first cast to `bool` (zero → `false`, any non-zero value → `true`;
+    /// Each element is first cast to `bool` (zero -> `false`, any non-zero value -> `true`;
     /// for `bool` this is the identity; for complex, non-zero means at least one component
     /// is non-zero), then the logical OR is applied. Returns `true` when at least one element
     /// is truthy.
@@ -90,7 +90,7 @@ define_op2!(
     /// Supported dtypes: all numeric types, `bool`, and `Complex<f32>`, `Complex<f64>`.
     /// Output dtype is `bool`. The output shape equals the input shape.
     ///
-    /// Each element is first cast to `bool` (zero → `false`, any non-zero value → `true`;
+    /// Each element is first cast to `bool` (zero -> `false`, any non-zero value -> `true`;
     /// for `bool` this is the identity; for complex, non-zero means at least one component
     /// is non-zero), then the logical XOR is applied. Returns `true` when exactly one element
     /// is truthy.
@@ -129,7 +129,7 @@ define_op1!(
     /// Supported dtypes: all numeric types, `bool`, and `Complex<f32>`, `Complex<f64>`.
     /// Output dtype is `bool`. The output shape equals the input shape.
     ///
-    /// Each element is first cast to `bool` (zero → `false`, any non-zero value → `true`;
+    /// Each element is first cast to `bool` (zero -> `false`, any non-zero value -> `true`;
     /// for `bool` this is the identity; for complex, non-zero means at least one component
     /// is non-zero), then negated. Returns `true` for zero (falsy) elements and `false` for
     /// non-zero (truthy) elements.

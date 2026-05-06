@@ -373,7 +373,7 @@ mod tests {
         asarray(val).unwrap().get().arr.to_ndarray::<T>().unwrap()
     }
 
-    // ── 0-D: Python scalars ──────────────────────────────────────────────────
+    // -- 0-D: Python scalars --------------------------------------------------
 
     #[test]
     fn test_python_int() {
@@ -405,7 +405,7 @@ mod tests {
         });
     }
 
-    // ── 0-D: typed numpy scalars ─────────────────────────────────────────────
+    // -- 0-D: typed numpy scalars ---------------------------------------------
 
     fn np0<T>(py: Python<'_>, v: T) -> Bound<'_, PyAny>
     where
@@ -468,7 +468,7 @@ mod tests {
         });
     }
 
-    // ── 0-D: complex scalars ─────────────────────────────────────────────────
+    // -- 0-D: complex scalars -------------------------------------------------
 
     #[test]
     fn test_0d_complex_f32() {
@@ -498,7 +498,7 @@ mod tests {
         });
     }
 
-    // ── multi-dimensional arrays ─────────────────────────────────────────────
+    // -- multi-dimensional arrays ---------------------------------------------
 
     fn npd<T, D>(py: Python<'_>, arr: ndarray::Array<T, D>) -> Bound<'_, PyAny>
     where
@@ -566,7 +566,7 @@ mod tests {
         });
     }
 
-    // ── passthrough ──────────────────────────────────────────────────────────
+    // -- passthrough ----------------------------------------------------------
 
     #[test]
     fn test_passthrough() {
@@ -579,7 +579,7 @@ mod tests {
         });
     }
 
-    // ── error cases ──────────────────────────────────────────────────────────
+    // -- error cases ----------------------------------------------------------
 
     #[test]
     fn test_negative_stride_error() {

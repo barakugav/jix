@@ -31,13 +31,13 @@ use crate::Array;
 /// import zix
 /// import numpy as np
 ///
-/// # Row vector [1, 3] → matrix [2, 3]: every row becomes identical
+/// # Row vector [1, 3] -> matrix [2, 3]: every row becomes identical
 /// a = zix.compact([[1, 2, 3]], dtype=np.int32)
 /// result = zix.broadcast(a, [2, 3])
 /// assert result.numpy().shape == (2, 3)
 /// assert np.array_equal(result.numpy()[0], result.numpy()[1])
 ///
-/// # Column vector [3, 1] → matrix [3, 2]: every column becomes identical
+/// # Column vector [3, 1] -> matrix [3, 2]: every column becomes identical
 /// b = zix.compact([[10], [20], [30]], dtype=np.int32)
 /// result = zix.broadcast(b, [3, 2])
 /// assert result.numpy()[0, 0] == result.numpy()[0, 1] == 10
@@ -102,7 +102,7 @@ pub fn broadcast<'py>(
 ///
 /// Each value in `axis` is a **gap index** that identifies a position before an existing
 /// dimension: `0` inserts before dimension 0 (a new leading axis), `1` inserts between
-/// dimensions 0 and 1, …, `ndim` appends after the last dimension. Negative values are
+/// dimensions 0 and 1, ..., `ndim` appends after the last dimension. Negative values are
 /// supported and are resolved against `ndim + 1`.
 ///
 /// Duplicate gap indices are allowed and each adds another length-1 dimension at the same
@@ -121,12 +121,12 @@ pub fn broadcast<'py>(
 /// import numpy as np
 ///
 /// a = zix.compact([1, 2, 3], dtype=np.int32)   # shape [3]
-/// assert zix.insert_axes(a, [0]).numpy().shape == (1, 3)  # → [1, 3]
-/// assert zix.insert_axes(a, [1]).numpy().shape == (3, 1)  # → [3, 1]
+/// assert zix.insert_axes(a, [0]).numpy().shape == (1, 3)  # -> [1, 3]
+/// assert zix.insert_axes(a, [1]).numpy().shape == (3, 1)  # -> [3, 1]
 /// assert zix.insert_axes(a, [-1]).numpy().shape == (3, 1) # negative: same as [1]
 ///
 /// b = zix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
-/// assert zix.insert_axes(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # → [1, 2, 1, 3]
+/// assert zix.insert_axes(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
 ///
 /// # duplicate axes: multiple length-1 dimensions at the same position
 /// assert zix.insert_axes(b, [0, 0, 0, 2]).shape() == (1, 1, 1, 2, 1, 3)
@@ -174,10 +174,10 @@ pub fn unsqueeze<'py>(
 /// import numpy as np
 ///
 /// a = zix.compact([[1, 2, 3]], dtype=np.int32)  # shape [1, 3]
-/// assert zix.remove_axes(a, [0]).numpy().shape == (3,)     # → [3]
+/// assert zix.remove_axes(a, [0]).numpy().shape == (3,)     # -> [3]
 ///
 /// b = zix.compact([[[10], [20]]], dtype=np.int32)  # shape [1, 2, 1]
-/// assert zix.remove_axes(b, [0, 2]).numpy().shape == (2,)    # → [2]
+/// assert zix.remove_axes(b, [0, 2]).numpy().shape == (2,)    # -> [2]
 /// assert zix.remove_axes(b, [0, -1]).numpy().shape == (2,)   # negative axis
 /// ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
@@ -239,7 +239,7 @@ pub fn squeeze<'py>(
 
 /// Reorders the axes of an array (generalized transpose).
 ///
-/// The `i`-th output axis corresponds to axis `axes[i]` of the input — identical to
+/// The `i`-th output axis corresponds to axis `axes[i]` of the input - identical to
 /// `numpy.transpose`. `axes` must be a permutation of `0..ndim`: correct length, all values
 /// in range, no duplicates. Integer values are interpreted as unsigned axis indices (negative
 /// axes are **not** supported for `axes`).
@@ -256,7 +256,7 @@ pub fn squeeze<'py>(
 /// import zix
 /// import numpy as np
 ///
-/// # 2-D transpose: [2, 3] → [3, 2]
+/// # 2-D transpose: [2, 3] -> [3, 2]
 /// a = zix.asarray(np.arange(6, dtype=np.int32).reshape(2, 3))
 /// t = zix.permute_axes(a, [1, 0])
 /// assert t.numpy().shape == (3, 2)
@@ -296,7 +296,7 @@ pub fn permute_axes<'py>(
 /// When `copy=True` (the default) the result is an eagerly materialized compact array with a
 /// block layout matched to `shape`. When `copy=False` the result is a lazy view; reading
 /// it may decompress many blocks if the new shape is not aligned with the original block
-/// boundaries — use with care.
+/// boundaries - use with care.
 ///
 /// The `array` argument must already be a `zix.Array` (no implicit `asarray()` conversion).
 ///
@@ -505,7 +505,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
 ///
 /// All input arrays must have identical shapes and the same dtype. A new axis of size equal
 /// to the number of arrays is inserted at position `axis` in the output. The output has one
-/// more dimension than the inputs — unlike `zix.concatenate`, which joins along an existing
+/// more dimension than the inputs - unlike `zix.concatenate`, which joins along an existing
 /// axis.
 ///
 /// `axis` supports negative values and is resolved against `ndim + 1` (the number of valid
@@ -525,12 +525,12 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
 /// a = zix.compact([1, 2, 3], dtype=np.int32)
 /// b = zix.compact([4, 5, 6], dtype=np.int32)
 ///
-/// # Stack along a new leading axis → shape [2, 3]
+/// # Stack along a new leading axis -> shape [2, 3]
 /// c = zix.stack([a, b], axis=0)
 /// assert c.numpy().shape == (2, 3)
 /// assert np.array_equal(c.numpy()[0], [1, 2, 3])
 ///
-/// # Stack along a new trailing axis → shape [3, 2]
+/// # Stack along a new trailing axis -> shape [3, 2]
 /// d = zix.stack([a, b], axis=1)
 /// assert d.numpy().shape == (3, 2)
 /// assert np.array_equal(d.numpy()[:, 0], [1, 2, 3])

@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn test_from_numpy_struct_packed() {
         Python::attach(|py| {
-            // packed: u8 at 0, u16 at 1, u32 at 3 — no padding
+            // packed: u8 at 0, u16 at 1, u32 at 3 - no padding
             let dict = PyDict::new(py);
             dict.set_item("names", vec!["a", "b", "c"]).unwrap();
             dict.set_item("formats", vec!["<u1", "<u2", "<u4"]).unwrap();
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn test_from_numpy_struct_aligned() {
         Python::attach(|py| {
-            // aligned: u8 at 0, pad 3 bytes, f32 at 4 — alignment=4
+            // aligned: u8 at 0, pad 3 bytes, f32 at 4 - alignment=4
             let np = py
                 .import("numpy")
                 .unwrap()
@@ -455,7 +455,7 @@ mod tests {
 
             assert!(dtype.is_aligned());
             assert_eq!(dtype.alignment().as_usize(), 8);
-            // u8@0, pad1, i16@2, pad4, f64@8 → itemsize=16
+            // u8@0, pad1, i16@2, pad4, f64@8 -> itemsize=16
             assert_eq!(dtype.itemsize(), 16);
             let fields = dtype.fields().unwrap();
             assert_eq!(fields[0].1, 0);
@@ -526,9 +526,9 @@ mod tests {
     #[test]
     fn test_from_numpy_void_zero_size_errors() {
         Python::attach(|py| {
-            // V0 is a void dtype with 0 bytes — zero-sized, unsupported
+            // V0 is a void dtype with 0 bytes - zero-sized, unsupported
             let np_dtype = PyArrayDescr::new(py, "V0").unwrap();
-            // V0 has no fields, kind 'V' — should error as unsupported
+            // V0 has no fields, kind 'V' - should error as unsupported
             assert!(dtype_from_numpy(&np_dtype).is_err());
         });
     }
@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn test_to_numpy_struct_aligned() {
         Python::attach(|py| {
-            // u8@0, pad3, f32@4 → aligned, itemsize=8, alignment=4
+            // u8@0, pad3, f32@4 -> aligned, itemsize=8, alignment=4
             let fields = vec![
                 (
                     "x".to_string(),

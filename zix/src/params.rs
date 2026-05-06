@@ -10,12 +10,12 @@ use crate::Array;
 ///
 /// `ArrayParams` groups two independent sets of configuration:
 ///
-/// - **Codec** — the compression ([`EncoderParams`]) and decompression ([`DecoderParams`])
+/// - **Codec** - the compression ([`EncoderParams`]) and decompression ([`DecoderParams`])
 ///   configuration used when decoding blocks from an existing array, or when encoding blocks for a
 ///   new array. These affect the compression ratio and CPU usage of the codec, but not the block
 ///   layout.
 ///
-/// - **Block layout** — the nd-block shape used to divide the array into blocks, each compressed
+/// - **Block layout** - the nd-block shape used to divide the array into blocks, each compressed
 ///   independently, and other related hints that are propagated through lazy view storage
 ///   operations. A good block layout is critical for performance, and should match the access
 ///   pattern of your workload.
@@ -41,7 +41,7 @@ use crate::Array;
 ///
 /// # Recommended usage
 ///
-/// Use `ArrayParams::new()` (equivalent to `ArrayParams::default()`) for most cases — the
+/// Use `ArrayParams::new()` (equivalent to `ArrayParams::default()`) for most cases - the
 /// defaults select a block shape that fits in the L1 data cache using Zstd level 3 with byte
 /// shuffling. For latency-sensitive workloads where you know the access pattern, set `block_shape`
 /// explicitly and call `copy_with` instead of `copy` after shape-changing ops.

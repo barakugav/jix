@@ -25,7 +25,7 @@ where
 ///
 /// All input arrays must have the same number of dimensions and the same size on every axis
 /// *except* the concatenation axis, along which their sizes may differ. All arrays must share the
-/// same [`Dtype`]. The output has the same number of dimensions as the inputs — unlike
+/// same [`Dtype`]. The output has the same number of dimensions as the inputs - unlike
 /// [`Stack`](crate::ops::Stack), which introduces a new axis.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
@@ -139,7 +139,7 @@ where
     /// The loop then runs forward and breaks as soon as an array starts past the requested range.
     ///
     /// Each overlapping sub-array is read with a local (array-relative) index on the concat axis.
-    /// When all dimensions before `concat_axis` have size ≤ 1 the output buffer is contiguous for
+    /// When all dimensions before `concat_axis` have size <= 1 the output buffer is contiguous for
     /// each sub-array ("in-place"), so the data is written directly at the right byte offset.
     /// Otherwise each sub-array is read into a temporary buffer and scattered into `buf` with
     /// `NdIter`, using the full output strides for dimensions before `concat_axis` and the
@@ -205,7 +205,7 @@ where
             let buf_offset = buf_concat_offset * concat_stride;
 
             let read_buf = if in_place {
-                // Data lands contiguously at the right offset — read directly into buf.
+                // Data lands contiguously at the right offset - read directly into buf.
                 &mut buf[buf_offset..buf_offset + sub_size_bytes]
             } else {
                 // Read into tmp_buf then scatter into buf using strided copy.
@@ -308,7 +308,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // 2D i32: concatenate along axis 0 — in-place path
+    // 2D i32: concatenate along axis 0 - in-place path
     #[test]
     fn test_i32_2d_axis0() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // 2D i32: concatenate along axis 1 — scatter path
+    // 2D i32: concatenate along axis 1 - scatter path
     #[test]
     fn test_i32_2d_axis1() {
         let a = array![[1i32, 2], [3, 4], [5, 6]];
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // 2D i32: three arrays along axis 1 with unequal sizes — scatter path
+    // 2D i32: three arrays along axis 1 with unequal sizes - scatter path
     #[test]
     fn test_i32_2d_axis1_three_unequal() {
         let a = array![[1i32], [2]];
@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // 2D f32: concatenate along axis 1 — scatter path
+    // 2D f32: concatenate along axis 1 - scatter path
     #[test]
     fn test_f32_2d_axis1() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0]];

@@ -2,9 +2,9 @@
 //!
 //! Returns the data L1 and unified L2/L3 cache sizes visible to this thread.
 //! Detection runs once on first call and the result is cached for the rest
-//! of the process lifetime via a `OnceLock`. When detection fails — either
+//! of the process lifetime via a `OnceLock`. When detection fails - either
 //! because the OS is unsupported or because a particular level can't be
-//! read — conservative defaults are used (32 KiB / 256 KiB / 1 MiB, matching
+//! read - conservative defaults are used (32 KiB / 256 KiB / 1 MiB, matching
 //! blosc2).
 //!
 //! Supported platforms:
@@ -208,7 +208,7 @@ mod macos {
     ///
     /// On macOS these keys return `int64_t`. We read into a `u64` initialized
     /// to zero, so if sysctl writes only 4 bytes (older variants) or 8 bytes,
-    /// the low half holds the value and the high half stays zero — either way
+    /// the low half holds the value and the high half stays zero - either way
     /// we get the right number for any plausible cache size.
     fn query(name: &CStr) -> Option<usize> {
         let mut value: u64 = 0;

@@ -29,7 +29,7 @@ define_op1!(
     Neg
 );
 define_op1!(
-    /// Rounds each element down to the nearest integer (towards −∞).
+    /// Rounds each element down to the nearest integer (towards -inf).
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
     ///
@@ -50,7 +50,7 @@ define_op1!(
     Floor
 );
 define_op1!(
-    /// Rounds each element up to the nearest integer (towards +∞).
+    /// Rounds each element up to the nearest integer (towards +inf).
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
     ///
@@ -191,7 +191,7 @@ define_op1!(
     /// a = zix.compact([0.0, np.pi / 2], dtype=np.float32)
     /// result = zix.sin(a)
     /// assert abs(result.numpy()[0]) < 1e-5   # sin(0) = 0
-    /// assert abs(result.numpy()[1] - 1.0) < 1e-5  # sin(π/2) = 1
+    /// assert abs(result.numpy()[1] - 1.0) < 1e-5  # sin(pi/2) = 1
     /// ```
     sin,
     Sin
@@ -213,7 +213,7 @@ define_op1!(
     /// a = zix.compact([0.0, np.pi], dtype=np.float32)
     /// result = zix.cos(a)
     /// assert abs(result.numpy()[0] - 1.0) < 1e-5   # cos(0) = 1
-    /// assert abs(result.numpy()[1] - (-1.0)) < 1e-5  # cos(π) = -1
+    /// assert abs(result.numpy()[1] - (-1.0)) < 1e-5  # cos(pi) = -1
     /// ```
     cos,
     Cos
@@ -235,13 +235,13 @@ define_op1!(
     /// a = zix.compact([0.0, np.pi / 4], dtype=np.float32)
     /// result = zix.tan(a)
     /// assert abs(result.numpy()[0]) < 1e-5        # tan(0) = 0
-    /// assert abs(result.numpy()[1] - 1.0) < 1e-5  # tan(π/4) = 1
+    /// assert abs(result.numpy()[1] - 1.0) < 1e-5  # tan(pi/4) = 1
     /// ```
     tan,
     Tan
 );
 define_op1!(
-    /// Computes the arcsine of each element; output is in radians in `[-π/2, π/2]`.
+    /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
     ///
@@ -265,7 +265,7 @@ define_op1!(
     Asin
 );
 define_op1!(
-    /// Computes the arccosine of each element; output is in radians in `[0, π]`.
+    /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
     ///
@@ -290,7 +290,7 @@ define_op1!(
     Acos
 );
 define_op1!(
-    /// Computes the arctangent of each element; output is in radians in `(-π/2, π/2)`.
+    /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
     ///
     /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
     ///
@@ -350,7 +350,7 @@ define_op1!(
     /// | `Complex<f32>` | `f32` |
     /// | `Complex<f64>` | `f64` |
     ///
-    /// For **complex** types the result is the modulus `sqrt(re² + im²)` computed via
+    /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)` computed via
     /// `hypot` for numerical stability. The output dtype is the real component type.
     ///
     /// For **signed integer** types, the minimum value overflows: `abs(-128)` on `int8`

@@ -24,7 +24,7 @@ pub(crate) trait ArraySequenceImpl {
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).
 ///
-/// This is a sealed trait — it cannot be implemented outside this crate. It is implemented for the
+/// This is a sealed trait - it cannot be implemented outside this crate. It is implemented for the
 /// following collection types, covering both homogeneous and heterogeneous cases:
 ///
 /// | Type | Notes |
@@ -32,7 +32,7 @@ pub(crate) trait ArraySequenceImpl {
 /// | `[Array<S>; N]` | Fixed-length array; all elements share the same storage type. |
 /// | `Vec<Array<S>>` | Dynamic-length list; all elements share the same storage type. |
 /// | `&[Array<S>]` | Borrowed slice; all elements share the same storage type. |
-/// | `(Array<S0>, Array<S1>, …)` | Tuple of up to 10 arrays; each element may have a different storage type. |
+/// | `(Array<S0>, Array<S1>, ...)` | Tuple of up to 10 arrays; each element may have a different storage type. |
 ///
 /// # Examples
 ///

@@ -700,7 +700,7 @@ pub(crate) mod tests {
     }
 
     // three_arrays_f32: (za + zb) * zc lazy chain equals (&a + &b) * &c.
-    // Fixed 2×3 shape with two different block shapes to exercise block-boundary handling.
+    // Fixed 2*3 shape with two different block shapes to exercise block-boundary handling.
     proptest::proptest! {
         #[test]
         fn three_arrays_f32(

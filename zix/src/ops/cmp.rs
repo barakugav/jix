@@ -426,7 +426,7 @@ mod tests {
     );
 
     // Ordering ops: output is bool, so NaN inputs are safe.
-    // Integers: any_strategy (no overflow). Floats: maybe_non_finite covers NaN → false paths.
+    // Integers: any_strategy (no overflow). Floats: maybe_non_finite covers NaN -> false paths.
     test_op2!(
         greater,
         |a, b| a > b,

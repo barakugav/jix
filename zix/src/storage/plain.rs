@@ -18,15 +18,15 @@ use crate::Array;
 /// `Plain<S>` holds a raw `*const u8` pointer into a buffer owned by `S`,
 /// together with a per-dimension shape and byte-stride description.  The
 /// buffer may be laid out in any order (C-contiguous, Fortran-contiguous,
-/// transposed, sliced with gaps, etc.) — reads use the strides to copy the
+/// transposed, sliced with gaps, etc.) - reads use the strides to copy the
 /// requested sub-region into a C-contiguous output buffer.
 ///
 /// The type parameter `S` is the *owner* of the underlying memory.  Keeping
 /// `S` alive alongside the pointer ensures the data remains valid.  Two
 /// concrete owners are provided:
 ///
-/// * `Plain<Vec<T>>` — owns the data (see [`Array::plain_ndarray`]).
-/// * `Plain<PlainRef<'a, T>>` — borrows from an `ndarray` view
+/// * `Plain<Vec<T>>` - owns the data (see [`Array::plain_ndarray`]).
+/// * `Plain<PlainRef<'a, T>>` - borrows from an `ndarray` view
 ///   (see [`Array::plain_ndarray_view`]).
 ///
 /// # Examples
@@ -43,7 +43,7 @@ use crate::Array;
 /// let nd_plain = array![[10.0f32, 20.0], [30.0, 40.0]];
 /// let plain = Array::plain_ndarray(nd_plain)?;
 ///
-/// // The result is computed lazily — no data is read until to_ndarray() is called.
+/// // The result is computed lazily - no data is read until to_ndarray() is called.
 /// let result = (compact + plain).to_ndarray::<f32>()?;
 /// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
 /// # Ok::<(), zix::Error>(())
@@ -67,13 +67,13 @@ impl<S> Plain<S> {
     ///
     /// # Arguments
     ///
-    /// * `storage` — owner of the underlying allocation.
-    /// * `data` — pointer to the first element (i.e. already offset to
+    /// * `storage` - owner of the underlying allocation.
+    /// * `data` - pointer to the first element (i.e. already offset to
     ///   `[0, 0, ..., 0]` of the logical view).
-    /// * `shape` — number of elements along each dimension.
-    /// * `strides` — byte distance between adjacent elements along each
+    /// * `shape` - number of elements along each dimension.
+    /// * `strides` - byte distance between adjacent elements along each
     ///   dimension.  Must have the same length as `shape`.
-    /// * `dtype` — element type descriptor; used for itemsize and alignment
+    /// * `dtype` - element type descriptor; used for itemsize and alignment
     ///   checks.
     ///
     /// # Errors
@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(got, nd.into_dyn());
     }
 
-    // Non-contiguous (transposed) array — column-major strides
+    // Non-contiguous (transposed) array - column-major strides
     #[test]
     fn owned_non_contiguous_transposed() {
         let nd = array![[1i32, 2, 3], [4, 5, 6]];

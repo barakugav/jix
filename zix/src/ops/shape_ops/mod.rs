@@ -94,7 +94,7 @@ where
     /// Returns a lazy view of the array expanded to `new_shape` by repeating length-1 dimensions.
     /// See [`Broadcast`] for details and examples.
     ///
-    /// No data is copied, but reads may be slow — the same source blocks are decompressed
+    /// No data is copied, but reads may be slow - the same source blocks are decompressed
     /// repeatedly. Call [`.copy()`](Array::copy) to materialise, or prefer
     /// [`broadcast`](Self::broadcast) directly.
     ///

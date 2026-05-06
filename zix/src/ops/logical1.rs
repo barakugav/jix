@@ -43,12 +43,12 @@ define_op1!(
     output_type = bool
 );
 define_op1!(
-    /// Tests whether each element is finite (not `±∞` and not `NaN`).
+    /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype is `bool`.
     /// The output shape equals the input shape.
     ///
-    /// Returns `true` if the element is a finite number, `false` for `±∞` and `NaN`.
+    /// Returns `true` if the element is a finite number, `false` for `+/-inf` and `NaN`.
     /// Semantics follow [`f32::is_finite`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -80,12 +80,12 @@ define_op1!(
     output_type = bool
 );
 define_op1!(
-    /// Tests whether each element is infinite (`+∞` or `-∞`).
+    /// Tests whether each element is infinite (`+inf` or `-inf`).
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype is `bool`.
     /// The output shape equals the input shape.
     ///
-    /// Returns `true` only for `+∞` and `-∞`; returns `false` for finite values and `NaN`.
+    /// Returns `true` only for `+inf` and `-inf`; returns `false` for finite values and `NaN`.
     /// Semantics follow [`f32::is_infinite`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.

@@ -22,7 +22,7 @@ use crate::ArrayParams;
 /// A multi-dimensional compressed array.
 ///
 /// `Array` is the central type in zix. It stores n-dimensional numeric data in a
-/// block-compressed format — the array is divided into nd-blocks, each compressed
+/// block-compressed format - the array is divided into nd-blocks, each compressed
 /// independently with Zstd. Data is decoded on demand: constructing an array or
 /// chaining operations does no I/O. Actual decompression happens only when you
 /// materialize the result, for example by indexing with `[]`, calling `.numpy()`,
@@ -52,14 +52,14 @@ use crate::ArrayParams;
 ///
 /// # Reading data
 ///
-/// Call `.numpy()` (or `[]`) to decode the array — or a sub-region of it — into a NumPy
+/// Call `.numpy()` (or `[]`) to decode the array - or a sub-region of it - into a NumPy
 /// array. The result is always a fresh allocation; mutations to it do not affect the
 /// source array. Both forms accept the same index syntax:
 ///
 /// ```python,ignore
 /// a.numpy()           # full array
 /// a.numpy(0)          # row 0 (integer drops that axis)
-/// a.numpy(slice(1,4)) # rows 1–3 (slice keeps the axis)
+/// a.numpy(slice(1,4)) # rows 1-3 (slice keeps the axis)
 /// a[0, 1:3]           # shorthand via __getitem__
 /// a[..., -1]          # last column of any-rank array
 /// ```
@@ -75,7 +75,7 @@ use crate::ArrayParams;
 /// # Operations
 ///
 /// Operations return a new `Array` that wraps the input and records the transformation.
-/// No data is copied or computed at call time — the computation runs in a single pass when
+/// No data is copied or computed at call time - the computation runs in a single pass when
 /// you read the result. Chains compose without intermediate allocations:
 ///
 /// ```python,ignore
@@ -86,7 +86,7 @@ use crate::ArrayParams;
 ///
 /// Shape operations remap the array's indices without copying data. Most accept a `copy`
 /// keyword (default `True`) that immediately re-encodes with a block layout suited to the
-/// new shape. Pass `copy=False` for a zero-copy view — but be aware that if the new layout
+/// new shape. Pass `copy=False` for a zero-copy view - but be aware that if the new layout
 /// crosses block boundaries that the original layout respected, reads may decompress more
 /// data than necessary.
 ///
@@ -310,15 +310,15 @@ impl Array {
     ///
     /// # Return value
     ///
-    /// * **dtype** — identical to `self.dtype`. No casting is performed.
-    /// * **shape** — determined by the `index` argument (see below). When no index is
+    /// * **dtype** - identical to `self.dtype`. No casting is performed.
+    /// * **shape** - determined by the `index` argument (see below). When no index is
     ///   supplied the shape equals `self.shape`.
-    /// * **memory layout** — always C-contiguous (row-major).
-    /// * **ownership** — a brand-new allocation; the caller owns it outright.
+    /// * **memory layout** - always C-contiguous (row-major).
+    /// * **ownership** - a brand-new allocation; the caller owns it outright.
     ///
     /// # The `index` argument
     ///
-    /// `index` selects a sub-region to read. It accepts the same syntax Python uses inside `[…]`:
+    /// `index` selects a sub-region to read. It accepts the same syntax Python uses inside `[...]`:
     ///
     /// | Form | Example | Effect |
     /// |---|---|---|
@@ -328,7 +328,7 @@ impl Array {
     /// | `...` (Ellipsis) | `arr[...]` or `arr.numpy(...)` | fill all remaining axes with full slices |
     /// | tuple of the above | `arr[0, 1:3, ..., :-2]` or `arr.numpy((0, slice(1,3)))` | index each axis independently |
     ///
-    /// Most callers use `__getitem__` (`arr[…]`) instead of calling `numpy` directly; the two
+    /// Most callers use `__getitem__` (`arr[...]`) instead of calling `numpy` directly; the two
     /// are equivalent.
     ///
     /// ## Integers
@@ -350,7 +350,7 @@ impl Array {
     /// * Both `start` and `stop` may be negative (counted from the end).
     /// * The **step must be 1** (explicit or omitted). Any other step raises `ValueError`.
     /// * **Bounds**: after normalizing negative values, `start` must satisfy
-    ///   `0 ≤ start < len` and `stop` must satisfy `0 ≤ stop ≤ len`. This is stricter than
+    ///   `0 <= start < len` and `stop` must satisfy `0 <= stop <= len`. This is stricter than
     ///   NumPy, which silently clamps out-of-range slice endpoints.
     /// * An empty slice (where `start == stop`) is valid and produces an axis of length 0.
     ///
@@ -700,12 +700,12 @@ impl Array {
         crate::ops::sqrt(slf)
     }
 
-    /// Rounds each element up to the nearest integer (towards +∞). See :func:`zix.ceil()`.
+    /// Rounds each element up to the nearest integer (towards +inf). See :func:`zix.ceil()`.
     pub fn ceil(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::ceil(slf)
     }
 
-    /// Rounds each element down to the nearest integer (towards −∞). See :func:`zix.floor()`.
+    /// Rounds each element down to the nearest integer (towards -inf). See :func:`zix.floor()`.
     pub fn floor(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::floor(slf)
     }
@@ -986,17 +986,17 @@ impl Array {
         crate::ops::tan(slf)
     }
 
-    /// Computes the arcsine of each element; output is in radians in `[-π/2, π/2]`. See :func:`zix.asin()`.
+    /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`. See :func:`zix.asin()`.
     pub fn asin(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::asin(slf)
     }
 
-    /// Computes the arccosine of each element; output is in radians in `[0, π]`. See :func:`zix.acos()`.
+    /// Computes the arccosine of each element; output is in radians in `[0, pi]`. See :func:`zix.acos()`.
     pub fn acos(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::acos(slf)
     }
 
-    /// Computes the arctangent of each element; output is in radians in `(-π/2, π/2)`. See :func:`zix.atan()`.
+    /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`. See :func:`zix.atan()`.
     pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::atan(slf)
     }
@@ -1485,7 +1485,7 @@ mod tests {
 
     #[test]
     fn test_getitem_2d_row_int() {
-        // arr[0] on shape [2, 3] → first row, shape [3]
+        // arr[0] on shape [2, 3] -> first row, shape [3]
         let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
@@ -1500,7 +1500,7 @@ mod tests {
 
     #[test]
     fn test_getitem_2d_element() {
-        // arr[1, 2] on shape [2, 3] → scalar, shape []
+        // arr[1, 2] on shape [2, 3] -> scalar, shape []
         let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
@@ -1519,7 +1519,7 @@ mod tests {
 
     #[test]
     fn test_getitem_2d_col() {
-        // arr[:, 1] on shape [2, 3] → column 1, shape [2]
+        // arr[:, 1] on shape [2, 3] -> column 1, shape [2]
         let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
@@ -1538,7 +1538,7 @@ mod tests {
 
     #[test]
     fn test_getitem_2d_subarray() {
-        // arr[0:2, 1:3] on shape [3, 3] → shape [2, 2]
+        // arr[0:2, 1:3] on shape [3, 3] -> shape [2, 2]
         let data =
             ndarray::Array::from_shape_vec(IxDyn(&[3, 3]), (0..9).map(|x| x as f32).collect())
                 .unwrap();
@@ -1550,7 +1550,7 @@ mod tests {
             ];
             let key = PyTuple::new(py, items).unwrap().into_any();
             let result = getitem::<f32>(&py_arr, key.as_any());
-            // [[0,1,2],[3,4,5],[6,7,8]] → rows 0-1, cols 1-2 → [[1,2],[4,5]]
+            // [[0,1,2],[3,4,5],[6,7,8]] -> rows 0-1, cols 1-2 -> [[1,2],[4,5]]
             let expected =
                 ndarray::Array::from_shape_vec(IxDyn(&[2, 2]), vec![1.0f32, 2.0, 4.0, 5.0])
                     .unwrap();
@@ -1562,7 +1562,7 @@ mod tests {
 
     #[test]
     fn test_getitem_ellipsis_full() {
-        // arr[...] → entire array unchanged
+        // arr[...] -> entire array unchanged
         let data = ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).collect()).unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &data);
@@ -1575,7 +1575,7 @@ mod tests {
 
     #[test]
     fn test_getitem_ellipsis_prefix() {
-        // arr[0, ...] on shape [2, 3] → row 0, shape [3]
+        // arr[0, ...] on shape [2, 3] -> row 0, shape [3]
         let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();
@@ -1594,7 +1594,7 @@ mod tests {
 
     #[test]
     fn test_getitem_ellipsis_suffix() {
-        // arr[..., 0] on shape [2, 3] → column 0, shape [2]
+        // arr[..., 0] on shape [2, 3] -> column 0, shape [2]
         let data =
             ndarray::Array::from_shape_vec(IxDyn(&[2, 3]), (0..6).map(|x| x as f32).collect())
                 .unwrap();

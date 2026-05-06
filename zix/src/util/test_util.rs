@@ -8,7 +8,7 @@ use crate::storage::Compact;
 use crate::util::AlignedBytes;
 
 // ---------------------------------------------------------------------------
-// arr_params — shared test helper (previously duplicated in every test module)
+// arr_params - shared test helper (previously duplicated in every test module)
 // ---------------------------------------------------------------------------
 
 pub(crate) fn arr_params(block_shape: &[usize]) -> ArrayParams {
@@ -19,7 +19,7 @@ pub(crate) fn arr_params(block_shape: &[usize]) -> ArrayParams {
 }
 
 // ---------------------------------------------------------------------------
-// gen_data_bytes_from_slice — convert a typed slice to aligned bytes
+// gen_data_bytes_from_slice - convert a typed slice to aligned bytes
 // ---------------------------------------------------------------------------
 
 /// Convert a slice of typed values to aligned bytes.
@@ -30,7 +30,7 @@ pub(crate) fn gen_data_bytes_from_slice<T: Dtyped>(items: &[T]) -> AlignedBytes 
 }
 
 // ---------------------------------------------------------------------------
-// ScalarStrategy — proptest strategies for scalar types
+// ScalarStrategy - proptest strategies for scalar types
 // ---------------------------------------------------------------------------
 
 use proptest::strategy::BoxedStrategy;
@@ -73,7 +73,7 @@ pub(crate) trait ScalarStrategy:
     /// ~33 % of generated pairs are equal, so both the `true` and `false` branches of
     /// `equal`/`not_equal` are exercised. For float types the set includes `NaN` to cover
     /// the `NaN != NaN` (IEEE 754) edge case. Defaults to `any_strategy` for types where
-    /// equal pairs happen naturally (e.g. `bool` has only 2 values → 50 % hit rate).
+    /// equal pairs happen naturally (e.g. `bool` has only 2 values -> 50 % hit rate).
     fn comparable_strategy() -> BoxedStrategy<Self> {
         Self::any_strategy()
     }
@@ -100,8 +100,8 @@ impl ScalarStrategy for u16 {
         any::<u16>().boxed()
     }
     fn op_safe_strategy() -> BoxedStrategy<Self> {
-        // three_arrays test does (a*b)*c where a=a_extra+b+c ≤ 3r.
-        // max (3r)·r·r = 3r³ ≤ u16::MAX=65535 → r ≤ 27.
+        // three_arrays test does (a*b)*c where a=a_extra+b+c <= 3r.
+        // max (3r)*r*r = 3r^3 <= u16::MAX=65535 -> r <= 27.
         (1u16..=27).boxed()
     }
     fn shift_safe_strategy() -> BoxedStrategy<Self> {
@@ -158,8 +158,8 @@ impl ScalarStrategy for i16 {
         any::<i16>().boxed()
     }
     fn op_safe_strategy() -> BoxedStrategy<Self> {
-        // three_arrays test does (a*b)*c where a=a_extra+b+c ≤ 3r.
-        // max (3r)·r·r = 3r³ ≤ i16::MAX=32767 → r ≤ 22.
+        // three_arrays test does (a*b)*c where a=a_extra+b+c <= 3r.
+        // max (3r)*r*r = 3r^3 <= i16::MAX=32767 -> r <= 22.
         (1i16..=22).boxed()
     }
     fn shift_safe_strategy() -> BoxedStrategy<Self> {

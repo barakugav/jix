@@ -129,7 +129,7 @@ define_op2!(
     ///
     /// For **integer** types the result is truncating (rounds towards zero); dividing by
     /// zero raises an error.
-    /// For **float** types, division by zero produces `±inf` or `NaN`.
+    /// For **float** types, division by zero produces `+/-inf` or `NaN`.
     /// For **complex** types this is full complex division.
     ///
     /// Available via the `/` operator on arrays.

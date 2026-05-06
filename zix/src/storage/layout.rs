@@ -7,12 +7,12 @@ use crate::util::{dim_arr, DimArray, Idx};
 ///
 /// Carries two independent hints that describe the recommended block shape for an array:
 ///
-/// - **Storage block shape** (`block_shape_hint`, `block_shape_tag`, `block_size_hint`) —
+/// - **Storage block shape** (`block_shape_hint`, `block_shape_tag`, `block_size_hint`) -
 ///   the recommended nd-block shape to use when encoding array data into block storage.
 ///   For the baseline compressed storage this matches the actual block shape, but in
 ///   general it is only a hint that may differ from the true underlying layout.
 ///
-/// - **Preferred read shape** (`preferred_read_shape`, `preferred_read_size_hint`) —
+/// - **Preferred read shape** (`preferred_read_shape`, `preferred_read_size_hint`) -
 ///   the recommended region size to request in a single read, typically larger than the
 ///   storage block shape and targeting the L2 cache.
 ///
@@ -67,21 +67,21 @@ impl BlocksLayout {
     ///
     /// # Arguments
     ///
-    /// - `block_shape` — shape of one storage block in items per dimension.
+    /// - `block_shape` - shape of one storage block in items per dimension.
     ///   When `None`, a shape is chosen automatically so that each block is approximately
     ///   `block_size_hint` bytes.
-    /// - `block_shape_tag` — per-dimension constraint on how the block shape may be scaled;
+    /// - `block_shape_tag` - per-dimension constraint on how the block shape may be scaled;
     ///   requires `block_shape` to also be provided. Defaults to all-[`BlockShapeTag::Fixed`].
     ///   See [`BlockShapeTag`] for the available options.
-    /// - `block_size_hint` — target block size in bytes used when auto-computing or scaling
+    /// - `block_size_hint` - target block size in bytes used when auto-computing or scaling
     ///   the block shape. Defaults to the L1 data cache size when the shape is not fully
     ///   [`BlockShapeTag::Fixed`].
-    /// - `preferred_read_shape` — region size the read path prefers to request at once,
+    /// - `preferred_read_shape` - region size the read path prefers to request at once,
     ///   in items per dimension. When `None`, auto-computed from `preferred_read_size_hint`.
-    /// - `preferred_read_size_hint` — target size for the preferred read region in bytes.
+    /// - `preferred_read_size_hint` - target size for the preferred read region in bytes.
     ///   Defaults to the L2 cache size.
-    /// - `shape` — the array shape, used to clamp block dimensions that would exceed the array.
-    /// - `itemsize` — bytes per array element.
+    /// - `shape` - the array shape, used to clamp block dimensions that would exceed the array.
+    /// - `itemsize` - bytes per array element.
     ///
     /// # Errors
     ///
@@ -274,7 +274,7 @@ impl BlocksLayout {
     /// override).
     ///
     /// Users typically choose a block shape based on their access patterns, so `Fixed`
-    /// is the default — it preserves that choice in downstream arrays. Operations that
+    /// is the default - it preserves that choice in downstream arrays. Operations that
     /// change the logical shape (reduction, broadcast, reshape, etc.) may tag affected
     /// dimensions as `Any` or `MultipleOf` to let the heuristic freely pick a suitable
     /// size for those dimensions.
@@ -285,7 +285,7 @@ impl BlocksLayout {
     /// Target byte size hint for a storage block.
     ///
     /// Used as the budget when auto-choosing a block shape for a new array. It is a hint
-    /// only — it may differ from `block_shape_hint.iter().product() * itemsize` when both
+    /// only - it may differ from `block_shape_hint.iter().product() * itemsize` when both
     /// a shape and a hint were provided independently, or when a lazy operation updated
     /// one without changing the other. Defaults to the L1 data cache size when no block
     /// shape or hint has been set explicitly.

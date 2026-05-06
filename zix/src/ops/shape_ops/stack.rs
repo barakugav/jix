@@ -24,7 +24,7 @@ where
 ///
 /// All input arrays must have identical shapes and the same [`Dtype`]. A new axis of size equal to
 /// the number of input arrays is inserted at position `axis` in the output. The output has one more
-/// dimension than the inputs — unlike
+/// dimension than the inputs - unlike
 /// [`Concatenate`](crate::ops::Concatenate), which joins along an existing axis.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
@@ -35,13 +35,13 @@ where
 /// use zix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
-/// // Stack two 1-D arrays along a new leading axis → shape [2, N]
+/// // Stack two 1-D arrays along a new leading axis -> shape [2, N]
 /// let a = Array::compact_array(&array![1i32, 2, 3])?;
 /// let b = Array::compact_array(&array![4i32, 5, 6])?;
 /// let c = zix::ops::stack((a, b), 0);
 /// assert_eq!(c.shape(), &[2, 3]);
 ///
-/// // Stack along axis 1 → shape [N, 2]
+/// // Stack along axis 1 -> shape [N, 2]
 /// let a = Array::compact_array(&array![1i32, 2, 3])?;
 /// let b = Array::compact_array(&array![4i32, 5, 6])?;
 /// let c = zix::ops::stack((a, b), 1);
@@ -207,7 +207,7 @@ mod tests {
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::NDIM_MAX;
 
-    // stack two 1D i32 arrays along axis 0 → shape [2, N]
+    // stack two 1D i32 arrays along axis 0 -> shape [2, N]
     #[test]
     fn test_i32_1d_axis0() {
         let a = array![1i32, 2, 3, 4];
@@ -219,7 +219,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // stack two 1D i32 arrays along axis 1 → shape [N, 2]
+    // stack two 1D i32 arrays along axis 1 -> shape [N, 2]
     #[test]
     fn test_i32_1d_axis1() {
         let a = array![1i32, 2, 3];
@@ -231,7 +231,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // stack two 2D i32 arrays along axis 0 → shape [2, M, N]
+    // stack two 2D i32 arrays along axis 0 -> shape [2, M, N]
     #[test]
     fn test_i32_2d_axis0() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // stack two 2D i32 arrays along axis 1 → shape [M, 2, N]
+    // stack two 2D i32 arrays along axis 1 -> shape [M, 2, N]
     #[test]
     fn test_i32_2d_axis1() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // stack three 1D i32 arrays along axis 0 → shape [3, N]
+    // stack three 1D i32 arrays along axis 0 -> shape [3, N]
     #[test]
     fn test_i32_three_arrays() {
         let a = array![1i32, 2, 3];
@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // stack two 1D f32 arrays along axis 0 → shape [2, N]
+    // stack two 1D f32 arrays along axis 0 -> shape [2, N]
     #[test]
     fn test_f32_1d_axis0() {
         let a = array![1.0f32, 2.0, 3.0, 4.0];
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(actual, expected.into_dyn());
     }
 
-    // stack two 2D f32 arrays along axis 1 → shape [M, 2, N]
+    // stack two 2D f32 arrays along axis 1 -> shape [M, 2, N]
     #[test]
     fn test_f32_2d_axis1() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];

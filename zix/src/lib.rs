@@ -7,12 +7,12 @@
 //! Zix arrays behave like regular n-dimensional arrays, but store their data in independently
 //! compressed blocks and decode on demand. The library is designed around two ideas:
 //!
-//! - **Block-based compression** — the array is divided into an n-dimensional grid of fixed-size
+//! - **Block-based compression** - the array is divided into an n-dimensional grid of fixed-size
 //!   blocks, each compressed independently. Only the blocks touched by a read request are
 //!   decompressed, enabling efficient random-access into large arrays without loading everything
 //!   into memory.
 //!
-//! - **Lazy operation chains** — every operation (arithmetic, shape manipulation, type cast,
+//! - **Lazy operation chains** - every operation (arithmetic, shape manipulation, type cast,
 //!   reduction, ...) returns a new [`Array<OpStorage<...>>`](Array), rather than a materialized result.
 //!   Computation only runs when data is explicitly requested (e.g. via
 //!   [`.to_ndarray()`](Array::to_ndarray) or [`.copy()`](Array::copy)). Because the full
@@ -35,7 +35,7 @@
 //! let decompressed = a.to_ndarray::<f32>()?;
 //! assert_eq!(decompressed[[0, 0]], 1.5);
 //!
-//! // Build a lazy operation pipeline — no data is read yet.
+//! // Build a lazy operation pipeline - no data is read yet.
 //! let ones = Array::compact_array(&ndarray::Array2::<f32>::ones((2, 3)))?;
 //! let result = a             // Array<Compact>
 //!     .exp()                 // Array<Exp<Compact>>
@@ -52,8 +52,8 @@
 //! # Core type: `Array<S>`
 //!
 //! [`Array<S>`](Array) is generic over its storage backend `S: ArrayStorage`. The storage
-//! trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else — slicing,
-//! arithmetic, reductions, serialization — is implemented on top of those three.
+//! trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else - slicing,
+//! arithmetic, reductions, serialization - is implemented on top of those three.
 //!
 //! The type parameter `S` carries the full operation chain at compile time:
 //!
@@ -64,7 +64,7 @@
 //!   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
 //!   .add(other)            -> Array<Add<PermuteAxes<...>, Compact>>
 //!   .sum(&[0], false)      -> Array<Sum<Add<...>>>
-//!   .copy()?               -> Array<Compact>  — materialize
+//!   .copy()?               -> Array<Compact>  - materialize
 //! ```
 //!
 //! There is no runtime evaluation graph or scheduler. The type system *is* the execution plan.
@@ -84,22 +84,22 @@
 //! All operations live in [`ops`] and are also available as methods on [`Array<S>`](Array).
 //! The support list of operations is still growing, but includes:
 //!
-//! **Element-wise unary** — `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
+//! **Element-wise unary** - `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
 //! `round`, `sign`, `sin`, `cos`, `tan`, ...
 //!
 //! **Element-wise binary** (array op array, or array op scalar, via `+`, `-`, `*`, `/`,
-//! operator overloads and named methods) — `add`, `sub`, `mul`, `div`, `powf`, `minimum`,
+//! operator overloads and named methods) - `add`, `sub`, `mul`, `div`, `powf`, `minimum`,
 //! `maximum`, ...
 //!
-//! **Comparisons** — `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
+//! **Comparisons** - `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
 //!
-//! **Logical** — `not`, `logical_and`, `logical_or`, `logical_xor`
+//! **Logical** - `not`, `logical_and`, `logical_or`, `logical_xor`
 //!
-//! **Bitwise** — `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_not`
+//! **Bitwise** - `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_not`
 //!
-//! **Reductions** — `sum`, `mean`, `min`, `max`, `argmin`, `argmax`, `any`, `all`, ...
+//! **Reductions** - `sum`, `mean`, `min`, `max`, `argmin`, `argmax`, `any`, `all`, ...
 //!
-//! **Shape operations** — `reshape`, `slice`, `permute_axes`, `broadcast`,
+//! **Shape operations** - `reshape`, `slice`, `permute_axes`, `broadcast`,
 //! `insert_axes`, `remove_axes`, `concatenate`, `stack`
 //!
 //! ## Shape-changing operations and performance
@@ -165,7 +165,7 @@
 //! Each compressed block passes through the following pipeline on write:
 //!
 //! ```text
-//! raw element bytes  →  [ByteShuffle filter]  →  Zstd compress  →  stored bytes
+//! raw element bytes  ->  [ByteShuffle filter]  ->  Zstd compress  ->  stored bytes
 //! ```
 //!
 //! On read, the pipeline is reversed. The byte-shuffle filter (enabled by default) rearranges
@@ -173,8 +173,8 @@
 //!
 //! Codec settings are controlled via [`ArrayParams`]:
 //!
-//! - [`encoder_params`](ArrayParams::encoder_params) — codec choice, compression level, filter.
-//! - [`decoder_params`](ArrayParams::decoder_params) — decoder configuration.
+//! - [`encoder_params`](ArrayParams::encoder_params) - codec choice, compression level, filter.
+//! - [`decoder_params`](ArrayParams::decoder_params) - decoder configuration.
 //!
 //! The codec and filter configuration is serialized into the array archive, so readers never need
 //! to know ahead of time which settings were used.
@@ -199,7 +199,7 @@
 //!
 //! let data = ndarray::Array2::<f32>::zeros((512, 512));
 //!
-//! // Store with 64×64 blocks — one decompression per tile.
+//! // Store with 64*64 blocks - one decompression per tile.
 //! let mut params = ArrayParams::new();
 //! params.block_shape(&[64, 64]);
 //! let array = Array::compact_array_with(&data, params)?;
@@ -246,7 +246,7 @@
 //! Array::compact_array(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
 //! let len = std::fs::metadata(&path)?.len();
 //!
-//! // Memory-map the source — blocks are paged in on demand.
+//! // Memory-map the source - blocks are paged in on demand.
 //! // Safety: the file is not modified while `src` is live.
 //! let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
 //! let context = src.read_ctx();
@@ -283,7 +283,7 @@
 //!
 //! - Maximum array dimensions: [`NDIM_MAX`] (8).
 //! - Maximum dtype inner-shape dimensions: [`dtype::DTYPE_MAX_NDIM`] (4).
-//! - Little-endian targets only — enforced by a compile-time assertion.
+//! - Little-endian targets only - enforced by a compile-time assertion.
 //! - Element types must implement [`Dtyped`](dtype::Dtyped); they must be `Copy + Send + Sync +
 //!   'static` and must not implement `Drop`.
 //!

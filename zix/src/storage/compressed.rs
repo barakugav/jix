@@ -3,9 +3,9 @@
 //! This module provides the three concrete [`ArrayStorage`] implementations that store array
 //! data as independently compressed nd-blocks:
 //!
-//! - [`Compact`] — heap-allocated; the standard in-memory storage.
-//! - [`CompactBorrowed`] — borrows its data from an existing byte buffer.
-//! - [`CompactMmap`] — memory-mapped; the OS pages data from disk on demand.
+//! - [`Compact`] - heap-allocated; the standard in-memory storage.
+//! - [`CompactBorrowed`] - borrows its data from an existing byte buffer.
+//! - [`CompactMmap`] - memory-mapped; the OS pages data from disk on demand.
 //!
 //! All three are thin wrappers around [`ArrayBlockTableStorageBase`], which contains the
 //! actual nd-array logic and delegates 1D block I/O to [`BlockTable`](crate::storage::block::BlockTable).
@@ -99,15 +99,15 @@ impl_array_storage!(CompactMmap);
 ///
 /// Bridges the nd-array world of [`ArrayStorage`] and the 1D block world of [`BlockTable`].
 /// The array's nd-blocks are stored in row-major order in the `BlockTable`: an nd-block at
-/// grid position `(b₀, b₁, …, bₙ)` has 1D index
-/// `b₀ * block_grid_shape[1] * … * block_grid_shape[n-1] * block_grid_shape[n] + … + bₙ`.
+/// grid position `(b0, b1, ..., bn)` has 1D index
+/// `b0 * block_grid_shape[1] * ... * block_grid_shape[n-1] * block_grid_shape[n] + ... + bn`.
 ///
 /// The block shape is stored in `blocks_layout.block_shape_hint` (items per dimension, not
 /// bytes). The number of blocks per dimension is `block_grid_shape[d] = ceil(shape[d] / block_shape[d])`.
 /// All blocks in the `BlockTable` are full, so `shape[d]` must be a multiple of `block_shape[d]`
 /// for all `d`.
 ///
-/// `encoder_params` and `decoder_params` are kept here — not in `BlockTable` — so that
+/// `encoder_params` and `decoder_params` are kept here - not in `BlockTable` - so that
 /// `ArrayStorage::spec` can propagate them through lazy view operations and `copy_with`.
 pub(crate) struct ArrayBlockTableStorageBase<S>
 where
@@ -170,16 +170,16 @@ where
     ///    `b_begin[d] = index[d].start / block_shape[d]`,
     ///    `b_end[d]   = ceil(index[d].end / block_shape[d])`.
     ///
-    /// 2. **Fast path** — if the index falls exactly on a single aligned block (start and end
+    /// 2. **Fast path** - if the index falls exactly on a single aligned block (start and end
     ///    are both block-aligned, one block per dimension), compute the 1D block index via
     ///    row-major flattening and call [`BlockTable::read_block`](crate::storage::block::BlockTable::read_block)
     ///    directly into `buf`. No temporary buffer needed.
     ///
-    /// 3. **General path** — iterate over every nd-block in the touched range using `NdIter`,
+    /// 3. **General path** - iterate over every nd-block in the touched range using `NdIter`,
     ///    extended with two side-cars:
-    ///    - `nd_iter_ext_logical_global_index` — yields the 1D `BlockTable` index for each
+    ///    - `nd_iter_ext_logical_global_index` - yields the 1D `BlockTable` index for each
     ///      block (row-major flattening of the nd block index within `block_grid_shape`).
-    ///    - `NdIterExtBlockOffsetSize` — yields `(block_inner_offset, block_size)`: the
+    ///    - `NdIterExtBlockOffsetSize` - yields `(block_inner_offset, block_size)`: the
     ///      element-space start offset within the block and the active nd extent, both clipped
     ///      to the requested `index` at the array boundaries.
     ///

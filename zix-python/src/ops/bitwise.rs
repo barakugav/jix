@@ -7,7 +7,7 @@ define_op2!(
     /// `u64`), `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, and `bool`.
     /// Output dtype is `bool`. The output shape equals the input shape.
     ///
-    /// Each element is first cast to `bool` (zero → `False`, any non-zero value → `True`;
+    /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`;
     /// for `bool` this is the identity; for complex, non-zero means at least one component
     /// is non-zero), then the logical AND is applied.
     ///
@@ -42,7 +42,7 @@ define_op2!(
     /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
     /// shape.
     ///
-    /// Each element is first cast to `bool` (zero → `False`, any non-zero value → `True`),
+    /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`),
     /// then the logical OR is applied. Returns `True` when at least one element is truthy.
     ///
     /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
@@ -76,7 +76,7 @@ define_op2!(
     /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
     /// shape.
     ///
-    /// Each element is first cast to `bool` (zero → `False`, any non-zero value → `True`),
+    /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`),
     /// then the logical XOR is applied. Returns `True` when exactly one element is truthy.
     ///
     /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
@@ -110,7 +110,7 @@ define_op1!(
     /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
     /// shape.
     ///
-    /// Each element is first cast to `bool` (zero → `False`, any non-zero value → `True`),
+    /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`),
     /// then negated. Returns `True` for zero (falsy) elements and `False` for non-zero
     /// (truthy) elements.
     ///

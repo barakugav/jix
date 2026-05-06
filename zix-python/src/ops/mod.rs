@@ -44,9 +44,9 @@ pub use copy_op::*;
 /// Supported casts:
 /// - Between any two scalar types: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`,
 ///   `uint32`, `uint64`, `float16`, `float32`, `float64`, `bool`.
-/// - Between the two complex types: `complex64` ↔ `complex128`.
+/// - Between the two complex types: `complex64` <-> `complex128`.
 ///
-/// `bool` conversions follow C semantics: zero → `False`, any non-zero value → `True`.
+/// `bool` conversions follow C semantics: zero -> `False`, any non-zero value -> `True`.
 /// Casting between complex and non-complex types, or involving struct dtypes, is not
 /// supported.
 ///
@@ -66,7 +66,7 @@ pub use copy_op::*;
 /// result = zix.astype(a, np.float64)
 /// assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, 4.0])
 ///
-/// # Zero → False, non-zero → True
+/// # Zero -> False, non-zero -> True
 /// b = zix.compact([0, 1, -2, 0], dtype=np.int32)
 /// result = zix.astype(b, bool)
 /// assert np.array_equal(result.numpy(), [False, True, True, False])

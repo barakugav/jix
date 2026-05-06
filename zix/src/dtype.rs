@@ -1,7 +1,7 @@
 #![allow(rustdoc::redundant_explicit_links)]
 //! Element type descriptors and related primitives.
 //!
-//! The central type is [`Dtype`] — a runtime descriptor that captures all layout information
+//! The central type is [`Dtype`] - a runtime descriptor that captures all layout information
 //! needed to interpret the raw bytes of an array element. See its documentation for a full
 //! explanation, including scalar vs. struct dtypes and the inner-shape mechanism.
 //!
@@ -104,7 +104,7 @@ pub const DTYPE_MAX_NDIM: usize = 4;
 /// the raw bytes stored in an [`Array`](crate::Array).
 ///
 /// A `Dtype` answers three questions about every element in an array:
-/// - **What kind** of data is it (signed int, float, struct of named fields, …)?
+/// - **What kind** of data is it (signed int, float, struct of named fields, ...)?
 /// - **How many bytes** does one logical element occupy ([`itemsize`](Self::itemsize))?
 /// - **What alignment** is required when placing an element in memory ([`alignment`](Self::alignment))?
 ///
@@ -236,12 +236,12 @@ pub const DTYPE_MAX_NDIM: usize = 4;
 ///
 /// # Constraints
 ///
-/// - **Little-endian only** — zix enforces little-endian at compile time; big-endian targets
+/// - **Little-endian only** - zix enforces little-endian at compile time; big-endian targets
 ///   will not compile.
-/// - **Inner shape dimensions** — at most [`DTYPE_MAX_NDIM`] (currently 4).
-/// - **Itemsize limit** — stored as [`Itemsize`] (`u16`); the total bytes per element must not
+/// - **Inner shape dimensions** - at most [`DTYPE_MAX_NDIM`] (currently 4).
+/// - **Itemsize limit** - stored as [`Itemsize`] (`u16`); the total bytes per element must not
 ///   exceed `u16::MAX`.
-/// - **Field offsets** — must conform to either an aligned (`#[repr(C)]`) or packed
+/// - **Field offsets** - must conform to either an aligned (`#[repr(C)]`) or packed
 ///   (`#[repr(C, packed)]`) layout; arbitrary custom offsets are rejected.
 #[derive(Clone)]
 pub struct Dtype(DtypeInner);
@@ -1141,7 +1141,7 @@ mod tests {
 
     #[test]
     fn from_fields_detects_packed_layout() {
-        // u8 at 0, f64 at 1: contiguous → packed
+        // u8 at 0, f64 at 1: contiguous -> packed
         let dtype = Dtype::from_fields(vec![
             ("a".to_string(), 0, u8::DTYPE),
             ("b".to_string(), 1, f64::DTYPE),
@@ -1156,7 +1156,7 @@ mod tests {
 
     #[test]
     fn from_fields_detects_aligned_layout() {
-        // u8 at 0, f64 at 8: gap filled with padding → aligned
+        // u8 at 0, f64 at 8: gap filled with padding -> aligned
         let dtype = Dtype::from_fields(vec![
             ("a".to_string(), 0, u8::DTYPE),
             ("b".to_string(), 8, f64::DTYPE),
@@ -1177,7 +1177,7 @@ mod tests {
 
     #[test]
     fn from_fields_ambiguous_i32_u8_detected_as_aligned() {
-        // { a: i32 at 0, b: u8 at 4 } — offsets are valid for both packed and aligned layouts.
+        // { a: i32 at 0, b: u8 at 4 } - offsets are valid for both packed and aligned layouts.
         // from_fields tries aligned first and returns alignment=4, itemsize=8 (padded to align 4).
         // Use new_struct() when explicit control is needed.
         let dtype = Dtype::from_fields(vec![
@@ -1191,7 +1191,7 @@ mod tests {
 
     #[test]
     fn from_fields_sorts_by_offset() {
-        // Fields given in reverse order — result should be sorted ascending by offset.
+        // Fields given in reverse order - result should be sorted ascending by offset.
         let dtype = Dtype::from_fields(vec![
             ("b".to_string(), 1, f32::DTYPE),
             ("a".to_string(), 0, u8::DTYPE),

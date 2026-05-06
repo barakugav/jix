@@ -257,7 +257,7 @@ where
 
     /// Write the array to generic writer.
     ///
-    /// Like [`write_to_file`](Array::write_to_file) but accepts an arbitrary writer — useful for
+    /// Like [`write_to_file`](Array::write_to_file) but accepts an arbitrary writer - useful for
     /// writing into an in-memory buffer, writing multiple arrays into a single open file handle,
     /// or integrating into a custom container format.
     ///
@@ -305,7 +305,7 @@ where
     /// elsewhere without materializing the full array in memory.
     ///
     /// **When the array is already compact** (`Array<Compact>` or `Array<CompactMmap>`), its
-    /// existing compressed blocks are streamed directly to the writer — `params` is ignored
+    /// existing compressed blocks are streamed directly to the writer - `params` is ignored
     /// entirely. No decompression or re-compression takes place.
     ///
     /// **For any other array** (lazy views, op chains, plain buffers), each block is read from
@@ -314,7 +314,7 @@ where
     /// # Streaming pipeline example
     ///
     /// The following reads a large array from disk via mmap, applies a lazy slice and a
-    /// negation, and writes the result directly to a new file — without ever holding the full
+    /// negation, and writes the result directly to a new file - without ever holding the full
     /// array (compressed or decompressed) in memory:
     ///
     /// ```
@@ -328,12 +328,12 @@ where
     /// Array::compact_array(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
     /// let len = std::fs::metadata(&path)?.len();
     ///
-    /// // Map the file — compressed blocks are paged in on demand, no heap copy.
+    /// // Map the file - compressed blocks are paged in on demand, no heap copy.
     /// // Safety: the file is not modified while `src` is live.
     /// let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
     /// let context = src.read_ctx();
     ///
-    /// // Build a lazy view — no data is read yet.
+    /// // Build a lazy view - no data is read yet.
     /// let view = src.exp() + 1.0f32;
     ///
     /// // Write to a new file: blocks are decompressed, modified by ops, and re-compressed one at
@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn many_blocks_1d_i32() {
-        // 630 items, block 5 → 126 blocks
+        // 630 items, block 5 -> 126 blocks
         let vals: Vec<i32> = (0..630i32).collect();
         let src = ArrayD::from_shape_vec(vec![630], vals.clone()).unwrap();
         let a = compact::<i32>(vals, &[630], &[5]);
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn many_blocks_2d_f64() {
-        // shape [60, 24], block [4, 3] → 15×8 = 120 blocks
+        // shape [60, 24], block [4, 3] -> 15*8 = 120 blocks
         let vals: Vec<f64> = (0..60 * 24).map(|x: i32| x as f64).collect();
         let src = ArrayD::from_shape_vec(vec![60, 24], vals.clone()).unwrap();
         let a = compact::<f64>(vals, &[60, 24], &[4, 3]);
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn array_3d_multiblock_f32() {
-        // shape [10, 11, 12], block [2, 3, 4] → 5×4×3 = 60 blocks
+        // shape [10, 11, 12], block [2, 3, 4] -> 5*4*3 = 60 blocks
         let vals: Vec<f32> = (0..10 * 11 * 12).map(|x: i32| x as f32).collect();
         let src = ArrayD::from_shape_vec(vec![10, 11, 12], vals.clone()).unwrap();
         let a = compact::<f32>(vals, &[10, 11, 12], &[2, 3, 4]);
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn array_3d_all_dims_padded_i64() {
-        // shape [5, 7, 11], block [3, 4, 5] — every dimension needs padding
+        // shape [5, 7, 11], block [3, 4, 5] - every dimension needs padding
         let vals: Vec<i64> = (0..5 * 7 * 11 as i64).collect();
         let src = ArrayD::from_shape_vec(vec![5, 7, 11], vals.clone()).unwrap();
         let a = compact::<i64>(vals, &[5, 7, 11], &[3, 4, 5]);
@@ -689,7 +689,7 @@ mod tests {
         let a = compact::<i32>(vals, &[3, 4, 5], &[2, 2, 3]);
         let ctx = a.read_ctx();
 
-        let view = -(-a.as_ref()); // neg ∘ neg = identity
+        let view = -(-a.as_ref()); // neg * neg = identity
         let mut buf = Cursor::new(Vec::new());
         view.write_to_with(&mut buf, arr_params(&[2, 2, 3]), &ctx)
             .unwrap();
@@ -704,7 +704,7 @@ mod tests {
 
     #[test]
     fn write_to_with_add_chain_f32() {
-        // (a + a) over a compact array — params control the output block shape;
+        // (a + a) over a compact array - params control the output block shape;
         // the source is read block-by-block, never fully materialised.
         let vals: Vec<f32> = (0..24).map(|x: i32| x as f32).collect();
         let src = ArrayD::from_shape_vec(vec![4, 6], vals.clone()).unwrap();
@@ -728,7 +728,7 @@ mod tests {
     #[test]
     fn write_to_with_compact_ignores_params() {
         // For a compact source, write_to and write_to_with must produce identical
-        // bytes regardless of the params passed — the compressed blocks are
+        // bytes regardless of the params passed - the compressed blocks are
         // streamed directly.
         let vals: Vec<i32> = (0..16i32).collect();
         let a = compact::<i32>(vals, &[16], &[4]);
@@ -865,7 +865,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn mmap_read_many_blocks_3d_i32() {
-        // [10, 11, 12] with blocks [2, 3, 4] → 5×4×3 = 60 blocks; all dims padded.
+        // [10, 11, 12] with blocks [2, 3, 4] -> 5*4*3 = 60 blocks; all dims padded.
         let vals: Vec<i32> = (0..10 * 11 * 12i32).collect();
         let src = ArrayD::from_shape_vec(vec![10, 11, 12], vals.clone()).unwrap();
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -885,7 +885,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn mmap_source_pipeline_neg_write_to_with() {
-        // Full streaming pipeline: mmap source → lazy neg view → write_to_with.
+        // Full streaming pipeline: mmap source -> lazy neg view -> write_to_with.
         // The full array is never held decompressed in memory.
         let vals: Vec<i32> = (1..=4 * 5 * 6i32).collect();
         let src = ArrayD::from_shape_vec(vec![4, 5, 6], vals.clone()).unwrap();

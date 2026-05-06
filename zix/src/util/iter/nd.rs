@@ -1,4 +1,3 @@
-
 use crate::util::{dim_arr, DimArray, Idx};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
@@ -186,7 +185,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Tuple blanket impls — compose multiple extensions so that a single NdIter
+// Tuple blanket impls - compose multiple extensions so that a single NdIter
 // can maintain several pieces of derived state simultaneously.
 // ---------------------------------------------------------------------------
 
@@ -323,7 +322,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // IdxIter — basic traversal
+    // IdxIter - basic traversal
     // ---------------------------------------------------------------------------
 
     #[test]
@@ -397,7 +396,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // IdxIter — empty / exhaustion
+    // IdxIter - empty / exhaustion
     // ---------------------------------------------------------------------------
 
     #[test]
@@ -467,7 +466,7 @@ mod tests {
 
     #[test]
     fn new_with_begin_empty_when_one_dim_degenerate() {
-        // begin[0] == end[0] → no elements even though other dims are non-empty
+        // begin[0] == end[0] -> no elements even though other dims are non-empty
         assert!(collect_indices(NdIter::new_with_begin(&[2usize, 0], &[2, 5], ())).is_empty());
     }
 
@@ -496,9 +495,9 @@ mod tests {
 
     #[test]
     fn on_change_called_once_for_innermost_advance() {
-        // [0,0] → [0,1]: only dim 1 changes
+        // [0,0] -> [0,1]: only dim 1 changes
         let mut iter = NdIter::new(&[3usize, 4], ChangeLog::new());
-        iter.next(); // emit [0,0] — no changes
+        iter.next(); // emit [0,0] - no changes
         let before = iter.extensions.log.len();
         iter.next(); // emit [0,1]
         let new: Vec<_> = iter.extensions.log[before..].to_vec();
@@ -507,13 +506,13 @@ mod tests {
 
     #[test]
     fn on_change_called_twice_on_row_wrap() {
-        // At [0,3] → [1,0]: dim 0 increments then dim 1 resets.
+        // At [0,3] -> [1,0]: dim 0 increments then dim 1 resets.
         let mut iter = NdIter::new(&[3usize, 4], ChangeLog::new());
         for _ in 0..4 {
             iter.next();
         } // reach end of first row
         let before = iter.extensions.log.len();
-        iter.next(); // [0,3] → [1,0]
+        iter.next(); // [0,3] -> [1,0]
         let new: Vec<_> = iter.extensions.log[before..].to_vec();
         assert_eq!(new, vec![(0, 0, 1), (1, 3, 0)]);
     }
@@ -526,7 +525,7 @@ mod tests {
             iter.next();
         } // reach [0,2,3]
         let before = iter.extensions.log.len();
-        iter.next(); // [0,2,3] → [1,0,0]
+        iter.next(); // [0,2,3] -> [1,0,0]
         let new: Vec<_> = iter.extensions.log[before..].to_vec();
         assert_eq!(new, vec![(0, 0, 1), (1, 2, 0), (2, 3, 0)]);
     }
@@ -535,14 +534,14 @@ mod tests {
     fn on_change_reset_targets_begin_not_zero() {
         // begin=[1,2], end=[3,5]: when dim 0 wraps, dim 1 should reset to 2 (begin), not 0.
         let mut iter = NdIter::new_with_begin(&[1usize, 2], &[3, 5], ChangeLog::new());
-        // advance to [1,4] — last element of first row
+        // advance to [1,4] - last element of first row
         for _ in 0..3 {
             iter.next();
         }
         let before = iter.extensions.log.len();
-        iter.next(); // [1,4] → [2,2]
+        iter.next(); // [1,4] -> [2,2]
         let new: Vec<_> = iter.extensions.log[before..].to_vec();
-        assert_eq!(new[0], (0, 1, 2), "dim 0: 1→2");
+        assert_eq!(new[0], (0, 1, 2), "dim 0: 1->2");
         assert_eq!(new[1], (1, 4, 2), "dim 1 resets to begin=2, not 0");
     }
 

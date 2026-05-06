@@ -79,11 +79,11 @@ define_reduction_op!(
     /// import numpy as np
     ///
     /// a = zix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    /// # Reduce all axes → scalar
+    /// # Reduce all axes -> scalar
     /// assert zix.max(a).numpy()[()] == 6
-    /// # Reduce axis 0 → shape [3]
+    /// # Reduce axis 0 -> shape [3]
     /// assert np.array_equal(zix.max(a, axis=0).numpy(), [4, 5, 6])
-    /// # Reduce axis 0, keepdims=True → shape [1, 3]
+    /// # Reduce axis 0, keepdims=True -> shape [1, 3]
     /// assert zix.max(a, axis=0, keepdims=True).numpy().shape == (1, 3)
     /// ```
     max,
@@ -111,9 +111,9 @@ define_reduction_op!(
     /// import numpy as np
     ///
     /// a = zix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    /// # Reduce all axes → scalar
+    /// # Reduce all axes -> scalar
     /// assert zix.min(a).numpy()[()] == 1
-    /// # Reduce axis 0 → shape [3]
+    /// # Reduce axis 0 -> shape [3]
     /// assert np.array_equal(zix.min(a, axis=0).numpy(), [1, 2, 3])
     /// ```
     min,
@@ -328,7 +328,7 @@ define_reduction_op!(
     /// Supported dtypes: all integer types, `f16`, `f32`, `f64`, `Complex<f32>`,
     /// `Complex<f64>`, and `bool`. Output dtype is `bool`.
     ///
-    /// Each element is first cast to `bool` (zero → `False`, non-zero → `True`), then the
+    /// Each element is first cast to `bool` (zero -> `False`, non-zero -> `True`), then the
     /// AND reduction is applied. Returns `True` only if every element in the reduced
     /// dimensions is truthy; returns `True` for empty reductions.
     ///
@@ -357,7 +357,7 @@ define_reduction_op!(
     /// Supported dtypes: all integer types, `f16`, `f32`, `f64`, `Complex<f32>`,
     /// `Complex<f64>`, and `bool`. Output dtype is `bool`.
     ///
-    /// Each element is first cast to `bool` (zero → `False`, non-zero → `True`), then the
+    /// Each element is first cast to `bool` (zero -> `False`, non-zero -> `True`), then the
     /// OR reduction is applied. Returns `True` if at least one element in the reduced
     /// dimensions is truthy; returns `False` for empty reductions.
     ///

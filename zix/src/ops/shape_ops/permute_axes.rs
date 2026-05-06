@@ -9,7 +9,7 @@ use crate::Array;
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
 ///
-/// The `i`-th output axis corresponds to axis `axes[i]` of the input — identical to the
+/// The `i`-th output axis corresponds to axis `axes[i]` of the input - identical to the
 /// convention used by NumPy's `numpy.transpose`. No data is copied at construction time;
 /// elements are rearranged on demand when the result is read.
 ///
@@ -24,7 +24,7 @@ use crate::Array;
 /// use zix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
-/// // 2-D transpose: [2, 3] → [3, 2]
+/// // 2-D transpose: [2, 3] -> [3, 2]
 /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
 /// let t = a.permute_axes(&[1, 0]);
 /// assert_eq!(t.shape(), &[3, 2]);
@@ -33,7 +33,7 @@ use crate::Array;
 /// assert_eq!(result[[0, 1]], 4);
 /// assert_eq!(result[[2, 1]], 6);
 ///
-/// // 3-D cyclic permutation [2, 3, 4] → [4, 2, 3]
+/// // 3-D cyclic permutation [2, 3, 4] -> [4, 2, 3]
 /// let b = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
 /// let zb = Array::compact_array(&b)?;
 /// let p = zb.permute_axes(&[2, 0, 1]);

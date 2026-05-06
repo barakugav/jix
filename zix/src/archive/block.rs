@@ -16,19 +16,19 @@ use crate::util::{cast_slice, cast_slice_mut, Idx, SendSyncPtr};
 
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
 ///
-/// [`BlockTable::read_content`] calls `read_section` twice — once for `block_data` (`T = u8`)
-/// and once for `block_offsets` (`T = u64`) — delegating all I/O and lifetime management to the
+/// [`BlockTable::read_content`] calls `read_section` twice - once for `block_data` (`T = u8`)
+/// and once for `block_offsets` (`T = u64`) - delegating all I/O and lifetime management to the
 /// storage-specific implementation:
 ///
-/// - [`Owned`] — reads the section bytes into a freshly allocated `Vec<T>`.
-/// - [`Mmap`] — returns a zero-copy [`MmapData<T>`] pointer into the already-mapped region.
+/// - [`Owned`] - reads the section bytes into a freshly allocated `Vec<T>`.
+/// - [`Mmap`] - returns a zero-copy [`MmapData<T>`] pointer into the already-mapped region.
 pub(crate) trait BlockTableStorageRead: BlockTableStorage {
     /// Read one archive section into a typed array appropriate for this storage backend.
     ///
     /// # Arguments
     ///
-    /// - `reader` — the open archive reader; the section is located via `section.offset`.
-    /// - `section` — byte offset and length of the section within the archive.
+    /// - `reader` - the open archive reader; the section is located via `section.offset`.
+    /// - `section` - byte offset and length of the section within the archive.
     ///
     /// # Errors
     ///
@@ -97,9 +97,9 @@ where
 ///
 /// ```text
 /// [ protobuf BlockTableHeader ]
-/// [ TOC placeholder: 2 × Section (overwritten at end) ]
+/// [ TOC placeholder: 2 * Section (overwritten at end) ]
 /// [ alignment padding to u64 boundary ]
-/// [ block_offsets: (nblocks + 1) × u64, or 0 entries when nblocks == 0 ]
+/// [ block_offsets: (nblocks + 1) * u64, or 0 entries when nblocks == 0 ]
 /// [ block_data:    concatenated compressed block bytes ]
 /// ```
 ///
@@ -111,13 +111,13 @@ where
 ///
 /// # Arguments
 ///
-/// - `nblocks` — total block count; may be zero.
-/// - `block_size` — items per block, written verbatim into the header.
-/// - `decoder_config` — codec, filters, and dtype written into the header.
-/// - `writer` — destination; must support `Seek` for the deferred TOC write-back.
-/// - `compressed_block_size_bound` — passed straight through to the batch-sizing logic
+/// - `nblocks` - total block count; may be zero.
+/// - `block_size` - items per block, written verbatim into the header.
+/// - `decoder_config` - codec, filters, and dtype written into the header.
+/// - `writer` - destination; must support `Seek` for the deferred TOC write-back.
+/// - `compressed_block_size_bound` - passed straight through to the batch-sizing logic
 ///   (targets ~64 KB of compressed data per `block_fn` call).
-/// - `block_fn` — data source; called once per batch of blocks.
+/// - `block_fn` - data source; called once per batch of blocks.
 ///
 /// # Errors
 ///
@@ -277,8 +277,8 @@ impl BlockTable<Owned> {
     ///
     /// # Arguments
     ///
-    /// - `reader` — the source; must be positioned at the start of the archive.
-    /// - `len` — total byte length of the archive section passed to `ArchiveReader` for bounds
+    /// - `reader` - the source; must be positioned at the start of the archive.
+    /// - `len` - total byte length of the archive section passed to `ArchiveReader` for bounds
     ///   checking.
     ///
     /// # Errors

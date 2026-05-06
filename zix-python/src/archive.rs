@@ -11,7 +11,7 @@ use crate::{Array, ArrayParams, ReadContext};
 ///
 /// `path` is the path to the `.zix` file.
 ///
-/// `offset` and `len` allow reading a single array from a byte range within a larger file —
+/// `offset` and `len` allow reading a single array from a byte range within a larger file -
 /// useful when multiple arrays have been packed into the same file with back-to-back
 /// writes. `offset` defaults to `0`; `len` defaults to the remaining file size from `offset`.
 ///
@@ -84,7 +84,7 @@ pub fn read_array(
 ///
 /// Works for any array type: a compact array (the result of :func:`zix.compact` or
 /// :func:`zix.read_array`) streams its already-compressed blocks directly to the destination
-/// without decompressing — `params` is ignored in this case and no re-compression takes place.
+/// without decompressing - `params` is ignored in this case and no re-compression takes place.
 /// A lazy view (slice, arithmetic op chain, etc.) compresses on the fly, so the full
 /// data (compressed or decompressed) is never held in memory.
 ///
@@ -95,7 +95,7 @@ pub fn read_array(
 /// `append` controls how a file path is opened. When `False` (default), the file is created
 /// anew and must not already exist. When `True`, the array is written to the end of an existing
 /// file (or a new file is created if it does not yet exist). Passing `append=True` alongside a
-/// file-like object is ignored — the writer is used as-is at its current position.
+/// file-like object is ignored - the writer is used as-is at its current position.
 /// This argument is only relevant when `path_or_writer` is a file path.
 ///
 /// `params` controls the block layout and codec used to encode the output. Accepts a
@@ -257,7 +257,7 @@ impl Write for PyWriter<'_> {
 
         // SAFETY: We create a read-only memoryview pointing directly into
         // `buf`.  This is sound as long as the memoryview does not outlive
-        // this call — i.e. Python's .write() must not stash a reference to
+        // this call - i.e. Python's .write() must not stash a reference to
         // the memoryview (or a slice of it) beyond returning.
         //
         // All standard library IO implementations (FileIO, BufferedWriter,
@@ -267,7 +267,7 @@ impl Write for PyWriter<'_> {
             Bound::from_owned_ptr_or_err(
                 py,
                 pyo3::ffi::PyMemoryView_FromMemory(
-                    buf.as_ptr().cast_mut().cast::<std::ffi::c_char>(), // cast away const — we mark readonly below
+                    buf.as_ptr().cast_mut().cast::<std::ffi::c_char>(), // cast away const - we mark readonly below
                     buf.len() as pyo3::ffi::Py_ssize_t,
                     pyo3::ffi::PyBUF_READ, // read-only access
                 ),
@@ -281,7 +281,7 @@ impl Write for PyWriter<'_> {
         // Python can't hold a reference into `buf` after this point.
         // (The refcount drop on `mv` would do this anyway, but
         // calling .release() makes the invalidation immediate and
-        // deterministic — any stashed reference becomes a dead
+        // deterministic - any stashed reference becomes a dead
         // memoryview that raises ValueError on access.)
         let _ = py_buf.call_method0("release");
 
@@ -457,7 +457,7 @@ class NoFlush:
     }
 
     // =======================================================================
-    // Write — basic
+    // Write - basic
     // =======================================================================
 
     #[test]
@@ -516,7 +516,7 @@ class NoFlush:
     }
 
     // =======================================================================
-    // Write — return value handling
+    // Write - return value handling
     // =======================================================================
 
     #[test]
@@ -565,7 +565,7 @@ class PartialWriter:
             let obj = cls.call0().unwrap();
             let mut pw = PyWriter::new(obj.clone()).unwrap();
 
-            // Single write call — should report partial.
+            // Single write call - should report partial.
             let n = pw.write(b"abcdef").unwrap();
             assert_eq!(n, 3);
 
@@ -577,7 +577,7 @@ class PartialWriter:
     }
 
     // =======================================================================
-    // Write — memoryview safety
+    // Write - memoryview safety
     // =======================================================================
 
     #[test]
@@ -626,7 +626,7 @@ class StashWriter:
             let mut pw = PyWriter::new(obj.clone()).unwrap();
             pw.write(b"dangerous").unwrap();
 
-            // The stashed memoryview should be released — accessing it should
+            // The stashed memoryview should be released - accessing it should
             // raise.
             let stashed = obj.getattr("stashed").unwrap();
             let result = stashed.call_method0("tobytes");
@@ -758,7 +758,7 @@ class CaptureWriter:
     }
 
     // =======================================================================
-    // Seek — fallback to tell() when seek() returns None
+    // Seek - fallback to tell() when seek() returns None
     // =======================================================================
 
     #[test]
@@ -918,7 +918,7 @@ class BrokenTell:
             let pw = PyWriter::new(bio.clone()).unwrap();
             let mut bw = std::io::BufWriter::with_capacity(16, pw);
 
-            // Write less than buffer capacity — should not hit Python yet.
+            // Write less than buffer capacity - should not hit Python yet.
             bw.write_all(b"hello").unwrap();
             assert_eq!(tell_bytesio(&bio), 0); // still buffered
 
@@ -935,7 +935,7 @@ class BrokenTell:
             let pw = PyWriter::new(bio.clone()).unwrap();
             let mut bw = std::io::BufWriter::with_capacity(8, pw);
 
-            // Write more than buffer capacity — should auto-flush.
+            // Write more than buffer capacity - should auto-flush.
             bw.write_all(b"0123456789ABCDEF").unwrap();
             // At least some data should have been flushed to Python.
             assert!(tell_bytesio(&bio) > 0);
@@ -976,7 +976,7 @@ class CountingWriter:
             let write_count: i32 = obj.getattr("write_count").unwrap().extract().unwrap();
             let data: Vec<u8> = obj.getattr("data").unwrap().extract().unwrap();
             assert_eq!(data.len(), 1000); // 500 * 2 bytes
-                                          // BufWriter should have batched — far fewer than 500 Python calls.
+                                          // BufWriter should have batched - far fewer than 500 Python calls.
             assert!(
                 write_count < 10,
                 "expected batching, got {write_count} Python write calls for 500 writes"

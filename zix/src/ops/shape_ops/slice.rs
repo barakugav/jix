@@ -11,7 +11,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
-/// The most ergonomic form is a tuple — one Rust range (or [`SliceItem`]) per dimension.
+/// The most ergonomic form is a tuple - one Rust range (or [`SliceItem`]) per dimension.
 /// Standard range types and negative integer ranges are all accepted:
 ///
 /// ```text
@@ -28,9 +28,9 @@ use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 /// The slice is specified via [`SliceSpec`], which wraps one [`SliceItem`] per dimension.
 /// Each [`SliceItem`] has three fields:
 ///
-/// * `start` — first element to include (negative: counted from the end; `None`: beginning).
-/// * `end`   — first element to exclude (negative: counted from the end; `None`: past the end).
-/// * `step`  — step between selected elements (must be ≥ 1).
+/// * `start` - first element to include (negative: counted from the end; `None`: beginning).
+/// * `end`   - first element to exclude (negative: counted from the end; `None`: past the end).
+/// * `step`  - step between selected elements (must be >= 1).
 ///
 /// Standard Rust ranges convert to [`SliceItem`] automatically; negative-integer range
 /// literals work for Python-style end-relative indexing.
@@ -120,7 +120,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         //
         // When all dimensions have `step == 1` (`no_steps` fast path), each read translates the
         // requested index ranges by the per-dimension `start` offsets and forwards directly to the inner
-        // storage — no temporary buffer is needed.
+        // storage - no temporary buffer is needed.
         //
         // When any dimension has `step > 1`, [`NdIter`] iterates over every combination of strided-dim
         // output indices.  For each step:
@@ -154,8 +154,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // and scatter the result into `buf` using nd_copy.
         //
         // Let:
-        //   strided dim     — dims[d].step > 1
-        //   non-strided dim — dims[d].step == 1
+        //   strided dim     - dims[d].step > 1
+        //   non-strided dim - dims[d].step == 1
         //
         // For NdIter we define `iter_shape`:
         //   iter_shape[d] = out_shape[d]   if strided       (iterate over each step)
@@ -171,10 +171,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         //     strided:     1
         //     non-strided: index[d].end - index[d].start   (full range for this dim)
         //
-        //   dst_byte_offset = Σ_{strided d} idx[d] * dst_strides[d]
+        //   dst_byte_offset = sum_{strided d} idx[d] * dst_strides[d]
         //   (non-strided dims contribute 0 since idx[d] == 0 for them in iter_shape)
         //
-        //   nd_copy(tmp_buf → buf + dst_byte_offset, shape = inner_read_shape,
+        //   nd_copy(tmp_buf -> buf + dst_byte_offset, shape = inner_read_shape,
         //           src_strides = C-order over inner_read_shape,
         //           dst_strides = C-order over out_shape)
         //
@@ -307,14 +307,14 @@ impl_from_tuple_for_slice_spec!(I1, I2, I3, I4, I5, I6, I7, I8 ; 8 ; 0, 1, 2, 3,
 ///
 /// `start` and `end` may be negative (Python-style: `-1` means last element).
 /// `None` means "use the natural boundary" (0 for start, dim length for end).
-/// `step` must be ≥ 1 (negative steps are not supported).
+/// `step` must be >= 1 (negative steps are not supported).
 #[derive(Debug, Clone, Copy)]
 pub struct SliceItem {
     /// First element to include. Negative values count from the end; `None` means the start of the dimension.
     pub start: Option<i64>,
     /// First element to exclude. Negative values count from the end; `None` means past the end of the dimension.
     pub end: Option<i64>,
-    /// Step between selected elements. Must be ≥ 1.
+    /// Step between selected elements. Must be >= 1.
     pub step: i64,
 }
 
@@ -441,7 +441,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Shape metadata — contiguous (no_steps)
+    // Shape metadata - contiguous (no_steps)
     // -----------------------------------------------------------------------
 
     #[test]
@@ -467,12 +467,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Shape metadata — strided
+    // Shape metadata - strided
     // -----------------------------------------------------------------------
 
     #[test]
     fn shape_strided_step2_both_axes() {
-        // [3, 8], step 2 on both → ceil(3/2)=2, ceil(8/2)=4
+        // [3, 8], step 2 on both -> ceil(3/2)=2, ceil(8/2)=4
         assert_eq!(
             make2d(arange(24), 3, 8)
                 .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
@@ -482,7 +482,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Full reads — contiguous (tuple syntax)
+    // Full reads - contiguous (tuple syntax)
     // -----------------------------------------------------------------------
 
     #[test]
@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn full_read_3d_slice() {
-        // [2,3,4] → (0..2, 1..3, 1..3)
+        // [2,3,4] -> (0..2, 1..3, 1..3)
         let got: ArrayD<i32> = make3d(arange(24), 2, 3, 4)
             .slice((0..2, 1..3, 1..3))
             .to_ndarray()
@@ -535,12 +535,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Full reads — strided (tuple syntax)
+    // Full reads - strided (tuple syntax)
     // -----------------------------------------------------------------------
 
     #[test]
     fn full_read_strided_axis1_step2() {
-        // [3, 8], step 2 on axis 1 → cols 0,2,4,6
+        // [3, 8], step 2 on axis 1 -> cols 0,2,4,6
         let got: ArrayD<i32> = make2d(arange(24), 3, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray()
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn full_read_strided_axis0_step2() {
-        // [6, 4], step 2 on axis 0 → rows 0, 2, 4
+        // [6, 4], step 2 on axis 0 -> rows 0, 2, 4
         let got: ArrayD<i32> = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(None, None, 2), ..))
             .to_ndarray()
@@ -568,7 +568,7 @@ mod tests {
 
     #[test]
     fn full_read_strided_both_axes() {
-        // [4, 6], step 2 on both → rows 0,2; cols 0,2,4
+        // [4, 6], step 2 on both -> rows 0,2; cols 0,2,4
         let got: ArrayD<i32> = make2d(arange(24), 4, 6)
             .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
             .to_ndarray()
@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn full_read_strided_with_start_offset() {
-        // [6, 8]: axis 1 from index 1, step 2 → indices 1,3,5,7
+        // [6, 8]: axis 1 from index 1, step 2 -> indices 1,3,5,7
         let got: ArrayD<i32> = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(Some(1), None, 2)))
             .to_ndarray()
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn negative_start_last_two_rows() {
-        // (-2..) on axis 0 of [5, 4] → rows 3 and 4
+        // (-2..) on axis 0 of [5, 4] -> rows 3 and 4
         let got: ArrayD<i32> = make2d(arange(20), 5, 4)
             .slice((-2.., ..))
             .to_ndarray()
@@ -632,7 +632,7 @@ mod tests {
 
     #[test]
     fn negative_end_all_but_last_col() {
-        // (..-1) on axis 1 of [3, 4] → cols 0,1,2
+        // (..-1) on axis 1 of [3, 4] -> cols 0,1,2
         let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .slice((.., ..-1))
             .to_ndarray()
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn negative_start_and_end() {
-        // [3, 6]: axis 1 with (-4..-1) → indices 2,3,4
+        // [3, 6]: axis 1 with (-4..-1) -> indices 2,3,4
         let got: ArrayD<i32> = make2d(arange(18), 3, 6)
             .slice((.., -4..-1))
             .to_ndarray()
@@ -659,7 +659,7 @@ mod tests {
 
     #[test]
     fn negative_start_strided() {
-        // [6, 4]: axis 0 from -6 (= 0) step 2 → rows 0, 2, 4
+        // [6, 4]: axis 0 from -6 (= 0) step 2 -> rows 0, 2, 4
         // negative start + step requires SliceItem since range syntax has no step
         let got: ArrayD<i32> = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(Some(-6), None, 2), ..))
@@ -690,7 +690,7 @@ mod tests {
 
     #[test]
     fn sub_read_within_strided_slice() {
-        // [6, 8] step 2 on axis 1 → shape [6, 4]; then read only row 0
+        // [6, 8] step 2 on axis 1 -> shape [6, 4]; then read only row 0
         let got: ArrayD<i32> = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())

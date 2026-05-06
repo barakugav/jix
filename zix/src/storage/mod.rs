@@ -8,24 +8,24 @@
 //! # Storage implementations
 //!
 //! The primary storages are block-compressed backends:
-//! - [`Compact`] — heap-allocated
-//! - [`CompactMmap`] — memory-mapped file
+//! - [`Compact`] - heap-allocated
+//! - [`CompactMmap`] - memory-mapped file
 //!
 //! Two adapters let non-compressed data participate in the same `Array` world (such as math operations with compressed arrays):
-//! - [`Plain`] — a zero-copy view into a contiguous or strided in-memory buffer.
-//! - [`Scalar<T>`] — a single value broadcast to any shape.
+//! - [`Plain`] - a zero-copy view into a contiguous or strided in-memory buffer.
+//! - [`Scalar<T>`] - a single value broadcast to any shape.
 //!
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
 //! the transformation at read time. These are defined in [`zix::ops`](crate::ops) and include shape
-//! operations (`Reshape`, `Slice`, `PermuteAxes`, `Broadcast`, …), element-wise operations
-//! (`Neg`, `Add`, `Exp`, `AsType`, …), reductions (`Sum`, `Mean`, …), etc.
+//! operations (`Reshape`, `Slice`, `PermuteAxes`, `Broadcast`, ...), element-wise operations
+//! (`Neg`, `Add`, `Exp`, `AsType`, ...), reductions (`Sum`, `Mean`, ...), etc.
 //!
 //! # Notable items in this module
 //!
-//! - [`ArrayStorage`] — the trait all storage backends implement.
-//! - [`Compact`] — the main block-compressed storage backend.
-//! - [`Plain`] and [`Scalar`] — adapters for non-compressed data.
-//! - [`BlocksLayout`] — block geometry hints attached to every storage.
+//! - [`ArrayStorage`] - the trait all storage backends implement.
+//! - [`Compact`] - the main block-compressed storage backend.
+//! - [`Plain`] and [`Scalar`] - adapters for non-compressed data.
+//! - [`BlocksLayout`] - block geometry hints attached to every storage.
 
 use std::ops::Range;
 
@@ -51,8 +51,8 @@ pub(crate) mod block;
 ///
 /// `Array<S>` is generic over its storage `S: ArrayStorage`, which provides three pieces
 /// of information: the array's shape, its element type, and the ability to read any
-/// rectangular sub-region into a byte buffer. Everything else — slicing, reshaping,
-/// arithmetic, reductions — is built on top of these three methods.
+/// rectangular sub-region into a byte buffer. Everything else - slicing, reshaping,
+/// arithmetic, reductions - is built on top of these three methods.
 ///
 /// # Primary storage backends
 ///
@@ -64,9 +64,9 @@ pub(crate) mod block;
 /// # Adapters
 ///
 /// Two adapters let plain data participate in the same `Array<S>` world:
-/// - `plain::Plain` — wraps a contiguous or strided in-memory ndarray, used when
+/// - `plain::Plain` - wraps a contiguous or strided in-memory ndarray, used when
 ///   operating on regular Rust/ndarray data alongside compressed arrays.
-/// - `scalar::Scalar<T>` — represents a single scalar value broadcast to any shape,
+/// - `scalar::Scalar<T>` - represents a single scalar value broadcast to any shape,
 ///   used as the right-hand side in operations like `array + scalar`.
 ///
 /// # Lazy operation views
@@ -91,7 +91,7 @@ pub(crate) mod block;
 ///
 /// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations
 /// carry zero heap allocation or virtual dispatch overhead. The full static type of an
-/// expression — e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` — is resolved by the compiler,
+/// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler,
 /// and only the final `read_data` call touches actual bytes.
 pub trait ArrayStorage {
     /// Read a sub-region of the array into a caller-supplied byte buffer.
@@ -102,14 +102,14 @@ pub trait ArrayStorage {
     ///
     /// # Arguments
     ///
-    /// - `index` — one half-open range per dimension (`start..end`).
+    /// - `index` - one half-open range per dimension (`start..end`).
     ///   The number of ranges must equal `self.shape().len()`.
     ///   Ranges must be within the array shape bounds; empty ranges are allowed.
-    /// - `buf` — destination byte buffer.
+    /// - `buf` - destination byte buffer.
     ///   Must be exactly `index.iter().map(|r| r.len()).product() * dtype.itemsize()` bytes.
     ///   Must be aligned to `dtype.alignment()`.
     ///   On success the elements are written in row-major (C-contiguous) order.
-    /// - `context` — read context carrying the decoder state.
+    /// - `context` - read context carrying the decoder state.
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>;
 
     /// Returns the shape of the array, one element per dimension.
@@ -135,7 +135,7 @@ pub trait ArrayStorage {
 /// Internal metadata of ArrayStorage.
 ///
 /// Carries the information [`Array`](crate::Array) needs when creating a new storage
-/// from an existing one — such as during `copy`, `copy_with`, and lazy view operations.
+/// from an existing one - such as during `copy`, `copy_with`, and lazy view operations.
 /// Not intended to be used directly.
 pub struct ArrayStorageSpec<'a> {
     pub(crate) blocks_layout: &'a BlocksLayout,

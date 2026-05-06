@@ -237,7 +237,7 @@ impl<'a> AlternatingBuffers<'a> {
     ///   with `tmp_buf1` as `main_buf`, then returns `(original_data, tmp_buf1)`. After
     ///   writing the transformed output into `dst`, [`data`](Self::data) will return its
     ///   contents with no further state change.
-    /// - In [`Alternating`](Self::Alternating): swaps `main_buf` ↔ `secondary_buf`, then
+    /// - In [`Alternating`](Self::Alternating): swaps `main_buf` <-> `secondary_buf`, then
     ///   returns `(old_main_data, old_secondary_buf)`. The caller writes transformed output
     ///   into `dst` (which is the new `main_buf`), and [`data`](Self::data) will immediately
     ///   reflect the new contents.

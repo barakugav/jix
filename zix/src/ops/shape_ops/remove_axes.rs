@@ -21,23 +21,23 @@ use crate::Array;
 /// # Examples
 ///
 /// ```text
-/// [1, N]          axes: [0]       → [N]
-/// [N, 1]          axes: [1]       → [N]
-/// [N, 1, M]       axes: [1]       → [N, M]
-/// [1, N, 1, M, 1] axes: [0, 2, 4] → [N, M]
+/// [1, N]          axes: [0]       -> [N]
+/// [N, 1]          axes: [1]       -> [N]
+/// [N, 1, M]       axes: [1]       -> [N, M]
+/// [1, N, 1, M, 1] axes: [0, 2, 4] -> [N, M]
 /// ```
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
-/// // [1, 3] → [3]: remove the leading size-1 dim
+/// // [1, 3] -> [3]: remove the leading size-1 dim
 /// let a = Array::compact_array(&array![[1i32, 2, 3]])?;
 /// let result = a.remove_axes(&[0]).to_ndarray::<i32>()?;
 /// assert_eq!(result.shape(), &[3]);
 /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
 ///
-/// // [1, 2, 1] → [2]: remove both size-1 dims at once
+/// // [1, 2, 1] -> [2]: remove both size-1 dims at once
 /// let b = Array::compact_array(&array![[[10i32], [20]]])?; // shape [1, 2, 1]
 /// assert_eq!(b.remove_axes(&[0, 2]).shape(), &[2]);
 /// # Ok::<(), zix::Error>(())
@@ -186,28 +186,28 @@ mod tests {
 
     #[test]
     fn shape_remove_leading() {
-        // [1, 6] remove axis 0 → [6]
+        // [1, 6] remove axis 0 -> [6]
         let a = make1d(arange(6), 6).insert_axes(&[0]);
         assert_eq!(a.remove_axes(&[0]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_trailing() {
-        // [6, 1] remove axis 1 → [6]
+        // [6, 1] remove axis 1 -> [6]
         let a = make1d(arange(6), 6).insert_axes(&[1]);
         assert_eq!(a.remove_axes(&[1]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_middle() {
-        // [3, 1, 4] remove axis 1 → [3, 4]
+        // [3, 1, 4] remove axis 1 -> [3, 4]
         let a = make2d(arange(12), 3, 4).insert_axes(&[1]);
         assert_eq!(a.remove_axes(&[1]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_remove_multiple() {
-        // [1, 2, 1, 3, 1] remove axes [0, 2, 4] → [2, 3]
+        // [1, 2, 1, 3, 1] remove axes [0, 2, 4] -> [2, 3]
         let a = make2d(arange(6), 2, 3).insert_axes(&[0, 1, 2]);
         assert_eq!(a.remove_axes(&[0, 2, 4]).shape(), &[2, 3]);
     }
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn sub_read_after_remove_leading() {
-        // [1, 6] → remove axis 0 → [6]; read elements 2..5
+        // [1, 6] -> remove axis 0 -> [6]; read elements 2..5
         let got: ArrayD<i32> = make1d(arange(6), 6)
             .insert_axes(&[0])
             .remove_axes(&[0])
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn sub_read_after_remove_middle() {
-        // [3, 1, 4] → remove axis 1 → [3, 4]; read rows 1..3, cols 0..2
+        // [3, 1, 4] -> remove axis 1 -> [3, 4]; read rows 1..3, cols 0..2
         let got: ArrayD<i32> = make2d(arange(12), 3, 4)
             .insert_axes(&[1])
             .remove_axes(&[1])
@@ -366,7 +366,7 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn proptest_remove_axes((nd, za, axes) in remove_axes_strategy::<i32>()) {
-            // Oracle: removing size-1 axes is a pure reshape — flat order is unchanged.
+            // Oracle: removing size-1 axes is a pure reshape - flat order is unchanged.
             let expected_shape: Vec<usize> = nd
                 .shape()
                 .iter()

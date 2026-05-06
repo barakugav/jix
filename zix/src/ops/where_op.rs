@@ -373,8 +373,8 @@ mod tests {
         ])
         .unwrap();
         let result = where_condition(cond, x, y).to_ndarray::<Pair>().unwrap();
-        assert_eq!(result[0], Pair { a: 1, b: 2 }); // cond=true  → x
-        assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false → y
-        assert_eq!(result[2], Pair { a: 5, b: 6 }); // cond=true  → x
+        assert_eq!(result[0], Pair { a: 1, b: 2 }); // cond=true  -> x
+        assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false -> y
+        assert_eq!(result[2], Pair { a: 5, b: 6 }); // cond=true  -> x
     }
 }

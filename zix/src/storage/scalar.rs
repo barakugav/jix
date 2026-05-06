@@ -21,7 +21,7 @@ use crate::Array;
 /// value directly as an operand, or explicitly via [`Array::plain_scalar`].
 /// Both are equivalent; choose whichever reads more clearly.
 ///
-/// **Implicit** — the operator accepts a raw scalar and broadcasts it automatically:
+/// **Implicit** - the operator accepts a raw scalar and broadcasts it automatically:
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
@@ -34,7 +34,7 @@ use crate::Array;
 /// # Ok::<(), zix::Error>(())
 /// ```
 ///
-/// **Explicit** — construct a `Scalar` array first, then apply the operation:
+/// **Explicit** - construct a `Scalar` array first, then apply the operation:
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
@@ -161,7 +161,7 @@ mod tests {
     use crate::Array;
 
     // -----------------------------------------------------------------------
-    // plain_scalar — shape [N]
+    // plain_scalar - shape [N]
     // -----------------------------------------------------------------------
 
     #[test]

@@ -8,9 +8,9 @@ Zix is a high-performance multi-dimensional array library written in Rust with P
 
 ## Crate Structure
 
-- **`zix/`** — Core Rust library (`Array<S>`, dtype system, ops, storage, archive)
-- **`zix-macros/`** — Procedural macros used by the core library
-- **`zix-python/`** — PyO3 Python bindings (`zix-pyo3` crate, publishes as `zix` Python package)
+- **`zix/`** - Core Rust library (`Array<S>`, dtype system, ops, storage, archive)
+- **`zix-macros/`** - Procedural macros used by the core library
+- **`zix-python/`** - PyO3 Python bindings (`zix-pyo3` crate, publishes as `zix` Python package)
 
 There is no workspace-level `Cargo.toml`; each crate is built independently.
 
@@ -44,7 +44,7 @@ cargo run -p zix-pyo3 --bin gen_pyi
 
 ## Architecture
 
-### `Array<S: ArrayStorage>` — Generic Core
+### `Array<S: ArrayStorage>` - Generic Core
 
 The central type is `Array<S>` where `S` implements `ArrayStorage`:
 - `read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>`
@@ -62,7 +62,7 @@ Arrays are stored in fixed-size blocks, each independently Zstd-compressed. `Blo
 
 ### Codec Pipeline
 
-`Input → [ByteShuffle filter] → [Zstd compress] → Block bytes`
+`Input -> [ByteShuffle filter] -> [Zstd compress] -> Block bytes`
 
 Defined in `zix/src/codec.rs`; codec/filter parameters serialized in protobuf headers.
 
@@ -85,11 +85,11 @@ PyO3 + `numpy` crate. The Python `Array` class wraps a type-erased `AnyArray` en
 
 ## Developer Guides
 
-- [Testing guide](docs/dev/tests.md) — test crates, shared utilities, when to use proptest, macros, and how to test a new op
+- [Testing guide](docs/dev/tests.md) - test crates, shared utilities, when to use proptest, macros, and how to test a new op
 
 ## Key Constraints
 
-- **Little-endian only** — enforced by a compile-time assertion
+- **Little-endian only** - enforced by a compile-time assertion
 - **Max 8 array dimensions** (`NDIM_MAX`)
 - **Max 4 inner dtype dimensions** (`DTYPE_MAX_NDIM`)
 - **Rust edition 2024**

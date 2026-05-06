@@ -9,7 +9,7 @@ use crate::{Array, ArrayParams};
 /// Copies the data of an array into a new compact array by compressing it into new blocks.
 ///
 /// The primary use of `copy` is to materialize a lazy operation chain. A `zix.Array` can
-/// wrap an arbitrary lazy computation — for example the result of `a * 2.0 + b`. Reads to
+/// wrap an arbitrary lazy computation - for example the result of `a * 2.0 + b`. Reads to
 /// such lazy arrays always perform the whole computation pipeline on the fly, which is very
 /// flexible but can be inefficient for repeated access. Calling `copy` breaks the lazy
 /// chain and materializes the result as a standalone compact array.
@@ -20,7 +20,7 @@ use crate::{Array, ArrayParams};
 /// decompress excess data. Calling `copy` on the result of such an operation re-encodes the
 /// data with a freshly derived block shape that matches the new layout. The block shape is
 /// automatically derived using a heuristic that aims to preserve user choices, but it is not
-/// perfect — pass explicit `params` after shape-changing ops when you know the access pattern.
+/// perfect - pass explicit `params` after shape-changing ops when you know the access pattern.
 ///
 /// Codec settings (compression level, filters, etc.) are inherited from the source storage.
 ///

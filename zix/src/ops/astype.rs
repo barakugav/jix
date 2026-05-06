@@ -41,9 +41,9 @@ where
 /// Supported casts:
 /// - Between any two scalar types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
 ///   `f16` (requires the `half` feature), `f32`, `f64`, `bool`.
-/// - Between the two complex types: `Complex<f32>` ↔ `Complex<f64>`.
+/// - Between the two complex types: `Complex<f32>` <-> `Complex<f64>`.
 ///
-/// `bool` conversions follow C semantics: zero → `false`, any non-zero value → `true`.
+/// `bool` conversions follow C semantics: zero -> `false`, any non-zero value -> `true`.
 /// Casting between complex and non-complex types, or involving struct dtypes, is not supported.
 ///
 /// Output dtype is the target dtype. Output shape equals the input shape.
@@ -63,7 +63,7 @@ where
 /// let result = za.astype::<f64>().to_ndarray::<f64>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1.0f64, 2.0, 3.0, 4.0]);
 ///
-/// // Zero → false, non-zero → true
+/// // Zero -> false, non-zero -> true
 /// let zb = Array::compact_array(&array![0i32, 1, -2, 0])?;
 /// let result = zb.astype::<bool>().to_ndarray::<bool>()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, true, false]);
@@ -530,7 +530,7 @@ mod tests {
     }
 
     // --- test generation macro ---
-    // One proptest function per (src → dst) cast pair: random shape, random block shape,
+    // One proptest function per (src -> dst) cast pair: random shape, random block shape,
     // full read + random sub-range reads via assert_array_matches.
     macro_rules! test_cast_pair {
         ($src:ty, $dst:ty) => {
@@ -553,8 +553,8 @@ mod tests {
     }
 
     // numeric widening / narrowing
-    test_cast_pair!(u8, f32); // smaller → larger itemsize
-    test_cast_pair!(f32, u8); // larger → smaller itemsize
+    test_cast_pair!(u8, f32); // smaller -> larger itemsize
+    test_cast_pair!(f32, u8); // larger -> smaller itemsize
     test_cast_pair!(i32, f64);
     test_cast_pair!(f64, i32);
     test_cast_pair!(f32, f64);

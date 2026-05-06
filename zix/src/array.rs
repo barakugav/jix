@@ -36,7 +36,7 @@ use crate::ArrayParams;
 /// | [`Array<Compact>`](crate::storage::Compact) | Heap-allocated block-compressed array. The main storage backend. |
 /// | [`Array<Add<S1, S2>> or Array<Neg<S>> ...`](crate::ops) | Lazy operations views that wrap one or more arrays and apply a transformation at read time. Created by methods in [`ops`](crate::ops). |
 /// | [`Array<Ref<'a, S>>`](crate::storage::Ref) | A reference to another storage, used to let multiple operations consume an array without cloning its storage. Created by [`as_ref`](Array::as_ref). |
-/// | [`Array<Plain<…>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_view`](Array::plain_ndarray_view). |
+/// | [`Array<Plain<...>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_view`](Array::plain_ndarray_view). |
 /// | [`Array<Scalar<T>>`](crate::storage::Scalar) | A single scalar broadcast to any shape, used as the operand in expressions like `array + 1.0`. |
 ///
 /// # Operations and lazy evaluation
@@ -47,10 +47,10 @@ use crate::ArrayParams;
 /// ```text
 /// Array<Compact>
 ///   .neg()                 -> Array<Neg<Compact>>
-///   .reshape_view(…)       -> Array<Reshape<Neg<Compact>>>
-///   .permute_axes(axes)    -> Array<PermuteAxes<Reshape<…>>>
-///   .add(other_array)      -> Array<Add<PermuteAxes<…>, Compact>>
-///   .sum(axis, false)      -> Array<Sum<Add<…>>>
+///   .reshape_view(...)       -> Array<Reshape<Neg<Compact>>>
+///   .permute_axes(axes)    -> Array<PermuteAxes<Reshape<...>>>
+///   .add(other_array)      -> Array<Add<PermuteAxes<...>, Compact>>
+///   .sum(axis, false)      -> Array<Sum<Add<...>>>
 ///   .copy();               -> Array<Compact> - materialize the pipeline
 /// ```
 ///
@@ -60,8 +60,8 @@ use crate::ArrayParams;
 /// chain, and only the minimum required data is read from the innermost backend.
 ///
 /// Because `Array<S>` is monomorphized over `S` at compile time, chains of operations incur zero
-/// virtual dispatch overhead. The full static type of an expression —
-/// e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` — is resolved by the compiler, which can inline the
+/// virtual dispatch overhead. The full static type of an expression -
+/// e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler, which can inline the
 /// entire pipeline into a single read loop. The type system *is* the execution plan.
 ///
 /// Operations accept an owned `Array<S>` and return a new `Array<Op<S>>` that wraps the original.
@@ -142,8 +142,8 @@ use crate::ArrayParams;
 /// of operations, etc.) choose their block shape with a heuristic, trying to preserve the original
 /// user block shape as much as possible while respecting the new shape and layout.
 ///
-/// Shape-changing operations — [`reshape_view`](Array::reshape_view),
-/// [`broadcast_view`](Array::broadcast_view), [`permute_axes`](Array::permute_axes) — remap how
+/// Shape-changing operations - [`reshape_view`](Array::reshape_view),
+/// [`broadcast_view`](Array::broadcast_view), [`permute_axes`](Array::permute_axes) - remap how
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
 /// than necessary. To avoid this, materialize with [`copy`](Array::copy) (automatic block shape)
@@ -167,9 +167,9 @@ impl Array<Compact> {
     ///
     /// # Errors
     ///
-    /// - [`TooManyDimensions`](crate::ErrorKind::TooManyDimensions) — `array.ndim()` exceeds
+    /// - [`TooManyDimensions`](crate::ErrorKind::TooManyDimensions) - `array.ndim()` exceeds
     ///   [`NDIM_MAX`](crate::NDIM_MAX).
-    /// - [`CodecError`](crate::ErrorKind::CodecError) — compression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) - compression fails.
     ///
     /// # Examples
     ///
@@ -223,12 +223,12 @@ impl Array<Compact> {
     ///
     /// let data = ndarray::Array2::<f32>::zeros((512, 512));
     ///
-    /// // Store with 64×64 blocks — good for tile-at-a-time access patterns.
+    /// // Store with 64*64 blocks - good for tile-at-a-time access patterns.
     /// let mut params = ArrayParams::new();
     /// params.block_shape(&[64, 64]);
     /// let array = Array::compact_array_with(&data, params)?;
     ///
-    /// // Read tiles of 128×128 by decompressing 2×2 blocks at a time.
+    /// // Read tiles of 128*128 by decompressing 2*2 blocks at a time.
     /// let context = array.read_ctx();
     /// for tile_row in 0..7 {
     ///   for tile_col in 0..7 {
@@ -343,9 +343,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) — `T` does not match
+    /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) - `T` does not match
     ///   `self.dtype()`.
-    /// - [`CodecError`](crate::ErrorKind::CodecError) — block decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
     pub fn to_ndarray<T>(&self) -> Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
@@ -367,11 +367,11 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) — `T` does not match
+    /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) - `T` does not match
     ///   `self.dtype()`.
-    /// - [`InvalidIndex`](crate::ErrorKind::InvalidIndex) — `range` is out of bounds or
+    /// - [`InvalidIndex`](crate::ErrorKind::InvalidIndex) - `range` is out of bounds or
     ///   has a different number of dimensions than the array.
-    /// - [`CodecError`](crate::ErrorKind::CodecError) — block decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
@@ -426,11 +426,11 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`InvalidBufferSize`](crate::ErrorKind::InvalidBufferSize) — `buf` has the wrong
+    /// - [`InvalidBufferSize`](crate::ErrorKind::InvalidBufferSize) - `buf` has the wrong
     ///   length for the requested range and dtype.
-    /// - [`InvalidArgument`](crate::ErrorKind::InvalidArgument) — `buf` is insufficiently
+    /// - [`InvalidArgument`](crate::ErrorKind::InvalidArgument) - `buf` is insufficiently
     ///   aligned for the dtype.
-    /// - [`CodecError`](crate::ErrorKind::CodecError) — block decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
     ///
@@ -487,7 +487,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::ErrorKind::CodecError) — compression or decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) - compression or decompression fails.
     ///
     /// # Examples
     ///
@@ -515,7 +515,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`CodecError`](crate::ErrorKind::CodecError) — compression or decompression fails.
+    /// - [`CodecError`](crate::ErrorKind::CodecError) - compression or decompression fails.
     ///
     /// ```
     /// use zix::{Array, ArrayParams};
@@ -680,7 +680,7 @@ impl<S: ArrayStorage> Array<S> {
     /// Ensure this array is in compact block-compressed form, re-compressing
     /// if needed.
     ///
-    /// If the array is already compact, the storage is kept as-is — no data is
+    /// If the array is already compact, the storage is kept as-is - no data is
     /// copied or re-compressed. Otherwise the array is materialized block by
     /// block into a new [`Compact`](crate::storage::Compact) storage using
     /// default [`ArrayParams`].
@@ -714,7 +714,7 @@ impl<S: ArrayStorage> Array<S> {
     /// Similar to [`into_compact`](Self::into_compact) but with explicit [`ArrayParams`].
     ///
     /// `params` controls the target block shape and compression settings. It is
-    /// **only used when the source is not already compact** — if `is_compact()`
+    /// **only used when the source is not already compact** - if `is_compact()`
     /// returns `true`, the existing storage is wrapped zero-cost and `params` is
     /// ignored.
     pub fn into_compact_with(
@@ -771,16 +771,16 @@ impl<S: ArrayStorage> Array<S> {
     /// # Block layout
     ///
     /// `params.block_shape` divides the array into an N-dimensional grid of blocks. Blocks are
-    /// visited in C order (last axis varies fastest). Boundary blocks — those that extend beyond
-    /// the array's shape — are zero-padded to fill the full `block_shape` before compression.
+    /// visited in C order (last axis varies fastest). Boundary blocks - those that extend beyond
+    /// the array's shape - are zero-padded to fill the full `block_shape` before compression.
     ///
     /// # Returned value
     ///
     /// Returns `(block_fn, bound)` where:
-    /// - `block_fn` — a [`BlockFnWithState`] closure that, per batch, reads each block from
+    /// - `block_fn` - a [`BlockFnWithState`] closure that, per batch, reads each block from
     ///   storage, compresses it with the encoder from `params`, and appends the result to an
     ///   internal `AlignedBytes` buffer. Returns the buffer slice and the absolute end-offsets.
-    /// - `bound` — the encoder's compressed-size upper bound for one block, used by the caller
+    /// - `bound` - the encoder's compressed-size upper bound for one block, used by the caller
     ///   to choose a batch size that targets ~64 KB of compressed output per call.
     ///
     /// # Errors
@@ -1007,7 +1007,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // to_ndarray — 1D
+    // to_ndarray - 1D
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1041,13 +1041,13 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // to_ndarray — 2D
+    // to_ndarray - 2D
     // Block-major order: block [r,c] = row-major grid index r*ncols_blocks+c.
-    // shape=[4,6], block_shape=[2,3] → grid 2×2:
-    //   block0=[0,0]: rows 0-1, cols 0-2 → 0,1,2,6,7,8
-    //   block1=[0,1]: rows 0-1, cols 3-5 → 3,4,5,9,10,11
-    //   block2=[1,0]: rows 2-3, cols 0-2 → 12,13,14,18,19,20
-    //   block3=[1,1]: rows 2-3, cols 3-5 → 15,16,17,21,22,23
+    // shape=[4,6], block_shape=[2,3] -> grid 2*2:
+    //   block0=[0,0]: rows 0-1, cols 0-2 -> 0,1,2,6,7,8
+    //   block1=[0,1]: rows 0-1, cols 3-5 -> 3,4,5,9,10,11
+    //   block2=[1,0]: rows 2-3, cols 0-2 -> 12,13,14,18,19,20
+    //   block3=[1,1]: rows 2-3, cols 3-5 -> 15,16,17,21,22,23
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1071,7 +1071,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // to_ndarray_sub — 1D
+    // to_ndarray_sub - 1D
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1086,7 +1086,7 @@ mod tests {
 
     #[test]
     fn to_ndarray_sub_1d_aligned_second_block() {
-        // range [3..6) → output shape [3], values [3,4,5]
+        // range [3..6) -> output shape [3], values [3,4,5]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let got: ArrayD<u8> = a.to_ndarray_sub(&[3..6], &a.read_ctx()).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![3, 4, 5]).unwrap());
@@ -1094,7 +1094,7 @@ mod tests {
 
     #[test]
     fn to_ndarray_sub_1d_cross_block_boundary() {
-        // range [1..5) → output shape [4], values [1,2,3,4]
+        // range [1..5) -> output shape [4], values [1,2,3,4]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let got: ArrayD<u8> = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
         assert_eq!(
@@ -1105,16 +1105,16 @@ mod tests {
 
     #[test]
     fn to_ndarray_sub_1d_within_single_block() {
-        // range [1..2) → output shape [1], value [1]
+        // range [1..2) -> output shape [1], value [1]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let got: ArrayD<u8> = a.to_ndarray_sub(&[1..2], &a.read_ctx()).unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1]).unwrap());
     }
 
     // -----------------------------------------------------------------------
-    // to_ndarray_sub — 2D
+    // to_ndarray_sub - 2D
     // shape=[4,6], block_shape=[2,3], data as in to_ndarray_2d test.
-    // range=[1..3, 2..5] → output shape [2,3]:
+    // range=[1..3, 2..5] -> output shape [2,3]:
     //   [8,  9,  10]
     //   [14, 15, 16]
     // -----------------------------------------------------------------------
@@ -1140,7 +1140,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // compact_array — 1D
+    // compact_array - 1D
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1157,7 +1157,7 @@ mod tests {
 
     #[test]
     fn compact_array_1d_with_padding() {
-        // size 5, block 3 → padded to 6; shape reported as 5
+        // size 5, block 3 -> padded to 6; shape reported as 5
         let src = array![0u8, 1, 2, 3, 4];
         let a = Array::compact_array_with(&src, arr_params(&[3])).unwrap();
         assert_eq!(a.shape(), &[5]);
@@ -1188,7 +1188,7 @@ mod tests {
 
     #[test]
     fn compact_array_1d_noncontiguous() {
-        // Step-2 slice of [0..10] → [0, 2, 4, 6, 8]
+        // Step-2 slice of [0..10] -> [0, 2, 4, 6, 8]
         let src = array![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let view = src.slice(ndarray::s![..;2]);
         let a = Array::compact_array_with(&view, arr_params(&[3])).unwrap();
@@ -1200,7 +1200,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // compact_array — metadata
+    // compact_array - metadata
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1212,7 +1212,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // compact_array — 2D
+    // compact_array - 2D
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1229,7 +1229,7 @@ mod tests {
 
     #[test]
     fn compact_array_2d_with_padding() {
-        // shape [3,5], block [2,3] → padded to [4,6]; shape reported as [3,5]
+        // shape [3,5], block [2,3] -> padded to [4,6]; shape reported as [3,5]
         #[rustfmt::skip]
         let src = array![
             [0i32,  1,  2,  3,  4],
@@ -1310,7 +1310,7 @@ mod tests {
 
     #[test]
     fn copy_1d_with_padding() {
-        // shape [5], block [3] → stored as 6 elements (padded)
+        // shape [5], block [3] -> stored as 6 elements (padded)
         let src = array![0u8, 1, 2, 3, 4];
         let a = Array::compact_array_with(&src, arr_params(&[3])).unwrap();
         let b = a.copy().unwrap();
@@ -1333,7 +1333,7 @@ mod tests {
 
     #[test]
     fn copy_2d_single_block() {
-        // shape=[2,3], block=[2,3] — one block, no partial-block path
+        // shape=[2,3], block=[2,3] - one block, no partial-block path
         let a = array(&[&[0u8, 1, 2, 3, 4, 5]], &[2, 3], &[2, 3]);
         let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[2, 3]);
@@ -1346,12 +1346,12 @@ mod tests {
 
     #[test]
     fn copy_2d_multi_block() {
-        // shape=[4,6], block=[2,3] — 4 blocks, exercises the full-block copy path
+        // shape=[4,6], block=[2,3] - 4 blocks, exercises the full-block copy path
         // Block layout (row-major grid):
-        //   block0=[0,0]: rows 0-1, cols 0-2 → 0,1,2,6,7,8
-        //   block1=[0,1]: rows 0-1, cols 3-5 → 3,4,5,9,10,11
-        //   block2=[1,0]: rows 2-3, cols 0-2 → 12,13,14,18,19,20
-        //   block3=[1,1]: rows 2-3, cols 3-5 → 15,16,17,21,22,23
+        //   block0=[0,0]: rows 0-1, cols 0-2 -> 0,1,2,6,7,8
+        //   block1=[0,1]: rows 0-1, cols 3-5 -> 3,4,5,9,10,11
+        //   block2=[1,0]: rows 2-3, cols 0-2 -> 12,13,14,18,19,20
+        //   block3=[1,1]: rows 2-3, cols 3-5 -> 15,16,17,21,22,23
         #[rustfmt::skip]
         let a = array(
             &[
@@ -1374,12 +1374,12 @@ mod tests {
 
     #[test]
     fn copy_2d_with_padding() {
-        // shape=[3,5], block=[2,3] → padded to [4,6]; shape preserved as [3,5].
-        // Block grid 2×2:
-        //   [0,0]: size [2,3] — full block
-        //   [0,1]: size [2,2] — partial in dim1
-        //   [1,0]: size [1,3] — partial in dim0
-        //   [1,1]: size [1,2] — partial in BOTH dims (corner block)
+        // shape=[3,5], block=[2,3] -> padded to [4,6]; shape preserved as [3,5].
+        // Block grid 2*2:
+        //   [0,0]: size [2,3] - full block
+        //   [0,1]: size [2,2] - partial in dim1
+        //   [1,0]: size [1,3] - partial in dim0
+        //   [1,1]: size [1,2] - partial in BOTH dims (corner block)
         #[rustfmt::skip]
         let src = array![
             [0i32,  1,  2,  3,  4],
@@ -1395,8 +1395,8 @@ mod tests {
 
     #[test]
     fn copy_3d_with_padding_in_all_dims() {
-        // shape=[3,3,5], block=[2,2,3] → padded to [4,4,6].
-        // Block grid 2×2×2 = 8 blocks; every boundary block is partial in at least
+        // shape=[3,3,5], block=[2,2,3] -> padded to [4,4,6].
+        // Block grid 2*2*2 = 8 blocks; every boundary block is partial in at least
         // one dimension, and the single corner block [1,1,1] is partial in all three:
         //   size [1,1,2] vs block_shape [2,2,3].
         let src = ndarray::Array3::<u8>::from_shape_vec([3, 3, 5], (0u8..45).collect()).unwrap();

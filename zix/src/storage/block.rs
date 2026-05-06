@@ -20,7 +20,7 @@ pub type BlockSize = u32;
 ///
 /// Items are stored as a flat sequence of `nitems` elements of type `dtype`. The sequence is
 /// split into blocks of `block_size` items each; every block is compressed independently using
-/// the codec pipeline described by `decoder_config`. All blocks are full — `nitems` must be an
+/// the codec pipeline described by `decoder_config`. All blocks are full - `nitems` must be an
 /// exact multiple of `block_size`.
 ///
 /// Internally the compressed bytes of all blocks are concatenated into a single byte buffer
@@ -32,9 +32,9 @@ pub type BlockSize = u32;
 ///
 /// The generic parameter `S: `[`BlockTableStorage`] determines how `block_data` and `block_offsets`
 /// are held in memory:
-/// - [`Owned`] — heap-allocated; produced by [`BlockTableBuilder`] or [`Self::build_from_data`].
-/// - [`Borrowed<'a>`] — borrowed slice; zero-copy view into an existing byte buffer.
-/// - [`Mmap`] — memory-mapped file; data is read from disk on demand by the OS.
+/// - [`Owned`] - heap-allocated; produced by [`BlockTableBuilder`] or [`Self::build_from_data`].
+/// - [`Borrowed<'a>`] - borrowed slice; zero-copy view into an existing byte buffer.
+/// - [`Mmap`] - memory-mapped file; data is read from disk on demand by the OS.
 ///
 /// # Invariants
 ///
@@ -66,13 +66,13 @@ where
     ///
     /// # Arguments
     ///
-    /// - `block_data` — concatenated compressed bytes for all blocks.
-    /// - `block_offsets` — byte positions into `block_data` that delimit each block.
+    /// - `block_data` - concatenated compressed bytes for all blocks.
+    /// - `block_offsets` - byte positions into `block_data` that delimit each block.
     ///   Block `i`'s compressed bytes are `block_data[block_offsets[i]..block_offsets[i+1]]`.
     ///   Must have length `nblocks + 1` when `nblocks > 0`, or length `0` when `nblocks == 0`.
     ///   Entries must be strictly increasing and the last entry must not exceed `block_data.len()`.
-    /// - `block_size` — number of items per block (must be `> 0`).
-    /// - `decoder_config` — codec and dtype configuration used when decoding blocks.
+    /// - `block_size` - number of items per block (must be `> 0`).
+    /// - `decoder_config` - codec and dtype configuration used when decoding blocks.
     ///
     /// # Errors
     ///
@@ -123,10 +123,10 @@ where
     ///
     /// # Arguments
     ///
-    /// - `block_idx` — zero-based block index in `0..(nitems / block_len)`.
+    /// - `block_idx` - zero-based block index in `0..(nitems / block_len)`.
     ///   **Panics** if out of range.
-    /// - `buf` — destination buffer. Must be exactly `block_len * dtype.itemsize()` bytes.
-    /// - `context` — read context used for decoding.
+    /// - `buf` - destination buffer. Must be exactly `block_len * dtype.itemsize()` bytes.
+    /// - `context` - read context used for decoding.
     ///
     /// # Errors
     ///
@@ -176,12 +176,12 @@ where
 ///
 /// # Arguments
 ///
-/// - `nblocks` — total number of blocks to build; may be zero.
-/// - `block_size` — items per block (passed through to [`BlockTable::new`]).
-/// - `decoder_config` — codec/dtype configuration stored in the table.
-/// - `compressed_block_size_bound` — upper bound on a single block's compressed byte size;
+/// - `nblocks` - total number of blocks to build; may be zero.
+/// - `block_size` - items per block (passed through to [`BlockTable::new`]).
+/// - `decoder_config` - codec/dtype configuration stored in the table.
+/// - `compressed_block_size_bound` - upper bound on a single block's compressed byte size;
 ///   used only to size the iteration chunk (no correctness requirement, just a performance hint).
-/// - `block_fn` — the data source; called once per batch.
+/// - `block_fn` - the data source; called once per batch.
 ///
 /// # Errors
 ///
@@ -245,11 +245,11 @@ impl BlockTable<Owned> {
     ///
     /// # Arguments
     ///
-    /// - `data` — contiguous raw (uncompressed) item bytes; length must equal
+    /// - `data` - contiguous raw (uncompressed) item bytes; length must equal
     ///   `nitems * dtype.itemsize()`.
-    /// - `dtype` — element type of the stored items.
-    /// - `block_size` — number of items per block (must be `> 0`).
-    /// - `encoder` — codec pipeline (filters + compressor) applied to each block. TODO
+    /// - `dtype` - element type of the stored items.
+    /// - `block_size` - number of items per block (must be `> 0`).
+    /// - `encoder` - codec pipeline (filters + compressor) applied to each block. TODO
     ///
     /// # Errors
     ///
@@ -333,9 +333,9 @@ impl BlockTable<Owned> {
 ///
 /// The associated type `Data<T>` determines how a typed array is held in memory.
 /// Three implementations are provided:
-/// - [`Owned`] — heap-allocated `Vec<T>`; owns its data.
-/// - [`Borrowed<'a>`] — a borrowed slice `&'a [T]`; zero-copy view into existing memory.
-/// - [`Mmap`] — memory-mapped file via [`MmapData<T>`]; the `Arc<Mmap>` keeps the mapping
+/// - [`Owned`] - heap-allocated `Vec<T>`; owns its data.
+/// - [`Borrowed<'a>`] - a borrowed slice `&'a [T]`; zero-copy view into existing memory.
+/// - [`Mmap`] - memory-mapped file via [`MmapData<T>`]; the `Arc<Mmap>` keeps the mapping
 ///   alive for as long as any `BlockTable<Mmap>` referencing it exists.
 pub trait BlockTableStorage {
     type Data<T: 'static>: AsRef<[T]>;
@@ -358,7 +358,7 @@ impl<'a> BlockTableStorage for Borrowed<'a> {
 }
 /// The `BlockTableStorage::Data<T>` type for memory-mapped storage.
 ///
-/// Pairs an `Arc<Mmap>` — which keeps the memory mapping alive — with a raw pointer and
+/// Pairs an `Arc<Mmap>` - which keeps the memory mapping alive - with a raw pointer and
 /// length describing the typed slice within it. The pointer is derived directly from the
 /// mapped region, so no allocation or copy takes place when reading.
 pub struct MmapData<T: 'static> {
@@ -383,25 +383,25 @@ impl BlockTableStorage for Mmap {
 /// with their cumulative end-offsets.
 ///
 /// Two implementations are provided in this module:
-/// - [`BlockFnWithState`] — closure-based, used when encoding an [`Array`](crate::Array) into a
+/// - [`BlockFnWithState`] - closure-based, used when encoding an [`Array`](crate::Array) into a
 ///   new `BlockTable`.
-/// - The inner `BlockFnImpl` returned by [`BlockTable::to_block_fn`] — zero-copy slice into an
+/// - The inner `BlockFnImpl` returned by [`BlockTable::to_block_fn`] - zero-copy slice into an
 ///   existing `BlockTable`, used when re-serializing already-compressed data.
 pub(crate) trait BlockFn {
     /// Produce compressed data for a contiguous range of block indices.
     ///
     /// # Arguments
     ///
-    /// - `blocks` — half-open range of block indices to compress, e.g. `4..8`.
-    /// - `base_offset` — the caller's accumulated byte count *before* this batch; equal to the
+    /// - `blocks` - half-open range of block indices to compress, e.g. `4..8`.
+    /// - `base_offset` - the caller's accumulated byte count *before* this batch; equal to the
     ///   absolute byte offset where `blocks.start`'s compressed data begins. Used by
     ///   implementations that need to produce absolute offsets.
     ///
     /// # Returns
     ///
     /// A pair `(data, offsets)` where:
-    /// - `data` — concatenated compressed bytes for all blocks in `blocks`.
-    /// - `offsets` — cumulative end-offsets of each block within the *entire* data stream
+    /// - `data` - concatenated compressed bytes for all blocks in `blocks`.
+    /// - `offsets` - cumulative end-offsets of each block within the *entire* data stream
     ///   (not relative to this batch). `offsets[i]` is the absolute byte position immediately
     ///   after block `blocks.start + i`. Length must equal `blocks.end - blocks.start`.
     fn get_compressed_blocks(
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn build_multiple_blocks_exact_divisor() {
-        // 12 items, block_size=4 → 3 full blocks
+        // 12 items, block_size=4 -> 3 full blocks
         let items: Vec<u8> = (0u8..12).collect();
         let table = build_from_items(&items, 4, &EncoderParams::default()).unwrap();
         assert_eq!(table.block_offsets.len(), 4);
@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn build_multiple_blocks_non_divisible_panics() {
-        // 10 items, block_size=4 → not divisible, should panic
+        // 10 items, block_size=4 -> not divisible, should panic
         let items: Vec<u8> = (0u8..10).collect();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             build_from_items(&items, 4, &EncoderParams::default()).unwrap();

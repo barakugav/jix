@@ -10,7 +10,7 @@ element-wise op tests is `ops/op1.rs`; match its style when adding tests to othe
 | Crate | Purpose |
 |---|---|
 | `proptest` | Property-based testing with automatic shrinking. |
-| `paste` | Expands `[<ident_$var>]` tokens inside `paste::paste! { }` — required to generate named test functions from macros. |
+| `paste` | Expands `[<ident_$var>]` tokens inside `paste::paste! { }` - required to generate named test functions from macros. |
 | `ndarray` | Already a regular dependency. Used in tests to construct reference arrays and compare results. |
 | `tempfile` | Used by archive I/O tests that write/read actual files. |
 
@@ -44,12 +44,12 @@ Implemented for every scalar dtype (including feature-gated `f16` and `Complex`)
 
 | Method | Integer types | Float types | When to use |
 |---|---|---|---|
-| `any_strategy()` | full `u8`/`i32`/… range | arbitrary bits (rarely NaN/∞) | Codec roundtrip tests, logical/bitwise ops. |
-| `op_safe_strategy()` | small positive range (e.g. `1..=100`) | `1.0..=100.0` | Arithmetic ops where values combine (`a + b`, `a * b`) — prevents overflow. |
-| `unit_strategy()` | (falls back to `op_safe_strategy`) | `[-1.0, 1.0]` | Domain-restricted ops (`asin`, `acos`) — values outside the domain produce NaN which breaks `==`. |
-| `shift_safe_strategy()` | `0..bit_width` (e.g. `0u8..8`) | n/a | Shift amounts for `<<`/`>>` — prevents debug-mode panic on out-of-range shifts. |
-| `comparable_strategy()` | `{1, 2, 3}` | `{1.0, 2.0, NaN}` | Equality/comparison ops (`equal`, `not_equal`) — small set ensures ~33 % of pairs are equal and NaN semantics are exercised. |
-| `maybe_non_finite_strategy()` | (falls back to `any_strategy`) | 7/8 `any_strategy` + 1/8 `{NaN, ∞, -∞}` | Ops whose *bool* output is well-defined for NaN inputs (`greater`, `less`, `is_nan`, `is_finite`) — tests edge-case branches without breaking `assert_eq`. |
+| `any_strategy()` | full `u8`/`i32`/... range | arbitrary bits (rarely NaN/inf) | Codec roundtrip tests, logical/bitwise ops. |
+| `op_safe_strategy()` | small positive range (e.g. `1..=100`) | `1.0..=100.0` | Arithmetic ops where values combine (`a + b`, `a * b`) - prevents overflow. |
+| `unit_strategy()` | (falls back to `op_safe_strategy`) | `[-1.0, 1.0]` | Domain-restricted ops (`asin`, `acos`) - values outside the domain produce NaN which breaks `==`. |
+| `shift_safe_strategy()` | `0..bit_width` (e.g. `0u8..8`) | n/a | Shift amounts for `<<`/`>>` - prevents debug-mode panic on out-of-range shifts. |
+| `comparable_strategy()` | `{1, 2, 3}` | `{1.0, 2.0, NaN}` | Equality/comparison ops (`equal`, `not_equal`) - small set ensures ~33 % of pairs are equal and NaN semantics are exercised. |
+| `maybe_non_finite_strategy()` | (falls back to `any_strategy`) | 7/8 `any_strategy` + 1/8 `{NaN, inf, -inf}` | Ops whose *bool* output is well-defined for NaN inputs (`greater`, `less`, `is_nan`, `is_finite`) - tests edge-case branches without breaking `assert_eq`. |
 
 **Key rule:** `assert_array_matches` uses `PartialEq`. For ops whose *float output* may be NaN
 (e.g. `maximum`, `sqrt` with negative input), use `op_safe_strategy` to keep outputs finite.
@@ -73,12 +73,12 @@ pub(crate) fn ndarray_strategy_generic<T>(
 pub(crate) fn carray_strategy_any<T: ScalarStrategy>()
     -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>)>
 
-// Same, but caller supplies the element strategy — used in op1 tests.
+// Same, but caller supplies the element strategy - used in op1 tests.
 pub(crate) fn carray_strategy_from_shape<T: ScalarStrategy>(
     element: impl Strategy<Value = T> + Clone,
 ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>)>
 
-// Two independent same-shape pairs — used in op2 tests.
+// Two independent same-shape pairs - used in op2 tests.
 pub(crate) fn carrays2_strategy<T: ScalarStrategy>()
     -> impl Strategy<Value = (
         (ndarray::ArrayD<T>, Array<Compact>),
@@ -95,7 +95,7 @@ pub(crate) fn sub_range_strategy(shape: &[u64]) -> BoxedStrategy<Vec<Range<u64>>
 ```
 
 Generates a random per-dimension sub-range compatible with `to_ndarray_sub`.
-Each dimension independently samples `start..end` with `0 ≤ start ≤ end ≤ shape[i]`.
+Each dimension independently samples `start..end` with `0 <= start <= end <= shape[i]`.
 Empty ranges and the full range are both in the sample space.
 
 ### `assert_array_matches`
@@ -116,7 +116,7 @@ Panics on failure (caught correctly by an enclosing `proptest!` runner).
 
 ---
 
-## The op1 pattern — gold standard
+## The op1 pattern - gold standard
 
 `ops/op1.rs` is the reference implementation. Mirror it when writing tests for any
 element-wise unary operation.
@@ -130,7 +130,7 @@ macro_rules! test_op1_dtype {
     ($op_method:ident, |$arg:ident| $body:expr, $dtype:ident, $strategy:ident) => {
         test_op1_dtype!($op_method, |$arg| $body, $dtype => $dtype, $strategy);
     };
-    // General form: input dtype may differ from output dtype (e.g. complex abs → real).
+    // General form: input dtype may differ from output dtype (e.g. complex abs -> real).
     ($op_method:ident, |$arg:ident| $body:expr, $in_dtype:ident => $out_dtype:ident, $strategy:ident) => {
         paste::paste! {
             proptest::proptest! {
@@ -195,7 +195,7 @@ mod tests {
     // Op with restricted domain: use unit_strategy to avoid NaN comparison failures.
     test_op1!(asin, |a| a.asin(), [f32, f64], unit_strategy);
 
-    // Op with a different output dtype (e.g. complex abs → real):
+    // Op with a different output dtype (e.g. complex abs -> real):
     // use the $in_dtype => $out_dtype form in a separate sub-module.
     #[cfg(feature = "num-complex")]
     mod abs_complex {
@@ -227,31 +227,31 @@ mod tests {
 | Codec roundtrip | `any_strategy()` | Full domain is valid input. |
 | Logical / bitwise ops (bool output) | `any_strategy()` | No overflow; any input is valid. |
 | Arithmetic / unary with overflow risk | `op_safe_strategy()` | Prevents wrap on integer types. |
-| Float transcendentals (floor, exp, ln, sin…) | `op_safe_strategy()` | Gives finite positive values; both sides compute identically so inf/NaN comparisons don't arise. |
+| Float transcendentals (floor, exp, ln, sin...) | `op_safe_strategy()` | Gives finite positive values; both sides compute identically so inf/NaN comparisons don't arise. |
 | Domain-restricted (`asin`, `acos`) | `unit_strategy()` | Inputs outside `[-1, 1]` produce NaN; `NaN != NaN` under `PartialEq`. |
 | Arithmetic binary ops (op2) | `op_safe_strategy()` | Same overflow avoidance. |
 | Bit shifts | `shift_safe_strategy()` for the shift amount | Keeps shift in `[0, bit_width)` to avoid debug-mode panic. |
 | Equality / comparison with bool output | `comparable_strategy()` | Ensures ~33 % equal pairs so both `true`/`false` branches are hit; float variant includes NaN for IEEE edge cases. |
-| Ordering / logical ops with bool output and float input | `maybe_non_finite_strategy()` | Exercises NaN → `false` paths without breaking `assert_array_matches` (output is `bool`, not float). |
-| Float ops where NaN/∞ propagates to the *output* (`maximum`, `minimum`, `sqrt`) | `op_safe_strategy()` | Avoids NaN in the output, which would break `assert_eq` via `PartialEq`. |
+| Ordering / logical ops with bool output and float input | `maybe_non_finite_strategy()` | Exercises NaN -> `false` paths without breaking `assert_array_matches` (output is `bool`, not float). |
+| Float ops where NaN/inf propagates to the *output* (`maximum`, `minimum`, `sqrt`) | `op_safe_strategy()` | Avoids NaN in the output, which would break `assert_eq` via `PartialEq`. |
 
 ### Deciding what strategy to use
 
-1. **Will the op ever output NaN/∞ given these inputs?**
+1. **Will the op ever output NaN/inf given these inputs?**
    - Yes (float arithmetic output): use `op_safe_strategy` or `unit_strategy`.
    - No (bool output, or integer output): you can use `any_strategy` or stronger.
 
-2. **Do you need to test NaN/∞ edge cases?**
-   - Inputs produce NaN in the output → doc-test it explicitly; proptest with `op_safe_strategy`.
-   - Bool output with NaN inputs → `maybe_non_finite_strategy` is safe.
+2. **Do you need to test NaN/inf edge cases?**
+   - Inputs produce NaN in the output -> doc-test it explicitly; proptest with `op_safe_strategy`.
+   - Bool output with NaN inputs -> `maybe_non_finite_strategy` is safe.
 
 3. **Do you need to test the equality branch?**
-   - Equality / `not_equal` → `comparable_strategy` ensures ~33 % hits.
-   - For integers with `any_strategy`, collisions are astronomically rare (e.g. 1/2³² for `i32`).
+   - Equality / `not_equal` -> `comparable_strategy` ensures ~33 % hits.
+   - For integers with `any_strategy`, collisions are astronomically rare (e.g. 1/2^32 for `i32`).
 
 4. **Can values overflow when combined?**
-   - Arithmetic (`+`, `*`, `-`) on integers → `op_safe_strategy`.
-   - Bitwise / logical → no overflow, `any_strategy` is fine.
+   - Arithmetic (`+`, `*`, `-`) on integers -> `op_safe_strategy`.
+   - Bitwise / logical -> no overflow, `any_strategy` is fine.
 
 ---
 
@@ -285,7 +285,7 @@ fn shape_after_op() {
 }
 ```
 
-Prefer `i32` as the default dtype in explicit-value tests — it is exact, readable, and
+Prefer `i32` as the default dtype in explicit-value tests - it is exact, readable, and
 not feature-gated.
 
 ---

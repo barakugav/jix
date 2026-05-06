@@ -25,12 +25,12 @@ define_op1!(
     IsNan
 );
 define_op1!(
-    /// Tests whether each element is finite (not `±inf` and not `NaN`).
+    /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype is `bool`.
     /// The output shape equals the input shape.
     ///
-    /// Returns `True` if the element is a finite number, `False` for `±inf` and `NaN`.
+    /// Returns `True` if the element is a finite number, `False` for `+/-inf` and `NaN`.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
     ///

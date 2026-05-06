@@ -34,12 +34,12 @@ use crate::NDIM_MAX;
 ///
 /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
 ///
-/// // Flatten [2, 3] → [6]
+/// // Flatten [2, 3] -> [6]
 /// let flat = a.reshape_view(&[6]);
 /// assert_eq!(flat.shape(), &[6]);
 /// assert_eq!(flat.to_ndarray::<i32>()?.as_slice().unwrap(), &[1, 2, 3, 4, 5, 6]);
 ///
-/// // Reshape [6] → [3, 2]
+/// // Reshape [6] -> [3, 2]
 /// let b = Array::compact_array(&array![1i32, 2, 3, 4, 5, 6])?;
 /// let result = b.reshape_view(&[3, 2]).to_ndarray::<i32>()?;
 /// assert_eq!(result.shape(), &[3, 2]);
@@ -138,7 +138,7 @@ where
         // -----------------------------------------------------------------------
         // Core concept
         // -----------------------------------------------------------------------
-        // A reshape does not move any data — it only reinterprets the flat,
+        // A reshape does not move any data - it only reinterprets the flat,
         // C-order (row-major) element sequence under a new shape.  Element `k`
         // in the flattened array is the same physical byte regardless of whether
         // the array is shaped [A, B] or [C, D] (as long as A*B == C*D).
@@ -157,12 +157,12 @@ where
         // computed with itemsize = 1).
         //
         // For example:
-        //   orig [6, 4]  → logical strides [4, 1]
-        //   new  [2, 3, 4] → logical strides [12, 4, 1]
+        //   orig [6, 4]  -> logical strides [4, 1]
+        //   new  [2, 3, 4] -> logical strides [12, 4, 1]
         //
         // New dim 1 (stride 4) == orig dim 0 (stride 4), so they are "matched".
         // New dim 2 (stride 1) == orig dim 1 (stride 1), so they are matched too.
-        // New dim 0 (stride 12) has no counterpart in orig → unmatched.
+        // New dim 0 (stride 12) has no counterpart in orig -> unmatched.
         //
         // When a new dim is matched to an orig dim it means that consecutive
         // steps along the new dim correspond to exactly the same memory layout as
@@ -186,7 +186,7 @@ where
         //                    requested range along all matched dims at once.
         //
         //   UNMATCHED dims - new dim j crosses an original dimension boundary
-        //                    (e.g. in [6]→[2,3] neither new dim aligns with the
+        //                    (e.g. in [6]->[2,3] neither new dim aligns with the
         //                    single orig dim).  We cannot express an arbitrary
         //                    sub-region of an unmatched dim as a contiguous range
         //                    in the original shape, so we handle them by iterating
@@ -200,11 +200,11 @@ where
         // For each iteration step `idx`:
         //
         //   1. BUILD `read_range` for the underlying storage (length orig_ndim):
-        //      - Matched orig dim i  → forward index[matched_new_dim].
-        //      - Unmatched orig dim i → convert the current unmatched-dim position
+        //      - Matched orig dim i  -> forward index[matched_new_dim].
+        //      - Unmatched orig dim i -> convert the current unmatched-dim position
         //        to a flat element index and decompose it back into orig coords:
         //
-        //          flat = Σ_{unmatched new dim d} (index[d].start + idx[d])
+        //          flat = sum_{unmatched new dim d} (index[d].start + idx[d])
         //                                         * new_logical_strides[d]
         //
         //          orig_coord[i] = (flat / orig_logical_strides[i]) % orig_shape[i]
@@ -223,7 +223,7 @@ where
         //      requested sizes, 1 elsewhere).  The destination pointer is offset
         //      by the byte contribution of the unmatched dims' current position:
         //
-        //          dst_byte_offset = Σ_{unmatched new dim d} idx[d] * dst_strides[d]
+        //          dst_byte_offset = sum_{unmatched new dim d} idx[d] * dst_strides[d]
         //
         //      `nd_copy` then iterates over the matched dims internally, so each
         //      element ends up exactly where it belongs in `buf`.
@@ -463,7 +463,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Full read: 1-D → 2-D
+    // Full read: 1-D -> 2-D
     // -----------------------------------------------------------------------
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Full read: 2-D → 1-D (flatten)
+    // Full read: 2-D -> 1-D (flatten)
     // -----------------------------------------------------------------------
 
     #[test]
@@ -519,12 +519,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Full read: 2-D → 2-D (re-partition)
+    // Full read: 2-D -> 2-D (re-partition)
     // -----------------------------------------------------------------------
 
     #[test]
     fn full_read_2d_to_2d_repartition() {
-        // [3, 4] → [2, 6]: rows of 3 in orig map to interleaved rows of 2 in new
+        // [3, 4] -> [2, 6]: rows of 3 in orig map to interleaved rows of 2 in new
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
         let r = a.reshape_view(&[2, 6]);
         let got: ArrayD<u8> = r.to_ndarray().unwrap();
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn full_read_2d_to_2d_repartition_asymmetric() {
-        // [4, 3] → [3, 4]
+        // [4, 3] -> [3, 4]
         let a = make2d(u8s(12), 4, 3, &[4, 3]);
         let r = a.reshape_view(&[3, 4]);
         let got: ArrayD<u8> = r.to_ndarray().unwrap();
@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn full_read_3d_to_2d() {
-        // [2, 3, 4] → [6, 4]
+        // [2, 3, 4] -> [6, 4]
         let a = make3d(u8s(24), 2, 3, 4, &[2, 3, 4]);
         let r = a.reshape_view(&[6, 4]);
         let got: ArrayD<u8> = r.to_ndarray().unwrap();
@@ -571,7 +571,7 @@ mod tests {
 
     #[test]
     fn full_read_2d_to_3d() {
-        // [6, 4] → [2, 3, 4]
+        // [6, 4] -> [2, 3, 4]
         let a = make2d(u8s(24), 6, 4, &[6, 4]);
         let r = a.reshape_view(&[2, 3, 4]);
         let got: ArrayD<u8> = r.to_ndarray().unwrap();
@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn full_read_3d_repartition() {
-        // [2, 3, 4] → [2, 12]
+        // [2, 3, 4] -> [2, 12]
         let a = make3d(u8s(24), 2, 3, 4, &[2, 3, 4]);
         let r = a.reshape_view(&[2, 12]);
         let got: ArrayD<u8> = r.to_ndarray().unwrap();
@@ -648,7 +648,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Subregion reads: 1-D → 2-D [3, 4], values 0..12
+    // Subregion reads: 1-D -> 2-D [3, 4], values 0..12
     // -----------------------------------------------------------------------
     //
     // Layout after reshape to [3, 4]:
@@ -702,7 +702,7 @@ mod tests {
 
     #[test]
     fn sub_read_first_two_columns() {
-        // [0..3, 0..2] → rows 0-2, cols 0-1
+        // [0..3, 0..2] -> rows 0-2, cols 0-1
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
         let got: ArrayD<u8> = r.to_ndarray_sub(&[0..3, 0..2], &r.read_ctx()).unwrap();
@@ -714,7 +714,7 @@ mod tests {
 
     #[test]
     fn sub_read_last_two_columns() {
-        // [0..3, 2..4] → rows 0-2, cols 2-3
+        // [0..3, 2..4] -> rows 0-2, cols 2-3
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
         let got: ArrayD<u8> = r.to_ndarray_sub(&[0..3, 2..4], &r.read_ctx()).unwrap();
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn sub_read_single_element_center() {
-        // [1..2, 2..3] → element at (1,2) = 6
+        // [1..2, 2..3] -> element at (1,2) = 6
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
         let got: ArrayD<u8> = r.to_ndarray_sub(&[1..2, 2..3], &r.read_ctx()).unwrap();
@@ -747,7 +747,7 @@ mod tests {
 
     #[test]
     fn sub_read_single_element_corner() {
-        // [2..3, 3..4] → element at (2,3) = 11
+        // [2..3, 3..4] -> element at (2,3) = 11
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[3, 4]);
         let got: ArrayD<u8> = r.to_ndarray_sub(&[2..3, 3..4], &r.read_ctx()).unwrap();
@@ -755,8 +755,8 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Subregion reads: 2-D → 1-D
-    // reshape [3, 4] → [12], sub-read [3..9]
+    // Subregion reads: 2-D -> 1-D
+    // reshape [3, 4] -> [12], sub-read [3..9]
     // -----------------------------------------------------------------------
 
     #[test]
@@ -783,7 +783,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Subregion reads: [2, 6] ← reshape of 1-D [12]
+    // Subregion reads: [2, 6] <- reshape of 1-D [12]
     //
     // Layout:
     //   row 0: [0,  1,  2,  3,  4,  5]
@@ -792,7 +792,7 @@ mod tests {
 
     #[test]
     fn sub_read_2x6_row0_partial() {
-        // [0..1, 1..4] → [1, 3] = [1, 2, 3]
+        // [0..1, 1..4] -> [1, 3] = [1, 2, 3]
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[2, 6]);
         let got: ArrayD<u8> = r.to_ndarray_sub(&[0..1, 1..4], &r.read_ctx()).unwrap();
@@ -804,7 +804,7 @@ mod tests {
 
     #[test]
     fn sub_read_2x6_both_rows_partial_cols() {
-        // [0..2, 2..5] → rows 0-1, cols 2-4
+        // [0..2, 2..5] -> rows 0-1, cols 2-4
         // row 0: [2, 3, 4]; row 1: [8, 9, 10]
         let a = make1d(u8s(12), 12);
         let r = a.reshape_view(&[2, 6]);
@@ -825,7 +825,7 @@ mod tests {
 
     #[test]
     fn sub_read_3d_single_row() {
-        // [0..1, 1..2, 0..4] → (0,1,*) = [4, 5, 6, 7]
+        // [0..1, 1..2, 0..4] -> (0,1,*) = [4, 5, 6, 7]
         let a = make1d(u8s(24), 24);
         let r = a.reshape_view(&[2, 3, 4]);
         let got: ArrayD<u8> = r
@@ -857,7 +857,7 @@ mod tests {
 
     #[test]
     fn sub_read_3d_second_slab() {
-        // [1..2, 0..3, 0..4] → all of the second "slab" = [12..24]
+        // [1..2, 0..3, 0..4] -> all of the second "slab" = [12..24]
         let a = make1d(u8s(24), 24);
         let r = a.reshape_view(&[2, 3, 4]);
         let got: ArrayD<u8> = r
@@ -875,7 +875,7 @@ mod tests {
 
     #[test]
     fn multiblock_1d_full_read_reshape_to_2d() {
-        // 12 elements, block_size=4 → 3 blocks; reshape to [3, 4]
+        // 12 elements, block_size=4 -> 3 blocks; reshape to [3, 4]
         let a = make1d(u8s(12), 4);
         let r = a.reshape_view(&[3, 4]);
         let got: ArrayD<u8> = r.to_ndarray().unwrap();
@@ -885,7 +885,7 @@ mod tests {
     #[test]
     fn multiblock_1d_sub_read_crosses_block_boundary() {
         // block_size=4, reshape to [3, 4]; read row 0 of new shape
-        // flat [0..4) = one full original block → [0, 1, 2, 3]
+        // flat [0..4) = one full original block -> [0, 1, 2, 3]
         let a = make1d(u8s(12), 4);
         let r = a.reshape_view(&[3, 4]);
         let got: ArrayD<u8> = r.to_ndarray_sub(&[0..1, 0..4], &r.read_ctx()).unwrap();
@@ -928,7 +928,7 @@ mod tests {
     #[test]
     fn multiblock_2d_orig_reshape_sub_read() {
         // orig [3, 4] with block_shape [2, 2], reshape to [2, 6]
-        // sub-read row 1: flat [6..12) → [6, 7, 8, 9, 10, 11]
+        // sub-read row 1: flat [6..12) -> [6, 7, 8, 9, 10, 11]
         let a = make2d(u8s(12), 3, 4, &[2, 2]);
         let r = a.reshape_view(&[2, 6]);
         let got: ArrayD<u8> = r.to_ndarray_sub(&[1..2, 0..6], &r.read_ctx()).unwrap();
@@ -940,7 +940,7 @@ mod tests {
 
     #[test]
     fn multiblock_small_blocks_reshape_3d() {
-        // 24 elements, block_size=3 → 8 blocks; reshape to [2, 3, 4]
+        // 24 elements, block_size=3 -> 8 blocks; reshape to [2, 3, 4]
         let a = make1d(u8s(24), 3);
         let r = a.reshape_view(&[2, 3, 4]);
         let got: ArrayD<u8> = r
@@ -950,7 +950,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Chained: reshape → reshape
+    // Chained: reshape -> reshape
     // -----------------------------------------------------------------------
 
     #[test]
@@ -978,7 +978,7 @@ mod tests {
 
     #[test]
     fn flat_order_preserved_4x3_vs_3x4() {
-        // Both reshape [12] → [4,3] and [3,4] must yield same flat sequence
+        // Both reshape [12] -> [4,3] and [3,4] must yield same flat sequence
         let a12 = make1d(u8s(12), 12);
         let r43 = a12.as_ref().reshape_view(&[4, 3]);
         let r34 = a12.as_ref().reshape_view(&[3, 4]);

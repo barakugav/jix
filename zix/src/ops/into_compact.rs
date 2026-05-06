@@ -9,7 +9,7 @@ use crate::{Array, ArrayParams};
 /// Returned by [`Array::into_compact`] and [`Array::into_compact_with`]. The
 /// adaptor handles two cases transparently:
 ///
-/// - **Already compact**: the original storage is kept as is — no copy or re-compression.
+/// - **Already compact**: the original storage is kept as is - no copy or re-compression.
 /// - **Not compact** (lazy views, op chains, etc.): the array is materialized
 ///   via `copy_with` into a new [`Compact`] block-table.
 ///
@@ -225,7 +225,7 @@ mod tests {
         let ctx = a.read_ctx();
         let original_bytes = to_bytes(&a);
 
-        // Pass a different block shape — it must be ignored.
+        // Pass a different block shape - it must be ignored.
         let result = a.into_compact_with(arr_params(&[8]), &ctx).unwrap();
         let mut result_bytes = Cursor::new(Vec::new());
         result.write_to(&mut result_bytes).unwrap();

@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn strides_ptr_mut_2d_non_contiguous_column_major() {
-        // Simulate a column-major (Fortran-order) 2×3 layout.
+        // Simulate a column-major (Fortran-order) 2*3 layout.
         // Row stride = 1, column stride = nrows = 2.
         let rows = 2usize;
         let cols = 3usize;

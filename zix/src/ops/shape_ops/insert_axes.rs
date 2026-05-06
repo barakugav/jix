@@ -18,13 +18,13 @@ use crate::Array;
 ///         |  d0  |  d1  |  d2  |
 /// ```
 ///
-/// * Gap `0` — before the first input dimension.
-/// * Gap `k` — between input dimensions `k-1` and `k`.
-/// * Gap `orig_ndim` — after the last input dimension.
+/// * Gap `0` - before the first input dimension.
+/// * Gap `k` - between input dimensions `k-1` and `k`.
+/// * Gap `orig_ndim` - after the last input dimension.
 ///
 /// Each occurrence of a gap index inserts one new length-1 dimension at that position. Duplicate
 /// gap indices are allowed and each adds another dimension at the same gap. The order of values in
-/// `axes` does not matter — only the multiset of gap indices matters. Valid gap indices are
+/// `axes` does not matter - only the multiset of gap indices matters. Valid gap indices are
 /// `0..=orig_ndim`.
 ///
 /// Output dtype equals the input dtype.
@@ -34,25 +34,25 @@ use crate::Array;
 /// # Examples
 ///
 /// ```text
-/// [N]       axes: [0]     → [1, N]      (insert before first dim)
-/// [N]       axes: [1]     → [N, 1]      (append after last dim)
-/// [N, M]    axes: [1]     → [N, 1, M]   (insert between dims)
-/// [N, M]    axes: [0, 2]  → [1, N, M, 1]
+/// [N]       axes: [0]     -> [1, N]      (insert before first dim)
+/// [N]       axes: [1]     -> [N, 1]      (append after last dim)
+/// [N, M]    axes: [1]     -> [N, 1, M]   (insert between dims)
+/// [N, M]    axes: [0, 2]  -> [1, N, M, 1]
 /// ```
 ///
 /// ```
 /// use zix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
-/// // [3] → [1, 3]
+/// // [3] -> [1, 3]
 /// let a = Array::compact_array(&array![1i32, 2, 3])?;
 /// assert_eq!(a.insert_axes(&[0]).shape(), &[1, 3]);
 ///
-/// // [3] → [3, 1]
+/// // [3] -> [3, 1]
 /// let b = Array::compact_array(&array![1i32, 2, 3])?;
 /// assert_eq!(b.insert_axes(&[1]).shape(), &[3, 1]);
 ///
-/// // [2, 3] → [1, 2, 3, 1]
+/// // [2, 3] -> [1, 2, 3, 1]
 /// let c = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
 /// assert_eq!(c.insert_axes(&[0, 2]).shape(), &[1, 2, 3, 1]);
 /// # Ok::<(), zix::Error>(())
@@ -78,7 +78,7 @@ impl<S: ArrayStorage> InsertAxes<S> {
 
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
-        // the last input dim".  Duplicates are allowed — each occurrence inserts one additional
+        // the last input dim".  Duplicates are allowed - each occurrence inserts one additional
         // dim at that gap.  Valid range: 0..=orig_ndim.
         for &ax in axes {
             ensure!(
@@ -227,19 +227,19 @@ mod tests {
 
     #[test]
     fn shape_insert_before_first_dim() {
-        // gap 0 on [6] → [1, 6]
+        // gap 0 on [6] -> [1, 6]
         assert_eq!(make1d(arange(6), 6).insert_axes(&[0]).shape(), &[1, 6]);
     }
 
     #[test]
     fn shape_insert_after_last_dim() {
-        // gap 1 (=orig_ndim) on [6] → [6, 1]
+        // gap 1 (=orig_ndim) on [6] -> [6, 1]
         assert_eq!(make1d(arange(6), 6).insert_axes(&[1]).shape(), &[6, 1]);
     }
 
     #[test]
     fn shape_insert_between_dims() {
-        // gap 1 on [3, 4] → [3, 1, 4]
+        // gap 1 on [3, 4] -> [3, 1, 4]
         assert_eq!(
             make2d(arange(12), 3, 4).insert_axes(&[1]).shape(),
             &[3, 1, 4]
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn shape_insert_front_and_back() {
-        // gaps 0 and 1 on [6] → [1, 6, 1]
+        // gaps 0 and 1 on [6] -> [1, 6, 1]
         assert_eq!(
             make1d(arange(6), 6).insert_axes(&[0, 1]).shape(),
             &[1, 6, 1]
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn shape_insert_duplicates_same_gap() {
-        // gaps 0, 0 on [3, 4] → [1, 1, 3, 4]
+        // gaps 0, 0 on [3, 4] -> [1, 1, 3, 4]
         assert_eq!(
             make2d(arange(12), 3, 4).insert_axes(&[0, 0]).shape(),
             &[1, 1, 3, 4]
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn shape_insert_user_example() {
-        // axes=(0,1,1,1,3) on (N=2, M=3, K=4) → (1, 2, 1, 1, 1, 3, 4, 1)
+        // axes=(0,1,1,1,3) on (N=2, M=3, K=4) -> (1, 2, 1, 1, 1, 3, 4, 1)
         let a = make3d(arange(24), 2, 3, 4);
         assert_eq!(
             a.insert_axes(&[0, 1, 1, 1, 3]).shape(),
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn full_read_insert_user_example() {
-        // axes=(0,1,1,1,3) on (2,3,4) → (1,2,1,1,1,3,4,1), elements unchanged
+        // axes=(0,1,1,1,3) on (2,3,4) -> (1,2,1,1,1,3,4,1), elements unchanged
         let got: ArrayD<i32> = make3d(arange(24), 2, 3, 4)
             .insert_axes(&[0, 1, 1, 1, 3])
             .to_ndarray()
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn sub_read_inserted_dim_is_stripped() {
-        // [1, 6]: read [0..1, 2..5] → same as reading [2..5] from the 1D inner
+        // [1, 6]: read [0..1, 2..5] -> same as reading [2..5] from the 1D inner
         let got: ArrayD<i32> = make1d(arange(6), 6)
             .insert_axes(&[0])
             .to_ndarray_sub(&[0..1, 2..5], &ReadContext::default())
@@ -421,7 +421,7 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn proptest_insert_axes((nd, za, axes) in insert_axes_strategy::<i32>()) {
-            // Oracle: inserting size-1 axes is a pure reshape — flat order is unchanged.
+            // Oracle: inserting size-1 axes is a pure reshape - flat order is unchanged.
             let mut sorted_axes = axes.clone();
             sorted_axes.sort_unstable();
             let mut expected_shape: Vec<usize> = nd.shape().to_vec();

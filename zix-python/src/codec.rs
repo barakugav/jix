@@ -13,7 +13,7 @@ use crate::util::IntoPyResult;
 /// instance and reusable scratch buffers. Passing the same `ReadContext` to successive reads
 /// amortizes these costs.
 ///
-/// For most workloads you do not need to create one explicitly — functions that read array
+/// For most workloads you do not need to create one explicitly - functions that read array
 /// data (such as `Array.numpy()` and `zix.copy()`) create a context internally when none is
 /// provided. Pass an explicit `ReadContext` when you are doing many successive reads and want
 /// to avoid the repeated initialization overhead.
@@ -25,7 +25,7 @@ use crate::util::IntoPyResult;
 ///
 /// `ReadContext` is intended to be used from a single thread. Although passing one to
 /// concurrent calls is not a hard error (accesses are serialized internally), doing so
-/// defeats the purpose — threads would block on each other and lose the benefit of reuse.
+/// defeats the purpose - threads would block on each other and lose the benefit of reuse.
 /// Create one `ReadContext` per thread for concurrent workloads instead.
 ///
 /// # Examples
