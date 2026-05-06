@@ -34,7 +34,7 @@ pub use logical1::*;
 mod reduction;
 pub use reduction::*;
 
-pub mod copy_op;
+mod copy_op;
 pub use copy_op::*;
 
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]

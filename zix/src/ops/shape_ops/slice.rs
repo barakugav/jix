@@ -17,7 +17,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 /// ```text
 /// array.slice((.., 1..4))                            // axis 0: all, axis 1: indices 1, 2, 3
 /// array.slice((2.., ..3))                            // axis 0: from 2, axis 1: up to (excl.) 3
-/// array.slice((1..=3, ..))                           // axis 0: indices 1–3 (inclusive end)
+/// array.slice((1..=3, ..))                           // axis 0: indices 1-3 (inclusive end)
 /// array.slice(((-2..), ..))                          // axis 0: last 2 elements
 /// array.slice((.., ..-1))                            // axis 1: all but the last
 /// array.slice((.., SliceItem::new(None, None, 2)))   // axis 1: every other element (step=2)

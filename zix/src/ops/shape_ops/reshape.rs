@@ -180,12 +180,12 @@ where
         // -----------------------------------------------------------------------
         // We split all new dims into two groups:
         //
-        //   MATCHED dims   – new dim j is paired with orig dim i.
+        //   MATCHED dims   - new dim j is paired with orig dim i.
         //                    Their index ranges are forwarded directly.  A single
         //                    call to the underlying storage can cover the full
         //                    requested range along all matched dims at once.
         //
-        //   UNMATCHED dims – new dim j crosses an original dimension boundary
+        //   UNMATCHED dims - new dim j crosses an original dimension boundary
         //                    (e.g. in [6]→[2,3] neither new dim aligns with the
         //                    single orig dim).  We cannot express an arbitrary
         //                    sub-region of an unmatched dim as a contiguous range
@@ -1009,8 +1009,7 @@ mod tests {
         divs
     }
 
-    fn reshape_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<u64>)>
+    fn reshape_strategy<T>() -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<u64>)>
     where
         T: ScalarStrategy,
     {
@@ -1027,7 +1026,11 @@ mod tests {
                     vec![vec![0u64]]
                 } else {
                     std::iter::once(vec![n_u64])
-                        .chain(divisors(n).iter().map(|&d| vec![d as u64, n_u64 / d as u64]))
+                        .chain(
+                            divisors(n)
+                                .iter()
+                                .map(|&d| vec![d as u64, n_u64 / d as u64]),
+                        )
                         .collect()
                 };
                 (array_strat, proptest::sample::select(out_options))

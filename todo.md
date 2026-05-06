@@ -9,9 +9,7 @@
     - sort
     - 'cumprod', 'cumsum'
     - imag, real
-    - flatten
     - repeat, tile
-    - squeeze, unsqueeze
     - allclose
     - isclose
     - diff

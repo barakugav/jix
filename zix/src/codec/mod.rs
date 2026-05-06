@@ -143,7 +143,7 @@ impl EncoderParams {
         &self.codec
     }
 
-    /// Set the compression level (0–19).
+    /// Set the compression level (0-19).
     ///
     /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the default.
     ///

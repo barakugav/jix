@@ -19,6 +19,110 @@ use crate::storage::DynStorage;
 use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence, OrKwargs};
 use crate::ArrayParams;
 
+/// A multi-dimensional compressed array.
+///
+/// `Array` is the central type in zix. It stores n-dimensional numeric data in a
+/// block-compressed format — the array is divided into nd-blocks, each compressed
+/// independently with Zstd. Data is decoded on demand: constructing an array or
+/// chaining operations does no I/O. Actual decompression happens only when you
+/// materialize the result, for example by indexing with `[]`, calling `.numpy()`,
+/// `.copy()`, or `.write_to()`.
+///
+/// # Creating arrays
+///
+/// | Function | Description |
+/// |---|---|
+/// | `zix.compact(data)` | Compress any array-like (NumPy array, list, scalar) into a new zix array. |
+/// | `zix.asarray(data)` | Create a zix array *view* of any array-like. Useful for mixing plain data with zix arrays in operations. |
+/// | `zix.read_array(path)` | Load an array from a `.zix` file. |
+///
+/// ```python,ignore
+/// import zix
+/// import numpy as np
+///
+/// # From a NumPy array
+/// a = zix.compact(np.arange(100, dtype=np.float32).reshape(10, 10))
+///
+/// # From a list
+/// b = zix.compact([[1, 2, 3], [4, 5, 6]])
+///
+/// # From a file
+/// c = zix.read_array("data.zix")
+/// ```
+///
+/// # Reading data
+///
+/// Call `.numpy()` (or `[]`) to decode the array — or a sub-region of it — into a NumPy
+/// array. The result is always a fresh allocation; mutations to it do not affect the
+/// source array. Both forms accept the same index syntax:
+///
+/// ```python,ignore
+/// a.numpy()           # full array
+/// a.numpy(0)          # row 0 (integer drops that axis)
+/// a.numpy(slice(1,4)) # rows 1–3 (slice keeps the axis)
+/// a[0, 1:3]           # shorthand via __getitem__
+/// a[..., -1]          # last column of any-rank array
+/// ```
+///
+/// For tight loops that read many slices, pass an explicit [`zix.ReadContext`](crate::codec::ReadContext)
+/// to amortize decompressor initialization:
+///
+/// ```python,ignore
+/// ctx = a.read_ctx()
+/// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
+/// ```
+///
+/// # Operations
+///
+/// Operations return a new `Array` that wraps the input and records the transformation.
+/// No data is copied or computed at call time — the computation runs in a single pass when
+/// you read the result. Chains compose without intermediate allocations:
+///
+/// ```python,ignore
+/// result = (a.astype('float64') - mean).abs().sum(axis=0).numpy()
+/// ```
+///
+/// ## Shape operations
+///
+/// Shape operations remap the array's indices without copying data. Most accept a `copy`
+/// keyword (default `True`) that immediately re-encodes with a block layout suited to the
+/// new shape. Pass `copy=False` for a zero-copy view — but be aware that if the new layout
+/// crosses block boundaries that the original layout respected, reads may decompress more
+/// data than necessary.
+///
+/// # Persistence
+///
+/// Save an array with [`.write_to(path)`](Array::write_to) or [`zix.write_array()`](crate::archive::write_array),
+/// and reload it with [`zix.read_array()`](crate::archive::read_array). Multiple arrays can
+/// be written back-to-back into a single file and read back by supplying `offset` and `len`.
+///
+/// ```python,ignore
+/// a.write_to("data.zix")
+/// b = zix.read_array("data.zix")
+/// ```
+///
+/// # Copying and re-encoding
+///
+/// [`copy()`](Array::copy) materializes the current array (including any pending lazy
+/// operations) into a new compressed array. This is also the way to tune the block layout
+/// after shape-changing operations:
+///
+/// ```python,ignore
+/// # Transpose and re-encode with a block layout suited for column access
+/// b = zix.copy(a.T, params={"block_shape": [1024, 1]})
+/// ```
+///
+/// # Architecture overview
+///
+/// Internally each `Array` holds a type-erased storage object that provides three things:
+/// the array's shape, its element dtype, and the ability to read any rectangular sub-region
+/// into a raw byte buffer. The primary concrete storage is a heap-allocated block-compressed
+/// backend; a memory-mapped variant is also available. Every operation constructs a new
+/// storage that wraps the input(s) and applies its transformation on each read request.
+///
+/// Because the entire operation chain is resolved at read time, there is no intermediate
+/// allocation or data copy until you ask for output. The read releases the GIL while
+/// decompressing, so Python threads can run concurrently.
 #[gen_stub_pyclass]
 #[pyclass(module = "zix", frozen)]
 pub struct Array {

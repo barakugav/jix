@@ -1,20 +1,22 @@
 use pyo3::prelude::*;
-use pyo3_stub_gen::define_stub_info_gatherer;
 
 mod array;
-pub use array::Array;
+pub use array::*;
+
+mod dtype;
 
 mod codec;
-pub use codec::ReadContext;
+pub use codec::*;
 
 mod params;
-pub use params::ArrayParams;
+pub use params::*;
 
 mod archive;
 pub use archive::*;
 
-mod dtype;
-pub mod ops;
+mod ops;
+pub use ops::*;
+
 mod storage;
 mod util;
 
@@ -77,4 +79,9 @@ mod zix {
     use crate::ops::{all, any, argmax, argmin, max, mean, min, product, std, sum, var};
 }
 
-define_stub_info_gatherer!(gen_pyi);
+#[doc(hidden)]
+pub mod __private {
+    use pyo3_stub_gen::define_stub_info_gatherer;
+
+    define_stub_info_gatherer!(gen_pyi);
+}

@@ -8,16 +8,28 @@
     "rust-analyzer.cargo.features": "all",
     "cSpell.words": [
         "arange",
+        "argmax",
+        "argmin",
+        "asarray",
         "carray",
         "carrays",
         "Dtyped",
+        "getattr",
+        "getitem",
+        "isnan",
         "itemsize",
         "keepdims",
+        "Kwargs",
         "memoryview",
         "mmap",
         "ndim",
         "nitems",
+        "pyclass",
+        "pyfunction",
+        "pymethods",
+        "pyobject",
         "seekable",
-        "strided"
+        "strided",
+        "unsqueeze"
     ]
 }
