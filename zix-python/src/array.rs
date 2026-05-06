@@ -4,19 +4,20 @@ use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyEllipsis, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
-use zix_core::codec::ReadContext;
 use zix_core::ops::SliceItem;
 use zix_core::storage::ArrayStorage;
-use zix_core::{Array as ZixArray, ArrayParams};
+use zix_core::Array as ZixArray;
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::{PyAnyMethods, PySlice};
 use std::ops::Range;
 
+use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
 use crate::ops::NumpyAsArray;
 use crate::storage::DynStorage;
-use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence, UnsafeSend};
+use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
+use crate::ArrayParams;
 
 #[gen_stub_pyclass]
 #[pyclass(module = "zix", frozen)]
@@ -43,10 +44,11 @@ impl Array {
         ZixArray::from_storage(self.arr.storage().clone())
     }
 
-    pub fn to_numpy<'py>(
+    fn to_numpy<'py>(
         &self,
         py: Python<'py>,
         index: &[Range<u64>],
+        context: Option<&Bound<'py, ReadContext>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
         let arr_shape = self.arr.shape();
         let ndim = arr_shape.len();
@@ -73,10 +75,21 @@ impl Array {
         let np_arr_data =
             unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
 
+        let context = context.map(|ctx| ctx.get());
+
         if np_arr_data_size > 0 {
             py.detach(|| {
+                let context_guard;
+                let context = match context {
+                    Some(ctx) => {
+                        context_guard = ctx.lock();
+                        &*context_guard
+                    }
+                    None => &self.arr.read_ctx(),
+                };
+
                 self.arr
-                    .to_ndarray_buf(index, np_arr_data, &self.arr.read_ctx())
+                    .to_ndarray_buf(index, np_arr_data, context)
                     .into_py_result()
             })?;
         }
@@ -267,11 +280,23 @@ impl Array {
     /// | `IndexError` | more than one ellipsis |
     /// | `ValueError` | slice step other than 1 |
     /// | `TypeError` | unsupported index item type |
-    #[pyo3(signature = (index=None))]
+    ///
+    /// # The `context` argument
+    ///
+    /// An optional `zix.ReadContext` to reuse across multiple reads. When omitted, a context
+    /// is created internally for each call. Pass one explicitly when calling `numpy()` many
+    /// times in a loop to avoid repeated decompressor initialization:
+    ///
+    /// ```python,ignore
+    /// ctx = zix.ReadContext()
+    /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
+    /// ```
+    #[pyo3(signature = (index=None, context=None))]
     pub fn numpy<'py>(
         &self,
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
+        context: Option<&Bound<'py, ReadContext>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
         let shape = self.arr.shape();
         let ndim = shape.len();
@@ -418,7 +443,7 @@ impl Array {
         }
 
         // 5. Read data
-        let np_arr = self.to_numpy(py, &ranges)?;
+        let np_arr = self.to_numpy(py, &ranges, context)?;
 
         let np_arr: Bound<'_, PyUntypedArray> =
             np_arr.call_method1("reshape", (out_shape,))?.cast_into()?;
@@ -429,8 +454,41 @@ impl Array {
     ///
     /// This function is identical to `numpy()`, see that method for details.
     fn __getitem__<'py>(&self, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyUntypedArray>> {
-        self.numpy(key.py(), Some(key))
+        self.numpy(key.py(), Some(key), None)
     }
+
+    /// Creates a `zix.ReadContext` with decoder parameters derived from this array's storage.
+    ///
+    /// The returned context inherits the decoder configuration stored alongside the array data,
+    /// ensuring that reads use the same settings the array was written with. Prefer this over
+    /// constructing `zix.ReadContext()` directly when reading a specific array.
+    ///
+    /// Pass the returned context to `Array.numpy()` or `zix.copy()` to amortize decompressor
+    /// initialization across many successive reads. See `zix.ReadContext` for details.
+    ///
+    /// ```python,ignore
+    /// import zix
+    /// import numpy as np
+    ///
+    /// a = zix.compact(np.arange(30, dtype=np.int32).reshape(10, 3))
+    /// ctx = a.read_ctx()
+    /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
+    /// ```
+    fn read_ctx<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, ReadContext>> {
+        Bound::new(py, ReadContext::from_core(self.arr.read_ctx()))
+    }
+
+    /// Copies the data of an array into a new compact array by compressing it into new blocks. See :func:`zix.copy()`.
+    #[pyo3(signature = (params=None, context=None))]
+    fn copy<'py>(
+        slf: &Bound<'py, Self>,
+        params: Option<&Bound<'_, PyAny>>,
+        context: Option<&Bound<'_, ReadContext>>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::copy(slf, params, context)
+    }
+
+    // TODO io ops ['tofile']
 
     // == arithmetic ops ==
 
@@ -798,8 +856,6 @@ impl Array {
     pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::atan(slf)
     }
-
-    // TODO ['copy', 'tofile']
 }
 
 /// Compact any array-like object to a new zix [`Array`].
@@ -810,6 +866,10 @@ impl Array {
 /// A new zix compact array is created, with all the input data compressed into blocks. The data
 /// is compressed even if the input is already a zix array.
 ///
+/// `params` controls the block layout and codec configuration. It accepts either a
+/// `zix.ArrayParams` instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). When
+/// omitted, defaults are chosen automatically. See `zix.ArrayParams` for details.
+///
 /// # Errors
 ///
 /// - If the input is not a zix array and it cannot be converted by `numpy.asarray`.
@@ -817,12 +877,14 @@ impl Array {
 /// - If the array has negative strides (e.g. a reversed slice `a[::-1]`).
 #[gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, dtype=None))]
-pub fn compact(array: &Bound<'_, PyAny>, dtype: Option<&Bound<'_, PyAny>>) -> PyResult<Array> {
+#[pyo3(signature = (array, dtype=None, params=None))]
+pub fn compact(
+    array: &Bound<'_, PyAny>,
+    dtype: Option<&Bound<'_, PyAny>>,
+    params: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Array> {
     let py = array.py();
-
-    let params = ArrayParams::default(); // TODO: accept as arg
-    let context = ReadContext::default(); // TODO: accept as arg
+    let params = ArrayParams::resolve(params)?;
 
     // already a zix array
     if let Ok(array) = array.cast::<Array>() {
@@ -830,14 +892,8 @@ pub fn compact(array: &Bound<'_, PyAny>, dtype: Option<&Bound<'_, PyAny>>) -> Py
         if let Some(dtype) = dtype {
             array = crate::ops::astype(&array, dtype)?;
         }
-        let value = &array.get().arr;
-        let array = py.detach({
-            let context = unsafe { UnsafeSend::new(&context) };
-            || {
-                let context = unsafe { context.into_inner() };
-                value.copy_with(params, &context).into_py_result()
-            }
-        })?;
+        let array = &array.get().arr;
+        let array = py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?;
         return Ok(Array::from_core_storage(array.into_storage()));
     }
 
@@ -849,13 +905,18 @@ pub fn compact(array: &Bound<'_, PyAny>, dtype: Option<&Bound<'_, PyAny>>) -> Py
     let array = NumpyAsArray::new(array)?;
 
     let array = py.detach({
-        let context = unsafe { UnsafeSend::new(&context) };
         || {
-            let context = unsafe { context.into_inner() };
             let array = match array {
-                NumpyAsArray::Numpy(array) => array.copy_with(params, &context),
+                NumpyAsArray::Numpy(array) => {
+                    let context = array.read_ctx();
+                    array.copy_with(params, &context)
+                }
                 // scalar
-                _ => array.into_py_array(None)?.arr.copy_with(params, &context),
+                _ => {
+                    let array = array.into_py_array(None)?;
+                    let context = array.arr.read_ctx();
+                    array.arr.copy_with(params, &context)
+                }
             };
             array.into_py_result()
         }
@@ -897,7 +958,7 @@ mod tests {
         // ndarray::Array -> zix_core::Array -> zix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array()
         })
@@ -978,7 +1039,7 @@ mod tests {
                 .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap();
             assert_eq!(np.shape(), &[2usize, 3, 4]);
         });
     }
@@ -989,7 +1050,7 @@ mod tests {
         let original = array![1.0f32, 2.0];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'f');
         });
@@ -1001,7 +1062,7 @@ mod tests {
         let original = array![1i32, 2, 3];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'i');
         });
@@ -1026,7 +1087,7 @@ mod tests {
     {
         Python::attach(|py| {
             py_arr
-                .numpy(py, None)
+                .numpy(py, None, None)
                 .unwrap()
                 .cast_into::<PyArrayDyn<T>>()
                 .unwrap()

@@ -470,12 +470,33 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
     let axis = normalize_axis(axis, ndim)?;
 
     let py = py_arrays.first().unwrap().py();
-    if arrays.len() == 1 && axis < ndim {
-        let [array] = py_arrays.try_into().unwrap();
-        return Ok(array);
+    match arrays.len() {
+        1 if axis < ndim => {
+            // no-op if only one array
+            let [array] = py_arrays.try_into().unwrap();
+            return Ok(array);
+        }
+        2 => {
+            let [arr1, arr2] = arrays.try_into().unwrap();
+            let ret = zix_core::ops::Concatenate::new([arr1, arr2], axis).into_py_result()?;
+            Bound::new(py, Array::from_core_storage(ret))
+        }
+        3 => {
+            let [arr1, arr2, arr3] = arrays.try_into().unwrap();
+            let ret = zix_core::ops::Concatenate::new([arr1, arr2, arr3], axis).into_py_result()?;
+            Bound::new(py, Array::from_core_storage(ret))
+        }
+        4 => {
+            let [arr1, arr2, arr3, arr4] = arrays.try_into().unwrap();
+            let ret =
+                zix_core::ops::Concatenate::new([arr1, arr2, arr3, arr4], axis).into_py_result()?;
+            Bound::new(py, Array::from_core_storage(ret))
+        }
+        _ => {
+            let ret = zix_core::ops::Concatenate::new(arrays, axis).into_py_result()?;
+            Bound::new(py, Array::from_core_storage(ret))
+        }
     }
-    let ret = zix_core::ops::Concatenate::new(arrays, axis).into_py_result()?;
-    Bound::new(py, Array::from_core_storage(ret))
 }
 
 /// Joins a sequence of arrays along a **new** axis.
@@ -537,6 +558,25 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
         }
     }
     let axis = normalize_axis(axis, ndim + 1)?;
-    let ret = zix_core::ops::Stack::new(arrays, axis).into_py_result()?;
-    Ok(Array::from_core_storage(ret))
+    match arrays.len() {
+        2 => {
+            let [arr1, arr2] = arrays.try_into().unwrap();
+            let ret = zix_core::ops::Stack::new([arr1, arr2], axis).into_py_result()?;
+            return Ok(Array::from_core_storage(ret));
+        }
+        3 => {
+            let [arr1, arr2, arr3] = arrays.try_into().unwrap();
+            let ret = zix_core::ops::Stack::new([arr1, arr2, arr3], axis).into_py_result()?;
+            return Ok(Array::from_core_storage(ret));
+        }
+        4 => {
+            let [arr1, arr2, arr3, arr4] = arrays.try_into().unwrap();
+            let ret = zix_core::ops::Stack::new([arr1, arr2, arr3, arr4], axis).into_py_result()?;
+            return Ok(Array::from_core_storage(ret));
+        }
+        _ => {
+            let ret = zix_core::ops::Stack::new(arrays, axis).into_py_result()?;
+            Ok(Array::from_core_storage(ret))
+        }
+    }
 }

@@ -4,6 +4,12 @@ use pyo3_stub_gen::define_stub_info_gatherer;
 mod array;
 pub use array::Array;
 
+mod codec;
+pub use codec::ReadContext;
+
+mod params;
+pub use params::ArrayParams;
+
 mod dtype;
 pub mod ops;
 mod storage;
@@ -16,7 +22,7 @@ mod zix {
     const __version__: &str = env!("CARGO_PKG_VERSION");
 
     #[pymodule_export]
-    use crate::Array;
+    use crate::{Array, ArrayParams, ReadContext};
 
     #[pymodule_export]
     use crate::array::compact;

@@ -28,3 +28,4 @@
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
 - name "axes" to "axis" in ops
+- python read/write methods
