@@ -681,27 +681,43 @@ impl Array {
     // == reduction ops ==
 
     /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy. See :func:`zix.all()`.
-    #[pyo3(signature = (axes=None, keepdims=false))]
-    pub fn all(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::all(slf, axes, keepdims)
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn all(
+        slf: &Bound<'_, Self>,
+        axis: Option<ItemOrSequence<i32>>,
+        keepdims: bool,
+    ) -> PyResult<Self> {
+        crate::ops::all(slf, axis, keepdims)
     }
 
     /// Reduces one or more axes with logical OR: returns `True` if any element is truthy. See :func:`zix.any()`.
-    #[pyo3(signature = (axes=None, keepdims=false))]
-    pub fn any(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::any(slf, axes, keepdims)
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn any(
+        slf: &Bound<'_, Self>,
+        axis: Option<ItemOrSequence<i32>>,
+        keepdims: bool,
+    ) -> PyResult<Self> {
+        crate::ops::any(slf, axis, keepdims)
     }
 
     /// Reduces one or more axes by taking the maximum element. See :func:`zix.max()`.
-    #[pyo3(signature = (axes=None, keepdims=false))]
-    pub fn max(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::max(slf, axes, keepdims)
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn max(
+        slf: &Bound<'_, Self>,
+        axis: Option<ItemOrSequence<i32>>,
+        keepdims: bool,
+    ) -> PyResult<Self> {
+        crate::ops::max(slf, axis, keepdims)
     }
 
     /// Reduces one or more axes by taking the minimum element. See :func:`zix.min()`.
-    #[pyo3(signature = (axes=None, keepdims=false))]
-    pub fn min(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::min(slf, axes, keepdims)
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn min(
+        slf: &Bound<'_, Self>,
+        axis: Option<ItemOrSequence<i32>>,
+        keepdims: bool,
+    ) -> PyResult<Self> {
+        crate::ops::min(slf, axis, keepdims)
     }
 
     /// Returns the index of the maximum element along a single axis. See :func:`zix.argmax()`.
@@ -717,43 +733,55 @@ impl Array {
     }
 
     /// Reduces one or more axes by summing all elements. See :func:`zix.sum()`.
-    #[pyo3(signature = (axes=None, keepdims=false))]
-    pub fn sum(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::sum(slf, axes, keepdims)
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn sum(
+        slf: &Bound<'_, Self>,
+        axis: Option<ItemOrSequence<i32>>,
+        keepdims: bool,
+    ) -> PyResult<Self> {
+        crate::ops::sum(slf, axis, keepdims)
     }
 
     /// Computes the arithmetic mean along one or more axes. See :func:`zix.mean()`.
-    #[pyo3(signature = (axes=None, keepdims=false))]
-    pub fn mean(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::mean(slf, axes, keepdims)
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn mean(
+        slf: &Bound<'_, Self>,
+        axis: Option<ItemOrSequence<i32>>,
+        keepdims: bool,
+    ) -> PyResult<Self> {
+        crate::ops::mean(slf, axis, keepdims)
     }
 
     /// Reduces one or more axes by multiplying all elements. See :func:`zix.product()`.
-    #[pyo3(signature = (axes=None, keepdims=false))]
-    pub fn prod(slf: &Bound<'_, Self>, axes: Option<Vec<i32>>, keepdims: bool) -> PyResult<Self> {
-        crate::ops::product(slf, axes, keepdims)
+    #[pyo3(signature = (axis=None, keepdims=false))]
+    pub fn prod(
+        slf: &Bound<'_, Self>,
+        axis: Option<ItemOrSequence<i32>>,
+        keepdims: bool,
+    ) -> PyResult<Self> {
+        crate::ops::product(slf, axis, keepdims)
     }
 
     /// Computes the standard deviation along one or more axes. See :func:`zix.std()`.
-    #[pyo3(signature = (axes=None, keepdims=false, ddof=0.0))]
+    #[pyo3(signature = (axis=None, keepdims=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
-        axes: Option<Vec<i32>>,
+        axis: Option<ItemOrSequence<i32>>,
         keepdims: bool,
         ddof: f64,
     ) -> PyResult<Self> {
-        crate::ops::std(slf, axes, keepdims, ddof)
+        crate::ops::std(slf, axis, keepdims, ddof)
     }
 
     /// Computes the variance along one or more axes. See :func:`zix.var()`.
-    #[pyo3(signature = (axes=None, keepdims=false, ddof=0.0))]
+    #[pyo3(signature = (axis=None, keepdims=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
-        axes: Option<Vec<i32>>,
+        axis: Option<ItemOrSequence<i32>>,
         keepdims: bool,
         ddof: f64,
     ) -> PyResult<Self> {
-        crate::ops::var(slf, axes, keepdims, ddof)
+        crate::ops::var(slf, axis, keepdims, ddof)
     }
 
     /// Casts each element of the array to a new dtype. See :func:`zix.astype()`.
@@ -820,9 +848,9 @@ impl Array {
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See :func:`zix.unsqueeze()`.
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Array>,
-        axes: ItemOrSequence<i32>,
+        axis: ItemOrSequence<i32>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::unsqueeze(slf, axes)
+        crate::ops::unsqueeze(slf, axis)
     }
 
     // == trigonometric ops ==

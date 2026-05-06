@@ -83,6 +83,7 @@ impl_stub_type!(ItemOrSequence<i32> = i32 | Vec<i32>);
 impl_stub_type!(ItemOrSequence<i64> = i64 | Vec<i64>);
 impl_stub_type!(ItemOrSequence<u64> = u64 | Vec<u64>);
 
+#[allow(unused)]
 pub(crate) struct UnsafeSend<T>(T);
 unsafe impl<T> Send for UnsafeSend<T> {}
 impl<T> UnsafeSend<T> {

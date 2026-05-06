@@ -5,19 +5,19 @@ macro_rules! define_reduction_op {
         #[pyo3::pyfunction]
         #[pyo3(signature = (
             array,
-            axes=None,
+            axis=None,
             keepdims=false,
             $($($extra_arg=$extra_default,)+)?
         ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
-            axes: Option<Vec<i32>>,
+            axis: Option<crate::util::ItemOrSequence<i32>>,
             keepdims: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
             let array = crate::ops::as_array::any_to_core_array(array)?;
-            let axes = match axes {
-                Some(axes) => crate::util::normalize_axes(axes, array.ndim())?,
+            let axes = match axis {
+                Some(axes) => crate::util::normalize_axes(axes.into_vec(), array.ndim())?,
                 None => (0..array.ndim()).collect(),
             };
             let res = zix_core::ops::$core_op::new(array, &axes, keepdims $($(, $extra_arg)+)?);
@@ -66,7 +66,7 @@ define_reduction_op!(
     /// For **float** types, `NaN` values are ignored: the result is the maximum of all
     /// non-`NaN` values. If all elements are `NaN`, the result is `NaN`.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
@@ -82,9 +82,9 @@ define_reduction_op!(
     /// # Reduce all axes → scalar
     /// assert zix.max(a).numpy()[()] == 6
     /// # Reduce axis 0 → shape [3]
-    /// assert np.array_equal(zix.max(a, axes=[0]).numpy(), [4, 5, 6])
+    /// assert np.array_equal(zix.max(a, axis=0).numpy(), [4, 5, 6])
     /// # Reduce axis 0, keepdims=True → shape [1, 3]
-    /// assert zix.max(a, axes=[0], keepdims=True).numpy().shape == (1, 3)
+    /// assert zix.max(a, axis=0, keepdims=True).numpy().shape == (1, 3)
     /// ```
     max,
     Max
@@ -98,7 +98,7 @@ define_reduction_op!(
     /// For **float** types, `NaN` values are ignored: the result is the minimum of all
     /// non-`NaN` values. If all elements are `NaN`, the result is `NaN`.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
@@ -114,7 +114,7 @@ define_reduction_op!(
     /// # Reduce all axes → scalar
     /// assert zix.min(a).numpy()[()] == 1
     /// # Reduce axis 0 → shape [3]
-    /// assert np.array_equal(zix.min(a, axes=[0]).numpy(), [1, 2, 3])
+    /// assert np.array_equal(zix.min(a, axis=0).numpy(), [1, 2, 3])
     /// ```
     min,
     Min
@@ -191,7 +191,7 @@ define_reduction_op!(
     /// For **integer** types, the result wraps on overflow (two's complement). For
     /// large sums, consider casting to a wider type first.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
@@ -205,7 +205,7 @@ define_reduction_op!(
     ///
     /// a = zix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     /// assert zix.sum(a).numpy()[()] == 21
-    /// assert np.array_equal(zix.sum(a, axes=[0]).numpy(), [5, 7, 9])
+    /// assert np.array_equal(zix.sum(a, axis=0).numpy(), [5, 7, 9])
     /// ```
     sum,
     Sum
@@ -220,7 +220,7 @@ define_reduction_op!(
     /// For **integer** types, the result wraps on overflow. For large products, consider
     /// casting to a wider type first.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
@@ -234,7 +234,7 @@ define_reduction_op!(
     ///
     /// a = zix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
     /// assert zix.product(a).numpy()[()] == 720
-    /// assert np.array_equal(zix.product(a, axes=[0]).numpy(), [4, 10, 18])
+    /// assert np.array_equal(zix.product(a, axis=0).numpy(), [4, 10, 18])
     /// ```
     product,
     Product
@@ -245,7 +245,7 @@ define_reduction_op!(
     /// Supported dtypes: `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Output dtype equals
     /// the input dtype.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// This function deviates from numpy in that only float and complex types are supported.
@@ -262,7 +262,7 @@ define_reduction_op!(
     ///
     /// a = zix.compact([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
     /// assert zix.mean(a).numpy()[()] == 3.5
-    /// assert np.allclose(zix.mean(a, axes=[0]).numpy(), [2.5, 3.5, 4.5])
+    /// assert np.allclose(zix.mean(a, axis=0).numpy(), [2.5, 3.5, 4.5])
     /// ```
     mean,
     Mean
@@ -275,7 +275,7 @@ define_reduction_op!(
     /// `ddof` (delta degrees of freedom) defaults to `0.0` (population variance). Use
     /// `ddof=1.0` for the sample (Bessel-corrected) variance.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
@@ -303,7 +303,7 @@ define_reduction_op!(
     /// `ddof` (delta degrees of freedom) defaults to `0.0` (population standard deviation).
     /// Use `ddof=1.0` for the sample (Bessel-corrected) standard deviation.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
@@ -332,7 +332,7 @@ define_reduction_op!(
     /// AND reduction is applied. Returns `True` only if every element in the reduced
     /// dimensions is truthy; returns `True` for empty reductions.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
@@ -346,7 +346,7 @@ define_reduction_op!(
     ///
     /// a = zix.compact([[True, True], [True, False]])
     /// assert zix.all(a).numpy()[()] == False
-    /// assert np.array_equal(zix.all(a, axes=[1]).numpy(), [True, False])
+    /// assert np.array_equal(zix.all(a, axis=1).numpy(), [True, False])
     /// ```
     all,
     All
@@ -361,7 +361,7 @@ define_reduction_op!(
     /// OR reduction is applied. Returns `True` if at least one element in the reduced
     /// dimensions is truthy; returns `False` for empty reductions.
     ///
-    /// `axes` accepts negative values (e.g. `-1` for the last axis). `axes=None` reduces
+    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
@@ -375,7 +375,7 @@ define_reduction_op!(
     ///
     /// a = zix.compact([[False, False], [False, True]])
     /// assert zix.any(a).numpy()[()] == True
-    /// assert np.array_equal(zix.any(a, axes=[1]).numpy(), [False, True])
+    /// assert np.array_equal(zix.any(a, axis=1).numpy(), [False, True])
     /// ```
     any,
     Any

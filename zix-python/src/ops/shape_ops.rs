@@ -99,13 +99,13 @@ pub fn broadcast<'py>(
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape.
 ///
-/// Each value in `axes` is a **gap index** that identifies a position before an existing
+/// Each value in `axis` is a **gap index** that identifies a position before an existing
 /// dimension: `0` inserts before dimension 0 (a new leading axis), `1` inserts between
 /// dimensions 0 and 1, …, `ndim` appends after the last dimension. Negative values are
 /// supported and are resolved against `ndim + 1`.
 ///
 /// Duplicate gap indices are allowed and each adds another length-1 dimension at the same
-/// position. The order of values in `axes` does not matter.
+/// position. The order of values in `axis` does not matter.
 ///
 /// This differs from `numpy.expand_dims`, where each axis index refers to the new (larger)
 /// shape rather than the original shape.
@@ -128,19 +128,19 @@ pub fn broadcast<'py>(
 /// assert zix.insert_axes(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # → [1, 2, 1, 3]
 ///
 /// # duplicate axes: multiple length-1 dimensions at the same position
-/// assert zix.insert_axes(b, [0, 0, 0, 2]_.shape() == (1, 1, 1, 2, 1, 3)
+/// assert zix.insert_axes(b, [0, 0, 0, 2]).shape() == (1, 1, 1, 2, 1, 3)
 /// ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn insert_axes<'py>(
     array: &Bound<'py, Array>,
-    axes: ItemOrSequence<i32>,
+    axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     // NOTE: API different than numpy: axes are specified with respect to the original ndim, not the new ndim. Same
     // axis can be specified multiple times to insert multiple axes in the same place.
     let py_arr = array;
     let array = py_arr.get().to_core_array();
-    let axes = normalize_axes(axes.into_vec(), array.ndim() + 1)?;
+    let axes = normalize_axes(axis.into_vec(), array.ndim() + 1)?;
     if axes.is_empty() {
         return Ok(py_arr.clone()); // no-op if no axes to insert
     }
@@ -152,14 +152,14 @@ pub fn insert_axes<'py>(
 #[pyfunction]
 pub fn unsqueeze<'py>(
     array: &Bound<'py, Array>,
-    axes: ItemOrSequence<i32>,
+    axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    insert_axes(array, axes)
+    insert_axes(array, axis)
 }
 
 /// Removes length-1 dimensions from an array's shape.
 ///
-/// `axes` is a set of axis indices in the *input* shape (0-based). Each named dimension must
+/// `axis` is a set of axis indices in the *input* shape (0-based). Each named dimension must
 /// have size exactly 1 and is dropped from the output. Duplicate axis indices are not allowed.
 /// Negative values are supported and are resolved against `ndim`. Removed axes must have size 1.
 ///
@@ -183,11 +183,11 @@ pub fn unsqueeze<'py>(
 #[pyfunction]
 pub fn remove_axes<'py>(
     array: &Bound<'py, Array>,
-    axes: ItemOrSequence<i32>,
+    axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = array;
     let array = py_arr.get().to_core_array();
-    let axes = normalize_axes(axes.into_vec(), array.ndim())?;
+    let axes = normalize_axes(axis.into_vec(), array.ndim())?;
     if axes.is_empty() {
         return Ok(py_arr.clone()); // no-op if no axes to remove
     }
