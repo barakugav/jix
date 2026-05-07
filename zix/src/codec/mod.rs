@@ -6,10 +6,10 @@
 //! raw block bytes
 //!     |
 //!     v
-//! [ Filter 0 ] -> [ Filter 1 ] -> ...   (optional pre-compression transforms)
+//! [ Filter 0 ] -> [ Filter 1 ] -> ...  (optional pre-compression transforms)
 //!     |
 //!     v
-//! [ Codec (e.g. Zstd) ]              (lossless compression)
+//! [ Codec (e.g. Zstd) ]                (lossless compression)
 //!     |
 //!     v
 //! stored block bytes

@@ -35,8 +35,8 @@ where
     /// once: the copy realigns blocks to the new shape, avoiding read-amplification on future
     /// reads.
     #[track_caller]
-    pub fn reshape(self, new_shape: &[u64]) -> Array<Compact> {
-        self.reshape_view(new_shape).copy().unwrap()
+    pub fn reshape(self, shape: &[u64]) -> Array<Compact> {
+        self.reshape_view(shape).copy().unwrap()
     }
 
     /// Returns a lazy view of the array with a new shape. See [`Reshape`] for details and
@@ -46,8 +46,8 @@ where
     /// block boundaries of the original layout. Call [`.copy()`](Array::copy) to realign blocks
     /// before repeated reads, or prefer [`reshape`](Self::reshape) directly.
     #[track_caller]
-    pub fn reshape_view(self, new_shape: &[u64]) -> Array<Reshape<S>> {
-        Array::from_storage(Reshape::new(self, new_shape).unwrap())
+    pub fn reshape_view(self, shape: &[u64]) -> Array<Reshape<S>> {
+        Array::from_storage(Reshape::new(self, shape).unwrap())
     }
 
     /// Returns a lazy view of a sub-region of the array. See [`Slice`] for details and examples.
@@ -76,7 +76,7 @@ where
         Array::from_storage(PermuteAxes::new(self, axes).unwrap())
     }
 
-    /// Expands the array to `new_shape` by repeating length-1 dimensions and returns a
+    /// Expands the array to `shape` by repeating length-1 dimensions and returns a
     /// materialized copy. See [`Broadcast`] for details and examples.
     ///
     /// Preferred over [`broadcast_view`](Self::broadcast_view) when the result will be read more
@@ -87,23 +87,23 @@ where
     ///
     /// See [`broadcast_view`](Self::broadcast_view) for validity rules.
     #[track_caller]
-    pub fn broadcast(self, new_shape: &[u64]) -> Array<Compact> {
-        self.broadcast_view(new_shape).copy().unwrap()
+    pub fn broadcast(self, shape: &[u64]) -> Array<Compact> {
+        self.broadcast_view(shape).copy().unwrap()
     }
 
-    /// Returns a lazy view of the array expanded to `new_shape` by repeating length-1 dimensions.
+    /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.
     /// See [`Broadcast`] for details and examples.
     ///
     /// No data is copied, but reads may be slow - the same source blocks are decompressed
-    /// repeatedly. Call [`.copy()`](Array::copy) to materialise, or prefer
+    /// repeatedly. Call [`.copy()`](Array::copy) to materialize, or prefer
     /// [`broadcast`](Self::broadcast) directly.
     ///
     /// # Panics
     ///
-    /// Panics if `new_shape.len() != self.ndim()` or any dimension with size > 1 is expanded.
+    /// Panics if `shape.len() != self.ndim()` or any dimension with size > 1 is expanded.
     #[track_caller]
-    pub fn broadcast_view(self, new_shape: &[u64]) -> Array<Broadcast<S>> {
-        Array::from_storage(Broadcast::new(self, new_shape).unwrap())
+    pub fn broadcast_view(self, shape: &[u64]) -> Array<Broadcast<S>> {
+        Array::from_storage(Broadcast::new(self, shape).unwrap())
     }
 
     /// Returns a lazy view of the array with the specified length-1 dimensions removed.

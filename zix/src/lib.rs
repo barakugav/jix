@@ -51,7 +51,7 @@
 //!
 //! # Core type: `Array<S>`
 //!
-//! [`Array<S>`](Array) is generic over its storage backend `S: ArrayStorage`. The storage
+//! [`Array<S>`](Array) is generic over its storage backend [`S: ArrayStorage`](storage::ArrayStorage). The storage
 //! trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else - slicing,
 //! arithmetic, reductions, serialization - is implemented on top of those three.
 //!
@@ -60,7 +60,7 @@
 //! ```text
 //! Array<Compact>
 //!   .neg()                 -> Array<Neg<Compact>>
-//!   .reshape_view(...)       -> Array<Reshape<Neg<Compact>>>
+//!   .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
 //!   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
 //!   .add(other)            -> Array<Add<PermuteAxes<...>, Compact>>
 //!   .sum(&[0], false)      -> Array<Sum<Add<...>>>
@@ -131,7 +131,7 @@
 //! # Element types (`Dtype`)
 //!
 //! The element type of an array is described at runtime by a [`Dtype`](dtype::Dtype), which
-//! records the kind, `itemsize`, and alignment of each element. Dtypes come in two flavors:
+//! records the kind, size, and alignment of each element. Dtypes come in two flavors:
 //!
 //! **Scalar dtypes** cover all primitive numeric and boolean types:
 //! `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
@@ -218,9 +218,10 @@
 //!
 //! # Serialization (`.zix` files)
 //!
-//! Arrays are serialized to a binary archive format (`.zix`). The format is defined via Protocol
-//! Buffers and stores the array shape, block shape, codec configuration, and the compressed block
-//! data. Multiple arrays can be packed into a single file back-to-back; each is read back
+//! Arrays are serialized to a binary archive format (`.zix`). The format is defined with a mix of
+//! protobuf for metadata such as the array shape, block shape, codec configuration, and a raw binary
+//! format for the compressed block data.
+//! Multiple arrays can be packed into a single file back-to-back; each is read back
 //! independently using a byte offset and length.
 //!
 //! The primary I/O methods are on [`Array`]:
@@ -249,16 +250,13 @@
 //! // Memory-map the source - blocks are paged in on demand.
 //! // Safety: the file is not modified while `src` is live.
 //! let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
-//! let context = src.read_ctx();
 //!
 //! // Build a lazy pipeline over the mmap'd data.
 //! let processed = src.exp() + 1.0f32;
 //!
 //! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
-//! processed.write_to_with(
+//! processed.write_to(
 //!     BufWriter::new(File::create(tmp_dir.path().join("modified.zix"))?),
-//!     ArrayParams::default(),
-//!     &context,
 //! )?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

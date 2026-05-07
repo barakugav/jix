@@ -1,8 +1,9 @@
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+use zix_core::codec::{Codec, EncoderParams};
 
-use crate::util::OrKwargs;
+use crate::util::{IntoPyResult, OrKwargs};
 
 /// Parameters controlling the block layout and codec configuration of an array.
 ///
@@ -62,59 +63,39 @@ impl ArrayParams {
             None => Ok(zix_core::ArrayParams::default()),
             Some(OrKwargs::Value(param)) => Ok(param.get().0.clone()),
             Some(OrKwargs::Kwargs(mut kwargs)) => {
-                let block_shape = kwargs
-                    .remove("block_shape")
-                    .map(|v| {
-                        v.bind(py).extract::<Vec<u32>>().map_err(|_| {
-                            PyTypeError::new_err("block_shape must be a list of integers")
-                        })
-                    })
-                    .transpose()?;
-                let block_shape_tag = kwargs
-                    .remove("block_shape_tag")
-                    .map(|v| {
-                        v.bind(py).extract::<Vec<String>>().map_err(|_| {
-                            PyTypeError::new_err("block_shape_tag must be a list of strings")
-                        })
-                    })
-                    .transpose()?;
-                let block_size_hint = kwargs
-                    .remove("block_size_hint")
-                    .map(|v| {
-                        v.bind(py)
-                            .extract::<u64>()
-                            .map_err(|_| PyTypeError::new_err("block_size_hint must be an integer"))
-                    })
-                    .transpose()?;
-                let preferred_read_shape = kwargs
-                    .remove("preferred_read_shape")
-                    .map(|v| {
-                        v.bind(py).extract::<Vec<u32>>().map_err(|_| {
-                            PyTypeError::new_err("preferred_read_shape must be a list of integers")
-                        })
-                    })
-                    .transpose()?;
-                let preferred_read_size_hint = kwargs
-                    .remove("preferred_read_size_hint")
-                    .map(|v| {
-                        v.bind(py).extract::<u64>().map_err(|_| {
-                            PyTypeError::new_err("preferred_read_size_hint must be an integer")
-                        })
-                    })
-                    .transpose()?;
+                macro_rules! extract_arg {
+                    ($key:expr, $ty:ty) => {
+                        kwargs
+                            .remove($key)
+                            .map(|v| {
+                                v.bind(py).extract::<$ty>().map_err(|e| {
+                                    PyTypeError::new_err(format!(
+                                        "{} must be of type {}: {e}",
+                                        $key,
+                                        stringify!($ty)
+                                    ))
+                                })
+                            })
+                            .transpose()
+                    };
+                }
+
+                let params = ArrayParams::new(
+                    extract_arg!("block_shape", Vec<u32>)?,
+                    extract_arg!("block_shape_tag", Vec<String>)?,
+                    extract_arg!("block_size_hint", u64)?,
+                    extract_arg!("preferred_read_shape", Vec<u32>)?,
+                    extract_arg!("preferred_read_size_hint", u64)?,
+                    extract_arg!("codec", String)?,
+                    extract_arg!("compression_level", u32)?,
+                    extract_arg!("filters", Vec<String>)?,
+                )?;
                 if !kwargs.is_empty() {
                     return Err(PyTypeError::new_err(format!(
                         "Unexpected ArrayParams kwargs: {}",
                         kwargs.into_keys().collect::<Vec<_>>().join(", ")
                     )));
                 }
-                let params = ArrayParams::new(
-                    block_shape,
-                    block_shape_tag,
-                    block_size_hint,
-                    preferred_read_shape,
-                    preferred_read_size_hint,
-                )?;
                 Ok(params.0.clone())
             }
         }
@@ -159,6 +140,20 @@ impl ArrayParams {
     ///
     /// **`preferred_read_size_hint`** - target size in bytes for the preferred read region,
     /// used when auto-computing `preferred_read_shape`. Defaults to the L2 cache size.
+    ///
+    /// **`codec`** - compression algorithm applied to each block. Currently the only accepted
+    /// value is `"zstd"`. Defaults to `"zstd"` when left unset.
+    ///
+    /// **`compression_level`** - compression level passed to the codec. For Zstd the valid
+    /// range is 1–22; higher values compress more but are slower to encode. Defaults to 3.
+    ///
+    /// **`filters`** - list of filters applied to the raw block bytes *before*
+    /// compression. Filters improve the compression ratio for typed numeric data:
+    /// - `"byte-shuffle"` - groups bytes by significance (e.g. all high bytes together, then
+    ///   all low bytes).
+    /// - `"bit-shuffle"` - groups bits across elements.
+    ///
+    /// Defaults to `["byte-shuffle"]`.
     #[new]
     #[pyo3(signature = (
         *,
@@ -166,7 +161,10 @@ impl ArrayParams {
         block_shape_tag=None,
         block_size_hint=None,
         preferred_read_shape=None,
-        preferred_read_size_hint=None
+        preferred_read_size_hint=None,
+        codec=None,
+        compression_level=None,
+        filters=None,
     ))]
     pub fn new(
         block_shape: Option<Vec<u32>>,
@@ -175,6 +173,11 @@ impl ArrayParams {
         block_size_hint: Option<u64>,
         preferred_read_shape: Option<Vec<u32>>,
         preferred_read_size_hint: Option<u64>,
+        #[gen_stub(override_type(type_repr="typing.Optional[typing.Literal['zstd']]", imports=("typing")))]
+        codec: Option<String>,
+        compression_level: Option<u32>,
+        #[gen_stub(override_type(type_repr="typing.Optional[typing.Literal['byte-shuffle', 'bit-shuffle']]", imports=("typing")))]
+        filters: Option<Vec<String>>,
     ) -> PyResult<Self> {
         let mut params = zix_core::ArrayParams::default();
         if let Some(block_shape) = block_shape {
@@ -203,6 +206,40 @@ impl ArrayParams {
         if let Some(preferred_read_size_hint) = preferred_read_size_hint {
             params.preferred_read_size_hint(preferred_read_size_hint);
         }
+
+        if codec.is_some() || compression_level.is_some() || filters.is_some() {
+            let mut encoder_params = EncoderParams::default();
+            if let Some(codec) = codec {
+                match codec.as_str() {
+                    "zstd" => {
+                        encoder_params.codec(Codec::Zstd);
+                    }
+                    _ => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Unsupported codec: {codec}"
+                        )));
+                    }
+                }
+            }
+            if let Some(compression_level) = compression_level {
+                encoder_params.level(compression_level).into_py_result()?;
+            }
+            if let Some(filters) = filters {
+                let filters = filters
+                    .into_iter()
+                    .map(|filter| match filter.as_str() {
+                        "byte-shuffle" => Ok(zix_core::codec::Filter::ByteShuffle),
+                        "bit-shuffle" => Ok(zix_core::codec::Filter::BitShuffle),
+                        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Unsupported filter: {filter}"
+                        ))),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                encoder_params.filters(&filters).into_py_result()?;
+            }
+            params.encoder_params(encoder_params);
+        }
+
         Ok(Self(params))
     }
 }

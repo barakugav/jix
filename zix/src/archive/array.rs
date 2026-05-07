@@ -661,7 +661,7 @@ mod tests {
     #[test]
     fn write_to_with_lazy_neg_view_i32() {
         // Negation is applied on the fly during write; no full decompressed array
-        // is materialised.
+        // is materialized.
         let vals: Vec<i32> = (1..=12i32).collect();
         let src = ArrayD::from_shape_vec(vec![3, 4], vals.clone()).unwrap();
         let expected = -&src;
@@ -705,7 +705,7 @@ mod tests {
     #[test]
     fn write_to_with_add_chain_f32() {
         // (a + a) over a compact array - params control the output block shape;
-        // the source is read block-by-block, never fully materialised.
+        // the source is read block-by-block, never fully materialized.
         let vals: Vec<f32> = (0..24).map(|x: i32| x as f32).collect();
         let src = ArrayD::from_shape_vec(vec![4, 6], vals.clone()).unwrap();
         let expected = &src + &src;

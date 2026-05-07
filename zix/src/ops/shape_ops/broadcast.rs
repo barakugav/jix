@@ -10,11 +10,11 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
 /// returned by [`Array::broadcast_view`](crate::Array::broadcast_view).
 ///
-/// `new_shape` must have the same number of dimensions as the input. For each dimension `d`,
-/// either `new_shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
-/// the single element is repeated `new_shape[d]` times). Any other combination is an error.
+/// The new shape (`shape`) must have the same number of dimensions as the input. For each dimension `d`,
+/// either `shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
+/// the single element is repeated `shape[d]` times). Any other combination is an error.
 ///
-/// Output dtype equals the input dtype. Output shape equals `new_shape`.
+/// Output dtype equals the input dtype. Output shape equals `shape`.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -54,7 +54,8 @@ pub struct Broadcast<S> {
 
 impl<S: ArrayStorage> Broadcast<S> {
     /// Constructs a `Broadcast` storage. See [`Broadcast`] for semantics and examples.
-    pub fn new(array: Array<S>, new_shape: &[u64]) -> Result<Self> {
+    pub fn new(array: Array<S>, shape: &[u64]) -> Result<Self> {
+        let new_shape = shape;
         let input_shape = array.shape();
         let ndim = input_shape.len();
 

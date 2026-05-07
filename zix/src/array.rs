@@ -47,7 +47,7 @@ use crate::ArrayParams;
 /// ```text
 /// Array<Compact>
 ///   .neg()                 -> Array<Neg<Compact>>
-///   .reshape_view(...)       -> Array<Reshape<Neg<Compact>>>
+///   .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
 ///   .permute_axes(axes)    -> Array<PermuteAxes<Reshape<...>>>
 ///   .add(other_array)      -> Array<Add<PermuteAxes<...>, Compact>>
 ///   .sum(axis, false)      -> Array<Sum<Add<...>>>
@@ -476,7 +476,7 @@ impl<S: ArrayStorage> Array<S> {
     /// derived block shape that matches the new layout. The block shape of copied arrays is
     /// automatically derived and tuned from the underlying storage(s), using a heuristic that aims
     /// to preserve user choices (that may depend on the user knowledge of the access pattern), but
-    /// its not perfect - you want want to explicitly pass some parameters via
+    /// its not perfect - you may want to explicitly pass some parameters via
     /// [`copy_with`](Array::copy_with).
     ///
     /// Its also possible to materialize a lazy operation chain directly into a file without holding

@@ -24,3 +24,4 @@
 - support string index in python array, accessing sub field by name
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
+- consider removing EncoderParams and DecoderParams, use ArrayParams for everything

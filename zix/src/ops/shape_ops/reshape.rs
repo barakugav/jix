@@ -11,7 +11,7 @@ use crate::NDIM_MAX;
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape_view`].
 ///
-/// The total number of elements must be the same: the product of `new_shape` must equal the
+/// The total number of elements must be the same: the product of the new shape must equal the
 /// product of the original shape. Output dtype equals the input dtype.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
@@ -54,10 +54,11 @@ pub struct Reshape<S> {
 }
 impl<S> Reshape<S> {
     /// Constructs a `Reshape` storage. See [`Reshape`] for semantics, performance notes, and examples.
-    pub fn new(array: Array<S>, new_shape: &[u64]) -> Result<Self>
+    pub fn new(array: Array<S>, shape: &[u64]) -> Result<Self>
     where
         S: ArrayStorage,
     {
+        let new_shape = shape;
         ensure!(
             new_shape.len() <= NDIM_MAX,
             InvalidShapeOperation,
