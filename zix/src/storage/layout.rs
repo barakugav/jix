@@ -59,6 +59,30 @@ pub enum BlockShapeTag {
 }
 
 impl BlocksLayout {
+    pub(crate) fn new(
+        block_shape_hint: DimArray<BlockSize>,
+        block_shape_tag: DimArray<BlockShapeTag>,
+        block_size_hint: u64,
+        preferred_read_shape: DimArray<BlockSize>,
+        preferred_read_size_hint: u64,
+    ) -> Self {
+        let ndim = block_shape_hint.len();
+
+        assert_eq!(ndim, block_shape_hint.len());
+        assert_eq!(ndim, block_shape_tag.len());
+        assert_eq!(ndim, preferred_read_shape.len());
+        assert!(block_shape_hint.iter().all(|l| *l > 0));
+        assert!(preferred_read_shape.iter().all(|l| *l > 0));
+
+        Self {
+            block_shape_hint,
+            block_shape_tag,
+            block_size_hint,
+            preferred_read_shape,
+            preferred_read_size_hint,
+        }
+    }
+
     /// Compute and validate the block geometry for an array.
     ///
     /// Both the storage block shape and the preferred read block shape are resolved here;
@@ -89,7 +113,7 @@ impl BlocksLayout {
     /// - `block_shape_tag` is provided without `block_shape`
     /// - the length of `block_shape_tag` or `preferred_read_shape` does not match `ndim`
     /// - `ndim` exceeds [`crate::NDIM_MAX`]
-    pub(crate) fn new(
+    pub(crate) fn tune(
         block_shape: Option<DimArray<BlockSize>>,
         block_shape_tag: Option<DimArray<BlockShapeTag>>,
         mut block_size_hint: Option<u64>,
@@ -163,7 +187,8 @@ impl BlocksLayout {
                 dim_arr(ndim, |dim| {
                     (preferred_read_shape[dim] as u64)
                         .max(block_shape[dim] as u64)
-                        .min(shape[dim]) as BlockSize
+                        .min(shape[dim])
+                        .max(1) as BlockSize
                 })
             }
             None => Self::scale_block_shape(
@@ -182,13 +207,13 @@ impl BlocksLayout {
                 * itemsize
         });
 
-        Ok(BlocksLayout {
-            block_shape_hint: block_shape,
+        Ok(BlocksLayout::new(
+            block_shape,
             block_shape_tag,
             block_size_hint,
             preferred_read_shape,
             preferred_read_size_hint,
-        })
+        ))
     }
 
     fn scale_block_shape(

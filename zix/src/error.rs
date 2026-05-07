@@ -145,7 +145,7 @@ pub(crate) fn check_get_buffer_size(
     ensure!(
         buf_len == required_size,
         InvalidBufferSize,
-        "Buffer size {buf_len} is too small for requested index {index:?} with dtype {dtype:?} (required size: {required_size})"
+        "Unexpected buffer size {buf_len} requested index {index:?} with dtype {dtype:?} (required size: {required_size})"
     );
     ensure!(
         (buf.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize()),

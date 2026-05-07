@@ -96,11 +96,13 @@ impl<S: ArrayStorage> Slice<S> {
             if shape[dim] == input_shape[dim] {
                 continue;
             }
-            b_layout.block_shape_hint[dim] =
-                b_layout.block_shape_hint[dim].min(shape[dim] as BlockSize);
+            b_layout.block_shape_hint[dim] = b_layout.block_shape_hint[dim]
+                .min(shape[dim] as BlockSize)
+                .max(1);
             b_layout.block_shape_tag[dim] = BlockShapeTag::Any;
-            b_layout.preferred_read_shape[dim] =
-                b_layout.preferred_read_shape[dim].min(shape[dim] as BlockSize);
+            b_layout.preferred_read_shape[dim] = b_layout.preferred_read_shape[dim]
+                .min(shape[dim] as BlockSize)
+                .max(1);
         }
 
         Ok(Self {

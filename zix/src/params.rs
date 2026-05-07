@@ -278,7 +278,7 @@ impl ArrayParams {
     }
 
     pub(crate) fn tune(&mut self, shape: &[u64], dtype: &Dtype) -> Result<()> {
-        let b_layout = BlocksLayout::new(
+        let b_layout = BlocksLayout::tune(
             self.block_shape.clone(),
             self.block_shape_tag.clone(),
             self.block_size_hint,

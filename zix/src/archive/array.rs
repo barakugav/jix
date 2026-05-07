@@ -458,7 +458,7 @@ where
             blocks.nitems()
         );
 
-        let b_layout = BlocksLayout::new(
+        let b_layout = BlocksLayout::tune(
             Some(block_shape),
             params.block_shape_tag,
             params.block_size_hint,

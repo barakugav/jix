@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_range, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::IntoCompact;
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
 use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref};
@@ -357,11 +357,11 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Decode a rectangular sub-region into a heap-allocated [`ndarray::Array`].
     ///
-    /// Only the compressed blocks overlapping `range` are decompressed. When `range` aligns to
+    /// Only the compressed blocks overlapping `index` are decompressed. When `index` aligns to
     /// block boundaries no extra data is read; for unaligned ranges, the overlapping boundary
     /// blocks are fully decompressed and only the requested slice is returned.
     ///
-    /// `range` must contain one half-open `start..end` per dimension within
+    /// `index` must contain one half-open `start..end` per dimension within
     /// `0..self.shape()[dim]`. `T` must match [`self.dtype()`](Array::dtype). Obtain a
     /// [`ReadContext`] via [`read_ctx`](Array::read_ctx).
     ///
@@ -369,7 +369,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) - `T` does not match
     ///   `self.dtype()`.
-    /// - [`InvalidIndex`](crate::ErrorKind::InvalidIndex) - `range` is out of bounds or
+    /// - [`InvalidIndex`](crate::ErrorKind::InvalidIndex) - `index` is out of bounds or
     ///   has a different number of dimensions than the array.
     /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
     ///
@@ -394,23 +394,23 @@ impl<S: ArrayStorage> Array<S> {
     /// ```
     pub fn to_ndarray_sub<T>(
         &self,
-        range: &[Range<u64>],
+        index: &[Range<u64>],
         context: &ReadContext,
     ) -> Result<ndarray::ArrayD<T>>
     where
         T: Dtyped,
     {
         self.check_type::<T>()?;
-        check_get_range(self.shape(), range)?;
+        check_get_range(self.shape(), index)?;
         let ndim = self.ndim();
         let out_shape = dim_arr(ndim, |dim| {
-            let len = range[dim].end - range[dim].start;
+            let len = index[dim].end - index[dim].start;
             let len: usize = len.try_into().unwrap();
             len
         });
         let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
         self.to_ndarray_buf(
-            range,
+            index,
             unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) },
             context,
         )?;
@@ -421,7 +421,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
     /// [`to_ndarray_sub`](Array::to_ndarray_sub). `buf` must be exactly
-    /// `range.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes and aligned to
+    /// `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes and aligned to
     /// `self.dtype().alignment()`. Elements are written in row-major (C-contiguous) order.
     ///
     /// # Errors
@@ -451,12 +451,78 @@ impl<S: ArrayStorage> Array<S> {
     /// ```
     pub fn to_ndarray_buf(
         &self,
-        range: &[Range<u64>],
+        index: &[Range<u64>],
         buf: &mut [u8],
         context: &ReadContext,
     ) -> Result<()> {
-        // TODO: call read_data multiple times with smaller blocks
-        self.storage.read_data(range, buf, context)
+        let shape = self.shape();
+        let ndim = shape.len();
+        let dtype = self.dtype();
+        check_get_range(shape, index)?;
+        check_get_buffer_size(index, &dtype, buf)?;
+
+        let read_shape = self.storage._spec().blocks_layout.preferred_read_shape();
+        debug_assert!(read_shape.iter().all(|l| *l > 0));
+
+        // Fast path for small reads
+        let small_read = (0..ndim).all(|d| (index[d].end - index[d].start) <= read_shape[d] as u64);
+        if small_read {
+            return self.storage.read_data(index, buf, context);
+        }
+
+        // Block-space begin/end for NdIter.
+        let block_begin = dim_arr(ndim, |dim| index[dim].start / read_shape[dim] as u64);
+        let block_end = dim_arr(ndim, |dim| index[dim].end.div_ceil(read_shape[dim] as u64));
+        // Element-space begin/end for NdIterExtBlockOffsetSize.
+        let elem_begin = dim_arr(ndim, |dim| index[dim].start);
+        let elem_end = dim_arr(ndim, |dim| index[dim].end);
+        // NdIter that yields blocks of size <= read_shape
+        let mut block_iter = NdIter::new_with_begin(
+            &block_begin,
+            &block_end,
+            NdIterExtBlockOffsetSize::new(
+                shape,
+                &elem_begin,
+                &elem_end,
+                &dim_arr(ndim, |dim| read_shape[dim] as u64),
+            ),
+        );
+
+        let itemsize = dtype.itemsize() as usize;
+        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_strides = default_strides(&out_shape, itemsize);
+
+        let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
+        while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
+            let inner_index = dim_arr(ndim, |d| {
+                let start = block_idx[d] * read_shape[d] as u64 + block_inner_offset[d];
+                let end = start + block_size[d];
+                start..end
+            });
+            let tmp_buf = {
+                let read_nitems = block_size.iter().product::<u64>();
+                tmp_buf.set_len(read_nitems as usize * dtype.itemsize() as usize);
+                tmp_buf.as_mut_slice()
+            };
+            self.storage.read_data(&inner_index, tmp_buf, context)?;
+
+            let out_offset = (0..ndim)
+                .map(|d| (inner_index[d].start - index[d].start) as usize * out_strides[d])
+                .sum::<usize>();
+            let dst_ptr = unsafe { buf.as_mut_ptr().add(out_offset) };
+
+            unsafe {
+                nd_copy(
+                    tmp_buf.as_ptr(),
+                    dst_ptr,
+                    block_size,
+                    &default_strides(block_size, itemsize as _),
+                    &out_strides,
+                    itemsize,
+                )
+            };
+        }
+        Ok(())
     }
 
     /// Copy the data of this array into a new `Array<Compact>` by compressing it into new blocks.
@@ -571,13 +637,13 @@ impl<S: ArrayStorage> Array<S> {
             &mut block_fn,
         )?;
 
-        let blocks_layout = BlocksLayout {
-            block_shape_hint: params.block_shape.unwrap(),
-            block_shape_tag: params.block_shape_tag.unwrap(),
-            block_size_hint: params.block_size_hint.unwrap(),
-            preferred_read_shape: params.preferred_read_shape.unwrap(),
-            preferred_read_size_hint: params.preferred_read_size_hint.unwrap(),
-        };
+        let blocks_layout = BlocksLayout::new(
+            params.block_shape.unwrap(),
+            params.block_shape_tag.unwrap(),
+            params.block_size_hint.unwrap(),
+            params.preferred_read_shape.unwrap(),
+            params.preferred_read_size_hint.unwrap(),
+        );
         let decoder_params = params.decoder_params.unwrap_or_default();
 
         Ok(Array {
@@ -976,13 +1042,13 @@ mod tests {
         let ndim = block_shape.len();
         let block_shape_hint: DimArray<BlockSize> =
             block_shape.iter().map(|&x| x as BlockSize).collect();
-        let layout = BlocksLayout {
-            block_shape_hint: block_shape_hint.clone(),
-            block_shape_tag: dim_arr(ndim, |_| BlockShapeTag::Fixed),
-            block_size_hint: 0,
-            preferred_read_shape: block_shape_hint,
-            preferred_read_size_hint: 0,
-        };
+        let layout = BlocksLayout::new(
+            block_shape_hint.clone(),
+            dim_arr(ndim, |_| BlockShapeTag::Fixed),
+            0,
+            block_shape_hint,
+            0,
+        );
         Array {
             storage: Compact(ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),

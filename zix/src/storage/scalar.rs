@@ -73,7 +73,7 @@ impl<T> Scalar<T> {
 
         let dtype = T::DTYPE;
 
-        let blocks_layout = BlocksLayout::new(
+        let blocks_layout = BlocksLayout::tune(
             Some(dim_arr(ndim, |_| 1)),
             Some(dim_arr(ndim, |_| BlockShapeTag::Any)),
             None,

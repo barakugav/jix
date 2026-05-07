@@ -118,7 +118,7 @@ impl<S> Plain<S> {
             "Data pointer or strides are not aligned to required alignment {alignment}"
         );
 
-        let blocks_layout = BlocksLayout::new(
+        let blocks_layout = BlocksLayout::tune(
             Some(dim_arr(ndim, |_| 1)),
             Some(dim_arr(ndim, |_| BlockShapeTag::Any)),
             None,
