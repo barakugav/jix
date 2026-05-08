@@ -76,7 +76,7 @@ impl<S, I, O, F> Map<S, I, O, F> {
         ensure!(
             src_dtype == *array.dtype(),
             UnsupportedDtype,
-            "map input dtype mismatch: array has {:?} but input generic (I) is {src_dtype:?}",
+            "map input dtype mismatch: array has {:#?} but input generic (I) is {src_dtype:#?}",
             array.dtype()
         );
 

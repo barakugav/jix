@@ -1,24 +1,17 @@
 - overflow checks in shape.iter().product()
 - use u8 for DimArray len
-- scan, like cumsum
-- remove Borrowed
-- use u8 for dim index everywhere, like axes: DimArray<usize>, and concat_axis: usize
 - ops
     - clip, clamp
     - split
-    - sort
-    - 'cumprod', 'cumsum'
+    - sort, median
+    - 'cumprod', 'cumsum', diff
     - imag, real
     - repeat, tile
-    - allclose
-    - isclose
-    - diff
+    - allclose, isclose
     - flip, roll, split
     - log variants, log10, log2, log1p
-    - median
 - full/zeros/ones/
 - array::from_fn
-- to_ndarray_sub should accept IntoSlice
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
 - cast types automatically in python bindings
 - support string index in python array, accessing sub field by name

@@ -411,7 +411,11 @@ macro_rules! define_reduction_op_kernel {
                     },)*
                     _ => {}
                 }
-                bail!(UnsupportedDtype, "Reduction op not supported for dtype {input_dtype:#?}");
+                crate::error::bail!(
+                    UnsupportedDtype,
+                    "Reduction<{}> not supported for dtype {input_dtype:#?}",
+                    stringify!($NameKernel)
+                );
             }
 
             fn output_dtype(&self, input_dtype: &crate::dtype::Dtype) -> crate::error::Result<crate::dtype::Dtype> {
@@ -423,7 +427,11 @@ macro_rules! define_reduction_op_kernel {
                     _ => {},
 
                 };
-                bail!(UnsupportedDtype, "Reduction op not supported for dtype {input_dtype:#?}");
+                crate::error::bail!(
+                    UnsupportedDtype,
+                    "Reduction<{}> not supported for dtype {input_dtype:#?}",
+                    stringify!($NameKernel)
+                );
             }
 
             fn supports_empty(&self) -> bool {
@@ -1490,10 +1498,9 @@ pub(crate) mod tests {
     test_reduction!(
         product,
         |items| {
-            items.fold(
-                Complex::<f64>::default() + Complex::<f64>::new(1.0, 1.0),
-                |m, x| m * crate::ops::astype::cast::<_, Complex<f64>>(x),
-            )
+            items.fold(Complex::<f64>::new(1.0, 0.0), |m, x| {
+                m * crate::ops::astype::cast::<_, Complex<f64>>(x)
+            })
         },
         [complex_f32, complex_f64],
         op_safe_strategy,

@@ -1,3 +1,5 @@
+use crate::dtype::Complex;
+
 macro_rules! define_array_op1_method {
     ($op:ident : $Name:ident) => {
         #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
@@ -78,5 +80,27 @@ macro_rules! scalar_kind {
 
 pub(crate) use {define_array_op1_method, define_array_op2_method, scalar_kind};
 
-// TODO: optimize per scalar type
-pub(crate) const BULK: usize = 8;
+pub(crate) trait BulkInfo {
+    const BULK: usize;
+}
+macro_rules! impl_bulk_info {
+    ($ty:ty, $bulk:expr) => {
+        impl BulkInfo for $ty {
+            const BULK: usize = $bulk;
+        }
+    };
+}
+impl_bulk_info!(i8, 128 / size_of::<i8>());
+impl_bulk_info!(i16, 128 / size_of::<i16>());
+impl_bulk_info!(i32, 128 / size_of::<i32>());
+impl_bulk_info!(i64, 128 / size_of::<i64>());
+impl_bulk_info!(u8, 128 / size_of::<u8>());
+impl_bulk_info!(u16, 128 / size_of::<u16>());
+impl_bulk_info!(u32, 128 / size_of::<u32>());
+impl_bulk_info!(u64, 128 / size_of::<u64>());
+impl_bulk_info!(crate::dtype::f16, 128 / size_of::<crate::dtype::f16>());
+impl_bulk_info!(f32, 128 / size_of::<f32>());
+impl_bulk_info!(f64, 128 / size_of::<f64>());
+impl_bulk_info!(Complex<f32>, 128 / size_of::<Complex<f32>>());
+impl_bulk_info!(Complex<f64>, 128 / size_of::<Complex<f64>>());
+impl_bulk_info!(bool, 128 / size_of::<bool>());

@@ -459,7 +459,7 @@ impl<S: ArrayStorage> Array<S> {
         let ndim = shape.len();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
-        check_get_buffer_size(index, &dtype, buf)?;
+        check_get_buffer_size(index, dtype, buf)?;
 
         let read_shape = self.storage._spec().blocks_layout.preferred_read_shape();
         debug_assert!(read_shape.iter().all(|l| *l > 0));

@@ -4,7 +4,7 @@ use numpy::{PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::PyOverflowError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
-use zix_core::dtype::{f16, Complex, DtypeScalarKind, Dtyped};
+use zix_core::dtype::{f16, Complex, Dtype, DtypeScalarKind, Dtyped};
 use zix_core::storage::{Plain, Scalar as ScalarStorage};
 use zix_core::Array as ZixArray;
 
@@ -50,6 +50,29 @@ impl<'py> AsArray<'py> {
         };
         Bound::new(py, numpy.into_py_array(None)?)
     }
+
+    pub(crate) fn dtype(asarray: &AsArray) -> Dtype {
+        match asarray {
+            AsArray::Array(array) => array.get().arr.dtype().clone(),
+            AsArray::Numpy(array) => array.dtype().clone(),
+            AsArray::Scalar(scalar) => match scalar {
+                ScalarAsArray::I8(_) => i8::DTYPE,
+                ScalarAsArray::I16(_) => i16::DTYPE,
+                ScalarAsArray::I32(_) => i32::DTYPE,
+                ScalarAsArray::I64(_) => i64::DTYPE,
+                ScalarAsArray::U8(_) => u8::DTYPE,
+                ScalarAsArray::U16(_) => u16::DTYPE,
+                ScalarAsArray::U32(_) => u32::DTYPE,
+                ScalarAsArray::U64(_) => u64::DTYPE,
+                ScalarAsArray::F16(_) => f16::DTYPE,
+                ScalarAsArray::F32(_) => f32::DTYPE,
+                ScalarAsArray::F64(_) => f64::DTYPE,
+                ScalarAsArray::ComplexF32(_) => Complex::<f32>::DTYPE,
+                ScalarAsArray::ComplexF64(_) => Complex::<f64>::DTYPE,
+                ScalarAsArray::Bool(_) => bool::DTYPE,
+            },
+        }
+    }
 }
 
 pub(crate) fn asarray_impl<'py>(value: &Bound<'py, PyAny>) -> PyResult<AsArray<'py>> {
@@ -74,20 +97,236 @@ pub(crate) fn asarray2<'py>(
     let mut a = asarray_impl(a)?;
     let mut b = asarray_impl(b)?;
 
-    fn get_shape(asarray: &AsArray) -> Option<Vec<u64>> {
+    // returns None for scalars
+    fn extract_shape<'a>(asarray: &'a AsArray) -> Option<&'a [u64]> {
         match asarray {
-            AsArray::Array(array) => Some(array.get().arr.shape().to_vec()),
-            AsArray::Numpy(array) => Some(array.shape().to_vec()),
+            AsArray::Array(array) => Some(array.get().arr.shape()),
+            AsArray::Numpy(array) => Some(array.shape()),
             AsArray::Scalar(_) => None,
         }
     }
-    let shape = if let Some(a) = get_shape(&a) {
-        Some(a)
-    } else if let Some(b) = get_shape(&b) {
-        Some(b)
+    let shape = if let Some(a) = extract_shape(&a) {
+        Some(a.to_vec())
+    } else if let Some(b) = extract_shape(&b) {
+        Some(b.to_vec())
     } else {
         None
     };
+
+    fn extract_dtype(asarray: &AsArray) -> Option<DtypeScalarKind> {
+        match asarray {
+            AsArray::Array(array) => array.get().arr.dtype().try_to_scalar(),
+            AsArray::Numpy(array) => array.dtype().try_to_scalar(),
+            AsArray::Scalar(_) => Some(AsArray::dtype(asarray).try_to_scalar().unwrap()),
+        }
+    }
+
+    let operands_scalar_dtypes = extract_dtype(&a).zip(extract_dtype(&b));
+    let dtype = operands_scalar_dtypes.map(|(a_dtype, b_dtype)| promote(a_dtype, b_dtype));
+
+    fn asarray_cast_if_scalar<'py>(
+        value: &mut AsArray<'py>,
+        target_dtype: DtypeScalarKind,
+    ) -> Result<(), zix_core::Error> {
+        enum Scalar {
+            Bool(bool),
+            Unsigned(u64),
+            Signed(i64),
+            Float(f64),
+            Complex(Complex<f64>),
+        }
+        let AsArray::Scalar(scalar_array) = value else {
+            return Ok(());
+        };
+        let value = match scalar_array {
+            ScalarAsArray::Bool(array) => Scalar::Bool(*array.storage().data()),
+            ScalarAsArray::U8(array) => Scalar::Unsigned(*array.storage().data() as u64),
+            ScalarAsArray::U16(array) => Scalar::Unsigned(*array.storage().data() as u64),
+            ScalarAsArray::U32(array) => Scalar::Unsigned(*array.storage().data() as u64),
+            ScalarAsArray::U64(array) => Scalar::Unsigned(*array.storage().data()),
+            ScalarAsArray::I8(array) => Scalar::Signed(*array.storage().data() as i64),
+            ScalarAsArray::I16(array) => Scalar::Signed(*array.storage().data() as i64),
+            ScalarAsArray::I32(array) => Scalar::Signed(*array.storage().data() as i64),
+            ScalarAsArray::I64(array) => Scalar::Signed(*array.storage().data()),
+            ScalarAsArray::F16(array) => {
+                Scalar::Float(zix_core::ops::__private::cast(*array.storage().data()))
+            }
+            ScalarAsArray::F32(array) => Scalar::Float(*array.storage().data() as f64),
+            ScalarAsArray::F64(array) => Scalar::Float(*array.storage().data()),
+            ScalarAsArray::ComplexF32(array) => {
+                Scalar::Complex(zix_core::ops::__private::cast(*array.storage().data()))
+            }
+            ScalarAsArray::ComplexF64(array) => Scalar::Complex(*array.storage().data()),
+        };
+
+        macro_rules! do_cast {
+            ($scalar_array:ident, $value:ident, $ty:ty, $variant:ident) => {
+                *$scalar_array = ScalarAsArray::$variant(ZixArray::from_storage(
+                    ScalarStorage::new(zix_core::ops::__private::cast::<_, $ty>($value), &[])?,
+                ))
+            };
+        }
+        match (value, target_dtype) {
+            (Scalar::Bool(value), DtypeScalarKind::Bool) => {
+                do_cast!(scalar_array, value, bool, Bool)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::U8) => {
+                do_cast!(scalar_array, value, u8, U8)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::U16) => {
+                do_cast!(scalar_array, value, u16, U16)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::U32) => {
+                do_cast!(scalar_array, value, u32, U32)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::U64) => {
+                do_cast!(scalar_array, value, u64, U64)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::I8) => {
+                do_cast!(scalar_array, value, i8, I8)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::I16) => {
+                do_cast!(scalar_array, value, i16, I16)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::I32) => {
+                do_cast!(scalar_array, value, i32, I32)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::I64) => {
+                do_cast!(scalar_array, value, i64, I64)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::F16) => {
+                do_cast!(scalar_array, value, f16, F16)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::F32) => {
+                do_cast!(scalar_array, value, f32, F32)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::F64) => {
+                do_cast!(scalar_array, value, f64, F64)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::ComplexF32) => {
+                do_cast!(scalar_array, value, Complex<f32>, ComplexF32)
+            }
+            (Scalar::Bool(value), DtypeScalarKind::ComplexF64) => {
+                do_cast!(scalar_array, value, Complex<f64>, ComplexF64)
+            }
+            (Scalar::Unsigned(_), DtypeScalarKind::Bool) => {}
+            (Scalar::Unsigned(value), DtypeScalarKind::U8) => {
+                do_cast!(scalar_array, value, u8, U8)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::U16) => {
+                do_cast!(scalar_array, value, u16, U16)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::U32) => {
+                do_cast!(scalar_array, value, u32, U32)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::U64) => {
+                do_cast!(scalar_array, value, u64, U64)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::I8) => {
+                do_cast!(scalar_array, value, i8, I8)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::I16) => {
+                do_cast!(scalar_array, value, i16, I16)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::I32) => {
+                do_cast!(scalar_array, value, i32, I32)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::I64) => {
+                do_cast!(scalar_array, value, i64, I64)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::F16) => {
+                do_cast!(scalar_array, value, f16, F16)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::F32) => {
+                do_cast!(scalar_array, value, f32, F32)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::F64) => {
+                do_cast!(scalar_array, value, f64, F64)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::ComplexF32) => {
+                do_cast!(scalar_array, value, Complex<f32>, ComplexF32)
+            }
+            (Scalar::Unsigned(value), DtypeScalarKind::ComplexF64) => {
+                do_cast!(scalar_array, value, Complex<f64>, ComplexF64)
+            }
+            (Scalar::Signed(_), DtypeScalarKind::Bool) => {}
+            (Scalar::Signed(_), DtypeScalarKind::U8) => {}
+            (Scalar::Signed(_), DtypeScalarKind::U16) => {}
+            (Scalar::Signed(_), DtypeScalarKind::U32) => {}
+            (Scalar::Signed(_), DtypeScalarKind::U64) => {}
+            (Scalar::Signed(value), DtypeScalarKind::I8) => {
+                do_cast!(scalar_array, value, i8, I8)
+            }
+            (Scalar::Signed(value), DtypeScalarKind::I16) => {
+                do_cast!(scalar_array, value, i16, I16)
+            }
+            (Scalar::Signed(value), DtypeScalarKind::I32) => {
+                do_cast!(scalar_array, value, i32, I32)
+            }
+            (Scalar::Signed(value), DtypeScalarKind::I64) => {
+                do_cast!(scalar_array, value, i64, I64)
+            }
+            (Scalar::Signed(value), DtypeScalarKind::F16) => {
+                do_cast!(scalar_array, value, f16, F16)
+            }
+            (Scalar::Signed(value), DtypeScalarKind::F32) => {
+                do_cast!(scalar_array, value, f32, F32)
+            }
+            (Scalar::Signed(value), DtypeScalarKind::F64) => {
+                do_cast!(scalar_array, value, f64, F64)
+            }
+            (Scalar::Signed(value), DtypeScalarKind::ComplexF32) => {
+                do_cast!(scalar_array, value, Complex<f32>, ComplexF32)
+            }
+            (Scalar::Signed(value), DtypeScalarKind::ComplexF64) => {
+                do_cast!(scalar_array, value, Complex<f64>, ComplexF64)
+            }
+            (Scalar::Float(_), DtypeScalarKind::Bool) => {}
+            (Scalar::Float(_), DtypeScalarKind::U8) => {}
+            (Scalar::Float(_), DtypeScalarKind::U16) => {}
+            (Scalar::Float(_), DtypeScalarKind::U32) => {}
+            (Scalar::Float(_), DtypeScalarKind::U64) => {}
+            (Scalar::Float(_), DtypeScalarKind::I8) => {}
+            (Scalar::Float(_), DtypeScalarKind::I16) => {}
+            (Scalar::Float(_), DtypeScalarKind::I32) => {}
+            (Scalar::Float(_), DtypeScalarKind::I64) => {}
+            (Scalar::Float(value), DtypeScalarKind::F16) => {
+                do_cast!(scalar_array, value, f16, F16)
+            }
+            (Scalar::Float(value), DtypeScalarKind::F32) => {
+                do_cast!(scalar_array, value, f32, F32)
+            }
+            (Scalar::Float(value), DtypeScalarKind::F64) => {
+                do_cast!(scalar_array, value, f64, F64)
+            }
+            (Scalar::Float(value), DtypeScalarKind::ComplexF32) => {
+                do_cast!(scalar_array, value, Complex<f32>, ComplexF32)
+            }
+            (Scalar::Float(value), DtypeScalarKind::ComplexF64) => {
+                do_cast!(scalar_array, value, Complex<f64>, ComplexF64)
+            }
+            (Scalar::Complex(_), DtypeScalarKind::Bool) => {}
+            (Scalar::Complex(_), DtypeScalarKind::I8) => {}
+            (Scalar::Complex(_), DtypeScalarKind::I16) => {}
+            (Scalar::Complex(_), DtypeScalarKind::I32) => {}
+            (Scalar::Complex(_), DtypeScalarKind::I64) => {}
+            (Scalar::Complex(_), DtypeScalarKind::U8) => {}
+            (Scalar::Complex(_), DtypeScalarKind::U16) => {}
+            (Scalar::Complex(_), DtypeScalarKind::U32) => {}
+            (Scalar::Complex(_), DtypeScalarKind::U64) => {}
+            (Scalar::Complex(_), DtypeScalarKind::F16) => {}
+            (Scalar::Complex(_), DtypeScalarKind::F32) => {}
+            (Scalar::Complex(_), DtypeScalarKind::F64) => {}
+            (Scalar::Complex(value), DtypeScalarKind::ComplexF32) => {
+                do_cast!(scalar_array, value, Complex<f32>, ComplexF32)
+            }
+            (Scalar::Complex(value), DtypeScalarKind::ComplexF64) => {
+                do_cast!(scalar_array, value, Complex<f64>, ComplexF64)
+            }
+        }
+
+        Ok(())
+    }
 
     fn asarray_broadcast_if_scalar<'py>(
         value: &mut AsArray<'py>,
@@ -183,6 +422,11 @@ pub(crate) fn asarray2<'py>(
             _ => {}
         };
         Ok(())
+    }
+
+    if let Some(dtype) = dtype {
+        asarray_cast_if_scalar(&mut a, dtype).into_py_result()?;
+        asarray_cast_if_scalar(&mut b, dtype).into_py_result()?;
     }
 
     if let Some(shape) = shape {
@@ -359,6 +603,46 @@ pub(crate) fn any_to_core_array<'py>(
 ) -> PyResult<zix_core::Array<DynStorage>> {
     Ok(asarray(value)?.get().to_core_array())
 }
+
+fn promote(a: DtypeScalarKind, b: DtypeScalarKind) -> DtypeScalarKind {
+    #[derive(PartialEq, Eq, PartialOrd, Ord)]
+    enum Rank {
+        Bool = 0,
+        UnsignedInteger = 1,
+        SignedInteger = 2,
+        Float = 3,
+        Complex = 4,
+    }
+    let rank = |kind: DtypeScalarKind| match kind {
+        _ if kind.is_bool() => Rank::Bool,
+        _ if kind.is_unsigned_integer() => Rank::UnsignedInteger,
+        _ if kind.is_integer() => Rank::SignedInteger,
+        _ if kind.is_float() => Rank::Float,
+        _ if kind.is_complex() => Rank::Complex,
+        _ => unreachable!(),
+    };
+    match (
+        std::cmp::max(rank(a), rank(b)),
+        std::cmp::max(a.alignment().as_usize(), b.alignment().as_usize()),
+    ) {
+        (Rank::SignedInteger, 1) => DtypeScalarKind::I8,
+        (Rank::SignedInteger, 2) => DtypeScalarKind::I16,
+        (Rank::SignedInteger, 4) => DtypeScalarKind::I32,
+        (Rank::SignedInteger, 8) => DtypeScalarKind::I64,
+        (Rank::UnsignedInteger, 1) => DtypeScalarKind::U8,
+        (Rank::UnsignedInteger, 2) => DtypeScalarKind::U16,
+        (Rank::UnsignedInteger, 4) => DtypeScalarKind::U32,
+        (Rank::UnsignedInteger, 8) => DtypeScalarKind::U64,
+        (Rank::Float, 2) => DtypeScalarKind::F16,
+        (Rank::Float, 4) => DtypeScalarKind::F32,
+        (Rank::Float, 8) => DtypeScalarKind::F64,
+        (Rank::Complex, 4) => DtypeScalarKind::ComplexF32,
+        (Rank::Complex, 8) => DtypeScalarKind::ComplexF64,
+        (Rank::Bool, 1) => DtypeScalarKind::Bool,
+        _ => unreachable!(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::{array, Array0, ArrayD, IxDyn};

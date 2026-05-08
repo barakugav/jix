@@ -241,10 +241,11 @@ macro_rules! define_op1_kernel {
                 macro_rules! apply_loop_impl {
                     ($input_type2:ty, $output_type2:ty) => {{
                         unsafe {
-                            while let Some(src) = data.read_bulk::<$input_type2, { crate::ops::common::BULK }>() {
-                                let mut dst: [std::mem::MaybeUninit<$output_type2>; crate::ops::common::BULK]
-                                    = std::mem::transmute(std::mem::MaybeUninit::<[$output_type2; crate::ops::common::BULK]>::uninit());
-                                for i in 0..crate::ops::common::BULK {
+                            use crate::ops::common::BulkInfo;
+                            while let Some(src) = data.read_bulk::<$input_type2, { <$input_type2>::BULK }>() {
+                                let mut dst: [std::mem::MaybeUninit<$output_type2>; <$input_type2>::BULK]
+                                    = std::mem::transmute(std::mem::MaybeUninit::<[$output_type2; <$input_type2>::BULK]>::uninit());
+                                for i in 0..<$input_type2>::BULK {
                                     dst[i].write({
                                         let $arg = src[i];
                                         $body
@@ -288,7 +289,11 @@ macro_rules! define_op1_kernel {
                     },)*
                     _ => {}
                 }
-                crate::error::bail!(UnsupportedDtype, "op not supported for dtype {input_dtype:#?}");
+                crate::error::bail!(
+                    UnsupportedDtype,
+                    "Op1<{}> not supported for dtype {input_dtype:#?}",
+                    stringify!($NameKernel)
+                );
             }
 
             fn output_dtype(&self, input_dtype: &crate::dtype::Dtype) -> crate::error::Result<crate::dtype::Dtype> {
@@ -300,7 +305,11 @@ macro_rules! define_op1_kernel {
                     _ => {},
 
                 };
-                crate::error::bail!(UnsupportedDtype, "op not supported for dtype {input_dtype:#?}");
+                crate::error::bail!(
+                    UnsupportedDtype,
+                    "Op1<{}> not supported for dtype {input_dtype:#?}",
+                    stringify!($NameKernel)
+                );
             }
         }
     };
@@ -979,9 +988,14 @@ pub(crate) mod tests {
     test_op1!(floor, |a| a.floor(), [f32, f64], op_safe_strategy);
     test_op1!(ceil, |a| a.ceil(), [f32, f64], op_safe_strategy);
     test_op1!(round, |a| a.round(), [f32, f64], op_safe_strategy);
-    test_op1!(sqrt, |a| a.sqrt(), [f32, f64], op_safe_strategy);
+    test_op1!(
+        sqrt,
+        |a| a.sqrt(),
+        [f32, f64],
+        op_safe_non_negative_strategy
+    );
     test_op1!(exp, |a| a.exp(), [f32, f64], op_safe_strategy);
-    test_op1!(ln, |a| a.ln(), [f32, f64], op_safe_strategy);
+    test_op1!(ln, |a| a.ln(), [f32, f64], op_safe_non_negative_strategy);
     test_op1!(sin, |a| a.sin(), [f32, f64], op_safe_strategy);
     test_op1!(cos, |a| a.cos(), [f32, f64], op_safe_strategy);
     test_op1!(tan, |a| a.tan(), [f32, f64], op_safe_strategy);

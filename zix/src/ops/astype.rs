@@ -267,7 +267,8 @@ where
     }
 }
 
-pub(crate) fn cast<S, D>(value: S) -> D
+#[doc(hidden)]
+pub fn cast<S, D>(value: S) -> D
 where
     S: Cast<D>,
 {
@@ -279,7 +280,8 @@ where
 {
     value.cast()
 }
-pub(crate) trait Cast<D> {
+#[doc(hidden)]
+pub trait Cast<D> {
     fn cast(self) -> D;
 }
 

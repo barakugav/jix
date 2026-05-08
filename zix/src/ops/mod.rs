@@ -53,7 +53,9 @@ mod into_compact;
 pub use into_compact::*;
 
 mod astype;
-pub use astype::*;
+#[allow(unused_imports)]
+pub(crate) use astype::cast;
+pub use astype::AsType;
 
 mod shape_ops;
 pub use shape_ops::*;
@@ -86,3 +88,8 @@ mod sub_dtype;
 pub use sub_dtype::*;
 
 mod common;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use super::astype::{cast, Cast};
+}

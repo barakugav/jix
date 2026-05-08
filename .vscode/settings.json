@@ -6,6 +6,9 @@
         "zix-python/Cargo.toml"
     ],
     "rust-analyzer.cargo.features": "all",
+    "python.analysis.extraPaths": [
+        "zix-python/python/tests/"
+    ],
     "cSpell.words": [
         "arange",
         "argmax",

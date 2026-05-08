@@ -116,7 +116,7 @@ impl<Op, S1, S2> Op2<Op, S1, S2> {
         ensure!(
             a.shape() == b.shape(),
             InvalidArgument,
-            "shape mismatch between a {:?} and b {:?} in Op2",
+            "Op2 shape mismatch between `a` {:?} and `b` {:?}",
             a.shape(),
             b.shape()
         );
@@ -313,10 +313,11 @@ macro_rules! define_op2_kernel {
                 macro_rules! apply_loop_impl {
                     ($input_type2:ty, $output_type2:ty) => {{
                         unsafe {
-                            while let Some((src_a, src_b)) = data.read_bulk::<$input_type2, $input_type2, { crate::ops::common::BULK }>() {
-                                let mut dst: [std::mem::MaybeUninit<$output_type2>; crate::ops::common::BULK]
-                                    = std::mem::transmute(std::mem::MaybeUninit::<[$output_type2; crate::ops::common::BULK]>::uninit());
-                                for i in 0..crate::ops::common::BULK {
+                            use crate::ops::common::BulkInfo;
+                            while let Some((src_a, src_b)) = data.read_bulk::<$input_type2, $input_type2, { <$input_type2>::BULK }>() {
+                                let mut dst: [std::mem::MaybeUninit<$output_type2>; <$input_type2>::BULK]
+                                    = std::mem::transmute(std::mem::MaybeUninit::<[$output_type2; <$input_type2>::BULK]>::uninit());
+                                for i in 0..<$input_type2>::BULK {
                                     dst[i].write({
                                         let $a = src_a[i];
                                         let $b = src_b[i];
@@ -366,7 +367,11 @@ macro_rules! define_op2_kernel {
                     },)*
                     _ => {}
                 }
-                crate::error::bail!(UnsupportedDtype, "op not supported for dtype {input_dtype:#?}");
+                crate::error::bail!(
+                    UnsupportedDtype,
+                    "Op2<{}> not supported for dtype {input_dtype:#?}",
+                    stringify!($NameKernel)
+                );
             }
 
             fn output_dtype(
@@ -374,7 +379,12 @@ macro_rules! define_op2_kernel {
                 input_dtypes: (&crate::dtype::Dtype, &crate::dtype::Dtype),
             ) -> crate::error::Result<crate::dtype::Dtype> {
                 let (a_dtype, b_dtype) = input_dtypes;
-                crate::error::ensure!(a_dtype == b_dtype, UnsupportedDtype, "dtype mismatch");
+                crate::error::ensure!(
+                    a_dtype == b_dtype,
+                    UnsupportedDtype,
+                    "Op2<{}> dtype mismatch: `a` has dtype {a_dtype:#?} but `b` has dtype {b_dtype:#?}",
+                    stringify!($NameKernel)
+                );
 
                 let input_dtype = a_dtype;
 
@@ -386,7 +396,11 @@ macro_rules! define_op2_kernel {
                     _ => {},
 
                 };
-                crate::error::bail!(UnsupportedDtype, "op not supported for dtype {input_dtype:#?}");
+                crate::error::bail!(
+                    UnsupportedDtype,
+                    "Op2<{}> not supported for dtype {input_dtype:#?}",
+                    stringify!($NameKernel)
+                );
             }
         }
     };
@@ -656,6 +670,7 @@ pub(crate) mod tests {
     test_op2!(
         sub,
         |a, b| a - b,
+        // TODO: unsigned ints
         [i8, i16, i32, i64, f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]
@@ -677,7 +692,7 @@ pub(crate) mod tests {
         div,
         |a, b| a / b,
         [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
-        op_safe_strategy,
+        op_safe_non_zero_strategy,
         #[cfg(feature = "half")]
         [f16],
         #[cfg(feature = "num-complex")]
