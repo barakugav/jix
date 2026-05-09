@@ -16,6 +16,7 @@ from tests_util import (
     complexes,
     floats,
     ints,
+    op_safe_non_zero_element_strategy,
     uints,
 )
 
@@ -132,7 +133,9 @@ def test_subtract_custom_inputs():
 def test_multiply(dtype: np.dtype, data: DataObject):
     (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype), label="arrays")
     result = za * zb
-    assert_array_matches(result, np_a * np_b, data=data)
+    # Complex multiplication of large values can differ by a few ULP across implementations.
+    rtol = 1e-5 if np.issubdtype(dtype, np.complexfloating) else 0.0
+    assert_array_matches(result, np_a * np_b, data=data, rtol=rtol)
 
 
 def test_multiply_custom_inputs():
@@ -174,10 +177,19 @@ def test_multiply_custom_inputs():
 @pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
 @given(st.data())
 def test_divide(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype), label="arrays")
+    # Use non-zero strategy for both operands to avoid integer division-by-zero panics.
+    # Mirrors Rust's test_op2!(div, ..., op_safe_non_zero_strategy).
+    nz = op_safe_non_zero_element_strategy(dtype)
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_strategy(dtype, element_st=nz), label="arrays"
+    )
     result = za / zb
-    # numpy / promotes integers to float; use // (floor div == truncating for positive values)
-    expected = np_a // np_b if np.issubdtype(dtype, np.integer) else np_a / np_b
+    # zix integer division truncates toward zero (Rust semantics); numpy // is floor division.
+    # Cast through float64 and back to get truncation-toward-zero for all signed/unsigned combos.
+    if np.issubdtype(dtype, np.integer):
+        expected = (np_a.astype(np.float64) / np_b.astype(np.float64)).astype(dtype)
+    else:
+        expected = np_a / np_b
     # Complex division algorithms differ slightly between zix (Rust) and numpy;
     # allow a few ULP of tolerance. Float32 eps ~1.2e-7, float64 eps ~2.2e-16.
     rtol = 1e-5 if np.issubdtype(dtype, np.complexfloating) else 0.0

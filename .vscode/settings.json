@@ -31,6 +31,7 @@
         "pyfunction",
         "pymethods",
         "pyobject",
+        "rtol",
         "seekable",
         "strided",
         "unsqueeze"
