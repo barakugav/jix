@@ -1,5 +1,6 @@
 mod common;
-use common::{define_op1, define_op2};
+use common::{define_op1, define_op2, promote};
+pub(crate) use common::{Operand, Scalar};
 
 mod as_array;
 pub use as_array::*;

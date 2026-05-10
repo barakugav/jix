@@ -14,7 +14,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
-use crate::ops::NumpyAsArray;
+use crate::ops::Operand;
 use crate::storage::DynStorage;
 use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence, OrKwargs};
 use crate::ArrayParams;
@@ -1030,42 +1030,22 @@ pub fn compact(
     let py = array.py();
     let params = ArrayParams::resolve(py, params)?;
 
-    // already a zix array
-    if let Ok(array) = array.cast::<Array>() {
-        let mut array = array.clone();
-        if let Some(dtype) = dtype {
-            array = crate::ops::astype(&array, dtype)?;
-        }
-        let array = &array.get().arr;
-        let array = py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?;
-        return Ok(Array::from_core_storage(array.into_storage()));
-    }
+    let array = Operand::from_any(array)?;
 
-    // convert to numpy array
-    let py = array.py();
-    let numpy_asarray = numpy::get_array_module(py)?.getattr("asarray")?;
-    let array = numpy_asarray.call1((array, dtype))?;
-    let array = array.cast::<PyUntypedArray>()?;
-    let array = NumpyAsArray::new(array)?;
-
-    let array = py.detach({
-        || {
-            let array = match array {
-                NumpyAsArray::Numpy(array) => {
-                    let context = array.read_ctx();
-                    array.copy_with(params, &context)
-                }
-                // scalar
-                _ => {
-                    let array = array.into_py_array(None)?;
-                    let context = array.arr.read_ctx();
-                    array.arr.copy_with(params, &context)
-                }
-            };
-            array.into_py_result()
+    let array = match array {
+        Operand::Numpy(array) => {
+            py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?
         }
-    })?;
-    return Ok(Array::from_core_storage(array.into_storage()));
+        _ => {
+            let mut array = array.into_py_array(py)?;
+            if let Some(dtype) = dtype {
+                array = crate::ops::astype(&array, dtype)?;
+            }
+            let array = &array.get().arr;
+            py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?
+        }
+    };
+    Ok(Array::from_core_storage(array.into_storage()))
 }
 
 #[cfg(test)]
