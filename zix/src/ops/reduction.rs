@@ -861,6 +861,7 @@ define_reduction_op!(
         [u8, u16, u32, u64] => f64,
         [f16, f32, f64] => f64,
         [(Complex<f32>), (Complex<f64>)] => f64,
+        [bool] => f64,
     }
 );
 define_reduction_op!(
@@ -910,6 +911,7 @@ define_reduction_op!(
         [u8, u16, u32, u64] => f64,
         [f16, f32, f64] => f64,
         [(Complex<f32>), (Complex<f64>)] => f64,
+        [bool] => f64,
     }
 );
 fn variance_impl<T>(items: impl Iterator<Item = T>, ddof: f64) -> f64

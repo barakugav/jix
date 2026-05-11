@@ -63,11 +63,20 @@ def any_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
 def logical_op_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     """any_strategy plus extra zero/default. Mirrors ScalarStrategy::logical_op_strategy()."""
     _zero = {
-        np.int8: 0, np.int16: 0, np.int32: 0, np.int64: 0,
-        np.uint8: 0, np.uint16: 0, np.uint32: 0, np.uint64: 0,
-        np.float16: 0.0, np.float32: 0.0, np.float64: 0.0,
+        np.int8: 0,
+        np.int16: 0,
+        np.int32: 0,
+        np.int64: 0,
+        np.uint8: 0,
+        np.uint16: 0,
+        np.uint32: 0,
+        np.uint64: 0,
+        np.float16: 0.0,
+        np.float32: 0.0,
+        np.float64: 0.0,
         np.bool_: False,
-        np.complex64: complex(0.0, 0.0), np.complex128: complex(0.0, 0.0),
+        np.complex64: complex(0.0, 0.0),
+        np.complex128: complex(0.0, 0.0),
     }[dtype]
     return st.one_of(any_element_strategy(dtype), st.just(_zero))
 
@@ -77,7 +86,13 @@ def comparable_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     Mirrors ScalarStrategy::comparable_strategy()."""
     _i = [0, 1, 2]
     _f = [0.0, 1.0, 2.4, float("nan")]
-    _c = [complex(0, 0), complex(1, 0), complex(0, 1), complex(float("nan"), 0), complex(0, float("nan"))]
+    _c = [
+        complex(0, 0),
+        complex(1, 0),
+        complex(0, 1),
+        complex(float("nan"), 0),
+        complex(0, float("nan")),
+    ]
     return {
         np.int8: st.sampled_from(_i),
         np.int16: st.sampled_from(_i),
@@ -142,6 +157,7 @@ def op_safe_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
         np.float64: _f,
         np.complex64: st.tuples(_f, _f).map(lambda x: complex(x[0], x[1])),
         np.complex128: st.tuples(_f, _f).map(lambda x: complex(x[0], x[1])),
+        np.bool_: st.booleans(),
     }[dtype]
 
 
