@@ -77,6 +77,9 @@ mod zix {
 
     #[pymodule_export]
     use crate::ops::{all, any, argmax, argmin, max, mean, min, product, std, sum, var};
+
+    #[pymodule_export]
+    use crate::ops::dtype_sub_field;
 }
 
 #[doc(hidden)]

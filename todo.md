@@ -14,7 +14,11 @@
 - array::from_fn
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
 - cast types automatically in python bindings
-- support string index in python array, accessing sub field by name
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
 - consider removing EncoderParams and DecoderParams, use ArrayParams for everything
+- modify all ops to have `new() -> Array<Self>` and `new_storage() -> Self`
+- SliceArg::OutDim
+- is_empty()
+- squeeze()
+- modify insert_axes and remove_axes to operate on a single dimension

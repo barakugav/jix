@@ -45,7 +45,6 @@ use crate::{Array, ArrayParams};
 /// # After a shape-changing op, pin the block shape explicitly
 /// c = zix.copy(a.T, params={"block_shape": [2, 1]})
 /// ```
-
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (

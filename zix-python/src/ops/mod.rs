@@ -38,6 +38,9 @@ pub use reduction::*;
 mod copy_op;
 pub use copy_op::*;
 
+mod sub_dtype;
+pub use sub_dtype::*;
+
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 /// Casts each element of `array` to a new dtype.
