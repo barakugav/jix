@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
@@ -27,14 +27,13 @@ pub(crate) struct ReductionOp<Op, S> {
 
     array: Array<S>,
     is_reduced: DimArray<bool>,
-    keepdims: bool,
 
     dtype: Dtype,
     shape: DimArray<u64>,
     blocks_layout: BlocksLayout,
 }
 impl<Op, S> ReductionOp<Op, S> {
-    pub(crate) fn new(op: Op, array: Array<S>, axes: &[usize], keepdims: bool) -> Result<Self>
+    pub(crate) fn new(op: Op, array: Array<S>, axes: &[usize]) -> Result<Self>
     where
         Op: ReductionOpKernel,
         S: ArrayStorage,
@@ -71,41 +70,21 @@ impl<Op, S> ReductionOp<Op, S> {
             .shape()
             .iter()
             .enumerate()
-            .filter_map(|(i, &s)| {
-                if is_reduced[i] {
-                    keepdims.then_some(1)
-                } else {
-                    Some(s)
-                }
-            })
+            .filter_map(|(dim, &s)| is_reduced[dim].not().then_some(s))
             .collect::<DimArray<_>>();
 
         let mut b_layout = array.blocks_layout().clone();
         b_layout.block_shape_hint = (0..input_ndim)
-            .filter_map(|d| {
-                if is_reduced[d] {
-                    keepdims.then_some(1)
-                } else {
-                    Some(b_layout.block_shape_hint[d])
-                }
-            })
+            .filter_map(|d| is_reduced[d].not().then_some(b_layout.block_shape_hint[d]))
             .collect();
         b_layout.block_shape_tag = (0..input_ndim)
-            .filter_map(|d| {
-                if is_reduced[d] {
-                    keepdims.then_some(crate::storage::BlockShapeTag::Any)
-                } else {
-                    Some(b_layout.block_shape_tag[d])
-                }
-            })
+            .filter_map(|d| is_reduced[d].not().then_some(b_layout.block_shape_tag[d]))
             .collect();
         b_layout.preferred_read_shape = (0..input_ndim)
             .filter_map(|d| {
-                if is_reduced[d] {
-                    keepdims.then_some(1)
-                } else {
-                    Some(b_layout.preferred_read_shape[d])
-                }
+                is_reduced[d]
+                    .not()
+                    .then_some(b_layout.preferred_read_shape[d])
             })
             .collect();
 
@@ -116,7 +95,6 @@ impl<Op, S> ReductionOp<Op, S> {
             blocks_layout: b_layout,
             array,
             is_reduced,
-            keepdims,
         })
     }
 }
@@ -134,18 +112,10 @@ where
 
         // Build inner_index: reduced dims span the full original range,
         // non-reduced dims forward the requested output range.
-        //
-        // With keepdims=false the output has fewer dims than the input, so we
-        // use `out_dim` to step through `index`.  With keepdims=true the output
-        // has the same number of dims (reduced ones are size-1), so `index[d]`
-        // maps directly to input dim `d`.
         let mut out_dim = 0usize;
         let inner_index = (0..orig_ndim)
             .map(|in_d| {
                 if self.is_reduced[in_d] {
-                    if self.keepdims {
-                        out_dim += 1; // skip the size-1 keepdim slot
-                    }
                     // TODO: we could read it in chunks
                     0..orig_shape[in_d]
                 } else {
@@ -182,20 +152,11 @@ where
         let inner_strides = default_strides(&inner_read_shape, src_dtype.itemsize() as usize);
         let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as usize);
 
-        // Strides used by out_iter to advance the `base_ptr` into tmp_buf.
-        // For reduced dims the outer loop visits exactly one position (size 1
-        // when keepdims=true, or the dim is absent when keepdims=false), so
-        // their stride contribution to base_ptr is 0.
+        // Strides into tmp_buf for the output iterator: reduced dims are absent.
         let tmp_buf_strides = inner_strides
             .iter()
             .zip(&self.is_reduced)
-            .filter_map(|(&s, &reduced)| {
-                if reduced {
-                    self.keepdims.then_some(0)
-                } else {
-                    Some(s)
-                }
-            })
+            .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
             .collect::<DimArray<_>>();
 
         let out_iter = NdIter::new(
@@ -258,12 +219,12 @@ macro_rules! define_reduction_op {
             /// Creates a new view storage applying the operation by reducing the specified axis.
             ///
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
-            pub fn new(array: crate::Array<S>, axis: usize, keepdims: bool $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
+            pub fn new(array: crate::Array<S>, axis: usize $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
             {
                 let kernel = $NameKernel { $($extra_arg),* };
-                Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, &[axis], keepdims)?))
+                Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, &[axis])?))
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
@@ -290,12 +251,12 @@ macro_rules! define_reduction_op {
             /// Creates a new view storage applying the operation by reducing the specified axes.
             ///
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
-            pub fn new(array: crate::Array<S>, axes: &[usize], keepdims: bool $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
+            pub fn new(array: crate::Array<S>, axes: &[usize] $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
             {
                 let kernel = $NameKernel { $($extra_arg),* };
-                Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, axes, keepdims)?))
+                Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, axes)?))
             }
         }
         crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
@@ -467,18 +428,13 @@ define_reduction_op!(
     ///
     /// // Reduce all axes -> scalar
     /// let scalar = Array::compact_array(&nd)?
-    ///     .max(&[0, 1], false).to_ndarray::<i32>()?;
+    ///     .max(&[0, 1]).to_ndarray::<i32>()?;
     /// assert_eq!(scalar[[]], 6);
     ///
-    /// // Reduce axis 0, keepdims=false -> shape [3]
+    /// // Reduce axis 0 -> shape [3]
     /// let col_max = Array::compact_array(&nd)?
-    ///     .max(&[0], false).to_ndarray::<i32>()?;
+    ///     .max(&[0]).to_ndarray::<i32>()?;
     /// assert_eq!(col_max.as_slice().unwrap(), &[4, 5, 6]);
-    ///
-    /// // Reduce axis 0, keepdims=true -> shape [1, 3]
-    /// let col_max_k = Array::compact_array(&nd)?
-    ///     .max(&[0], true).to_ndarray::<i32>()?;
-    /// assert_eq!(col_max_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     Max,
@@ -515,18 +471,13 @@ define_reduction_op!(
     ///
     /// // Reduce all axes -> scalar
     /// let scalar = Array::compact_array(&nd)?
-    ///     .min(&[0, 1], false).to_ndarray::<i32>()?;
+    ///     .min(&[0, 1]).to_ndarray::<i32>()?;
     /// assert_eq!(scalar[[]], 1);
     ///
-    /// // Reduce axis 0, keepdims=false -> shape [3]
+    /// // Reduce axis 0 -> shape [3]
     /// let col_min = Array::compact_array(&nd)?
-    ///     .min(&[0], false).to_ndarray::<i32>()?;
+    ///     .min(&[0]).to_ndarray::<i32>()?;
     /// assert_eq!(col_min.as_slice().unwrap(), &[1, 2, 3]);
-    ///
-    /// // Reduce axis 0, keepdims=true -> shape [1, 3]
-    /// let col_min_k = Array::compact_array(&nd)?
-    ///     .min(&[0], true).to_ndarray::<i32>()?;
-    /// assert_eq!(col_min_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     Min,
@@ -561,20 +512,15 @@ define_reduction_op!(
     ///
     /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
     ///
-    /// // Index of max along axis 1 (per row), keepdims=false -> shape [2]
+    /// // Index of max along axis 1 (per row) -> shape [2]
     /// let idx = Array::compact_array(&nd)?
-    ///     .argmax(1, false).to_ndarray::<u64>()?;
+    ///     .argmax(1).to_ndarray::<u64>()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[1, 2]); // max of row 0 at col 1, row 1 at col 2
     ///
-    /// // Index of max along axis 0 (per column), keepdims=false -> shape [3]
+    /// // Index of max along axis 0 (per column) -> shape [3]
     /// let col_idx = Array::compact_array(&nd)?
-    ///     .argmax(0, false).to_ndarray::<u64>()?;
+    ///     .argmax(0).to_ndarray::<u64>()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[1, 0, 1]); // max of col 0 at row 1, col 1 at row 0, col 2 at row 1
-    ///
-    /// // keepdims=true -> shape [2, 1]
-    /// let idx_k = Array::compact_array(&nd)?
-    ///     .argmax(1, true).to_ndarray::<u64>()?;
-    /// assert_eq!(idx_k.shape(), &[2, 1]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     ArgMax,
@@ -616,20 +562,15 @@ define_reduction_op!(
     ///
     /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
     ///
-    /// // Index of min along axis 1 (per row), keepdims=false -> shape [2]
+    /// // Index of min along axis 1 (per row) -> shape [2]
     /// let idx = Array::compact_array(&nd)?
-    ///     .argmin(1, false).to_ndarray::<u64>()?;
+    ///     .argmin(1).to_ndarray::<u64>()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[0, 1]); // min of row 0 at col 0, row 1 at col 1
     ///
-    /// // Index of min along axis 0 (per column), keepdims=false -> shape [3]
+    /// // Index of min along axis 0 (per column) -> shape [3]
     /// let col_idx = Array::compact_array(&nd)?
-    ///     .argmin(0, false).to_ndarray::<u64>()?;
+    ///     .argmin(0).to_ndarray::<u64>()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[0, 1, 0]); // min of col 0 at row 0, col 1 at row 1, col 2 at row 0
-    ///
-    /// // keepdims=true -> shape [2, 1]
-    /// let idx_k = Array::compact_array(&nd)?
-    ///     .argmin(1, true).to_ndarray::<u64>()?;
-    /// assert_eq!(idx_k.shape(), &[2, 1]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     ArgMin,
@@ -677,18 +618,13 @@ define_reduction_op!(
     ///
     /// // Sum all elements -> i64
     /// let total = Array::compact_array(&nd)?
-    ///     .sum(&[0, 1], false).to_ndarray::<i64>()?;
+    ///     .sum(&[0, 1]).to_ndarray::<i64>()?;
     /// assert_eq!(total[[]], 21);
     ///
-    /// // Sum along axis 0, keepdims=false -> shape [3]
+    /// // Sum along axis 0 -> shape [3]
     /// let col_sums = Array::compact_array(&nd)?
-    ///     .sum(&[0], false).to_ndarray::<i64>()?;
+    ///     .sum(&[0]).to_ndarray::<i64>()?;
     /// assert_eq!(col_sums.as_slice().unwrap(), &[5, 7, 9]);
-    ///
-    /// // Sum along axis 1, keepdims=true -> shape [2, 1]
-    /// let row_sums = Array::compact_array(&nd)?
-    ///     .sum(&[1], true).to_ndarray::<i64>()?;
-    /// assert_eq!(row_sums.shape(), &[2, 1]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     Sum,
@@ -731,18 +667,13 @@ define_reduction_op!(
     ///
     /// // Product of all elements -> i64
     /// let total = Array::compact_array(&nd)?
-    ///     .product(&[0, 1], false).to_ndarray::<i64>()?;
+    ///     .product(&[0, 1]).to_ndarray::<i64>()?;
     /// assert_eq!(total[[]], 720);
     ///
-    /// // Product along axis 0, keepdims=false -> shape [3]
+    /// // Product along axis 0 -> shape [3]
     /// let col_products = Array::compact_array(&nd)?
-    ///     .product(&[0], false).to_ndarray::<i64>()?;
+    ///     .product(&[0]).to_ndarray::<i64>()?;
     /// assert_eq!(col_products.as_slice().unwrap(), &[4, 10, 18]);
-    ///
-    /// // Product along axis 1, keepdims=true -> shape [2, 1]
-    /// let row_products = Array::compact_array(&nd)?
-    ///     .product(&[1], true).to_ndarray::<i64>()?;
-    /// assert_eq!(row_products.shape(), &[2, 1]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     Product,
@@ -778,18 +709,13 @@ define_reduction_op!(
     ///
     /// // Mean of all elements -> f64
     /// let total = Array::compact_array(&nd)?
-    ///     .mean(&[0, 1], false).to_ndarray::<f64>()?;
+    ///     .mean(&[0, 1]).to_ndarray::<f64>()?;
     /// assert_eq!(total[[]], 3.5);
     ///
-    /// // Mean along axis 0, keepdims=false -> shape [3]
+    /// // Mean along axis 0 -> shape [3]
     /// let col_means = Array::compact_array(&nd)?
-    ///     .mean(&[0], false).to_ndarray::<f64>()?;
+    ///     .mean(&[0]).to_ndarray::<f64>()?;
     /// assert_eq!(col_means.as_slice().unwrap(), &[2.5, 3.5, 4.5]);
-    ///
-    /// // Mean along axis 0, keepdims=true -> shape [1, 3]
-    /// let col_means_k = Array::compact_array(&nd)?
-    ///     .mean(&[0], true).to_ndarray::<f64>()?;
-    /// assert_eq!(col_means_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     Mean,
@@ -838,18 +764,13 @@ define_reduction_op!(
     ///
     /// // Population variance (ddof=0) of all elements -> f64
     /// let var_all = Array::compact_array(&nd)?
-    ///     .var(&[0, 1], false, 0.0).to_ndarray::<f64>()?;
+    ///     .var(&[0, 1], 0.0).to_ndarray::<f64>()?;
     /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
     ///
-    /// // Sample variance (ddof=1) along axis 0, keepdims=false -> shape [3]
+    /// // Sample variance (ddof=1) along axis 0 -> shape [3]
     /// let col_vars = Array::compact_array(&nd)?
-    ///     .var(&[0], false, 1.0).to_ndarray::<f64>()?;
+    ///     .var(&[0], 1.0).to_ndarray::<f64>()?;
     /// assert_eq!(col_vars.as_slice().unwrap(), &[4.5, 4.5, 4.5]);
-    ///
-    /// // Population variance along axis 0, keepdims=true -> shape [1, 3]
-    /// let col_vars_k = Array::compact_array(&nd)?
-    ///     .var(&[0], true, 0.0).to_ndarray::<f64>()?;
-    /// assert_eq!(col_vars_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     Variance,
@@ -888,18 +809,13 @@ define_reduction_op!(
     ///
     /// // Population std (ddof=0) of all elements -> f64
     /// let std_all = Array::compact_array(&nd)?
-    ///     .std(&[0, 1], false, 0.0).to_ndarray::<f64>()?;
+    ///     .std(&[0, 1], 0.0).to_ndarray::<f64>()?;
     /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
     ///
-    /// // Sample std (ddof=1) along axis 0, keepdims=false -> shape [3]
+    /// // Sample std (ddof=1) along axis 0 -> shape [3]
     /// let col_stds = Array::compact_array(&nd)?
-    ///     .std(&[0], false, 1.0).to_ndarray::<f64>()?;
+    ///     .std(&[0], 1.0).to_ndarray::<f64>()?;
     /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
-    ///
-    /// // Population std along axis 0, keepdims=true -> shape [1, 3]
-    /// let col_stds_k = Array::compact_array(&nd)?
-    ///     .std(&[0], true, 0.0).to_ndarray::<f64>()?;
-    /// assert_eq!(col_stds_k.shape(), &[1, 3]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     StandardDeviation,
@@ -1009,18 +925,13 @@ define_reduction_op!(
     ///
     /// // All elements truthy? -> false (contains a zero)
     /// let all_true = Array::compact_array(&nd)?
-    ///     .all(&[0, 1], false).to_ndarray::<bool>()?;
+    ///     .all(&[0, 1]).to_ndarray::<bool>()?;
     /// assert_eq!(all_true[[]], false);
     ///
-    /// // All truthy along axis 0, keepdims=false -> shape [3]
+    /// // All truthy along axis 0 -> shape [3]
     /// let col_all = Array::compact_array(&nd)?
-    ///     .all(&[0], false).to_ndarray::<bool>()?;
+    ///     .all(&[0]).to_ndarray::<bool>()?;
     /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
-    ///
-    /// // All truthy along axis 1, keepdims=true -> shape [2, 1]
-    /// let row_all = Array::compact_array(&nd)?
-    ///     .all(&[1], true).to_ndarray::<bool>()?;
-    /// assert_eq!(row_all.shape(), &[2, 1]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     All,
@@ -1057,18 +968,13 @@ define_reduction_op!(
     ///
     /// // Any element truthy? -> true
     /// let any_true = Array::compact_array(&nd)?
-    ///     .any(&[0, 1], false).to_ndarray::<bool>()?;
+    ///     .any(&[0, 1]).to_ndarray::<bool>()?;
     /// assert_eq!(any_true[[]], true);
     ///
-    /// // Any truthy along axis 0, keepdims=false -> shape [3]
+    /// // Any truthy along axis 0 -> shape [3]
     /// let col_any = Array::compact_array(&nd)?
-    ///     .any(&[0], false).to_ndarray::<bool>()?;
+    ///     .any(&[0]).to_ndarray::<bool>()?;
     /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
-    ///
-    /// // Any truthy along axis 1, keepdims=true -> shape [2, 1]
-    /// let row_any = Array::compact_array(&nd)?
-    ///     .any(&[1], true).to_ndarray::<bool>()?;
-    /// assert_eq!(row_any.shape(), &[2, 1]);
     /// # Ok::<(), zix::Error>(())
     /// ```
     Any,
@@ -1085,8 +991,8 @@ macro_rules! define_array_reduction_method {
     ($op:ident : $Name:ident, single_axis = true $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
         #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op(self, axis: usize, keepdims: bool $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
-            let op = $Name::new(self, axis, keepdims $($(, $extra_arg)*)?).unwrap();
+        pub fn $op(self, axis: usize $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
+            let op = $Name::new(self, axis $($(, $extra_arg)*)?).unwrap();
             crate::Array::from_storage(op)
         }
     };
@@ -1094,8 +1000,8 @@ macro_rules! define_array_reduction_method {
     ($op:ident : $Name:ident $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
         #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op(self, axes: &[usize], keepdims: bool $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
-            let op = $Name::new(self, axes, keepdims $($(, $extra_arg)*)?).unwrap();
+        pub fn $op(self, axes: &[usize] $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
+            let op = $Name::new(self, axes $($(, $extra_arg)*)?).unwrap();
             crate::Array::from_storage(op)
         }
     };
@@ -1179,7 +1085,7 @@ pub(crate) mod tests {
 
     pub(crate) fn carray_strategy_for_reduction<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, Vec<usize>, bool)>
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, Vec<usize>)>
     {
         let shape = reduction_shape_strategy();
         let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
@@ -1187,29 +1093,26 @@ pub(crate) mod tests {
             .prop_map(|(nd, za)| (nd, Rc::new(za)))
             .prop_flat_map(|(nd, za)| {
                 let axes = axes_strategy(nd.ndim());
-                let keepdims = proptest::bool::ANY;
-                (Just(nd), Just(za), axes, keepdims)
+                (Just(nd), Just(za), axes)
             })
     }
 
     pub(crate) fn carray_strategy_for_reduction_single_axis<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, usize, bool)>
-    {
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, usize)> {
         let shape = reduction_shape_strategy();
         let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
         array
             .prop_map(|(nd, za)| (nd, Rc::new(za)))
             .prop_flat_map(|(nd, za)| {
                 let axis = axis_strategy(nd.ndim());
-                let keepdims = proptest::bool::ANY;
-                (Just(nd), Just(za), axis, keepdims)
+                (Just(nd), Just(za), axis)
             })
     }
 
     pub(crate) fn carray_strategy_for_reduction_small<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, Vec<usize>, bool)>
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, Vec<usize>)>
     {
         let shape = prop::strategy::Union::new_weighted(vec![
             // 1D
@@ -1222,8 +1125,7 @@ pub(crate) mod tests {
             .prop_map(|(nd, za)| (nd, Rc::new(za)))
             .prop_flat_map(|(nd, za)| {
                 let axes = axes_strategy(nd.ndim());
-                let keepdims = proptest::bool::ANY;
-                (Just(nd), Just(za), axes, keepdims)
+                (Just(nd), Just(za), axes)
             })
     }
 
@@ -1238,13 +1140,13 @@ pub(crate) mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<$op_method _ $dtype>](
-                        (nd, za, axes, keepdims) in crate::ops::reduction::tests::carray_strategy_for_reduction::<$dtype>(
+                        (nd, za, axes) in crate::ops::reduction::tests::carray_strategy_for_reduction::<$dtype>(
                             <$dtype as crate::util::ScalarStrategy>::$strategy()
                         )
                     ) {
-                        let result = (*za).as_ref().$op_method(&axes, keepdims);
+                        let result = (*za).as_ref().$op_method(&axes);
                         let expected = crate::ops::reduction::tests::ndarray_reduce(
-                            &nd, &axes, keepdims,
+                            &nd, &axes,
                             |arr| {
                                 let $items = arr.iter().cloned();
                                 $body
@@ -1267,13 +1169,13 @@ pub(crate) mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<$op_method _ $dtype>](
-                        (nd, za, axes, keepdims) in crate::ops::reduction::tests::carray_strategy_for_reduction_small::<$dtype>(
+                        (nd, za, axes) in crate::ops::reduction::tests::carray_strategy_for_reduction_small::<$dtype>(
                             <$dtype as crate::util::ScalarStrategy>::$strategy()
                         )
                     ) {
-                        let result = (*za).as_ref().$op_method(&axes, keepdims);
+                        let result = (*za).as_ref().$op_method(&axes);
                         let expected = crate::ops::reduction::tests::ndarray_reduce(
-                            &nd, &axes, keepdims,
+                            &nd, &axes,
                             |arr| {
                                 let $items = arr.iter().cloned();
                                 $body
@@ -1296,13 +1198,13 @@ pub(crate) mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<$op_method _ $dtype>](
-                        (nd, za, axis, keepdims) in crate::ops::reduction::tests::carray_strategy_for_reduction_single_axis::<$dtype>(
+                        (nd, za, axis) in crate::ops::reduction::tests::carray_strategy_for_reduction_single_axis::<$dtype>(
                             <$dtype as crate::util::ScalarStrategy>::$strategy()
                         )
                     ) {
-                        let result = (*za).as_ref().$op_method(axis, keepdims);
+                        let result = (*za).as_ref().$op_method(axis);
                         let expected = crate::ops::reduction::tests::ndarray_reduce(
-                            &nd, &[axis], keepdims,
+                            &nd, &[axis],
                             |arr| {
                                 let $items = arr.iter().cloned();
                                 $body
@@ -1547,38 +1449,22 @@ pub(crate) mod tests {
     #[test]
     fn variance() {
         let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let var_all = a
-            .as_ref()
-            .var(&[0, 1], false, 0.0)
-            .to_ndarray::<f64>()
-            .unwrap();
+        let var_all = a.as_ref().var(&[0, 1], 0.0).to_ndarray::<f64>().unwrap();
         assert!((var_all[[]] - 2.9166).abs() < 0.001);
-        let var_col = a
-            .as_ref()
-            .var(&[0], false, 0.0)
-            .to_ndarray::<f64>()
-            .unwrap();
+        let var_col = a.as_ref().var(&[0], 0.0).to_ndarray::<f64>().unwrap();
         assert!((var_col[[0]] - 2.25).abs() < 0.001);
-        let var_row = a.as_ref().var(&[1], true, 0.0).to_ndarray::<f64>().unwrap();
-        assert!((var_row[[0, 0]] - 0.6666).abs() < 0.001);
+        let var_row = a.as_ref().var(&[1], 0.0).to_ndarray::<f64>().unwrap();
+        assert!((var_row[[0]] - 0.6666).abs() < 0.001);
     }
     #[test]
     fn std() {
         let a = Array::compact_array(&array![[7i32, 8, 9], [4, 5, 6]]).unwrap();
-        let std_all = a
-            .as_ref()
-            .std(&[0, 1], false, 0.0)
-            .to_ndarray::<f64>()
-            .unwrap();
+        let std_all = a.as_ref().std(&[0, 1], 0.0).to_ndarray::<f64>().unwrap();
         assert!((std_all[[]] - 1.7078).abs() < 0.001);
-        let std_col = a
-            .as_ref()
-            .std(&[0], false, 0.0)
-            .to_ndarray::<f64>()
-            .unwrap();
+        let std_col = a.as_ref().std(&[0], 0.0).to_ndarray::<f64>().unwrap();
         assert!((std_col[[0]] - 1.5).abs() < 0.001);
-        let std_row = a.as_ref().std(&[1], true, 0.0).to_ndarray::<f64>().unwrap();
-        assert!((std_row[[0, 0]] - 0.8164).abs() < 0.001);
+        let std_row = a.as_ref().std(&[1], 0.0).to_ndarray::<f64>().unwrap();
+        assert!((std_row[[0]] - 0.8164).abs() < 0.001);
     }
     test_reduction!(
         all,
@@ -1604,7 +1490,6 @@ pub(crate) mod tests {
     fn ndarray_reduce<'a, S, D, O>(
         array: &'a ndarray::ArrayBase<S, D>,
         axes: &[usize],
-        keepdims: bool,
         f: impl Fn(&ndarray::ArrayViewD<'a, S::Elem>) -> O,
     ) -> ndarray::ArrayD<O>
     where
@@ -1624,22 +1509,11 @@ pub(crate) mod tests {
             .map(|(_, &s)| s)
             .collect();
 
-        // Iterate over kept axes, each view spans the reduction axes -> f collapses it to scalar
         let values: Vec<O> = ndarray_reduction_iter(array, &axes)
             .map(|(_, view)| f(&view))
             .collect();
 
-        let mut result =
-            ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&out_shape), values).unwrap();
-        if keepdims {
-            // Insert singleton dimensions at the reduced axes
-            let mut final_shape = result.shape().to_vec();
-            for &ax in axes.iter() {
-                final_shape.insert(ax, 1);
-            }
-            result = result.into_shape_with_order(final_shape).unwrap();
-        }
-        result
+        ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&out_shape), values).unwrap()
     }
 
     /// Iterates over all index combinations of the **kept** axes (i.e. axes NOT in `axes`),
@@ -1870,7 +1744,7 @@ pub(crate) mod tests {
             fn reduce_sum_axis_0() {
                 // np.sum(a, axis=0) for shape [2, 3]
                 let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
-                let result = ndarray_reduce(&a, &[0], false, |v| v.iter().sum::<i32>());
+                let result = ndarray_reduce(&a, &[0], |v| v.iter().sum::<i32>());
 
                 assert_eq!(result.shape(), &[3]);
                 assert_eq!(result, array![5, 7, 9].into_dyn());
@@ -1880,7 +1754,7 @@ pub(crate) mod tests {
             fn reduce_sum_axis_1() {
                 // np.sum(a, axis=1) for shape [2, 3]
                 let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
-                let result = ndarray_reduce(&a, &[1], false, |v| v.iter().sum::<i32>());
+                let result = ndarray_reduce(&a, &[1], |v| v.iter().sum::<i32>());
 
                 assert_eq!(result.shape(), &[2]);
                 assert_eq!(result, array![6, 15].into_dyn());
@@ -1891,7 +1765,7 @@ pub(crate) mod tests {
                 // np.sum(a, axis=(0, 2)) for shape [2, 3, 4]
                 let a: ArrayD<i32> =
                     Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
-                let result = ndarray_reduce(&a, &[0, 2], false, |v| v.iter().sum::<i32>());
+                let result = ndarray_reduce(&a, &[0, 2], |v| v.iter().sum::<i32>());
 
                 assert_eq!(result.shape(), &[3]);
                 // axis 1 index 0: sum of a[:, 0, :] = sum(0..4) + sum(12..16) = 6 + 54 = 60
@@ -1905,7 +1779,7 @@ pub(crate) mod tests {
                 // np.sum(a) - reduce everything
                 let a: ArrayBase<OwnedRepr<i32>, Dim<IxDynImpl>, i32> =
                     Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
-                let result = ndarray_reduce(&a, &[0, 1], false, |v| v.iter().sum::<i32>());
+                let result = ndarray_reduce(&a, &[0, 1], |v| v.iter().sum::<i32>());
 
                 assert_eq!(result.shape(), &[] as &[usize]);
                 assert_eq!(*result.first().unwrap(), 21);
@@ -1915,7 +1789,7 @@ pub(crate) mod tests {
             fn reduce_no_axes_identity() {
                 // Reducing no axes -> same shape, each element passed through f
                 let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
-                let result = ndarray_reduce(&a, &[], false, |v| *v.first().unwrap());
+                let result = ndarray_reduce(&a, &[], |v| *v.first().unwrap());
 
                 assert_eq!(result.shape(), &[2, 3]);
                 assert_eq!(result, array![[1, 2, 3], [4, 5, 6]].into_dyn());
@@ -1925,7 +1799,7 @@ pub(crate) mod tests {
             fn reduce_max_axis() {
                 // np.max(a, axis=0)
                 let a = Array::from_shape_vec(IxDyn(&[3, 2]), vec![5, 1, 3, 8, 7, 2]).unwrap();
-                let result = ndarray_reduce(&a, &[0], false, |v| *v.iter().max().unwrap());
+                let result = ndarray_reduce(&a, &[0], |v| *v.iter().max().unwrap());
 
                 assert_eq!(result.shape(), &[2]);
                 assert_eq!(result, array![7, 8].into_dyn());

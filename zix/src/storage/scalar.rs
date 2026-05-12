@@ -230,7 +230,7 @@ mod tests {
         // max of a constant array is the constant itself
         let got: ArrayD<f64> = Array::plain_scalar(7.0f64, &[3, 4])
             .unwrap()
-            .max(&[0], false)
+            .max(&[0])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -244,7 +244,7 @@ mod tests {
         // sum of [2,2,2] (3 rows, broadcast) over axis 0 = [6,6,6,6] as i64
         let got: ArrayD<i64> = Array::plain_scalar(2i32, &[3, 4])
             .unwrap()
-            .sum(&[0], false)
+            .sum(&[0])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![4], vec![6i64; 4]).unwrap());

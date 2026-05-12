@@ -16,11 +16,26 @@ macro_rules! define_reduction_op {
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
             let array = crate::ops::as_array::any_to_core_array(array)?;
-            let axes = match axis {
+            let mut axes = match axis {
                 Some(axes) => crate::util::normalize_axes(axes.into_vec(), array.ndim())?,
                 None => (0..array.ndim()).collect(),
             };
-            let res = zix_core::ops::$core_op::new(array, &axes, keepdims $($(, $extra_arg)+)?);
+            let res = zix_core::ops::$core_op::new(array, &axes $($(, $extra_arg)+)?);
+            let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+            if !keepdims {
+                return Ok(crate::Array::from_core_storage(ret));
+            }
+            let arr = zix_core::Array::from_storage(ret);
+            // keepdims=true: re-insert singleton axes via insert_axis.
+            // insert_axis uses gap indices in the space of the array it receives, so we must
+            // re-map: original sorted axis a_i → result-space gap (a_i - i).
+            axes.sort_unstable();
+            let mapped_axes = axes
+                .iter()
+                .enumerate()
+                .map(|(i, &ax)| ax - i)
+                .collect::<Vec<_>>();
+            let res = zix_core::ops::InsertAxis::new(arr, &mapped_axes);
             let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
             Ok(crate::Array::from_core_storage(ret))
         }
@@ -51,7 +66,15 @@ macro_rules! define_reduction_op {
                     0
                 },
             };
-            let res = zix_core::ops::$core_op::new(array, axis, keepdims);
+            let res = zix_core::ops::$core_op::new(array, axis);
+            let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+            if !keepdims {
+                return Ok(crate::Array::from_core_storage(ret));
+            }
+            let arr = zix_core::Array::from_storage(ret);
+            // keepdims=true: for a single-axis reduction, the result-space gap equals the
+            // original axis index (only one axis removed, shift = 0).
+            let res = zix_core::ops::InsertAxis::new(arr, &[axis]);
             let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
             Ok(crate::Array::from_core_storage(ret))
         }

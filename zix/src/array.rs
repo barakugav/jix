@@ -50,7 +50,7 @@ use crate::ArrayParams;
 ///   .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
 ///   .permute_axes(axes)    -> Array<PermuteAxes<Reshape<...>>>
 ///   .add(other_array)      -> Array<Add<PermuteAxes<...>, Compact>>
-///   .sum(axis, false)      -> Array<Sum<Add<...>>>
+///   .sum(axis)             -> Array<Sum<Add<...>>>
 ///   .copy();               -> Array<Compact> - materialize the pipeline
 /// ```
 ///
@@ -119,7 +119,7 @@ use crate::ArrayParams;
 ///
 /// // Materialize the result and write to a file.
 /// let result = scaled
-///     .argmax(/* axis */ 1, /* keepdims */ false)  // Array<ArgMax<Add<Mul<...>, Compact>>>
+///     .argmax(/* axis */ 1)                        // Array<ArgMax<Add<Mul<...>, Compact>>>
 ///     .astype::<i16>()                             // Array<AsType<ArgMax<Add<...>>>>
 ///     // materialize the pipeline with a copy
 ///     .copy()?;                                    // Array<Compact>
