@@ -73,7 +73,7 @@
 //!
 //! | Type | Description |
 //! |------|-------------|
-//! | [`Array<Compact>`](storage::Compact) | Heap-allocated block-compressed array. The main backend. |
+//! | [`Array<Compact<D>>`](storage::Compact) | Heap-allocated block-compressed array. The main backend. `D` tracks the ndim at the type level (`Dim<N>` when statically known, `DimDyn` otherwise). |
 //! | [`Array<Op<...>>`](ops) | Lazy operation views defined in [`ops`]. Wrap one or more arrays; apply their transformation on each read. |
 //! | [`Array<Ref<'_, S>>`](storage::Ref) | Borrow of a storage without cloning. Created by [`Array::as_ref`]. |
 //! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray_view`]. |

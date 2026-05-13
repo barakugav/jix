@@ -59,8 +59,7 @@ use crate::{dim_arr, Array, Dimension};
 /// use zix::{Array, Dim};
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![1i32, 2, 3])? // shape [3], DimDyn
-///     .into_dim::<Dim<1>>()?;                         // assert Dim<1>
+/// let a = Array::compact_array(&array![1i32, 2, 3])?; // shape [3], Dim<1>
 ///
 /// // usize → output D = Dim<2> (one more than input Dim<1>)
 /// assert_eq!(a.as_ref().insert_axis(0).shape(), &[1, 3]);
@@ -229,19 +228,19 @@ mod tests {
     use crate::ops::InsertAxis;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::NDIM_MAX;
+    use crate::{DimDyn, NDIM_MAX};
 
-    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<crate::storage::Compact> {
+    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<crate::storage::Compact> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<crate::storage::Compact> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
@@ -424,8 +423,9 @@ mod tests {
     // Proptest: arbitrary shape, arbitrary gap multiset, order-independent
     // -----------------------------------------------------------------------
 
-    fn insert_axes_strategy<T>(
-    ) -> impl proptest::strategy::Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<usize>)>
+    fn insert_axes_strategy<T>() -> impl proptest::strategy::Strategy<
+        Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<usize>),
+    >
     where
         T: ScalarStrategy,
     {

@@ -191,12 +191,15 @@ macro_rules! define_op1 {
                 Ok(Self(crate::ops::op1::Op1::new($NameKernel, array)?))
             }
         }
-        crate::storage::impl_array_storage_forward!(
-            $Name<S>,
-            where
-                S: crate::storage::ArrayStorage;
-            Dimension = S::Dimension
-        );
+
+        impl<S> crate::storage::ArrayStorage for $Name<S>
+        where
+            S: crate::storage::ArrayStorage,
+        {
+            type Dimension = S::Dimension;
+
+            crate::storage::impl_array_storage_forward!();
+        }
 
         crate::ops::op1::define_op1_kernel!($NameKernel, $($kernel_args)*);
     };

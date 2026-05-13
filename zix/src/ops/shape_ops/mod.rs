@@ -36,7 +36,7 @@ where
     /// once: the copy realigns blocks to the new shape, avoiding read-amplification on future
     /// reads.
     #[track_caller]
-    pub fn reshape<Sh>(self, shape: Sh) -> Array<Compact>
+    pub fn reshape<Sh>(self, shape: Sh) -> Array<Compact<Sh::Dimension>>
     where
         Sh: IntoDimension,
     {
@@ -98,7 +98,7 @@ where
     ///
     /// See [`broadcast_view`](Self::broadcast_view) for validity rules.
     #[track_caller]
-    pub fn broadcast(self, shape: &[u64]) -> Array<Compact> {
+    pub fn broadcast(self, shape: &[u64]) -> Array<Compact<S::Dimension>> {
         self.broadcast_view(shape).copy().unwrap()
     }
 

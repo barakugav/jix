@@ -10,21 +10,22 @@ use crate::{Array, ArrayParams};
 /// Returned by [`Array::into_compact`] and [`Array::into_compact_with`]. The
 /// adaptor handles two cases transparently:
 ///
-/// - **Already compact**: the original storage is kept as is - no copy or re-compression.
+/// - **Already compact**: the original storage is kept as is — no copy or re-compression.
 /// - **Not compact** (lazy views, op chains, etc.): the array is materialized
 ///   via `copy_with` into a new [`Compact`] block-table.
 ///
 /// In both cases all [`ArrayStorage`] methods delegate to the inner variant,
-/// and the storage is guaranteed to be a materialized compact storage, and not a view.
-pub struct IntoCompact<S>(pub(crate) ToCompactInner<S>);
+/// and the storage is guaranteed to be a materialized compact storage, not a view.
+/// The dimension type `S::Dimension` is preserved in both paths.
+pub struct IntoCompact<S: ArrayStorage>(pub(crate) ToCompactInner<S>);
 
 /// The two internal states of an [`IntoCompact<S>`] storage.
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum ToCompactInner<S> {
+pub(crate) enum ToCompactInner<S: ArrayStorage> {
     /// The source was already compact; the original storage is kept as-is.
     Original(S),
     /// The source was not compact; it was materialized into a new `Compact`.
-    Compact(Compact),
+    Compact(Compact<S::Dimension>),
 }
 impl<S> IntoCompact<S>
 where
@@ -74,7 +75,7 @@ where
             ToCompactInner::Compact(c) => c._spec(),
         }
     }
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_>> {
+    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, Self::Dimension>> {
         Some(match &self.0 {
             ToCompactInner::Original(s) => s.as_compact().unwrap(),
             ToCompactInner::Compact(c) => c.as_compact().unwrap(),
@@ -91,18 +92,22 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::{ArrayStorage, Compact};
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams};
+    use crate::{Array, ArrayParams, DimDyn, Dimension};
 
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn compact<T: Dtyped>(vals: Vec<T>, shape: &[usize], block_shape: &[usize]) -> Array<Compact> {
+    fn compact<T: Dtyped>(
+        vals: Vec<T>,
+        shape: &[usize],
+        block_shape: &[usize],
+    ) -> Array<Compact<DimDyn>> {
         let src = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::compact_array_with(&src, arr_params(block_shape)).unwrap()
     }
 
-    fn to_bytes(a: &Array<Compact>) -> Vec<u8> {
+    fn to_bytes<D: Dimension>(a: &Array<Compact<D>>) -> Vec<u8> {
         let mut buf = Cursor::new(Vec::new());
         a.write_to(&mut buf).unwrap();
         buf.into_inner()

@@ -240,12 +240,15 @@ macro_rules! define_reduction_op {
                 Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, &[axis])?))
             }
         }
-        crate::storage::impl_array_storage_forward!(
-            $Name<S>,
-            where
-                S: crate::storage::ArrayStorage;
-            Dimension = <S::Dimension as crate::Dimension>::Smaller
-        );
+
+        impl<S> crate::storage::ArrayStorage for $Name<S>
+        where
+            S: crate::storage::ArrayStorage,
+        {
+            type Dimension = <S::Dimension as crate::Dimension>::Smaller;
+
+            crate::storage::impl_array_storage_forward!();
+        }
 
         define_reduction_op_kernel!(
             $NameKernel,
@@ -279,13 +282,16 @@ macro_rules! define_reduction_op {
                 Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, axes)?))
             }
         }
-        crate::storage::impl_array_storage_forward!(
-            $Name<S, D>,
-            where
-                S: crate::storage::ArrayStorage,
-                D: crate::Dimension;
-            Dimension = D
-        );
+
+        impl<S, D> crate::storage::ArrayStorage for $Name<S, D>
+        where
+            S: crate::storage::ArrayStorage,
+            D: crate::Dimension,
+        {
+            type Dimension = D;
+
+            crate::storage::impl_array_storage_forward!();
+        }
 
         define_reduction_op_kernel!(
             $NameKernel,
@@ -1070,7 +1076,9 @@ pub(crate) mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::dtype::Complex<f64>;
 
-    use crate::{array::Array, storage::Compact};
+    use crate::array::Array;
+    use crate::storage::Compact;
+    use crate::DimDyn;
 
     use proptest::prelude::*;
 
@@ -1114,7 +1122,7 @@ pub(crate) mod tests {
 
     pub(crate) fn carray_strategy_for_reduction<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, Vec<usize>)>
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<DimDyn>>>, Vec<usize>)>
     {
         let shape = reduction_shape_strategy();
         let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
@@ -1128,7 +1136,8 @@ pub(crate) mod tests {
 
     pub(crate) fn carray_strategy_for_reduction_single_axis<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, usize)> {
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<DimDyn>>>, usize)>
+    {
         let shape = reduction_shape_strategy();
         let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
         array
@@ -1141,7 +1150,7 @@ pub(crate) mod tests {
 
     pub(crate) fn carray_strategy_for_reduction_small<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact>>, Vec<usize>)>
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<DimDyn>>>, Vec<usize>)>
     {
         let shape = prop::strategy::Union::new_weighted(vec![
             // 1D

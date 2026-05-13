@@ -27,6 +27,11 @@ where
 /// dimension than the inputs - unlike
 /// [`Concatenate`](crate::ops::Concatenate), which joins along an existing axis.
 ///
+/// The output dimension type `Stack<ArraysT>::Dimension` is
+/// `ArraysT::FirstArrayDimension::Larger` — one dimension wider than the inputs. This means a
+/// static dimension is propagated when all input arrays share a known `Dim<N>`, producing
+/// `Dim<N+1>` for the output.
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples
@@ -207,7 +212,7 @@ mod tests {
     use crate::ops::stack;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::NDIM_MAX;
+    use crate::{DimDyn, NDIM_MAX};
 
     // stack two 1D i32 arrays along axis 0 -> shape [2, N]
     #[test]
@@ -332,7 +337,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_empty_panics() {
-        let _ = stack(Vec::<Array<crate::storage::Compact>>::new(), 0);
+        let _ = stack(Vec::<Array<Compact<DimDyn>>>::new(), 0);
     }
 
     // -----------------------------------------------------------------------
@@ -340,7 +345,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn stack_strategy<T>(
-    ) -> impl Strategy<Value = (Vec<ndarray::ArrayD<T>>, Vec<Array<Compact>>, usize)>
+    ) -> impl Strategy<Value = (Vec<ndarray::ArrayD<T>>, Vec<Array<Compact<DimDyn>>>, usize)>
     where
         T: ScalarStrategy,
     {

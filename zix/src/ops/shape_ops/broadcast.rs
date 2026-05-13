@@ -14,7 +14,9 @@ use crate::{Array, Dimension};
 /// either `shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
 /// the single element is repeated `shape[d]` times). Any other combination is an error.
 ///
-/// Output dtype equals the input dtype. Output shape equals `shape`.
+/// Output dtype equals the input dtype. Output shape equals `shape`. `Broadcast<S>` carries
+/// `type Dimension = S::Dimension` — broadcasting does not change the number of axes so the
+/// dimension type is preserved unchanged.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -206,9 +208,9 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::NDIM_MAX;
+    use crate::{DimDyn, NDIM_MAX};
 
-    fn make(vals: Vec<i32>, shape: &[usize]) -> Array<crate::storage::Compact> {
+    fn make(vals: Vec<i32>, shape: &[usize]) -> Array<Compact<DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::compact_array(&nd).unwrap()
     }
@@ -423,12 +425,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn broadcast_2d_axis0_strategy() -> impl proptest::strategy::Strategy<
-        Value = (
-            ndarray::ArrayD<i32>,
-            Array<crate::storage::Compact>,
-            usize,
-            usize,
-        ),
+        Value = (ndarray::ArrayD<i32>, Array<Compact<DimDyn>>, usize, usize),
     > {
         use proptest::prelude::*;
         (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
@@ -441,12 +438,7 @@ mod tests {
     }
 
     fn broadcast_2d_axis1_strategy() -> impl proptest::strategy::Strategy<
-        Value = (
-            ndarray::ArrayD<i32>,
-            Array<crate::storage::Compact>,
-            usize,
-            usize,
-        ),
+        Value = (ndarray::ArrayD<i32>, Array<Compact<DimDyn>>, usize, usize),
     > {
         use proptest::prelude::*;
         (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
@@ -516,8 +508,9 @@ mod tests {
 
     use proptest::prelude::*;
 
-    fn broadcast_axes_strategy<T>(
-    ) -> impl proptest::strategy::Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<usize>)>
+    fn broadcast_axes_strategy<T>() -> impl proptest::strategy::Strategy<
+        Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<usize>),
+    >
     where
         T: ScalarStrategy,
     {

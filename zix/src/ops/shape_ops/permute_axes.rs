@@ -16,6 +16,9 @@ use crate::{Array, Dimension};
 /// `axes` must be a permutation of `0..ndim`: correct length, all values in range, no
 /// duplicates.
 ///
+/// Output dtype equals the input dtype. `PermuteAxes<S>` carries `type Dimension = S::Dimension`
+/// — permutation does not change the number of axes so the dimension type is preserved unchanged.
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples
@@ -176,6 +179,7 @@ mod tests {
     use crate::array::Array;
     use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
+    use crate::DimDyn;
 
     // 2D i32: transpose (axes=[1,0])
     #[test]
@@ -278,7 +282,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn permute_axes_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<usize>)>
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<usize>)>
     where
         T: ScalarStrategy,
     {

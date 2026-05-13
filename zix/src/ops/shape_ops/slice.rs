@@ -35,6 +35,9 @@ use crate::{Array, Dimension};
 /// Standard Rust ranges convert to [`SliceItem`] automatically; negative-integer range
 /// literals work for Python-style end-relative indexing.
 ///
+/// `Slice<S>` carries `type Dimension = S::Dimension` — slicing does not change the number of
+/// axes so the dimension type is preserved unchanged.
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples
@@ -430,13 +433,14 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
+    use crate::DimDyn;
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<crate::storage::Compact> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<crate::storage::Compact> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
@@ -747,7 +751,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn slice_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact>, Vec<SliceItem>)>
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<SliceItem>)>
     where
         T: ScalarStrategy,
     {

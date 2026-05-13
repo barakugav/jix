@@ -7,7 +7,7 @@ use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::IntoCompact;
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, IntoDim, Ref,
+    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref, SwapDim,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
@@ -170,14 +170,16 @@ pub struct Array<S> {
     pub(crate) storage: S,
 }
 
-impl Array<Compact> {
-    /// Compress an ndarray into a block-compressed `Array<Compact>` with default encoding settings.
+impl<D> Array<Compact<D>> {
+    /// Compress an ndarray into a block-compressed `Array<Compact<D>>` with default encoding settings.
     ///
     /// The array is partitioned into n-dimensional blocks, each independently compressed. The
     /// block shape is derived automatically to fit within the L1 data cache. Use
     /// [`compact_array_with`](Array::compact_array_with) for explicit control over block shape,
     /// compression level, and other codec settings. If the access pattern is known in advance,
     /// providing a matching block shape can improve read performance significantly.
+    ///
+    /// The dimension type `D` is inferred from the ndarray argument's type.
     ///
     /// # Errors
     ///
@@ -214,9 +216,10 @@ impl Array<Compact> {
     /// assert_eq!(scaled.to_ndarray::<f32>()?[[1, 1]], 957.0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn compact_array<S, D>(array: &ndarray::ArrayBase<S, D>) -> Result<Self>
+    pub fn compact_array<S, InD>(array: &ndarray::ArrayBase<S, InD>) -> Result<Self>
     where
-        D: ndarray::Dimension + IntoDimension,
+        InD: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D: Dimension,
         S: ndarray::Data<Elem: Dtyped>,
     {
         Array::compact_array_with(array, ArrayParams::default())
@@ -254,12 +257,13 @@ impl Array<Compact> {
     /// }
     /// # Ok::<(), zix::Error>(())
     /// ```
-    pub fn compact_array_with<S, D>(
-        array: &ndarray::ArrayBase<S, D>,
+    pub fn compact_array_with<S, InD>(
+        array: &ndarray::ArrayBase<S, InD>,
         mut params: ArrayParams,
     ) -> Result<Self>
     where
-        D: ndarray::Dimension + IntoDimension,
+        InD: ndarray::Dimension + IntoDimension<Dimension = D>,
+        D: Dimension,
         S: ndarray::Data<Elem: Dtyped>,
     {
         let array = Array::plain_ndarray_view(array)?;
@@ -291,13 +295,17 @@ impl Array<Compact> {
     /// The buffer should contains elements of the given `dtype`.
     /// Accessing the buffer according to the shape, strides and dtype must be memory-safe and yield
     /// valid elements.
-    pub unsafe fn compact_nd_ptr(
+    pub unsafe fn compact_nd_ptr<Sh>(
         ptr: *const u8,
-        shape: &[u64],
+        shape: Sh,
         strides: &[usize],
         dtype: Dtype,
         mut params: ArrayParams,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        Sh: IntoDimension<Dimension = D>,
+        D: Dimension,
+    {
         let plain_storage = unsafe {
             crate::storage::Plain::new(
                 crate::storage::PlainRef::<'_, u8>::new(),
@@ -582,7 +590,7 @@ impl<S: ArrayStorage> Array<S> {
     ///    .copy()?;      // Array<Compact> - materialize the pipeline
     /// # Ok::<(), zix::Error>(())
     /// ```
-    pub fn copy(&self) -> Result<Array<Compact>> {
+    pub fn copy(&self) -> Result<Array<Compact<S::Dimension>>> {
         let context = self.read_ctx();
         self.copy_with(ArrayParams::default(), &context)
     }
@@ -621,7 +629,7 @@ impl<S: ArrayStorage> Array<S> {
         &self,
         mut params: ArrayParams,
         context: &ReadContext,
-    ) -> Result<Array<Compact>> {
+    ) -> Result<Array<Compact<S::Dimension>>> {
         params.override_from_storage(&self.storage);
         params.tune(self.shape(), self.dtype())?;
 
@@ -660,6 +668,7 @@ impl<S: ArrayStorage> Array<S> {
         );
         let decoder_params = params.decoder_params.unwrap_or_default();
 
+        let shape = S::Dimension::from_slice(&shape).unwrap();
         Ok(Array {
             storage: Compact(ArrayBlockTableStorageBase::new(
                 blocks,
@@ -746,6 +755,12 @@ impl<S: ArrayStorage> Array<S> {
     /// Generally speaking, the compiler can optimize more aggressively when the dimension is
     /// statically known, which can yield better performance.
     ///
+    /// This method wraps the storage in a [`SwapDim<S, D>`](crate::storage::SwapDim) adaptor and
+    /// works for any `S: ArrayStorage`. For concrete block-compressed storages
+    /// ([`Compact<D>`](crate::storage::Compact), [`CompactMmap<D>`](crate::storage::CompactMmap)),
+    /// prefer [`swap_dim`](crate::Array::swap_dim) instead — it replaces the `D` parameter
+    /// in-place without adding a wrapper layer.
+    ///
     /// See [`into_dim_dyn`](Self::into_dim_dyn).
     ///
     /// # Errors
@@ -755,23 +770,26 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
-    /// use zix::{Array, ArrayParams, Dim};
+    /// ```
+    /// use zix::{Array, Dim};
     ///
-    /// // Array loaded from file has DimDyn storage.
-    /// let a = Array::read_from_file("data.zix", ArrayParams::default())?;
+    /// // Passing a dynamically-dimensioned ndarray produces Array<Compact<DimDyn>>.
+    /// // Arrays loaded from files via Array::read_from_file also carry DimDyn.
+    /// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3, 4])))?;
     ///
-    /// // Assert the file contains a 3-D array; fail gracefully if not.
-    /// let a3d = a.into_dim::<Dim<3>>()?;
+    /// // Assert the array is 3-D; fail gracefully if not.
+    /// let a3d = a.into_dim::<Dim<3>>()?;  // Array<SwapDim<Compact<DimDyn>, Dim<3>>>
     ///
     /// // Now insert_axis knows the result is 4-D at compile time.
     /// let a4d = a3d.insert_axis(0usize); // Array<InsertAxis<..., Dim<4>>>
+    /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
+    /// # Ok::<(), zix::Error>(())
     /// ```
-    pub fn into_dim<D>(self) -> Result<Array<IntoDim<S, D>>>
+    pub fn into_dim<D>(self) -> Result<Array<SwapDim<S, D>>>
     where
         D: Dimension,
     {
-        Ok(Array::from_storage(IntoDim::<S, D>::new(self)?))
+        Ok(Array::from_storage(SwapDim::<S, D>::new(self)?))
     }
 
     /// Re-tag this array's storage as [`DimDyn`], erasing any static dimension information.
@@ -779,10 +797,16 @@ impl<S: ArrayStorage> Array<S> {
     /// This is the infallible counterpart to [`into_dim`](Self::into_dim). Every array has a
     /// runtime ndim regardless of its static type, so converting to `DimDyn` always succeeds.
     ///
+    /// Like `into_dim`, this wraps the storage in a [`SwapDim`](crate::storage::SwapDim) adaptor.
+    /// For concrete block-compressed storages ([`Compact<D>`](crate::storage::Compact),
+    /// [`CompactMmap<D>`](crate::storage::CompactMmap)), prefer
+    /// [`swap_dim_dyn`](crate::Array::swap_dim_dyn) instead — it replaces the `D` parameter
+    /// in-place without adding a wrapper layer.
+    ///
     /// After calling `into_dim_dyn`, subsequent shape-changing operations will produce
     /// `DimDyn` results rather than `Dim<N>`. Call [`into_dim`](Self::into_dim) again to
     /// re-establish static tracking once the ndim is confirmed.
-    pub fn into_dim_dyn(self) -> Array<IntoDim<S, DimDyn>> {
+    pub fn into_dim_dyn(self) -> Array<SwapDim<S, DimDyn>> {
         self.into_dim().unwrap()
     }
 
@@ -1076,7 +1100,7 @@ mod tests {
     use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::{BlockShapeTag, BlocksLayout};
     use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
-    use crate::IntoDimension;
+    use crate::{DimDyn, Dimension, IntoDimension};
 
     // -----------------------------------------------------------------------
     // compact_array roundtrip helper
@@ -1105,7 +1129,11 @@ mod tests {
         BlockTable::build_from_data(&data, T::DTYPE, block_len, &EncoderParams::default()).unwrap()
     }
 
-    fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Compact> {
+    fn array<T: Dtyped>(
+        blocks: &[&[T]],
+        shape: &[usize],
+        block_shape: &[usize],
+    ) -> Array<Compact<DimDyn>> {
         let shape = shape.iter().map(|&x| x as u64).collect::<DimArray<_>>();
         let ndim = block_shape.len();
         let block_shape_hint = block_shape
@@ -1122,7 +1150,7 @@ mod tests {
         Array {
             storage: Compact(ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),
-                shape,
+                DimDyn::from_slice(&shape).unwrap(),
                 layout,
                 EncoderParams::default(),
                 DecoderParams::default(),

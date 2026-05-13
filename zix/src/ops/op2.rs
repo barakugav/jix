@@ -264,13 +264,17 @@ macro_rules! define_op2 {
                 Ok(Self(crate::ops::op2::Op2::new($NameKernel, a, b)?))
             }
         }
-        crate::storage::impl_array_storage_forward!(
-            $Name<S1, S2>,
-            where
-                S1: crate::storage::ArrayStorage,
-                S2: crate::storage::ArrayStorage;
-            Dimension = S1::Dimension
-        );
+
+
+        impl<S1, S2> crate::storage::ArrayStorage for $Name<S1, S2>
+        where
+            S1: crate::storage::ArrayStorage,
+            S2: crate::storage::ArrayStorage,
+        {
+            type Dimension = S1::Dimension;
+
+            crate::storage::impl_array_storage_forward!();
+        }
 
         crate::ops::op2::define_op2_kernel!($NameKernel, $($kernel_args)*);
     };

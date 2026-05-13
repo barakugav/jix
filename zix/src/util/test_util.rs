@@ -6,6 +6,7 @@ use crate::params::ArrayParams;
 use crate::storage::block::BlockSize;
 use crate::storage::Compact;
 use crate::util::AlignedBytes;
+use crate::DimDyn;
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper (previously duplicated in every test module)
@@ -489,7 +490,7 @@ pub(crate) fn block_shape_strategy(ndim: usize) -> impl Strategy<Value = Vec<Blo
 }
 
 pub(crate) fn carray_strategy_any<T>(
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -499,7 +500,7 @@ where
 pub(crate) fn carray_strategy_from_shape<T>(
     shape: impl Strategy<Value = Vec<usize>>,
     element: impl Strategy<Value = T> + Clone,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -508,7 +509,7 @@ where
 
 pub(crate) fn carray_strategy_from_data<T>(
     data: impl Strategy<Value = ndarray::ArrayD<T>>,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -542,8 +543,8 @@ pub(crate) fn carrays2_strategy_generic<T>(
     element: impl Strategy<Value = T> + Clone,
 ) -> impl Strategy<
     Value = (
-        (ndarray::ArrayD<T>, crate::Array<Compact>),
-        (ndarray::ArrayD<T>, crate::Array<Compact>),
+        (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>),
+        (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>),
     ),
 >
 where

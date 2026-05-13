@@ -48,8 +48,8 @@ pub use scalar::*;
 
 pub(crate) mod block;
 
-mod into_dim;
-pub use into_dim::*;
+mod swap_dim;
+pub use swap_dim::*;
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
@@ -101,7 +101,8 @@ pub trait ArrayStorage {
     /// The compile-time dimension of arrays backed by this storage.
     ///
     /// This associated type lets the compiler track how many axes an array has through a chain
-    /// of lazy operations. When the dimension is known statically (e.g. after calling
+    /// of lazy operations. When the dimension is known statically (e.g. arrays created from a
+    /// statically-dimensioned ndarray, or after calling
     /// [`Array::into_dim::<Dim<N>>`](crate::Array::into_dim)), it is [`Dim<N>`](crate::Dim);
     /// when it is only known at runtime (e.g. for arrays loaded from a file or created with
     /// slice-based shape arguments) it is [`DimDyn`](crate::DimDyn).
@@ -145,7 +146,7 @@ pub trait ArrayStorage {
     fn _spec(&self) -> ArrayStorageSpec<'_>;
 
     #[doc(hidden)]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_>> {
+    fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::Dimension>> {
         None
     }
 }
@@ -173,45 +174,36 @@ impl<'a, S> Ref<'a, S> {
         Self(storage)
     }
 }
-impl_array_storage_forward!(
-    Ref<'a, S>,
-    where
-        S: ArrayStorage;
-    Dimension = S::Dimension
-);
+impl<'a, S> ArrayStorage for Ref<'a, S>
+where
+    S: ArrayStorage,
+{
+    type Dimension = S::Dimension;
+
+    impl_array_storage_forward!();
+}
 
 macro_rules! impl_array_storage_forward {
-    (
-        $wrapper:ident $(<$($gen:tt),*>)?,
-        $(where $($bound:path : $constraint:path),*)?;
-        Dimension = $dim:ty
-    ) => {
-        impl $(<$($gen),*>)? crate::storage::ArrayStorage for $wrapper $(<$($gen),*>)?
-        where
-            $($($bound : $constraint),*)?
-        {
-            type Dimension = $dim;
-
-            fn read_data(
-                &self,
-                index: &[core::ops::Range<u64>],
-                buf: &mut [u8],
-                context: &crate::codec::ReadContext,
-            ) -> crate::error::Result<()> {
-                self.0.read_data(index, buf, context)
-            }
-            fn shape(&self) -> &[u64] {
-                self.0.shape()
-            }
-            fn dtype(&self) -> &crate::dtype::Dtype {
-                self.0.dtype()
-            }
-            fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
-                self.0._spec()
-            }
-            fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_>> {
-                self.0.as_compact()
-            }
+    () => {
+        fn read_data(
+            &self,
+            index: &[core::ops::Range<u64>],
+            buf: &mut [u8],
+            context: &crate::codec::ReadContext,
+        ) -> crate::error::Result<()> {
+            self.0.read_data(index, buf, context)
+        }
+        fn shape(&self) -> &[u64] {
+            self.0.shape()
+        }
+        fn dtype(&self) -> &crate::dtype::Dtype {
+            self.0.dtype()
+        }
+        fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
+            self.0._spec()
+        }
+        fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, Self::Dimension>> {
+            self.0.as_compact()
         }
     };
 }

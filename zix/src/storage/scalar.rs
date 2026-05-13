@@ -9,9 +9,12 @@ use crate::{Array, Dimension, Error, ErrorKind, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
-/// Every element read from a `Scalar` array returns the same value regardless
+/// Every element read from a `Scalar<T, D>` array returns the same value regardless
 /// of position, making it a zero-copy way to represent constant or filled arrays.
 /// A 0-D `Scalar` (empty `shape`) represents a plain scalar value.
+///
+/// `D: Dimension` tracks the ndim at the type level and follows the same semantics as
+/// [`Compact<D>`](crate::storage::Compact): `D` is inferred from the shape argument type.
 ///
 /// Prefer the [`Array`] constructor [`Array::plain_scalar`] over constructing this type directly.
 ///
@@ -157,6 +160,24 @@ where
             decoder_params: None,
             // decoder_config: None,
         }
+    }
+}
+
+impl<T, D> crate::storage::SwapDimInplace for Scalar<T, D>
+where
+    T: Dtyped,
+    D: Dimension,
+{
+    type SwapDimension<NewD: Dimension> = Scalar<T, NewD>;
+
+    fn swap_dim<NewD: Dimension>(self) -> Option<Self::SwapDimension<NewD>> {
+        let shape = NewD::from_slice(self.shape())?;
+        Some(Scalar {
+            data: self.data,
+            shape,
+            dtype: self.dtype,
+            blocks_layout: self.blocks_layout,
+        })
     }
 }
 

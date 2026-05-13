@@ -14,9 +14,9 @@ use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, CompactMmap,
 };
 use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
-use crate::{Array, ArrayParams};
+use crate::{Array, ArrayParams, DimDyn, Dimension};
 
-impl Array<Compact> {
+impl Array<Compact<DimDyn>> {
     /// Load a compressed array from a `.zix` file, allocating storage on the heap.
     ///
     /// This is the most common way to read an array that was previously saved with
@@ -147,7 +147,7 @@ impl Array<Compact> {
     }
 }
 
-impl Array<CompactMmap> {
+impl Array<CompactMmap<DimDyn>> {
     /// Load a compressed array from a file using memory mapping (zero-copy).
     ///
     /// Instead of copying the file's bytes into heap memory, this maps the file into virtual
@@ -401,7 +401,7 @@ where
     }
 }
 
-impl<S> ArrayBlockTableStorageBase<S>
+impl<S> ArrayBlockTableStorageBase<S, DimDyn>
 where
     S: BlockTableStorage,
 {
@@ -468,6 +468,7 @@ where
             blocks.dtype().itemsize(),
         )?;
 
+        let shape = DimDyn::from_slice(&shape).unwrap();
         Ok(Self::new(
             blocks,
             shape,
@@ -487,18 +488,22 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams};
+    use crate::{Array, ArrayParams, DimDyn, Dimension};
 
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn compact<T: Dtyped>(vals: Vec<T>, shape: &[usize], block_shape: &[usize]) -> Array<Compact> {
+    fn compact<T: Dtyped>(
+        vals: Vec<T>,
+        shape: &[usize],
+        block_shape: &[usize],
+    ) -> Array<Compact<DimDyn>> {
         let src = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::compact_array_with(&src, arr_params(block_shape)).unwrap()
     }
 
-    fn write_read<T: Dtyped>(a: &Array<Compact>) -> ArrayD<T> {
+    fn write_read<T: Dtyped, D: Dimension>(a: &Array<Compact<D>>) -> ArrayD<T> {
         let mut buf = Cursor::new(Vec::new());
         a.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
@@ -526,7 +531,7 @@ mod tests {
                     fn [<roundtrip_ $dtype>](
                         (src, a) in carray_strategy_any::<$dtype>()
                     ) {
-                        proptest::prop_assert_eq!(write_read::<$dtype>(&a), src);
+                        proptest::prop_assert_eq!(write_read::<$dtype, _>(&a), src);
                     }
                 }
             }
@@ -549,7 +554,7 @@ mod tests {
         let vals: Vec<i32> = (0..630i32).collect();
         let src = ArrayD::from_shape_vec(vec![630], vals.clone()).unwrap();
         let a = compact::<i32>(vals, &[630], &[5]);
-        assert_eq!(write_read::<i32>(&a), src);
+        assert_eq!(write_read::<i32, _>(&a), src);
     }
 
     #[test]
@@ -558,7 +563,7 @@ mod tests {
         let vals: Vec<f64> = (0..60 * 24).map(|x: i32| x as f64).collect();
         let src = ArrayD::from_shape_vec(vec![60, 24], vals.clone()).unwrap();
         let a = compact::<f64>(vals, &[60, 24], &[4, 3]);
-        assert_eq!(write_read::<f64>(&a), src);
+        assert_eq!(write_read::<f64, _>(&a), src);
     }
 
     // -----------------------------------------------------------------------
@@ -571,7 +576,7 @@ mod tests {
         let vals: Vec<f32> = (0..10 * 11 * 12).map(|x: i32| x as f32).collect();
         let src = ArrayD::from_shape_vec(vec![10, 11, 12], vals.clone()).unwrap();
         let a = compact::<f32>(vals, &[10, 11, 12], &[2, 3, 4]);
-        let got = write_read::<f32>(&a);
+        let got = write_read::<f32, _>(&a);
         assert_eq!(got.shape(), &[10, 11, 12]);
         assert_eq!(got, src);
     }
@@ -582,7 +587,7 @@ mod tests {
         let vals: Vec<i64> = (0..5 * 7 * 11 as i64).collect();
         let src = ArrayD::from_shape_vec(vec![5, 7, 11], vals.clone()).unwrap();
         let a = compact::<i64>(vals, &[5, 7, 11], &[3, 4, 5]);
-        let got = write_read::<i64>(&a);
+        let got = write_read::<i64, _>(&a);
         assert_eq!(got.shape(), &[5, 7, 11]);
         assert_eq!(got, src);
     }

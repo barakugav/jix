@@ -15,7 +15,7 @@ use crate::{Array, Dimension, Error, ErrorKind, IntoDimension};
 /// This storage is useful when regular ndarray objects need to behave like `Array`, for example
 /// to participate in math operations with compressed arrays.
 ///
-/// `Plain<S>` holds a raw `*const u8` pointer into a buffer owned by `S`,
+/// `Plain<S, D>` holds a raw `*const u8` pointer into a buffer owned by `S`,
 /// together with a per-dimension shape and byte-stride description.  The
 /// buffer may be laid out in any order (C-contiguous, Fortran-contiguous,
 /// transposed, sliced with gaps, etc.) - reads use the strides to copy the
@@ -25,9 +25,12 @@ use crate::{Array, Dimension, Error, ErrorKind, IntoDimension};
 /// `S` alive alongside the pointer ensures the data remains valid.  Two
 /// concrete owners are provided:
 ///
-/// * `Plain<Vec<T>>` - owns the data (see [`Array::plain_ndarray`]).
-/// * `Plain<PlainRef<'a, T>>` - borrows from an `ndarray` view
+/// * `Plain<Vec<T>, D>` - owns the data (see [`Array::plain_ndarray`]).
+/// * `Plain<PlainRef<'a, T>, D>` - borrows from an `ndarray` view
 ///   (see [`Array::plain_ndarray_view`]).
+///
+/// `D: Dimension` tracks the ndim at the type level and follows the same semantics as
+/// [`Compact<D>`](crate::storage::Compact): `D` is inferred from the shape argument type.
 ///
 /// # Examples
 ///
@@ -344,6 +347,25 @@ where
             decoder_params: None,
             // decoder_config: None,
         }
+    }
+}
+
+impl<S, D> crate::storage::SwapDimInplace for Plain<S, D>
+where
+    D: Dimension,
+{
+    type SwapDimension<NewD: Dimension> = Plain<S, NewD>;
+
+    fn swap_dim<NewD: Dimension>(self) -> Option<Self::SwapDimension<NewD>> {
+        let shape = NewD::from_slice(self.shape())?;
+        Some(Plain {
+            storage: self.storage,
+            data: self.data,
+            shape,
+            strides: self.strides,
+            dtype: self.dtype,
+            blocks_layout: self.blocks_layout,
+        })
     }
 }
 

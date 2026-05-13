@@ -43,12 +43,13 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// # Example: static vs dynamic dimension tracking
 ///
-/// ```rust,ignore
-/// use zix::{Array, Dim, ArrayParams};
+/// ```
+/// use zix::{Array, Dim};
 ///
-/// // An array loaded from a file has DimDyn — ndim is not known at compile time.
-/// let a = Array::read_from_file("data.zix", ArrayParams::default())?;
-/// // a: Array<Compact> where Compact::Dimension = DimDyn
+/// // Passing a dynamically-dimensioned ndarray produces Array<Compact<DimDyn>>.
+/// // Arrays loaded from files via Array::read_from_file also carry DimDyn.
+/// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3])))?;
+/// // a: Array<Compact<DimDyn>>
 ///
 /// // Asserting "I know this is 2-D" converts to static Dim<2>.
 /// // Returns Err if a.ndim() != 2.
@@ -62,11 +63,13 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// // reshape_view(&shape[..]): &[u64] arg → DimDyn output
 /// let flat_dyn = flat.reshape_view(&[6u64][..]);
+/// assert_eq!(flat_dyn.shape(), &[6]);
+/// # Ok::<(), zix::Error>(())
 /// ```
 ///
 /// Every `Dimension` value also implements [`IntoDimension`] (with `Dimension = Self`), so a
 /// `Dim<N>` or `DimDyn` can be passed directly to any function that accepts `IntoDimension`.
-pub trait Dimension: IntoDimension<Dimension = Self> {
+pub trait Dimension: IntoDimension<Dimension = Self> + Clone {
     /// The number of axes, if known at compile time.
     ///
     /// - `Some(N)` for [`Dim<N>`]: the compiler can prove `ndim == N`.
@@ -128,6 +131,7 @@ pub trait Dimension: IntoDimension<Dimension = Self> {
 /// dynamic through any chain of shape-changing operations. Use
 /// [`Array::into_dim`](crate::Array::into_dim) to recover a static [`Dim<N>`] when the ndim
 /// becomes known.
+#[derive(Clone)]
 pub struct DimDyn(DimArray<u64>);
 impl Dimension for DimDyn {
     const NDIM: Option<usize> = None;
@@ -158,6 +162,7 @@ impl Dimension for DimDyn {
 ///
 /// This means that N consecutive `insert_axis(0usize)` calls on a `Dim<M>` array produce a
 /// `Dim<M+N>` result, as long as `M + N ≤ 8`.
+#[derive(Clone)]
 pub struct Dim<const NDIM: usize>([u64; NDIM]);
 impl<const NDIM: usize> Dim<NDIM> {
     /// Construct a `Dim<NDIM>` from a fixed-size array of axis sizes.

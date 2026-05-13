@@ -28,6 +28,10 @@ where
 /// same [`Dtype`]. The output has the same number of dimensions as the inputs - unlike
 /// [`Stack`](crate::ops::Stack), which introduces a new axis.
 ///
+/// The output dimension type `Concatenate<ArraysT>::Dimension` equals
+/// `ArraysT::FirstArrayDimension` — it is taken from the first array in the sequence. This
+/// means the static dimension is propagated when all input arrays share a known `Dim<N>`.
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples
@@ -268,6 +272,7 @@ mod tests {
     use crate::ops::concatenate;
     use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
+    use crate::DimDyn;
 
     // 1D i32: concatenate two arrays of equal size along axis 0 (in-place path)
     #[test]
@@ -390,7 +395,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_empty_panics() {
-        let _ = concatenate(Vec::<Array<crate::storage::Compact>>::new(), 0);
+        let _ = concatenate(Vec::<Array<Compact<DimDyn>>>::new(), 0);
     }
 
     // -----------------------------------------------------------------------
@@ -398,7 +403,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn concat_strategy<T>(
-    ) -> impl Strategy<Value = (Vec<ndarray::ArrayD<T>>, Vec<Array<Compact>>, usize)>
+    ) -> impl Strategy<Value = (Vec<ndarray::ArrayD<T>>, Vec<Array<Compact<DimDyn>>>, usize)>
     where
         T: ScalarStrategy,
     {

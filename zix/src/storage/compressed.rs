@@ -21,6 +21,7 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::Dimension;
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -28,30 +29,49 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 /// compressed. All compressed bytes are held in a heap-allocated buffer owned by
 /// this struct.
 ///
+/// `Compact<D>` is generic over `D: Dimension`, which tracks the number of axes at the type
+/// level:
+///
+/// - **`Compact<Dim<N>>`** — the compiler knows the array is N-dimensional. Produced when the
+///   source ndarray has a statically-known dimension: `Array::compact_array(&ndarray::Array2<f32>)`
+///   returns `Array<Compact<Dim<2>>>`.
+/// - **`Compact<DimDyn>`** — the ndim is only known at runtime. Arrays read from files or
+///   memory-mapped sources always return `Compact<DimDyn>`.
+///
+/// Use [`Array::swap_dim`](crate::Array::swap_dim) to change `D` in-place for a `Compact` array
+/// (e.g. `DimDyn` → `Dim<N>`), or [`Array::into_dim`](crate::Array::into_dim) for a
+/// wrapper-based conversion that works on any storage.
+///
 /// Created by [`Array::compact_array`](crate::Array::compact_array), [`Array::copy`](crate::Array::copy)
 /// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
-pub struct Compact(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned>);
+pub struct Compact<D>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, D>);
 
 /// Borrowed, block-compressed nd-array storage.
 ///
 /// Same layout as [`Compact`] but borrows its compressed bytes from an existing byte slice
 /// instead of owning them. Used internally when constructing temporary views into a
 /// pre-encoded buffer.
-pub struct CompactBorrowed<'a>(
-    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>>,
+pub struct CompactBorrowed<'a, D>(
+    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>, D>,
 );
 
 /// Memory-mapped, block-compressed nd-array storage.
 ///
 /// Same layout as [`Compact`] but the compressed bytes are served from a memory-mapped file.
 /// The OS pages data into memory on demand, avoiding a full file read at open time.
+/// Arrays loaded this way always carry `CompactMmap<DimDyn>` because the ndim is determined
+/// from the file header at runtime. The `D` parameter carries the same dimension semantics as in
+/// [`Compact<D>`].
 ///
 /// Created by [`Array::read_from_file_mmap`](crate::Array::read_from_file_mmap).
-pub struct CompactMmap(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap>);
+pub struct CompactMmap<D>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, D>);
 macro_rules! impl_array_storage {
-    ($ty:ty) => {
-        impl ArrayStorage for $ty {
-            type Dimension = crate::DimDyn;
+    ($ty:ident < $($lt:lifetime,)? D >) => {
+        impl<$($lt,)? D> ArrayStorage for $ty<$($lt,)? D>
+        where
+            D: crate::Dimension,
+        {
+            type Dimension = D;
 
             fn read_data(
                 &self,
@@ -63,7 +83,7 @@ macro_rules! impl_array_storage {
             }
 
             fn shape(&self) -> &[u64] {
-                &self.0.shape
+                self.0.shape()
             }
             fn dtype(&self) -> &Dtype {
                 self.0.blocks.dtype()
@@ -78,7 +98,7 @@ macro_rules! impl_array_storage {
                 }
             }
 
-            fn as_compact(&self) -> Option<CompactBorrowed<'_>> {
+            fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::Dimension>> {
                 Some(CompactBorrowed(ArrayBlockTableStorageBase {
                     blocks: self.0.blocks.as_ref(),
                     shape: self.0.shape.clone(),
@@ -91,11 +111,22 @@ macro_rules! impl_array_storage {
                 }))
             }
         }
+
+        impl<$($lt,)? D> crate::storage::SwapDimInplace for $ty<$($lt,)? D>
+        where D:
+            crate::Dimension
+        {
+            type SwapDimension<NewD: Dimension> = $ty<$($lt,)? NewD>;
+
+            fn swap_dim<NewD: Dimension>(self) -> Option<Self::SwapDimension<NewD>> {
+                Some($ty(self.0.swap_dim()?))
+            }
+        }
     };
 }
-impl_array_storage!(Compact);
-impl_array_storage!(CompactBorrowed<'_>);
-impl_array_storage!(CompactMmap);
+impl_array_storage!(Compact<D>);
+impl_array_storage!(CompactBorrowed<'a, D>);
+impl_array_storage!(CompactMmap<D>);
 
 /// Nd-array layer on top of [`BlockTable<S>`](crate::storage::block::BlockTable).
 ///
@@ -111,12 +142,12 @@ impl_array_storage!(CompactMmap);
 ///
 /// `encoder_params` and `decoder_params` are kept here - not in `BlockTable` - so that
 /// `ArrayStorage::spec` can propagate them through lazy view operations and `copy_with`.
-pub(crate) struct ArrayBlockTableStorageBase<S>
+pub(crate) struct ArrayBlockTableStorageBase<S, D>
 where
     S: BlockTableStorage,
 {
     pub(crate) blocks: BlockTable<S>,
-    shape: DimArray<u64>,
+    shape: D,
 
     blocks_layout: BlocksLayout,
     /// Number of blocks per dimension: `ceil(shape[d] / block_shape[d])`.
@@ -125,7 +156,7 @@ where
     encoder_params: EncoderParams,
     decoder_params: DecoderParams,
 }
-impl<S> ArrayBlockTableStorageBase<S>
+impl<S, D> ArrayBlockTableStorageBase<S, D>
 where
     S: BlockTableStorage,
 {
@@ -135,14 +166,18 @@ where
     /// `blocks`. `block_grid_shape` is derived from `shape` and the block shape.
     pub(crate) fn new(
         blocks: BlockTable<S>,
-        shape: DimArray<u64>,
+        shape: D,
         blocks_layout: BlocksLayout,
         encoder_params: EncoderParams,
         decoder_params: DecoderParams,
-    ) -> Self {
-        let ndim = shape.len();
+    ) -> Self
+    where
+        D: Dimension,
+    {
+        let shape_slice = shape.as_slice();
+        let ndim = shape_slice.len();
         let block_grid_shape = dim_arr(ndim, |dim| {
-            shape[dim].div_ceil(blocks_layout.block_shape_hint[dim] as u64)
+            shape_slice[dim].div_ceil(blocks_layout.block_shape_hint[dim] as u64)
         });
         Self {
             blocks,
@@ -159,6 +194,13 @@ where
     /// Returns the nd-block shape (items per dimension) used by this storage.
     pub(crate) fn block_shape(&self) -> &[BlockSize] {
         &self.blocks_layout.block_shape_hint
+    }
+
+    pub(crate) fn shape(&self) -> &[u64]
+    where
+        D: Dimension,
+    {
+        self.shape.as_slice()
     }
 
     /// Read a rectangular sub-region of the nd-array into `buf`.
@@ -196,11 +238,15 @@ where
     ///      position of the active region relative to `index`.
     ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
     ///      respecting both strides.
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape, index)?;
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>
+    where
+        D: Dimension,
+    {
+        let shape = self.shape();
+        check_get_range(shape, index)?;
         let _nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
 
-        let ndim = self.shape.len();
+        let ndim = shape.len();
         let block_shape = self.block_shape();
 
         let mut b_range = DimArray::default();
@@ -242,7 +288,7 @@ where
             (
                 nd_iter_ext_logical_global_index(&self.block_grid_shape, &block_begin),
                 NdIterExtBlockOffsetSize::new(
-                    &self.shape,
+                    shape,
                     &elem_begin,
                     &elem_end,
                     &dim_arr(ndim, |dim| block_shape[dim] as u64),
@@ -290,5 +336,20 @@ where
         }
 
         Ok(())
+    }
+
+    pub(crate) fn swap_dim<NewD: Dimension>(self) -> Option<ArrayBlockTableStorageBase<S, NewD>>
+    where
+        D: Dimension,
+    {
+        let shape = NewD::from_slice(self.shape())?;
+        Some(ArrayBlockTableStorageBase {
+            blocks: self.blocks,
+            shape,
+            blocks_layout: self.blocks_layout,
+            block_grid_shape: self.block_grid_shape,
+            encoder_params: self.encoder_params,
+            decoder_params: self.decoder_params,
+        })
     }
 }

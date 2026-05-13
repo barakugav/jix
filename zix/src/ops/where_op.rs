@@ -194,6 +194,7 @@ mod tests {
     use crate::array::Array;
     use crate::storage::Compact;
     use crate::util::ScalarStrategy;
+    use crate::DimDyn;
 
     #[cfg(feature = "half")]
     use crate::dtype::f16;
@@ -209,9 +210,9 @@ mod tests {
             ndarray::ArrayD<bool>,
             ndarray::ArrayD<T>,
             ndarray::ArrayD<T>,
-            Array<Compact>,
-            Array<Compact>,
-            Array<Compact>,
+            Array<Compact<DimDyn>>,
+            Array<Compact<DimDyn>>,
+            Array<Compact<DimDyn>>,
         ),
     >
     where
@@ -244,12 +245,6 @@ mod tests {
     // The condition, x, and y arrays all share the same random shape.
     macro_rules! test_where_dtype {
         ($dtype:ty) => {
-            // use super::where_condition;
-            // use crate::storage::Compact;
-            // use crate::util::ScalarStrategy;
-            // use crate::Array;
-            // use proptest::prelude::*;
-
             paste::paste! {
                 proptest::proptest! {
                     #[test]
