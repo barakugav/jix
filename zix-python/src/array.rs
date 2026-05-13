@@ -141,7 +141,10 @@ impl Array {
     }
 
     pub(crate) fn from_core_storage(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
-        Self::from_storage(DynStorage(Arc::new(storage)))
+        let storage = ZixArray::from_storage(storage)
+            .into_dim_dyn()
+            .into_storage();
+        Self::from_storage(DynStorage::new(Arc::new(storage)))
     }
 
     pub(crate) fn to_core_array(&self) -> ZixArray<DynStorage> {
@@ -1058,7 +1061,7 @@ mod tests {
     use pyo3::types::{PyAny, PyEllipsis, PySlice, PyTuple};
     use pyo3::{Bound, IntoPyObject, Python};
     use zix_core::dtype::Dtyped;
-    use zix_core::Array as ZixArray;
+    use zix_core::{Array as ZixArray, IntoDimension};
 
     use super::{Array, DynStorage};
 
@@ -1067,17 +1070,17 @@ mod tests {
         ndarray: &ndarray::Array<T, D>,
     ) -> Bound<'py, Array>
     where
-        D: ndarray::Dimension,
+        D: ndarray::Dimension + IntoDimension,
     {
         let core = ZixArray::compact_array(ndarray).unwrap();
-        let dyn_storage = DynStorage(Arc::new(core.into_storage()));
+        let dyn_storage = DynStorage::new(Arc::new(core.into_storage()));
         Bound::new(py, Array::from_storage(dyn_storage)).unwrap()
     }
 
     fn roundtrip<T, D>(original: &ndarray::Array<T, D>) -> ArrayD<T>
     where
         T: Dtyped + numpy::Element + Copy,
-        D: ndarray::Dimension,
+        D: ndarray::Dimension + IntoDimension,
     {
         // ndarray::Array -> zix_core::Array -> zix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {

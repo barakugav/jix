@@ -6,13 +6,15 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::IntoCompact;
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
-use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref};
+use crate::storage::{
+    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, IntoDim, Ref,
+};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
 use crate::util::{
     cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray, Idx, IxIterExt,
 };
-use crate::ArrayParams;
+use crate::{ArrayParams, DimDyn, Dimension, IntoDimension};
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
 ///
@@ -151,6 +153,18 @@ use crate::ArrayParams;
 /// variants [`reshape`](Array::reshape) and [`broadcast`](Array::broadcast) call `copy`
 /// internally. To ensure a well-aligned block layout, pass explicit `ArrayParams` with a block
 /// shape that matches the expected access pattern.
+///
+/// # Dimension type tracking
+///
+/// `S::Dimension` records the number of array axes at the type level. When the ndim is
+/// statically known, `S::Dimension = Dim<N>`, and the compiler can verify that operations that
+/// require a specific ndim are used correctly. When the ndim is only known at runtime (e.g.
+/// for arrays loaded from files), `S::Dimension = DimDyn`.
+///
+/// The dimension type propagates automatically: passing a `usize` to `insert_axis` on a
+/// `Dim<N>` array produces `Dim<N+1>`; passing `&[usize]` always produces `DimDyn`. Use
+/// [`into_dim::<Dim<N>>()`](Array::into_dim) to assert a specific ndim and recover static
+/// tracking, or [`into_dim_dyn()`](Array::into_dim_dyn) to erase static dimension info.
 #[derive(Clone)]
 pub struct Array<S> {
     pub(crate) storage: S,
@@ -202,7 +216,7 @@ impl Array<Compact> {
     /// ```
     pub fn compact_array<S, D>(array: &ndarray::ArrayBase<S, D>) -> Result<Self>
     where
-        D: ndarray::Dimension,
+        D: ndarray::Dimension + IntoDimension,
         S: ndarray::Data<Elem: Dtyped>,
     {
         Array::compact_array_with(array, ArrayParams::default())
@@ -245,7 +259,7 @@ impl Array<Compact> {
         mut params: ArrayParams,
     ) -> Result<Self>
     where
-        D: ndarray::Dimension,
+        D: ndarray::Dimension + IntoDimension,
         S: ndarray::Data<Elem: Dtyped>,
     {
         let array = Array::plain_ndarray_view(array)?;
@@ -719,6 +733,59 @@ impl<S: ArrayStorage> Array<S> {
         }
     }
 
+    /// Re-tag this array's storage as having dimension `D`, returning an error if the actual
+    /// ndim does not match.
+    ///
+    /// This is the bridge between dynamic and static dimension tracking. Arrays loaded from
+    /// files or produced by slice-based shape operations carry [`DimDyn`] as their dimension
+    /// type because the compiler cannot know the ndim at that point. After you have confirmed
+    /// the ndim (e.g. by reading `array.ndim()` or knowing the data layout ahead of time),
+    /// call `into_dim::<Dim<N>>()` to recover a statically-typed dimension. Subsequent
+    /// operations on the result will propagate the static `Dim<N>` through the type system.
+    ///
+    /// Generally speaking, the compiler can optimize more aggressively when the dimension is
+    /// statically known, which can yield better performance.
+    ///
+    /// See [`into_dim_dyn`](Self::into_dim_dyn).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidShapeOperation`](crate::ErrorKind::InvalidShapeOperation) if
+    /// `D::NDIM` is `Some(n)` and `self.ndim() != n`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use zix::{Array, ArrayParams, Dim};
+    ///
+    /// // Array loaded from file has DimDyn storage.
+    /// let a = Array::read_from_file("data.zix", ArrayParams::default())?;
+    ///
+    /// // Assert the file contains a 3-D array; fail gracefully if not.
+    /// let a3d = a.into_dim::<Dim<3>>()?;
+    ///
+    /// // Now insert_axis knows the result is 4-D at compile time.
+    /// let a4d = a3d.insert_axis(0usize); // Array<InsertAxis<..., Dim<4>>>
+    /// ```
+    pub fn into_dim<D>(self) -> Result<Array<IntoDim<S, D>>>
+    where
+        D: Dimension,
+    {
+        Ok(Array::from_storage(IntoDim::<S, D>::new(self)?))
+    }
+
+    /// Re-tag this array's storage as [`DimDyn`], erasing any static dimension information.
+    ///
+    /// This is the infallible counterpart to [`into_dim`](Self::into_dim). Every array has a
+    /// runtime ndim regardless of its static type, so converting to `DimDyn` always succeeds.
+    ///
+    /// After calling `into_dim_dyn`, subsequent shape-changing operations will produce
+    /// `DimDyn` results rather than `Dim<N>`. Call [`into_dim`](Self::into_dim) again to
+    /// re-establish static tracking once the ndim is confirmed.
+    pub fn into_dim_dyn(self) -> Array<IntoDim<S, DimDyn>> {
+        self.into_dim().unwrap()
+    }
+
     /// Check if this array storage is compact block-compressed storage.
     ///
     /// This functions returns `true` for arrays that are stored in compact block-compressed form,
@@ -1009,6 +1076,7 @@ mod tests {
     use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::{BlockShapeTag, BlocksLayout};
     use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
+    use crate::IntoDimension;
 
     // -----------------------------------------------------------------------
     // compact_array roundtrip helper
@@ -1018,7 +1086,7 @@ mod tests {
     where
         T: Dtyped,
         S: ndarray::Data<Elem = T>,
-        D: ndarray::Dimension,
+        D: ndarray::Dimension + IntoDimension,
     {
         let a = Array::compact_array_with(&src, arr_params(block_shape)).unwrap();
         a.to_ndarray().unwrap()
@@ -1038,10 +1106,12 @@ mod tests {
     }
 
     fn array<T: Dtyped>(blocks: &[&[T]], shape: &[usize], block_shape: &[usize]) -> Array<Compact> {
-        let shape: DimArray<u64> = shape.iter().map(|&x| x as u64).collect();
+        let shape = shape.iter().map(|&x| x as u64).collect::<DimArray<_>>();
         let ndim = block_shape.len();
-        let block_shape_hint: DimArray<BlockSize> =
-            block_shape.iter().map(|&x| x as BlockSize).collect();
+        let block_shape_hint = block_shape
+            .iter()
+            .map(|&x| x as BlockSize)
+            .collect::<DimArray<_>>();
         let layout = BlocksLayout::new(
             block_shape_hint.clone(),
             dim_arr(ndim, |_| BlockShapeTag::Fixed),

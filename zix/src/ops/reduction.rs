@@ -5,11 +5,12 @@ use crate::dtype::Dtype;
 #[allow(unused_imports)]
 use crate::dtype::{f16, Complex};
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
+use crate::ops::common::AxesArg;
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, DimArray};
-use crate::Array;
+use crate::{Array, Dimension};
 
 pub(crate) trait ReductionOpKernel {
     fn reduce<'a>(
@@ -22,27 +23,30 @@ pub(crate) trait ReductionOpKernel {
     fn supports_empty(&self) -> bool;
 }
 
-pub(crate) struct ReductionOp<Op, S> {
+pub(crate) struct ReductionOp<Op, S, D> {
     op: Op,
 
     array: Array<S>,
     is_reduced: DimArray<bool>,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
+    shape: D,
     blocks_layout: BlocksLayout,
 }
-impl<Op, S> ReductionOp<Op, S> {
-    pub(crate) fn new(op: Op, array: Array<S>, axes: &[usize]) -> Result<Self>
+impl<Op, S, D> ReductionOp<Op, S, D> {
+    pub(crate) fn new<Ax>(op: Op, array: Array<S>, axes: Ax) -> Result<Self>
     where
         Op: ReductionOpKernel,
         S: ArrayStorage,
+        D: Dimension,
+        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
         let output_dtype = op.output_dtype(array.dtype())?;
 
         let input_ndim = array.shape().len();
         let mut is_reduced = dim_arr(input_ndim, |_| false);
-        for &ax in axes {
+        for i in 0..axes.len() {
+            let ax = axes.get(i);
             ensure!(
                 ax < input_ndim,
                 InvalidArgument,
@@ -72,6 +76,7 @@ impl<Op, S> ReductionOp<Op, S> {
             .enumerate()
             .filter_map(|(dim, &s)| is_reduced[dim].not().then_some(s))
             .collect::<DimArray<_>>();
+        let shape = D::from_slice(&shape).unwrap();
 
         let mut b_layout = array.blocks_layout().clone();
         b_layout.block_shape_hint = (0..input_ndim)
@@ -98,11 +103,14 @@ impl<Op, S> ReductionOp<Op, S> {
         })
     }
 }
-impl<Op, S> ArrayStorage for ReductionOp<Op, S>
+impl<Op, S, D> ArrayStorage for ReductionOp<Op, S, D>
 where
     Op: ReductionOpKernel,
     S: ArrayStorage,
+    D: Dimension,
 {
+    type Dimension = D;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(self.shape(), index)?;
         check_get_buffer_size(index, &self.dtype, buf)?;
@@ -190,7 +198,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype
@@ -214,8 +222,13 @@ macro_rules! define_reduction_op {
         single_axis = true
     ) => {
         $(#[$meta])*
-        pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
-        impl<S> $Name<S> {
+        pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S, <S::Dimension as crate::Dimension>::Smaller>)
+        where
+            S: crate::storage::ArrayStorage;
+        impl<S> $Name<S>
+        where
+            S: crate::storage::ArrayStorage,
+        {
             /// Creates a new view storage applying the operation by reducing the specified axis.
             ///
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
@@ -227,7 +240,12 @@ macro_rules! define_reduction_op {
                 Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, &[axis])?))
             }
         }
-        crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
+        crate::storage::impl_array_storage_forward!(
+            $Name<S>,
+            where
+                S: crate::storage::ArrayStorage;
+            Dimension = <S::Dimension as crate::Dimension>::Smaller
+        );
 
         define_reduction_op_kernel!(
             $NameKernel,
@@ -246,20 +264,28 @@ macro_rules! define_reduction_op {
         types = $types:tt
     ) => {
         $(#[$meta])*
-        pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S>);
-        impl<S> $Name<S> {
+        pub struct $Name<S, D>(crate::ops::reduction::ReductionOp<$NameKernel, S, D>);
+        impl<S, D> $Name<S, D> {
             /// Creates a new view storage applying the operation by reducing the specified axes.
             ///
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
-            pub fn new(array: crate::Array<S>, axes: &[usize] $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
+            pub fn new<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorage,
+                D: crate::Dimension,
+                Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
             {
                 let kernel = $NameKernel { $($extra_arg),* };
                 Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, axes)?))
             }
         }
-        crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
+        crate::storage::impl_array_storage_forward!(
+            $Name<S, D>,
+            where
+                S: crate::storage::ArrayStorage,
+                D: crate::Dimension;
+            Dimension = D
+        );
 
         define_reduction_op_kernel!(
             $NameKernel,
@@ -1000,7 +1026,10 @@ macro_rules! define_array_reduction_method {
     ($op:ident : $Name:ident $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
         #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op(self, axes: &[usize] $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
+        pub fn $op<Ax>(self, axes: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S, Ax::ReducedDimension<S::Dimension>>>
+        where
+            Ax: AxesArg,
+        {
             let op = $Name::new(self, axes $($(, $extra_arg)*)?).unwrap();
             crate::Array::from_storage(op)
         }

@@ -20,3 +20,4 @@
 - modify all ops to have `new() -> Array<Self>` and `new_storage() -> Self`
 - is_empty()
 - squeeze()
+- make Compact generic over D

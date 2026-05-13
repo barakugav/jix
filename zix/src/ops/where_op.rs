@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
-use crate::util::{cast_slice, cast_slice_mut, DimArray};
+use crate::util::{cast_slice, cast_slice_mut};
+use crate::Array;
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
 /// examples.
@@ -15,15 +15,15 @@ use crate::util::{cast_slice, cast_slice_mut, DimArray};
 /// Panics if `condition` is not `bool`, `x` and `y` differ in dtype, or any two arrays differ
 /// in shape.
 #[track_caller]
-pub fn where_condition<S1, S2, S3>(
-    condition: Array<S1>,
-    x: Array<S2>,
-    y: Array<S3>,
-) -> Array<Where<S1, S2, S3>>
+pub fn where_condition<SC, SX, SY>(
+    condition: Array<SC>,
+    x: Array<SX>,
+    y: Array<SY>,
+) -> Array<Where<SC, SX, SY>>
 where
-    S1: ArrayStorage,
-    S2: ArrayStorage,
-    S3: ArrayStorage,
+    SC: ArrayStorage,
+    SX: ArrayStorage,
+    SY: ArrayStorage,
 {
     Array::from_storage(Where::new(condition, x, y).unwrap())
 }
@@ -65,21 +65,20 @@ where
 /// assert_eq!(result[[1, 1]], 4.0);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Where<S1, S2, S3> {
-    condition: Array<S1>,
-    x: Array<S2>,
-    y: Array<S3>,
+pub struct Where<SC, SX, SY> {
+    condition: Array<SC>,
+    x: Array<SX>,
+    y: Array<SY>,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
 }
-impl<S1, S2, S3> Where<S1, S2, S3> {
+impl<SC, SX, SY> Where<SC, SX, SY> {
     /// Constructs a `Where` storage. See [`Where`] for semantics and examples.
-    pub fn new(condition: Array<S1>, x: Array<S2>, y: Array<S3>) -> Result<Self>
+    pub fn new(condition: Array<SC>, x: Array<SX>, y: Array<SY>) -> Result<Self>
     where
-        S1: ArrayStorage,
-        S2: ArrayStorage,
-        S3: ArrayStorage,
+        SC: ArrayStorage,
+        SX: ArrayStorage,
+        SY: ArrayStorage,
     {
         ensure!(
             condition.dtype() == &bool::DTYPE,
@@ -106,21 +105,22 @@ impl<S1, S2, S3> Where<S1, S2, S3> {
 
         Ok(Self {
             dtype: x.dtype().clone(),
-            shape: shape.try_into().unwrap(),
             condition,
             x,
             y,
         })
     }
 }
-impl<S1, S2, S3> ArrayStorage for Where<S1, S2, S3>
+impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
 where
-    S1: ArrayStorage,
-    S2: ArrayStorage,
-    S3: ArrayStorage,
+    SC: ArrayStorage,
+    SX: ArrayStorage,
+    SY: ArrayStorage,
 {
+    type Dimension = SC::Dimension;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape, index)?;
+        check_get_range(self.shape(), index)?;
         let dtype = self.dtype();
         let nitems = check_get_buffer_size(index, dtype, buf)?;
 
@@ -173,7 +173,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.condition.shape()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

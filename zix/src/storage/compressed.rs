@@ -51,6 +51,8 @@ pub struct CompactMmap(pub(crate) ArrayBlockTableStorageBase<crate::storage::blo
 macro_rules! impl_array_storage {
     ($ty:ty) => {
         impl ArrayStorage for $ty {
+            type Dimension = crate::DimDyn;
+
             fn read_data(
                 &self,
                 index: &[Range<u64>],

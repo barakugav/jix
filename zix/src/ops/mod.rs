@@ -88,6 +88,7 @@ mod sub_dtype;
 pub use sub_dtype::*;
 
 mod common;
+pub use common::AxesArg;
 
 #[doc(hidden)]
 pub mod __private {

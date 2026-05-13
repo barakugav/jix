@@ -3,63 +3,88 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, ensure, Result};
+use crate::ops::AxesArg;
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
-use crate::Array;
+use crate::{dim_arr, Array, Dimension};
 
 /// Removes length-1 dimensions from an array's shape,
 /// returned by [`Array::remove_axis`](crate::Array::remove_axis).
 ///
-/// `axes` is a set of axis indices in the *input* shape (0-based). Each named dimension must have
+/// `axis` is a set of axis indices in the *input* shape (0-based). Each named dimension must have
 /// length exactly 1 and is dropped from the output shape. Duplicate axis indices are not allowed.
-/// The order of values in `axes` does not matter. Valid axis indices are `0..input_ndim`.
+/// The order of values in `axis` does not matter. Valid axis indices are `0..input_ndim`.
 ///
 /// Output dtype equals the input dtype.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
+/// # Dimension tracking
+///
+/// `RemoveAxis<S, D>` is generic over `D: Dimension`, determined by the axis argument type.
+/// Statically-sized arguments encode the output ndim in the type:
+///
+/// | Argument type | Output `D` |
+/// |---|---|
+/// | `usize` | `S::Dimension::Smaller` |
+/// | `[usize; N]` / `(usize, ...)` N-tuple | `Smaller` applied N times |
+/// | `[usize; 0]` / `()` | `S::Dimension` (unchanged) |
+/// | `&[usize]` / `&Vec<usize>` | `DimDyn` |
+///
 /// # Examples
 ///
 /// ```text
-/// [1, N]          axes: [0]       -> [N]
-/// [N, 1]          axes: [1]       -> [N]
-/// [N, 1, M]       axes: [1]       -> [N, M]
-/// [1, N, 1, M, 1] axes: [0, 2, 4] -> [N, M]
+/// [1, N]          axis: [0]       -> [N]
+/// [N, 1]          axis: [1]       -> [N]
+/// [N, 1, M]       axis: [1]       -> [N, M]
+/// [1, N, 1, M, 1] axis: [0, 2, 4] -> [N, M]
 /// ```
 ///
+/// Different argument types select both the removed axes and the output dimension type:
+///
 /// ```
-/// use zix::{Array, ArrayParams};
+/// use zix::{Array, Dim};
 /// use ndarray::array;
 ///
-/// // [1, 3] -> [3]: remove the leading size-1 dim
-/// let a = Array::compact_array(&array![[1i32, 2, 3]])?;
-/// let result = a.remove_axis(&[0]).to_ndarray::<i32>()?;
-/// assert_eq!(result.shape(), &[3]);
-/// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
+/// // shape [1, 1, 3], DimDyn → assert Dim<3>
+/// let a = Array::compact_array(&array![[[1i32, 2, 3]]])?
+///     .into_dim::<Dim<3>>()?;
 ///
-/// // [1, 2, 1] -> [2]: remove both size-1 dims at once
-/// let b = Array::compact_array(&array![[[10i32], [20]]])?; // shape [1, 2, 1]
-/// assert_eq!(b.remove_axis(&[0, 2]).shape(), &[2]);
+/// // usize → output D = Dim<2> (one fewer than input Dim<3>)
+/// assert_eq!(a.as_ref().remove_axis(0usize).shape(), &[1, 3]);
+///
+/// // [usize; 2] → output D = Dim<1> (two fewer than input Dim<3>)
+/// assert_eq!(a.as_ref().remove_axis([0usize, 1]).shape(), &[3]);
+///
+/// // &[usize] → output D = DimDyn
+/// let axes = vec![0usize, 1];
+/// assert_eq!(a.remove_axis(axes.as_slice()).shape(), &[3]);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct RemoveAxis<S> {
+pub struct RemoveAxis<S, D> {
     array: Array<S>,
     /// `is_removed[input_dim]` is `true` for every input dimension that was removed.
     is_removed: DimArray<bool>,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
+    shape: D,
     blocks_layout: BlocksLayout,
 }
 
-impl<S: ArrayStorage> RemoveAxis<S> {
+impl<S, D> RemoveAxis<S, D> {
     /// Constructs a `RemoveAxis` storage. See [`RemoveAxis`] for semantics and examples.
-    pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
+    pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
+    where
+        S: ArrayStorage,
+        D: Dimension,
+        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+    {
         let input_ndim = array.shape().len();
 
         // Validate axis indices and check for duplicates.
         let mut seen = DimArray::<bool>::from_iter(std::iter::repeat_n(false, input_ndim));
-        for &ax in axes {
+        let axes = dim_arr(axis.len(), |i| axis.get(i));
+        for &ax in &axes {
             ensure!(
                 ax < input_ndim,
                 InvalidShapeOperation,
@@ -96,6 +121,7 @@ impl<S: ArrayStorage> RemoveAxis<S> {
                 preferred.push(inner_layout.preferred_read_shape[input_dim]);
             }
         }
+        let shape = D::from_slice(&shape).unwrap();
 
         let mut b_layout = inner_layout.clone();
         b_layout.block_shape_hint = hint;
@@ -113,7 +139,13 @@ impl<S: ArrayStorage> RemoveAxis<S> {
     }
 }
 
-impl<S: ArrayStorage> ArrayStorage for RemoveAxis<S> {
+impl<S, D> ArrayStorage for RemoveAxis<S, D>
+where
+    S: ArrayStorage,
+    D: Dimension,
+{
+    type Dimension = D;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(self.shape(), index)?;
 
@@ -137,7 +169,7 @@ impl<S: ArrayStorage> ArrayStorage for RemoveAxis<S> {
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

@@ -5,6 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::Dimension;
 
 /// Private implementation trait for [`ArraySequence`]. Not part of the public API.
 pub(crate) trait ArraySequenceImpl {
@@ -65,7 +66,13 @@ pub(crate) trait ArraySequenceImpl {
 /// # Ok::<(), zix::Error>(())
 /// ```
 #[allow(private_bounds)]
-pub trait ArraySequence: ArraySequenceImpl {}
+pub trait ArraySequence: ArraySequenceImpl {
+    /// The compile-time dimension of the first array in the sequence.
+    ///
+    /// This is used by operations like `stack` and `concatenate` to determine the output dimension
+    /// of the result, which is always derived from the first array's dimension.
+    type FirstArrayDimension: Dimension;
+}
 
 impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
 where
@@ -97,7 +104,12 @@ where
         self[arr].storage._spec()
     }
 }
-impl<S, const N: usize> ArraySequence for [Array<S>; N] where S: ArrayStorage {}
+impl<S, const N: usize> ArraySequence for [Array<S>; N]
+where
+    S: ArrayStorage,
+{
+    type FirstArrayDimension = S::Dimension;
+}
 
 impl<S> ArraySequenceImpl for Vec<Array<S>>
 where
@@ -129,7 +141,9 @@ where
         self[arr].storage._spec()
     }
 }
-impl<S: ArrayStorage> ArraySequence for Vec<Array<S>> {}
+impl<S: ArrayStorage> ArraySequence for Vec<Array<S>> {
+    type FirstArrayDimension = S::Dimension;
+}
 
 impl<S> ArraySequenceImpl for &[Array<S>]
 where
@@ -161,14 +175,18 @@ where
         self[arr].storage._spec()
     }
 }
-impl<S: ArrayStorage> ArraySequence for &[Array<S>] {}
+impl<S: ArrayStorage> ArraySequence for &[Array<S>] {
+    type FirstArrayDimension = S::Dimension;
+}
 
 macro_rules! impl_array_sequence_for_tuple {
     ($($idx:tt : $S:ident),+ $(,)?) => {
         impl<$($S),+> ArraySequence for ($(Array<$S>,)+)
         where
             $($S: ArrayStorage,)+
-        {}
+        {
+            type FirstArrayDimension = S0::Dimension;
+        }
         impl<$($S),+> ArraySequenceImpl for ($(Array<$S>,)+)
         where
             $($S: ArrayStorage,)+

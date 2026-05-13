@@ -22,8 +22,9 @@ pub use concatenate::*;
 mod stack;
 pub use stack::*;
 
+use crate::ops::AxesArg;
 use crate::storage::{ArrayStorage, Compact};
-use crate::Array;
+use crate::{Array, IntoDimension};
 
 impl<S> Array<S>
 where
@@ -35,7 +36,10 @@ where
     /// once: the copy realigns blocks to the new shape, avoiding read-amplification on future
     /// reads.
     #[track_caller]
-    pub fn reshape(self, shape: &[u64]) -> Array<Compact> {
+    pub fn reshape<Sh>(self, shape: Sh) -> Array<Compact>
+    where
+        Sh: IntoDimension,
+    {
         self.reshape_view(shape).copy().unwrap()
     }
 
@@ -45,8 +49,15 @@ where
     /// No data is copied at construction time, but reads may be slow when the new shape crosses
     /// block boundaries of the original layout. Call [`.copy()`](Array::copy) to realign blocks
     /// before repeated reads, or prefer [`reshape`](Self::reshape) directly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
-    pub fn reshape_view(self, shape: &[u64]) -> Array<Reshape<S>> {
+    pub fn reshape_view<Sh>(self, shape: Sh) -> Array<Reshape<S, Sh::Dimension>>
+    where
+        Sh: IntoDimension,
+    {
         Array::from_storage(Reshape::new(self, shape).unwrap())
     }
 
@@ -109,28 +120,39 @@ where
     /// Returns a lazy view of the array with the specified length-1 dimensions removed.
     /// See [`RemoveAxis`] for details and examples.
     ///
-    /// Each axis in `axes` must have length 1. No data is copied.
+    /// Each axis in `axis` must have length 1. No data is copied.
     ///
     /// # Panics
     ///
     /// Panics if any axis is out of bounds, duplicated, or has length != 1.
     #[track_caller]
-    pub fn remove_axis(self, axes: &[usize]) -> Array<RemoveAxis<S>> {
-        Array::from_storage(RemoveAxis::new(self, axes).unwrap())
+    pub fn remove_axis<Ax>(
+        self,
+        axis: Ax,
+    ) -> Array<RemoveAxis<S, Ax::ReducedDimension<S::Dimension>>>
+    where
+        Ax: AxesArg,
+    {
+        Array::from_storage(RemoveAxis::new(self, axis).unwrap())
     }
 
     /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertAxis`]
     /// for details and examples.
     ///
-    /// Each value in `axes` is a gap index in the output shape: `0` inserts before dim 0, `ndim`
-    /// appends after the last dim. Duplicates are allowed and each inserts one dimension. No data
-    /// is copied.
+    /// Each value in `axis` is a gap index: `0` inserts before dim 0, `ndim` appends after the
+    /// last dim. Duplicates are allowed and each inserts one dimension. No data is copied.
     ///
     /// # Panics
     ///
-    /// Panics if any value in `axes` is > `self.ndim()` or the resulting ndim exceeds the maximum.
+    /// Panics if any value in `axis` is > `self.ndim()` or the resulting ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
-    pub fn insert_axis(self, axes: &[usize]) -> Array<InsertAxis<S>> {
-        Array::from_storage(InsertAxis::new(self, axes).unwrap())
+    pub fn insert_axis<Ax>(
+        self,
+        axis: Ax,
+    ) -> Array<InsertAxis<S, Ax::ExpandedDimension<S::Dimension>>>
+    where
+        Ax: AxesArg,
+    {
+        Array::from_storage(InsertAxis::new(self, axis).unwrap())
     }
 }

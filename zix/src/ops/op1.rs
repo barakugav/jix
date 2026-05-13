@@ -6,7 +6,6 @@ use crate::dtype::{f16, Complex, Dtype, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::common::define_array_op1_method;
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
-use crate::util::DimArray;
 
 pub(crate) trait Op1Kernel {
     fn apply(&self, data: Op1KernelData, input_dtype: &Dtype) -> Result<()>;
@@ -75,11 +74,8 @@ impl<'a> Op1KernelData<'a> {
 
 pub(crate) struct Op1<Op, S> {
     op: Op,
-
     array: Array<S>,
-
     output_dtype: Dtype,
-    shape: DimArray<u64>,
 }
 impl<Op, S> Op1<Op, S> {
     pub(crate) fn new(op: Op, array: Array<S>) -> Result<Self>
@@ -91,7 +87,6 @@ impl<Op, S> Op1<Op, S> {
         Ok(Self {
             op,
             output_dtype,
-            shape: array.shape().try_into().unwrap(),
             array,
         })
     }
@@ -101,8 +96,10 @@ where
     Op: Op1Kernel,
     S: ArrayStorage,
 {
+    type Dimension = S::Dimension;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape, index)?;
+        check_get_range(&self.shape(), index)?;
         let nitems = check_get_buffer_size(index, &self.output_dtype, buf)?;
 
         let (src_dtype, dst_dtype) = (self.array.dtype(), &self.output_dtype);
@@ -137,7 +134,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.array.shape()
     }
     fn dtype(&self) -> &Dtype {
         &self.output_dtype
@@ -194,7 +191,12 @@ macro_rules! define_op1 {
                 Ok(Self(crate::ops::op1::Op1::new($NameKernel, array)?))
             }
         }
-        crate::storage::impl_array_storage_forward!($Name<S> where S: crate::storage::ArrayStorage);
+        crate::storage::impl_array_storage_forward!(
+            $Name<S>,
+            where
+                S: crate::storage::ArrayStorage;
+            Dimension = S::Dimension
+        );
 
         crate::ops::op1::define_op1_kernel!($NameKernel, $($kernel_args)*);
     };

@@ -160,6 +160,16 @@
 //! assert_eq!(fields[0].0, "r");
 //! ```
 //!
+//! # Dimension types
+//!
+//! Every [`ArrayStorage`](storage::ArrayStorage) carries an associated `type Dimension:
+//! Dimension` that records the number of axes at the type level. When the ndim is known
+//! statically, it is [`Dim<N>`]: the const generic `N` is the axis count and is visible to the
+//! compiler. When the ndim is only known at runtime (e.g. arrays loaded from files), it is
+//! [`DimDyn`]: a stack-allocated array of sizes with capacity [`NDIM_MAX`].
+//! The dimension type propagates through every shape-changing operation automatically.
+//! See [`Dimension`](dimension) for details.
+//!
 //! # Codec pipeline
 //!
 //! Each compressed block passes through the following pipeline on write:
@@ -307,11 +317,11 @@ mod archive;
 
 pub mod ops;
 
+mod dimension;
+pub use dimension::*;
+
 mod util;
 pub use util::ArraySequence;
 
 mod error;
 pub use error::{Error, ErrorKind};
-
-/// Maximum number of dimensions supported by the library for an array.
-pub const NDIM_MAX: usize = 8;

@@ -1,11 +1,11 @@
 use std::ops::{Not, Range};
 
-use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
+use crate::{Array, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///
@@ -48,20 +48,17 @@ where
 /// assert_eq!(c.shape(), &[3, 2]);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Stack<ArraysT> {
+pub struct Stack<ArraysT: ArraySequence> {
     arrays: ArraysT,
     stack_axis: usize,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
+    shape: <ArraysT::FirstArrayDimension as crate::Dimension>::Larger,
     blocks_layout: BlocksLayout,
 }
-impl<ArraysT> Stack<ArraysT> {
+impl<ArraysT: ArraySequence> Stack<ArraysT> {
     /// Constructs a `Stack` storage. See [`Stack`] for semantics and examples.
-    pub fn new(arrays: ArraysT, axis: usize) -> Result<Self>
-    where
-        ArraysT: ArraySequence,
-    {
+    pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
         let narrays = arrays.narrays();
         ensure!(
             narrays > 0,
@@ -94,6 +91,9 @@ impl<ArraysT> Stack<ArraysT> {
         check_ndim(shape0.len() + 1)?;
         let mut new_shape: DimArray<_> = shape0.try_into().unwrap();
         new_shape.insert(axis, narrays as u64);
+        let new_shape =
+            <ArraysT::FirstArrayDimension as crate::Dimension>::Larger::from_slice(&new_shape)
+                .unwrap();
 
         let mut b_layout = arrays._spec(0).blocks_layout.clone();
         b_layout.block_shape_hint.insert(axis, 1);
@@ -113,14 +113,16 @@ impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
     ArraysT: ArraySequence,
 {
+    type Dimension = <ArraysT::FirstArrayDimension as crate::Dimension>::Larger;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape, index)?;
+        check_get_range(self.shape(), index)?;
         let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
         if nitems == 0 {
             return Ok(());
         }
 
-        let in_place = self.shape.iter().take(self.stack_axis).all(|&s| s <= 1);
+        let in_place = self.shape().iter().take(self.stack_axis).all(|&s| s <= 1);
         let arr_range = index[..self.stack_axis]
             .iter()
             .chain(index[self.stack_axis + 1..].iter())
@@ -183,7 +185,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

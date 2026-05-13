@@ -5,7 +5,6 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
-use crate::util::DimArray;
 
 impl<S> Array<S>
 where
@@ -54,10 +53,8 @@ where
 /// ```
 pub struct SubDtype<S> {
     array: Array<S>,
-
     dst_dtype: Dtype,
     sub_field_offset: Itemsize,
-    shape: DimArray<u64>,
 }
 impl<S> SubDtype<S> {
     /// Constructs a `SubDtype` storage. See [`SubDtype`] for semantics and examples.
@@ -85,7 +82,6 @@ impl<S> SubDtype<S> {
         Ok(Self {
             dst_dtype: dtype,
             sub_field_offset: offset,
-            shape: array.shape().try_into().unwrap(),
             array,
         })
     }
@@ -94,8 +90,10 @@ impl<S> ArrayStorage for SubDtype<S>
 where
     S: ArrayStorage,
 {
+    type Dimension = S::Dimension;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape, index)?;
+        check_get_range(self.shape(), index)?;
         let nitems = check_get_buffer_size(index, &self.dst_dtype, buf)?;
         if nitems == 0 {
             return Ok(());
@@ -119,7 +117,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.array.shape()
     }
     fn dtype(&self) -> &Dtype {
         &self.dst_dtype

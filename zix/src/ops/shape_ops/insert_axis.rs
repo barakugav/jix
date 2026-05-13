@@ -3,14 +3,15 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
+use crate::ops::AxesArg;
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::DimArray;
-use crate::Array;
+use crate::{dim_arr, Array, Dimension};
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
 /// returned by [`Array::insert_axis`](crate::Array::insert_axis).
 ///
-/// Each element of `axes` is a **gap index** that identifies a position *between* (or outside)
+/// Each element of `axis` is a **gap index** that identifies a position *between* (or outside)
 /// the input dimensions:
 ///
 /// ```text
@@ -18,69 +19,90 @@ use crate::Array;
 ///         |  d0  |  d1  |  d2  |
 /// ```
 ///
-/// * Gap `0` - before the first input dimension.
-/// * Gap `k` - between input dimensions `k-1` and `k`.
-/// * Gap `orig_ndim` - after the last input dimension.
+/// * Gap `0` — before the first input dimension.
+/// * Gap `k` — between input dimensions `k-1` and `k`.
+/// * Gap `orig_ndim` — after the last input dimension.
 ///
 /// Each occurrence of a gap index inserts one new length-1 dimension at that position. Duplicate
 /// gap indices are allowed and each adds another dimension at the same gap. The order of values in
-/// `axes` does not matter - only the multiset of gap indices matters. Valid gap indices are
+/// `axis` does not matter — only the multiset of gap indices matters. Valid gap indices are
 /// `0..=orig_ndim`.
 ///
 /// Output dtype equals the input dtype.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
+/// # Dimension tracking
+///
+/// `InsertAxis<S, D>` is generic over `D: Dimension`, determined by the axis argument type.
+/// Statically-sized arguments encode the output ndim in the type:
+///
+/// | Argument type | Output `D` |
+/// |---|---|
+/// | `usize` | `S::Dimension::Larger` |
+/// | `[usize; N]` / `(usize, ...)` N-tuple | `Larger` applied N times |
+/// | `[usize; 0]` / `()` | `S::Dimension` (unchanged) |
+/// | `&[usize]` / `&Vec<usize>` | `DimDyn` |
+///
 /// # Examples
 ///
 /// ```text
-/// [N]       axes: [0]     -> [1, N]      (insert before first dim)
-/// [N]       axes: [1]     -> [N, 1]      (append after last dim)
-/// [N, M]    axes: [1]     -> [N, 1, M]   (insert between dims)
-/// [N, M]    axes: [0, 2]  -> [1, N, M, 1]
+/// [N]       axis: [0]     -> [1, N]      (insert before first dim)
+/// [N]       axis: [1]     -> [N, 1]      (append after last dim)
+/// [N, M]    axis: [1]     -> [N, 1, M]   (insert between dims)
+/// [N, M]    axis: [0, 2]  -> [1, N, M, 1]
 /// ```
 ///
+/// Different argument types select both the insertion positions and the output dimension type:
+///
 /// ```
-/// use zix::{Array, ArrayParams};
+/// use zix::{Array, Dim};
 /// use ndarray::array;
 ///
-/// // [3] -> [1, 3]
-/// let a = Array::compact_array(&array![1i32, 2, 3])?;
-/// assert_eq!(a.insert_axis(&[0]).shape(), &[1, 3]);
+/// let a = Array::compact_array(&array![1i32, 2, 3])? // shape [3], DimDyn
+///     .into_dim::<Dim<1>>()?;                         // assert Dim<1>
 ///
-/// // [3] -> [3, 1]
-/// let b = Array::compact_array(&array![1i32, 2, 3])?;
-/// assert_eq!(b.insert_axis(&[1]).shape(), &[3, 1]);
+/// // usize → output D = Dim<2> (one more than input Dim<1>)
+/// assert_eq!(a.as_ref().insert_axis(0).shape(), &[1, 3]);
+/// assert_eq!(a.as_ref().insert_axis(1).shape(), &[3, 1]);
 ///
-/// // [2, 3] -> [1, 2, 3, 1]
-/// let c = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
-/// assert_eq!(c.insert_axis(&[0, 2]).shape(), &[1, 2, 3, 1]);
+/// // [usize; 2] → output D = Dim<3> (two more than input Dim<1>)
+/// assert_eq!(a.as_ref().insert_axis([0, 1]).shape(), &[1, 3, 1]);
+///
+/// // &[usize] → output D = DimDyn
+/// let gaps = vec![0, 1];
+/// assert_eq!(a.insert_axis(gaps.as_slice()).shape(), &[1, 3, 1]);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct InsertAxis<S> {
+pub struct InsertAxis<S, D> {
     array: Array<S>,
     /// `is_inserted[output_dim]` is `true` for every output dimension that was inserted
     /// (length 1, no corresponding input dimension).
     is_inserted: DimArray<bool>,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
+    shape: D,
     blocks_layout: BlocksLayout,
 }
 
-impl<S: ArrayStorage> InsertAxis<S> {
+impl<S, D> InsertAxis<S, D> {
     /// Constructs an `InsertAxis` storage. See [`InsertAxis`] for semantics and examples.
-    pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
+    pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
+    where
+        S: ArrayStorage,
+        D: Dimension,
+        Ax: AxesArg<ExpandedDimension<S::Dimension> = D>,
+    {
         let orig_ndim = array.shape().len();
-        let new_ndim = orig_ndim + axes.len();
-
+        let new_ndim = orig_ndim + axis.len();
         check_ndim(new_ndim)?;
+        let mut axes = dim_arr(axis.len(), |i| axis.get(i));
 
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
         // the last input dim".  Duplicates are allowed - each occurrence inserts one additional
         // dim at that gap.  Valid range: 0..=orig_ndim.
-        for &ax in axes {
+        for &ax in &axes {
             ensure!(
                 ax <= orig_ndim,
                 InvalidShapeOperation,
@@ -90,9 +112,8 @@ impl<S: ArrayStorage> InsertAxis<S> {
         }
 
         // Sort a local copy so we can walk input dims and inserted gaps together in one pass.
-        let mut sorted_axes: DimArray<_> = axes.try_into().unwrap();
-        sorted_axes.sort_unstable();
-        let mut sorted_axes = sorted_axes.iter().peekable();
+        axes.sort_unstable();
+        let mut sorted_axes = axes.iter().peekable();
 
         // Build is_inserted and shape by interleaving: for each gap `g` (0..=orig_ndim),
         // first emit all inserted dims that belong at gap `g`, then emit input dim `g`
@@ -114,6 +135,7 @@ impl<S: ArrayStorage> InsertAxis<S> {
             is_inserted.push(true);
             shape.push(1u64);
         }
+        let shape = D::from_slice(&shape).unwrap();
 
         // Build blocks_layout: inserted dims get block_shape = 1 (Any); non-inserted dims
         // inherit the corresponding input dim's layout unchanged.
@@ -150,7 +172,13 @@ impl<S: ArrayStorage> InsertAxis<S> {
     }
 }
 
-impl<S: ArrayStorage> ArrayStorage for InsertAxis<S> {
+impl<S, D> ArrayStorage for InsertAxis<S, D>
+where
+    S: ArrayStorage,
+    D: Dimension,
+{
+    type Dimension = D;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(self.shape(), index)?;
 
@@ -178,7 +206,7 @@ impl<S: ArrayStorage> ArrayStorage for InsertAxis<S> {
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

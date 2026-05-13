@@ -1,11 +1,11 @@
 use std::ops::{Not, Range};
 
-use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
+use crate::{Array, Dimension};
 
 /// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
 ///
@@ -55,21 +55,18 @@ where
 /// assert_eq!(c.shape(), &[2, 5]);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Concatenate<ArraysT> {
+pub struct Concatenate<ArraysT: ArraySequence> {
     arrays: ArraysT,
     concat_axis: usize,
     borders: Vec<u64>,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
+    shape: ArraysT::FirstArrayDimension,
     blocks_layout: BlocksLayout,
 }
-impl<ArraysT> Concatenate<ArraysT> {
+impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
     /// Constructs a `Concatenate` storage. See [`Concatenate`] for semantics and examples.
-    pub fn new(arrays: ArraysT, axis: usize) -> Result<Self>
-    where
-        ArraysT: ArraySequence,
-    {
+    pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
         let narrays = arrays.narrays();
         ensure!(
             narrays > 0,
@@ -92,7 +89,7 @@ impl<ArraysT> Concatenate<ArraysT> {
         for arr in 0..narrays {
             let shape_i = arrays.shape(arr);
             if shape.len() != shape_i.len()
-                || shape0
+                || shape
                     .iter()
                     .zip(shape_i)
                     .enumerate()
@@ -100,7 +97,7 @@ impl<ArraysT> Concatenate<ArraysT> {
             {
                 bail!(
                     InvalidShapeOperation,
-                    "cannot stack arrays of different shapes: {shape0:?} != {shape_i:?}"
+                    "cannot stack arrays of different shapes: {shape:?} != {shape_i:?}"
                 );
             }
             let dtype_i = arrays.dtype(arr);
@@ -114,6 +111,7 @@ impl<ArraysT> Concatenate<ArraysT> {
             borders.push(shape[axis]);
         }
 
+        let shape = ArraysT::FirstArrayDimension::from_slice(&shape).unwrap();
         Ok(Self {
             dtype: dtype.clone(),
             shape,
@@ -128,6 +126,8 @@ impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where
     ArraysT: ArraySequence,
 {
+    type Dimension = ArraysT::FirstArrayDimension;
+
     /// Fills `buf` with a C-order slice of the concatenated array described by `index`.
     ///
     /// `borders` stores the cumulative end positions of each sub-array along `concat_axis`, so
@@ -145,7 +145,7 @@ where
     /// `NdIter`, using the full output strides for dimensions before `concat_axis` and the
     /// sub-array strides for dimensions at and after it.
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape, index)?;
+        check_get_range(self.shape(), index)?;
         let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
         if nitems == 0 {
             return Ok(());
@@ -246,7 +246,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

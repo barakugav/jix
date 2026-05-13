@@ -1,4 +1,5 @@
 use crate::codec::ReadContext;
+use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::{ArrayStorage, Compact};
 use crate::{Array, ArrayParams};
@@ -42,6 +43,8 @@ impl<S> ArrayStorage for IntoCompact<S>
 where
     S: ArrayStorage,
 {
+    type Dimension = S::Dimension;
+
     fn read_data(
         &self,
         index: &[core::ops::Range<u64>],
@@ -59,7 +62,7 @@ where
             ToCompactInner::Compact(c) => c.shape(),
         }
     }
-    fn dtype(&self) -> &crate::dtype::Dtype {
+    fn dtype(&self) -> &Dtype {
         match &self.0 {
             ToCompactInner::Original(s) => s.dtype(),
             ToCompactInner::Compact(c) => c.dtype(),

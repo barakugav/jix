@@ -7,7 +7,7 @@ use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::NDIM_MAX;
+use crate::{Dimension, Error, ErrorKind, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape_view`].
 ///
@@ -15,6 +15,19 @@ use crate::NDIM_MAX;
 /// product of the original shape. Output dtype equals the input dtype.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
+///
+/// # Dimension tracking
+///
+/// `Reshape<S, D>` is generic over `D: Dimension`, determined by the shape argument type.
+/// Statically-sized arguments encode the output ndim in the type; slice arguments yield
+/// [`DimDyn`](crate::DimDyn):
+///
+/// | Argument type | Output `D` |
+/// |---|---|
+/// | `u64` | `Dim<1>` |
+/// | `[u64; N]` / `&[u64; N]` | `Dim<N>` |
+/// | `(u64, u64, ...)` N-tuple | `Dim<N>` |
+/// | `&[u64]` / `&Vec<u64>` | `DimDyn` |
 ///
 /// # Performance
 ///
@@ -28,43 +41,51 @@ use crate::NDIM_MAX;
 /// new shape.
 ///
 /// # Examples
+///
+/// Different argument types select both the new shape and the output dimension type:
+///
 /// ```
-/// use zix::{Array, ArrayParams};
+/// use zix::{Array, Dim};
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
+/// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
 ///
-/// // Flatten [2, 3] -> [6]
-/// let flat = a.reshape_view(&[6]);
-/// assert_eq!(flat.shape(), &[6]);
-/// assert_eq!(flat.to_ndarray::<i32>()?.as_slice().unwrap(), &[1, 2, 3, 4, 5, 6]);
+/// // [u64; 1] → output D = Dim<1>: compiler knows the result is 1-D
+/// assert_eq!(a.as_ref().reshape_view([6u64]).shape(), &[6]);
 ///
-/// // Reshape [6] -> [3, 2]
-/// let b = Array::compact_array(&array![1i32, 2, 3, 4, 5, 6])?;
-/// let result = b.reshape_view(&[3, 2]).to_ndarray::<i32>()?;
-/// assert_eq!(result.shape(), &[3, 2]);
+/// // (u64, u64) → output D = Dim<2>: compiler knows the result is 2-D
+/// assert_eq!(a.as_ref().reshape_view((3u64, 2u64)).shape(), &[3, 2]);
+///
+/// // &[u64] → output D = DimDyn: ndim only known at runtime
+/// let new_shape = vec![6u64];
+/// assert_eq!(a.as_ref().reshape_view(new_shape.as_slice()).shape(), &[6]);
+///
+/// // Elements are the same regardless of argument style
+/// assert_eq!(
+///     a.reshape_view([6u64]).to_ndarray::<i32>()?.as_slice().unwrap(),
+///     &[1, 2, 3, 4, 5, 6]
+/// );
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Reshape<S> {
+pub struct Reshape<S, D> {
     array: Array<S>,
 
     dtype: Dtype,
-    new_shape: DimArray<u64>,
+    new_shape: D,
     blocks_layout: BlocksLayout,
 }
-impl<S> Reshape<S> {
+impl<S, D> Reshape<S, D> {
     /// Constructs a `Reshape` storage. See [`Reshape`] for semantics, performance notes, and examples.
-    pub fn new(array: Array<S>, shape: &[u64]) -> Result<Self>
+    pub fn new<Sh>(array: Array<S>, shape: Sh) -> Result<Self>
     where
         S: ArrayStorage,
+        D: Dimension,
+        Sh: IntoDimension<Dimension = D>,
     {
-        let new_shape = shape;
-        ensure!(
-            new_shape.len() <= NDIM_MAX,
-            InvalidShapeOperation,
-            "cannot reshape array to have {} dimensions (max {NDIM_MAX})",
-            new_shape.len()
-        );
+        let new_shape_raw = shape
+            .into_dimension()
+            .ok_or_else(|| Error::new(ErrorKind::TooManyDimensions, "Too many dimensions"))?;
+        let new_shape: DimArray<_> = new_shape_raw.as_slice().try_into().unwrap();
         let orig_shape: DimArray<_> = array.shape().try_into().unwrap();
         let nitems = orig_shape.iter().product::<u64>();
         let new_nitems = new_shape.iter().product::<u64>();
@@ -75,7 +96,7 @@ impl<S> Reshape<S> {
         );
 
         let orig_logical_strides = default_strides(&orig_shape, 1);
-        let new_logical_strides = default_strides(new_shape, 1);
+        let new_logical_strides = default_strides(&new_shape, 1);
         let same_logical_stride = (0..new_shape.len())
             .scan(0, |orig_dim_idx, new_dim_idx| {
                 Some(loop {
@@ -125,16 +146,19 @@ impl<S> Reshape<S> {
         let dtype = array.dtype();
         Ok(Self {
             dtype: dtype.clone(),
-            new_shape: new_shape.try_into().unwrap(),
+            new_shape: new_shape_raw,
             blocks_layout: b_layout,
             array,
         })
     }
 }
-impl<S> ArrayStorage for Reshape<S>
+impl<S, D> ArrayStorage for Reshape<S, D>
 where
     S: ArrayStorage,
+    D: Dimension,
 {
+    type Dimension = D;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         // -----------------------------------------------------------------------
         // Core concept
@@ -233,7 +257,7 @@ where
         check_get_buffer_size(index, &self.dtype, buf)?;
 
         let orig_shape = self.array.shape();
-        let new_shape = &self.new_shape;
+        let new_shape = self.new_shape.as_slice();
         let ndim = new_shape.len();
         let orig_ndim = orig_shape.len();
         if index.iter().any(|r| r.start >= r.end) {
@@ -353,7 +377,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.new_shape
+        self.new_shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

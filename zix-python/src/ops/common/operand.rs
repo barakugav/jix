@@ -5,7 +5,7 @@ use pyo3::types::{PyComplex, PyFloat, PyInt};
 
 use zix_core::dtype::{f16, Complex, DtypeScalarKind, Dtyped, Itemsize};
 use zix_core::storage::Plain;
-use zix_core::Array as ZixArray;
+use zix_core::{Array as ZixArray, DimDyn};
 
 use crate::dtype::dtype_from_numpy;
 use crate::util::{check_ndim, DimArray, IntoPyResult};
@@ -13,7 +13,7 @@ use crate::Array;
 
 pub(crate) enum Operand {
     Zix(Py<Array>),
-    Numpy(ZixArray<Plain<Py<PyUntypedArray>>>),
+    Numpy(ZixArray<Plain<Py<PyUntypedArray>, DimDyn>>),
     Scalar {
         value: Scalar,
         shape: Vec<u64>,
@@ -188,8 +188,9 @@ impl Operand {
             arr_ptr.data.cast_const().cast::<u8>()
         };
         let array = array.clone().unbind();
-        let storage =
-            unsafe { zix_core::storage::Plain::new(array, data_ptr, &shape, &strides, dtype) };
+        let storage = unsafe {
+            zix_core::storage::Plain::new(array, data_ptr, shape.as_slice(), &strides, dtype)
+        };
         let storage = storage.into_py_result()?;
 
         Ok(Self::Numpy(ZixArray::from_storage(storage)))

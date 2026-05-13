@@ -2,10 +2,10 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, Result};
+use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
-use crate::util::{cast_slice_mut, dim_arr, DimArray};
-use crate::Array;
+use crate::util::{cast_slice_mut, dim_arr};
+use crate::{Array, Dimension, Error, ErrorKind, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -47,13 +47,13 @@ use crate::Array;
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]].into_dyn());
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Scalar<T> {
+pub struct Scalar<T, D> {
     data: T,
-    shape: DimArray<u64>,
+    shape: D,
     dtype: Dtype,
     blocks_layout: BlocksLayout,
 }
-impl<T> Scalar<T> {
+impl<T, D> Scalar<T, D> {
     /// Create a `Scalar` storage that broadcasts `data` across `shape`.
     ///
     /// `shape` may be empty (producing a 0-D scalar) or any non-empty slice
@@ -63,14 +63,16 @@ impl<T> Scalar<T> {
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
     /// of dimensions.
-    pub fn new(data: T, shape: &[u64]) -> Result<Self>
+    pub fn new<Sh>(data: T, shape: Sh) -> Result<Self>
     where
         T: Dtyped,
+        D: Dimension,
+        Sh: IntoDimension<Dimension = D>,
     {
-        let ndim = shape.len();
-        check_ndim(ndim)?;
-        let shape: DimArray<_> = shape.try_into().unwrap();
-
+        let shape = shape
+            .into_dimension()
+            .ok_or_else(|| Error::new(ErrorKind::TooManyDimensions, "Too many dimensions"))?;
+        let ndim = shape.ndim();
         let dtype = T::DTYPE;
 
         let blocks_layout = BlocksLayout::tune(
@@ -79,7 +81,7 @@ impl<T> Scalar<T> {
             None,
             None,
             None,
-            &shape,
+            shape.as_slice(),
             dtype.itemsize(),
         )?;
 
@@ -97,7 +99,7 @@ impl<T> Scalar<T> {
     }
 }
 
-impl<T> Array<Scalar<T>> {
+impl<T, D> Array<Scalar<T, D>> {
     /// Create an array with the given `shape` where every element equals `value`.
     ///
     /// This is a zero-copy broadcast: the scalar is stored once and repeated on
@@ -110,18 +112,23 @@ impl<T> Array<Scalar<T>> {
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
     /// of dimensions.
-    pub fn plain_scalar(value: T, shape: &[u64]) -> Result<Self>
+    pub fn plain_scalar<Sh>(value: T, shape: Sh) -> Result<Self>
     where
         T: Dtyped,
+        D: Dimension,
+        Sh: IntoDimension<Dimension = D>,
     {
         Ok(Self::from_storage(Scalar::new(value, shape)?))
     }
 }
 
-impl<T> ArrayStorage for Scalar<T>
+impl<T, D> ArrayStorage for Scalar<T, D>
 where
     T: Dtyped,
+    D: Dimension,
 {
+    type Dimension = D;
+
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -138,7 +145,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

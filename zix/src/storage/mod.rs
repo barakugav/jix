@@ -32,6 +32,7 @@ use std::ops::Range;
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::error::Result;
+use crate::Dimension;
 
 mod layout;
 pub use layout::*;
@@ -46,6 +47,9 @@ mod scalar;
 pub use scalar::*;
 
 pub(crate) mod block;
+
+mod into_dim;
+pub use into_dim::*;
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
@@ -94,6 +98,20 @@ pub(crate) mod block;
 /// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler,
 /// and only the final `read_data` call touches actual bytes.
 pub trait ArrayStorage {
+    /// The compile-time dimension of arrays backed by this storage.
+    ///
+    /// This associated type lets the compiler track how many axes an array has through a chain
+    /// of lazy operations. When the dimension is known statically (e.g. after calling
+    /// [`Array::into_dim::<Dim<N>>`](crate::Array::into_dim)), it is [`Dim<N>`](crate::Dim);
+    /// when it is only known at runtime (e.g. for arrays loaded from a file or created with
+    /// slice-based shape arguments) it is [`DimDyn`](crate::DimDyn).
+    ///
+    /// Operations that change the number of axes determine the output dimension by either using
+    /// the input dimension's associated type (e.g. `S::Dimension::Smaller` or `S::Dimension::Larger`)
+    /// or by accepting an explicit dimension argument from the caller
+    /// (e.g. `reshape()` accept IntoDimension, `max()` accept `AxesArg`).
+    type Dimension: Dimension;
+
     /// Read a sub-region of the array into a caller-supplied byte buffer.
     ///
     /// This is the single I/O method that every storage backend must implement.
@@ -155,14 +173,25 @@ impl<'a, S> Ref<'a, S> {
         Self(storage)
     }
 }
-impl_array_storage_forward!(Ref<'a, S> where S: ArrayStorage);
+impl_array_storage_forward!(
+    Ref<'a, S>,
+    where
+        S: ArrayStorage;
+    Dimension = S::Dimension
+);
 
 macro_rules! impl_array_storage_forward {
-    ($wrapper:ident $(<$($gen:tt),*>)? $(where $($wh:tt)*)?) => {
+    (
+        $wrapper:ident $(<$($gen:tt),*>)?,
+        $(where $($bound:path : $constraint:path),*)?;
+        Dimension = $dim:ty
+    ) => {
         impl $(<$($gen),*>)? crate::storage::ArrayStorage for $wrapper $(<$($gen),*>)?
         where
-            $($($wh)*)?
+            $($($bound : $constraint),*)?
         {
+            type Dimension = $dim;
+
             fn read_data(
                 &self,
                 index: &[core::ops::Range<u64>],

@@ -3,10 +3,10 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, SendSyncPtr};
-use crate::Array;
+use crate::{Array, Dimension, Error, ErrorKind, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -48,17 +48,17 @@ use crate::Array;
 /// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Plain<S> {
+pub struct Plain<S, D> {
     #[allow(unused)]
     storage: S,
 
     data: SendSyncPtr<u8>,
-    shape: DimArray<u64>,
+    shape: D,
     strides: DimArray<usize>, // in bytes
     dtype: Dtype,
     blocks_layout: BlocksLayout,
 }
-impl<S> Plain<S> {
+impl<S, D> Plain<S, D> {
     /// Construct a `Plain` storage from a raw pointer, shape, and byte strides.
     ///
     /// `storage` is any value that owns (or keeps alive) the memory pointed to
@@ -91,16 +91,21 @@ impl<S> Plain<S> {
     /// * The memory region reachable via `data` and `strides` is valid to
     ///   read for all index combinations in `0..shape[d]` on each dimension
     ///   `d`.
-    pub unsafe fn new(
+    pub unsafe fn new<Sh>(
         storage: S,
         data: *const u8,
-        shape: &[u64],
+        shape: Sh,
         strides: &[usize], // in bytes
         dtype: Dtype,
-    ) -> Result<Self> {
-        let ndim = shape.len();
-        check_ndim(ndim)?;
-        let shape: DimArray<_> = shape.try_into().unwrap();
+    ) -> Result<Self>
+    where
+        D: Dimension,
+        Sh: IntoDimension<Dimension = D>,
+    {
+        let shape = shape
+            .into_dimension()
+            .ok_or_else(|| Error::new(ErrorKind::TooManyDimensions, "Too many dimensions"))?;
+        let ndim = shape.ndim();
 
         ensure!(
             strides.len() == ndim,
@@ -124,7 +129,7 @@ impl<S> Plain<S> {
             None,
             None,
             None,
-            &shape,
+            shape.as_slice(),
             dtype.itemsize(),
         )?;
 
@@ -139,7 +144,7 @@ impl<S> Plain<S> {
     }
 }
 
-impl<T> Array<Plain<Vec<T>>> {
+impl<T, D> Array<Plain<Vec<T>, D>> {
     /// Create a [`Plain`] array that takes ownership of an `ndarray` array.
     ///
     /// The ndarray's allocation is moved into the returned `Array`; no element
@@ -154,15 +159,18 @@ impl<T> Array<Plain<Vec<T>>> {
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim.
-    pub fn plain_ndarray<D>(arr: ndarray::Array<T, D>) -> Result<Self>
+    pub fn plain_ndarray<D2>(arr: ndarray::Array<T, D2>) -> Result<Self>
     where
         T: Dtyped,
-        D: ndarray::Dimension,
+        D: Dimension,
+        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
     {
-        let shape = arr.shape();
-        check_ndim(shape.len())?;
-        let ndim = shape.len();
-        let shape = dim_arr(ndim, |dim| shape[dim] as u64);
+        let shape = arr.raw_dim().into_dimension().ok_or_else(|| {
+            Error::new(
+                ErrorKind::TooManyDimensions,
+                "ndarray has too many dimensions",
+            )
+        })?;
 
         let strides = arr
             .strides()
@@ -177,7 +185,7 @@ impl<T> Array<Plain<Vec<T>>> {
         }
         let data_ptr = data_ptr.cast::<u8>();
 
-        let storage = unsafe { Plain::new(allocation, data_ptr, &shape, &strides, T::DTYPE) }?;
+        let storage = unsafe { Plain::new(allocation, data_ptr, shape, &strides, T::DTYPE) }?;
         Ok(Self::from_storage(storage))
     }
 }
@@ -195,7 +203,7 @@ impl<'a, A> PlainRef<'a, A> {
     }
 }
 
-impl<'a, T> Array<Plain<PlainRef<'a, T>>> {
+impl<'a, T, D> Array<Plain<PlainRef<'a, T>, D>> {
     /// Create a [`Plain`] array that borrows from an ndarray view.
     ///
     /// No element data is copied.  The resulting array shares memory with
@@ -210,16 +218,19 @@ impl<'a, T> Array<Plain<PlainRef<'a, T>>> {
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim.
-    pub fn plain_ndarray_view<S, D>(arr: &ndarray::ArrayBase<S, D>) -> Result<Self>
+    pub fn plain_ndarray_view<S, D2>(arr: &ndarray::ArrayBase<S, D2>) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
-        D: ndarray::Dimension,
+        D: Dimension,
+        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
         T: Dtyped,
     {
-        let shape = arr.shape();
-        check_ndim(shape.len())?;
-        let ndim = shape.len();
-        let shape = dim_arr(ndim, |dim| shape[dim] as u64);
+        let shape = arr.raw_dim().into_dimension().ok_or_else(|| {
+            Error::new(
+                ErrorKind::TooManyDimensions,
+                "ndarray has too many dimensions",
+            )
+        })?;
 
         let strides = arr
             .strides()
@@ -229,21 +240,25 @@ impl<'a, T> Array<Plain<PlainRef<'a, T>>> {
 
         let data_ptr = arr.as_ptr().cast::<u8>();
 
-        unsafe { Self::plain_ndarray_ptr_impl(data_ptr, &shape, &strides, T::DTYPE) }
+        unsafe { Self::plain_ndarray_ptr_impl(data_ptr, shape, &strides, T::DTYPE) }
     }
 
-    unsafe fn plain_ndarray_ptr_impl(
+    unsafe fn plain_ndarray_ptr_impl<Sh>(
         data_ptr: *const u8,
-        shape: &[u64],
+        shape: Sh,
         strides: &[usize],
         dtype: Dtype,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        D: Dimension,
+        Sh: IntoDimension<Dimension = D>,
+    {
         let allocation = PlainRef::new();
         let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype) }?;
         Ok(Self::from_storage(storage))
     }
 }
-impl<'a> Array<Plain<PlainRef<'a, u8>>> {
+impl<'a, D> Array<Plain<PlainRef<'a, u8>, D>> {
     /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an external
     /// allocation.
     ///
@@ -262,17 +277,26 @@ impl<'a> Array<Plain<PlainRef<'a, u8>>> {
     ///   `0..shape[d]` on each dimension `d`.
     /// * `data_ptr` and all strides are aligned to `dtype.alignment()`.
     /// * Elements accessed by the data pointer must be valid for the specified `dtype`.
-    pub unsafe fn plain_ndarray_ptr(
+    pub unsafe fn plain_ndarray_ptr<Sh>(
         data_ptr: *const u8,
-        shape: &[u64],
+        shape: Sh,
         strides: &[usize],
         dtype: Dtype,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        D: Dimension,
+        Sh: IntoDimension<Dimension = D>,
+    {
         unsafe { Self::plain_ndarray_ptr_impl(data_ptr, shape, strides, dtype) }
     }
 }
 
-impl<S> ArrayStorage for Plain<S> {
+impl<S, D> ArrayStorage for Plain<S, D>
+where
+    D: Dimension,
+{
+    type Dimension = D;
+
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -283,7 +307,7 @@ impl<S> ArrayStorage for Plain<S> {
         check_get_range(self.shape(), index)?;
         check_get_buffer_size(index, &self.dtype, buf)?;
 
-        let ndim = self.shape.len();
+        let ndim = self.shape.ndim();
         let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let out_strides = default_strides(&out_shape, itemsize);
 
@@ -308,7 +332,7 @@ impl<S> ArrayStorage for Plain<S> {
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

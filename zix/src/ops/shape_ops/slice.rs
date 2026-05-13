@@ -1,6 +1,5 @@
 use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 
-use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
@@ -8,6 +7,7 @@ use crate::storage::block::BlockSize;
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
+use crate::{Array, Dimension};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -58,7 +58,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 /// assert_eq!(result[[0, 1]], 8);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Slice<S> {
+pub struct Slice<S: ArrayStorage> {
     array: Array<S>,
     /// Resolved slice for each dimension.
     slice: DimArray<DimSlice>,
@@ -66,7 +66,7 @@ pub struct Slice<S> {
     no_steps: bool,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
+    shape: S::Dimension,
     blocks_layout: BlocksLayout,
 }
 
@@ -105,6 +105,7 @@ impl<S: ArrayStorage> Slice<S> {
                 .max(1);
         }
 
+        let shape = S::Dimension::from_slice(&shape).unwrap();
         Ok(Self {
             array,
             slice,
@@ -117,6 +118,8 @@ impl<S: ArrayStorage> Slice<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for Slice<S> {
+    type Dimension = S::Dimension;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         // # Read behaviour
         //
@@ -244,7 +247,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

@@ -5,7 +5,6 @@ use crate::codec::ReadContext;
 use crate::dtype::{f16, Complex, Dtype, DtypeScalarKind, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
-use crate::util::DimArray;
 
 impl<S> Array<S>
 where
@@ -73,7 +72,6 @@ pub struct AsType<S> {
     array: Array<S>,
 
     dst_dtype: Dtype,
-    shape: DimArray<u64>,
 }
 impl<S> AsType<S> {
     /// Constructs an `AsType` storage. See [`AsType`] for semantics, supported casts, and examples.
@@ -90,7 +88,6 @@ impl<S> AsType<S> {
 
         Ok(Self {
             dst_dtype: dtype,
-            shape: array.shape().try_into().unwrap(),
             array,
         })
     }
@@ -129,8 +126,10 @@ impl<S> ArrayStorage for AsType<S>
 where
     S: ArrayStorage,
 {
+    type Dimension = S::Dimension;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape, index)?;
+        check_get_range(&self.shape(), index)?;
         let nitems = check_get_buffer_size(index, &self.dst_dtype, buf)?;
 
         let (src_dtype, dst_dtype) = (self.array.dtype(), &self.dst_dtype);
@@ -257,7 +256,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.array.shape()
     }
     fn dtype(&self) -> &Dtype {
         &self.dst_dtype

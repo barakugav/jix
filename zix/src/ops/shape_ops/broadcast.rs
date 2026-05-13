@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::{Array, Dimension};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
 /// returned by [`Array::broadcast_view`](crate::Array::broadcast_view).
@@ -39,7 +39,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 /// assert_eq!(result[[2, 1]], 30);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Broadcast<S> {
+pub struct Broadcast<S: ArrayStorage> {
     array: Array<S>,
     /// `is_broadcast[d]` is `true` when output dim `d` was expanded from length 1.
     is_broadcast: DimArray<bool>,
@@ -48,7 +48,7 @@ pub struct Broadcast<S> {
     is_identity: bool,
 
     dtype: Dtype,
-    new_shape: DimArray<u64>,
+    new_shape: S::Dimension,
     blocks_layout: BlocksLayout,
 }
 
@@ -83,7 +83,8 @@ impl<S: ArrayStorage> Broadcast<S> {
         }
         let is_identity = is_broadcast.iter().all(|&b| !b);
 
-        let new_shape: DimArray<_> = new_shape.try_into().unwrap();
+        let new_shape = S::Dimension::from_slice(new_shape).unwrap();
+        let new_shape_slice = new_shape.as_slice();
 
         // For broadcast dims: Any tag, hint=1, preferred=new size (full extent reads are free).
         // For unchanged dims: inherit from inner.
@@ -104,7 +105,7 @@ impl<S: ArrayStorage> Broadcast<S> {
         });
         b_layout.preferred_read_shape = dim_arr(ndim, |d| {
             if is_broadcast[d] {
-                new_shape[d] as u32
+                new_shape_slice[d] as u32
             } else {
                 b_layout.preferred_read_shape[d]
             }
@@ -123,13 +124,15 @@ impl<S: ArrayStorage> Broadcast<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
+    type Dimension = S::Dimension;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         // Fast path: no dimension was actually broadcast - forward directly.
         if self.is_identity {
             return self.array.storage.read_data(index, buf, context);
         }
 
-        check_get_range(&self.new_shape, index)?;
+        check_get_range(self.shape(), index)?;
         check_get_buffer_size(index, &self.dtype, buf)?;
 
         let ndim = self.is_broadcast.len();
@@ -182,7 +185,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     }
 
     fn shape(&self) -> &[u64] {
-        &self.new_shape
+        self.new_shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

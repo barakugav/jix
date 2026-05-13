@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::Array;
+use crate::{Array, Dimension};
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
 ///
@@ -40,7 +40,7 @@ use crate::Array;
 /// assert_eq!(p.shape(), &[4, 2, 3]);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct PermuteAxes<S> {
+pub struct PermuteAxes<S: ArrayStorage> {
     array: Array<S>,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.
     axes: DimArray<usize>,
@@ -48,7 +48,7 @@ pub struct PermuteAxes<S> {
     inv_axes: DimArray<usize>,
 
     dtype: Dtype,
-    shape: DimArray<u64>,
+    shape: S::Dimension,
     blocks_layout: BlocksLayout,
 }
 
@@ -92,6 +92,7 @@ impl<S: ArrayStorage> PermuteAxes<S> {
         b_layout.preferred_read_shape = dim_arr(ndim, |i| b_layout.preferred_read_shape[axes[i]]);
 
         let dtype = array.dtype().clone();
+        let shape = S::Dimension::from_slice(&shape).unwrap();
         Ok(Self {
             dtype,
             shape,
@@ -104,6 +105,8 @@ impl<S: ArrayStorage> PermuteAxes<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
+    type Dimension = S::Dimension;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(self.shape(), index)?;
         let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
@@ -152,7 +155,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
         &self.dtype

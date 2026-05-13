@@ -6,7 +6,6 @@ use crate::dtype::{f16, Complex, Dtype, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::common::define_array_op2_method;
 use crate::storage::{ArrayStorage, ArrayStorageSpec};
-use crate::util::DimArray;
 
 pub(crate) trait Op2Kernel {
     fn apply(&self, data: Op2KernelData, input_dtypes: (&Dtype, &Dtype)) -> Result<()>;
@@ -98,12 +97,9 @@ impl<'a> Op2KernelData<'a> {
 
 pub(crate) struct Op2<Op, S1, S2> {
     op: Op,
-
     a: Array<S1>,
     b: Array<S2>,
-
     output_dtype: Dtype,
-    shape: DimArray<u64>,
 }
 impl<Op, S1, S2> Op2<Op, S1, S2> {
     pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> Result<Self>
@@ -123,7 +119,6 @@ impl<Op, S1, S2> Op2<Op, S1, S2> {
         Ok(Self {
             op,
             output_dtype,
-            shape: a.shape().try_into().unwrap(),
             a,
             b,
         })
@@ -135,8 +130,10 @@ where
     S1: ArrayStorage,
     S2: ArrayStorage,
 {
+    type Dimension = S1::Dimension;
+
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape, index)?;
+        check_get_range(&self.shape(), index)?;
         let nitems = check_get_buffer_size(index, &self.output_dtype, buf)?;
 
         let (a_dtype, b_dtype, dst_dtype) = (self.a.dtype(), self.b.dtype(), &self.output_dtype);
@@ -191,7 +188,7 @@ where
     }
 
     fn shape(&self) -> &[u64] {
-        &self.shape
+        self.a.shape()
     }
     fn dtype(&self) -> &Dtype {
         &self.output_dtype
@@ -235,11 +232,12 @@ macro_rules! define_op2 {
             S: ArrayStorage,
             T: crate::dtype::Dtyped,
         {
-            type Output = Array<$Name<S, crate::storage::Scalar<T>>>;
+            type Output = Array<$Name<S, crate::storage::Scalar<T, S::Dimension>>>;
             #[doc = concat!("Applies the [`", stringify!($Name), "`] operation by broadcasting the scalar, see the op struct docs for details.")]
             #[track_caller]
-            fn $op_fn(self, b: T) -> Array<$Name<S, crate::storage::Scalar<T>>> {
-                let b = Array::plain_scalar(b, self.shape()).unwrap();
+            fn $op_fn(self, b: T) -> Array<$Name<S, crate::storage::Scalar<T, S::Dimension>>> {
+                let shape = <S::Dimension as crate::Dimension>::from_slice(self.shape()).unwrap();
+                let b = Array::plain_scalar(b, shape).unwrap();
                 let op = $Name::new(self, b).unwrap();
                 Array::from_storage(op)
             }
@@ -266,7 +264,13 @@ macro_rules! define_op2 {
                 Ok(Self(crate::ops::op2::Op2::new($NameKernel, a, b)?))
             }
         }
-        crate::storage::impl_array_storage_forward!($Name<S1, S2> where S1: crate::storage::ArrayStorage, S2: crate::storage::ArrayStorage);
+        crate::storage::impl_array_storage_forward!(
+            $Name<S1, S2>,
+            where
+                S1: crate::storage::ArrayStorage,
+                S2: crate::storage::ArrayStorage;
+            Dimension = S1::Dimension
+        );
 
         crate::ops::op2::define_op2_kernel!($NameKernel, $($kernel_args)*);
     };
