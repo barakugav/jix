@@ -62,7 +62,7 @@ mod zix {
 
     #[pymodule_export]
     use crate::ops::{
-        broadcast, concatenate, flatten, insert_axes, permute_axes, remove_axes, reshape, squeeze,
+        broadcast, concatenate, flatten, insert_axis, permute_axes, remove_axis, reshape, squeeze,
         stack, unsqueeze,
     };
 

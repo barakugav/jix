@@ -121,19 +121,19 @@ pub fn broadcast<'py>(
 /// import numpy as np
 ///
 /// a = zix.compact([1, 2, 3], dtype=np.int32)   # shape [3]
-/// assert zix.insert_axes(a, [0]).numpy().shape == (1, 3)  # -> [1, 3]
-/// assert zix.insert_axes(a, [1]).numpy().shape == (3, 1)  # -> [3, 1]
-/// assert zix.insert_axes(a, [-1]).numpy().shape == (3, 1) # negative: same as [1]
+/// assert zix.insert_axis(a, 0).numpy().shape == (1, 3)  # -> [1, 3]
+/// assert zix.insert_axis(a, 1).numpy().shape == (3, 1)  # -> [3, 1]
+/// assert zix.insert_axis(a, -1).numpy().shape == (3, 1) # negative: same as [1]
 ///
 /// b = zix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
-/// assert zix.insert_axes(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
+/// assert zix.insert_axis(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
 ///
 /// # duplicate axes: multiple length-1 dimensions at the same position
-/// assert zix.insert_axes(b, [0, 0, 0, 2]).shape() == (1, 1, 1, 2, 1, 3)
+/// assert zix.insert_axis(b, [0, 0, 0, 2]).shape() == (1, 1, 1, 2, 1, 3)
 /// ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn insert_axes<'py>(
+pub fn insert_axis<'py>(
     array: &Bound<'py, Array>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
@@ -145,17 +145,17 @@ pub fn insert_axes<'py>(
     if axes.is_empty() {
         return Ok(py_arr.clone()); // no-op if no axes to insert
     }
-    let ret = zix_core::ops::InsertAxes::new(array, &axes).into_py_result()?;
+    let ret = zix_core::ops::InsertAxis::new(array, &axes).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core_storage(ret))
 }
-/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for :func:`zix.insert_axes()`.
+/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for :func:`zix.insert_axis()`.
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn unsqueeze<'py>(
     array: &Bound<'py, Array>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    insert_axes(array, axis)
+    insert_axis(array, axis)
 }
 
 /// Removes length-1 dimensions from an array's shape.
@@ -174,15 +174,15 @@ pub fn unsqueeze<'py>(
 /// import numpy as np
 ///
 /// a = zix.compact([[1, 2, 3]], dtype=np.int32)  # shape [1, 3]
-/// assert zix.remove_axes(a, [0]).numpy().shape == (3,)     # -> [3]
+/// assert zix.remove_axis(a, 0).numpy().shape == (3,)     # -> [3]
 ///
 /// b = zix.compact([[[10], [20]]], dtype=np.int32)  # shape [1, 2, 1]
-/// assert zix.remove_axes(b, [0, 2]).numpy().shape == (2,)    # -> [2]
-/// assert zix.remove_axes(b, [0, -1]).numpy().shape == (2,)   # negative axis
+/// assert zix.remove_axis(b, [0, 2]).numpy().shape == (2,)    # -> [2]
+/// assert zix.remove_axis(b, [0, -1]).numpy().shape == (2,)   # negative axis
 /// ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-pub fn remove_axes<'py>(
+pub fn remove_axis<'py>(
     array: &Bound<'py, Array>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
@@ -192,7 +192,7 @@ pub fn remove_axes<'py>(
     if axes.is_empty() {
         return Ok(py_arr.clone()); // no-op if no axes to remove
     }
-    let ret = zix_core::ops::RemoveAxes::new(array, &axes).into_py_result()?;
+    let ret = zix_core::ops::RemoveAxis::new(array, &axes).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core_storage(ret))
 }
 
@@ -234,7 +234,7 @@ pub fn squeeze<'py>(
                 .collect(),
         )
     });
-    remove_axes(array, axis)
+    remove_axis(array, axis)
 }
 
 /// Reorders the axes of an array (generalized transpose).

@@ -100,7 +100,7 @@
 //! **Reductions** - `sum`, `mean`, `min`, `max`, `argmin`, `argmax`, `any`, `all`, ...
 //!
 //! **Shape operations** - `reshape`, `slice`, `permute_axes`, `broadcast`,
-//! `insert_axes`, `remove_axes`, `concatenate`, `stack`
+//! `insert_axis`, `remove_axis`, `concatenate`, `stack`
 //!
 //! ## Shape-changing operations and performance
 //!

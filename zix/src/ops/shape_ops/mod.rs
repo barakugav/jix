@@ -4,11 +4,11 @@ pub use broadcast::*;
 mod slice;
 pub use slice::*;
 
-mod insert_axes;
-pub use insert_axes::*;
+mod insert_axis;
+pub use insert_axis::*;
 
-mod remove_axes;
-pub use remove_axes::*;
+mod remove_axis;
+pub use remove_axis::*;
 
 mod permute_axes;
 pub use permute_axes::*;
@@ -107,7 +107,7 @@ where
     }
 
     /// Returns a lazy view of the array with the specified length-1 dimensions removed.
-    /// See [`RemoveAxes`] for details and examples.
+    /// See [`RemoveAxis`] for details and examples.
     ///
     /// Each axis in `axes` must have length 1. No data is copied.
     ///
@@ -115,11 +115,11 @@ where
     ///
     /// Panics if any axis is out of bounds, duplicated, or has length != 1.
     #[track_caller]
-    pub fn remove_axes(self, axes: &[usize]) -> Array<RemoveAxes<S>> {
-        Array::from_storage(RemoveAxes::new(self, axes).unwrap())
+    pub fn remove_axis(self, axes: &[usize]) -> Array<RemoveAxis<S>> {
+        Array::from_storage(RemoveAxis::new(self, axes).unwrap())
     }
 
-    /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertAxes`]
+    /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertAxis`]
     /// for details and examples.
     ///
     /// Each value in `axes` is a gap index in the output shape: `0` inserts before dim 0, `ndim`
@@ -130,7 +130,7 @@ where
     ///
     /// Panics if any value in `axes` is > `self.ndim()` or the resulting ndim exceeds the maximum.
     #[track_caller]
-    pub fn insert_axes(self, axes: &[usize]) -> Array<InsertAxes<S>> {
-        Array::from_storage(InsertAxes::new(self, axes).unwrap())
+    pub fn insert_axis(self, axes: &[usize]) -> Array<InsertAxis<S>> {
+        Array::from_storage(InsertAxis::new(self, axes).unwrap())
     }
 }

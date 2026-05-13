@@ -304,6 +304,9 @@ def test_var(dtype: np.dtype, data: DataObject):
         np.var(np_a.astype(np.float64), axis=_np_axis(axis), keepdims=keepdims, ddof=0),
         data=data,
         rtol=1e-3,
+        # atol covers near-zero cases where the true variance is 0 but numpy accumulates
+        # a tiny FP error (e.g. all-equal elements like [-99.97, -99.97, -99.97]).
+        atol=1e-10,
     )
 
 
@@ -318,6 +321,7 @@ def test_std(dtype: np.dtype, data: DataObject):
         np.std(np_a.astype(np.float64), axis=_np_axis(axis), keepdims=keepdims, ddof=0),
         data=data,
         rtol=1e-3,
+        atol=1e-10,
     )
 
 

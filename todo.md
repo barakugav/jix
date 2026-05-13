@@ -18,7 +18,5 @@
 - move pyi gen to a separate crate
 - consider removing EncoderParams and DecoderParams, use ArrayParams for everything
 - modify all ops to have `new() -> Array<Self>` and `new_storage() -> Self`
-- SliceArg::OutDim
 - is_empty()
 - squeeze()
-- modify insert_axes and remove_axes to operate on a single dimension
