@@ -1,6 +1,6 @@
-use crate::array::Array;
 use crate::dtype::Dtyped;
-use crate::storage::{ArrayStorage, ArrayStorageTyped};
+use crate::storage::ArrayStorageTyped;
+use crate::{Array, ArrayStorage};
 
 pub(crate) mod _traits {
     #[allow(unused_imports)]

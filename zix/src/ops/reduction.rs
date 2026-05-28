@@ -6,11 +6,11 @@ use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result}
 use crate::ops::common::AxesArg;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
+use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
 use crate::util::{assert_unchecked_eq, default_strides, dim_arr, DimArray};
-use crate::{Array, Dimension, Ty};
+use crate::{Array, ArrayStorage, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
     kernel: K,
@@ -218,10 +218,10 @@ macro_rules! define_reduction_op {
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::reduction::ReductionOp<S, $Kernel, <S::Dimension as crate::Dimension>::Smaller>)
         where
-            S: crate::storage::ArrayStorage;
+            S: crate::ArrayStorage;
         impl<S> $Op<S>
         where
-            S: crate::storage::ArrayStorage,
+            S: crate::ArrayStorage,
         {
             /// Creates a new view storage applying the operation by reducing the specified axis.
             ///
@@ -236,7 +236,7 @@ macro_rules! define_reduction_op {
             }
         }
 
-        impl<S> crate::storage::ArrayStorage for $Op<S>
+        impl<S> crate::ArrayStorage for $Op<S>
         where
             S: crate::storage::ArrayStorageTyped,
              S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
@@ -282,7 +282,7 @@ macro_rules! define_reduction_op {
             }
         }
 
-        impl<S, D> crate::storage::ArrayStorage for $Op<S, D>
+        impl<S, D> crate::ArrayStorage for $Op<S, D>
         where
             S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
@@ -356,7 +356,7 @@ macro_rules! define_reduction_op {
             }
         }
 
-        impl<S, D> crate::storage::ArrayStorage for $Op<S, D>
+        impl<S, D> crate::ArrayStorage for $Op<S, D>
         where
             S: crate::storage::ArrayStorageTyped<Item = $in_type>,
             D: crate::Dimension,

@@ -4,8 +4,8 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{ArrayStorage, ArrayStorageSpec};
-use crate::{Dimension, ElementType};
+use crate::storage::ArrayStorageSpec;
+use crate::{ArrayStorage, Dimension, ElementType};
 
 /// Private implementation trait for [`ArraySequence`]. Not part of the public API.
 pub(crate) trait ArraySequenceImpl {

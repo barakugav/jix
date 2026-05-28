@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::error::Result;
-use crate::storage::ArrayStorage;
+use crate::ArrayStorage;
 use crate::util::assert_unchecked_eq;
 use crate::{Array, Dimension, Error, ErrorKind};
 

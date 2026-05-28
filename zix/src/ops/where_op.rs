@@ -3,9 +3,9 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped};
+use crate::storage::{ArrayStorageSpec, ArrayStorageTyped};
 use crate::util::{cast_slice, cast_slice_mut};
-use crate::Array;
+use crate::{Array, ArrayStorage};
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
 /// examples.

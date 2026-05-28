@@ -23,8 +23,8 @@ mod stack;
 pub use stack::*;
 
 use crate::ops::AxesArg;
-use crate::storage::{ArrayStorage, Compact};
-use crate::{Array, IntoDimension};
+use crate::storage::Compact;
+use crate::{Array, ArrayStorage, IntoDimension};
 
 impl<S> Array<S>
 where

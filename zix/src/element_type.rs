@@ -4,9 +4,9 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{bail, Result};
 use crate::util::assert_unchecked_eq;
 
-/// Compile-time element-type tracking for [`ArrayStorage`](crate::storage::ArrayStorage).
+/// Compile-time element-type tracking for [`ArrayStorage`](crate::ArrayStorage).
 ///
-/// Every [`ArrayStorage`](crate::storage::ArrayStorage) has an associated `type ElementType: ElementType`. There are two
+/// Every [`ArrayStorage`](crate::ArrayStorage) has an associated `type ElementType: ElementType`. There are two
 /// implementors:
 ///
 /// - [`Ty<T>`] — the concrete element type `T` is known at compile time. All element-wise
@@ -36,7 +36,7 @@ pub trait ElementType: Clone + Send + Sync {
 ///
 /// Arrays with `TypeDyn` do not support most element-wise operations directly; call
 /// [`Array::to_typed::<T>()`](crate::Array::to_typed) first to assert the expected
-/// element type and recover [`ArrayStorageTyped`](crate::storage::ArrayStorage).
+/// element type and recover [`ArrayStorageTyped`](crate::ArrayStorage).
 #[derive(Clone)]
 pub struct TypeDyn(Dtype);
 impl ElementType for TypeDyn {

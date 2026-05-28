@@ -2,7 +2,7 @@ use crate::ops::common::define_array_op2_method;
 use crate::ops::op2::define_op2;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
-use crate::storage::ArrayStorage;
+use crate::ArrayStorage;
 use crate::Array;
 
 pub(crate) mod _traits {

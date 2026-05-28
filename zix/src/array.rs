@@ -6,14 +6,16 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::{DimensionChange, ElementTypeChange, IntoCompact, ToDim, ToType};
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
-use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref};
+use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Compact, Ref};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray,
     Idx, IxIterExt,
 };
-use crate::{ArrayParams, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn};
+use crate::{
+    ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
+};
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
 ///

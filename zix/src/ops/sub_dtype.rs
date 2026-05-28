@@ -3,8 +3,8 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec};
-use crate::{Array, ElementType, Ty, TypeDyn};
+use crate::storage::ArrayStorageSpec;
+use crate::{Array, ArrayStorage, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
 where

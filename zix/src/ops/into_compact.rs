@@ -1,8 +1,8 @@
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{ArrayStorage, Compact};
-use crate::{Array, ArrayParams};
+use crate::storage::Compact;
+use crate::{Array, ArrayParams, ArrayStorage};
 
 /// Storage adaptor that guarantees the wrapped array is always in compact
 /// block-compressed form.
@@ -93,9 +93,9 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::dtype::Dtyped;
-    use crate::storage::{ArrayStorage, Compact};
+    use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, DimDyn, Dimension, ElementType, Ty};
+    use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, Ty};
 
     // -----------------------------------------------------------------------
     // Helpers

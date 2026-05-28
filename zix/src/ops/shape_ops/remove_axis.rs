@@ -4,9 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
+use crate::storage::{ArrayStorageSpec, BlocksLayout};
 use crate::util::DimArray;
-use crate::{dim_arr, Array, Dimension};
+use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Removes length-1 dimensions from an array's shape,
 /// returned by [`Array::remove_axis`](crate::Array::remove_axis).

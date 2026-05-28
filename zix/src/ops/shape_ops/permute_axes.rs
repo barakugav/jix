@@ -3,9 +3,9 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
+use crate::storage::{ArrayStorageSpec, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, Dimension};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
 ///

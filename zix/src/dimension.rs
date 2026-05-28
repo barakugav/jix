@@ -8,7 +8,7 @@ pub const NDIM_MAX: usize = 8;
 
 /// A type-level representation of the number of axes in an array.
 ///
-/// Every [`ArrayStorage`](crate::storage::ArrayStorage) carries an associated
+/// Every [`ArrayStorage`](crate::ArrayStorage) carries an associated
 /// `type Dimension: Dimension` that records how many axes the array has. The compiler propagates
 /// this through a chain of lazy operations, such as unary and binary operations, and shape changing
 /// operations: `insert_axis`, `remove_axis`, `reshape_view`, and

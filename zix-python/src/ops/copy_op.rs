@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
-use zix_core::storage::ArrayStorage;
 use zix_core::Array as ZixArray;
+use zix_core::ArrayStorage;
 
 use crate::codec::ReadContext;
 use crate::util::{IntoPyResult, OrKwargs};

@@ -5,8 +5,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyEllipsis, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
 use zix_core::ops::SliceItem;
-use zix_core::storage::ArrayStorage;
 use zix_core::Array as ZixArray;
+use zix_core::ArrayStorage;
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::{PyAnyMethods, PySlice};

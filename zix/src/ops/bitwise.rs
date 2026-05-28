@@ -3,8 +3,7 @@ use crate::ops::op2::define_op2;
 use crate::ops::{define_op1, define_op2_rhs_fixed};
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
-use crate::storage::ArrayStorage;
-use crate::Array;
+use crate::{Array, ArrayStorage};
 
 pub(crate) mod _traits {
     use crate::scalar::traits_util::{define_op1_trait, define_op2_trait};

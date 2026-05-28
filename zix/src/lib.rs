@@ -51,7 +51,7 @@
 //!
 //! # Core type: `Array<S>`
 //!
-//! [`Array<S>`](Array) is generic over its storage backend [`S: ArrayStorage`](storage::ArrayStorage). The storage
+//! [`Array<S>`](Array) is generic over its storage backend [`S: ArrayStorage`]. The storage
 //! trait has three methods: `shape()`, `dtype()`, and `read_data()`. Everything else - slicing,
 //! arithmetic, reductions, serialization - is implemented on top of those three.
 //!
@@ -192,7 +192,7 @@
 //!
 //! # Dimension types
 //!
-//! Every [`ArrayStorage`](storage::ArrayStorage) carries an associated `type Dimension:
+//! Every [`ArrayStorage`] carries an associated `type Dimension:
 //! Dimension` that records the number of axes at the type level. When the ndim is known
 //! statically, it is [`Dim<N>`]: the const generic `N` is the axis count and is visible to the
 //! compiler. When the ndim is only known at runtime (e.g. arrays loaded from files), it is
@@ -344,6 +344,7 @@ pub use params::ArrayParams;
 pub mod scalar;
 
 pub mod storage;
+pub use storage::core::ArrayStorage;
 
 mod archive;
 

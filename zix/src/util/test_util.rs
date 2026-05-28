@@ -577,7 +577,7 @@ pub(crate) fn sub_range_strategy(shape: &[u64]) -> BoxedStrategy<Vec<Range<u64>>
 /// Checks the full array first, then 16 random sub-ranges via `to_ndarray_sub`.
 pub(crate) fn assert_array_matches<S, T>(actual: &crate::Array<S>, expected: &ndarray::ArrayD<T>)
 where
-    S: crate::storage::ArrayStorage,
+    S: crate::ArrayStorage,
     T: crate::dtype::Dtyped + std::fmt::Debug + Clone + PartialEq,
 {
     use proptest::prelude::*;

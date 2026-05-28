@@ -1,7 +1,7 @@
 //! Array operations.
 //!
 //! Every operation returns a new [`Array<S>`](crate::Array) where `S` is a struct that implements
-//! [`ArrayStorage`](crate::storage::ArrayStorage). The storage wraps the input array(s) and
+//! [`ArrayStorage`](crate::ArrayStorage). The storage wraps the input array(s) and
 //! transforms read requests on demand - no data is copied at construction time. An operation only
 //! executes when its result is materialized, e.g. via [`.to_ndarray()`](crate::Array::to_ndarray)
 //! or [`.copy()`](crate::Array::copy).

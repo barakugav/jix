@@ -2,9 +2,9 @@ use crate::codec::{DecoderParams, EncoderParams};
 use crate::dtype::Dtype;
 use crate::error::{check_ndim, Result};
 use crate::storage::block::BlockSize;
-use crate::storage::{ArrayStorage, BlockShapeTag, BlocksLayout};
+use crate::storage::{BlockShapeTag, BlocksLayout};
 use crate::util::DimArray;
-use crate::Array;
+use crate::{Array, ArrayStorage};
 
 /// Parameters controlling the encoding/decoding configs of an [`Array`], and its block layout.
 ///
