@@ -388,11 +388,15 @@ macro_rules! define_reduction_op {
 }
 // pub(crate) use {define_reduction_op};
 
+/// Internal scalar-level reduction kernels used by the reduction op storage wrappers.
 pub(crate) mod _traits {
     use crate::scalar::{f16, Complex};
 
+    /// Scalar kernel trait for the element-wise `max` reduction.
     pub trait ReduceMax {
+        /// The output element type of this reduction (same as the input for scalar max).
         type Output;
+        /// Reduce `items` to their maximum value. Returns `None` if the iterator is empty.
         fn reduce_max(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
     }
     impl<T> ReduceMax for T
@@ -406,8 +410,11 @@ pub(crate) mod _traits {
         }
     }
 
+    /// Scalar kernel trait for the element-wise `min` reduction.
     pub trait ReduceMin {
+        /// The output element type of this reduction (same as the input for scalar min).
         type Output;
+        /// Reduce `items` to their minimum value. Returns `None` if the iterator is empty.
         fn reduce_min(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
     }
     impl<T> ReduceMin for T
@@ -421,8 +428,14 @@ pub(crate) mod _traits {
         }
     }
 
+    /// Scalar kernel trait for `argmax`: finds the index of the maximum element.
     pub trait ArgMax {
+        /// The output type for the flat index — always `u64` for concrete impls.
         type Output;
+        /// Return the flat index of the maximum element in `items`, or `None` if empty.
+        ///
+        /// For floating-point types, comparison uses [`PartialOrd`]: `NaN` values behave
+        /// as unordered and the result is unspecified when `NaN` is present.
         fn argmax(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
     }
     impl<T> ArgMax for T
@@ -446,8 +459,14 @@ pub(crate) mod _traits {
         }
     }
 
+    /// Scalar kernel trait for `argmin`: finds the index of the minimum element.
     pub trait ArgMin {
+        /// The output type for the flat index — always `u64` for concrete impls.
         type Output;
+        /// Return the flat index of the minimum element in `items`, or `None` if empty.
+        ///
+        /// For floating-point types, comparison uses [`PartialOrd`]: `NaN` values behave
+        /// as unordered and the result is unspecified when `NaN` is present.
         fn argmin(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
     }
     impl<T> ArgMin for T
@@ -471,8 +490,14 @@ pub(crate) mod _traits {
         }
     }
 
+    /// Scalar kernel trait for the element-wise `sum` reduction.
+    ///
+    /// Accumulates into a wider output type to reduce overflow risk: integer types accumulate
+    /// into `i64`/`u64`, floating-point types accumulate into `f64`.
     pub trait ReduceSum {
+        /// The output element type (wider than the input for most types).
         type Output;
+        /// Sum all elements in `items`, starting from zero. Returns zero for an empty iterator.
         fn reduce_sum(items: impl Iterator<Item = Self>) -> Self::Output;
     }
 
@@ -506,8 +531,14 @@ pub(crate) mod _traits {
     impl_sum!(Complex<f64>, Complex<f64>);
     impl_sum!(bool, u64);
 
+    /// Scalar kernel trait for the element-wise `product` reduction.
+    ///
+    /// Accumulates into a wider output type to reduce overflow risk: integer types accumulate
+    /// into `i64`/`u64`, floating-point types accumulate into `f64`.
     pub trait ReduceProduct {
+        /// The output element type (wider than the input for most types).
         type Output;
+        /// Multiply all elements in `items`, starting from one. Returns one for an empty iterator.
         fn reduce_product(items: impl Iterator<Item = Self>) -> Self::Output;
     }
     macro_rules! impl_product {
@@ -539,8 +570,14 @@ pub(crate) mod _traits {
     #[cfg(feature = "num-complex")]
     impl_product!(Complex<f64>, Complex<f64>);
 
+    /// Scalar kernel trait for the element-wise `mean` reduction.
+    ///
+    /// The mean is computed as the sum divided by the count; the output is always `f64`
+    /// (or `Complex<f64>` for complex inputs) to preserve precision.
     pub trait ReduceMean {
+        /// The output element type — always `f64` or `Complex<f64>`.
         type Output;
+        /// Compute the arithmetic mean of `items`. Returns `None` if the iterator is empty.
         fn reduce_mean(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
     }
     macro_rules! impl_mean {
@@ -577,9 +614,18 @@ pub(crate) mod _traits {
     impl_mean!(Complex<f64>, Complex<f64>);
     impl_mean!(bool, f64);
 
+    /// Scalar kernel trait for the `var` (variance) and `std` (standard deviation) reductions.
+    ///
+    /// The degree-of-freedom correction is controlled by `ddof`: use `0.0` for population
+    /// variance (`N` denominator) and `1.0` for sample variance (`N-1` denominator).
     pub trait ReduceVariance {
+        /// The output element type — always a `Float` (i.e. `f64` for most inputs).
         type Output: num_traits::Float;
+        /// Compute the variance of `items` with `ddof` degrees-of-freedom correction.
         fn reduce_variance(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output;
+        /// Compute the standard deviation of `items` with `ddof` degrees-of-freedom correction.
+        ///
+        /// This is `sqrt(variance)` using the same `ddof`.
         fn reduce_std(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output {
             let var = Self::reduce_variance(items, ddof);
             <_ as num_traits::Float>::sqrt(var)

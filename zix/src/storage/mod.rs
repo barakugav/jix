@@ -92,6 +92,7 @@ pub struct ArrayStorageSpec<'a> {
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
 /// [`Array::to_typed::<T>()`](crate::Array::to_typed).
 pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> {
+    /// The concrete Rust element type stored in this array (e.g. `f32`, `i64`).
     type Item: Dtyped;
 }
 impl<S, T> ArrayStorageTyped for S

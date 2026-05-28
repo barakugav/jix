@@ -5,8 +5,11 @@ macro_rules! define_op1_trait {
         |$a:ident| $kernel_expr:expr,
         [$($input_type:ty => $output_type:ty),* $(,)?]
     ) => {
+        #[doc = concat!("Scalar kernel trait for the `", stringify!($method_name), "` element-wise unary operation.")]
         pub trait $trait_name {
+            #[doc = "The output element type produced by this operation."]
             type Output;
+            #[doc = concat!("Apply the `", stringify!($method_name), "` operation to `self`, returning a value of type `Self::Output`.")]
             fn $method_name(self) -> Self::Output;
         }
         $(
@@ -128,8 +131,11 @@ macro_rules! define_op2_trait {
         |$a:ident, $b:ident| $kernel_expr:expr,
         [pairs_of[$($input_type:ty),*] => $output_type:ty]
     ) => {
+        #[doc = concat!("Scalar kernel trait for the `", stringify!($method_name), "` element-wise binary operation.")]
         pub trait $trait_name<Rhs = Self> {
+            #[doc = "The output element type produced by this operation."]
             type Output;
+            #[doc = concat!("Apply the `", stringify!($method_name), "` operation to `self` and `rhs`, returning a value of type `Self::Output`.")]
             fn $method_name(self, rhs: Rhs) -> Self::Output;
         }
 

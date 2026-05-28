@@ -1,4 +1,4 @@
-// #![cfg_attr(deny_warnings, deny(missing_docs))]
+#![cfg_attr(deny_warnings, deny(missing_docs))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! A high-performance multi-dimensional array library with block-compressed, lazy-evaluated
@@ -171,7 +171,7 @@
 //! - [`Ty<T>`](Ty) — the scalar element type `T` is known at compile time.
 //!   Arrays constructed from typed sources carry this automatically (e.g.
 //!   `Array::compact_array(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
-//!   All element-wise operations are available.
+//!   Most of the element-wise operations require `Ty<T>`, as they are bounded by scalar trait of `T`.
 //!
 //! - [`TypeDyn`] — the element type is only known at runtime. Arrays loaded
 //!   from disk start with this (`Array<Compact<TypeDyn, DimDyn>>`). Call
@@ -184,8 +184,10 @@
 //!
 //! let src = Array::read_from_file(Path::new("data.zix"), ArrayParams::default())?;
 //! // src: Array<Compact<TypeDyn, DimDyn>> - element type unknown at compile time
+//! // src: Array<S::ElementType = TypeDyn>
 //!
 //! let typed = src.to_typed::<f32>()?;  // runtime check: dtype must be f32
+//! // typed: Array<S::ElementType = Ty<f32>>
 //! let result = typed.exp().sum(0).copy()?;
 //! # Ok::<(), zix::Error>(())
 //! ```
@@ -299,22 +301,6 @@
 //!     BufWriter::new(File::create(tmp_dir.path().join("modified.zix"))?),
 //! )?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
-//!
-//! # Reusing arrays with `as_ref`
-//!
-//! Most operations consume ownership of the array. To use an array in multiple operations
-//! without cloning its storage, call [`as_ref`](Array::as_ref) to create a borrow:
-//!
-//! ```
-//! use zix::Array;
-//! use ndarray::array;
-//!
-//! let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
-//! let b = a.as_ref() + 1.0f32;     // Array<Add<Ref<Compact>, Scalar<f32>>>
-//! let c = a.as_ref() * b;          // reuse a without cloning
-//! assert_eq!(c.to_ndarray::<f32>()?[[1, 1]], 6.17 * (6.17 + 1.0));
-//! # Ok::<(), zix::Error>(())
 //! ```
 //!
 //! # Limits

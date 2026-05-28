@@ -31,7 +31,7 @@ impl<S> IntoCompact<S>
 where
     S: ArrayStorage,
 {
-    /// Wrap `array` in an `IntoCompact` adaptor, compressing it if necessary.
+    /// Constructs a [`IntoCompact`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>, params: ArrayParams, context: &ReadContext) -> Result<Self> {
         Ok(Self(if array.storage.as_compact().is_some() {
             ToCompactInner::Original(array.into_storage())

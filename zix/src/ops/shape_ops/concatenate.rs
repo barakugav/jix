@@ -68,7 +68,7 @@ pub struct Concatenate<ArraysT: ArraySequence> {
     blocks_layout: BlocksLayout,
 }
 impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
-    /// Constructs a `Concatenate` storage. See [`Concatenate`] for semantics and examples.
+    /// Constructs a [`Concatenate`] storage. See the struct docs for semantics and examples.
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
         let narrays = arrays.narrays();
         ensure!(

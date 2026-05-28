@@ -220,6 +220,7 @@ macro_rules! define_op2 {
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2> {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
             where
                 S1: crate::storage::ArrayStorageTyped,
@@ -262,6 +263,7 @@ macro_rules! define_op2 {
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2> {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
             where
                 S1: crate::storage::ArrayStorageTyped,
@@ -402,6 +404,7 @@ macro_rules! define_op2_rhs_fixed {
         $(#[$meta])*
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2> {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
             where
                 S1: crate::storage::ArrayStorageTyped,

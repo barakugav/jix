@@ -22,6 +22,7 @@ struct ErrorRepr {
     msg: Cow<'static, str>,
 }
 impl Error {
+    /// Create a new [`Error`] with the given [`ErrorKind`] and a human-readable `message`.
     pub fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
         let msg = message.into();
         Self(Box::new(ErrorRepr { kind, msg }))

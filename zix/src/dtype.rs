@@ -23,13 +23,6 @@
 //! - **Floats**: `f16`, `f32`, `f64`
 //! - **Complex**: `Complex<f32>`, `Complex<f64>`
 //! - **Boolean**: `bool`
-//!
-//! ## `f16` and `Complex<T>` coverage
-//!
-//! The [`f16`](crate::scalar::f16) and [`Complex<T>`](crate::scalar::Complex) types are available
-//! as minimal stubs by default, and can be upgraded to full-featured types with the **`half`** and
-//! **`num-complex`** crate features, respectively.
-//! See their documentation for details.
 
 use std::borrow::Cow;
 use std::collections::HashSet;

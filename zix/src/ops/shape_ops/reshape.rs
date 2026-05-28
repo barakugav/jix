@@ -75,7 +75,7 @@ pub struct Reshape<S, D> {
     blocks_layout: BlocksLayout,
 }
 impl<S, D> Reshape<S, D> {
-    /// Constructs a `Reshape` storage. See [`Reshape`] for semantics, performance notes, and examples.
+    /// Constructs a [`Reshape`] storage. See the struct docs for semantics and examples.
     pub fn new<Sh>(array: Array<S>, shape: Sh) -> Result<Self>
     where
         S: ArrayStorage,

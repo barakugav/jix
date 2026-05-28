@@ -73,7 +73,7 @@ pub struct Slice<S: ArrayStorage> {
 }
 
 impl<S: ArrayStorage> Slice<S> {
-    /// Constructs a `Slice` storage. See [`Slice`] for slice conventions, semantics, and examples.
+    /// Constructs a [`Slice`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>, slice: SliceSpec) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();

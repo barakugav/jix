@@ -54,7 +54,7 @@ pub struct Broadcast<S: ArrayStorage> {
 }
 
 impl<S: ArrayStorage> Broadcast<S> {
-    /// Constructs a `Broadcast` storage. See [`Broadcast`] for semantics and examples.
+    /// Constructs a [`Broadcast`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>, shape: &[u64]) -> Result<Self> {
         let new_shape = shape;
         let input_shape = array.shape();

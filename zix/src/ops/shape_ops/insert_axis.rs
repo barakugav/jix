@@ -87,7 +87,7 @@ impl<S, D> InsertAxis<S, D>
 where
     S: ArrayStorage,
 {
-    /// Constructs an `InsertAxis` storage. See [`InsertAxis`] for semantics and examples.
+    /// Constructs a [`InsertAxis`] storage. See the struct docs for semantics and examples.
     pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
     where
         S: ArrayStorage,

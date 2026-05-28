@@ -27,7 +27,9 @@ pub(crate) mod _traits {
     /// equivalent. The trait therefore provides a single uniform interface usable across all
     /// supported numeric dtypes.
     pub trait Maximum<Rhs = Self> {
+        /// The output element type of this maximum operation.
         type Output;
+        /// Return the element-wise maximum of `self` and `other`, propagating `NaN` for floats.
         fn maximum(self, other: Rhs) -> Self::Output;
     }
     macro_rules! impl_integer_maximum {
@@ -78,7 +80,9 @@ pub(crate) mod _traits {
     /// supported numeric dtypes.
 
     pub trait Minimum<Rhs = Self> {
+        /// The output element type of this minimum operation.
         type Output;
+        /// Return the element-wise minimum of `self` and `other`, propagating `NaN` for floats.
         fn minimum(self, other: Rhs) -> Self::Output;
     }
     macro_rules! impl_integer_minimum {

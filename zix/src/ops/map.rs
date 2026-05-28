@@ -53,7 +53,7 @@ where
 /// ```
 pub struct Map<S, F>(Op1<S, F>);
 impl<S, F> Map<S, F> {
-    /// Constructs a `Map` storage. See [`Map`] for semantics and examples.
+    /// Constructs a [`Map`] storage. See the struct docs for semantics and examples.
     pub fn new<O>(array: Array<S>, map_fn: F) -> Result<Self>
     where
         S: ArrayStorageTyped,

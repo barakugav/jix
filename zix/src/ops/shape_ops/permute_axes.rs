@@ -55,7 +55,7 @@ pub struct PermuteAxes<S: ArrayStorage> {
 }
 
 impl<S: ArrayStorage> PermuteAxes<S> {
-    /// Constructs a `PermuteAxes` storage. See [`PermuteAxes`] for semantics and examples.
+    /// Constructs a [`PermuteAxes`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
         let ndim = array.shape().len();
         ensure!(

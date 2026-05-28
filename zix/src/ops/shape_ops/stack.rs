@@ -61,7 +61,7 @@ pub struct Stack<ArraysT: ArraySequence> {
     blocks_layout: BlocksLayout,
 }
 impl<ArraysT: ArraySequence> Stack<ArraysT> {
-    /// Constructs a `Stack` storage. See [`Stack`] for semantics and examples.
+    /// Constructs a [`Stack`] storage. See the struct docs for semantics and examples.
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
         let narrays = arrays.narrays();
         ensure!(

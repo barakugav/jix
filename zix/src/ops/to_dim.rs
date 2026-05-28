@@ -1,9 +1,8 @@
 use std::marker::PhantomData;
 
 use crate::error::Result;
-use crate::ArrayStorage;
 use crate::util::assert_unchecked_eq;
-use crate::{Array, Dimension, Error, ErrorKind};
+use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 
 /// A lazy storage adapter that re-tags an array's dimension parameter without copying data.
 ///
@@ -46,6 +45,7 @@ pub struct ToDim<S, D> {
     dim: PhantomData<D>,
 }
 impl<S, D> ToDim<S, D> {
+    /// Constructs a [`ToDim`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>) -> Result<Self>
     where
         S: ArrayStorage,

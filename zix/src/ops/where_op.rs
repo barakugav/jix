@@ -71,7 +71,7 @@ pub struct Where<SC, SX, SY> {
     y: Array<SY>,
 }
 impl<SC, SX, SY> Where<SC, SX, SY> {
-    /// Constructs a `Where` storage. See [`Where`] for semantics and examples.
+    /// Constructs a [`Where`] storage. See the struct docs for semantics and examples.
     pub fn new(condition: Array<SC>, x: Array<SX>, y: Array<SY>) -> Result<Self>
     where
         SC: ArrayStorageTyped<Item = bool>,

@@ -189,6 +189,7 @@ macro_rules! define_op1 {
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
         impl<S> $Op<S> {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(array: Array<S>) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorageTyped,
@@ -266,6 +267,7 @@ macro_rules! define_op1 {
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
         impl<S> $Op<S> {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(array: Array<S>) -> crate::error::Result<Self>
             where
                 S: crate::storage::ArrayStorageTyped,

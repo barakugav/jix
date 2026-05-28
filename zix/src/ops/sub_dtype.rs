@@ -66,7 +66,7 @@ pub struct SubDtype<S, ET> {
     sub_field_offset: Itemsize,
 }
 impl<S, ET> SubDtype<S, ET> {
-    /// Constructs a `SubDtype` storage. See [`SubDtype`] for semantics and examples.
+    /// Constructs a [`SubDtype`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>, sub_field: &str) -> Result<Self>
     where
         S: ArrayStorage,

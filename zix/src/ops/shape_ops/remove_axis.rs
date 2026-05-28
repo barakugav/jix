@@ -72,7 +72,7 @@ impl<S, D> RemoveAxis<S, D>
 where
     S: ArrayStorage,
 {
-    /// Constructs a `RemoveAxis` storage. See [`RemoveAxis`] for semantics and examples.
+    /// Constructs a [`RemoveAxis`] storage. See the struct docs for semantics and examples.
     pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
     where
         S: ArrayStorage,

@@ -1,9 +1,8 @@
 use std::marker::PhantomData;
 
 use crate::error::Result;
-use crate::ArrayStorage;
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ElementType, Error, ErrorKind};
+use crate::{Array, ArrayStorage, ElementType, Error, ErrorKind};
 
 /// A lazy storage adapter that re-tags an array's element-type parameter without copying data.
 ///
@@ -53,6 +52,7 @@ pub struct ToType<S, ET> {
     element_type: PhantomData<ET>,
 }
 impl<S, ET> ToType<S, ET> {
+    /// Constructs a [`ToType`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>) -> Result<Self>
     where
         S: ArrayStorage,

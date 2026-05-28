@@ -177,6 +177,7 @@ where
     }
 }
 impl<S, T> Cast<S, T> {
+    /// Constructs a [`Cast`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>) -> crate::error::Result<Self>
     where
         S: ArrayStorageTyped,
