@@ -336,7 +336,6 @@ where
                 itemsize,
             )
         };
-
         Ok(())
     }
 
@@ -568,7 +567,7 @@ mod tests {
         let nd = array![[1i32, 5, 3], [4, 2, 6]];
         let got: ArrayD<i32> = Array::plain_ndarray(nd)
             .unwrap()
-            .max(&[0])
+            .max(0)
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -582,7 +581,7 @@ mod tests {
         let nd = array![[1i32, 2, 3], [4, 5, 6]];
         let got: ArrayD<i64> = Array::plain_ndarray(nd)
             .unwrap()
-            .sum(&[1])
+            .sum(1)
             .to_ndarray()
             .unwrap();
         assert_eq!(

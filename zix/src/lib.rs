@@ -63,7 +63,7 @@
 //!   .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
 //!   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
 //!   .add(other)            -> Array<Add<PermuteAxes<...>, Compact>>
-//!   .sum(&[0], false)      -> Array<Sum<Add<...>>>
+//!   .sum(0).               -> Array<Sum<Add<...>>>
 //!   .copy()?               -> Array<Compact>  - materialize
 //! ```
 //!

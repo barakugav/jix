@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{bail, Result};
+use crate::error::{check_dtype, Result};
 use crate::util::assert_unchecked_eq;
 
 /// Compile-time element-type tracking for [`ArrayStorage`](crate::ArrayStorage).
@@ -76,13 +76,7 @@ where
     const DTYPE: Option<Dtype> = Some(T::DTYPE);
 
     fn from_dtype(dtype: Dtype) -> Result<Self> {
-        if dtype != T::DTYPE {
-            bail!(
-                UnsupportedDtype,
-                "expected dtype {:?} but got {dtype:?}",
-                T::DTYPE
-            )
-        }
+        check_dtype(&dtype, &T::DTYPE)?;
         Ok(Self::new())
     }
 

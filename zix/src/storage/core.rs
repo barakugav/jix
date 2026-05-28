@@ -1,9 +1,10 @@
 use std::ops::Range;
 
-use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-use crate::error::Result;
-use crate::storage::{ArrayStorageSpec, CompactBorrowed};
+use crate::codec::{ReadContext, TmpBuf};
+use crate::dtype::{Dtype, Dtyped};
+use crate::error::{check_dtype, Result};
+use crate::storage::{ArrayStorageSpec, CompactBorrowed, ReadData};
+use crate::util::assert_unchecked_eq;
 use crate::{Dimension, ElementType};
 
 /// The backing data source of an [`Array<S>`](crate::Array).
@@ -97,6 +98,65 @@ pub trait ArrayStorage {
     ///   On success the elements are written in row-major (C-contiguous) order.
     /// - `context` - read context carrying the decoder state.
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>;
+
+    /// Read a sub-region of the array as a typed `ReadData<T>`.
+    ///
+    /// # Arguments
+    ///
+    /// - `index` - one half-open range per dimension (`start..end`).
+    ///   The number of ranges must equal `self.shape().len()`.
+    ///   Ranges must be within the array shape bounds; empty ranges are allowed.
+    /// - `context` - read context carrying the decoder state.
+    ///
+    /// # Returns
+    ///
+    /// A `ReadData<T>` that can be used to read the requested region as typed elements.
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, Self>>
+    where
+        T: Dtyped,
+        Self: Sized,
+    {
+        check_dtype(&T::DTYPE, self.dtype())?;
+
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let mut buf = context.tmp_buf_typed::<T>(nitems);
+        self.read_data(index, buf.as_mut_slice(), context)?;
+
+        struct DefaultReadData<'a, T> {
+            buf: TmpBuf<'a>,
+            len_: usize,
+            _phantom: std::marker::PhantomData<T>,
+        }
+        impl<T> ReadData<T> for DefaultReadData<'_, T>
+        where
+            T: Dtyped,
+        {
+            fn len(&self) -> usize {
+                let len = self.len_;
+                unsafe { assert_unchecked_eq!(self.buf.as_slice().len(), len * size_of::<T>()) };
+                len
+            }
+
+            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N] {
+                let len = self.len();
+                assert!(offset + N <= len);
+                let buf = self.buf.as_slice().as_ptr().cast::<T>();
+                let buf = unsafe { std::slice::from_raw_parts(buf, len) };
+                let chunk = &buf[offset..offset + N];
+                chunk.try_into().unwrap()
+            }
+        }
+        debug_assert!(buf.as_slice().len().is_multiple_of(size_of::<T>()));
+        Ok(DefaultReadData {
+            len_: buf.as_slice().len() / size_of::<T>(),
+            buf,
+            _phantom: std::marker::PhantomData,
+        })
+    }
 
     /// Returns the shape of the array, one element per dimension.
     fn shape(&self) -> &[u64];

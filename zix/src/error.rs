@@ -112,6 +112,15 @@ pub(crate) fn check_ndim(ndim: usize) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
+    ensure!(
+        actual == expected,
+        UnsupportedDtype,
+        "expected dtype {expected:?} but got {actual:?}",
+    );
+    Ok(())
+}
+
 pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
     ensure!(
         shape.len() == index.len(),

@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use crate::codec::ReadContext;
-use crate::dtype::Dtype;
+use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout, ReadData};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
@@ -86,12 +86,11 @@ pub struct InsertAxis<S, D> {
 impl<S, D> InsertAxis<S, D>
 where
     S: ArrayStorage,
+    D: Dimension,
 {
     /// Constructs a [`InsertAxis`] storage. See the struct docs for semantics and examples.
     pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
     where
-        S: ArrayStorage,
-        D: Dimension,
         Ax: AxesArg<ExpandedDimension<S::Dimension> = D>,
     {
         let orig_ndim = array.shape().len();
@@ -169,17 +168,8 @@ where
             blocks_layout: b_layout,
         })
     }
-}
 
-impl<S, D> ArrayStorage for InsertAxis<S, D>
-where
-    S: ArrayStorage,
-    D: Dimension,
-{
-    type ElementType = S::ElementType;
-    type Dimension = D;
-
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn transform_index(&self, index: &[Range<u64>]) -> Result<Option<DimArray<Range<u64>>>> {
         check_get_range(self.shape(), index)?;
 
         // Inserted dimensions have size 1 and do not affect the element sequence.
@@ -195,14 +185,60 @@ where
         for (dim, index) in index.iter().enumerate() {
             if !self.is_inserted[dim] {
                 inner_index.push(index.clone());
-            } else {
-                if index.start == index.end {
-                    return Ok(()); // empty read
-                }
-                debug_assert_eq!(*index, 0..1);
+            } else if index.start == index.end {
+                return Ok(None);
             }
         }
-        self.array.storage.read_data(&inner_index, buf, context)
+        Ok(Some(inner_index))
+    }
+}
+
+impl<S, D> ArrayStorage for InsertAxis<S, D>
+where
+    S: ArrayStorage,
+    D: Dimension,
+{
+    type ElementType = S::ElementType;
+    type Dimension = D;
+
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        if let Some(inner_index) = self.transform_index(index)? {
+            self.array.storage.read_data(&inner_index, buf, context)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, S, D>>
+    where
+        T: Dtyped,
+    {
+        let data = self
+            .transform_index(index)?
+            .map(|inner_index| self.array.storage.read_data_typed(&inner_index, context))
+            .transpose()?;
+        struct ReadDataOptional<R>(Option<R>);
+        impl<T, R> ReadData<T> for ReadDataOptional<R>
+        where
+            R: ReadData<T>,
+        {
+            fn len(&self) -> usize {
+                self.0.as_ref().map_or(0, |r| r.len())
+            }
+
+            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N] {
+                if let Some(r) = &mut self.0 {
+                    r.read_bulk(offset)
+                } else {
+                    unimplemented!()
+                }
+            }
+        }
+        Ok(ReadDataOptional(data))
     }
 
     fn shape(&self) -> &[u64] {
@@ -423,7 +459,7 @@ mod tests {
     // Proptest: arbitrary shape, arbitrary gap multiset, order-independent
     // -----------------------------------------------------------------------
 
-    fn insert_axes_strategy<T>() -> impl proptest::strategy::Strategy<
+    fn insert_axis_strategy<T>() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<T>,
             Array<Compact<Ty<T>, DimDyn>>,
@@ -453,7 +489,7 @@ mod tests {
 
     proptest::proptest! {
         #[test]
-        fn proptest_insert_axes((nd, za, axes) in insert_axes_strategy::<i32>()) {
+        fn proptest_insert_axis((nd, za, axes) in insert_axis_strategy::<i32>()) {
             // Oracle: inserting size-1 axes is a pure reshape - flat order is unchanged.
             let mut sorted_axes = axes.clone();
             sorted_axes.sort_unstable();

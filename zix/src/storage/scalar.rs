@@ -2,8 +2,8 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, Ty};
+use crate::error::{check_dtype, check_get_buffer_size, check_get_range, Result};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ReadData, Ty};
 use crate::util::{cast_slice_mut, dim_arr};
 use crate::{Array, Dimension, IntoDimension};
 
@@ -146,6 +146,46 @@ where
         Ok(())
     }
 
+    fn read_data_typed<'a, T2>(
+        &'a self,
+        index: &[Range<u64>],
+        _context: &'a ReadContext,
+    ) -> Result<impl ReadData<T2> + use<'a, T2, T, D>>
+    where
+        T2: Dtyped,
+    {
+        let dtype = T::DTYPE;
+        check_dtype(&T2::DTYPE, &dtype)?;
+        check_get_range(self.shape(), index)?;
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        struct ScalarReadData<T2> {
+            value: T2,
+            len_: usize,
+        }
+        impl<T2> ReadData<T2> for ScalarReadData<T2>
+        where
+            T2: Dtyped,
+        {
+            fn len(&self) -> usize {
+                self.len_
+            }
+
+            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T2; N] {
+                let len = self.len();
+                assert!(offset + N <= len);
+                [self.value; N]
+            }
+        }
+
+        // SAFETY: we checked that T and T2 have the same dtype
+        let value = unsafe { std::mem::transmute_copy::<T, T2>(&self.data) };
+
+        Ok(ScalarReadData {
+            value,
+            len_: nitems,
+        })
+    }
+
     fn shape(&self) -> &[u64] {
         self.shape.as_slice()
     }
@@ -257,7 +297,7 @@ mod tests {
         // max of a constant array is the constant itself
         let got: ArrayD<f64> = Array::plain_scalar(7.0f64, &[3, 4])
             .unwrap()
-            .max(&[0])
+            .max(0)
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -271,7 +311,7 @@ mod tests {
         // sum of [2,2,2] (3 rows, broadcast) over axis 0 = [6,6,6,6] as i64
         let got: ArrayD<i64> = Array::plain_scalar(2i32, &[3, 4])
             .unwrap()
-            .sum(&[0])
+            .sum(0)
             .to_ndarray()
             .unwrap();
         assert_eq!(got, ArrayD::from_shape_vec(vec![4], vec![6i64; 4]).unwrap());

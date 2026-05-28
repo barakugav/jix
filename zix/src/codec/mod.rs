@@ -471,6 +471,11 @@ impl ReadContext {
     pub(crate) fn tmp_buf(&self, size: usize, alignment: Alignment) -> TmpBuf<'_> {
         self.tmp_buffers.get(size, alignment)
     }
+
+    pub(crate) fn tmp_buf_typed<T>(&self, nitems: usize) -> TmpBuf<'_> {
+        self.tmp_buffers
+            .get(nitems * size_of::<T>(), Alignment::of::<T>())
+    }
 }
 impl Default for ReadContext {
     /// Creates a `ReadContext` with default [`DecoderParams`].
@@ -581,6 +586,10 @@ impl TmpBuf<'_> {
         self.buf.clear();
         self.buf.reserve(new_len);
         unsafe { self.buf.set_len(new_len) };
+    }
+
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        self.buf.as_slice()
     }
 
     pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {

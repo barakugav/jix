@@ -52,6 +52,9 @@
 
 use crate::codec::{DecoderParams, EncoderParams};
 use crate::dtype::Dtyped;
+use crate::error::{ensure, Result};
+use crate::ops::bulk_size;
+use crate::util::cast_slice_mut;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core;
@@ -91,7 +94,7 @@ pub struct ArrayStorageSpec<'a> {
 ///
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
 /// [`Array::to_typed::<T>()`](crate::Array::to_typed).
-pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> {
+pub trait ArrayStorageTyped {
     /// The concrete Rust element type stored in this array (e.g. `f32`, `i64`).
     type Item: Dtyped;
 }
@@ -121,11 +124,15 @@ where
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    impl_array_storage_forward!();
+    impl_array_storage_forward!('b, T, <S>);
 }
 
 macro_rules! impl_array_storage_forward {
-    () => {
+    (<$($generics:tt),* $(,)?>) => {
+        crate::storage::impl_array_storage_forward!('a, T, <$($generics),*>);
+    };
+
+    ($lifetime:tt, $generic:ident, <$($generics:tt),* $(,)?>) => {
         fn read_data(
             &self,
             index: &[::core::ops::Range<u64>],
@@ -134,6 +141,19 @@ macro_rules! impl_array_storage_forward {
         ) -> crate::error::Result<()> {
             self.0.read_data(index, buf, context)
         }
+
+        #[allow(refining_impl_trait)]
+        fn read_data_typed<$lifetime, $generic>(
+            &$lifetime self,
+            index: &[::core::ops::Range<u64>],
+            context: &$lifetime crate::codec::ReadContext,
+        ) -> crate::error::Result<impl crate::storage::ReadData<$generic> + use<$lifetime, $generic, $($generics),*>>
+        where
+            $generic: crate::dtype::Dtyped,
+        {
+            self.0.read_data_typed(index, context)
+        }
+
         fn shape(&self) -> &[u64] {
             self.0.shape()
         }
@@ -151,3 +171,192 @@ macro_rules! impl_array_storage_forward {
     };
 }
 pub(crate) use impl_array_storage_forward;
+
+/// An iterator-like trait for reading items from an `ArrayStorage` in bulk.
+pub trait ReadData<T> {
+    /// The total number of items available to read.
+    fn len(&self) -> usize;
+
+    /// Read a contiguous chunk of `N` items starting from the given offset.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `offset + N > self.len()`.
+    fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N];
+
+    /// Read all items into the given buffer.
+    ///
+    /// The given buffer must have the exact size of `self.len() * size_of::<T>()` and be properly aligned for `T`.
+    fn to_buf(&mut self, buf: &mut [u8]) -> Result<()>
+    where
+        T: Dtyped,
+        Self: Sized,
+    {
+        let dtype = T::DTYPE;
+        let nitems = self.len();
+        let required_size = nitems * size_of::<T>();
+        let buf_len = buf.len();
+        ensure!(
+                buf_len == required_size,
+                InvalidBufferSize,
+                "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype:?} (required size: {required_size})",
+            );
+        ensure!(
+            (buf.as_ptr() as usize).is_multiple_of(align_of::<T>()),
+            InvalidArgument,
+            "Buffer pointer is not aligned to required alignment {} for dtype {dtype:?}",
+            align_of::<T>(),
+        );
+        let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
+        assert_eq!(buf.len(), nitems);
+
+        unsafe fn read_to_buf_impl<T, const BULK: usize>(
+            data: &mut impl ReadData<T>,
+            buf: &mut [T],
+        ) -> Result<()>
+        where
+            T: Dtyped,
+        {
+            let nitems = data.len();
+            assert_eq!(buf.len(), nitems);
+            let mut offset = 0;
+            while offset + BULK <= nitems {
+                let chunk = data.read_bulk::<BULK>(offset);
+                buf[offset..][..BULK].copy_from_slice(&chunk);
+                offset += BULK;
+            }
+            while offset < nitems {
+                let item = data.read_bulk::<1>(offset)[0];
+                buf[offset] = item;
+                offset += 1;
+            }
+            Ok(())
+        }
+
+        let bulk_size = bulk_size::<T>();
+        assert!(bulk_size.is_power_of_two());
+        // this is a compile time check, the compiler knows the value of `bulk_size::<T>()`
+        let read_fn = match bulk_size {
+            1 => read_to_buf_impl::<T, 1>,
+            2 => read_to_buf_impl::<T, 2>,
+            4 => read_to_buf_impl::<T, 4>,
+            8 => read_to_buf_impl::<T, 8>,
+            16 => read_to_buf_impl::<T, 16>,
+            32 => read_to_buf_impl::<T, 32>,
+            64 => read_to_buf_impl::<T, 64>,
+            128 => read_to_buf_impl::<T, 128>,
+            256 => read_to_buf_impl::<T, 256>,
+            512 => read_to_buf_impl::<T, 512>,
+            _ => read_to_buf_impl::<T, 1024>,
+        };
+        unsafe { read_fn(self, buf) }
+    }
+}
+pub(crate) trait ReadDataExt<T>: ReadData<T>
+where
+    T: Copy + Send + Sync + Sized + 'static,
+{
+    fn map_items<U, F: FnMut(T) -> U>(self, f: F) -> impl ReadData<U>
+    where
+        Self: Sized,
+    {
+        struct Map<T, U, R, F> {
+            inner: R,
+            f: F,
+            _phantom: std::marker::PhantomData<(T, U)>,
+        }
+        impl<T, U, R, F> ReadData<U> for Map<T, U, R, F>
+        where
+            R: ReadData<T>,
+            F: FnMut(T) -> U,
+        {
+            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [U; N] {
+                self.inner.read_bulk::<N>(offset).map(&mut self.f)
+            }
+            fn len(&self) -> usize {
+                self.inner.len()
+            }
+        }
+        Map {
+            inner: self,
+            f,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    fn zip_items<U, R>(self, other: R) -> impl ReadData<(T, U)>
+    where
+        Self: Sized,
+        R: ReadData<U>,
+        U: Copy + Send + Sync + Sized + 'static,
+    {
+        struct Zip<T, U, R1, R2> {
+            left: R1,
+            right: R2,
+            _phantom: std::marker::PhantomData<(T, U)>,
+        }
+        impl<T, U, R1, R2> ReadData<(T, U)> for Zip<T, U, R1, R2>
+        where
+            R1: ReadData<T>,
+            R2: ReadData<U>,
+            T: Copy + Send + Sync + Sized + 'static,
+            U: Copy + Send + Sync + Sized + 'static,
+        {
+            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [(T, U); N] {
+                let left = self.left.read_bulk::<N>(offset);
+                let right = self.right.read_bulk::<N>(offset);
+                std::array::from_fn(|i| (left[i], right[i]))
+            }
+            fn len(&self) -> usize {
+                assert_eq!(self.left.len(), self.right.len());
+                self.left.len()
+            }
+        }
+        Zip {
+            left: self,
+            right: other,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    unsafe fn transmute_items<U>(self) -> impl ReadData<U>
+    where
+        Self: Sized,
+        U: Copy + Send + Sync + Sized + 'static,
+    {
+        struct Transmute<T, U, R> {
+            inner: R,
+            _phantom: std::marker::PhantomData<(T, U)>,
+        }
+        impl<T, U, R> ReadData<U> for Transmute<T, U, R>
+        where
+            R: ReadData<T>,
+            T: Copy + Send + Sync + Sized + 'static,
+            U: Copy + Send + Sync + Sized + 'static,
+        {
+            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [U; N] {
+                const {
+                    assert!(
+                        size_of::<T>() == size_of::<U>(),
+                        "T and U must have equal size to reinterpret",
+                    );
+                }
+                let chunk: [T; N] = self.inner.read_bulk::<N>(offset);
+                unsafe { std::mem::transmute_copy::<[T; N], [U; N]>(&chunk) }
+            }
+            fn len(&self) -> usize {
+                self.inner.len()
+            }
+        }
+        Transmute {
+            inner: self,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+impl<T, R> ReadDataExt<T> for R
+where
+    R: ReadData<T>,
+    T: Copy + Send + Sync + Sized + 'static,
+{
+}

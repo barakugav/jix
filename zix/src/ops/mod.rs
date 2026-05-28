@@ -128,6 +128,7 @@ mod sub_dtype;
 pub use sub_dtype::*;
 
 mod common;
+pub(crate) use common::bulk_size;
 pub use common::AxesArg;
 
 pub(crate) mod _traits {

@@ -180,7 +180,7 @@ impl<S, T> Cast<S, T> {
     /// Constructs a [`Cast`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>) -> crate::error::Result<Self>
     where
-        S: ArrayStorageTyped,
+        S: ArrayStorage + ArrayStorageTyped,
         S::Item: crate::scalar::Cast<T>,
         T: Dtyped,
     {
@@ -190,13 +190,13 @@ impl<S, T> Cast<S, T> {
 }
 impl<S, T> ArrayStorage for Cast<S, T>
 where
-    S: ArrayStorageTyped,
+    S: ArrayStorage + ArrayStorageTyped,
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
     type ElementType = crate::Ty<T>;
     type Dimension = S::Dimension;
-    crate::storage::impl_array_storage_forward!();
+    crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
 }
 
 impl<S> Array<S>
@@ -207,7 +207,7 @@ where
     #[track_caller]
     pub fn cast<T>(self) -> Array<Cast<S, T>>
     where
-        S: ArrayStorageTyped,
+        S: ArrayStorage + ArrayStorageTyped,
         S::Item: crate::scalar::Cast<T>,
         T: Dtyped,
     {

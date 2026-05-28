@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorageSpec, ArrayStorageTyped};
+use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, ReadData, ReadDataExt};
 use crate::util::{cast_slice, cast_slice_mut};
 use crate::{Array, ArrayStorage};
 
@@ -21,7 +21,7 @@ pub fn where_condition<SC, SX, SY>(
     y: Array<SY>,
 ) -> Array<Where<SC, SX, SY>>
 where
-    SC: ArrayStorageTyped<Item = bool>,
+    SC: ArrayStorage + ArrayStorageTyped<Item = bool>,
     SX: ArrayStorage,
     SY: ArrayStorage<ElementType = SX::ElementType>,
 {
@@ -74,7 +74,7 @@ impl<SC, SX, SY> Where<SC, SX, SY> {
     /// Constructs a [`Where`] storage. See the struct docs for semantics and examples.
     pub fn new(condition: Array<SC>, x: Array<SX>, y: Array<SY>) -> Result<Self>
     where
-        SC: ArrayStorageTyped<Item = bool>,
+        SC: ArrayStorage + ArrayStorageTyped<Item = bool>,
         SX: ArrayStorage,
         SY: ArrayStorage<ElementType = SX::ElementType>,
     {
@@ -106,7 +106,7 @@ impl<SC, SX, SY> Where<SC, SX, SY> {
 }
 impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
 where
-    SC: ArrayStorageTyped<Item = bool>,
+    SC: ArrayStorage + ArrayStorageTyped<Item = bool>,
     SX: ArrayStorage,
     SY: ArrayStorage<ElementType = SX::ElementType>,
 {
@@ -164,6 +164,26 @@ where
             }
         };
         Ok(())
+    }
+
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, SC, SX, SY>>
+    where
+        T: Dtyped,
+    {
+        let condition = self
+            .condition
+            .storage
+            .read_data_typed::<bool>(index, context)?;
+        let x = self.x.storage.read_data_typed::<T>(index, context)?;
+        let y = self.y.storage.read_data_typed::<T>(index, context)?;
+
+        Ok(condition
+            .zip_items(x.zip_items(y))
+            .map_items(|(cond, (x, y))| if cond { x } else { y }))
     }
 
     fn shape(&self) -> &[u64] {

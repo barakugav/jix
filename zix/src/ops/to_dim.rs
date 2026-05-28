@@ -1,6 +1,10 @@
 use std::marker::PhantomData;
+use std::ops::Range;
 
+use crate::codec::ReadContext;
+use crate::dtype::Dtyped;
 use crate::error::Result;
+use crate::storage::ReadData;
 use crate::util::assert_unchecked_eq;
 use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 
@@ -76,17 +80,27 @@ where
     type ElementType = S::ElementType;
     type Dimension = D;
 
-    fn read_data(
-        &self,
-        index: &[core::ops::Range<u64>],
-        buf: &mut [u8],
-        context: &crate::codec::ReadContext,
-    ) -> crate::error::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         if let Some(ndim) = D::NDIM {
             unsafe { assert_unchecked_eq!(ndim, self.inner.storage.shape().len()) };
         }
         self.inner.storage.read_data(index, buf, context)
     }
+
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, S, D>>
+    where
+        T: Dtyped,
+    {
+        if let Some(ndim) = D::NDIM {
+            unsafe { assert_unchecked_eq!(ndim, self.inner.storage.shape().len()) };
+        }
+        self.inner.storage.read_data_typed(index, context)
+    }
+
     fn shape(&self) -> &[u64] {
         let shape = self.inner.storage.shape();
         if let Some(ndim) = D::NDIM {

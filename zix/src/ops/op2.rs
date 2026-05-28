@@ -1,11 +1,10 @@
-use std::mem::MaybeUninit;
 use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::ops::common::{bulk_size2, define_array_op2_method};
-use crate::storage::{ArrayStorageSpec, ArrayStorageTyped};
+use crate::error::{check_dtype, ensure, Result};
+use crate::ops::common::define_array_op2_method;
+use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
 use crate::{Array, ArrayStorage, Ty};
 
@@ -22,8 +21,8 @@ pub(crate) trait Op2Kernel<T1, T2> {
 impl<S1, S2, K> Op2<S1, S2, K> {
     pub(crate) fn new(a: Array<S1>, b: Array<S2>, kernel: K) -> Result<Self>
     where
-        S1: ArrayStorageTyped,
-        S2: ArrayStorageTyped,
+        S1: ArrayStorage + ArrayStorageTyped,
+        S2: ArrayStorage + ArrayStorageTyped,
         K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
     {
         ensure!(
@@ -44,25 +43,36 @@ impl<S1, S2, K> Op2<S1, S2, K> {
 
 impl<S1, S2, K> ArrayStorage for Op2<S1, S2, K>
 where
-    S1: ArrayStorageTyped,
-    S2: ArrayStorageTyped,
+    S1: ArrayStorage + ArrayStorageTyped,
+    S2: ArrayStorage + ArrayStorageTyped,
     K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
 {
     type ElementType = Ty<K::Output>;
     type Dimension = S1::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        unsafe {
-            op2_read_data_unchecked::<S1::Item, S2::Item, K::Output>(
-                self.a.shape(),
-                &self.a.storage,
-                &self.b.storage,
-                &self.kernel,
-                index,
-                buf,
-                context,
-            )
-        }
+        self.read_data_typed::<K::Output>(index, context)?
+            .to_buf(buf)
+    }
+
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, S1, S2, K>>
+    where
+        T: Dtyped,
+    {
+        check_dtype(&T::DTYPE, &K::Output::DTYPE)?;
+
+        let a_data = self.a.storage.read_data_typed(index, context)?;
+        let b_data = self.b.storage.read_data_typed(index, context)?;
+        let data = a_data
+            .zip_items(b_data)
+            .map_items(|(a, b)| self.kernel.apply(a, b));
+
+        // SAFETY: We checked that `T` has the same dtype as `K::Output`
+        Ok(unsafe { data.transmute_items::<T>() })
     }
 
     fn shape(&self) -> &[u64] {
@@ -80,126 +90,6 @@ where
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         self.a.storage._spec()
     }
-}
-
-pub(crate) unsafe fn op2_read_data_unchecked<T1, T2, Out>(
-    shape: &[u64],
-    a: &impl ArrayStorage,
-    b: &impl ArrayStorage,
-    kernel: &impl Op2Kernel<T1, T2, Output = Out>,
-    index: &[Range<u64>],
-    buf: &mut [u8],
-    context: &ReadContext,
-) -> Result<()>
-where
-    T1: Dtyped,
-    T2: Dtyped,
-    Out: Dtyped,
-{
-    let bulk_size = bulk_size2::<T1, T2>();
-    assert!(bulk_size.is_power_of_two());
-
-    // this is a compile time check, the compiler knows the value of `bulk_size2::<T1, T2>()`
-    let read_fn = match bulk_size {
-        1 => op2_read_data_unchecked_impl::<T1, T2, Out, 1>,
-        2 => op2_read_data_unchecked_impl::<T1, T2, Out, 2>,
-        4 => op2_read_data_unchecked_impl::<T1, T2, Out, 4>,
-        8 => op2_read_data_unchecked_impl::<T1, T2, Out, 8>,
-        16 => op2_read_data_unchecked_impl::<T1, T2, Out, 16>,
-        32 => op2_read_data_unchecked_impl::<T1, T2, Out, 32>,
-        64 => op2_read_data_unchecked_impl::<T1, T2, Out, 64>,
-        128 => op2_read_data_unchecked_impl::<T1, T2, Out, 128>,
-        256 => op2_read_data_unchecked_impl::<T1, T2, Out, 256>,
-        512 => op2_read_data_unchecked_impl::<T1, T2, Out, 512>,
-        _ => op2_read_data_unchecked_impl::<T1, T2, Out, 1024>,
-    };
-    unsafe { read_fn(shape, a, b, kernel, index, buf, context) }
-}
-unsafe fn op2_read_data_unchecked_impl<T1, T2, Out, const BULK: usize>(
-    shape: &[u64],
-    a: &impl ArrayStorage,
-    b: &impl ArrayStorage,
-    kernel: &impl Op2Kernel<T1, T2, Output = Out>,
-    index: &[Range<u64>],
-    buf: &mut [u8],
-    context: &ReadContext,
-) -> Result<()>
-where
-    T1: Dtyped,
-    T2: Dtyped,
-    Out: Dtyped,
-{
-    check_get_range(shape, index)?;
-    let (a_dtype, b_dtype, out_dtype) = (T1::DTYPE, T2::DTYPE, Out::DTYPE);
-    let nitems = check_get_buffer_size(index, &out_dtype, buf)?;
-
-    let (src_a_itemsize, src_b_itemsize, dst_itemsize) = (
-        a_dtype.itemsize() as usize,
-        b_dtype.itemsize() as usize,
-        out_dtype.itemsize() as usize,
-    );
-
-    let a_in_place = src_a_itemsize == dst_itemsize
-        && (buf.as_ptr() as usize).is_multiple_of(a_dtype.alignment().as_usize());
-    let b_in_place = src_b_itemsize == dst_itemsize
-        && (buf.as_ptr() as usize).is_multiple_of(b_dtype.alignment().as_usize());
-    let mut a_tmp_buf;
-    let mut b_tmp_buf;
-    let (a_buf, b_buf, dst) = if a_in_place {
-        b_tmp_buf = context.tmp_buf(nitems * src_b_itemsize, b_dtype.alignment());
-        let b_tmp_buf = b_tmp_buf.as_mut_slice();
-        let ptr = buf.as_mut_ptr();
-        (buf, b_tmp_buf, ptr)
-    } else if b_in_place {
-        a_tmp_buf = context.tmp_buf(nitems * src_a_itemsize, a_dtype.alignment());
-        let a_tmp_buf = a_tmp_buf.as_mut_slice();
-        let dst = buf.as_mut_ptr();
-        (a_tmp_buf, buf, dst)
-    } else {
-        a_tmp_buf = context.tmp_buf(nitems * src_a_itemsize, a_dtype.alignment());
-        let a_tmp_buf = a_tmp_buf.as_mut_slice();
-
-        b_tmp_buf = context.tmp_buf(nitems * src_b_itemsize, b_dtype.alignment());
-        let b_tmp_buf = b_tmp_buf.as_mut_slice();
-
-        (a_tmp_buf, b_tmp_buf, buf.as_mut_ptr())
-    };
-
-    unsafe { assert_unchecked_eq!(a_dtype, *a.dtype()) };
-    unsafe { assert_unchecked_eq!(shape, a.shape()) };
-    a.read_data(index, a_buf, context)?;
-    unsafe { assert_unchecked_eq!(b_dtype, *b.dtype()) };
-    unsafe { assert_unchecked_eq!(shape, b.shape()) };
-    b.read_data(index, b_buf, context)?;
-
-    let mut src_a_data = a_buf.as_ptr().cast::<T1>();
-    let mut src_b_data = b_buf.as_ptr().cast::<T2>();
-    let mut dst_data = dst.cast::<Out>();
-    let mut nitems = nitems;
-    unsafe {
-        while nitems >= BULK {
-            let src_a = src_a_data.cast::<[T1; BULK]>().read();
-            let src_b = src_b_data.cast::<[T2; BULK]>().read();
-            let dst = &mut *dst_data.cast::<[MaybeUninit<Out>; BULK]>();
-            for i in 0..BULK {
-                dst[i].write(kernel.apply(src_a[i], src_b[i]));
-            }
-            nitems -= BULK;
-            src_a_data = src_a_data.add(BULK);
-            src_b_data = src_b_data.add(BULK);
-            dst_data = dst_data.add(BULK);
-        }
-        while nitems > 0 {
-            let src_a = src_a_data.read();
-            let src_b = src_b_data.read();
-            dst_data.write(kernel.apply(src_a, src_b));
-            nitems -= 1;
-            src_a_data = src_a_data.add(1);
-            src_b_data = src_b_data.add(1);
-            dst_data = dst_data.add(1);
-        }
-    }
-    Ok(())
 }
 
 macro_rules! define_op2 {
@@ -223,8 +113,8 @@ macro_rules! define_op2 {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
             where
-                S1: crate::storage::ArrayStorageTyped,
-                S2: crate::storage::ArrayStorageTyped,
+                S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+                S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
                 S1::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
             {
                 Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel)?))
@@ -232,13 +122,13 @@ macro_rules! define_op2 {
         }
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S1::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type ElementType = crate::Ty<<S1::Item as $($trait)::+<S2::Item>>::Output>;
             type Dimension = S1::Dimension;
-            crate::storage::impl_array_storage_forward!();
+            crate::storage::impl_array_storage_forward!(<S1, S2>);
         }
         define_op2!(@define_core
             impl $Op
@@ -266,8 +156,8 @@ macro_rules! define_op2 {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
             where
-                S1: crate::storage::ArrayStorageTyped,
-                S2: crate::storage::ArrayStorageTyped,
+                S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+                S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
                 S1::Item: $($trait)::+<S2::Item>,
             {
                 Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel)?))
@@ -275,13 +165,13 @@ macro_rules! define_op2 {
         }
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S1::Item: $($trait)::+<S2::Item>,
         {
             type ElementType = crate::Ty<$output_type>;
             type Dimension = S1::Dimension;
-            crate::storage::impl_array_storage_forward!();
+            crate::storage::impl_array_storage_forward!(<S1, S2>);
         }
     };
 
@@ -349,8 +239,8 @@ macro_rules! define_op2 {
     ) => {
         impl<S1, S2> core::ops::$core_op_trait<Array<S2>> for Array<S1>
         where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S1::Item: core::ops::$core_op_trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S1, S2>>;
@@ -364,7 +254,7 @@ macro_rules! define_op2 {
 
         impl<S1, T2> core::ops::$core_op_trait<T2> for Array<S1>
         where
-            S1: crate::storage::ArrayStorageTyped,
+            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             T2: crate::dtype::Dtyped,
             S1::Item: core::ops::$core_op_trait<T2, Output: crate::dtype::Dtyped>,
         {
@@ -407,8 +297,8 @@ macro_rules! define_op2_rhs_fixed {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
             where
-                S1: crate::storage::ArrayStorageTyped,
-                S2: crate::storage::ArrayStorageTyped<Item = $rhs>,
+                S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+                S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $rhs>,
                 S1::Item: $($trait)::+
             {
                 Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel)?))
@@ -416,13 +306,13 @@ macro_rules! define_op2_rhs_fixed {
         }
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
-            S1: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Item = $rhs>,
+            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $rhs>,
             S1::Item: $($trait)::+
         {
             type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S1::Dimension;
-            crate::storage::impl_array_storage_forward!();
+            crate::storage::impl_array_storage_forward!(<S1, S2>);
         }
     };
 }

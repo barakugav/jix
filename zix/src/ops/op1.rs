@@ -3,9 +3,9 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, Result};
-use crate::ops::common::{bulk_size, define_array_op1_method};
-use crate::storage::{ArrayStorageSpec, ArrayStorageTyped};
+use crate::error::{check_dtype, Result};
+use crate::ops::common::define_array_op1_method;
+use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
 use crate::{ArrayStorage, Ty};
 
@@ -30,7 +30,7 @@ where
 impl<S, K> Op1<S, K> {
     pub(crate) fn new(array: Array<S>, kernel: K) -> Result<Self>
     where
-        S: ArrayStorageTyped,
+        S: ArrayStorage + ArrayStorageTyped,
         K: Op1Kernel<S::Item, Output: Dtyped>,
     {
         Ok(Self {
@@ -43,23 +43,35 @@ impl<S, K> Op1<S, K> {
 
 impl<S, K> ArrayStorage for Op1<S, K>
 where
-    S: ArrayStorageTyped,
+    S: ArrayStorage + ArrayStorageTyped,
     K: Op1Kernel<S::Item, Output: Dtyped>,
 {
     type ElementType = Ty<K::Output>;
     type Dimension = S::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        unsafe {
-            op1_read_data_unchecked::<S::Item, K::Output>(
-                self.array.shape(),
-                &self.array.storage,
-                &self.kernel,
-                index,
-                buf,
-                context,
-            )
-        }
+        self.read_data_typed::<K::Output>(index, context)?
+            .to_buf(buf)
+    }
+
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, S, K>>
+    where
+        T: Dtyped,
+    {
+        check_dtype(&T::DTYPE, &K::Output::DTYPE)?;
+
+        let data = self
+            .array
+            .storage
+            .read_data_typed(index, context)?
+            .map_items(|x| self.kernel.apply(x));
+
+        // SAFETY: We checked that `T` has the same dtype as `K::Output`
+        Ok(unsafe { data.transmute_items::<T>() })
     }
 
     fn shape(&self) -> &[u64] {
@@ -75,97 +87,6 @@ where
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         self.array.storage._spec()
     }
-}
-
-pub(crate) unsafe fn op1_read_data_unchecked<T, Out>(
-    shape: &[u64],
-    array: &impl ArrayStorage,
-    kernel: &impl Op1Kernel<T, Output = Out>,
-    index: &[Range<u64>],
-    buf: &mut [u8],
-    context: &ReadContext,
-) -> Result<()>
-where
-    T: Dtyped,
-    Out: Dtyped,
-{
-    let bulk_size = bulk_size::<T>();
-    assert!(bulk_size.is_power_of_two());
-
-    // this is a compile time check, the compiler knows the value of `bulk_size::<T>()`
-    let read_fn = match bulk_size {
-        1 => op1_read_data_unchecked_impl::<T, Out, 1>,
-        2 => op1_read_data_unchecked_impl::<T, Out, 2>,
-        4 => op1_read_data_unchecked_impl::<T, Out, 4>,
-        8 => op1_read_data_unchecked_impl::<T, Out, 8>,
-        16 => op1_read_data_unchecked_impl::<T, Out, 16>,
-        32 => op1_read_data_unchecked_impl::<T, Out, 32>,
-        64 => op1_read_data_unchecked_impl::<T, Out, 64>,
-        128 => op1_read_data_unchecked_impl::<T, Out, 128>,
-        256 => op1_read_data_unchecked_impl::<T, Out, 256>,
-        512 => op1_read_data_unchecked_impl::<T, Out, 512>,
-        _ => op1_read_data_unchecked_impl::<T, Out, 1024>,
-    };
-    unsafe { read_fn(shape, array, kernel, index, buf, context) }
-}
-unsafe fn op1_read_data_unchecked_impl<T, Out, const BULK: usize>(
-    shape: &[u64],
-    array: &impl ArrayStorage,
-    kernel: &impl Op1Kernel<T, Output = Out>,
-    index: &[Range<u64>],
-    buf: &mut [u8],
-    context: &ReadContext,
-) -> Result<()>
-where
-    T: Dtyped,
-    Out: Dtyped,
-{
-    check_get_range(shape, index)?;
-    let (in_dtype, out_dtype) = (T::DTYPE, Out::DTYPE);
-    let nitems = check_get_buffer_size(index, &out_dtype, buf)?;
-
-    let (src_itemsize, dst_itemsize) =
-        (in_dtype.itemsize() as usize, out_dtype.itemsize() as usize);
-
-    let in_place = src_itemsize == dst_itemsize
-        && (buf.as_ptr() as usize).is_multiple_of(in_dtype.alignment().as_usize());
-    let mut tmp_buf;
-    let (buf, dst) = if in_place {
-        let ptr = buf.as_mut_ptr();
-        (buf, ptr)
-    } else {
-        tmp_buf = context.tmp_buf(nitems * src_itemsize, in_dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-
-        (tmp_buf, buf.as_mut_ptr())
-    };
-
-    unsafe { assert_unchecked_eq!(in_dtype, *array.dtype()) };
-    unsafe { assert_unchecked_eq!(shape, array.shape()) };
-    array.read_data(index, buf, context)?;
-
-    let mut src_data = buf.as_ptr().cast::<T>();
-    let mut dst_data = dst.cast::<Out>();
-    let mut nitems = nitems;
-    unsafe {
-        while nitems >= BULK {
-            let src = src_data.cast::<[T; BULK]>().read();
-            let dst = src.map(|x| kernel.apply(x));
-            dst_data.cast::<[Out; BULK]>().write(dst);
-
-            nitems -= BULK;
-            src_data = src_data.add(BULK);
-            dst_data = dst_data.add(BULK);
-        }
-        while nitems > 0 {
-            let src = src_data.read();
-            dst_data.write(kernel.apply(src));
-            nitems -= 1;
-            src_data = src_data.add(1);
-            dst_data = dst_data.add(1);
-        }
-    }
-    Ok(())
 }
 
 macro_rules! define_op1 {
@@ -192,7 +113,7 @@ macro_rules! define_op1 {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(array: Array<S>) -> crate::error::Result<Self>
             where
-                S: crate::storage::ArrayStorageTyped,
+                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
                 S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
             {
                 Ok(Self(crate::ops::op1::Op1::new(array, $Kernel)?))
@@ -200,12 +121,12 @@ macro_rules! define_op1 {
         }
         impl<S> ArrayStorage for $Op<S>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = S::Dimension;
-            crate::storage::impl_array_storage_forward!();
+            crate::storage::impl_array_storage_forward!(<S>);
         }
 
         define_op1!(@define_core
@@ -270,7 +191,7 @@ macro_rules! define_op1 {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
             pub fn new(array: Array<S>) -> crate::error::Result<Self>
             where
-                S: crate::storage::ArrayStorageTyped,
+                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
                 S::Item: $($trait)::+,
             {
                 Ok(Self(crate::ops::op1::Op1::new(array, $Kernel)?))
@@ -278,12 +199,12 @@ macro_rules! define_op1 {
         }
         impl<S> ArrayStorage for $Op<S>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
         {
             type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S::Dimension;
-            crate::storage::impl_array_storage_forward!();
+            crate::storage::impl_array_storage_forward!(<S>);
         }
     };
 
@@ -298,7 +219,7 @@ macro_rules! define_op1 {
     ) => {
         impl<S> core::ops::$core_op_trait for Array<S>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: core::ops::$core_op_trait<Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S>>;

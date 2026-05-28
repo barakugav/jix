@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use crate::codec::ReadContext;
-use crate::dtype::Dtype;
+use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::{ArrayStorageSpec, BlocksLayout};
+use crate::storage::{ArrayStorageSpec, BlocksLayout, ReadData};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
@@ -71,12 +71,11 @@ pub struct RemoveAxis<S, D> {
 impl<S, D> RemoveAxis<S, D>
 where
     S: ArrayStorage,
+    D: Dimension,
 {
     /// Constructs a [`RemoveAxis`] storage. See the struct docs for semantics and examples.
     pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
     where
-        S: ArrayStorage,
-        D: Dimension,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
         let input_ndim = array.shape().len();
@@ -135,17 +134,8 @@ where
             blocks_layout: b_layout,
         })
     }
-}
 
-impl<S, D> ArrayStorage for RemoveAxis<S, D>
-where
-    S: ArrayStorage,
-    D: Dimension,
-{
-    type ElementType = S::ElementType;
-    type Dimension = D;
-
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn transform_index(&self, index: &[Range<u64>]) -> Result<DimArray<Range<u64>>> {
         check_get_range(self.shape(), index)?;
 
         // Removed dimensions have size 1 and do not affect the element sequence.
@@ -164,7 +154,35 @@ where
                 }
             })
             .collect();
-        self.array.storage.read_data(&inner_index, buf, context)
+        Ok(inner_index)
+    }
+}
+
+impl<S, D> ArrayStorage for RemoveAxis<S, D>
+where
+    S: ArrayStorage,
+    D: Dimension,
+{
+    type ElementType = S::ElementType;
+    type Dimension = D;
+
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        self.array
+            .storage
+            .read_data(&self.transform_index(index)?, buf, context)
+    }
+
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, S, D>>
+    where
+        T: Dtyped,
+    {
+        self.array
+            .storage
+            .read_data_typed(&self.transform_index(index)?, context)
     }
 
     fn shape(&self) -> &[u64] {

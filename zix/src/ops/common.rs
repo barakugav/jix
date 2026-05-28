@@ -8,7 +8,7 @@ macro_rules! define_array_op1_method {
         #[track_caller]
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
             <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
         {
@@ -21,7 +21,7 @@ macro_rules! define_array_op1_method {
         #[track_caller]
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
         {
             let op = $Op::new(self).unwrap();
@@ -35,8 +35,8 @@ macro_rules! define_array_op2_method {
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<S2::Item>,
             <S::Item as $($trait)::+<S2::Item>>::Output: crate::dtype::Dtyped,
         {
@@ -49,8 +49,8 @@ macro_rules! define_array_op2_method {
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<S2::Item>,
         {
             let op = $Op::new(self, other).unwrap();
@@ -62,8 +62,8 @@ macro_rules! define_array_op2_method {
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S2: crate::storage::ArrayStorageTyped<Item = $lhs_type>,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $lhs_type>,
             S::Item: $($trait)::+,
         {
             let op = $Op::new(self, other).unwrap();
@@ -150,15 +150,15 @@ pub(crate) fn bulk_size<T: Dtyped>() -> usize {
         }
     }
 }
-#[inline(always)]
-pub(crate) fn bulk_size2<T1: Dtyped, T2: Dtyped>() -> usize {
-    let (bs1, bs2) = (bulk_size::<T1>(), bulk_size::<T2>());
-    if bs1 < bs2 {
-        bs1
-    } else {
-        bs2
-    }
-}
+// #[inline(always)]
+// pub(crate) fn bulk_size2<T1: Dtyped, T2: Dtyped>() -> usize {
+//     let (bs1, bs2) = (bulk_size::<T1>(), bulk_size::<T2>());
+//     if bs1 < bs2 {
+//         bs1
+//     } else {
+//         bs2
+//     }
+// }
 
 /// An argument that specifies a set of axis indices, encoding the dimension change in the type.
 ///

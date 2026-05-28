@@ -405,7 +405,7 @@ impl<S: ArrayStorage> Array<S> {
     /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
     pub fn to_ndarray(&self) -> Result<ndarray::ArrayD<S::Item>>
     where
-        S: ArrayStorageTyped,
+        S: ArrayStorage + ArrayStorageTyped,
     {
         let shape = self.shape();
         let full_range = dim_arr(shape.len(), |dim| 0u64..shape[dim]);
@@ -453,7 +453,7 @@ impl<S: ArrayStorage> Array<S> {
         context: &ReadContext,
     ) -> Result<ndarray::ArrayD<S::Item>>
     where
-        S: ArrayStorageTyped,
+        S: ArrayStorage + ArrayStorageTyped,
     {
         check_get_range(self.shape(), index)?;
         let ndim = self.ndim();

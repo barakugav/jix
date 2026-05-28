@@ -52,6 +52,11 @@ impl Alignment {
         }
     }
 
+    /// Creates a new `Alignment` for the given type `T`, using its natural alignment.
+    pub const fn of<T>() -> Self {
+        Self::new(align_of::<T>()).unwrap()
+    }
+
     /// Returns the underlying value of the alignment in bytes.
     pub const fn as_usize(self) -> usize {
         let align = self.0.get() as usize;

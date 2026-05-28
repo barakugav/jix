@@ -1,6 +1,10 @@
 use std::marker::PhantomData;
+use std::ops::Range;
 
+use crate::codec::ReadContext;
+use crate::dtype::Dtyped;
 use crate::error::Result;
+use crate::storage::ReadData;
 use crate::util::assert_unchecked_eq;
 use crate::{Array, ArrayStorage, ElementType, Error, ErrorKind};
 
@@ -62,7 +66,7 @@ impl<S, ET> ToType<S, ET> {
             let actual_dtype = array.dtype();
             if actual_dtype != &expected_dtype {
                 return Err(Error::new(
-                    ErrorKind::InvalidShapeOperation,
+                    ErrorKind::UnsupportedDtype,
                     format!(
                         "Cannot convert array with dtype {actual_dtype:?} to expected dtype {expected_dtype:?}"
                     ),
@@ -83,17 +87,27 @@ where
     type ElementType = ET;
     type Dimension = S::Dimension;
 
-    fn read_data(
-        &self,
-        index: &[core::ops::Range<u64>],
-        buf: &mut [u8],
-        context: &crate::codec::ReadContext,
-    ) -> crate::error::Result<()> {
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         if let Some(dtype) = ET::DTYPE {
             unsafe { assert_unchecked_eq!(self.inner.storage.dtype(), &dtype) };
         }
         self.inner.storage.read_data(index, buf, context)
     }
+
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, S, ET>>
+    where
+        T: Dtyped,
+    {
+        if let Some(dtype) = ET::DTYPE {
+            unsafe { assert_unchecked_eq!(self.inner.storage.dtype(), &dtype) };
+        }
+        self.inner.storage.read_data_typed(index, context)
+    }
+
     fn shape(&self) -> &[u64] {
         self.inner.storage.shape()
     }

@@ -30,7 +30,7 @@ pub(crate) trait ReductionOpKernel<T> {
 impl<S, K, D> ReductionOp<S, K, D> {
     pub(crate) fn new<Ax>(array: Array<S>, kernel: K, axes: Ax) -> Result<Self>
     where
-        S: ArrayStorageTyped,
+        S: ArrayStorage + ArrayStorageTyped,
         K: ReductionOpKernel<S::Item, Output: Dtyped>,
         D: Dimension,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
@@ -98,7 +98,7 @@ impl<S, K, D> ReductionOp<S, K, D> {
 
 impl<S, K, D> ArrayStorage for ReductionOp<S, K, D>
 where
-    S: ArrayStorageTyped,
+    S: ArrayStorage + ArrayStorageTyped,
     K: ReductionOpKernel<S::Item, Output: Dtyped>,
     D: Dimension,
 {
@@ -228,7 +228,7 @@ macro_rules! define_reduction_op {
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new(array: crate::Array<S>, axis: usize $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
-                S: crate::storage::ArrayStorageTyped,
+                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
                 S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
             {
                 let kernel = $Kernel { $($extra_arg),* };
@@ -238,13 +238,13 @@ macro_rules! define_reduction_op {
 
         impl<S> crate::ArrayStorage for $Op<S>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
              S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
 
-            crate::storage::impl_array_storage_forward!();
+            crate::storage::impl_array_storage_forward!(<S>);
         }
 
         define_reduction_op!(
@@ -272,7 +272,7 @@ macro_rules! define_reduction_op {
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
-                S: crate::storage::ArrayStorageTyped,
+                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
                 S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
                 D: crate::Dimension,
                 Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
@@ -284,14 +284,14 @@ macro_rules! define_reduction_op {
 
         impl<S, D> crate::ArrayStorage for $Op<S, D>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
             D: crate::Dimension,
         {
             type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = D;
 
-            crate::storage::impl_array_storage_forward!();
+            crate::storage::impl_array_storage_forward!(<S, D>);
         }
 
         define_reduction_op!(
@@ -347,7 +347,7 @@ macro_rules! define_reduction_op {
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
-                S: crate::storage::ArrayStorageTyped<Item = $in_type>,
+                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $in_type>,
                 D: crate::Dimension,
                 Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
             {
@@ -358,13 +358,13 @@ macro_rules! define_reduction_op {
 
         impl<S, D> crate::ArrayStorage for $Op<S, D>
         where
-            S: crate::storage::ArrayStorageTyped<Item = $in_type>,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $in_type>,
             D: crate::Dimension,
         {
             type ElementType = crate::Ty<$out_type>;
             type Dimension = D;
 
-            crate::storage::impl_array_storage_forward!();
+            crate::storage::impl_array_storage_forward!(<S, D>);
         }
 
 
@@ -752,12 +752,12 @@ define_reduction_op!(
     ///
     /// // Reduce all axes -> scalar
     /// let scalar = Array::compact_array(&nd)?
-    ///     .max(&[0, 1]).to_ndarray()?;
+    ///     .max((0, 1)).to_ndarray()?;
     /// assert_eq!(scalar[[]], 6);
     ///
     /// // Reduce axis 0 -> shape [3]
     /// let col_max = Array::compact_array(&nd)?
-    ///     .max(&[0]).to_ndarray()?;
+    ///     .max(0).to_ndarray()?;
     /// assert_eq!(col_max.as_slice().unwrap(), &[4, 5, 6]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -789,12 +789,12 @@ define_reduction_op!(
     ///
     /// // Reduce all axes -> scalar
     /// let scalar = Array::compact_array(&nd)?
-    ///     .min(&[0, 1]).to_ndarray()?;
+    ///     .min((0, 1)).to_ndarray()?;
     /// assert_eq!(scalar[[]], 1);
     ///
     /// // Reduce axis 0 -> shape [3]
     /// let col_min = Array::compact_array(&nd)?
-    ///     .min(&[0]).to_ndarray()?;
+    ///     .min(0).to_ndarray()?;
     /// assert_eq!(col_min.as_slice().unwrap(), &[1, 2, 3]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -917,12 +917,12 @@ define_reduction_op!(
     ///
     /// // Sum all elements -> i64
     /// let total = Array::compact_array(&nd)?
-    ///     .sum(&[0, 1]).to_ndarray()?;
+    ///     .sum((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 21);
     ///
     /// // Sum along axis 0 -> shape [3]
     /// let col_sums = Array::compact_array(&nd)?
-    ///     .sum(&[0]).to_ndarray()?;
+    ///     .sum(0).to_ndarray()?;
     /// assert_eq!(col_sums.as_slice().unwrap(), &[5, 7, 9]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -961,12 +961,12 @@ define_reduction_op!(
     ///
     /// // Product of all elements -> i64
     /// let total = Array::compact_array(&nd)?
-    ///     .product(&[0, 1]).to_ndarray()?;
+    ///     .product((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 720);
     ///
     /// // Product along axis 0 -> shape [3]
     /// let col_products = Array::compact_array(&nd)?
-    ///     .product(&[0]).to_ndarray()?;
+    ///     .product(0).to_ndarray()?;
     /// assert_eq!(col_products.as_slice().unwrap(), &[4, 10, 18]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -998,12 +998,12 @@ define_reduction_op!(
     ///
     /// // Mean of all elements -> f64
     /// let total = Array::compact_array(&nd)?
-    ///     .mean(&[0, 1]).to_ndarray()?;
+    ///     .mean((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 3.5);
     ///
     /// // Mean along axis 0 -> shape [3]
     /// let col_means = Array::compact_array(&nd)?
-    ///     .mean(&[0]).to_ndarray()?;
+    ///     .mean(0).to_ndarray()?;
     /// assert_eq!(col_means.as_slice().unwrap(), &[2.5, 3.5, 4.5]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -1040,12 +1040,12 @@ define_reduction_op!(
     ///
     /// // Population variance (ddof=0) of all elements -> f64
     /// let var_all = Array::compact_array(&nd)?
-    ///     .var(&[0, 1], 0.0).to_ndarray()?;
+    ///     .var((0, 1), 0.0).to_ndarray()?;
     /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
     ///
     /// // Sample variance (ddof=1) along axis 0 -> shape [3]
     /// let col_vars = Array::compact_array(&nd)?
-    ///     .var(&[0], 1.0).to_ndarray()?;
+    ///     .var(0, 1.0).to_ndarray()?;
     /// assert_eq!(col_vars.as_slice().unwrap(), &[4.5, 4.5, 4.5]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -1078,12 +1078,12 @@ define_reduction_op!(
     ///
     /// // Population std (ddof=0) of all elements -> f64
     /// let std_all = Array::compact_array(&nd)?
-    ///     .std(&[0, 1], 0.0).to_ndarray()?;
+    ///     .std((0, 1), 0.0).to_ndarray()?;
     /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
     ///
     /// // Sample std (ddof=1) along axis 0 -> shape [3]
     /// let col_stds = Array::compact_array(&nd)?
-    ///     .std(&[0], 1.0).to_ndarray()?;
+    ///     .std(0, 1.0).to_ndarray()?;
     /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -1116,12 +1116,12 @@ define_reduction_op!(
     ///
     /// // All elements true? -> false (contains false)
     /// let all_true = Array::compact_array(&nd)?
-    ///     .all(&[0, 1]).to_ndarray()?;
+    ///     .all((0, 1)).to_ndarray()?;
     /// assert_eq!(all_true[[]], false);
     ///
     /// // All true along axis 0 (per column) -> shape [3]
     /// let col_all = Array::compact_array(&nd)?
-    ///     .all(&[0]).to_ndarray()?;
+    ///     .all(0).to_ndarray()?;
     /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -1153,12 +1153,12 @@ define_reduction_op!(
     ///
     /// // Any element true? -> true
     /// let any_true = Array::compact_array(&nd)?
-    ///     .any(&[0, 1]).to_ndarray()?;
+    ///     .any((0, 1)).to_ndarray()?;
     /// assert_eq!(any_true[[]], true);
     ///
     /// // Any true along axis 0 (per column) -> shape [3]
     /// let col_any = Array::compact_array(&nd)?
-    ///     .any(&[0]).to_ndarray()?;
+    ///     .any(0).to_ndarray()?;
     /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -1177,7 +1177,7 @@ macro_rules! define_array_reduction_method {
         #[track_caller]
         pub fn $method(self, axis: usize $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S>>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
             <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
         {
@@ -1190,7 +1190,7 @@ macro_rules! define_array_reduction_method {
         #[track_caller]
         pub fn $method<Ax>(self, axis: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
         where
-            S: crate::storage::ArrayStorageTyped,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
             <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
             Ax: AxesArg,
@@ -1204,7 +1204,7 @@ macro_rules! define_array_reduction_method {
         #[track_caller]
         pub fn $method<Ax>(self, axis: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
         where
-            S: crate::storage::ArrayStorageTyped<Item = $in_type>,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $in_type>,
             Ax: AxesArg,
         {
             let op = $Op::new(self, axis $($(, $extra_arg)*)?).unwrap();
@@ -1661,21 +1661,21 @@ pub(crate) mod tests {
     #[test]
     fn variance() {
         let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let var_all = a.as_ref().var(&[0, 1], 0.0).to_ndarray().unwrap();
+        let var_all = a.as_ref().var((0, 1), 0.0).to_ndarray().unwrap();
         assert!((var_all[[]] - 2.9166).abs() < 0.001);
-        let var_col = a.as_ref().var(&[0], 0.0).to_ndarray().unwrap();
+        let var_col = a.as_ref().var(0, 0.0).to_ndarray().unwrap();
         assert!((var_col[[0]] - 2.25).abs() < 0.001);
-        let var_row = a.as_ref().var(&[1], 0.0).to_ndarray().unwrap();
+        let var_row = a.as_ref().var(1, 0.0).to_ndarray().unwrap();
         assert!((var_row[[0]] - 0.6666).abs() < 0.001);
     }
     #[test]
     fn std() {
         let a = Array::compact_array(&array![[7i32, 8, 9], [4, 5, 6]]).unwrap();
-        let std_all = a.as_ref().std(&[0, 1], 0.0).to_ndarray().unwrap();
+        let std_all = a.as_ref().std((0, 1), 0.0).to_ndarray().unwrap();
         assert!((std_all[[]] - 1.7078).abs() < 0.001);
-        let std_col = a.as_ref().std(&[0], 0.0).to_ndarray().unwrap();
+        let std_col = a.as_ref().std(0, 0.0).to_ndarray().unwrap();
         assert!((std_col[[0]] - 1.5).abs() < 0.001);
-        let std_row = a.as_ref().std(&[1], 0.0).to_ndarray().unwrap();
+        let std_row = a.as_ref().std(1, 0.0).to_ndarray().unwrap();
         assert!((std_row[[0]] - 0.8164).abs() < 0.001);
     }
     // test_reduction!(

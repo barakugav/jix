@@ -258,9 +258,6 @@ where
         }
         let x = *offsets.last().unwrap();
         debug_assert!(block_data_total_len <= x);
-        if !(offsets.windows(2).all(|w| w[0] <= w[1])) {
-            println!("Offsets are not non-decreasing: {offsets:?}");
-        }
         debug_assert!(offsets.windows(2).all(|w| w[0] <= w[1]));
         block_offsets.extend_from_slice(offsets);
 

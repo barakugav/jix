@@ -17,7 +17,7 @@ where
     #[track_caller]
     pub fn map<R, F>(self, map_fn: F) -> Array<Map<S, F>>
     where
-        S: ArrayStorageTyped,
+        S: ArrayStorage + ArrayStorageTyped,
         R: Dtyped,
         F: Fn(S::Item) -> R,
     {
@@ -56,7 +56,7 @@ impl<S, F> Map<S, F> {
     /// Constructs a [`Map`] storage. See the struct docs for semantics and examples.
     pub fn new<O>(array: Array<S>, map_fn: F) -> Result<Self>
     where
-        S: ArrayStorageTyped,
+        S: ArrayStorage + ArrayStorageTyped,
         F: Fn(S::Item) -> O,
         O: Dtyped,
     {
@@ -65,13 +65,13 @@ impl<S, F> Map<S, F> {
 }
 impl<S, O, F> ArrayStorage for Map<S, F>
 where
-    S: ArrayStorageTyped,
+    S: ArrayStorage + ArrayStorageTyped,
     O: Dtyped,
     F: Fn(S::Item) -> O,
 {
     type ElementType = Ty<O>;
     type Dimension = S::Dimension;
-    crate::storage::impl_array_storage_forward!();
+    crate::storage::impl_array_storage_forward!(<S, O, F>);
 }
 
 #[cfg(test)]
