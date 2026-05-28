@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::error::{ensure, Result};
-use crate::storage::ElementType;
 use crate::util::{assert_unchecked_eq, SendSyncPtr};
+use crate::ElementType;
 
 const _: () = const {
     assert!(

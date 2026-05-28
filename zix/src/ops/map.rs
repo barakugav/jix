@@ -1,8 +1,8 @@
-use crate::array::Array;
 use crate::dtype::Dtyped;
 use crate::error::Result;
 use crate::ops::Op1;
-use crate::storage::{ArrayStorage, ArrayStorageTyped, Ty};
+use crate::storage::{ArrayStorage, ArrayStorageTyped};
+use crate::{Array, Ty};
 
 impl<S> Array<S>
 where

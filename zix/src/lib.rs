@@ -163,17 +163,17 @@
 //! assert_eq!(fields[0].0, "r");
 //! ```
 //!
-//! **Compile-time — [`ElementType`](storage::ElementType), [`Ty<T>`](storage::Ty), [`TypeDyn`](storage::TypeDyn)**
+//! **Compile-time — [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`]**
 //!
 //! In addition to the runtime [`Dtype`](dtype::Dtype), the storage type parameter `S` carries the
 //! element type at the *type level* via `S::ElementType`:
 //!
-//! - [`Ty<T>`](storage::Ty) — the scalar element type `T` is known at compile time.
+//! - [`Ty<T>`](Ty) — the scalar element type `T` is known at compile time.
 //!   Arrays constructed from typed sources carry this automatically (e.g.
 //!   `Array::compact_array(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
 //!   All element-wise operations are available.
 //!
-//! - [`TypeDyn`](storage::TypeDyn) — the element type is only known at runtime. Arrays loaded
+//! - [`TypeDyn`] — the element type is only known at runtime. Arrays loaded
 //!   from disk start with this (`Array<Compact<TypeDyn, DimDyn>>`). Call
 //!   [`Array::to_typed::<T>()`](Array::to_typed) to assert the expected element type (checked
 //!   against the file header at runtime) and unlock element-wise operations:
@@ -350,7 +350,9 @@ mod archive;
 pub mod ops;
 
 mod dimension;
+mod element_type;
 pub use dimension::*;
+pub use element_type::*;
 
 mod util;
 pub use util::ArraySequence;

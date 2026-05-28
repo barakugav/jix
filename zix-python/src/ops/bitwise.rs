@@ -1,13 +1,12 @@
-use zix_core::scalar::{f16, Complex};
+use zix_core::scalar::Complex;
 
-use crate::ops::common::define_op1;
-use crate::ops::define_op2;
+use crate::ops::{define_op1, define_op2};
 
 define_op2!(
     /// Element-wise logical AND of two arrays.
     ///
     /// Supported dtypes: all integer types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
-    /// `u64`), `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, and `bool`.
+    /// `u64`), `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, and `bool`.
     /// Output dtype is `bool`. The output shape equals the input shape.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`;
@@ -36,13 +35,14 @@ define_op2!(
     /// ```
     logical_and,
     LogicalAnd,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    // TODO: f16
 );
 
 define_op2!(
     /// Element-wise logical OR of two arrays.
     ///
-    /// Supported dtypes: all integer types, `f16`, `f32`, `f64`, `Complex<f32>`,
+    /// Supported dtypes: all integer types, `f32`, `f64`, `Complex<f32>`,
     /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
     /// shape.
     ///
@@ -71,13 +71,14 @@ define_op2!(
     /// ```
     logical_or,
     LogicalOr,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    // TODO: f16
 );
 
 define_op2!(
     /// Element-wise logical XOR of two arrays.
     ///
-    /// Supported dtypes: all integer types, `f16`, `f32`, `f64`, `Complex<f32>`,
+    /// Supported dtypes: all integer types, `f32`, `f64`, `Complex<f32>`,
     /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
     /// shape.
     ///
@@ -106,13 +107,14 @@ define_op2!(
     /// ```
     logical_xor,
     LogicalXor,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    // TODO: f16
 );
 
 define_op1!(
     /// Element-wise logical NOT.
     ///
-    /// Supported dtypes: all integer types, `f16`, `f32`, `f64`, `Complex<f32>`,
+    /// Supported dtypes: all integer types, `f32`, `f64`, `Complex<f32>`,
     /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
     /// shape.
     ///
@@ -135,7 +137,8 @@ define_op1!(
     /// ```
     logical_not,
     LogicalNot,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    // TODO: f16
 );
 
 define_op2!(

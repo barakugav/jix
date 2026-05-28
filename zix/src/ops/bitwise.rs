@@ -685,8 +685,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "half")]
-    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;

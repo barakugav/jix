@@ -40,7 +40,7 @@ mod tests {
     use numpy::PyArray;
     use pyo3::prelude::*;
     use zix_core::dtype::Dtyped;
-    use zix_core::scalar::{f16, Complex};
+    use zix_core::scalar::Complex;
 
     use super::asarray;
 

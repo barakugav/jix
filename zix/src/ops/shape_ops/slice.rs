@@ -430,9 +430,9 @@ mod tests {
     use super::SliceItem;
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::DimDyn;
+    use crate::{DimDyn, Ty};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();

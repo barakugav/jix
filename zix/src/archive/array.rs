@@ -11,10 +11,10 @@ use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, CompactMmap, TypeDyn,
+    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, CompactMmap,
 };
 use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
-use crate::{Array, ArrayParams, DimDyn, Dimension};
+use crate::{Array, ArrayParams, DimDyn, Dimension, TypeDyn};
 
 impl Array<Compact<TypeDyn, DimDyn>> {
     /// Load a compressed array from a `.zix` file, allocating storage on the heap.
@@ -486,9 +486,9 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::dtype::Dtyped;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, DimDyn, Dimension};
+    use crate::{Array, ArrayParams, DimDyn, Dimension, Ty};
 
     // -----------------------------------------------------------------------
     // Helpers

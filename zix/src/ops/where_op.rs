@@ -186,9 +186,9 @@ mod tests {
 
     use super::{where_condition, Where};
     use crate::array::Array;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::ScalarStrategy;
-    use crate::DimDyn;
+    use crate::{DimDyn, Ty};
 
     #[cfg(feature = "half")]
     use crate::scalar::f16;

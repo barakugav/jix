@@ -1,13 +1,13 @@
 use std::mem::MaybeUninit;
 use std::ops::Range;
 
-use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::common::{bulk_size2, define_array_op2_method};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped, Ty};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped};
 use crate::util::assert_unchecked_eq;
+use crate::{Array, Ty};
 
 pub(crate) struct Op2<S1, S2, K> {
     a: Array<S1>,
@@ -235,7 +235,7 @@ macro_rules! define_op2 {
             S2: crate::storage::ArrayStorageTyped,
             S1::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
-            type ElementType = crate::storage::Ty<<S1::Item as $($trait)::+<S2::Item>>::Output>;
+            type ElementType = crate::Ty<<S1::Item as $($trait)::+<S2::Item>>::Output>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!();
         }
@@ -277,7 +277,7 @@ macro_rules! define_op2 {
             S2: crate::storage::ArrayStorageTyped,
             S1::Item: $($trait)::+<S2::Item>,
         {
-            type ElementType = crate::storage::Ty<$output_type>;
+            type ElementType = crate::Ty<$output_type>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!();
         }
@@ -417,7 +417,7 @@ macro_rules! define_op2_rhs_fixed {
             S2: crate::storage::ArrayStorageTyped<Item = $rhs>,
             S1::Item: $($trait)::+
         {
-            type ElementType = crate::storage::Ty<$output_type_s>;
+            type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!();
         }

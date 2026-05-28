@@ -12,8 +12,8 @@ use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::storage::block::{
     BlockFn, BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned,
 };
-use crate::storage::{ElementType, TypeDyn};
 use crate::util::{cast_slice, cast_slice_mut, Idx, SendSyncPtr};
+use crate::{ElementType, TypeDyn};
 
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
 ///

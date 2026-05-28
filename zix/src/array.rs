@@ -6,16 +6,14 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::{DimensionChange, ElementTypeChange, IntoCompact, ToDim, ToType};
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
-use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, ElementType, Ref, Ty, TypeDyn,
-};
+use crate::storage::{ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray,
     Idx, IxIterExt,
 };
-use crate::{ArrayParams, DimDyn, Dimension, IntoDimension};
+use crate::{ArrayParams, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn};
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
 ///
@@ -1062,7 +1060,7 @@ where
         Ok(Array::from_storage(ToType::<S, ET>::new(self)?))
     }
 
-    /// Re-tag this array's element type as [`Ty<T>`](crate::storage::Ty), asserting a concrete scalar type.
+    /// Re-tag this array's element type as [`Ty<T>`](crate::Ty), asserting a concrete scalar type.
     ///
     /// Sugar for [`to_type::<Ty<T>>()`](Self::to_type). See [`ToType`] for details and examples.
     ///
@@ -1101,7 +1099,7 @@ where
         Ok(Array::from_storage(self.into_storage().change_type()?))
     }
 
-    /// Re-tag this array's element type as [`Ty<T>`](crate::storage::Ty) in-place, asserting a concrete scalar type.
+    /// Re-tag this array's element type as [`Ty<T>`](crate::Ty) in-place, asserting a concrete scalar type.
     ///
     /// Sugar for [`into_type::<Ty<T>>()`](Self::into_type). Requires `S: ElementTypeChange`.
     /// See [`ElementTypeChange`] for details. Prefer [`to_typed`](Self::to_typed) when `S` does
@@ -1242,9 +1240,9 @@ mod tests {
     use crate::codec::{DecoderParams, EncoderParams};
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
-    use crate::storage::{BlockShapeTag, BlocksLayout, Ty};
+    use crate::storage::{BlockShapeTag, BlocksLayout};
     use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
-    use crate::{DimDyn, Dimension, IntoDimension};
+    use crate::{DimDyn, Dimension, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // compact_array roundtrip helper

@@ -63,7 +63,7 @@
 //! # Ok::<(), zix::Error>(())
 //! ```
 //!
-//! Arrays loaded from disk carry [`TypeDyn`](crate::storage::TypeDyn) because the element type
+//! Arrays loaded from disk carry [`TypeDyn`](crate::TypeDyn) because the element type
 //! comes from the file header. Use [`Array::to_typed`](crate::Array::to_typed) to assert the
 //! expected element type and recover compile-time tracking:
 //!

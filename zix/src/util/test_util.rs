@@ -4,9 +4,9 @@ use std::ops::Range;
 use crate::dtype::Dtyped;
 use crate::params::ArrayParams;
 use crate::storage::block::BlockSize;
-use crate::storage::{Compact, Ty};
+use crate::storage::Compact;
 use crate::util::AlignedBytes;
-use crate::DimDyn;
+use crate::{DimDyn, Ty};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper (previously duplicated in every test module)

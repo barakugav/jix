@@ -5,8 +5,9 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::common::{bulk_size, define_array_op1_method};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped, Ty};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped};
 use crate::util::assert_unchecked_eq;
+use crate::Ty;
 
 pub(crate) struct Op1<S, K> {
     array: Array<S>,
@@ -201,7 +202,7 @@ macro_rules! define_op1 {
             S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
-            type ElementType = crate::storage::Ty<<S::Item as $($trait)::+>::Output>;
+            type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!();
         }
@@ -278,7 +279,7 @@ macro_rules! define_op1 {
             S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
         {
-            type ElementType = crate::storage::Ty<$output_type_s>;
+            type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!();
         }

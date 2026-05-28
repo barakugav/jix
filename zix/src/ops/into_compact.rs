@@ -93,9 +93,9 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::dtype::Dtyped;
-    use crate::storage::{ArrayStorage, Compact, ElementType, Ty};
+    use crate::storage::{ArrayStorage, Compact};
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, DimDyn, Dimension};
+    use crate::{Array, ArrayParams, DimDyn, Dimension, ElementType, Ty};
 
     // -----------------------------------------------------------------------
     // Helpers

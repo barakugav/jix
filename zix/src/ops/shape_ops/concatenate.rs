@@ -268,11 +268,10 @@ mod tests {
     use ndarray::array;
     use proptest::prelude::*;
 
-    use crate::array::Array;
     use crate::ops::concatenate;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::DimDyn;
+    use crate::{Array, DimDyn, Ty};
 
     // 1D i32: concatenate two arrays of equal size along axis 0 (in-place path)
     #[test]

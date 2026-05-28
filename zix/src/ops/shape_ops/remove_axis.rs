@@ -188,9 +188,9 @@ mod tests {
 
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{DimDyn, NDIM_MAX};
+    use crate::{DimDyn, Ty, NDIM_MAX};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();

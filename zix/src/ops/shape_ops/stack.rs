@@ -211,9 +211,9 @@ mod tests {
 
     use crate::array::Array;
     use crate::ops::stack;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{DimDyn, NDIM_MAX};
+    use crate::{DimDyn, Ty, NDIM_MAX};
 
     // stack two 1D i32 arrays along axis 0 -> shape [2, N]
     #[test]

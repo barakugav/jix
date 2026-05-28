@@ -203,11 +203,10 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 mod tests {
     use ndarray::ArrayD;
 
-    use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::{DimDyn, NDIM_MAX};
+    use crate::{Array, DimDyn, Ty, NDIM_MAX};
 
     fn make(vals: Vec<i32>, shape: &[usize]) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();

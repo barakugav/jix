@@ -31,8 +31,8 @@ use crate::Dimension;
 ///
 /// `Compact<ET, D>` has two type parameters:
 ///
-/// - **`ET: ElementType`** — compile-time element type, either [`Ty<Scalar>`](crate::storage::Ty)
-///   (element type known at compile time) or [`TypeDyn`](crate::storage::TypeDyn) (runtime only).
+/// - **`ET: ElementType`** — compile-time element type, either [`Ty<Scalar>`](crate::Ty)
+///   (element type known at compile time) or [`TypeDyn`](crate::TypeDyn) (runtime only).
 ///   Arrays constructed from typed sources carry `Ty<_>` automatically; arrays loaded from disk
 ///   carry `TypeDyn`.
 ///
@@ -74,7 +74,7 @@ macro_rules! impl_array_storage {
     ($ty:ident < $($lt:lifetime,)? ET, D >) => {
         impl<$($lt,)? ET, D> ArrayStorage for $ty<$($lt,)? ET, D>
         where
-            ET: crate::storage::ElementType,
+            ET: crate::ElementType,
             D: crate::Dimension,
         {
             type ElementType = ET;
@@ -121,7 +121,7 @@ macro_rules! impl_array_storage {
 
         impl<$($lt,)? ET, D> crate::ops::ElementTypeChange for $ty<$($lt,)? ET, D>
         where
-            ET: crate::storage::ElementType,
+            ET: crate::ElementType,
             D: crate::Dimension,
         {
             type ElementTypeChange<NewET: ElementType> = $ty<$($lt,)? NewET, D>;
@@ -133,7 +133,7 @@ macro_rules! impl_array_storage {
 
         impl<$($lt,)? ET, D> crate::ops::DimensionChange for $ty<$($lt,)? ET, D>
         where
-            ET: crate::storage::ElementType,
+            ET: crate::ElementType,
             D: crate::Dimension,
         {
             type DimensionChange<NewD: Dimension> = $ty<$($lt,)? ET, NewD>;

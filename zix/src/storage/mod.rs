@@ -28,7 +28,7 @@
 //!   `S::ElementType`. This is either [`Ty<T>`] (the concrete scalar type `T` is known at
 //!   compile time) or [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk).
 //!
-//! - **[`Dimension`](crate::Dimension)** — the compile-time dimension, accessible via
+//! - **[`Dimension`]** — the compile-time dimension, accessible via
 //!   `S::Dimension`. Either [`Dim<N>`](crate::Dim) (known statically) or
 //!   [`DimDyn`](crate::DimDyn) (runtime only).
 //!
@@ -50,14 +50,12 @@
 //! - [`Plain`] and [`Scalar`] — adapters for non-compressed data.
 //! - [`BlocksLayout`] — block geometry hints attached to every storage.
 
-use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{bail, Result};
-use crate::util::assert_unchecked_eq;
-use crate::Dimension;
+use crate::error::Result;
+use crate::{Dimension, ElementType, Ty, TypeDyn};
 
 mod layout;
 pub use layout::*;
@@ -195,93 +193,6 @@ pub struct ArrayStorageSpec<'a> {
     pub(crate) encoder_params: Option<&'a EncoderParams>,
     pub(crate) decoder_params: Option<&'a DecoderParams>,
     // pub(crate) decoder_config: Option<&'a DecoderCodecConfig>,
-}
-
-/// Compile-time element-type tracking for [`ArrayStorage`].
-///
-/// Every [`ArrayStorage`] has an associated `type ElementType: ElementType`. There are two
-/// implementors:
-///
-/// - [`Ty<T>`] — the concrete element type `T` is known at compile time. All element-wise
-///   operations (arithmetic, comparisons, reductions, cast) are available.
-/// - [`TypeDyn`] — the element type is only available at runtime. Arrays loaded from disk
-///   start with this. Call [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert
-///   the expected element type and recover compile-time tracking.
-pub trait ElementType: Clone + Send + Sync {
-    /// `Some(dtype)` when the element type is statically known ([`Ty<T>`]),
-    /// `None` for [`TypeDyn`].
-    const DTYPE: Option<Dtype>;
-
-    /// Construct from a runtime `Dtype`, validating it against `DTYPE`.
-    ///
-    /// Returns an error if `Self::DTYPE = Some(d)` and `dtype != d`.
-    /// Always succeeds for `TypeDyn`.
-    fn from_dtype(dtype: Dtype) -> Result<Self>
-    where
-        Self: Sized;
-
-    /// Returns the element dtype, either the fixed dtype or the runtime one.
-    fn dtype(&self) -> &Dtype;
-}
-
-/// Runtime-only element type tag. `S::ElementType = TypeDyn` when the element type is not
-/// known at compile time (e.g. arrays loaded from a `.zix` file).
-///
-/// Arrays with `TypeDyn` do not support most element-wise operations directly; call
-/// [`Array::to_typed::<T>()`](crate::Array::to_typed) first to assert the expected
-/// element type and recover [`ArrayStorageTyped`].
-#[derive(Clone)]
-pub struct TypeDyn(Dtype);
-impl ElementType for TypeDyn {
-    const DTYPE: Option<Dtype> = None;
-
-    fn from_dtype(dtype: Dtype) -> Result<Self> {
-        Ok(Self(dtype))
-    }
-
-    fn dtype(&self) -> &Dtype {
-        &self.0
-    }
-}
-
-/// Compile-time element type tag. `S::ElementType = Ty<T>` when the scalar element type
-/// `T` is statically known.
-///
-/// `Ty<T>` enables all element-wise operations: arithmetic, comparisons, reductions, and
-/// type casts. Arrays constructed from typed sources (e.g.
-/// [`Array::compact_array`](crate::Array::compact_array)) automatically carry `Ty<T>`.
-#[derive(Clone)]
-pub struct Ty<T>(Dtype, PhantomData<T>);
-impl<T> Ty<T> {
-    /// Construct the element type marker.
-    pub fn new() -> Self
-    where
-        T: Dtyped,
-    {
-        Self(T::DTYPE, PhantomData)
-    }
-}
-impl<T> ElementType for Ty<T>
-where
-    T: Dtyped,
-{
-    const DTYPE: Option<Dtype> = Some(T::DTYPE);
-
-    fn from_dtype(dtype: Dtype) -> Result<Self> {
-        if dtype != T::DTYPE {
-            bail!(
-                UnsupportedDtype,
-                "expected dtype {:?} but got {dtype:?}",
-                T::DTYPE
-            )
-        }
-        Ok(Self::new())
-    }
-
-    fn dtype(&self) -> &Dtype {
-        unsafe { assert_unchecked_eq!(self.0, T::DTYPE) };
-        &self.0
-    }
 }
 
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.

@@ -410,9 +410,9 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::array::Array;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::DimDyn;
+    use crate::{DimDyn, Ty};
 
     // -----------------------------------------------------------------------
     // Helpers

@@ -6,11 +6,11 @@ use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result}
 use crate::ops::common::AxesArg;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped, BlocksLayout, Ty};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
 use crate::util::{assert_unchecked_eq, default_strides, dim_arr, DimArray};
-use crate::{Array, Dimension};
+use crate::{Array, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
     kernel: K,
@@ -241,7 +241,7 @@ macro_rules! define_reduction_op {
             S: crate::storage::ArrayStorageTyped,
              S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
-            type ElementType = crate::storage::Ty<<S::Item as $($trait)::+>::Output>;
+            type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
 
             crate::storage::impl_array_storage_forward!();
@@ -288,7 +288,7 @@ macro_rules! define_reduction_op {
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
             D: crate::Dimension,
         {
-            type ElementType = crate::storage::Ty<<S::Item as $($trait)::+>::Output>;
+            type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = D;
 
             crate::storage::impl_array_storage_forward!();
@@ -361,7 +361,7 @@ macro_rules! define_reduction_op {
             S: crate::storage::ArrayStorageTyped<Item = $in_type>,
             D: crate::Dimension,
         {
-            type ElementType = crate::storage::Ty<$out_type>;
+            type ElementType = crate::Ty<$out_type>;
             type Dimension = D;
 
             crate::storage::impl_array_storage_forward!();
@@ -1196,8 +1196,8 @@ pub(crate) mod tests {
 
     use crate::array::Array;
     use crate::storage::Compact;
-    use crate::storage::Ty;
     use crate::DimDyn;
+    use crate::Ty;
 
     use proptest::prelude::*;
 

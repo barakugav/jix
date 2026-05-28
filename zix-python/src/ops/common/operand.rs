@@ -5,8 +5,8 @@ use pyo3::types::{PyComplex, PyFloat, PyInt};
 
 use zix_core::dtype::{DtypeScalarKind, Dtyped, Itemsize};
 use zix_core::scalar::{f16, Complex};
-use zix_core::storage::{Plain, TypeDyn};
-use zix_core::{Array as ZixArray, DimDyn};
+use zix_core::storage::Plain;
+use zix_core::{Array as ZixArray, DimDyn, TypeDyn};
 
 use crate::dtype::dtype_from_numpy;
 use crate::util::{check_ndim, DimArray, IntoPyResult};

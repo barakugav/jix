@@ -224,12 +224,11 @@ mod tests {
     use ndarray::ArrayD;
     use proptest::prelude::*;
 
-    use crate::array::Array;
     use crate::codec::ReadContext;
     use crate::ops::InsertAxis;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{DimDyn, NDIM_MAX};
+    use crate::{Array, DimDyn, Ty, NDIM_MAX};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();

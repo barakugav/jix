@@ -1,7 +1,8 @@
 use pyo3::prelude::*;
-use zix_core::storage::TypeDyn;
+use zix_core::TypeDyn;
 
-use crate::{util::IntoPyResult, Array};
+use crate::util::IntoPyResult;
+use crate::Array;
 
 /// Extracts one named field from a struct dtype array.
 ///

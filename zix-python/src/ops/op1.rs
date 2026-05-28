@@ -1,6 +1,6 @@
 use zix_core::scalar::{f16, Complex};
 
-use crate::ops::common::define_op1;
+use crate::ops::define_op1;
 
 define_op1!(
     /// Arithmetic negation applied element-wise (`-array`).

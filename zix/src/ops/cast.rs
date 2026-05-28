@@ -193,7 +193,7 @@ where
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
-    type ElementType = crate::storage::Ty<T>;
+    type ElementType = crate::Ty<T>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!();
 }

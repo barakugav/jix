@@ -175,10 +175,9 @@ mod tests {
     use ndarray::array;
     use proptest::prelude::*;
 
-    use crate::array::Array;
-    use crate::storage::{Compact, Ty};
+    use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::DimDyn;
+    use crate::{Array, DimDyn, Ty};
 
     // 2D i32: transpose (axes=[1,0])
     #[test]

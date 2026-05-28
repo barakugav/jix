@@ -1,16 +1,16 @@
 use std::marker::PhantomData;
 
 use crate::error::Result;
-use crate::storage::{ArrayStorage, ElementType};
+use crate::storage::ArrayStorage;
 use crate::util::assert_unchecked_eq;
-use crate::{Array, Error, ErrorKind};
+use crate::{Array, ElementType, Error, ErrorKind};
 
 /// A lazy storage adapter that re-tags an array's element-type parameter without copying data.
 ///
 /// `ToType<S, ET>` wraps an [`Array<S>`](crate::Array) and presents it as having element type
 /// `ET`, without touching the underlying bytes. At construction time, if `ET` is a concrete type
-/// ([`Ty<T>`](crate::storage::Ty)), the runtime [`Dtype`](crate::dtype::Dtype) is validated to
-/// match `T`; if it is [`TypeDyn`](crate::storage::TypeDyn) the conversion always succeeds.
+/// ([`Ty<T>`](crate::Ty)), the runtime [`Dtype`](crate::dtype::Dtype) is validated to
+/// match `T`; if it is [`TypeDyn`](crate::TypeDyn) the conversion always succeeds.
 ///
 /// The typical entry points are [`Array::to_type`](crate::Array::to_type),
 /// [`Array::to_typed`](crate::Array::to_typed), and

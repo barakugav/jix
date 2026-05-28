@@ -1,10 +1,10 @@
 use std::ops::Range;
 
-use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, ElementType, Ty, TypeDyn};
+use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::{Array, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
 where
@@ -143,8 +143,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::array::Array;
-    use crate::storage::TypeDyn;
+    use crate::{Array, TypeDyn};
 
     #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
     #[repr(C)]
