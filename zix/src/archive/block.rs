@@ -12,6 +12,7 @@ use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::storage::block::{
     BlockFn, BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned,
 };
+use crate::storage::{ElementType, TypeDyn};
 use crate::util::{cast_slice, cast_slice_mut, Idx, SendSyncPtr};
 
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
@@ -44,8 +45,9 @@ pub(crate) trait BlockTableStorageRead: BlockTableStorage {
         R: Read + Seek;
 }
 
-impl<S> BlockTable<S>
+impl<S, ET> BlockTable<S, ET>
 where
+    ET: ElementType,
     S: BlockTableStorage,
 {
     /// Write this `BlockTable` as a self-contained archive to `writer`.
@@ -79,7 +81,7 @@ where
         write_content_impl(
             nblocks,
             self.block_size,
-            &self.decoder_config,
+            self.decoder_config(),
             writer,
             compressed_block_size_bound,
             &mut block_fn,
@@ -268,7 +270,7 @@ where
     Ok(())
 }
 
-impl BlockTable<Owned> {
+impl BlockTable<Owned, TypeDyn> {
     /// Read a `BlockTable` from a self-contained archive, allocating storage on the heap.
     ///
     /// Wraps `reader` in an [`ArchiveReader`], validates the archive type, then delegates to
@@ -303,7 +305,7 @@ impl BlockTable<Owned> {
     }
 }
 
-impl<S> BlockTable<S>
+impl<S> BlockTable<S, TypeDyn>
 where
     S: BlockTableStorage,
 {

@@ -12,9 +12,9 @@
 //!
 //! ```text
 //! let result = array           // Array<Compact>
-//!     .astype::<f32>()         // Array<AsType<Compact>>
-//!     .floor()                 // Array<Floor<AsType<Compact>>>
-//!     .exp()                   // Array<Exp<Floor<AsType<Compact>>>>
+//!     .cast::<f32>()           // Array<Cast<Compact>>
+//!     .floor()                 // Array<Floor<Cast<Compact>>>
+//!     .exp()                   // Array<Exp<Floor<Cast<Compact>>>>
 //!     .copy();                 // Array<Compact> - materialize the pipeline
 //! ```
 //!
@@ -42,6 +42,48 @@
 //! [`Array::broadcast`](crate::Array::broadcast)) call `.copy()` internally.
 //! Use the `_view` variants with care.
 //!
+//! # Typed element requirements
+//!
+//! Element-wise operations — arithmetic, comparisons, reductions, bitwise ops, type casting — all
+//! require the input storage to be *typed*: the element type must be known at compile time, not
+//! just at runtime. Concretely, the input must satisfy
+//! [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), which is a shorthand for
+//! `ArrayStorage<ElementType = Ty<T>>` for some concrete `T: Dtyped`.
+//!
+//! Arrays constructed from typed sources are typed automatically:
+//!
+//! ```
+//! use zix::Array;
+//! use ndarray::array;
+//!
+//! // compact_array returns Array<Compact<Ty<f32>, ...>>: automatically typed.
+//! let a = Array::compact_array(&array![1.0f32, 2.0, 3.0])?;
+//! let b = a.exp();        // fine: f32: Exp
+//! let c = b.cast::<i32>(); // fine: f32: Cast<i32>
+//! # Ok::<(), zix::Error>(())
+//! ```
+//!
+//! Arrays loaded from disk carry [`TypeDyn`](crate::storage::TypeDyn) because the element type
+//! comes from the file header. Use [`Array::into_typed`](crate::Array::into_typed) to assert the
+//! expected element type and recover compile-time tracking:
+//!
+//! ```no_run
+//! use std::path::Path;
+//! use zix::{Array, ArrayParams};
+//!
+//! let src = Array::read_from_file(Path::new("data.zix"), ArrayParams::default())?;
+//! // src is Array<Compact<TypeDyn, DimDyn>> - ops not yet available
+//!
+//! let typed = src.into_typed::<f32>()?;  // validates dtype at runtime
+//! let result = typed.exp().cast::<f64>().copy()?;
+//! # Ok::<(), zix::Error>(())
+//! ```
+//!
+//! Each op additionally requires the input element type to implement the relevant scalar trait,
+//! such as traits in [`core::ops`], [`num_traits`] or [`zix::scalar`](crate::scalar).
+//! For example, `add()` requires `core::ops::Add`, `exp()` requires `num_traits::Float`, and
+//! `sum()` requires `crate::scalar::ReduceSum`.
+//!
 //! # Multi-array operations
 //!
 //! Operations that accept a variable number of input arrays - [`stack`] and [`concatenate`] - take
@@ -52,10 +94,8 @@
 mod into_compact;
 pub use into_compact::*;
 
-mod astype;
-#[allow(unused_imports)]
-pub(crate) use astype::cast;
-pub use astype::AsType;
+mod cast;
+pub use cast::Cast;
 
 mod shape_ops;
 pub use shape_ops::*;
@@ -90,7 +130,16 @@ pub use sub_dtype::*;
 mod common;
 pub use common::AxesArg;
 
-#[doc(hidden)]
-pub mod __private {
-    pub use super::astype::{cast, Cast};
+pub(crate) mod _traits {
+    pub use super::bitwise::_traits::*;
+    pub use super::cast::_traits::*;
+    pub use super::cmp::_traits::*;
+    pub use super::op1::_traits::*;
+    pub use super::reduction::_traits::*;
 }
+
+mod swap_element_type;
+pub use swap_element_type::*;
+
+mod swap_dim;
+pub use swap_dim::*;

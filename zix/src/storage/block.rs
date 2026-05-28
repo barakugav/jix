@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::error::{ensure, Result};
-use crate::util::SendSyncPtr;
+use crate::storage::ElementType;
+use crate::util::{assert_unchecked_eq, SendSyncPtr};
 
 const _: () = const {
     assert!(
@@ -42,23 +43,23 @@ pub type BlockSize = u32;
 /// - `nitems % block_size == 0`
 /// - `block_offsets.len() == nblocks + 1` when `nblocks > 0`, or `0` when `nblocks == 0`
 /// - `block_offsets` is strictly increasing; the last entry equals `block_data.len()`
-pub(crate) struct BlockTable<S>
+pub(crate) struct BlockTable<S, ET>
 where
     S: BlockTableStorage,
 {
-    // pub(crate) storage: S,
     pub(crate) block_data: S::Data<u8>,
     pub(crate) block_offsets: S::Data<u64>,
 
     pub(crate) nitems: u64,
+    element_type: ET,
 
     /// The number of items in each block. All blocks are full (nitems is divisible by block_size).
     /// Note the units are items, not bytes.
     pub(crate) block_size: BlockSize,
 
-    pub(crate) decoder_config: DecoderCodecConfig,
+    decoder_config: DecoderCodecConfig,
 }
-impl<S> BlockTable<S>
+impl<S, ET> BlockTable<S, ET>
 where
     S: BlockTableStorage,
 {
@@ -83,7 +84,10 @@ where
         block_offsets: S::Data<u64>,
         block_size: BlockSize,
         decoder_config: DecoderCodecConfig,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        ET: ElementType,
+    {
         ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
         let nblocks = block_offsets.as_ref().len().saturating_sub(1);
         let nitems = nblocks as u64 * block_size as u64;
@@ -93,18 +97,23 @@ where
                 *block_offsets.as_ref().last().unwrap() <= block_data.as_ref().len() as u64
             );
         }
+        let element_type = ET::from_dtype(decoder_config.dtype.clone())?;
         Ok(Self {
             block_data,
             block_offsets,
             nitems,
+            element_type,
             block_size,
             decoder_config,
         })
     }
 
     /// Get the dtype of items in this storage.
-    pub(crate) fn dtype(&self) -> &Dtype {
-        &self.decoder_config.dtype
+    pub(crate) fn dtype(&self) -> &Dtype
+    where
+        ET: ElementType,
+    {
+        self.element_type.dtype()
     }
 
     /// Get the total number of items in this storage.
@@ -137,7 +146,10 @@ where
         block_idx: u64,
         buf: &mut [u8],
         context: &ReadContext,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        ET: ElementType,
+    {
         let b_size_bytes = self.block_len() as usize * self.dtype().itemsize() as usize;
         ensure!(
             buf.len() == b_size_bytes,
@@ -157,14 +169,41 @@ where
         Ok(())
     }
 
-    pub(crate) fn as_ref(&self) -> BlockTable<Borrowed<'_>> {
+    pub(crate) fn as_ref(&self) -> BlockTable<Borrowed<'_>, ET>
+    where
+        ET: ElementType,
+    {
         BlockTable {
             block_data: self.block_data.as_ref(),
             block_offsets: self.block_offsets.as_ref(),
             nitems: self.nitems,
+            element_type: self.element_type.clone(),
             block_size: self.block_size,
             decoder_config: self.decoder_config.clone(),
         }
+    }
+
+    pub(crate) fn decoder_config(&self) -> &DecoderCodecConfig
+    where
+        ET: ElementType,
+    {
+        unsafe { assert_unchecked_eq!(self.element_type.dtype(), &self.decoder_config.dtype) };
+        &self.decoder_config
+    }
+
+    pub(crate) fn swap_element_type<NewET: ElementType>(self) -> Result<BlockTable<S, NewET>>
+    where
+        ET: ElementType,
+    {
+        let element_type = NewET::from_dtype(self.dtype().clone())?;
+        Ok(BlockTable {
+            block_data: self.block_data,
+            block_offsets: self.block_offsets,
+            nitems: self.nitems,
+            element_type,
+            block_size: self.block_size,
+            decoder_config: self.decoder_config,
+        })
     }
 }
 
@@ -186,13 +225,16 @@ where
 /// # Errors
 ///
 /// Propagates any error returned by `block_fn` or by [`BlockTable::new`].
-pub(crate) fn build_block_table(
+pub(crate) fn build_block_table<ET>(
     nblocks: u64,
     block_size: BlockSize,
     decoder_config: DecoderCodecConfig,
     compressed_block_size_bound: usize,
     block_fn: &mut impl BlockFn,
-) -> Result<BlockTable<Owned>> {
+) -> Result<BlockTable<Owned, ET>>
+where
+    ET: ElementType,
+{
     let mut block_data = Vec::<u8>::new();
     let mut block_offsets = Vec::<u64>::new();
 
@@ -236,7 +278,7 @@ pub(crate) fn build_block_table(
     BlockTable::new(block_data, block_offsets, block_size, decoder_config)
 }
 
-impl BlockTable<Owned> {
+impl<ET> BlockTable<Owned, ET> {
     /// Build a `BlockTable` by encoding raw item bytes in one shot.
     ///
     /// Splits `data` into chunks of `block_size * dtype.itemsize()` bytes, compresses each
@@ -264,7 +306,10 @@ impl BlockTable<Owned> {
         dtype: Dtype,
         block_size: BlockSize,
         encoder_params: &EncoderParams,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        ET: ElementType,
+    {
         let itemsize = dtype.itemsize();
         ensure!(itemsize > 0, InvalidArgument, "itemsize must be > 0");
         ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
@@ -444,7 +489,7 @@ where
     }
 }
 
-impl<S> BlockTable<S>
+impl<S, ET> BlockTable<S, ET>
 where
     S: BlockTableStorage,
 {
@@ -464,13 +509,13 @@ where
             .max()
             .unwrap_or(0);
 
-        struct BlockFnImpl<'a, S>
+        struct BlockFnImpl<'a, S, ET>
         where
             S: BlockTableStorage,
         {
-            table: &'a BlockTable<S>,
+            table: &'a BlockTable<S, ET>,
         }
-        impl<'a, S> BlockFn for BlockFnImpl<'a, S>
+        impl<'a, S, ET> BlockFn for BlockFnImpl<'a, S, ET>
         where
             S: BlockTableStorage,
         {
@@ -509,11 +554,17 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::error::Result;
     use crate::storage::block::{BlockTableStorage, Owned};
+    use crate::storage::{ElementType, Ty};
     use crate::util::{cast_slice, AlignedBytes};
 
-    fn decode_block<S>(table: &BlockTable<S>, idx: usize, context: &mut ReadContext) -> Vec<u8>
+    fn decode_block<S, ET>(
+        table: &BlockTable<S, ET>,
+        idx: usize,
+        context: &mut ReadContext,
+    ) -> Vec<u8>
     where
         S: BlockTableStorage,
+        ET: ElementType,
     {
         let block_bytes = table.block_len() as usize * table.dtype().itemsize() as usize;
         let mut buf = vec![0u8; block_bytes];
@@ -525,7 +576,7 @@ mod tests {
         items: &[T],
         block_size: BlockSize,
         encoder_params: &EncoderParams,
-    ) -> Result<BlockTable<Owned>>
+    ) -> Result<BlockTable<Owned, Ty<T>>>
     where
         T: Dtyped,
     {
@@ -590,13 +641,16 @@ mod tests {
     // write_to / read_from round-trip
     // -----------------------------------------------------------------------
 
-    fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<Owned> {
+    fn round_trip<T: Dtyped>(items: &[T], block_size: BlockSize) -> BlockTable<Owned, Ty<T>> {
         let table = build_from_items(items, block_size, &EncoderParams::default()).unwrap();
         let mut buf = Cursor::new(Vec::<u8>::new());
         table.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
         let len = bytes.len() as u64;
-        BlockTable::read_from(Cursor::new(bytes), len).unwrap()
+        BlockTable::read_from(Cursor::new(bytes), len)
+            .unwrap()
+            .swap_element_type::<Ty<T>>()
+            .unwrap()
     }
 
     #[test]
@@ -666,7 +720,7 @@ mod tests {
         items: &[T],
         block_len: BlockSize,
         encoder_params: &EncoderParams,
-    ) -> BlockTable<Owned> {
+    ) -> BlockTable<Owned, Ty<T>> {
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
             T::DTYPE,
@@ -676,7 +730,7 @@ mod tests {
         .unwrap()
     }
 
-    fn read_block_items<T, S>(storage: &BlockTable<S>, idx: usize) -> Vec<T>
+    fn read_block_items<T, S>(storage: &BlockTable<S, Ty<T>>, idx: usize) -> Vec<T>
     where
         T: Dtyped,
         S: BlockTableStorage,

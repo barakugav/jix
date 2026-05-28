@@ -18,20 +18,45 @@
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
 //! the transformation at read time. These are defined in [`zix::ops`](crate::ops) and include shape
 //! operations (`Reshape`, `Slice`, `PermuteAxes`, `Broadcast`, ...), element-wise operations
-//! (`Neg`, `Add`, `Exp`, `AsType`, ...), reductions (`Sum`, `Mean`, ...), etc.
+//! (`Neg`, `Add`, `Exp`, `Cast`, ...), reductions (`Sum`, `Mean`, ...), etc.
+//!
+//! # Element types
+//!
+//! Every storage carries two pieces of compile-time information as associated types:
+//!
+//! - **[`ElementType`]** — the compile-time element type, accessible via
+//!   `S::ElementType`. This is either [`Ty<T>`] (the concrete scalar type `T` is known at
+//!   compile time) or [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk).
+//!
+//! - **[`Dimension`](crate::Dimension)** — the compile-time dimension, accessible via
+//!   `S::Dimension`. Either [`Dim<N>`](crate::Dim) (known statically) or
+//!   [`DimDyn`](crate::DimDyn) (runtime only).
+//!
+//! The [`ArrayStorageTyped`] supertrait is a shorthand for
+//! `ArrayStorage<ElementType = Ty<T>>`. All element-wise operations require it —
+//! the element type must be known at compile time so the compiler can dispatch to the
+//! correct scalar implementation.
+//!
+//! Arrays constructed from typed sources (e.g. [`Array::compact_array`](crate::Array::compact_array))
+//! are automatically typed. Arrays loaded from disk carry [`TypeDyn`]; call
+//! [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
+//! type and regain compile-time tracking.
 //!
 //! # Notable items in this module
 //!
-//! - [`ArrayStorage`] - the trait all storage backends implement.
-//! - [`Compact`] - the main block-compressed storage backend.
-//! - [`Plain`] and [`Scalar`] - adapters for non-compressed data.
-//! - [`BlocksLayout`] - block geometry hints attached to every storage.
+//! - [`ArrayStorage`] — the trait all storage backends implement.
+//! - [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`] — compile-time element type tracking.
+//! - [`Compact`] — the main block-compressed storage backend.
+//! - [`Plain`] and [`Scalar`] — adapters for non-compressed data.
+//! - [`BlocksLayout`] — block geometry hints attached to every storage.
 
+use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
-use crate::dtype::Dtype;
-use crate::error::Result;
+use crate::dtype::{Dtype, Dtyped};
+use crate::error::{bail, Result};
+use crate::util::assert_unchecked_eq;
 use crate::Dimension;
 
 mod layout;
@@ -47,9 +72,6 @@ mod scalar;
 pub use scalar::*;
 
 pub(crate) mod block;
-
-mod swap_dim;
-pub use swap_dim::*;
 
 /// The backing data source of an [`Array<S>`](crate::Array).
 ///
@@ -84,7 +106,7 @@ pub use swap_dim::*;
 /// arr.permute_axes(axes)     -> Array<PermuteAxes<S>>
 /// arr1.add(arr2)             -> Array<Add<S1, S2>>
 /// arr.sum(axis)              -> Array<Sum<S>>
-/// arr.astype::<f32>()        -> Array<AsType<S>>
+/// arr.cast::<f32>()          -> Array<Cast<S>>
 /// ```
 ///
 /// No data is copied or computed until `read_data` is called. At that point the index
@@ -98,6 +120,18 @@ pub use swap_dim::*;
 /// expression - e.g. `Array<Add<Neg<S1>, Reshape<S2>>>` - is resolved by the compiler,
 /// and only the final `read_data` call touches actual bytes.
 pub trait ArrayStorage {
+    /// The compile-time element type of arrays backed by this storage.
+    ///
+    /// Either [`Ty<T>`] — element type `T` is known at compile time — or [`TypeDyn`] — element
+    /// type is only available at runtime via [`dtype()`](ArrayStorage::dtype).
+    ///
+    /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
+    /// cast) are bounded on [`ArrayStorageTyped`], a shorthand for
+    /// `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
+    /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
+    /// type and re-enable those operations.
+    type ElementType: ElementType;
+
     /// The compile-time dimension of arrays backed by this storage.
     ///
     /// This associated type lets the compiler track how many axes an array has through a chain
@@ -146,7 +180,7 @@ pub trait ArrayStorage {
     fn _spec(&self) -> ArrayStorageSpec<'_>;
 
     #[doc(hidden)]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::Dimension>> {
+    fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
         None
     }
 }
@@ -161,6 +195,113 @@ pub struct ArrayStorageSpec<'a> {
     pub(crate) encoder_params: Option<&'a EncoderParams>,
     pub(crate) decoder_params: Option<&'a DecoderParams>,
     // pub(crate) decoder_config: Option<&'a DecoderCodecConfig>,
+}
+
+/// Compile-time element-type tracking for [`ArrayStorage`].
+///
+/// Every [`ArrayStorage`] has an associated `type ElementType: ElementType`. There are two
+/// implementors:
+///
+/// - [`Ty<T>`] — the concrete element type `T` is known at compile time. All element-wise
+///   operations (arithmetic, comparisons, reductions, cast) are available.
+/// - [`TypeDyn`] — the element type is only available at runtime. Arrays loaded from disk
+///   start with this. Call [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert
+///   the expected element type and recover compile-time tracking.
+pub trait ElementType: Clone + Send + Sync {
+    /// `Some(dtype)` when the element type is statically known ([`Ty<T>`]),
+    /// `None` for [`TypeDyn`].
+    const DTYPE: Option<Dtype>;
+
+    /// Construct from a runtime `Dtype`, validating it against `DTYPE`.
+    ///
+    /// Returns an error if `Self::DTYPE = Some(d)` and `dtype != d`.
+    /// Always succeeds for `TypeDyn`.
+    fn from_dtype(dtype: Dtype) -> Result<Self>
+    where
+        Self: Sized;
+
+    /// Returns the element dtype, either the fixed dtype or the runtime one.
+    fn dtype(&self) -> &Dtype;
+}
+
+/// Runtime-only element type tag. `S::ElementType = TypeDyn` when the element type is not
+/// known at compile time (e.g. arrays loaded from a `.zix` file).
+///
+/// Arrays with `TypeDyn` do not support most element-wise operations directly; call
+/// [`Array::into_typed::<T>()`](crate::Array::into_typed) first to assert the expected
+/// element type and recover [`ArrayStorageTyped`].
+#[derive(Clone)]
+pub struct TypeDyn(Dtype);
+impl ElementType for TypeDyn {
+    const DTYPE: Option<Dtype> = None;
+
+    fn from_dtype(dtype: Dtype) -> Result<Self> {
+        Ok(Self(dtype))
+    }
+
+    fn dtype(&self) -> &Dtype {
+        &self.0
+    }
+}
+
+/// Compile-time element type tag. `S::ElementType = Ty<T>` when the scalar element type
+/// `T` is statically known.
+///
+/// `Ty<T>` enables all element-wise operations: arithmetic, comparisons, reductions, and
+/// type casts. Arrays constructed from typed sources (e.g.
+/// [`Array::compact_array`](crate::Array::compact_array)) automatically carry `Ty<T>`.
+#[derive(Clone)]
+pub struct Ty<T>(Dtype, PhantomData<T>);
+impl<T> Ty<T> {
+    /// Construct the element type marker.
+    pub fn new() -> Self
+    where
+        T: Dtyped,
+    {
+        Self(T::DTYPE, PhantomData)
+    }
+}
+impl<T> ElementType for Ty<T>
+where
+    T: Dtyped,
+{
+    const DTYPE: Option<Dtype> = Some(T::DTYPE);
+
+    fn from_dtype(dtype: Dtype) -> Result<Self> {
+        if dtype != T::DTYPE {
+            bail!(
+                UnsupportedDtype,
+                "expected dtype {:?} but got {dtype:?}",
+                T::DTYPE
+            )
+        }
+        Ok(Self::new())
+    }
+
+    fn dtype(&self) -> &Dtype {
+        unsafe { assert_unchecked_eq!(self.0, T::DTYPE) };
+        &self.0
+    }
+}
+
+/// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
+///
+/// `ArrayStorageTyped` is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. It exposes the
+/// concrete item type as the associated type `Item`. All element-wise operations — arithmetic,
+/// comparisons, reductions, type casts — are bounded on this trait so the compiler can dispatch
+/// to the correct scalar implementation without runtime checks.
+///
+/// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
+/// [`Array::into_typed::<T>()`](crate::Array::into_typed).
+pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> {
+    type Item: Dtyped;
+}
+impl<S, T> ArrayStorageTyped for S
+where
+    S: ArrayStorage<ElementType = Ty<T>>,
+    T: Dtyped,
+{
+    type Item = T;
 }
 
 /// A borrowed reference to an [`ArrayStorage`], itself implementing [`ArrayStorage`].
@@ -178,6 +319,7 @@ impl<'a, S> ArrayStorage for Ref<'a, S>
 where
     S: ArrayStorage,
 {
+    type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
     impl_array_storage_forward!();
@@ -202,7 +344,9 @@ macro_rules! impl_array_storage_forward {
         fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
             self.0._spec()
         }
-        fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, Self::Dimension>> {
+        fn as_compact(
+            &self,
+        ) -> Option<crate::storage::CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
             self.0.as_compact()
         }
     };

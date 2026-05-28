@@ -330,6 +330,14 @@ impl<T> SendSyncPtr<T> {
     }
 }
 
+macro_rules! assert_unchecked_eq {
+    ($a:expr, $b:expr) => {{
+        debug_assert_eq!($a, $b);
+        std::hint::assert_unchecked($a == $b);
+    }};
+}
+pub(crate) use assert_unchecked_eq;
+
 #[cfg(test)]
 mod tests {
     use super::{default_strides, AlignedBytes, AlternatingBuffers};

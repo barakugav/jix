@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::dtype::Dtyped;
 use crate::params::ArrayParams;
 use crate::storage::block::BlockSize;
-use crate::storage::Compact;
+use crate::storage::{Compact, Ty};
 use crate::util::AlignedBytes;
 use crate::DimDyn;
 
@@ -40,7 +40,7 @@ use proptest::strategy::BoxedStrategy;
 ///
 /// - `any_strategy()`: full domain (used for codec roundtrip tests).
 /// - `op_safe_strategy()`: bounded range that avoids overflow when values are
-///   combined arithmetically (used for op2, astype tests). For integer types,
+///   combined arithmetically (used for op2, cast tests). For integer types,
 ///   values are small and positive so that e.g. `a = a_extra + b` still fits
 ///   in the type. Floats default to `any_strategy()`.
 pub(crate) trait ScalarStrategy:
@@ -240,35 +240,35 @@ impl ScalarStrategy for i64 {
 }
 
 #[cfg(feature = "half")]
-impl ScalarStrategy for crate::dtype::f16 {
+impl ScalarStrategy for crate::scalar::f16 {
     fn any_strategy() -> BoxedStrategy<Self> {
-        any::<f32>().prop_map(crate::dtype::f16::from_f32).boxed()
+        any::<f32>().prop_map(crate::scalar::f16::from_f32).boxed()
     }
 
     fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
         f32::maybe_non_finite_strategy()
-            .prop_map(crate::dtype::f16::from_f32)
+            .prop_map(crate::scalar::f16::from_f32)
             .boxed()
     }
 
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         f32::op_safe_strategy()
-            .prop_map(crate::dtype::f16::from_f32)
+            .prop_map(crate::scalar::f16::from_f32)
             .boxed()
     }
     fn op_safe_non_zero_strategy() -> BoxedStrategy<Self> {
         f32::op_safe_non_zero_strategy()
-            .prop_map(crate::dtype::f16::from_f32)
+            .prop_map(crate::scalar::f16::from_f32)
             .boxed()
     }
     fn op_safe_non_negative_strategy() -> BoxedStrategy<Self> {
         f32::op_safe_non_negative_strategy()
-            .prop_map(crate::dtype::f16::from_f32)
+            .prop_map(crate::scalar::f16::from_f32)
             .boxed()
     }
     fn comparable_strategy() -> BoxedStrategy<Self> {
         f32::comparable_strategy()
-            .prop_map(crate::dtype::f16::from_f32)
+            .prop_map(crate::scalar::f16::from_f32)
             .boxed()
     }
 }
@@ -355,10 +355,10 @@ impl ScalarStrategy for bool {
     }
 }
 
-impl ScalarStrategy for crate::dtype::Complex<f32> {
+impl ScalarStrategy for crate::scalar::Complex<f32> {
     fn any_strategy() -> BoxedStrategy<Self> {
         (any::<f32>(), any::<f32>())
-            .prop_map(|(re, im)| crate::dtype::Complex { re, im })
+            .prop_map(|(re, im)| crate::scalar::Complex { re, im })
             .boxed()
     }
 
@@ -367,13 +367,13 @@ impl ScalarStrategy for crate::dtype::Complex<f32> {
             f32::maybe_non_finite_strategy(),
             f32::maybe_non_finite_strategy(),
         )
-            .prop_map(|(re, im)| crate::dtype::Complex { re, im })
+            .prop_map(|(re, im)| crate::scalar::Complex { re, im })
             .boxed()
     }
 
     fn op_safe_strategy() -> BoxedStrategy<Self> {
         (f32::op_safe_strategy(), f32::op_safe_strategy())
-            .prop_map(|(re, im)| crate::dtype::Complex { re, im })
+            .prop_map(|(re, im)| crate::scalar::Complex { re, im })
             .boxed()
     }
     fn op_safe_non_zero_strategy() -> BoxedStrategy<Self> {
@@ -381,28 +381,28 @@ impl ScalarStrategy for crate::dtype::Complex<f32> {
             f32::op_safe_non_zero_strategy(),
             f32::op_safe_non_zero_strategy(),
         )
-            .prop_map(|(re, im)| crate::dtype::Complex { re, im })
+            .prop_map(|(re, im)| crate::scalar::Complex { re, im })
             .boxed()
     }
     fn comparable_strategy() -> BoxedStrategy<Self> {
         prop_oneof![
-            Just(crate::dtype::Complex {
+            Just(crate::scalar::Complex {
                 re: 0.0f32,
                 im: 0.0
             }),
-            Just(crate::dtype::Complex {
+            Just(crate::scalar::Complex {
                 re: 1.0f32,
                 im: 0.0
             }),
-            Just(crate::dtype::Complex {
+            Just(crate::scalar::Complex {
                 re: 0.0f32,
                 im: 1.0
             }),
-            Just(crate::dtype::Complex {
+            Just(crate::scalar::Complex {
                 re: f32::NAN,
                 im: 0.0
             }),
-            Just(crate::dtype::Complex {
+            Just(crate::scalar::Complex {
                 re: 0.0,
                 im: f32::NAN
             }),
@@ -411,32 +411,32 @@ impl ScalarStrategy for crate::dtype::Complex<f32> {
     }
 }
 
-impl ScalarStrategy for crate::dtype::Complex<f64> {
+impl ScalarStrategy for crate::scalar::Complex<f64> {
     fn any_strategy() -> BoxedStrategy<Self> {
-        <crate::dtype::Complex<f32>>::any_strategy()
-            .prop_map(crate::ops::cast)
+        <crate::scalar::Complex<f32>>::any_strategy()
+            .prop_map(crate::scalar::Cast::<Self>::cast)
             .boxed()
     }
 
     fn maybe_non_finite_strategy() -> BoxedStrategy<Self> {
-        <crate::dtype::Complex<f32>>::maybe_non_finite_strategy()
-            .prop_map(crate::ops::cast)
+        <crate::scalar::Complex<f32>>::maybe_non_finite_strategy()
+            .prop_map(crate::scalar::Cast::<Self>::cast)
             .boxed()
     }
 
     fn op_safe_strategy() -> BoxedStrategy<Self> {
-        <crate::dtype::Complex<f32>>::op_safe_strategy()
-            .prop_map(crate::ops::cast)
+        <crate::scalar::Complex<f32>>::op_safe_strategy()
+            .prop_map(crate::scalar::Cast::<Self>::cast)
             .boxed()
     }
     fn op_safe_non_zero_strategy() -> BoxedStrategy<Self> {
-        <crate::dtype::Complex<f32>>::op_safe_non_zero_strategy()
-            .prop_map(crate::ops::cast)
+        <crate::scalar::Complex<f32>>::op_safe_non_zero_strategy()
+            .prop_map(crate::scalar::Cast::<Self>::cast)
             .boxed()
     }
     fn comparable_strategy() -> BoxedStrategy<Self> {
-        <crate::dtype::Complex<f32>>::comparable_strategy()
-            .prop_map(crate::ops::cast)
+        <crate::scalar::Complex<f32>>::comparable_strategy()
+            .prop_map(crate::scalar::Cast::<Self>::cast)
             .boxed()
     }
 }
@@ -490,7 +490,7 @@ pub(crate) fn block_shape_strategy(ndim: usize) -> impl Strategy<Value = Vec<Blo
 }
 
 pub(crate) fn carray_strategy_any<T>(
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -500,7 +500,7 @@ where
 pub(crate) fn carray_strategy_from_shape<T>(
     shape: impl Strategy<Value = Vec<usize>>,
     element: impl Strategy<Value = T> + Clone,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -509,7 +509,7 @@ where
 
 pub(crate) fn carray_strategy_from_data<T>(
     data: impl Strategy<Value = ndarray::ArrayD<T>>,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -543,8 +543,8 @@ pub(crate) fn carrays2_strategy_generic<T>(
     element: impl Strategy<Value = T> + Clone,
 ) -> impl Strategy<
     Value = (
-        (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>),
-        (ndarray::ArrayD<T>, crate::Array<Compact<DimDyn>>),
+        (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>),
+        (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>),
     ),
 >
 where

@@ -4,7 +4,7 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ElementType};
 use crate::Dimension;
 
 /// Private implementation trait for [`ArraySequence`]. Not part of the public API.
@@ -72,6 +72,9 @@ pub trait ArraySequence: ArraySequenceImpl {
     /// This is used by operations like `stack` and `concatenate` to determine the output dimension
     /// of the result, which is always derived from the first array's dimension.
     type FirstArrayDimension: Dimension;
+
+    ///
+    type FirstArrayElementType: ElementType;
 }
 
 impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
@@ -109,6 +112,7 @@ where
     S: ArrayStorage,
 {
     type FirstArrayDimension = S::Dimension;
+    type FirstArrayElementType = S::ElementType;
 }
 
 impl<S> ArraySequenceImpl for Vec<Array<S>>
@@ -143,6 +147,7 @@ where
 }
 impl<S: ArrayStorage> ArraySequence for Vec<Array<S>> {
     type FirstArrayDimension = S::Dimension;
+    type FirstArrayElementType = S::ElementType;
 }
 
 impl<S> ArraySequenceImpl for &[Array<S>]
@@ -177,6 +182,7 @@ where
 }
 impl<S: ArrayStorage> ArraySequence for &[Array<S>] {
     type FirstArrayDimension = S::Dimension;
+    type FirstArrayElementType = S::ElementType;
 }
 
 macro_rules! impl_array_sequence_for_tuple {
@@ -186,6 +192,7 @@ macro_rules! impl_array_sequence_for_tuple {
             $($S: ArrayStorage,)+
         {
             type FirstArrayDimension = S0::Dimension;
+            type FirstArrayElementType = S0::ElementType;
         }
         impl<$($S),+> ArraySequenceImpl for ($(Array<$S>,)+)
         where

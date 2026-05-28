@@ -50,7 +50,6 @@ pub struct PermuteAxes<S: ArrayStorage> {
     /// `inv_axes[d]` = index of the output dimension that maps from input dimension `d`.
     inv_axes: DimArray<usize>,
 
-    dtype: Dtype,
     shape: S::Dimension,
     blocks_layout: BlocksLayout,
 }
@@ -94,10 +93,8 @@ impl<S: ArrayStorage> PermuteAxes<S> {
         b_layout.block_shape_tag = dim_arr(ndim, |i| b_layout.block_shape_tag[axes[i]]);
         b_layout.preferred_read_shape = dim_arr(ndim, |i| b_layout.preferred_read_shape[axes[i]]);
 
-        let dtype = array.dtype().clone();
         let shape = S::Dimension::from_slice(&shape).unwrap();
         Ok(Self {
-            dtype,
             shape,
             blocks_layout: b_layout,
             array,
@@ -108,14 +105,16 @@ impl<S: ArrayStorage> PermuteAxes<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
+    type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
+        let nitems = check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.axes.len();
-        let itemsize = self.dtype.itemsize() as usize;
+        let itemsize = dtype.itemsize() as usize;
 
         // Build the index into the underlying (un-permuted) storage.
         // Output dim i reads from input dim axes[i], so input dim d = inv_axes[output dim] needs
@@ -128,7 +127,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
             (input_index[d].end - input_index[d].start) as usize
         });
         let n_bytes = nitems * itemsize;
-        let mut tmp_buf = context.tmp_buf(n_bytes, self.dtype.alignment());
+        let mut tmp_buf = context.tmp_buf(n_bytes, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
         self.array
             .storage
@@ -161,7 +160,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.array.dtype()
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -177,7 +176,7 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::array::Array;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::DimDyn;
 
@@ -281,8 +280,13 @@ mod tests {
     // Proptest: arbitrary ndim, arbitrary permutation, verified against ndarray
     // -----------------------------------------------------------------------
 
-    fn permute_axes_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<usize>)>
+    fn permute_axes_strategy<T>() -> impl Strategy<
+        Value = (
+            ndarray::ArrayD<T>,
+            Array<Compact<Ty<T>, DimDyn>>,
+            Vec<usize>,
+        ),
+    >
     where
         T: ScalarStrategy,
     {

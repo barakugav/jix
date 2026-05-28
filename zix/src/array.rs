@@ -4,10 +4,10 @@ use std::ops::Range;
 use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::ops::IntoCompact;
+use crate::ops::{IntoCompact, SwapDim, SwapType};
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref, SwapDim,
+    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref, Ty, TypeDyn,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
@@ -122,7 +122,7 @@ use crate::{ArrayParams, DimDyn, Dimension, IntoDimension};
 /// // Materialize the result and write to a file.
 /// let result = scaled
 ///     .argmax(/* axis */ 1)                        // Array<ArgMax<Add<Mul<...>, Compact>>>
-///     .astype::<i16>()                             // Array<AsType<ArgMax<Add<...>>>>
+///     .cast::<i16>()                               // Array<Cast<ArgMax<Add<...>>>>
 ///     // materialize the pipeline with a copy
 ///     .copy()?;                                    // Array<Compact>
 /// assert_eq!(result.shape(), &[2]);
@@ -154,6 +154,20 @@ use crate::{ArrayParams, DimDyn, Dimension, IntoDimension};
 /// internally. To ensure a well-aligned block layout, pass explicit `ArrayParams` with a block
 /// shape that matches the expected access pattern.
 ///
+/// # Element type tracking
+///
+/// `S::ElementType` records the scalar element type at the type level. When the element type is
+/// statically known, `S::ElementType = Ty<T>`, and all element-wise operations — arithmetic,
+/// comparisons, reductions, type casts — become available. When the element type is only known
+/// at runtime (e.g. for arrays loaded from files), `S::ElementType = TypeDyn`, and those
+/// operations are not available until the type is asserted.
+///
+/// Arrays constructed from typed sources automatically carry `Ty<T>`: `compact_array(&array![1.0f32])`
+/// returns `Array<Compact<Ty<f32>, Dim<1>>>`. Arrays loaded from disk carry `TypeDyn`. Use
+/// [`into_typed::<T>()`](Array::into_typed) to assert the expected element type — validated
+/// against the stored dtype at runtime — and recover `Ty<T>`. Use
+/// [`into_type_dyn()`](Array::into_type_dyn) to erase the static element type.
+///
 /// # Dimension type tracking
 ///
 /// `S::Dimension` records the number of array axes at the type level. When the ndim is
@@ -170,7 +184,7 @@ pub struct Array<S> {
     pub(crate) storage: S,
 }
 
-impl<D> Array<Compact<D>> {
+impl<T, D> Array<Compact<Ty<T>, D>> {
     /// Compress an ndarray into a block-compressed `Array<Compact<D>>` with default encoding settings.
     ///
     /// The array is partitioned into n-dimensional blocks, each independently compressed. The
@@ -179,7 +193,7 @@ impl<D> Array<Compact<D>> {
     /// compression level, and other codec settings. If the access pattern is known in advance,
     /// providing a matching block shape can improve read performance significantly.
     ///
-    /// The dimension type `D` is inferred from the ndarray argument's type.
+    /// The element type `Ty<T>` and dimension type `D` are inferred from the ndarray argument's type.
     ///
     /// # Errors
     ///
@@ -220,7 +234,8 @@ impl<D> Array<Compact<D>> {
     where
         InD: ndarray::Dimension + IntoDimension<Dimension = D>,
         D: Dimension,
-        S: ndarray::Data<Elem: Dtyped>,
+        S: ndarray::Data<Elem = T>,
+        T: Dtyped,
     {
         Array::compact_array_with(array, ArrayParams::default())
     }
@@ -264,14 +279,17 @@ impl<D> Array<Compact<D>> {
     where
         InD: ndarray::Dimension + IntoDimension<Dimension = D>,
         D: Dimension,
-        S: ndarray::Data<Elem: Dtyped>,
+        S: ndarray::Data<Elem = T>,
+        T: Dtyped,
     {
         let array = Array::plain_ndarray_view(array)?;
         params.tune(array.shape(), array.dtype())?;
         let context = ReadContext::new(&params.decoder_params.clone().unwrap_or_default())?;
         array.copy_with(params, &context)
     }
+}
 
+impl<D> Array<Compact<TypeDyn, D>> {
     /// Compress a raw n-dimensional buffer into a block-compressed `Array<Compact>`.
     ///
     /// Same as [`compact_array_with`](Array::compact_array_with) but takes a raw pointer and
@@ -590,7 +608,7 @@ impl<S: ArrayStorage> Array<S> {
     ///    .copy()?;      // Array<Compact> - materialize the pipeline
     /// # Ok::<(), zix::Error>(())
     /// ```
-    pub fn copy(&self) -> Result<Array<Compact<S::Dimension>>> {
+    pub fn copy(&self) -> Result<Array<Compact<S::ElementType, S::Dimension>>> {
         let context = self.read_ctx();
         self.copy_with(ArrayParams::default(), &context)
     }
@@ -629,14 +647,15 @@ impl<S: ArrayStorage> Array<S> {
         &self,
         mut params: ArrayParams,
         context: &ReadContext,
-    ) -> Result<Array<Compact<S::Dimension>>> {
+    ) -> Result<Array<Compact<S::ElementType, S::Dimension>>> {
+        let shape = self.shape();
+        let ndim = shape.len();
+        let dtype = self.dtype();
+
         params.override_from_storage(&self.storage);
-        params.tune(self.shape(), self.dtype())?;
+        params.tune(shape, &dtype)?;
 
-        let ndim = self.ndim();
-        let dtype = self.dtype().clone();
-
-        let shape: DimArray<_> = self.shape().try_into().unwrap();
+        let shape: DimArray<_> = shape.try_into().unwrap();
         let encoder_params = params.encoder_params.clone().unwrap_or_default();
 
         let block_shape = params.block_shape.as_ref().unwrap();
@@ -740,6 +759,17 @@ impl<S: ArrayStorage> Array<S> {
         Array {
             storage: Ref(self.storage()),
         }
+    }
+
+    pub fn into_typed<T>(self) -> Result<Array<SwapType<S, Ty<T>>>>
+    where
+        T: Dtyped,
+    {
+        Ok(Array::from_storage(SwapType::<S, Ty<T>>::new(self)?))
+    }
+
+    pub fn into_type_dyn(self) -> Array<SwapType<S, TypeDyn>> {
+        Array::from_storage(SwapType::<S, TypeDyn>::new(self).unwrap())
     }
 
     /// Re-tag this array's storage as having dimension `D`, returning an error if the actual
@@ -910,12 +940,12 @@ impl<S: ArrayStorage> Array<S> {
     }
 
     fn check_type<T: Dtyped>(&self) -> Result<()> {
-        let dtype = T::DTYPE;
+        let t_dtype = T::DTYPE;
+        let self_dtype = self.dtype();
         ensure!(
-            self.dtype() == &dtype,
+            self_dtype == &t_dtype,
             UnsupportedDtype,
-            "requested type {dtype:?} does not match array dtype {:?}",
-            self.dtype()
+            "requested type {t_dtype:?} does not match array dtype {self_dtype:?}"
         );
         Ok(())
     }
@@ -1098,7 +1128,7 @@ mod tests {
     use crate::codec::{DecoderParams, EncoderParams};
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
-    use crate::storage::{BlockShapeTag, BlocksLayout};
+    use crate::storage::{BlockShapeTag, BlocksLayout, Ty};
     use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
     use crate::{DimDyn, Dimension, IntoDimension};
 
@@ -1120,7 +1150,9 @@ mod tests {
     // Helper: build a BlockTable from pre-arranged typed blocks
     // -----------------------------------------------------------------------
 
-    fn make_block_table<T: Dtyped>(blocks: &[&[T]]) -> BlockTable<crate::storage::block::Owned> {
+    fn make_block_table<T: Dtyped>(
+        blocks: &[&[T]],
+    ) -> BlockTable<crate::storage::block::Owned, Ty<T>> {
         let block_len = blocks[0].len() as BlockSize;
         let data: Vec<u8> = blocks
             .iter()
@@ -1133,7 +1165,7 @@ mod tests {
         blocks: &[&[T]],
         shape: &[usize],
         block_shape: &[usize],
-    ) -> Array<Compact<DimDyn>> {
+    ) -> Array<Compact<Ty<T>, DimDyn>> {
         let shape = shape.iter().map(|&x| x as u64).collect::<DimArray<_>>();
         let ndim = block_shape.len();
         let block_shape_hint = block_shape

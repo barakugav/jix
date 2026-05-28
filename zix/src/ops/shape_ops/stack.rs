@@ -57,7 +57,6 @@ pub struct Stack<ArraysT: ArraySequence> {
     arrays: ArraysT,
     stack_axis: usize,
 
-    dtype: Dtype,
     shape: <ArraysT::FirstArrayDimension as crate::Dimension>::Larger,
     blocks_layout: BlocksLayout,
 }
@@ -106,7 +105,6 @@ impl<ArraysT: ArraySequence> Stack<ArraysT> {
         b_layout.preferred_read_shape.insert(axis, 1);
 
         Ok(Self {
-            dtype: dtype.clone(),
             shape: new_shape,
             blocks_layout: b_layout,
             arrays,
@@ -118,16 +116,19 @@ impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
     ArraysT: ArraySequence,
 {
+    type ElementType = ArraysT::FirstArrayElementType;
     type Dimension = <ArraysT::FirstArrayDimension as crate::Dimension>::Larger;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(self.shape(), index)?;
-        let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
+        let shape = self.shape();
+        let dtype = self.dtype();
+        check_get_range(shape, index)?;
+        let nitems = check_get_buffer_size(index, dtype, buf)?;
         if nitems == 0 {
             return Ok(());
         }
 
-        let in_place = self.shape().iter().take(self.stack_axis).all(|&s| s <= 1);
+        let in_place = shape.iter().take(self.stack_axis).all(|&s| s <= 1);
         let arr_range = index[..self.stack_axis]
             .iter()
             .chain(index[self.stack_axis + 1..].iter())
@@ -136,11 +137,11 @@ where
         let arr_range_shape = dim_arr(arr_range.len(), |dim| {
             (arr_range[dim].end - arr_range[dim].start) as usize
         });
-        let itemsize = self.dtype.itemsize() as usize;
+        let itemsize = dtype.itemsize() as usize;
         let arr_size_bytes = arr_range_shape.iter().product::<usize>() * itemsize;
         let mut tmp_buf = in_place
             .not()
-            .then(|| context.tmp_buf(arr_size_bytes, self.dtype.alignment()));
+            .then(|| context.tmp_buf(arr_size_bytes, dtype.alignment()));
         // Stride of the stack axis in the output buffer (= size of one sub-array slice).
         let stack_axis_stride =
             arr_range_shape[self.stack_axis..].iter().product::<usize>() * itemsize;
@@ -193,7 +194,7 @@ where
         self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.arrays.dtype(0)
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -210,7 +211,7 @@ mod tests {
 
     use crate::array::Array;
     use crate::ops::stack;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{DimDyn, NDIM_MAX};
 
@@ -337,15 +338,20 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_empty_panics() {
-        let _ = stack(Vec::<Array<Compact<DimDyn>>>::new(), 0);
+        let _ = stack(Vec::<Array<Compact<Ty<i64>, DimDyn>>>::new(), 0);
     }
 
     // -----------------------------------------------------------------------
     // Proptest: arbitrary ndim, arbitrary axis, arbitrary number of arrays
     // -----------------------------------------------------------------------
 
-    fn stack_strategy<T>(
-    ) -> impl Strategy<Value = (Vec<ndarray::ArrayD<T>>, Vec<Array<Compact<DimDyn>>>, usize)>
+    fn stack_strategy<T>() -> impl Strategy<
+        Value = (
+            Vec<ndarray::ArrayD<T>>,
+            Vec<Array<Compact<Ty<T>, DimDyn>>>,
+            usize,
+        ),
+    >
     where
         T: ScalarStrategy,
     {

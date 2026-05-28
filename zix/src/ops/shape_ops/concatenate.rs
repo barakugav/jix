@@ -64,7 +64,6 @@ pub struct Concatenate<ArraysT: ArraySequence> {
     concat_axis: usize,
     borders: Vec<u64>,
 
-    dtype: Dtype,
     shape: ArraysT::FirstArrayDimension,
     blocks_layout: BlocksLayout,
 }
@@ -117,7 +116,6 @@ impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
 
         let shape = ArraysT::FirstArrayDimension::from_slice(&shape).unwrap();
         Ok(Self {
-            dtype: dtype.clone(),
             shape,
             blocks_layout: arrays._spec(0).blocks_layout.clone(),
             arrays,
@@ -130,6 +128,7 @@ impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where
     ArraysT: ArraySequence,
 {
+    type ElementType = ArraysT::FirstArrayElementType;
     type Dimension = ArraysT::FirstArrayDimension;
 
     /// Fills `buf` with a C-order slice of the concatenated array described by `index`.
@@ -149,15 +148,16 @@ where
     /// `NdIter`, using the full output strides for dimensions before `concat_axis` and the
     /// sub-array strides for dimensions at and after it.
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        let nitems = check_get_buffer_size(index, &self.dtype, buf)?;
+        let nitems = check_get_buffer_size(index, dtype, buf)?;
         if nitems == 0 {
             return Ok(());
         }
 
         const BINARY_SEARCH_THRESHOLD: usize = 32;
 
-        let itemsize = self.dtype.itemsize() as usize;
+        let itemsize = dtype.itemsize() as usize;
 
         let output_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let output_strides = default_strides(&output_shape, itemsize);
@@ -166,7 +166,7 @@ where
         let in_place = output_shape.iter().take(self.concat_axis).all(|&s| s <= 1);
         let mut tmp_buf = in_place
             .not()
-            .then(|| context.tmp_buf(0, self.dtype.alignment()));
+            .then(|| context.tmp_buf(0, dtype.alignment()));
 
         let req_start = index[self.concat_axis].start;
         let req_end = index[self.concat_axis].end;
@@ -253,7 +253,7 @@ where
         self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.arrays.dtype(0)
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -270,7 +270,7 @@ mod tests {
 
     use crate::array::Array;
     use crate::ops::concatenate;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::DimDyn;
 
@@ -395,15 +395,20 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_empty_panics() {
-        let _ = concatenate(Vec::<Array<Compact<DimDyn>>>::new(), 0);
+        let _ = concatenate(Vec::<Array<Compact<Ty<i32>, DimDyn>>>::new(), 0);
     }
 
     // -----------------------------------------------------------------------
     // Proptest: arbitrary ndim, arbitrary axis, arbitrary number of arrays
     // -----------------------------------------------------------------------
 
-    fn concat_strategy<T>(
-    ) -> impl Strategy<Value = (Vec<ndarray::ArrayD<T>>, Vec<Array<Compact<DimDyn>>>, usize)>
+    fn concat_strategy<T>() -> impl Strategy<
+        Value = (
+            Vec<ndarray::ArrayD<T>>,
+            Vec<Array<Compact<Ty<T>, DimDyn>>>,
+            usize,
+        ),
+    >
     where
         T: ScalarStrategy,
     {

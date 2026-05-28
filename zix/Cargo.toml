@@ -12,8 +12,13 @@ libc = "0.2"
 memmap2 = "0.9"
 
 # dtype scalar
-half = { version = "2", default-features = false, optional = true }
+half = { version = "2", default-features = false, features = [
+    "num-traits",
+], optional = true }
 num-complex = { version = "0.4", default-features = false, optional = true }
+
+# TODO make it optional
+num-traits = "0.2"
 
 # codec
 zstd = "0.13"

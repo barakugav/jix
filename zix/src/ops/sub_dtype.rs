@@ -2,9 +2,9 @@ use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Itemsize};
+use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
 where
@@ -17,7 +17,16 @@ where
     ///
     /// Panics if the array dtype is not a struct dtype or has no field with the given name.
     #[track_caller]
-    pub fn dtype_sub_field(self, sub_field: &str) -> Array<SubDtype<S>> {
+    pub fn dtype_sub_field<T>(self, sub_field: &str) -> Array<SubDtype<S, Ty<T>>>
+    where
+        T: Dtyped,
+    {
+        Array::from_storage(SubDtype::new(self, sub_field).unwrap())
+    }
+
+    ///
+    #[track_caller]
+    pub fn dtype_sub_field_dyn(self, sub_field: &str) -> Array<SubDtype<S, TypeDyn>> {
         Array::from_storage(SubDtype::new(self, sub_field).unwrap())
     }
 }
@@ -29,7 +38,7 @@ where
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// This struct is the bare storage implementation, but the operation is also available as
+/// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::dtype_sub_field()`](crate::Array::dtype_sub_field).
 ///
 /// # Examples
@@ -51,16 +60,17 @@ where
 /// assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct SubDtype<S> {
+pub struct SubDtype<S, ET> {
     array: Array<S>,
-    dst_dtype: Dtype,
+    dst_type: ET,
     sub_field_offset: Itemsize,
 }
-impl<S> SubDtype<S> {
+impl<S, ET> SubDtype<S, ET> {
     /// Constructs a `SubDtype` storage. See [`SubDtype`] for semantics and examples.
     pub fn new(array: Array<S>, sub_field: &str) -> Result<Self>
     where
         S: ArrayStorage,
+        ET: ElementType,
     {
         let src_dtype = array.dtype();
         ensure!(
@@ -71,7 +81,7 @@ impl<S> SubDtype<S> {
         let sub_field_spec = src_dtype
             .fields()
             .and_then(|fields| fields.iter().find(|f| f.0 == sub_field))
-            .map(|(_f_name, offset, sub_dtype)| (*offset, sub_dtype.clone()));
+            .map(|(_f_name, offset, sub_dtype)| (*offset, sub_dtype));
         ensure!(
             sub_field_spec.is_some(),
             UnsupportedDtype,
@@ -79,26 +89,30 @@ impl<S> SubDtype<S> {
         );
         let (offset, dtype) = sub_field_spec.unwrap();
 
+        let dst_dtype = ET::from_dtype(dtype.clone())?;
         Ok(Self {
-            dst_dtype: dtype,
+            dst_type: dst_dtype,
             sub_field_offset: offset,
             array,
         })
     }
 }
-impl<S> ArrayStorage for SubDtype<S>
+impl<S, ET> ArrayStorage for SubDtype<S, ET>
 where
     S: ArrayStorage,
+    ET: ElementType,
 {
+    type ElementType = ET;
     type Dimension = S::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        let nitems = check_get_buffer_size(index, &self.dst_dtype, buf)?;
+        let dst_dtype = self.dtype();
+        let nitems = check_get_buffer_size(index, dst_dtype, buf)?;
         if nitems == 0 {
             return Ok(());
         }
-        let (src_dtype, dst_dtype) = (self.array.dtype(), &self.dst_dtype);
+        let (src_dtype, dst_dtype) = (self.array.dtype(), dst_dtype);
         let (src_itemsize, dst_itemsize) =
             (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
 
@@ -120,7 +134,7 @@ where
         self.array.shape()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dst_dtype
+        self.dst_type.dtype()
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         self.array.storage._spec()
@@ -130,6 +144,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::array::Array;
+    use crate::storage::TypeDyn;
 
     #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
     #[repr(C)]
@@ -148,12 +163,12 @@ mod tests {
         let za = Array::compact_array(&pts).unwrap();
         let xs = za
             .as_ref()
-            .dtype_sub_field("x")
+            .dtype_sub_field::<i32>("x")
             .to_ndarray::<i32>()
             .unwrap();
         let ys = za
             .as_ref()
-            .dtype_sub_field("y")
+            .dtype_sub_field::<i32>("y")
             .to_ndarray::<i32>()
             .unwrap();
         assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
@@ -163,14 +178,14 @@ mod tests {
     #[test]
     fn error_not_struct_dtype() {
         let a = Array::compact_array(&ndarray::array![1i32, 2, 3]).unwrap();
-        assert!(super::SubDtype::new(a, "x").is_err());
+        assert!(super::SubDtype::<_, TypeDyn>::new(a, "x").is_err());
     }
 
     #[test]
     fn error_field_not_found() {
         let pts = ndarray::array![Pair { x: 1, y: 10 }];
         let za = Array::compact_array(&pts).unwrap();
-        assert!(super::SubDtype::new(za, "z").is_err());
+        assert!(super::SubDtype::<_, TypeDyn>::new(za, "z").is_err());
     }
 
     proptest::proptest! {
@@ -193,8 +208,8 @@ mod tests {
                 vec![n],
                 pairs.iter().map(|&(_, y)| y).collect::<Vec<_>>(),
             ).unwrap();
-            crate::util::assert_array_matches(&za.as_ref().dtype_sub_field("x"), &expected_x);
-            crate::util::assert_array_matches(&za.as_ref().dtype_sub_field("y"), &expected_y);
+            crate::util::assert_array_matches(&za.as_ref().dtype_sub_field::<i32>("x"), &expected_x);
+            crate::util::assert_array_matches(&za.as_ref().dtype_sub_field::<i32>("y"), &expected_y);
         }
     }
 }

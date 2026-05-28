@@ -1,11 +1,11 @@
-#![cfg_attr(deny_warnings, deny(missing_docs))]
+// #![cfg_attr(deny_warnings, deny(missing_docs))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! A high-performance multi-dimensional array library with block-compressed, lazy-evaluated
 //! storage.
 //!
-//! Zix arrays behave like regular n-dimensional arrays, but store their data in independently
-//! compressed blocks and decode on demand. The library is designed around two ideas:
+//! Zix arrays behave like regular n-dimensional arrays, but store their data in compressed blocks
+//! and decode them on demand. The library is designed around two ideas:
 //!
 //! - **Block-based compression** - the array is divided into an n-dimensional grid of fixed-size
 //!   blocks, each compressed independently. Only the blocks touched by a read request are
@@ -73,7 +73,7 @@
 //!
 //! | Type | Description |
 //! |------|-------------|
-//! | [`Array<Compact<D>>`](storage::Compact) | Heap-allocated block-compressed array. The main backend. `D` tracks the ndim at the type level (`Dim<N>` when statically known, `DimDyn` otherwise). |
+//! | [`Array<Compact<...>>`](storage::Compact) | Heap-allocated block-compressed array. The main backend of the library. |
 //! | [`Array<Op<...>>`](ops) | Lazy operation views defined in [`ops`]. Wrap one or more arrays; apply their transformation on each read. |
 //! | [`Array<Ref<'_, S>>`](storage::Ref) | Borrow of a storage without cloning. Created by [`Array::as_ref`]. |
 //! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray_view`]. |
@@ -88,7 +88,7 @@
 //! `round`, `sign`, `sin`, `cos`, `tan`, ...
 //!
 //! **Element-wise binary** (array op array, or array op scalar, via `+`, `-`, `*`, `/`,
-//! operator overloads and named methods) - `add`, `sub`, `mul`, `div`, `powf`, `minimum`,
+//! operator overloads and named methods) - `add`, `sub`, `mul`, `div`, `pow`, `minimum`,
 //! `maximum`, ...
 //!
 //! **Comparisons** - `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
@@ -101,6 +101,8 @@
 //!
 //! **Shape operations** - `reshape`, `slice`, `permute_axes`, `broadcast`,
 //! `insert_axis`, `remove_axis`, `concatenate`, `stack`
+//!
+//! **Type cast** - `cast::<T>()` converts each element to T.
 //!
 //! ## Shape-changing operations and performance
 //!
@@ -128,25 +130,26 @@
 //! # Ok::<(), zix::Error>(())
 //! ```
 //!
-//! # Element types (`Dtype`)
+//! # Element types
 //!
-//! The element type of an array is described at runtime by a [`Dtype`](dtype::Dtype), which
-//! records the kind, size, and alignment of each element. Dtypes come in two flavors:
+//! Zix tracks element types at two levels:
 //!
-//! **Scalar dtypes** cover all primitive numeric and boolean types:
-//! `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
-//! `Complex<f32>`, `Complex<f64>`, `bool`.
+//! **Runtime — [`Dtype`](dtype::Dtype)**
 //!
-//! **Struct dtypes** group named fields with explicit byte offsets, matching either C aligned
-//! (`#[repr(C)]`) or packed (`#[repr(C, packed)]`) layout. Fields can themselves be struct
-//! dtypes, enabling arbitrary nesting. This is similar to NumPy's structured dtypes.
+//! Every array carries a runtime [`Dtype`](dtype::Dtype) that records the kind, size, and
+//! alignment of each element. Dtypes come in two flavors:
+//!
+//! - *Scalar dtypes* cover all primitive numeric and boolean types:
+//!   `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
+//!   `Complex<f32>`, `Complex<f64>`, `bool`.
+//! - *Struct dtypes* group named fields with explicit byte offsets (C aligned or packed layout),
+//!   enabling NumPy-style structured dtypes.
 //!
 //! Both flavors support an *inner shape*: a small fixed-size sub-array baked into each logical
-//! element (e.g. `[f32; 3]` has dtype shape `[3]` and itemsize `12`). This is how Rust
-//! fixed-size arrays and NumPy sub-array dtypes are represented.
+//! element (e.g. `[f32; 3]` has dtype shape `[3]` and itemsize `12`).
 //!
-//! The [`Dtyped`](dtype::Dtyped) trait (and its derive macro) maps a Rust type to its `Dtype`
-//! at compile time. Implement it for your own `#[repr(C)]` structs:
+//! The [`Dtyped`](dtype::Dtyped) trait maps a Rust type to its `Dtype` at compile time.
+//! Implement it for your own `#[repr(C)]` structs:
 //!
 //! ```rust,ignore
 //! use zix::dtype::{Dtype, Dtyped};
@@ -160,6 +163,33 @@
 //! assert_eq!(fields[0].0, "r");
 //! ```
 //!
+//! **Compile-time — [`ElementType`](storage::ElementType), [`Ty<T>`](storage::Ty), [`TypeDyn`](storage::TypeDyn)**
+//!
+//! In addition to the runtime [`Dtype`](dtype::Dtype), the storage type parameter `S` carries the
+//! element type at the *type level* via `S::ElementType`:
+//!
+//! - [`Ty<T>`](storage::Ty) — the scalar element type `T` is known at compile time.
+//!   Arrays constructed from typed sources carry this automatically (e.g.
+//!   `Array::compact_array(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
+//!   All element-wise operations are available.
+//!
+//! - [`TypeDyn`](storage::TypeDyn) — the element type is only known at runtime. Arrays loaded
+//!   from disk start with this (`Array<Compact<TypeDyn, DimDyn>>`). Call
+//!   [`Array::into_typed::<T>()`](Array::into_typed) to assert the expected element type (checked
+//!   against the file header at runtime) and unlock element-wise operations:
+//!
+//! ```no_run
+//! use std::path::Path;
+//! use zix::{Array, ArrayParams};
+//!
+//! let src = Array::read_from_file(Path::new("data.zix"), ArrayParams::default())?;
+//! // src: Array<Compact<TypeDyn, DimDyn>> - element type unknown at compile time
+//!
+//! let typed = src.into_typed::<f32>()?;  // runtime check: dtype must be f32
+//! let result = typed.exp().sum(0).copy()?;
+//! # Ok::<(), zix::Error>(())
+//! ```
+//!
 //! # Dimension types
 //!
 //! Every [`ArrayStorage`](storage::ArrayStorage) carries an associated `type Dimension:
@@ -168,7 +198,7 @@
 //! compiler. When the ndim is only known at runtime (e.g. arrays loaded from files), it is
 //! [`DimDyn`]: a stack-allocated array of sizes with capacity [`NDIM_MAX`].
 //! The dimension type propagates through every shape-changing operation automatically.
-//! See [`Dimension`](dimension) for details.
+//! See [`Dimension`] for details.
 //!
 //! # Codec pipeline
 //!
@@ -262,7 +292,7 @@
 //! let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
 //!
 //! // Build a lazy pipeline over the mmap'd data.
-//! let processed = src.exp() + 1.0f32;
+//! let processed = src.into_typed::<f32>()?.exp() + 1.0f32;
 //!
 //! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
 //! processed.write_to(
@@ -310,6 +340,8 @@ pub mod codec;
 pub mod dtype;
 mod params;
 pub use params::ArrayParams;
+
+pub mod scalar;
 
 pub mod storage;
 

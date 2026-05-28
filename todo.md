@@ -20,3 +20,9 @@
 - modify all ops to have `new() -> Array<Self>` and `new_storage() -> Self`
 - is_empty()
 - squeeze()
+- rename into_dim to into_dim_generic, and have into_dim accept const usize ndim
+- rename SwapDim to AsSwapDim, and SwapDimInplace to SwapDim
+- rename Maximum scalar trait to PartialMax
+- make BlockLayout private
+- move Ty and TypeDyn to element_type.rs
+- refactor ArrayStorage::as_compact

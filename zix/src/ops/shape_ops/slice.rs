@@ -68,7 +68,6 @@ pub struct Slice<S: ArrayStorage> {
     /// `true` when every dimension has `step == 1`.  Enables a cheaper read path.
     no_steps: bool,
 
-    dtype: Dtype,
     shape: S::Dimension,
     blocks_layout: BlocksLayout,
 }
@@ -92,7 +91,6 @@ impl<S: ArrayStorage> Slice<S> {
         let no_steps = slice.iter().all(|ds| ds.is_contiguous());
 
         let shape = dim_arr(ndim, |d| slice[d].len());
-        let dtype = array.dtype().clone();
 
         let mut b_layout = array.blocks_layout().clone();
         for dim in 0..ndim {
@@ -113,7 +111,6 @@ impl<S: ArrayStorage> Slice<S> {
             array,
             slice,
             no_steps,
-            dtype,
             shape,
             blocks_layout: b_layout,
         })
@@ -121,6 +118,7 @@ impl<S: ArrayStorage> Slice<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for Slice<S> {
+    type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
@@ -190,9 +188,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // strided).  The single step on strided dims is handled by dst_byte_offset
         // already placing us at the right row/column; nd_copy takes care of the rest.
         // -----------------------------------------------------------------------
-        check_get_buffer_size(index, &self.dtype, buf)?;
+        let dtype = self.dtype();
+        check_get_buffer_size(index, dtype, buf)?;
         let ndim = self.slice.len();
-        let itemsize = self.dtype.itemsize() as usize;
+        let itemsize = dtype.itemsize() as usize;
         let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
         let dst_strides = default_strides(&out_shape, itemsize);
 
@@ -206,7 +205,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         });
         let src_strides = default_strides(&inner_read_shape, itemsize);
         let tmp_buf_bytes = inner_read_shape.iter().product::<usize>() * itemsize;
-        let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, self.dtype.alignment());
+        let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, dtype.alignment());
 
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
         let iter_shape = dim_arr(ndim, |d| {
@@ -253,7 +252,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.array.dtype()
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -431,16 +430,16 @@ mod tests {
     use super::SliceItem;
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::DimDyn;
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<DimDyn>> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<DimDyn>> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
@@ -750,8 +749,13 @@ mod tests {
     // Proptest: arbitrary shape, per-dim start/end/step, ndarray oracle
     // -----------------------------------------------------------------------
 
-    fn slice_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<SliceItem>)>
+    fn slice_strategy<T>() -> impl Strategy<
+        Value = (
+            ndarray::ArrayD<T>,
+            Array<Compact<Ty<T>, DimDyn>>,
+            Vec<SliceItem>,
+        ),
+    >
     where
         T: ScalarStrategy,
     {

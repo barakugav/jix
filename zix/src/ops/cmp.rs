@@ -1,15 +1,120 @@
-use crate::dtype::f16;
 use crate::ops::common::define_array_op2_method;
-use crate::ops::define_op2;
+use crate::ops::op2::define_op2;
+#[allow(unused_imports)]
+use crate::scalar::{f16, Complex};
 use crate::storage::ArrayStorage;
 use crate::Array;
+
+pub(crate) mod _traits {
+    #[allow(unused_imports)]
+    use crate::scalar::{f16, Complex};
+
+    /// Element-wise maximum with NaN-propagating semantics for floating-point types.
+    ///
+    /// This trait exists because neither of the standard alternatives covers all supported dtypes:
+    ///
+    /// - [`std::cmp::max`] requires [`Ord`], which floating-point types do not implement due to
+    ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
+    /// - [`f32::max`] / [`f64::max`] use **NaN-ignoring** semantics: when exactly one operand is
+    ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmax` / `numpy.nanmax`, not
+    ///   `numpy.maximum`.
+    ///
+    /// `Maximum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
+    /// the result is `NaN`. This matches `numpy.maximum` and makes NaN visible rather than
+    /// silently discarding it.
+    ///
+    /// For integer and `bool` types the implementation delegates to [`std::cmp::max`], which is
+    /// equivalent. The trait therefore provides a single uniform interface usable across all
+    /// supported numeric dtypes.
+    pub trait Maximum<Rhs = Self> {
+        type Output;
+        fn maximum(self, other: Rhs) -> Self::Output;
+    }
+    macro_rules! impl_integer_maximum {
+        ($($t:ty),* $(,)?) => {
+            $(impl Maximum for $t {
+                type Output = Self;
+                fn maximum(self, other: Self) -> Self {
+                    std::cmp::max(self, other)
+                }
+            })*
+        };
+}
+    macro_rules! impl_float_maximum {
+        ($($t:ty),* $(,)?) => {
+            $(impl Maximum for $t {
+                type Output = Self;
+                fn maximum(self, other: Self) -> Self {
+                    if self.is_nan() | other.is_nan() {
+                        Self::NAN
+                    } else {
+                        self.max(other)
+                    }
+                }
+            })*
+        };
+    }
+    impl_integer_maximum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
+    impl_float_maximum!(f32, f64);
+    #[cfg(feature = "half")]
+    impl_float_maximum!(f16);
+
+    /// Element-wise minimum with NaN-propagating semantics for floating-point types.
+    ///
+    /// This trait exists because neither of the standard alternatives covers all supported dtypes:
+    ///
+    /// - [`std::cmp::min`] requires [`Ord`], which floating-point types do not implement due to
+    ///   the unordered nature of `NaN`. It cannot be used for `f32`, `f64`, or `f16`.
+    /// - [`f32::min`] / [`f64::min`] use **NaN-ignoring** semantics: when exactly one operand is
+    ///   `NaN`, they return the non-`NaN` value. This matches `numpy.fmin` / `numpy.nanmin`, not
+    ///   `numpy.minimum`.
+    ///
+    /// `Minimum` instead uses **NaN-propagating** semantics: if *either* operand is `NaN`,
+    /// the result is `NaN`. This matches `numpy.minimum` and makes NaN visible rather than
+    /// silently discarding it.
+    ///
+    /// For integer and `bool` types the implementation delegates to [`std::cmp::min`], which is
+    /// equivalent. The trait therefore provides a single uniform interface usable across all
+    /// supported numeric dtypes.
+
+    pub trait Minimum<Rhs = Self> {
+        type Output;
+        fn minimum(self, other: Rhs) -> Self::Output;
+    }
+    macro_rules! impl_integer_minimum {
+    ($($t:ty),* $(,)?) => {
+        $(impl Minimum for $t { // TODO: rename
+            type Output = Self;
+            fn minimum(self, other: Self) -> Self {
+                std::cmp::min(self, other)
+            }
+        })*
+    };
+}
+    macro_rules! impl_float_minimum {
+    ($($t:ty),* $(,)?) => {
+        $(impl Minimum for $t {
+            type Output = Self;
+            fn minimum(self, other: Self) -> Self {
+                if self.is_nan() | other.is_nan() {
+                    Self::NAN
+                } else {
+                    self.min(other)
+                }
+            }
+        })*
+    };
+}
+    impl_integer_minimum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
+    impl_float_minimum!(f32, f64);
+    #[cfg(feature = "half")]
+    impl_float_minimum!(f16);
+}
 
 define_op2!(
     /// Element-wise equality test (`a == b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values
     /// returns `false`.
@@ -17,7 +122,7 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::equal()`](crate::Array::equal).
     ///
     /// # Examples
@@ -39,23 +144,20 @@ define_op2!(
     /// ```
     Equal,
     EqualKernel,
-    |a, b| a == b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
-    output_type = bool
+    <PartialEq>::eq(&a, &b),
+    type Output = bool,
 );
 define_op2!(
     /// Element-wise inequality test (`a != b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// For **float** types, `NaN != NaN` returns `true` per IEEE 754.
     /// For **complex** types, returns `true` if either the real or imaginary component differs.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::not_equal()`](crate::Array::not_equal).
     ///
     /// # Examples
@@ -77,23 +179,20 @@ define_op2!(
     /// ```
     NotEqual,
     NotEqualKernel,
-    |a, b| a != b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
-    output_type = bool
+    <PartialEq>::ne(&a, &b),
+    type Output = bool,
 );
 define_op2!(
     /// Element-wise greater-than test (`a > b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported as they have no
-    /// total ordering. Output dtype is `bool`. The output shape equals the input shape.
+    /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
     ///
     /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
     /// For **bool**: `true > false`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::greater()`](crate::Array::greater).
     ///
     /// # Examples
@@ -115,23 +214,20 @@ define_op2!(
     /// ```
     Greater,
     GreaterKernel,
-    |a, b| a > b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-    output_type = bool
+    <PartialOrd>::gt(&a, &b),
+    type Output = bool,
 );
 define_op2!(
     /// Element-wise greater-than-or-equal test (`a >= b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported as they have no
-    /// total ordering. Output dtype is `bool`. The output shape equals the input shape.
+    /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
     ///
     /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
     /// For **bool**: `true >= false`, and both `true >= true` and `false >= false` hold.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::greater_equal()`](crate::Array::greater_equal).
     ///
     /// # Examples
@@ -153,23 +249,20 @@ define_op2!(
     /// ```
     GreaterEqual,
     GreaterEqualKernel,
-    |a, b| a >= b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-    output_type = bool
+    <PartialOrd>::ge(&a, &b),
+    type Output = bool,
 );
 define_op2!(
     /// Element-wise less-than test (`a < b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported as they have no
-    /// total ordering. Output dtype is `bool`. The output shape equals the input shape.
+    /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
     ///
     /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
     /// For **bool**: `false < true`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::less()`](crate::Array::less).
     ///
     /// # Examples
@@ -191,23 +284,20 @@ define_op2!(
     /// ```
     Less,
     LessKernel,
-    |a, b| a < b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-    output_type = bool
+    <PartialOrd>::lt(&a, &b),
+    type Output = bool,
 );
 define_op2!(
     /// Element-wise less-than-or-equal test (`a <= b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported as they have no
-    /// total ordering. Output dtype is `bool`. The output shape equals the input shape.
+    /// Complex types are not supported as they have no total ordering. Output dtype is `bool`.
     ///
     /// For **float** types, any comparison involving `NaN` returns `false` (IEEE 754).
     /// For **bool**: `false <= true`, and both `false <= false` and `true <= true` hold.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::less_equal()`](crate::Array::less_equal).
     ///
     /// # Examples
@@ -229,16 +319,12 @@ define_op2!(
     /// ```
     LessEqual,
     LessEqualKernel,
-    |a, b| a <= b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-    output_type = bool
+    <PartialOrd>::le(&a, &b),
+    type Output = bool,
 );
 
 define_op2!(
     /// Element-wise maximum of two arrays.
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype and shape equal the input.
     ///
     /// For **integer** and **bool** types the result is `std::cmp::max(a, b)`.
     /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
@@ -247,7 +333,7 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::maximum()`](crate::Array::maximum).
     ///
     /// # Examples
@@ -270,15 +356,10 @@ define_op2!(
     /// ```
     Maximum,
     MaximumKernel,
-    |a, b| MaximumTrait::maximum(a, b),
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-    output_type = "same"
+    <crate::scalar::Maximum>::maximum(a, b),
 );
 define_op2!(
     /// Element-wise minimum of two arrays.
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype and shape equal the input.
     ///
     /// For **integer** and **bool** types the result is `std::cmp::min(a, b)`.
     /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
@@ -287,7 +368,7 @@ define_op2!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::minimum()`](crate::Array::minimum).
     ///
     /// # Examples
@@ -310,96 +391,34 @@ define_op2!(
     /// ```
     Minimum,
     MinimumKernel,
-    |a, b| MinimumTrait::minimum(a, b),
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-    output_type = "same"
+    <crate::scalar::Minimum>::minimum(a, b),
 );
-
-trait MaximumTrait {
-    fn maximum(self, other: Self) -> Self;
-}
-macro_rules! impl_integer_maximum {
-    ($($t:ty),* $(,)?) => {
-        $(impl MaximumTrait for $t {
-            fn maximum(self, other: Self) -> Self {
-                std::cmp::max(self, other)
-            }
-        })*
-    };
-}
-macro_rules! impl_float_maximum {
-    ($($t:ty),* $(,)?) => {
-        $(impl MaximumTrait for $t {
-            fn maximum(self, other: Self) -> Self {
-                if self.is_nan() | other.is_nan() {
-                    Self::NAN
-                } else {
-                    self.max(other)
-                }
-            }
-        })*
-    };
-}
-impl_integer_maximum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
-impl_float_maximum!(f32, f64);
-#[cfg(feature = "half")]
-impl_float_maximum!(f16);
-
-trait MinimumTrait {
-    fn minimum(self, other: Self) -> Self;
-}
-macro_rules! impl_integer_minimum {
-    ($($t:ty),* $(,)?) => {
-        $(impl MinimumTrait for $t {
-            fn minimum(self, other: Self) -> Self {
-                std::cmp::min(self, other)
-            }
-        })*
-    };
-}
-macro_rules! impl_float_minimum {
-    ($($t:ty),* $(,)?) => {
-        $(impl MinimumTrait for $t {
-            fn minimum(self, other: Self) -> Self {
-                if self.is_nan() | other.is_nan() {
-                    Self::NAN
-                } else {
-                    self.min(other)
-                }
-            }
-        })*
-    };
-}
-impl_integer_minimum!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
-impl_float_minimum!(f32, f64);
-#[cfg(feature = "half")]
-impl_float_minimum!(f16);
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op2_method!(equal: Equal);
-    define_array_op2_method!(not_equal: NotEqual);
-    define_array_op2_method!(greater: Greater);
-    define_array_op2_method!(greater_equal: GreaterEqual);
-    define_array_op2_method!(less: Less);
-    define_array_op2_method!(less_equal: LessEqual);
-    define_array_op2_method!(maximum: Maximum);
-    define_array_op2_method!(minimum: Minimum);
+    define_array_op2_method!(equal: Equal, PartialEq, fixed_output_type = true);
+    define_array_op2_method!(not_equal: NotEqual, PartialEq, fixed_output_type = true);
+    define_array_op2_method!(greater: Greater, PartialOrd, fixed_output_type = true);
+    define_array_op2_method!(greater_equal: GreaterEqual, PartialOrd, fixed_output_type = true);
+    define_array_op2_method!(less: Less, PartialOrd, fixed_output_type = true);
+    define_array_op2_method!(less_equal: LessEqual, PartialOrd, fixed_output_type = true);
+    define_array_op2_method!(maximum: Maximum, crate::scalar::Maximum);
+    define_array_op2_method!(minimum: Minimum, crate::scalar::Minimum);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MaximumTrait, MinimumTrait};
     #[cfg(feature = "half")]
-    use crate::dtype::f16;
+    use crate::scalar::f16;
+    use crate::scalar::{Maximum, Minimum};
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f32 = crate::dtype::Complex<f32>;
+    type complex_f32 = crate::scalar::Complex<f32>;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f64 = crate::dtype::Complex<f64>;
+    type complex_f64 = crate::scalar::Complex<f64>;
     use crate::ops::op2::tests::test_op2;
 
     // equal / not_equal: comparable_strategy gives ~33 % equal pairs and exercises NaN != NaN.
@@ -488,13 +507,13 @@ mod tests {
     // Use op_safe_strategy for floats to keep all outputs finite.
     test_op2!(
         maximum,
-        |a, b| MaximumTrait::maximum(a, b),
+        |a, b| Maximum::maximum(a, b),
         [i8, i16, i32, i64, u8, u16, u32, u64, bool],
         any_strategy
     );
     test_op2!(
         maximum,
-        |a, b| MaximumTrait::maximum(a, b),
+        |a, b| Maximum::maximum(a, b),
         [f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]
@@ -502,13 +521,13 @@ mod tests {
     );
     test_op2!(
         minimum,
-        |a, b| MinimumTrait::minimum(a, b),
+        |a, b| Minimum::minimum(a, b),
         [i8, i16, i32, i64, u8, u16, u32, u64, bool],
         any_strategy
     );
     test_op2!(
         minimum,
-        |a, b| MinimumTrait::minimum(a, b),
+        |a, b| Minimum::minimum(a, b),
         [f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]

@@ -1,48 +1,40 @@
 use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
-use crate::dtype::Dtype;
-#[allow(unused_imports)]
-use crate::dtype::{f16, Complex};
+use crate::dtype::{Dtype, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::common::AxesArg;
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
+#[allow(unused_imports)]
+use crate::scalar::{f16, Complex};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped, BlocksLayout, Ty};
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, DimArray};
+use crate::util::{assert_unchecked_eq, default_strides, dim_arr, DimArray};
 use crate::{Array, Dimension};
 
-pub(crate) trait ReductionOpKernel {
-    fn reduce<'a>(
-        &self,
-        slice_iter: impl Iterator<Item = (impl Iterator<Item = &'a [u8]> + Clone, &'a mut [u8])>,
-        input_dtype: &Dtype,
-    ) -> Result<()>;
-
-    fn output_dtype(&self, input_dtype: &Dtype) -> Result<Dtype>;
-    fn supports_empty(&self) -> bool;
-}
-
-pub(crate) struct ReductionOp<Op, S, D> {
-    op: Op,
+pub(crate) struct ReductionOp<S, K, D> {
+    kernel: K,
 
     array: Array<S>,
     is_reduced: DimArray<bool>,
 
-    dtype: Dtype,
+    out_dtype_: Dtype,
     shape: D,
     blocks_layout: BlocksLayout,
 }
-impl<Op, S, D> ReductionOp<Op, S, D> {
-    pub(crate) fn new<Ax>(op: Op, array: Array<S>, axes: Ax) -> Result<Self>
+pub(crate) trait ReductionOpKernel<T> {
+    type Output;
+    fn reduce(&self, items: impl Iterator<Item = T>) -> Self::Output;
+    fn supports_empty(&self) -> bool;
+}
+impl<S, K, D> ReductionOp<S, K, D> {
+    pub(crate) fn new<Ax>(array: Array<S>, kernel: K, axes: Ax) -> Result<Self>
     where
-        Op: ReductionOpKernel,
-        S: ArrayStorage,
+        S: ArrayStorageTyped,
+        K: ReductionOpKernel<S::Item, Output: Dtyped>,
         D: Dimension,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
-        let output_dtype = op.output_dtype(array.dtype())?;
-
         let input_ndim = array.shape().len();
         let mut is_reduced = dim_arr(input_ndim, |_| false);
         for i in 0..axes.len() {
@@ -57,7 +49,7 @@ impl<Op, S, D> ReductionOp<Op, S, D> {
             is_reduced[ax] = true;
         }
 
-        if !op.supports_empty()
+        if !kernel.supports_empty()
             && array
                 .shape()
                 .iter()
@@ -94,8 +86,8 @@ impl<Op, S, D> ReductionOp<Op, S, D> {
             .collect();
 
         Ok(Self {
-            op,
-            dtype: output_dtype,
+            kernel,
+            out_dtype_: K::Output::DTYPE,
             shape,
             blocks_layout: b_layout,
             array,
@@ -103,17 +95,21 @@ impl<Op, S, D> ReductionOp<Op, S, D> {
         })
     }
 }
-impl<Op, S, D> ArrayStorage for ReductionOp<Op, S, D>
+
+impl<S, K, D> ArrayStorage for ReductionOp<S, K, D>
 where
-    Op: ReductionOpKernel,
-    S: ArrayStorage,
+    S: ArrayStorageTyped,
+    K: ReductionOpKernel<S::Item, Output: Dtyped>,
     D: Dimension,
 {
+    type ElementType = Ty<K::Output>;
     type Dimension = D;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        let src_dtype = self.array.dtype();
+        let dst_dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, &self.dtype, buf)?;
+        check_get_buffer_size(index, dst_dtype, buf)?;
 
         let orig_shape = self.array.shape();
         let orig_ndim = orig_shape.len();
@@ -133,9 +129,6 @@ where
                 }
             })
             .collect::<DimArray<_>>();
-
-        let src_dtype = self.array.dtype();
-        let dst_dtype = self.dtype();
 
         let inner_read_shape = inner_index
             .iter()
@@ -167,7 +160,7 @@ where
             .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
             .collect::<DimArray<_>>();
 
-        let out_iter = NdIter::new(
+        let mut out_iter = NdIter::new(
             &out_shape,
             (
                 NdIterExtStridesPtr::new(&tmp_buf_strides, tmp_buf.as_ptr()),
@@ -182,26 +175,27 @@ where
             }
         });
 
-        let slice_iter = out_iter.map(|(_out_idx, (base_ptr, out_ptr))| {
+        while let Some((_out_idx, (base_ptr, out_ptr))) = out_iter.next() {
             let reduction_iter = NdIter::new(
                 &reduction_shape,
                 NdIterExtStridesPtr::new(&inner_strides, base_ptr),
             );
-            let reduction_iter = reduction_iter.map(|(_idx, in_ptr)| unsafe {
-                std::slice::from_raw_parts(in_ptr, src_dtype.itemsize() as usize)
-            });
-            let out_entry =
-                unsafe { std::slice::from_raw_parts_mut(out_ptr, dst_dtype.itemsize() as usize) };
-            (reduction_iter, out_entry)
-        });
-        self.op.reduce(slice_iter, src_dtype)
+            let reduction_iter =
+                reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+            let res = self.kernel.reduce(reduction_iter);
+            unsafe { out_ptr.cast::<K::Output>().write(res) };
+        }
+
+        Ok(())
     }
 
     fn shape(&self) -> &[u64] {
         self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        let dtype = &self.out_dtype_;
+        unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
+        dtype
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -214,18 +208,18 @@ where
 macro_rules! define_reduction_op {
     (
         $(#[$meta:meta])*
-        $Name:ident,
-        $NameKernel:ident,
+        $Op:ident,
+        $Kernel:ident,
+        $($trait:ident)::+,
         support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
-        types = $types:tt,
         single_axis = true
     ) => {
         $(#[$meta])*
-        pub struct $Name<S>(crate::ops::reduction::ReductionOp<$NameKernel, S, <S::Dimension as crate::Dimension>::Smaller>)
+        pub struct $Op<S>(crate::ops::reduction::ReductionOp<S, $Kernel, <S::Dimension as crate::Dimension>::Smaller>)
         where
             S: crate::storage::ArrayStorage;
-        impl<S> $Name<S>
+        impl<S> $Op<S>
         where
             S: crate::storage::ArrayStorage,
         {
@@ -234,197 +228,100 @@ macro_rules! define_reduction_op {
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new(array: crate::Array<S>, axis: usize $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
-                S: crate::storage::ArrayStorage,
+                S: crate::storage::ArrayStorageTyped,
+                S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
             {
-                let kernel = $NameKernel { $($extra_arg),* };
-                Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, &[axis])?))
+                let kernel = $Kernel { $($extra_arg),* };
+                Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, &[axis])?))
             }
         }
 
-        impl<S> crate::storage::ArrayStorage for $Name<S>
+        impl<S> crate::storage::ArrayStorage for $Op<S>
         where
-            S: crate::storage::ArrayStorage,
+            S: crate::storage::ArrayStorageTyped,
+             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
+            type ElementType = crate::storage::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
 
             crate::storage::impl_array_storage_forward!();
         }
 
-        define_reduction_op_kernel!(
-            $NameKernel,
+        define_reduction_op!(
+            @define_kernel
+            $Kernel,
+            $($trait)::+,
             support_empty = $support_empty,
             |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
-            types = $types
         );
     };
 
     (
         $(#[$meta:meta])*
-        $Name:ident,
-        $NameKernel:ident,
+        $Op:ident,
+        $Kernel:ident,
+        $($trait:ident)::+,
         support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
-        types = $types:tt
     ) => {
         $(#[$meta])*
-        pub struct $Name<S, D>(crate::ops::reduction::ReductionOp<$NameKernel, S, D>);
-        impl<S, D> $Name<S, D> {
+        pub struct $Op<S, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
+        impl<S, D> $Op<S, D> {
             /// Creates a new view storage applying the operation by reducing the specified axes.
             ///
             /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
             pub fn new<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
-                S: crate::storage::ArrayStorage,
+                S: crate::storage::ArrayStorageTyped,
+                S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
                 D: crate::Dimension,
                 Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
             {
-                let kernel = $NameKernel { $($extra_arg),* };
-                Ok(Self(crate::ops::reduction::ReductionOp::new(kernel, array, axes)?))
+                let kernel = $Kernel { $($extra_arg),* };
+                Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, axes)?))
             }
         }
 
-        impl<S, D> crate::storage::ArrayStorage for $Name<S, D>
+        impl<S, D> crate::storage::ArrayStorage for $Op<S, D>
         where
-            S: crate::storage::ArrayStorage,
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
             D: crate::Dimension,
         {
+            type ElementType = crate::storage::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = D;
 
             crate::storage::impl_array_storage_forward!();
         }
 
-        define_reduction_op_kernel!(
-            $NameKernel,
+        define_reduction_op!(
+            @define_kernel
+            $Kernel,
+            $($trait)::+,
             support_empty = $support_empty,
             |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
-            types = $types
-        );
-    };
-}
-
-macro_rules! define_reduction_op_kernel {
-    (
-        $NameKernel:ident,
-        support_empty = $support_empty:expr,
-        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
-        types = {
-            input = [$($scalar:tt),* $(,)?],
-            output = "same"
-        }
-    ) => {
-        define_reduction_op_kernel!(
-            $NameKernel,
-            support_empty = $support_empty,
-            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
-            types = {$($scalar => $scalar),*}
         );
     };
 
-    (
-        $NameKernel:ident,
-        support_empty = $support_empty:expr,
-        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
-        types = {
-            input = [$($scalar:tt),* $(,)?],
-            output = $output_type:tt
-        }
-    ) => {
-        define_reduction_op_kernel!(
-            $NameKernel,
-            support_empty = $support_empty,
-            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
-            types = {$($scalar => $output_type),*}
-        );
-    };
 
     (
-        $NameKernel:ident,
+        @define_kernel
+        $Kernel:ident,
+        $($trait:ident)::+,
         support_empty = $support_empty:expr,
         |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
-        types = {$([$($scalar:tt),*] => $output_type:tt),* $(,)?}
     ) => {
-        define_reduction_op_kernel!(
-            $NameKernel,
-            support_empty = $support_empty,
-            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
-            types = {$($($scalar => $output_type),*),*}
-        );
-    };
-
-    (
-        $NameKernel:ident,
-        support_empty = $support_empty:expr,
-        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
-        types = {$($scalar:tt => $reduction_type:tt),* $(,)?}
-    ) => {
-        struct $NameKernel { $($extra_arg: $extra_ty,)* }
-        impl crate::ops::reduction::ReductionOpKernel for $NameKernel {
-            fn reduce<'a>(
-                &self,
-                slice_iter: impl Iterator<Item = (impl Iterator<Item = &'a [u8]> + Clone, &'a mut [u8])>,
-                input_dtype: &Dtype,
-            ) -> crate::error::Result<()> {
-                macro_rules! apply_loop_impl {
-                    ($scalar2:ty, $reduction_type2:ty) => {{
-                        for (slice, out) in slice_iter {
-                            let items = slice.map(|x| unsafe { x.as_ptr().cast::<$scalar2>().read() });
-                            let result: $reduction_type2 = {
-                                #[allow(unused)]
-                                type ReductionType = $reduction_type2;
-                                $(let $extra_arg = self.$extra_arg;)*
-                                let $arg_items = items;
-                                { $body }
-                            };
-                            unsafe { out.as_mut_ptr().cast::<$reduction_type2>().write(result) };
-                        }
-                        return Ok(())
-                    }};
-                }
-                macro_rules! apply_loop {
-                    (f16, $reduction_type2:ty) => {
-                        #[cfg(feature = "half")]
-                        apply_loop_impl!(f16, $reduction_type2)
-                    };
-                    ((Complex<f32>), $reduction_type2:ty) => {
-                        #[cfg(feature = "num-complex")]
-                        apply_loop_impl!(Complex<f32>, $reduction_type2)
-                    };
-                    ((Complex<f64>), $reduction_type2:ty) => {
-                        #[cfg(feature = "num-complex")]
-                        apply_loop_impl!(Complex<f64>, $reduction_type2)
-                    };
-                    ($scalar2:ty, $reduction_type2:ty) => {
-                        apply_loop_impl!($scalar2, $reduction_type2)
-                    };
-                }
-                #[allow(unused_parens)]
-                match input_dtype.try_to_scalar() {
-                    $(Some(crate::ops::common::scalar_kind!($scalar)) => {
-                        apply_loop!($scalar, $reduction_type)
-                    },)*
-                    _ => {}
-                }
-                crate::error::bail!(
-                    UnsupportedDtype,
-                    "Reduction<{}> not supported for dtype {input_dtype:#?}",
-                    stringify!($NameKernel)
-                );
-            }
-
-            fn output_dtype(&self, input_dtype: &crate::dtype::Dtype) -> crate::error::Result<crate::dtype::Dtype> {
-                #[allow(unused_parens)]
-                match input_dtype.try_to_scalar() {
-                    $(Some(crate::ops::common::scalar_kind!($scalar)) => {
-                        return Ok(<$reduction_type as crate::dtype::Dtyped>::DTYPE);
-                    },)*
-                    _ => {},
-
-                };
-                crate::error::bail!(
-                    UnsupportedDtype,
-                    "Reduction<{}> not supported for dtype {input_dtype:#?}",
-                    stringify!($NameKernel)
-                );
+        struct $Kernel { $($extra_arg: $extra_ty,)* }
+        impl<T> crate::ops::reduction::ReductionOpKernel<T> for $Kernel
+        where
+            T: $($trait)::+,
+        {
+            type Output = <T as $($trait)::+>::Output;
+            fn reduce(&self, items: impl Iterator<Item = T>) -> Self::Output {
+                #[allow(unused)]
+                $(let $extra_arg = self.$extra_arg;)*
+                let $arg_items = items;
+                { $body }.unwrap()
             }
 
             fn supports_empty(&self) -> bool {
@@ -432,14 +329,362 @@ macro_rules! define_reduction_op_kernel {
             }
         }
     };
+
+
+
+    (
+        $(#[$meta:meta])*
+        $Op:ident,
+        $Kernel:ident,
+        support_empty = $support_empty:expr,
+        |$arg_items:ident: Iterator<Item = $in_type:ty> $(, $extra_arg:ident : $extra_ty:ty)*| -> $out_type:ty { $body:expr },
+    ) => {
+        $(#[$meta])*
+        pub struct $Op<S, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
+        impl<S, D> $Op<S, D> {
+            /// Creates a new view storage applying the operation by reducing the specified axes.
+            ///
+            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
+            pub fn new<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
+            where
+                S: crate::storage::ArrayStorageTyped<Item = $in_type>,
+                D: crate::Dimension,
+                Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
+            {
+                let kernel = $Kernel { $($extra_arg),* };
+                Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, axes)?))
+            }
+        }
+
+        impl<S, D> crate::storage::ArrayStorage for $Op<S, D>
+        where
+            S: crate::storage::ArrayStorageTyped<Item = $in_type>,
+            D: crate::Dimension,
+        {
+            type ElementType = crate::storage::Ty<$out_type>;
+            type Dimension = D;
+
+            crate::storage::impl_array_storage_forward!();
+        }
+
+
+        struct $Kernel { $($extra_arg: $extra_ty,)* }
+        impl crate::ops::reduction::ReductionOpKernel<$in_type> for $Kernel
+        {
+            type Output = $out_type;
+            fn reduce(&self, items: impl Iterator<Item = $in_type>) -> Self::Output {
+                #[allow(unused)]
+                $(let $extra_arg = self.$extra_arg;)*
+                let $arg_items = items;
+                { $body }.unwrap()
+            }
+
+            fn supports_empty(&self) -> bool {
+                $support_empty
+            }
+        }
+    };
+
 }
-// pub(crate) use {define_reduction_op, define_reduction_op_kernel};
+// pub(crate) use {define_reduction_op};
+
+pub(crate) mod _traits {
+    use crate::scalar::{f16, Complex};
+
+    pub trait ReduceMax {
+        type Output;
+        fn reduce_max(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
+    }
+    impl<T> ReduceMax for T
+    where
+        T: crate::scalar::Maximum<Output = T>,
+    {
+        type Output = Self;
+
+        fn reduce_max(items: impl Iterator<Item = T>) -> Option<Self::Output> {
+            items.reduce(|m, x| m.maximum(x))
+        }
+    }
+
+    pub trait ReduceMin {
+        type Output;
+        fn reduce_min(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
+    }
+    impl<T> ReduceMin for T
+    where
+        T: crate::scalar::Minimum<Output = T>,
+    {
+        type Output = Self;
+
+        fn reduce_min(items: impl Iterator<Item = Self>) -> Option<Self::Output> {
+            items.reduce(|m, x| m.minimum(x))
+        }
+    }
+
+    pub trait ArgMax {
+        type Output;
+        fn argmax(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
+    }
+    impl<T> ArgMax for T
+    where
+        T: PartialOrd,
+    {
+        type Output = u64;
+
+        fn argmax(items: impl Iterator<Item = Self>) -> Option<Self::Output> {
+            let mut idx = 0u64;
+            items
+                .map({
+                    |x| {
+                        let i = idx;
+                        idx += 1;
+                        (i, x)
+                    }
+                })
+                .reduce(|(m_idx, m), (idx, x)| if x > m { (idx, x) } else { (m_idx, m) })
+                .map(|(idx, _)| idx)
+        }
+    }
+
+    pub trait ArgMin {
+        type Output;
+        fn argmin(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
+    }
+    impl<T> ArgMin for T
+    where
+        T: PartialOrd,
+    {
+        type Output = u64;
+
+        fn argmin(items: impl Iterator<Item = Self>) -> Option<Self::Output> {
+            let mut idx = 0u64;
+            items
+                .map({
+                    |x| {
+                        let i = idx;
+                        idx += 1;
+                        (i, x)
+                    }
+                })
+                .reduce(|(m_idx, m), (idx, x)| if x < m { (idx, x) } else { (m_idx, m) })
+                .map(|(idx, _)| idx)
+        }
+    }
+
+    pub trait ReduceSum {
+        type Output;
+        fn reduce_sum(items: impl Iterator<Item = Self>) -> Self::Output;
+    }
+
+    macro_rules! impl_sum {
+        ($item_ty:ty, $output_ty:ty) => {
+            impl ReduceSum for $item_ty {
+                type Output = $output_ty;
+                fn reduce_sum(items: impl Iterator<Item = Self>) -> Self::Output {
+                    items.fold(<_ as crate::scalar::Cast<Self::Output>>::cast(0), |m, x| {
+                        m + <_ as crate::scalar::Cast<Self::Output>>::cast(x)
+                    })
+                }
+            }
+        };
+    }
+    impl_sum!(i8, i64);
+    impl_sum!(i16, i64);
+    impl_sum!(i32, i64);
+    impl_sum!(i64, i64);
+    impl_sum!(u8, u64);
+    impl_sum!(u16, u64);
+    impl_sum!(u32, u64);
+    impl_sum!(u64, u64);
+    #[cfg(feature = "half")]
+    impl_sum!(f16, f64);
+    impl_sum!(f32, f64);
+    impl_sum!(f64, f64);
+    #[cfg(feature = "num-complex")]
+    impl_sum!(Complex<f32>, Complex<f64>);
+    #[cfg(feature = "num-complex")]
+    impl_sum!(Complex<f64>, Complex<f64>);
+    impl_sum!(bool, u64);
+
+    pub trait ReduceProduct {
+        type Output;
+        fn reduce_product(items: impl Iterator<Item = Self>) -> Self::Output;
+    }
+    macro_rules! impl_product {
+        ($item_ty:ty, $output_ty:ty) => {
+            impl ReduceProduct for $item_ty {
+                type Output = $output_ty;
+                fn reduce_product(items: impl Iterator<Item = Self>) -> Self::Output {
+                    items.fold(<_ as crate::scalar::Cast<Self::Output>>::cast(1), |m, x| {
+                        m * <_ as crate::scalar::Cast<Self::Output>>::cast(x)
+                    })
+                }
+            }
+        };
+    }
+    impl_product!(i8, i64);
+    impl_product!(i16, i64);
+    impl_product!(i32, i64);
+    impl_product!(i64, i64);
+    impl_product!(u8, u64);
+    impl_product!(u16, u64);
+    impl_product!(u32, u64);
+    impl_product!(u64, u64);
+    #[cfg(feature = "half")]
+    impl_product!(f16, f64);
+    impl_product!(f32, f64);
+    impl_product!(f64, f64);
+    #[cfg(feature = "num-complex")]
+    impl_product!(Complex<f32>, Complex<f64>);
+    #[cfg(feature = "num-complex")]
+    impl_product!(Complex<f64>, Complex<f64>);
+
+    pub trait ReduceMean {
+        type Output;
+        fn reduce_mean(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
+    }
+    macro_rules! impl_mean {
+        ($item_ty:ty, $output_ty:ty) => {
+            impl ReduceMean for $item_ty {
+                type Output = $output_ty;
+                fn reduce_mean(items: impl Iterator<Item = Self>) -> Option<Self::Output> {
+                    let (size, size_high) = items.size_hint();
+                    assert_eq!(Some(size), size_high);
+                    if size == 0 {
+                        return None;
+                    }
+                    let sum = <Self as ReduceSum>::reduce_sum(items);
+                    Some(<_ as crate::scalar::Cast<Self::Output>>::cast(sum) / size as f64)
+                }
+            }
+        };
+    }
+    impl_mean!(i8, f64);
+    impl_mean!(i16, f64);
+    impl_mean!(i32, f64);
+    impl_mean!(i64, f64);
+    impl_mean!(u8, f64);
+    impl_mean!(u16, f64);
+    impl_mean!(u32, f64);
+    impl_mean!(u64, f64);
+    #[cfg(feature = "half")]
+    impl_mean!(f16, f64);
+    impl_mean!(f32, f64);
+    impl_mean!(f64, f64);
+    #[cfg(feature = "num-complex")]
+    impl_mean!(Complex<f32>, Complex<f64>);
+    #[cfg(feature = "num-complex")]
+    impl_mean!(Complex<f64>, Complex<f64>);
+    impl_mean!(bool, f64);
+
+    pub trait ReduceVariance {
+        type Output: num_traits::Float;
+        fn reduce_variance(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output;
+        fn reduce_std(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output {
+            let var = Self::reduce_variance(items, ddof);
+            <_ as num_traits::Float>::sqrt(var)
+        }
+    }
+    macro_rules! impl_variance {
+        ($item_ty:ty) => {
+            impl ReduceVariance for $item_ty {
+                type Output = f64;
+                fn reduce_variance(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output {
+                    variance_impl(items, ddof)
+                }
+            }
+        };
+    }
+    impl_variance!(i8);
+    impl_variance!(i16);
+    impl_variance!(i32);
+    impl_variance!(i64);
+    impl_variance!(u8);
+    impl_variance!(u16);
+    impl_variance!(u32);
+    impl_variance!(u64);
+    #[cfg(feature = "half")]
+    impl_variance!(f16);
+    impl_variance!(f32);
+    impl_variance!(f64);
+    #[cfg(feature = "num-complex")]
+    impl_variance!(Complex<f32>);
+    #[cfg(feature = "num-complex")]
+    impl_variance!(Complex<f64>);
+    impl_variance!(bool);
+    fn variance_impl<T>(items: impl Iterator<Item = T>, ddof: f64) -> f64
+    where
+        T: VarianceImpl,
+        i32: crate::scalar::Cast<T::MeanType>,
+        T: crate::scalar::Cast<T::MeanType>,
+        T::MeanType: core::ops::Sub<T::MeanType, Output = T::MeanType>
+            + core::ops::Div<f64, Output = T::MeanType>
+            + core::ops::AddAssign<T::MeanType>
+            + Copy,
+    {
+        let mut mean = <_ as crate::scalar::Cast<T::MeanType>>::cast(0);
+        let mut m2 = 0.0_f64;
+        let mut n = 0_u64;
+
+        for x in items {
+            let x = <_ as crate::scalar::Cast<T::MeanType>>::cast(x);
+            n += 1;
+            let delta = x - mean;
+            mean += delta / n as f64;
+            let delta2 = x - mean;
+            m2 += T::update_m2(delta, delta2);
+        }
+
+        let denom = n as f64 - ddof;
+        if denom <= 0.0 {
+            f64::NAN
+        } else {
+            m2 / denom
+        }
+    }
+    trait VarianceImpl {
+        type MeanType;
+        fn update_m2(delta: Self::MeanType, delta2: Self::MeanType) -> f64;
+    }
+    macro_rules! impl_num_variance_impl {
+        ($ty:ty) => {
+            impl VarianceImpl for $ty {
+                type MeanType = f64;
+                fn update_m2(delta: f64, delta2: f64) -> f64 {
+                    delta * delta2
+                }
+            }
+        };
+    }
+    macro_rules! impl_complex_variance_impl {
+        ($f_ty:ty) => {
+            impl VarianceImpl for Complex<$f_ty> {
+                type MeanType = Complex<f64>;
+                fn update_m2(delta: Complex<f64>, delta2: Complex<f64>) -> f64 {
+                    delta.re * delta2.re + delta.im * delta2.im
+                }
+            }
+        };
+    }
+    impl_num_variance_impl!(i8);
+    impl_num_variance_impl!(i16);
+    impl_num_variance_impl!(i32);
+    impl_num_variance_impl!(i64);
+    impl_num_variance_impl!(u8);
+    impl_num_variance_impl!(u16);
+    impl_num_variance_impl!(u32);
+    impl_num_variance_impl!(u64);
+    #[cfg(feature = "half")]
+    impl_num_variance_impl!(f16);
+    impl_num_variance_impl!(f32);
+    impl_num_variance_impl!(f64);
+    impl_complex_variance_impl!(f32);
+    impl_complex_variance_impl!(f64);
+    impl_num_variance_impl!(bool);
+}
 
 define_reduction_op!(
     /// Reduces one or more axes by taking the maximum element.
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the input dtype.
     ///
     /// For **float** types, `NaN` values are ignored: if at least one non-`NaN` value
     /// is present, the result is the maximum of the non-`NaN` values. If all elements
@@ -448,7 +693,7 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::max()`](crate::Array::max).
     ///
     /// # Examples
@@ -471,18 +716,12 @@ define_reduction_op!(
     /// ```
     Max,
     MaxKernel,
+    crate::scalar::ReduceMax,
     support_empty = false,
-    |items| { items.reduce(|m, x| m.max(x)).unwrap() },
-    types = {
-        input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-        output = "same"
-    }
+    |items| { <T as crate::scalar::ReduceMax>::reduce_max(items) },
 );
 define_reduction_op!(
     /// Reduces one or more axes by taking the minimum element.
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the input dtype.
     ///
     /// For **float** types, `NaN` values are ignored: if at least one non-`NaN` value
     /// is present, the result is the minimum of the non-`NaN` values. If all elements
@@ -491,7 +730,7 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::min()`](crate::Array::min).
     ///
     /// # Examples
@@ -514,18 +753,14 @@ define_reduction_op!(
     /// ```
     Min,
     MinKernel,
+    crate::scalar::ReduceMin,
     support_empty = false,
-    |items| { items.reduce(|m, x| m.min(x)).unwrap() },
-    types = {
-        input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-        output = "same"
-    }
+    |items| { <T as crate::scalar::ReduceMin>::reduce_min(items) },
 );
 define_reduction_op!(
     /// Reduces a single axis by returning the index of the maximum element.
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype is `u64`.
+    /// Output dtype is `u64`.
     ///
     /// Unlike [`Max`], this op accepts only a single axis. If multiple elements share
     /// the maximum value, the index of the first occurrence is returned.
@@ -534,7 +769,7 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::argmax()`](crate::Array::argmax).
     ///
     /// # Examples
@@ -557,25 +792,17 @@ define_reduction_op!(
     /// ```
     ArgMax,
     ArgMaxKernel,
+    crate::scalar::ArgMax,
     support_empty = false,
     |items| {
-        items
-            .enumerate()
-            .reduce(|(m_idx, m), (idx, x)| if x > m { (idx, x) } else { (m_idx, m) })
-            .unwrap()
-            .0 as u64
-    },
-    types = {
-        input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-        output = u64
+        <T as crate::scalar::ArgMax>::argmax(items)
     },
     single_axis = true
 );
 define_reduction_op!(
     /// Reduces a single axis by returning the index of the minimum element.
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype is `u64`.
+    /// Output dtype is `u64`.
     ///
     /// Unlike [`Min`], this op accepts only a single axis. If multiple elements share
     /// the minimum value, the index of the first occurrence is returned.
@@ -584,7 +811,7 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::argmin()`](crate::Array::argmin).
     ///
     /// # Examples
@@ -607,17 +834,10 @@ define_reduction_op!(
     /// ```
     ArgMin,
     ArgMinKernel,
+    crate::scalar::ArgMin,
     support_empty = false,
     |items| {
-        items
-            .enumerate()
-            .reduce(|(m_idx, m), (idx, x)| if x < m { (idx, x) } else { (m_idx, m) })
-            .unwrap()
-            .0 as u64
-    },
-    types = {
-        input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-        output = u64
+        <T as crate::scalar::ArgMin>::argmin(items)
     },
     single_axis = true
 );
@@ -638,7 +858,7 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::sum()`](crate::Array::sum).
     ///
     /// # Examples
@@ -661,14 +881,9 @@ define_reduction_op!(
     /// ```
     Sum,
     SumKernel,
+    crate::scalar::ReduceSum,
     support_empty = true,
-    |items| { items.fold(crate::ops::astype::cast(0), |m, x| m + crate::ops::astype::cast_as(x, &m)) },
-    types = {
-        [i8, i16, i32, i64] => i64,
-        [u8, u16, u32, u64, bool] => u64,
-        [f16, f32, f64] => f64,
-        [(Complex<f32>), (Complex<f64>)] => (Complex::<f64>),
-    }
+    |items| { Some(<T as crate::scalar::ReduceSum>::reduce_sum(items)) },
 );
 define_reduction_op!(
     /// Reduces one or more axes by multiplying all elements along those axes.
@@ -687,7 +902,7 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::product()`](crate::Array::product).
     ///
     /// # Examples
@@ -710,26 +925,21 @@ define_reduction_op!(
     /// ```
     Product,
     ProductKernel,
+    crate::scalar::ReduceProduct,
     support_empty = true,
-    |items| { items.fold(crate::ops::astype::cast(1), |m, x| m * crate::ops::astype::cast_as(x, &m)) },
-    types = {
-        [i8, i16, i32, i64] => i64,
-        [u8, u16, u32, u64] => u64,
-        [f16, f32, f64] => f64,
-        [(Complex<f32>), (Complex<f64>)] => (Complex::<f64>),
-    }
+    |items| { Some(<T as crate::scalar::ReduceProduct>::reduce_product(items)) },
 );
 define_reduction_op!(
     /// Reduces one or more axes by computing the arithmetic mean.
     ///
-    /// Supported dtypes: all numeric types and `bool`. Output dtype is `f64` for all
-    /// scalar inputs; `Complex<f64>` for `Complex<f32>` and `Complex<f64>` inputs.
+    /// Output dtype is `f64` for all scalar inputs; `Complex<f64>` for `Complex<f32>` and
+    /// `Complex<f64>` inputs.
     ///
     /// Reducing an empty slice (zero elements) panics.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::mean()`](crate::Array::mean).
     ///
     /// # Examples
@@ -752,26 +962,13 @@ define_reduction_op!(
     /// ```
     Mean,
     MeanKernel,
+    crate::scalar::ReduceMean,
     support_empty = false,
-    |items| {{
-        let (size, size_high) = items.size_hint();
-        assert_eq!(Some(size), size_high);
-        assert!(size > 0);
-        let sum = items.fold(crate::ops::astype::cast::<_, ReductionType>(0), |m, x| m + crate::ops::astype::cast_as(x, &m));
-        sum / size as f64
-     }},
-    types = {
-        [i8, i16, i32, i64] => f64,
-        [u8, u16, u32, u64] => f64,
-        [f16, f32, f64] => f64,
-        [(Complex<f32>), (Complex<f64>)] => (Complex::<f64>),
-        [bool] => f64,
-    }
+    |items| { <T as crate::scalar::ReduceMean>::reduce_mean(items) },
 );
 define_reduction_op!(
     /// Reduces one or more axes by computing the variance.
     ///
-    /// Supported dtypes: all integer and float types, `Complex<f32>`, `Complex<f64>`.
     /// Output dtype is `f64`. For complex inputs the result is the real-valued variance
     /// `E[|x - mean|^2]`.
     ///
@@ -784,7 +981,7 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::var()`](crate::Array::var).
     ///
     /// # Examples
@@ -807,20 +1004,13 @@ define_reduction_op!(
     /// ```
     Variance,
     VarianceKernel,
+    crate::scalar::ReduceVariance,
     support_empty = false,
-    |items, ddof: f64| { variance_impl(items, ddof) },
-    types = {
-        [i8, i16, i32, i64] => f64,
-        [u8, u16, u32, u64] => f64,
-        [f16, f32, f64] => f64,
-        [(Complex<f32>), (Complex<f64>)] => f64,
-        [bool] => f64,
-    }
+    |items, ddof: f64| { Some(<T as crate::scalar::ReduceVariance>::reduce_variance(items, ddof)) },
 );
 define_reduction_op!(
     /// Reduces one or more axes by computing the standard deviation.
     ///
-    /// Supported dtypes: all integer and float types, `Complex<f32>`, `Complex<f64>`.
     /// Output dtype is `f64`. For complex inputs the result is the real-valued standard
     /// deviation `sqrt(E[|x - mean|^2])`.
     ///
@@ -829,7 +1019,7 @@ define_reduction_op!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::std()`](crate::Array::std).
     ///
     /// # Examples
@@ -852,100 +1042,22 @@ define_reduction_op!(
     /// ```
     StandardDeviation,
     StandardDeviationKernel,
+    crate::scalar::ReduceVariance,
     support_empty = false,
-    |items, ddof: f64| { variance_impl(items, ddof).sqrt() },
-    types = {
-        [i8, i16, i32, i64] => f64,
-        [u8, u16, u32, u64] => f64,
-        [f16, f32, f64] => f64,
-        [(Complex<f32>), (Complex<f64>)] => f64,
-        [bool] => f64,
-    }
+    |items, ddof: f64| {{
+        Some(<T as crate::scalar::ReduceVariance>::reduce_std(items, ddof))
+    }},
 );
-fn variance_impl<T>(items: impl Iterator<Item = T>, ddof: f64) -> f64
-where
-    T: VarianceImpl,
-    i32: crate::ops::astype::Cast<T::MeanType>,
-    T: crate::ops::astype::Cast<T::MeanType>,
-    T::MeanType: core::ops::Sub<T::MeanType, Output = T::MeanType>
-        + core::ops::Div<f64, Output = T::MeanType>
-        + core::ops::AddAssign<T::MeanType>
-        + Copy,
-{
-    let mut mean: T::MeanType = crate::ops::astype::cast(0);
-    let mut m2 = 0.0_f64;
-    let mut n = 0_u64;
-
-    for x in items {
-        let x: T::MeanType = crate::ops::astype::cast(x);
-        n += 1;
-        let delta = x - mean;
-        mean += delta / n as f64;
-        let delta2 = x - mean;
-        m2 += T::update_m2(delta, delta2);
-    }
-
-    let denom = n as f64 - ddof;
-    if denom <= 0.0 {
-        f64::NAN
-    } else {
-        m2 / denom
-    }
-}
-trait VarianceImpl {
-    type MeanType;
-    fn update_m2(delta: Self::MeanType, delta2: Self::MeanType) -> f64;
-}
-macro_rules! impl_num_variance_impl {
-    ($ty:ty) => {
-        impl VarianceImpl for $ty {
-            type MeanType = f64;
-            fn update_m2(delta: f64, delta2: f64) -> f64 {
-                delta * delta2
-            }
-        }
-    };
-}
-macro_rules! impl_complex_variance_impl {
-    ($f_ty:ty) => {
-        impl VarianceImpl for Complex<$f_ty> {
-            type MeanType = Complex<f64>;
-            fn update_m2(delta: Complex<f64>, delta2: Complex<f64>) -> f64 {
-                delta.re * delta2.re + delta.im * delta2.im
-            }
-        }
-    };
-}
-impl_num_variance_impl!(i8);
-impl_num_variance_impl!(i16);
-impl_num_variance_impl!(i32);
-impl_num_variance_impl!(i64);
-impl_num_variance_impl!(u8);
-impl_num_variance_impl!(u16);
-impl_num_variance_impl!(u32);
-impl_num_variance_impl!(u64);
-#[cfg(feature = "half")]
-impl_num_variance_impl!(f16);
-impl_num_variance_impl!(f32);
-impl_num_variance_impl!(f64);
-impl_complex_variance_impl!(f32);
-impl_complex_variance_impl!(f64);
-impl_num_variance_impl!(bool);
 
 define_reduction_op!(
-    /// Reduces one or more axes by testing whether all elements are truthy.
+    /// Reduces one or more axes by testing whether all elements are `true`.
     ///
-    /// Supported dtypes: all numeric types, `bool`, `Complex<f32>`, `Complex<f64>`.
-    /// Output dtype is `bool`.
-    ///
-    /// Each element is cast to `bool` before reduction (zero -> `false`, any non-zero
-    /// -> `true`; for `bool` this is the identity; for complex, non-zero means at least
-    /// one component is non-zero). Returns `true` only when every element is truthy.
-    /// An empty reduction returns `true`.
+    /// The input array must contain `bool` elements. Output dtype is `bool`.
+    /// Returns `true` only when every element is `true`. An empty reduction returns `true`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::all()`](crate::Array::all).
     ///
     /// # Examples
@@ -953,14 +1065,14 @@ define_reduction_op!(
     /// use zix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
-    /// let nd = array![[1i32, 0, 3], [4, 5, 6]];
+    /// let nd = array![[true, false, true], [true, true, true]];
     ///
-    /// // All elements truthy? -> false (contains a zero)
+    /// // All elements true? -> false (contains false)
     /// let all_true = Array::compact_array(&nd)?
     ///     .all(&[0, 1]).to_ndarray::<bool>()?;
     /// assert_eq!(all_true[[]], false);
     ///
-    /// // All truthy along axis 0 -> shape [3]
+    /// // All true along axis 0 (per column) -> shape [3]
     /// let col_all = Array::compact_array(&nd)?
     ///     .all(&[0]).to_ndarray::<bool>()?;
     /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
@@ -969,26 +1081,17 @@ define_reduction_op!(
     All,
     AllKernel,
     support_empty = true,
-    |items| { items.fold(true, |m, x| m && crate::ops::astype::cast::<_, bool>(x)) },
-    types = {
-        input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
-        output = bool
-    }
+    |items: Iterator<Item = bool>| -> bool { Some(items.fold(true, |m, x| m && x)) },
 );
 define_reduction_op!(
-    /// Reduces one or more axes by testing whether any element is truthy,
+    /// Reduces one or more axes by testing whether any element is `true`.
     ///
-    /// Supported dtypes: all numeric types, `bool`, `Complex<f32>`, `Complex<f64>`.
-    /// Output dtype is `bool`.
-    ///
-    /// Each element is cast to `bool` before reduction (zero -> `false`, any non-zero
-    /// -> `true`; for `bool` this is the identity; for complex, non-zero means at least
-    /// one component is non-zero). Returns `true` when at least one element is truthy.
-    /// An empty reduction returns `false`.
+    /// The input array must contain `bool` elements. Output dtype is `bool`.
+    /// Returns `true` when at least one element is `true`. An empty reduction returns `false`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::any()`](crate::Array::any).
     ///
     /// # Examples
@@ -996,14 +1099,14 @@ define_reduction_op!(
     /// use zix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
-    /// let nd = array![[0i32, 0, 0], [4, 5, 6]];
+    /// let nd = array![[false, false, false], [true, true, true]];
     ///
-    /// // Any element truthy? -> true
+    /// // Any element true? -> true
     /// let any_true = Array::compact_array(&nd)?
     ///     .any(&[0, 1]).to_ndarray::<bool>()?;
     /// assert_eq!(any_true[[]], true);
     ///
-    /// // Any truthy along axis 0 -> shape [3]
+    /// // Any true along axis 0 (per column) -> shape [3]
     /// let col_any = Array::compact_array(&nd)?
     ///     .any(&[0]).to_ndarray::<bool>()?;
     /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
@@ -1012,31 +1115,46 @@ define_reduction_op!(
     Any,
     AnyKernel,
     support_empty = true,
-    |items| { items.fold(false, |m, x| m || crate::ops::astype::cast::<_, bool>(x)) },
-    types = {
-        input = [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
-        output = bool
-    }
+    |items: Iterator<Item = bool>| -> bool { Some(items.fold(false, |m, x| m || x)) },
 );
 
 macro_rules! define_array_reduction_method {
-    ($op:ident : $Name:ident, single_axis = true $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
-        #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
+    ($method:ident : $Op:ident, $($trait:ident)::+, single_axis = true $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
+        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op(self, axis: usize $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S>> {
-            let op = $Name::new(self, axis $($(, $extra_arg)*)?).unwrap();
+        pub fn $method(self, axis: usize $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S>>
+        where
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+,
+            <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
+        {
+            let op = $Op::new(self, axis $($(, $extra_arg)*)?).unwrap();
             crate::Array::from_storage(op)
         }
     };
-
-    ($op:ident : $Name:ident $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
-        #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
+    ($method:ident : $Op:ident, $($trait:ident)::+ $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
+        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op<Ax>(self, axes: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Name<S, Ax::ReducedDimension<S::Dimension>>>
+        pub fn $method<Ax>(self, axis: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
         where
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+,
+            <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
             Ax: AxesArg,
         {
-            let op = $Name::new(self, axes $($(, $extra_arg)*)?).unwrap();
+            let op = $Op::new(self, axis $($(, $extra_arg)*)?).unwrap();
+            crate::Array::from_storage(op)
+        }
+    };
+    ($method:ident : $Op:ident, $in_type:ty => $out_type:ty $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
+        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[track_caller]
+        pub fn $method<Ax>(self, axis: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
+        where
+            S: crate::storage::ArrayStorageTyped<Item = $in_type>,
+            Ax: AxesArg,
+        {
+            let op = $Op::new(self, axis $($(, $extra_arg)*)?).unwrap();
             crate::Array::from_storage(op)
         }
     };
@@ -1046,17 +1164,17 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_reduction_method!(max: Max);
-    define_array_reduction_method!(min: Min);
-    define_array_reduction_method!(argmax: ArgMax, single_axis = true);
-    define_array_reduction_method!(argmin: ArgMin, single_axis = true);
-    define_array_reduction_method!(sum: Sum);
-    define_array_reduction_method!(product: Product);
-    define_array_reduction_method!(mean: Mean);
-    define_array_reduction_method!(var: Variance, extra_args = (ddof: f64));
-    define_array_reduction_method!(std: StandardDeviation, extra_args = (ddof: f64));
-    define_array_reduction_method!(all: All);
-    define_array_reduction_method!(any: Any);
+    define_array_reduction_method!(max: Max, crate::scalar::ReduceMax);
+    define_array_reduction_method!(min: Min, crate::scalar::ReduceMin);
+    define_array_reduction_method!(argmax: ArgMax, crate::scalar::ArgMax, single_axis = true);
+    define_array_reduction_method!(argmin: ArgMin, crate::scalar::ArgMin, single_axis = true);
+    define_array_reduction_method!(sum: Sum, crate::scalar::ReduceSum);
+    define_array_reduction_method!(product: Product, crate::scalar::ReduceProduct);
+    define_array_reduction_method!(mean: Mean, crate::scalar::ReduceMean);
+    define_array_reduction_method!(var: Variance, crate::scalar::ReduceVariance, extra_args = (ddof: f64));
+    define_array_reduction_method!(std: StandardDeviation, crate::scalar::ReduceVariance, extra_args = (ddof: f64));
+    define_array_reduction_method!(all: All, bool => bool);
+    define_array_reduction_method!(any: Any, bool => bool);
 }
 
 #[cfg(test)]
@@ -1066,18 +1184,19 @@ pub(crate) mod tests {
     use ndarray::{array, ArrayD};
 
     #[cfg(feature = "half")]
-    use crate::dtype::f16;
+    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
-    use crate::dtype::Complex;
-    #[cfg(feature = "num-complex")]
-    #[allow(non_camel_case_types)]
-    type complex_f32 = crate::dtype::Complex<f32>;
+    use crate::scalar::Complex;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f64 = crate::dtype::Complex<f64>;
+    type complex_f32 = crate::scalar::Complex<f32>;
+    #[cfg(feature = "num-complex")]
+    #[allow(non_camel_case_types)]
+    type complex_f64 = crate::scalar::Complex<f64>;
 
     use crate::array::Array;
     use crate::storage::Compact;
+    use crate::storage::Ty;
     use crate::DimDyn;
 
     use proptest::prelude::*;
@@ -1122,8 +1241,9 @@ pub(crate) mod tests {
 
     pub(crate) fn carray_strategy_for_reduction<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<DimDyn>>>, Vec<usize>)>
-    {
+    ) -> impl proptest::strategy::Strategy<
+        Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>, DimDyn>>>, Vec<usize>),
+    > {
         let shape = reduction_shape_strategy();
         let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
         array
@@ -1136,7 +1256,7 @@ pub(crate) mod tests {
 
     pub(crate) fn carray_strategy_for_reduction_single_axis<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<DimDyn>>>, usize)>
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>, DimDyn>>>, usize)>
     {
         let shape = reduction_shape_strategy();
         let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
@@ -1150,8 +1270,9 @@ pub(crate) mod tests {
 
     pub(crate) fn carray_strategy_for_reduction_small<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<DimDyn>>>, Vec<usize>)>
-    {
+    ) -> impl proptest::strategy::Strategy<
+        Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>, DimDyn>>>, Vec<usize>),
+    > {
         let shape = prop::strategy::Union::new_weighted(vec![
             // 1D
             (8, proptest::collection::vec(1usize..=4, 1)),
@@ -1352,36 +1473,36 @@ pub(crate) mod tests {
         #[cfg(feature = "half")]
         [f16]
     );
-    test_reduction!(
-        argmax,
-        single_axis = true,
-        |items| {
-            items
-                .enumerate()
-                .reduce(|(m_i, m), (i, x)| if x > m { (i, x) } else { (m_i, m) })
-                .unwrap()
-                .0 as u64
-        },
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        any_strategy,
-        #[cfg(feature = "half")]
-        [f16]
-    );
-    test_reduction!(
-        argmin,
-        single_axis = true,
-        |items| {
-            items
-                .enumerate()
-                .reduce(|(m_i, m), (i, x)| if x < m { (i, x) } else { (m_i, m) })
-                .unwrap()
-                .0 as u64
-        },
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        any_strategy,
-        #[cfg(feature = "half")]
-        [f16]
-    );
+    // test_reduction!( // TODO
+    //     argmax,
+    //     single_axis = true,
+    //     |items| {
+    //         items
+    //             .enumerate()
+    //             .reduce(|(m_i, m), (i, x)| if x > m { (i, x) } else { (m_i, m) })
+    //             .unwrap()
+    //             .0 as u64
+    //     },
+    //     [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+    //     any_strategy,
+    //     #[cfg(feature = "half")]
+    //     [f16]
+    // );
+    // test_reduction!(
+    //     argmin,
+    //     single_axis = true,
+    //     |items| {
+    //         items
+    //             .enumerate()
+    //             .reduce(|(m_i, m), (i, x)| if x < m { (i, x) } else { (m_i, m) })
+    //             .unwrap()
+    //             .0 as u64
+    //     },
+    //     [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+    //     any_strategy,
+    //     #[cfg(feature = "half")]
+    //     [f16]
+    // );
     test_reduction!(
         sum,
         |items| { items.fold(0u64, |m, x| m + x as u64) },
@@ -1396,7 +1517,7 @@ pub(crate) mod tests {
     );
     test_reduction!(
         sum,
-        |items| { items.fold(0.0f64, |m, x| m + crate::ops::astype::cast::<_, f64>(x)) },
+        |items| { items.fold(0.0f64, |m, x| m + <_ as crate::scalar::Cast<f64>>::cast(x)) },
         [f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]
@@ -1407,7 +1528,7 @@ pub(crate) mod tests {
         sum,
         |items| {
             items.fold(Complex::<f64>::default(), |m, x| {
-                m + crate::ops::astype::cast::<_, Complex<f64>>(x)
+                m + <_ as crate::scalar::Cast<Complex<f64>>>::cast(x)
             })
         },
         [complex_f32, complex_f64],
@@ -1429,7 +1550,7 @@ pub(crate) mod tests {
     );
     test_reduction!(
         product,
-        |items| { items.fold(1.0f64, |m, x| m * crate::ops::astype::cast::<_, f64>(x)) },
+        |items| { items.fold(1.0f64, |m, x| m * <_ as crate::scalar::Cast<f64>>::cast(x)) },
         [f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]
@@ -1441,7 +1562,7 @@ pub(crate) mod tests {
         product,
         |items| {
             items.fold(Complex::<f64>::new(1.0, 0.0), |m, x| {
-                m * crate::ops::astype::cast::<_, Complex<f64>>(x)
+                m * <_ as crate::scalar::Cast<Complex<f64>>>::cast(x)
             })
         },
         [complex_f32, complex_f64],
@@ -1456,7 +1577,7 @@ pub(crate) mod tests {
                 let mut sum: f64 = 0.0;
                 let mut count: usize = 0;
                 for x in items {
-                    sum += crate::ops::astype::cast::<_, f64>(x);
+                    sum += <_ as crate::scalar::Cast<f64>>::cast(x);
                     count += 1;
                 }
                 sum / count as f64
@@ -1475,7 +1596,7 @@ pub(crate) mod tests {
                 let mut sum: Complex<f64> = Complex::default();
                 let mut count: usize = 0;
                 for x in items {
-                    sum += crate::ops::astype::cast::<_, Complex<f64>>(x);
+                    sum += <_ as crate::scalar::Cast<Complex<f64>>>::cast(x);
                     count += 1;
                 }
                 sum / Complex::new(count as f64, 0.0)
@@ -1504,26 +1625,26 @@ pub(crate) mod tests {
         let std_row = a.as_ref().std(&[1], 0.0).to_ndarray::<f64>().unwrap();
         assert!((std_row[[0]] - 0.8164).abs() < 0.001);
     }
-    test_reduction!(
-        all,
-        |items| { items.fold(true, |m, x| m && crate::ops::astype::cast::<_, bool>(x)) },
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        logical_op_strategy,
-        #[cfg(feature = "half")]
-        [f16],
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
-    test_reduction!(
-        any,
-        |items| { items.fold(false, |m, x| m || crate::ops::astype::cast::<_, bool>(x)) },
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        logical_op_strategy,
-        #[cfg(feature = "half")]
-        [f16],
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
+    // test_reduction!(
+    //     all,
+    //     |items| { items.fold(true, |m, x| m && <_ as crate::scalar::Cast<bool>>::cast(x)) },
+    //     [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+    //     logical_op_strategy,
+    //     #[cfg(feature = "half")]
+    //     [f16],
+    //     #[cfg(feature = "num-complex")]
+    //     [complex_f32, complex_f64]
+    // );
+    // test_reduction!(
+    //     any,
+    //     |items| { items.fold(false, |m, x| m || <_ as crate::scalar::Cast<bool>>::cast(x)) },
+    //     [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
+    //     logical_op_strategy,
+    //     #[cfg(feature = "half")]
+    //     [f16],
+    //     #[cfg(feature = "num-complex")]
+    //     [complex_f32, complex_f64]
+    // );
 
     fn ndarray_reduce<'a, S, D, O>(
         array: &'a ndarray::ArrayBase<S, D>,

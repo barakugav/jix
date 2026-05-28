@@ -1,114 +1,31 @@
+use std::mem::MaybeUninit;
 use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
-use crate::dtype::{f16, Complex, Dtype, Itemsize};
+use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::ops::common::define_array_op2_method;
-use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::ops::common::{bulk_size2, define_array_op2_method};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped, Ty};
+use crate::util::assert_unchecked_eq;
 
-pub(crate) trait Op2Kernel {
-    fn apply(&self, data: Op2KernelData, input_dtypes: (&Dtype, &Dtype)) -> Result<()>;
-
-    fn output_dtype(&self, input_dtypes: (&Dtype, &Dtype)) -> Result<Dtype>;
-}
-
-pub(crate) struct Op2KernelData<'a> {
-    src_a_data: *const u8,
-    src_b_data: *const u8,
-    dst_data: *mut u8, // potentially an alias to src_a_data or src_b_data
-    nitems: usize,
-    src_a_itemsize: Itemsize,
-    src_b_itemsize: Itemsize,
-    dst_itemsize: Itemsize,
-    phantom: std::marker::PhantomData<&'a ()>,
-}
-#[allow(unused)]
-impl<'a> Op2KernelData<'a> {
-    pub(crate) fn read_as_bytes(&mut self) -> Option<(&[u8], &[u8])> {
-        (self.nitems > 0).then(|| unsafe {
-            (
-                std::slice::from_raw_parts(self.src_a_data, self.src_a_itemsize as usize),
-                std::slice::from_raw_parts(self.src_b_data, self.src_b_itemsize as usize),
-            )
-        })
-    }
-
-    pub(crate) unsafe fn read<T1, T2>(&mut self) -> Option<(T1, T2)> {
-        debug_assert_eq!(self.src_a_itemsize as usize, size_of::<T1>());
-        debug_assert_eq!(self.src_b_itemsize as usize, size_of::<T2>());
-        (self.nitems > 0).then(|| unsafe {
-            (
-                self.src_a_data.cast::<T1>().read(),
-                self.src_b_data.cast::<T2>().read(),
-            )
-        })
-    }
-
-    pub(crate) unsafe fn read_bulk<T1, T2, const N: usize>(
-        &mut self,
-    ) -> Option<([T1; N], [T2; N])> {
-        debug_assert_eq!(self.src_a_itemsize as usize, size_of::<T1>());
-        debug_assert_eq!(self.src_b_itemsize as usize, size_of::<T2>());
-        (self.nitems >= N).then(|| unsafe {
-            (
-                self.src_a_data.cast::<[T1; N]>().read(),
-                self.src_b_data.cast::<[T2; N]>().read(),
-            )
-        })
-    }
-
-    pub(crate) unsafe fn write_bytes(&mut self, data: &[u8]) {
-        assert_eq!(self.dst_itemsize as usize, data.len());
-        assert!(self.nitems > 0);
-        unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), self.dst_data, data.len());
-        }
-        self.nitems -= 1;
-        self.src_a_data = unsafe { self.src_a_data.add(self.src_a_itemsize as usize) };
-        self.src_b_data = unsafe { self.src_b_data.add(self.src_b_itemsize as usize) };
-        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize) };
-    }
-
-    pub(crate) unsafe fn write<T>(&mut self, data: T) {
-        debug_assert_eq!(self.dst_itemsize as usize, size_of::<T>());
-        assert!(self.nitems > 0);
-        unsafe {
-            self.dst_data.cast::<T>().write(data);
-        }
-        self.nitems -= 1;
-        self.src_a_data = unsafe { self.src_a_data.add(self.src_a_itemsize as usize) };
-        self.src_b_data = unsafe { self.src_b_data.add(self.src_b_itemsize as usize) };
-        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize) };
-    }
-
-    pub(crate) unsafe fn write_bulk<T, const N: usize>(&mut self, data: [T; N]) {
-        debug_assert_eq!(self.dst_itemsize as usize, size_of::<T>());
-        assert!(self.nitems >= N);
-        unsafe {
-            self.dst_data.cast::<[T; N]>().write(data);
-        }
-        self.nitems -= N;
-        self.src_a_data = unsafe { self.src_a_data.add(self.src_a_itemsize as usize * N) };
-        self.src_b_data = unsafe { self.src_b_data.add(self.src_b_itemsize as usize * N) };
-        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize * N) };
-    }
-}
-
-pub(crate) struct Op2<Op, S1, S2> {
-    op: Op,
+pub(crate) struct Op2<S1, S2, K> {
     a: Array<S1>,
     b: Array<S2>,
-    output_dtype: Dtype,
+    out_dtype_: Dtype,
+    kernel: K,
 }
-impl<Op, S1, S2> Op2<Op, S1, S2> {
-    pub(crate) fn new(op: Op, a: Array<S1>, b: Array<S2>) -> Result<Self>
+pub(crate) trait Op2Kernel<T1, T2> {
+    type Output;
+    fn apply(&self, a: T1, b: T2) -> Self::Output;
+}
+impl<S1, S2, K> Op2<S1, S2, K> {
+    pub(crate) fn new(a: Array<S1>, b: Array<S2>, kernel: K) -> Result<Self>
     where
-        Op: Op2Kernel,
-        S1: ArrayStorage,
-        S2: ArrayStorage,
+        S1: ArrayStorageTyped,
+        S2: ArrayStorageTyped,
+        K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
     {
-        let output_dtype = op.output_dtype((a.dtype(), b.dtype()))?;
         ensure!(
             a.shape() == b.shape(),
             InvalidArgument,
@@ -117,310 +34,400 @@ impl<Op, S1, S2> Op2<Op, S1, S2> {
             b.shape()
         );
         Ok(Self {
-            op,
-            output_dtype,
             a,
             b,
+            out_dtype_: K::Output::DTYPE,
+            kernel,
         })
     }
 }
-impl<Op, S1, S2> ArrayStorage for Op2<Op, S1, S2>
+
+impl<S1, S2, K> ArrayStorage for Op2<S1, S2, K>
 where
-    Op: Op2Kernel,
-    S1: ArrayStorage,
-    S2: ArrayStorage,
+    S1: ArrayStorageTyped,
+    S2: ArrayStorageTyped,
+    K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
 {
+    type ElementType = Ty<K::Output>;
     type Dimension = S1::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape(), index)?;
-        let nitems = check_get_buffer_size(index, &self.output_dtype, buf)?;
-
-        let (a_dtype, b_dtype, dst_dtype) = (self.a.dtype(), self.b.dtype(), &self.output_dtype);
-        let (src_a_itemsize, src_b_itemsize, dst_itemsize) = (
-            a_dtype.itemsize() as usize,
-            b_dtype.itemsize() as usize,
-            dst_dtype.itemsize() as usize,
-        );
-
-        let a_in_place = src_a_itemsize == dst_itemsize
-            && (buf.as_ptr() as usize).is_multiple_of(a_dtype.alignment().as_usize());
-        let b_in_place = src_b_itemsize == dst_itemsize
-            && (buf.as_ptr() as usize).is_multiple_of(b_dtype.alignment().as_usize());
-        let mut a_tmp_buf;
-        let mut b_tmp_buf;
-        let (a_buf, b_buf, dst) = if a_in_place {
-            b_tmp_buf = context.tmp_buf(nitems * src_b_itemsize, b_dtype.alignment());
-            let b_tmp_buf = b_tmp_buf.as_mut_slice();
-            let ptr = buf.as_mut_ptr();
-            (buf, b_tmp_buf, ptr)
-        } else if b_in_place {
-            a_tmp_buf = context.tmp_buf(nitems * src_a_itemsize, a_dtype.alignment());
-            let a_tmp_buf = a_tmp_buf.as_mut_slice();
-            let dst = buf.as_mut_ptr();
-            (a_tmp_buf, buf, dst)
-        } else {
-            a_tmp_buf = context.tmp_buf(nitems * src_a_itemsize, a_dtype.alignment());
-            let a_tmp_buf = a_tmp_buf.as_mut_slice();
-
-            b_tmp_buf = context.tmp_buf(nitems * src_b_itemsize, b_dtype.alignment());
-            let b_tmp_buf = b_tmp_buf.as_mut_slice();
-
-            (a_tmp_buf, b_tmp_buf, buf.as_mut_ptr())
-        };
-
-        self.a.storage.read_data(index, a_buf, context)?;
-        self.b.storage.read_data(index, b_buf, context)?;
-
-        self.op.apply(
-            Op2KernelData {
-                src_a_data: a_buf.as_ptr(),
-                src_b_data: b_buf.as_ptr(),
-                dst_data: dst,
-                nitems,
-                src_a_itemsize: a_dtype.itemsize(),
-                src_b_itemsize: b_dtype.itemsize(),
-                dst_itemsize: dst_dtype.itemsize(),
-                phantom: std::marker::PhantomData,
-            },
-            (a_dtype, b_dtype),
-        )
+        unsafe {
+            op2_read_data_unchecked::<S1::Item, S2::Item, K::Output>(
+                self.a.shape(),
+                &self.a.storage,
+                &self.b.storage,
+                &self.kernel,
+                index,
+                buf,
+                context,
+            )
+        }
     }
 
     fn shape(&self) -> &[u64] {
-        self.a.shape()
+        let shape = self.a.shape();
+        unsafe { assert_unchecked_eq!(shape, self.b.shape()) };
+        shape
     }
+
     fn dtype(&self) -> &Dtype {
-        &self.output_dtype
+        let dtype = &self.out_dtype_;
+        unsafe { assert_unchecked_eq!(*dtype, K::Output::DTYPE) };
+        dtype
     }
+
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         self.a.storage._spec()
     }
 }
 
+pub(crate) unsafe fn op2_read_data_unchecked<T1, T2, Out>(
+    shape: &[u64],
+    a: &impl ArrayStorage,
+    b: &impl ArrayStorage,
+    kernel: &impl Op2Kernel<T1, T2, Output = Out>,
+    index: &[Range<u64>],
+    buf: &mut [u8],
+    context: &ReadContext,
+) -> Result<()>
+where
+    T1: Dtyped,
+    T2: Dtyped,
+    Out: Dtyped,
+{
+    let bulk_size = bulk_size2::<T1, T2>();
+    assert!(bulk_size.is_power_of_two());
+
+    // this is a compile time check, the compiler knows the value of `bulk_size2::<T1, T2>()`
+    let read_fn = match bulk_size {
+        1 => op2_read_data_unchecked_impl::<T1, T2, Out, 1>,
+        2 => op2_read_data_unchecked_impl::<T1, T2, Out, 2>,
+        4 => op2_read_data_unchecked_impl::<T1, T2, Out, 4>,
+        8 => op2_read_data_unchecked_impl::<T1, T2, Out, 8>,
+        16 => op2_read_data_unchecked_impl::<T1, T2, Out, 16>,
+        32 => op2_read_data_unchecked_impl::<T1, T2, Out, 32>,
+        64 => op2_read_data_unchecked_impl::<T1, T2, Out, 64>,
+        128 => op2_read_data_unchecked_impl::<T1, T2, Out, 128>,
+        256 => op2_read_data_unchecked_impl::<T1, T2, Out, 256>,
+        512 => op2_read_data_unchecked_impl::<T1, T2, Out, 512>,
+        _ => op2_read_data_unchecked_impl::<T1, T2, Out, 1024>,
+    };
+    unsafe { read_fn(shape, a, b, kernel, index, buf, context) }
+}
+unsafe fn op2_read_data_unchecked_impl<T1, T2, Out, const BULK: usize>(
+    shape: &[u64],
+    a: &impl ArrayStorage,
+    b: &impl ArrayStorage,
+    kernel: &impl Op2Kernel<T1, T2, Output = Out>,
+    index: &[Range<u64>],
+    buf: &mut [u8],
+    context: &ReadContext,
+) -> Result<()>
+where
+    T1: Dtyped,
+    T2: Dtyped,
+    Out: Dtyped,
+{
+    check_get_range(shape, index)?;
+    let (a_dtype, b_dtype, out_dtype) = (T1::DTYPE, T2::DTYPE, Out::DTYPE);
+    let nitems = check_get_buffer_size(index, &out_dtype, buf)?;
+
+    let (src_a_itemsize, src_b_itemsize, dst_itemsize) = (
+        a_dtype.itemsize() as usize,
+        b_dtype.itemsize() as usize,
+        out_dtype.itemsize() as usize,
+    );
+
+    let a_in_place = src_a_itemsize == dst_itemsize
+        && (buf.as_ptr() as usize).is_multiple_of(a_dtype.alignment().as_usize());
+    let b_in_place = src_b_itemsize == dst_itemsize
+        && (buf.as_ptr() as usize).is_multiple_of(b_dtype.alignment().as_usize());
+    let mut a_tmp_buf;
+    let mut b_tmp_buf;
+    let (a_buf, b_buf, dst) = if a_in_place {
+        b_tmp_buf = context.tmp_buf(nitems * src_b_itemsize, b_dtype.alignment());
+        let b_tmp_buf = b_tmp_buf.as_mut_slice();
+        let ptr = buf.as_mut_ptr();
+        (buf, b_tmp_buf, ptr)
+    } else if b_in_place {
+        a_tmp_buf = context.tmp_buf(nitems * src_a_itemsize, a_dtype.alignment());
+        let a_tmp_buf = a_tmp_buf.as_mut_slice();
+        let dst = buf.as_mut_ptr();
+        (a_tmp_buf, buf, dst)
+    } else {
+        a_tmp_buf = context.tmp_buf(nitems * src_a_itemsize, a_dtype.alignment());
+        let a_tmp_buf = a_tmp_buf.as_mut_slice();
+
+        b_tmp_buf = context.tmp_buf(nitems * src_b_itemsize, b_dtype.alignment());
+        let b_tmp_buf = b_tmp_buf.as_mut_slice();
+
+        (a_tmp_buf, b_tmp_buf, buf.as_mut_ptr())
+    };
+
+    unsafe { assert_unchecked_eq!(a_dtype, *a.dtype()) };
+    unsafe { assert_unchecked_eq!(shape, a.shape()) };
+    a.read_data(index, a_buf, context)?;
+    unsafe { assert_unchecked_eq!(b_dtype, *b.dtype()) };
+    unsafe { assert_unchecked_eq!(shape, b.shape()) };
+    b.read_data(index, b_buf, context)?;
+
+    let mut src_a_data = a_buf.as_ptr().cast::<T1>();
+    let mut src_b_data = b_buf.as_ptr().cast::<T2>();
+    let mut dst_data = dst.cast::<Out>();
+    let mut nitems = nitems;
+    unsafe {
+        while nitems >= BULK {
+            let src_a = src_a_data.cast::<[T1; BULK]>().read();
+            let src_b = src_b_data.cast::<[T2; BULK]>().read();
+            let dst = &mut *dst_data.cast::<[MaybeUninit<Out>; BULK]>();
+            for i in 0..BULK {
+                dst[i].write(kernel.apply(src_a[i], src_b[i]));
+            }
+            nitems -= BULK;
+            src_a_data = src_a_data.add(BULK);
+            src_b_data = src_b_data.add(BULK);
+            dst_data = dst_data.add(BULK);
+        }
+        while nitems > 0 {
+            let src_a = src_a_data.read();
+            let src_b = src_b_data.read();
+            dst_data.write(kernel.apply(src_a, src_b));
+            nitems -= 1;
+            src_a_data = src_a_data.add(1);
+            src_b_data = src_b_data.add(1);
+            dst_data = dst_data.add(1);
+        }
+    }
+    Ok(())
+}
+
 macro_rules! define_op2 {
     (
         $(#[$meta:meta])*
-        $Name:ident,
-        $NameKernel:ident,
-        core_op = ($op_trait:ident, $op_fn:ident),
-        $($kernel_args:tt)*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
+        $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
-        define_op2!(
-            $(#[$meta])*
-            $Name,
-            $NameKernel,
-            $($kernel_args)*
+        define_op2!(@kernel_dispatch
+            $Kernel,
+            $($trait)::+,
+            $kernel_fn,
+            ($($call_args)*),
+            type Output = <T1 as $($trait)::+<T2>>::Output,
         );
-
-        impl<S1, S2> core::ops::$op_trait<Array<S2>> for Array<S1>
-        where
-            S1: ArrayStorage,
-            S2: ArrayStorage,
-        {
-            type Output = Array<$Name<S1, S2>>;
-            #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
-            #[track_caller]
-            fn $op_fn(self, b: Array<S2>) -> Array<$Name<S1, S2>> {
-                let op = $Name::new(self, b).unwrap();
-                Array::from_storage(op)
+        $(#[$meta])*
+        pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
+        impl<S1, S2> $Op<S1, S2> {
+            pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
+            where
+                S1: crate::storage::ArrayStorageTyped,
+                S2: crate::storage::ArrayStorageTyped,
+                S1::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
+            {
+                Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel)?))
             }
         }
-
-        impl<S, T> core::ops::$op_trait<T> for Array<S>
+        impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
-            S: ArrayStorage,
-            T: crate::dtype::Dtyped,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped,
+            S1::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
-            type Output = Array<$Name<S, crate::storage::Scalar<T, S::Dimension>>>;
-            #[doc = concat!("Applies the [`", stringify!($Name), "`] operation by broadcasting the scalar, see the op struct docs for details.")]
-            #[track_caller]
-            fn $op_fn(self, b: T) -> Array<$Name<S, crate::storage::Scalar<T, S::Dimension>>> {
-                let shape = <S::Dimension as crate::Dimension>::from_slice(self.shape()).unwrap();
-                let b = Array::plain_scalar(b, shape).unwrap();
-                let op = $Name::new(self, b).unwrap();
-                Array::from_storage(op)
-            }
+            type ElementType = crate::storage::Ty<<S1::Item as $($trait)::+<S2::Item>>::Output>;
+            type Dimension = S1::Dimension;
+            crate::storage::impl_array_storage_forward!();
         }
+        define_op2!(@define_core
+            impl $Op
+            $(core_op = $core_op_trait::$core_op_fn,)?
+        );
     };
 
     (
         $(#[$meta:meta])*
-        $Name:ident,
-        $NameKernel:ident,
-        $($kernel_args:tt)*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident ($($call_args:tt)*),
+        type Output = $output_type:ty,
     ) => {
+        define_op2!(@kernel_dispatch
+            $Kernel,
+            $($trait)::+,
+            $kernel_fn,
+            ($($call_args)*),
+            type Output = $output_type,
+        );
         $(#[$meta])*
-        pub struct $Name<S1, S2>(crate::ops::op2::Op2<$NameKernel, S1, S2>);
-        impl<S1, S2> $Name<S1, S2> {
-            /// Creates a new view storage applying the operation element-wise to arrays `a` and `b`.
-            ///
-            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
-            pub fn new(a: crate::Array<S1>, b: crate::Array<S2>) -> crate::error::Result<Self>
+        pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
+        impl<S1, S2> $Op<S1, S2> {
+            pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
             where
-                S1: crate::storage::ArrayStorage,
-                S2: crate::storage::ArrayStorage,
+                S1: crate::storage::ArrayStorageTyped,
+                S2: crate::storage::ArrayStorageTyped,
+                S1::Item: $($trait)::+<S2::Item>,
             {
-                Ok(Self(crate::ops::op2::Op2::new($NameKernel, a, b)?))
+                Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel)?))
             }
         }
-
-
-        impl<S1, S2> crate::storage::ArrayStorage for $Name<S1, S2>
+        impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
-            S1: crate::storage::ArrayStorage,
-            S2: crate::storage::ArrayStorage,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped,
+            S1::Item: $($trait)::+<S2::Item>,
         {
+            type ElementType = crate::storage::Ty<$output_type>;
             type Dimension = S1::Dimension;
-
             crate::storage::impl_array_storage_forward!();
         }
-
-        crate::ops::op2::define_op2_kernel!($NameKernel, $($kernel_args)*);
     };
-}
-macro_rules! define_op2_kernel {
+
+    // @kernel_dispatch: parse the call convention from the args and forward to @kernel.
+    // Handles `(a, b)` (value) and `(&a, &b)` (ref-to-value) calling conventions,
+    // extracting the ident names so @kernel can use them as both parameter names and
+    // call args (ensuring macro hygiene is consistent).
     (
-        $NameKernel:ident,
-        |$a:ident, $b:ident| $body:expr,
-        [$($scalar:tt),* $(,)?],
-        output_type = "same"
+        @kernel_dispatch
+        $Kernel:ident,
+        $($trait:ident)::+,
+        $kernel_fn:ident,
+        ($a:ident, $b:ident),
+        type Output = $output_type:ty,
     ) => {
-        crate::ops::op2::define_op2_kernel!(
-            $NameKernel,
-            |$a, $b| $body,
-            [$($scalar => $scalar),*]
+        define_op2!(@kernel
+            $Kernel, $($trait)::+, $kernel_fn,
+            $a, $b, ($a, $b),
+            type Output = $output_type,
+        );
+    };
+    (
+        @kernel_dispatch
+        $Kernel:ident,
+        $($trait:ident)::+,
+        $kernel_fn:ident,
+        (&$a:ident, &$b:ident),
+        type Output = $output_type:ty,
+    ) => {
+        define_op2!(@kernel
+            $Kernel, $($trait)::+, $kernel_fn,
+            $a, $b, (&$a, &$b),
+            type Output = $output_type,
         );
     };
 
+    // @kernel: generates the kernel struct + Op2Kernel impl.
+    // $a and $b are the parameter ident names (same hygiene context as $($call_args)*).
     (
-        $NameKernel:ident,
-        |$a:ident, $b:ident| $body:expr,
-        [$($scalar:tt),* $(,)?],
-        output_type = $output_type:tt
+        @kernel
+        $Kernel:ident, $($trait:ident)::+, $kernel_fn:ident,
+        $a:ident, $b:ident, ($($call_args:tt)*),
+        type Output = $output_type:ty,
     ) => {
-        crate::ops::op2::define_op2_kernel!(
-            $NameKernel,
-            |$a, $b| $body,
-            [$($scalar => $output_type),*]
-        );
-    };
-
-    (
-        $NameKernel:ident,
-        |$a:ident, $b:ident| $body:expr,
-        [$($input_type:tt => $output_type:tt),* $(,)?]
-    ) => {
-        struct $NameKernel;
-        impl crate::ops::op2::Op2Kernel for $NameKernel {
-            fn apply(
-                &self,
-                mut data: crate::ops::op2::Op2KernelData,
-                input_dtypes: (&crate::dtype::Dtype, &crate::dtype::Dtype),
-            ) -> crate::error::Result<()> {
-                macro_rules! apply_loop_impl {
-                    ($input_type2:ty, $output_type2:ty) => {{
-                        unsafe {
-                            use crate::ops::common::BulkInfo;
-                            while let Some((src_a, src_b)) = data.read_bulk::<$input_type2, $input_type2, { <$input_type2>::BULK }>() {
-                                let mut dst: [std::mem::MaybeUninit<$output_type2>; <$input_type2>::BULK]
-                                    = std::mem::transmute(std::mem::MaybeUninit::<[$output_type2; <$input_type2>::BULK]>::uninit());
-                                for i in 0..<$input_type2>::BULK {
-                                    dst[i].write({
-                                        let $a = src_a[i];
-                                        let $b = src_b[i];
-                                        $body
-                                    });
-                                }
-                                data.write_bulk(dst);
-                            }
-                            while let Some((src_a, src_b)) = data.read::<$input_type2, $input_type2>() {
-                                let mut dst = std::mem::MaybeUninit::<$output_type2>::uninit();
-                                dst.write({
-                                    let $a = src_a;
-                                    let $b = src_b;
-                                    $body
-                                });
-                                data.write(dst);
-                            }
-                        }
-                        return Ok(());
-                    }};
-                }
-                macro_rules! apply_loop {
-                    (f16, $output_type2:ty) => {
-                        #[cfg(feature = "half")]
-                        apply_loop_impl!(f16, $output_type2)
-                    };
-                    ((Complex<f32>), $output_type2:ty) => {
-                        #[cfg(feature = "num-complex")]
-                        apply_loop_impl!(crate::dtype::Complex<f32>, $output_type2)
-                    };
-                    ((Complex<f64>), $output_type2:ty) => {
-                        #[cfg(feature = "num-complex")]
-                        apply_loop_impl!(crate::dtype::Complex<f64>, $output_type2)
-                    };
-                    ($input_type2:ty, $output_type2:ty) => {
-                        apply_loop_impl!($input_type2, $output_type2)
-                    };
-                }
-
-                debug_assert_eq!(input_dtypes.0, input_dtypes.1);
-                let input_dtype = input_dtypes.0;
-
-                #[allow(unused_parens)]
-                match input_dtype.try_to_scalar() {
-                    $(Some(crate::ops::common::scalar_kind!($input_type)) => {
-                        apply_loop!($input_type, $output_type)
-                    },)*
-                    _ => {}
-                }
-                crate::error::bail!(
-                    UnsupportedDtype,
-                    "Op2<{}> not supported for dtype {input_dtype:#?}",
-                    stringify!($NameKernel)
-                );
+        struct $Kernel;
+        impl<T1, T2> crate::ops::op2::Op2Kernel<T1, T2> for $Kernel
+        where
+            T1: $($trait)::+<T2>,
+        {
+            type Output = $output_type;
+            fn apply(&self, $a: T1, $b: T2) -> Self::Output {
+                <T1 as $($trait)::+<T2>>::$kernel_fn($($call_args)*)
             }
+        }
+    };
 
-            fn output_dtype(
-                &self,
-                input_dtypes: (&crate::dtype::Dtype, &crate::dtype::Dtype),
-            ) -> crate::error::Result<crate::dtype::Dtype> {
-                let (a_dtype, b_dtype) = input_dtypes;
-                crate::error::ensure!(
-                    a_dtype == b_dtype,
-                    UnsupportedDtype,
-                    "Op2<{}> dtype mismatch: `a` has dtype {a_dtype:#?} but `b` has dtype {b_dtype:#?}",
-                    stringify!($NameKernel)
-                );
+    (
+        @define_core
+        impl $Op:ident
+    ) => {};
+    (
+        @define_core
+        impl $Op:ident
+        core_op = $core_op_trait:ident::$core_op_fn:ident,
+    ) => {
+        impl<S1, S2> core::ops::$core_op_trait<Array<S2>> for Array<S1>
+        where
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped,
+            S1::Item: core::ops::$core_op_trait<S2::Item, Output: crate::dtype::Dtyped>,
+        {
+            type Output = Array<$Op<S1, S2>>;
+            #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+            #[track_caller]
+            fn $core_op_fn(self, b: Array<S2>) -> Self::Output {
+                let op = $Op::new(self, b).unwrap();
+                Array::from_storage(op)
+            }
+        }
 
-                let input_dtype = a_dtype;
-
-                #[allow(unused_parens)]
-                match input_dtype.try_to_scalar() {
-                    $(Some(crate::ops::common::scalar_kind!($input_type)) => {
-                        return Ok(<$output_type as crate::dtype::Dtyped>::DTYPE);
-                    },)*
-                    _ => {},
-
-                };
-                crate::error::bail!(
-                    UnsupportedDtype,
-                    "Op2<{}> not supported for dtype {input_dtype:#?}",
-                    stringify!($NameKernel)
-                );
+        impl<S1, T2> core::ops::$core_op_trait<T2> for Array<S1>
+        where
+            S1: crate::storage::ArrayStorageTyped,
+            T2: crate::dtype::Dtyped,
+            S1::Item: core::ops::$core_op_trait<T2, Output: crate::dtype::Dtyped>,
+        {
+            type Output = Array<$Op<S1, crate::storage::Scalar<T2, S1::Dimension>>>;
+            #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+            #[track_caller]
+            fn $core_op_fn(self, b: T2) -> Self::Output {
+                let shape = <S1::Dimension as crate::Dimension>::from_slice(self.shape()).unwrap();
+                let b = Array::plain_scalar(b, shape).unwrap();
+                let op = $Op::new(self, b).unwrap();
+                Array::from_storage(op)
             }
         }
     };
 }
 
-pub(crate) use {define_op2, define_op2_kernel};
+macro_rules! define_op2_rhs_fixed {
+    (
+        $(#[$meta:meta])*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident ($a:ident, $b:ident),
+        rhs = $rhs:ty,
+        type Output<T1> = $output_type_t:ty,
+        type Output<S1> = $output_type_s:ty,
+    ) => {
+        struct $Kernel;
+        impl<T1> crate::ops::op2::Op2Kernel<T1, $rhs> for $Kernel
+        where
+            T1: $($trait)::+,
+        {
+            type Output = $output_type_t;
+            fn apply(&self, $a: T1, $b: $rhs) -> Self::Output {
+                <T1 as $($trait)::+>::$kernel_fn($a, $b)
+            }
+        }
+        $(#[$meta])*
+        pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
+        impl<S1, S2> $Op<S1, S2> {
+            pub fn new(a: Array<S1>, b: Array<S2>) -> crate::error::Result<Self>
+            where
+                S1: crate::storage::ArrayStorageTyped,
+                S2: crate::storage::ArrayStorageTyped<Item = $rhs>,
+                S1::Item: $($trait)::+
+            {
+                Ok(Self(crate::ops::op2::Op2::new(a, b, $Kernel)?))
+            }
+        }
+        impl<S1, S2> ArrayStorage for $Op<S1, S2>
+        where
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Item = $rhs>,
+            S1::Item: $($trait)::+
+        {
+            type ElementType = crate::storage::Ty<$output_type_s>;
+            type Dimension = S1::Dimension;
+            crate::storage::impl_array_storage_forward!();
+        }
+    };
+}
+
+pub(crate) use {define_op2, define_op2_rhs_fixed};
+
 define_op2!(
     /// Element-wise addition of two arrays.
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Both arrays must have
-    /// the same dtype. Output dtype and shape equal the input.
     ///
     /// For **integer** types the result wraps on overflow (two's complement).
     /// For **complex** types each component is added independently:
@@ -448,17 +455,11 @@ define_op2!(
     /// ```
     Add,
     AddKernel,
-    core_op = (Add, add),
-    |a, b| a + b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
-    output_type = "same"
+    <core::ops::Add>::add(a, b),
+    core_op = Add::add,
 );
 define_op2!(
     /// Element-wise subtraction of two arrays (`a - b`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Both arrays must have
-    /// the same dtype. Output dtype and shape equal the input.
     ///
     /// For **integer** types the result wraps on underflow (two's complement).
     /// For **complex** types each component is subtracted independently:
@@ -486,17 +487,11 @@ define_op2!(
     /// ```
     Sub,
     SubKernel,
-    core_op = (Sub, sub),
-    |a, b| a - b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
-    output_type = "same"
+    <core::ops::Sub>::sub(a, b),
+    core_op = Sub::sub,
 );
 define_op2!(
     /// Element-wise multiplication of two arrays.
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Both arrays must have
-    /// the same dtype. Output dtype and shape equal the input.
     ///
     /// For **integer** types the result wraps on overflow (two's complement).
     /// For **complex** types this is full complex multiplication:
@@ -524,17 +519,12 @@ define_op2!(
     /// ```
     Mul,
     MulKernel,
-    core_op = (Mul, mul),
-    |a, b| a * b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
-    output_type = "same"
+    <core::ops::Mul>::mul(a, b),
+    core_op = Mul::mul,
 );
+
 define_op2!(
     /// Element-wise division of two arrays (`a / b`).
-    ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Both arrays must have
-    /// the same dtype. Output dtype and shape equal the input.
     ///
     /// For **integer** types the result is truncating (rounds towards zero); dividing
     /// by zero panics in debug builds and the result is implementation-defined in release.
@@ -563,66 +553,59 @@ define_op2!(
     /// ```
     Div,
     DivKernel,
-    core_op = (Div, div),
-    |a, b| a / b,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
-    output_type = "same"
+    <core::ops::Div>::div(a, b),
+    core_op = Div::div,
 );
 define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
-    ///
-    /// Negative base with a non-integer exponent produces `NaN`.
+    /// A negative base with a non-integer exponent produces `NaN`.
     /// Semantics follow [`f32::powf`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
-    /// [`Array::powf()`](crate::Array::powf).
+    /// This struct is the bare storage implementation, the operation is also available as
+    /// [`Array::pow()`](crate::Array::pow).
     ///
     /// # Examples
     /// ```
-    /// use zix::{Array, ArrayParams};
-    /// use zix::ops::Power;
+    /// use zix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![2.0f32, 3.0, 4.0])?;
     /// let b = Array::compact_array(&array![3.0f32, 2.0, 0.5])?;
-    /// let result = a.powf(b).to_ndarray::<f32>()?;
+    /// let result = a.pow(b).to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[8.0, 9.0, 2.0]);
     ///
-    /// // Raise each element to a scalar exponent by broadcasting a scalar array.
+    /// // Raise each element to a scalar exponent.
     /// let a = Array::compact_array(&array![2.0f32, 3.0, 4.0])?;
     /// let exp = Array::plain_scalar(2.0f32, &[3])?;
-    /// let result = a.powf(exp).to_ndarray::<f32>()?;
+    /// let result = a.pow(exp).to_ndarray::<f32>()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4.0, 9.0, 16.0]);
     /// # Ok::<(), zix::Error>(())
     /// ```
-    Power,
-    PowerKernel,
-    |a, b| a.powf(b),
-    [f32, f64],
-    output_type = "same"
+    Pow,
+    PowKernel,
+    <num_traits::Pow>::pow(a, b),
 );
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op2_method!(powf: Power);
+    define_array_op2_method!(pow: Pow, num_traits::Pow);
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     #[cfg(feature = "half")]
-    use crate::dtype::f16;
+    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f32 = crate::dtype::Complex<f32>;
+    type complex_f32 = crate::scalar::Complex<f32>;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f64 = crate::dtype::Complex<f64>;
+    type complex_f64 = crate::scalar::Complex<f64>;
 
     macro_rules! test_op2_dtype {
         ($op_method:ident, |$a:ident, $b:ident| $body:expr, $dtype:ident, $strategy:ident) => {

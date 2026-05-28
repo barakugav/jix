@@ -79,12 +79,14 @@ pub struct InsertAxis<S, D> {
     /// (length 1, no corresponding input dimension).
     is_inserted: DimArray<bool>,
 
-    dtype: Dtype,
     shape: D,
     blocks_layout: BlocksLayout,
 }
 
-impl<S, D> InsertAxis<S, D> {
+impl<S, D> InsertAxis<S, D>
+where
+    S: ArrayStorage,
+{
     /// Constructs an `InsertAxis` storage. See [`InsertAxis`] for semantics and examples.
     pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
     where
@@ -160,11 +162,9 @@ impl<S, D> InsertAxis<S, D> {
         b_layout.block_shape_tag = tag;
         b_layout.preferred_read_shape = preferred;
 
-        let dtype = array.dtype().clone();
         Ok(Self {
             array,
             is_inserted,
-            dtype,
             shape,
             blocks_layout: b_layout,
         })
@@ -176,6 +176,7 @@ where
     S: ArrayStorage,
     D: Dimension,
 {
+    type ElementType = S::ElementType;
     type Dimension = D;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
@@ -208,7 +209,7 @@ where
         self.shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.array.dtype()
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -226,21 +227,21 @@ mod tests {
     use crate::array::Array;
     use crate::codec::ReadContext;
     use crate::ops::InsertAxis;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{DimDyn, NDIM_MAX};
 
-    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<DimDyn>> {
+    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<DimDyn>> {
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<DimDyn>> {
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
@@ -424,7 +425,11 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn insert_axes_strategy<T>() -> impl proptest::strategy::Strategy<
-        Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<usize>),
+        Value = (
+            ndarray::ArrayD<T>,
+            Array<Compact<Ty<T>, DimDyn>>,
+            Vec<usize>,
+        ),
     >
     where
         T: ScalarStrategy,

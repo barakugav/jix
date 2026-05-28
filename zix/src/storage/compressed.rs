@@ -16,7 +16,7 @@ use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout, ElementType};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
@@ -29,48 +29,55 @@ use crate::Dimension;
 /// compressed. All compressed bytes are held in a heap-allocated buffer owned by
 /// this struct.
 ///
-/// `Compact<D>` is generic over `D: Dimension`, which tracks the number of axes at the type
-/// level:
+/// `Compact<ET, D>` has two type parameters:
 ///
-/// - **`Compact<Dim<N>>`** — the compiler knows the array is N-dimensional. Produced when the
-///   source ndarray has a statically-known dimension: `Array::compact_array(&ndarray::Array2<f32>)`
-///   returns `Array<Compact<Dim<2>>>`.
-/// - **`Compact<DimDyn>`** — the ndim is only known at runtime. Arrays read from files or
-///   memory-mapped sources always return `Compact<DimDyn>`.
+/// - **`ET: ElementType`** — compile-time element type, either [`Ty<Scalar>`](crate::storage::Ty)
+///   (element type known at compile time) or [`TypeDyn`](crate::storage::TypeDyn) (runtime only).
+///   Arrays constructed from typed sources carry `Ty<_>` automatically; arrays loaded from disk
+///   carry `TypeDyn`.
 ///
-/// Use [`Array::swap_dim`](crate::Array::swap_dim) to change `D` in-place for a `Compact` array
-/// (e.g. `DimDyn` → `Dim<N>`), or [`Array::into_dim`](crate::Array::into_dim) for a
-/// wrapper-based conversion that works on any storage.
+/// - **`D: Dimension`** — compile-time dimension, either [`Dim<N>`](crate::Dim) (statically known
+///   ndim) or [`DimDyn`](crate::DimDyn) (runtime only).
+///
+/// Use [`Array::swap_dim`](crate::Array::swap_dim) to convert between `D` variants in-place, or
+/// [`Array::into_typed`](crate::Array::into_typed) to assert a concrete element type and go from
+/// `TypeDyn` to `Ty<T>`.
 ///
 /// Created by [`Array::compact_array`](crate::Array::compact_array), [`Array::copy`](crate::Array::copy)
 /// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
-pub struct Compact<D>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, D>);
+pub struct Compact<ET, D>(
+    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, ET, D>,
+);
 
 /// Borrowed, block-compressed nd-array storage.
 ///
 /// Same layout as [`Compact`] but borrows its compressed bytes from an existing byte slice
 /// instead of owning them. Used internally when constructing temporary views into a
 /// pre-encoded buffer.
-pub struct CompactBorrowed<'a, D>(
-    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>, D>,
+pub struct CompactBorrowed<'a, ET, D>(
+    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Borrowed<'a>, ET, D>,
 );
 
 /// Memory-mapped, block-compressed nd-array storage.
 ///
 /// Same layout as [`Compact`] but the compressed bytes are served from a memory-mapped file.
 /// The OS pages data into memory on demand, avoiding a full file read at open time.
-/// Arrays loaded this way always carry `CompactMmap<DimDyn>` because the ndim is determined
-/// from the file header at runtime. The `D` parameter carries the same dimension semantics as in
-/// [`Compact<D>`].
+/// Arrays loaded via mmap always start as `CompactMmap<TypeDyn, DimDyn>` because both the
+/// element type and ndim are read from the file header at runtime. The `T` and `D` parameters
+/// carry the same semantics as in [`Compact<ET, D>`](Compact).
 ///
 /// Created by [`Array::read_from_file_mmap`](crate::Array::read_from_file_mmap).
-pub struct CompactMmap<D>(pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, D>);
+pub struct CompactMmap<ET, D>(
+    pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET, D>,
+);
 macro_rules! impl_array_storage {
-    ($ty:ident < $($lt:lifetime,)? D >) => {
-        impl<$($lt,)? D> ArrayStorage for $ty<$($lt,)? D>
+    ($ty:ident < $($lt:lifetime,)? ET, D >) => {
+        impl<$($lt,)? ET, D> ArrayStorage for $ty<$($lt,)? ET, D>
         where
+            ET: crate::storage::ElementType,
             D: crate::Dimension,
         {
+            type ElementType = ET;
             type Dimension = D;
 
             fn read_data(
@@ -98,7 +105,7 @@ macro_rules! impl_array_storage {
                 }
             }
 
-            fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::Dimension>> {
+            fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
                 Some(CompactBorrowed(ArrayBlockTableStorageBase {
                     blocks: self.0.blocks.as_ref(),
                     shape: self.0.shape.clone(),
@@ -112,21 +119,34 @@ macro_rules! impl_array_storage {
             }
         }
 
-        impl<$($lt,)? D> crate::storage::SwapDimInplace for $ty<$($lt,)? D>
-        where D:
-            crate::Dimension
+        impl<$($lt,)? ET, D> crate::ops::SwapElementTypeInplace for $ty<$($lt,)? ET, D>
+        where
+            ET: crate::storage::ElementType,
+            D: crate::Dimension,
         {
-            type SwapDimension<NewD: Dimension> = $ty<$($lt,)? NewD>;
+            type SwapElementType<NewET: ElementType> = $ty<$($lt,)? NewET, D>;
 
-            fn swap_dim<NewD: Dimension>(self) -> Option<Self::SwapDimension<NewD>> {
-                Some($ty(self.0.swap_dim()?))
+            fn swap_element_type<NewET: ElementType>(self) -> Result<Self::SwapElementType<NewET>> {
+                Ok($ty(self.0.swap_element_type()?))
+            }
+        }
+
+        impl<$($lt,)? ET, D> crate::ops::SwapDimInplace for $ty<$($lt,)? ET, D>
+        where
+            ET: crate::storage::ElementType,
+            D: crate::Dimension,
+        {
+            type SwapDimension<NewD: Dimension> = $ty<$($lt,)? ET, NewD>;
+
+            fn swap_dim<NewD: Dimension>(self) -> Result<Self::SwapDimension<NewD>> {
+                Ok($ty(self.0.swap_dim()?))
             }
         }
     };
 }
-impl_array_storage!(Compact<D>);
-impl_array_storage!(CompactBorrowed<'a, D>);
-impl_array_storage!(CompactMmap<D>);
+impl_array_storage!(Compact<ET, D>);
+impl_array_storage!(CompactBorrowed<'a, ET, D>);
+impl_array_storage!(CompactMmap<ET, D>);
 
 /// Nd-array layer on top of [`BlockTable<S>`](crate::storage::block::BlockTable).
 ///
@@ -142,11 +162,11 @@ impl_array_storage!(CompactMmap<D>);
 ///
 /// `encoder_params` and `decoder_params` are kept here - not in `BlockTable` - so that
 /// `ArrayStorage::spec` can propagate them through lazy view operations and `copy_with`.
-pub(crate) struct ArrayBlockTableStorageBase<S, D>
+pub(crate) struct ArrayBlockTableStorageBase<S, ET, D>
 where
     S: BlockTableStorage,
 {
-    pub(crate) blocks: BlockTable<S>,
+    pub(crate) blocks: BlockTable<S, ET>,
     shape: D,
 
     blocks_layout: BlocksLayout,
@@ -156,7 +176,7 @@ where
     encoder_params: EncoderParams,
     decoder_params: DecoderParams,
 }
-impl<S, D> ArrayBlockTableStorageBase<S, D>
+impl<S, ET, D> ArrayBlockTableStorageBase<S, ET, D>
 where
     S: BlockTableStorage,
 {
@@ -165,7 +185,7 @@ where
     /// `blocks_layout.block_shape_hint` must match the block geometry already encoded in
     /// `blocks`. `block_grid_shape` is derived from `shape` and the block shape.
     pub(crate) fn new(
-        blocks: BlockTable<S>,
+        blocks: BlockTable<S, ET>,
         shape: D,
         blocks_layout: BlocksLayout,
         encoder_params: EncoderParams,
@@ -240,6 +260,7 @@ where
     ///      respecting both strides.
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>
     where
+        ET: ElementType,
         D: Dimension,
     {
         let shape = self.shape();
@@ -338,12 +359,28 @@ where
         Ok(())
     }
 
-    pub(crate) fn swap_dim<NewD: Dimension>(self) -> Option<ArrayBlockTableStorageBase<S, NewD>>
+    pub(crate) fn swap_element_type<NewET: ElementType>(
+        self,
+    ) -> Result<ArrayBlockTableStorageBase<S, NewET, D>>
+    where
+        ET: ElementType,
+    {
+        Ok(ArrayBlockTableStorageBase {
+            blocks: self.blocks.swap_element_type()?,
+            shape: self.shape,
+            blocks_layout: self.blocks_layout,
+            block_grid_shape: self.block_grid_shape,
+            encoder_params: self.encoder_params,
+            decoder_params: self.decoder_params,
+        })
+    }
+
+    pub(crate) fn swap_dim<NewD: Dimension>(self) -> Result<ArrayBlockTableStorageBase<S, ET, NewD>>
     where
         D: Dimension,
     {
         let shape = NewD::from_slice(self.shape())?;
-        Some(ArrayBlockTableStorageBase {
+        Ok(ArrayBlockTableStorageBase {
             blocks: self.blocks,
             shape,
             blocks_layout: self.blocks_layout,

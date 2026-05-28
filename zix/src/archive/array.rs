@@ -11,12 +11,12 @@ use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, CompactMmap,
+    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, CompactMmap, TypeDyn,
 };
 use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
 use crate::{Array, ArrayParams, DimDyn, Dimension};
 
-impl Array<Compact<DimDyn>> {
+impl Array<Compact<TypeDyn, DimDyn>> {
     /// Load a compressed array from a `.zix` file, allocating storage on the heap.
     ///
     /// This is the most common way to read an array that was previously saved with
@@ -147,7 +147,7 @@ impl Array<Compact<DimDyn>> {
     }
 }
 
-impl Array<CompactMmap<DimDyn>> {
+impl Array<CompactMmap<TypeDyn, DimDyn>> {
     /// Load a compressed array from a file using memory mapping (zero-copy).
     ///
     /// Instead of copying the file's bytes into heap memory, this maps the file into virtual
@@ -334,7 +334,7 @@ where
     /// let context = src.read_ctx();
     ///
     /// // Build a lazy view - no data is read yet.
-    /// let view = src.exp() + 1.0f32;
+    /// let view = src.into_typed::<f32>()?.exp() + 1.0f32;
     ///
     /// // Write to a new file: blocks are decompressed, modified by ops, and re-compressed one at
     /// // a time.
@@ -401,7 +401,7 @@ where
     }
 }
 
-impl<S> ArrayBlockTableStorageBase<S, DimDyn>
+impl<S> ArrayBlockTableStorageBase<S, TypeDyn, DimDyn>
 where
     S: BlockTableStorage,
 {
@@ -486,7 +486,7 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::dtype::Dtyped;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::{arr_params, carray_strategy_any};
     use crate::{Array, ArrayParams, DimDyn, Dimension};
 
@@ -498,12 +498,12 @@ mod tests {
         vals: Vec<T>,
         shape: &[usize],
         block_shape: &[usize],
-    ) -> Array<Compact<DimDyn>> {
+    ) -> Array<Compact<Ty<T>, DimDyn>> {
         let src = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::compact_array_with(&src, arr_params(block_shape)).unwrap()
     }
 
-    fn write_read<T: Dtyped, D: Dimension>(a: &Array<Compact<D>>) -> ArrayD<T> {
+    fn write_read<T: Dtyped, D: Dimension>(a: &Array<Compact<Ty<T>, D>>) -> ArrayD<T> {
         let mut buf = Cursor::new(Vec::new());
         a.write_to(&mut buf).unwrap();
         let bytes = buf.into_inner();
@@ -905,6 +905,7 @@ mod tests {
         let mmap_arr = unsafe {
             Array::read_from_file_mmap(tmp.path(), 0, len, ArrayParams::default()).unwrap()
         };
+        let mmap_arr = mmap_arr.swap_element_type::<Ty<i32>>().unwrap();
         let ctx = mmap_arr.read_ctx();
         let view = -mmap_arr.as_ref();
 

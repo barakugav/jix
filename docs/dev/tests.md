@@ -173,13 +173,13 @@ macro_rules! test_op1 {
 mod tests {
     // Bring feature-gated type aliases into scope.
     #[cfg(feature = "half")]
-    use crate::dtype::f16;
+    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f32 = crate::dtype::Complex<f32>;
+    type complex_f32 = crate::scalar::Complex<f32>;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f64 = crate::dtype::Complex<f64>;
+    type complex_f64 = crate::scalar::Complex<f64>;
 
     // ... macro definitions ...
 
@@ -296,11 +296,11 @@ Wrap `f16` and complex tests in the appropriate `#[cfg]`:
 
 ```rust
 #[cfg(feature = "half")]
-use crate::dtype::f16;
+use crate::scalar::f16;
 
 #[cfg(feature = "num-complex")]
 #[allow(non_camel_case_types)]
-type complex_f32 = crate::dtype::Complex<f32>;
+type complex_f32 = crate::scalar::Complex<f32>;
 ```
 
 Pass them as `#[cfg(feature = "...")] [dtype, ...]` trailing groups in `test_op1!`.

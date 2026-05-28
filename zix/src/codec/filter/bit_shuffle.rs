@@ -349,7 +349,7 @@ fn transpose8x8(x: [u8; 8]) -> [u8; 8] {
 #[cfg(test)]
 mod tests {
     use super::BitShuffleFilter;
-    use crate::dtype::Complex;
+    use crate::scalar::Complex;
     use crate::util::ScalarStrategy;
 
     macro_rules! test_roundtrip {
@@ -374,7 +374,7 @@ mod tests {
     test_roundtrip!(i32, i32_roundtrip);
     test_roundtrip!(i64, i64_roundtrip);
     #[cfg(feature = "half")]
-    test_roundtrip!(crate::dtype::f16, f16_roundtrip);
+    test_roundtrip!(crate::scalar::f16, f16_roundtrip);
     test_roundtrip!(f32, f32_roundtrip);
     test_roundtrip!(f64, f64_roundtrip);
     test_roundtrip!(Complex<f32>, complex_f32_roundtrip);
@@ -499,7 +499,7 @@ mod tests {
     test_agrees_with_trivial!(i32, i32_agrees_with_trivial);
     test_agrees_with_trivial!(i64, i64_agrees_with_trivial);
     #[cfg(feature = "half")]
-    test_agrees_with_trivial!(crate::dtype::f16, f16_agrees_with_trivial);
+    test_agrees_with_trivial!(crate::scalar::f16, f16_agrees_with_trivial);
     test_agrees_with_trivial!(f32, f32_agrees_with_trivial);
     test_agrees_with_trivial!(f64, f64_agrees_with_trivial);
     test_agrees_with_trivial!(Complex<f32>, complex_f32_agrees_with_trivial);

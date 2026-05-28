@@ -7,7 +7,7 @@ use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Dimension, Error, ErrorKind, IntoDimension};
+use crate::{Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape_view`].
 ///
@@ -70,7 +70,6 @@ use crate::{Dimension, Error, ErrorKind, IntoDimension};
 pub struct Reshape<S, D> {
     array: Array<S>,
 
-    dtype: Dtype,
     new_shape: D,
     blocks_layout: BlocksLayout,
 }
@@ -82,9 +81,7 @@ impl<S, D> Reshape<S, D> {
         D: Dimension,
         Sh: IntoDimension<Dimension = D>,
     {
-        let new_shape_raw = shape
-            .into_dimension()
-            .ok_or_else(|| Error::new(ErrorKind::TooManyDimensions, "Too many dimensions"))?;
+        let new_shape_raw = shape.into_dimension()?;
         let new_shape: DimArray<_> = new_shape_raw.as_slice().try_into().unwrap();
         let orig_shape: DimArray<_> = array.shape().try_into().unwrap();
         let nitems = orig_shape.iter().product::<u64>();
@@ -143,9 +140,7 @@ impl<S, D> Reshape<S, D> {
         b_layout.block_shape_tag = block_shape_tag;
         b_layout.preferred_read_shape = preferred_read_shape;
 
-        let dtype = array.dtype();
         Ok(Self {
-            dtype: dtype.clone(),
             new_shape: new_shape_raw,
             blocks_layout: b_layout,
             array,
@@ -157,6 +152,7 @@ where
     S: ArrayStorage,
     D: Dimension,
 {
+    type ElementType = S::ElementType;
     type Dimension = D;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
@@ -254,7 +250,8 @@ where
         //      element ends up exactly where it belongs in `buf`.
         // -----------------------------------------------------------------------
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, &self.dtype, buf)?;
+        let dtype = self.dtype();
+        check_get_buffer_size(index, dtype, buf)?;
 
         let orig_shape = self.array.shape();
         let new_shape = self.new_shape.as_slice();
@@ -320,12 +317,12 @@ where
         });
 
         let mut tmp_buf = context.tmp_buf(
-            orig_read_shape.iter().product::<u64>() as usize * self.dtype.itemsize() as usize,
-            self.dtype.alignment(),
+            orig_read_shape.iter().product::<u64>() as usize * dtype.itemsize() as usize,
+            dtype.alignment(),
         );
-        let tmp_buf_strides = default_strides(&new_read_shape, self.dtype.itemsize() as _);
+        let tmp_buf_strides = default_strides(&new_read_shape, dtype.itemsize() as _);
         let out_buf_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(&out_buf_shape, self.dtype.itemsize() as _);
+        let dst_strides = default_strides(&out_buf_shape, dtype.itemsize() as _);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
         let iteration_shape = dim_arr(ndim, |dim| {
@@ -368,7 +365,7 @@ where
                     &new_read_shape,
                     &tmp_buf_strides,
                     &dst_strides,
-                    self.dtype.itemsize() as _,
+                    dtype.itemsize() as _,
                 )
             };
         }
@@ -380,7 +377,7 @@ where
         self.new_shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.array.dtype()
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -396,7 +393,7 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::array::Array;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::DimDyn;
 
@@ -405,7 +402,10 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Create a 1-D Array<Compact> from `vals` with the given block size.
-    fn make1d<T: crate::dtype::Dtyped>(vals: Vec<T>, block_size: usize) -> Array<Compact<DimDyn>> {
+    fn make1d<T: crate::dtype::Dtyped>(
+        vals: Vec<T>,
+        block_size: usize,
+    ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
     }
@@ -416,7 +416,7 @@ mod tests {
         rows: usize,
         cols: usize,
         block_shape: &[usize],
-    ) -> Array<Compact<DimDyn>> {
+    ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(block_shape)).unwrap()
     }
@@ -428,7 +428,7 @@ mod tests {
         d1: usize,
         d2: usize,
         block_shape: &[usize],
-    ) -> Array<Compact<DimDyn>> {
+    ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(block_shape)).unwrap()
     }
@@ -1033,7 +1033,7 @@ mod tests {
     }
 
     fn reshape_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<u64>)>
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>, Vec<u64>)>
     where
         T: ScalarStrategy,
     {

@@ -1,5 +1,8 @@
 use std::hint::assert_unchecked;
 
+use crate::error::{bail, Result};
+use crate::{Error, ErrorKind};
+
 /// Maximum number of dimensions supported by the library for an array.
 pub const NDIM_MAX: usize = 8;
 
@@ -69,7 +72,7 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// Every `Dimension` value also implements [`IntoDimension`] (with `Dimension = Self`), so a
 /// `Dim<N>` or `DimDyn` can be passed directly to any function that accepts `IntoDimension`.
-pub trait Dimension: IntoDimension<Dimension = Self> + Clone {
+pub trait Dimension: IntoDimension<Dimension = Self> + Clone + Send + Sync {
     /// The number of axes, if known at compile time.
     ///
     /// - `Some(N)` for [`Dim<N>`]: the compiler can prove `ndim == N`.
@@ -95,9 +98,9 @@ pub trait Dimension: IntoDimension<Dimension = Self> + Clone {
 
     /// Construct a `Dimension` value from a shape slice.
     ///
-    /// Returns `None` if the slice length does not match the statically expected ndim (for
+    /// Returns an error if the slice length does not match the statically expected ndim (for
     /// `Dim<N>`) or exceeds [`NDIM_MAX`] (for `DimDyn`).
-    fn from_slice(slice: &[u64]) -> Option<Self>
+    fn from_slice(slice: &[u64]) -> Result<Self>
     where
         Self: Sized;
 
@@ -138,8 +141,17 @@ impl Dimension for DimDyn {
     type Smaller = Self;
     type Larger = Self;
 
-    fn from_slice(slice: &[u64]) -> Option<Self> {
-        Some(Self(slice.try_into().ok()?))
+    fn from_slice(slice: &[u64]) -> Result<Self> {
+        Ok(Self(slice.try_into().map_err(|_| {
+            Error::new(
+                ErrorKind::TooManyDimensions,
+                format!(
+                    "slice length {} exceeds NDIM_MAX ({})",
+                    slice.len(),
+                    NDIM_MAX
+                ),
+            )
+        })?))
     }
     fn as_slice(&self) -> &[u64] {
         let s = self.0.as_slice();
@@ -177,8 +189,13 @@ macro_rules! impl_dim {
             type Smaller = $smaller;
             type Larger = $larger;
 
-            fn from_slice(slice: &[u64]) -> Option<Self> {
-                Some(Self(slice.try_into().ok()?))
+            fn from_slice(slice: &[u64]) -> Result<Self> {
+                Ok(Self(slice.try_into().map_err(|_| {
+                    Error::new(
+                        ErrorKind::TooManyDimensions,
+                        format!("slice length {} does not match expected dimension {}", slice.len(), $dim),
+                    )
+                })?))
             }
             fn as_slice(&self) -> &[u64] {
                 self.0.as_slice()
@@ -229,35 +246,35 @@ pub trait IntoDimension {
 
     /// Convert `self` into a `Dimension` value.
     ///
-    /// Returns `None` if the input cannot be converted (e.g. a slice whose length exceeds
-    /// [`NDIM_MAX`]). For statically-sized types the returned `Option` is always `Some`.
-    fn into_dimension(self) -> Option<Self::Dimension>;
+    /// Returns an error if the input cannot be converted (e.g. a slice whose length exceeds
+    /// [`NDIM_MAX`]). For statically-sized types the conversion is infallible.
+    fn into_dimension(self) -> Result<Self::Dimension>;
 }
 impl<D> IntoDimension for D
 where
     D: Dimension,
 {
     type Dimension = D;
-    fn into_dimension(self) -> Option<Self::Dimension> {
-        Some(self)
+    fn into_dimension(self) -> Result<Self::Dimension> {
+        Ok(self)
     }
 }
 
 impl IntoDimension for u64 {
     type Dimension = Dim<1>;
-    fn into_dimension(self) -> Option<Self::Dimension> {
-        Some(Dim::<1>::from_array([self]))
+    fn into_dimension(self) -> Result<Self::Dimension> {
+        Ok(Dim::<1>::from_array([self]))
     }
 }
 impl IntoDimension for &[u64] {
     type Dimension = DimDyn;
-    fn into_dimension(self) -> Option<Self::Dimension> {
-        Some(DimDyn(self.try_into().ok()?))
+    fn into_dimension(self) -> Result<Self::Dimension> {
+        DimDyn::from_slice(self)
     }
 }
 impl IntoDimension for &Vec<u64> {
     type Dimension = DimDyn;
-    fn into_dimension(self) -> Option<Self::Dimension> {
+    fn into_dimension(self) -> Result<Self::Dimension> {
         self.as_slice().into_dimension()
     }
 }
@@ -266,14 +283,14 @@ macro_rules! impl_into_dimension_array {
     ($n:expr) => {
         impl IntoDimension for [u64; $n] {
             type Dimension = Dim<$n>;
-            fn into_dimension(self) -> Option<Self::Dimension> {
-                Some(Dim::<$n>::from_array(self))
+            fn into_dimension(self) -> Result<Self::Dimension> {
+                Ok(Dim::<$n>::from_array(self))
             }
         }
         impl IntoDimension for &[u64; $n] {
             type Dimension = Dim<$n>;
-            fn into_dimension(self) -> Option<Self::Dimension> {
-                Some(Dim::<$n>::from_array(*self))
+            fn into_dimension(self) -> Result<Self::Dimension> {
+                Ok(Dim::<$n>::from_array(*self))
             }
         }
     };
@@ -292,8 +309,8 @@ macro_rules! impl_into_dimension_tuple {
     ($($idx:tt),+ $(,)?) => {
         impl IntoDimension for ($(impl_into_dimension_tuple!(@replace $idx u64),)+) {
             type Dimension = Dim<{ impl_into_dimension_tuple!(@count $($idx)*) }>;
-            fn into_dimension(self) -> Option<Self::Dimension> {
-                Some(Dim::from_array([$(self.$idx,)+]))
+            fn into_dimension(self) -> Result<Self::Dimension> {
+                Ok(Dim::from_array([$(self.$idx,)+]))
             }
         }
     };
@@ -305,8 +322,8 @@ macro_rules! impl_into_dimension_tuple {
 
 impl IntoDimension for () {
     type Dimension = Dim<0>;
-    fn into_dimension(self) -> Option<Self::Dimension> {
-        Some(Dim::from_array([]))
+    fn into_dimension(self) -> Result<Self::Dimension> {
+        Ok(Dim::from_array([]))
     }
 }
 impl_into_dimension_tuple!(0);
@@ -322,12 +339,12 @@ macro_rules! impl_into_dimension_ndarray {
     ($n:expr) => {
         impl IntoDimension for ndarray::Dim<[usize; $n]> {
             type Dimension = Dim<$n>;
-            fn into_dimension(self) -> Option<Self::Dimension> {
+            fn into_dimension(self) -> Result<Self::Dimension> {
                 let mut arr = [0u64; $n];
                 for i in 0..$n {
                     arr[i] = self[i] as u64;
                 }
-                Some(Dim::from_array(arr))
+                Ok(Dim::from_array(arr))
             }
         }
     };
@@ -344,11 +361,16 @@ impl_into_dimension_ndarray!(6);
 // impl_into_dimension_ndarray!(8);
 impl IntoDimension for ndarray::IxDyn {
     type Dimension = DimDyn;
-    fn into_dimension(self) -> Option<Self::Dimension> {
+    fn into_dimension(self) -> Result<Self::Dimension> {
         let dim = <Self as ndarray::Dimension>::as_array_view(&self);
         let dim = dim.as_slice().unwrap();
         if dim.len() > NDIM_MAX {
-            return None;
+            bail!(
+                TooManyDimensions,
+                "ndarray dimension length {} exceeds NDIM_MAX ({})",
+                dim.len(),
+                NDIM_MAX
+            );
         }
         let dim = dim_arr(dim.len(), |i| dim[i] as u64);
         DimDyn::from_slice(&dim)

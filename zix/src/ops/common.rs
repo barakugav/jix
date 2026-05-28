@@ -1,86 +1,102 @@
-use crate::dtype::Complex;
+use crate::dtype::{DtypeScalarKind, Dtyped};
+use crate::scalar::Complex;
 use crate::{DimDyn, Dimension};
 
 macro_rules! define_array_op1_method {
-    ($op:ident : $Name:ident) => {
-        #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
+    ($method:ident : $Op:ident, $($trait:ident)::+) => {
+        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op(self) -> crate::Array<$Name<S>> {
-            let op = $Name::new(self).unwrap();
+        pub fn $method(self) -> crate::Array<$Op<S>>
+        where
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+,
+            <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
+        {
+            let op = $Op::new(self).unwrap();
+            crate::Array::from_storage(op)
+        }
+    };
+    ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
+        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[track_caller]
+        pub fn $method(self) -> crate::Array<$Op<S>>
+        where
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+,
+        {
+            let op = $Op::new(self).unwrap();
             crate::Array::from_storage(op)
         }
     };
 }
 macro_rules! define_array_op2_method {
-    ($op:ident : $Name:ident) => {
-        #[doc = concat!("Applies the [`", stringify!($Name), "`] operation, see the op struct docs for details.")]
+    ($method:ident : $Op:ident, $($trait:ident)::+) => {
+        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
-        pub fn $op<S2>(self, other: crate::Array<S2>) -> crate::Array<$Name<S, S2>>
+        pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S2: crate::storage::ArrayStorage,
+            S: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+<S2::Item>,
+            <S::Item as $($trait)::+<S2::Item>>::Output: crate::dtype::Dtyped,
         {
-            let op = $Name::new(self, other).unwrap();
+            let op = $Op::new(self, other).unwrap();
+            crate::Array::from_storage(op)
+        }
+    };
+    ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
+        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[track_caller]
+        pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
+        where
+            S: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+<S2::Item>,
+        {
+            let op = $Op::new(self, other).unwrap();
+            crate::Array::from_storage(op)
+        }
+    };
+    ($method:ident : $Op:ident, $($trait:ident)::+, fixed_lhs_type = $lhs_type:ty) => {
+        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[track_caller]
+        pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
+        where
+            S: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Item = $lhs_type>,
+            S::Item: $($trait)::+,
+        {
+            let op = $Op::new(self, other).unwrap();
             crate::Array::from_storage(op)
         }
     };
 }
 
-macro_rules! scalar_kind {
-    (i8) => {
-        crate::dtype::DtypeScalarKind::I8
-    };
-    (i16) => {
-        crate::dtype::DtypeScalarKind::I16
-    };
-    (i32) => {
-        crate::dtype::DtypeScalarKind::I32
-    };
-    (i64) => {
-        crate::dtype::DtypeScalarKind::I64
-    };
-    (u8) => {
-        crate::dtype::DtypeScalarKind::U8
-    };
-    (u16) => {
-        crate::dtype::DtypeScalarKind::U16
-    };
-    (u32) => {
-        crate::dtype::DtypeScalarKind::U32
-    };
-    (u64) => {
-        crate::dtype::DtypeScalarKind::U64
-    };
-    (f16) => {
-        crate::dtype::DtypeScalarKind::F16
-    };
-    (f32) => {
-        crate::dtype::DtypeScalarKind::F32
-    };
-    (f64) => {
-        crate::dtype::DtypeScalarKind::F64
-    };
-    (Complex<f32>) => {
-        crate::dtype::DtypeScalarKind::ComplexF32
-    };
-    ((Complex<f32>)) => {
-        crate::dtype::DtypeScalarKind::ComplexF32
-    };
-    (Complex<f64>) => {
-        crate::dtype::DtypeScalarKind::ComplexF64
-    };
-    ((Complex<f64>)) => {
-        crate::dtype::DtypeScalarKind::ComplexF64
-    };
-    (bool) => {
-        crate::dtype::DtypeScalarKind::Bool
-    };
-    ($ty:ty) => {
-        compile_error!(concat!("Unsupported scalar type: ", stringify!($ty)));
-    };
-}
+// macro_rules! or_else {
+//     ($( { $($optional:tt)+ } )? or { $($else:tt)+ }) => {
+//         crate::ops::common::or_else!(@impl_ $( { $($optional)+ } )? or { $($else)* });
+//     };
+//     (@impl_ { $($optional:tt)+ } or { $($else:tt)* }) => {
+//         $($optional)*
+//     };
+//     (@impl_ or { $($else:tt)* }) => {
+//         $($else)*
+//     };
+// }
+// macro_rules! if_none {
+//     ($( { $($optional:tt)+ } )? than { $($else:tt)+ }) => {
+//         crate::ops::common::if_none!(@impl_ $( { $($optional)+ } )? than { $($else)* });
+//     };
+//     (@impl_ { $($optional:tt)+ } than { $($else:tt)* }) => {
+//     };
+//     (@impl_ than { $($else:tt)* }) => {
+//         $($else)*
+//     };
+// }
 
-pub(crate) use {define_array_op1_method, define_array_op2_method, scalar_kind};
+pub(crate) use {define_array_op1_method, define_array_op2_method};
 
+// TODO: remove
 pub(crate) trait BulkInfo {
     const BULK: usize;
 }
@@ -99,12 +115,50 @@ impl_bulk_info!(u8, 128 / size_of::<u8>());
 impl_bulk_info!(u16, 128 / size_of::<u16>());
 impl_bulk_info!(u32, 128 / size_of::<u32>());
 impl_bulk_info!(u64, 128 / size_of::<u64>());
-impl_bulk_info!(crate::dtype::f16, 128 / size_of::<crate::dtype::f16>());
+impl_bulk_info!(crate::scalar::f16, 128 / size_of::<crate::scalar::f16>());
 impl_bulk_info!(f32, 128 / size_of::<f32>());
 impl_bulk_info!(f64, 128 / size_of::<f64>());
 impl_bulk_info!(Complex<f32>, 128 / size_of::<Complex<f32>>());
 impl_bulk_info!(Complex<f64>, 128 / size_of::<Complex<f64>>());
 impl_bulk_info!(bool, 128 / size_of::<bool>());
+
+#[inline(always)]
+pub(crate) fn bulk_size<T: Dtyped>() -> usize {
+    // this is a compile time check, the compiler knows the value of `T::DTYPE.try_to_scalar()`
+    match T::DTYPE.try_to_scalar() {
+        Some(scalar) => match scalar {
+            DtypeScalarKind::I8 => i8::BULK,
+            DtypeScalarKind::I16 => i16::BULK,
+            DtypeScalarKind::I32 => i32::BULK,
+            DtypeScalarKind::I64 => i64::BULK,
+            DtypeScalarKind::U8 => u8::BULK,
+            DtypeScalarKind::U16 => u16::BULK,
+            DtypeScalarKind::U32 => u32::BULK,
+            DtypeScalarKind::U64 => u64::BULK,
+            DtypeScalarKind::F16 => crate::scalar::f16::BULK,
+            DtypeScalarKind::F32 => f32::BULK,
+            DtypeScalarKind::F64 => f64::BULK,
+            DtypeScalarKind::ComplexF32 => Complex::<f32>::BULK,
+            DtypeScalarKind::ComplexF64 => Complex::<f64>::BULK,
+            DtypeScalarKind::Bool => bool::BULK,
+        },
+        None => {
+            if size_of::<T>() == 0 {
+                return 1024;
+            }
+            (128 / size_of::<T>()).next_power_of_two()
+        }
+    }
+}
+#[inline(always)]
+pub(crate) fn bulk_size2<T1: Dtyped, T2: Dtyped>() -> usize {
+    let (bs1, bs2) = (bulk_size::<T1>(), bulk_size::<T2>());
+    if bs1 < bs2 {
+        bs1
+    } else {
+        bs2
+    }
+}
 
 /// An argument that specifies a set of axis indices, encoding the dimension change in the type.
 ///

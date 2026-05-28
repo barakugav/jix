@@ -3,9 +3,9 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, Ty};
 use crate::util::{cast_slice_mut, dim_arr};
-use crate::{Array, Dimension, Error, ErrorKind, IntoDimension};
+use crate::{Array, Dimension, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -14,7 +14,7 @@ use crate::{Array, Dimension, Error, ErrorKind, IntoDimension};
 /// A 0-D `Scalar` (empty `shape`) represents a plain scalar value.
 ///
 /// `D: Dimension` tracks the ndim at the type level and follows the same semantics as
-/// [`Compact<D>`](crate::storage::Compact): `D` is inferred from the shape argument type.
+/// [`Compact<ET, D>`](crate::storage::Compact): `D` is inferred from the shape argument type.
 ///
 /// Prefer the [`Array`] constructor [`Array::plain_scalar`] over constructing this type directly.
 ///
@@ -72,9 +72,7 @@ impl<T, D> Scalar<T, D> {
         D: Dimension,
         Sh: IntoDimension<Dimension = D>,
     {
-        let shape = shape
-            .into_dimension()
-            .ok_or_else(|| Error::new(ErrorKind::TooManyDimensions, "Too many dimensions"))?;
+        let shape = shape.into_dimension()?;
         let ndim = shape.ndim();
         let dtype = T::DTYPE;
 
@@ -130,6 +128,7 @@ where
     T: Dtyped,
     D: Dimension,
 {
+    type ElementType = Ty<T>;
     type Dimension = D;
 
     fn read_data(
@@ -163,16 +162,16 @@ where
     }
 }
 
-impl<T, D> crate::storage::SwapDimInplace for Scalar<T, D>
+impl<T, D> crate::ops::SwapDimInplace for Scalar<T, D>
 where
     T: Dtyped,
     D: Dimension,
 {
     type SwapDimension<NewD: Dimension> = Scalar<T, NewD>;
 
-    fn swap_dim<NewD: Dimension>(self) -> Option<Self::SwapDimension<NewD>> {
+    fn swap_dim<NewD: Dimension>(self) -> Result<Self::SwapDimension<NewD>> {
         let shape = NewD::from_slice(self.shape())?;
-        Some(Scalar {
+        Ok(Scalar {
             data: self.data,
             shape,
             dtype: self.dtype,

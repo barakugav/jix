@@ -1,10 +1,8 @@
-use std::ops::Range;
-
 use crate::array::Array;
-use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::dtype::Dtyped;
+use crate::error::Result;
+use crate::ops::Op1;
+use crate::storage::{ArrayStorage, ArrayStorageTyped, Ty};
 
 impl<S> Array<S>
 where
@@ -17,11 +15,11 @@ where
     ///
     /// Panics if the array's dtype does not match `T::DTYPE`.
     #[track_caller]
-    pub fn map<T, R, F>(self, map_fn: F) -> Array<Map<S, T, R, F>>
+    pub fn map<R, F>(self, map_fn: F) -> Array<Map<S, F>>
     where
-        T: Dtyped,
+        S: ArrayStorageTyped,
         R: Dtyped,
-        F: Fn(T) -> R,
+        F: Fn(S::Item) -> R,
     {
         Array::from_storage(Map::new(self, map_fn).unwrap())
     }
@@ -35,7 +33,7 @@ where
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// This struct is the bare storage implementation, but the operation is also available as
+/// This struct is the bare storage implementation, the operation is also available as
 /// [`Array::map()`](crate::Array::map).
 ///
 /// # Examples
@@ -53,89 +51,27 @@ where
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
 /// # Ok::<(), zix::Error>(())
 /// ```
-pub struct Map<S, I, O, F> {
-    array: Array<S>,
-
-    map_fn: F,
-    output_dtype: Dtype,
-    _phantom: std::marker::PhantomData<(I, O)>,
-}
-impl<S, I, O, F> Map<S, I, O, F> {
+pub struct Map<S, F>(Op1<S, F>);
+impl<S, F> Map<S, F> {
     /// Constructs a `Map` storage. See [`Map`] for semantics and examples.
-    pub fn new(array: Array<S>, map_fn: F) -> Result<Self>
+    pub fn new<O>(array: Array<S>, map_fn: F) -> Result<Self>
     where
-        S: ArrayStorage,
-        I: Dtyped,
+        S: ArrayStorageTyped,
+        F: Fn(S::Item) -> O,
         O: Dtyped,
-        F: Fn(I) -> O,
     {
-        let src_dtype = I::DTYPE;
-        ensure!(
-            src_dtype == *array.dtype(),
-            UnsupportedDtype,
-            "map input dtype mismatch: array has {:#?} but input generic (I) is {src_dtype:#?}",
-            array.dtype()
-        );
-
-        Ok(Self {
-            map_fn,
-            output_dtype: O::DTYPE,
-            _phantom: std::marker::PhantomData,
-            array,
-        })
+        Ok(Self(Op1::new(array, map_fn)?))
     }
 }
-impl<S, I, O, F> ArrayStorage for Map<S, I, O, F>
+impl<S, O, F> ArrayStorage for Map<S, F>
 where
-    S: ArrayStorage,
-    I: Dtyped,
+    S: ArrayStorageTyped,
     O: Dtyped,
-    F: Fn(I) -> O,
+    F: Fn(S::Item) -> O,
 {
+    type ElementType = Ty<O>;
     type Dimension = S::Dimension;
-
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape(), index)?;
-        let (src_dtype, dst_dtype) = (self.array.dtype(), O::DTYPE);
-        let nitems = check_get_buffer_size(index, &dst_dtype, buf)?;
-
-        let (src_itemsize, dst_itemsize) =
-            (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
-
-        let in_place = src_itemsize == dst_itemsize
-            && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment().as_usize());
-        let mut tmp_buf;
-        let (read_buf, dst) = if in_place {
-            let ptr = buf.as_mut_ptr();
-            ((ptr, buf.len()), ptr)
-        } else {
-            tmp_buf = context.tmp_buf(nitems * src_itemsize, src_dtype.alignment());
-            let tmp_buf = tmp_buf.as_mut_slice();
-            ((tmp_buf.as_mut_ptr(), tmp_buf.len()), buf.as_mut_ptr())
-        };
-        let read_buf = unsafe { std::slice::from_raw_parts_mut(read_buf.0, read_buf.1) };
-        self.array.storage.read_data(index, read_buf, context)?;
-        let src = read_buf.as_ptr();
-
-        for i in 0..nitems {
-            unsafe {
-                let value = src.cast::<I>().add(i).read();
-                let value = (self.map_fn)(value);
-                dst.cast::<O>().add(i).write(value);
-            }
-        }
-        Ok(())
-    }
-
-    fn shape(&self) -> &[u64] {
-        self.array.shape()
-    }
-    fn dtype(&self) -> &Dtype {
-        &self.output_dtype
-    }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
-        self.array.storage._spec()
-    }
+    crate::storage::impl_array_storage_forward!();
 }
 
 #[cfg(test)]
@@ -272,15 +208,6 @@ mod tests {
             },
         ];
         assert_eq!(actual, expected.into_dyn());
-    }
-
-    #[test]
-    fn map_wrong_dtype_panics() {
-        let a = array![1i32, 2, 3];
-        let za = Array::compact_array_with(&a, arr_params(&[3])).unwrap();
-        // Constructing directly with wrong T should return Err
-        let result = super::Map::new(za, |x: f32| x + 1.0);
-        assert!(result.is_err());
     }
 
     proptest::proptest! {

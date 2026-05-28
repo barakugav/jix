@@ -49,7 +49,6 @@ pub struct Broadcast<S: ArrayStorage> {
     /// In this case `read_data` forwards directly to the inner storage with no extra work.
     is_identity: bool,
 
-    dtype: Dtype,
     new_shape: S::Dimension,
     blocks_layout: BlocksLayout,
 }
@@ -113,12 +112,10 @@ impl<S: ArrayStorage> Broadcast<S> {
             }
         });
 
-        let dtype = array.dtype().clone();
         Ok(Self {
             array,
             is_broadcast,
             is_identity,
-            dtype,
             new_shape,
             blocks_layout: b_layout,
         })
@@ -126,6 +123,7 @@ impl<S: ArrayStorage> Broadcast<S> {
 }
 
 impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
+    type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
@@ -134,11 +132,12 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             return self.array.storage.read_data(index, buf, context);
         }
 
+        let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, &self.dtype, buf)?;
+        check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.is_broadcast.len();
-        let itemsize = self.dtype.itemsize() as usize;
+        let itemsize = dtype.itemsize() as usize;
 
         // Read from inner with broadcast dims collapsed to 0..1.
         // tmp_buf is C-contiguous over inner_read_shape.
@@ -153,7 +152,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             (inner_index[d].end - inner_index[d].start) as usize
         });
         let n_bytes = inner_read_shape.iter().product::<usize>() * itemsize;
-        let mut tmp_buf = context.tmp_buf(n_bytes, self.dtype.alignment());
+        let mut tmp_buf = context.tmp_buf(n_bytes, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
         self.array
             .storage
@@ -190,7 +189,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         self.new_shape.as_slice()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.array.dtype()
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -206,11 +205,11 @@ mod tests {
 
     use crate::array::Array;
     use crate::codec::ReadContext;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::{DimDyn, NDIM_MAX};
 
-    fn make(vals: Vec<i32>, shape: &[usize]) -> Array<Compact<DimDyn>> {
+    fn make(vals: Vec<i32>, shape: &[usize]) -> Array<Compact<Ty<i32>, DimDyn>> {
         let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::compact_array(&nd).unwrap()
     }
@@ -425,7 +424,12 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn broadcast_2d_axis0_strategy() -> impl proptest::strategy::Strategy<
-        Value = (ndarray::ArrayD<i32>, Array<Compact<DimDyn>>, usize, usize),
+        Value = (
+            ndarray::ArrayD<i32>,
+            Array<Compact<Ty<i32>, DimDyn>>,
+            usize,
+            usize,
+        ),
     > {
         use proptest::prelude::*;
         (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
@@ -438,7 +442,12 @@ mod tests {
     }
 
     fn broadcast_2d_axis1_strategy() -> impl proptest::strategy::Strategy<
-        Value = (ndarray::ArrayD<i32>, Array<Compact<DimDyn>>, usize, usize),
+        Value = (
+            ndarray::ArrayD<i32>,
+            Array<Compact<Ty<i32>, DimDyn>>,
+            usize,
+            usize,
+        ),
     > {
         use proptest::prelude::*;
         (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
@@ -509,7 +518,11 @@ mod tests {
     use proptest::prelude::*;
 
     fn broadcast_axes_strategy<T>() -> impl proptest::strategy::Strategy<
-        Value = (ndarray::ArrayD<T>, Array<Compact<DimDyn>>, Vec<usize>),
+        Value = (
+            ndarray::ArrayD<T>,
+            Array<Compact<Ty<T>, DimDyn>>,
+            Vec<usize>,
+        ),
     >
     where
         T: ScalarStrategy,

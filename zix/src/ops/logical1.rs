@@ -1,22 +1,21 @@
 use crate::array::Array;
-#[allow(unused_imports)]
-use crate::dtype::f16;
 use crate::ops::common::define_array_op1_method;
 use crate::ops::define_op1;
+#[allow(unused_imports)]
+use crate::scalar::f16;
 use crate::storage::ArrayStorage;
 
 define_op1!(
     /// Tests whether each element is `NaN` (not a number).
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype is `bool`.
-    /// The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// Returns `true` if the element is `NaN`, `false` otherwise.
     /// Semantics follow [`f32::is_nan`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_nan()`](crate::Array::is_nan).
     ///
     /// # Examples
@@ -38,22 +37,20 @@ define_op1!(
     /// ```
     IsNan,
     IsNanKernel,
-    |a| a.is_nan(),
-    [f16, f32, f64],
-    output_type = bool
+    <num_traits::Float>::is_nan,
+    type Output = bool,
 );
 define_op1!(
     /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype is `bool`.
-    /// The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// Returns `true` if the element is a finite number, `false` for `+/-inf` and `NaN`.
     /// Semantics follow [`f32::is_finite`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_finite()`](crate::Array::is_finite).
     ///
     /// # Examples
@@ -75,22 +72,20 @@ define_op1!(
     /// ```
     IsFinite,
     IsFiniteKernel,
-    |a| a.is_finite(),
-    [f16, f32, f64],
-    output_type = bool
+    <num_traits::Float>::is_finite,
+    type Output = bool,
 );
 define_op1!(
     /// Tests whether each element is infinite (`+inf` or `-inf`).
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype is `bool`.
-    /// The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// Returns `true` only for `+inf` and `-inf`; returns `false` for finite values and `NaN`.
     /// Semantics follow [`f32::is_infinite`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::is_infinite()`](crate::Array::is_infinite).
     ///
     /// # Examples
@@ -112,25 +107,24 @@ define_op1!(
     /// ```
     IsInfinite,
     IsInfiniteKernel,
-    |a| a.is_infinite(),
-    [f16, f32, f64],
-    output_type = bool
+    <num_traits::Float>::is_infinite,
+    type Output = bool,
 );
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op1_method!(is_nan: IsNan);
-    define_array_op1_method!(is_finite: IsFinite);
-    define_array_op1_method!(is_infinite: IsInfinite);
+    define_array_op1_method!(is_nan: IsNan, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(is_finite: IsFinite, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(is_infinite: IsInfinite, num_traits::Float, fixed_output_type = true);
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "half")]
-    use crate::dtype::f16;
     use crate::ops::op1::tests::test_op1;
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
 
     // full domain is valid; output is bool so NaN inputs produce well-defined bool results
     test_op1!(

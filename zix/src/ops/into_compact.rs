@@ -25,7 +25,7 @@ pub(crate) enum ToCompactInner<S: ArrayStorage> {
     /// The source was already compact; the original storage is kept as-is.
     Original(S),
     /// The source was not compact; it was materialized into a new `Compact`.
-    Compact(Compact<S::Dimension>),
+    Compact(Compact<S::ElementType, S::Dimension>),
 }
 impl<S> IntoCompact<S>
 where
@@ -44,6 +44,7 @@ impl<S> ArrayStorage for IntoCompact<S>
 where
     S: ArrayStorage,
 {
+    type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
     fn read_data(
@@ -75,7 +76,9 @@ where
             ToCompactInner::Compact(c) => c._spec(),
         }
     }
-    fn as_compact(&self) -> Option<crate::storage::CompactBorrowed<'_, Self::Dimension>> {
+    fn as_compact(
+        &self,
+    ) -> Option<crate::storage::CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
         Some(match &self.0 {
             ToCompactInner::Original(s) => s.as_compact().unwrap(),
             ToCompactInner::Compact(c) => c.as_compact().unwrap(),
@@ -90,7 +93,7 @@ mod tests {
     use ndarray::ArrayD;
 
     use crate::dtype::Dtyped;
-    use crate::storage::{ArrayStorage, Compact};
+    use crate::storage::{ArrayStorage, Compact, ElementType, Ty};
     use crate::util::{arr_params, carray_strategy_any};
     use crate::{Array, ArrayParams, DimDyn, Dimension};
 
@@ -102,12 +105,12 @@ mod tests {
         vals: Vec<T>,
         shape: &[usize],
         block_shape: &[usize],
-    ) -> Array<Compact<DimDyn>> {
+    ) -> Array<Compact<Ty<T>, DimDyn>> {
         let src = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
         Array::compact_array_with(&src, arr_params(block_shape)).unwrap()
     }
 
-    fn to_bytes<D: Dimension>(a: &Array<Compact<D>>) -> Vec<u8> {
+    fn to_bytes<ET: ElementType, D: Dimension>(a: &Array<Compact<ET, D>>) -> Vec<u8> {
         let mut buf = Cursor::new(Vec::new());
         a.write_to(&mut buf).unwrap();
         buf.into_inner()

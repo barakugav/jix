@@ -22,7 +22,7 @@ struct ErrorRepr {
     msg: Cow<'static, str>,
 }
 impl Error {
-    pub(crate) fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
+    pub fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
         let msg = message.into();
         Self(Box::new(ErrorRepr { kind, msg }))
     }

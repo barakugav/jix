@@ -26,7 +26,7 @@
 //!
 //! ## `f16` and `Complex<T>` coverage
 //!
-//! The [`f16`](crate::dtype::f16) and [`Complex<T>`](crate::dtype::Complex) types are available
+//! The [`f16`](crate::scalar::f16) and [`Complex<T>`](crate::scalar::Complex) types are available
 //! as minimal stubs by default, and can be upgraded to full-featured types with the **`half`** and
 //! **`num-complex`** crate features, respectively.
 //! See their documentation for details.
@@ -39,6 +39,7 @@ use std::num::NonZero;
 use std::ops::Deref;
 
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
+use crate::scalar::{f16, Complex};
 use crate::util::{Idx, IxIterExt};
 
 /// A type alignment in bytes.
@@ -288,7 +289,7 @@ pub enum DtypeScalarKind {
     /// [`u64`] dtype.
     U64,
     #[allow(rustdoc::redundant_explicit_links)]
-    /// [`f16`](crate::dtype::f16) dtype.
+    /// [`f16`](crate::scalar::f16) dtype.
     F16,
     /// [`f32`] dtype.
     F32,
@@ -339,7 +340,7 @@ impl Dtype {
     ///
     /// assert_eq!(i32_dtype, i32::DTYPE);
     /// assert_eq!(f64_dtype, f64::DTYPE);
-    /// assert_eq!(complex_f32_dtype, zix::dtype::Complex::<f32>::DTYPE);
+    /// assert_eq!(complex_f32_dtype, zix::scalar::Complex::<f32>::DTYPE);
     /// ```
     pub const fn of_scalar(kind: DtypeScalarKind) -> Self {
         // assert!(Endianness::native() == Endianness::Little);
@@ -663,7 +664,7 @@ impl Dtype {
     ///
     /// Note that even if the function returns `Some`, the dtype may not be a plain scalar, it just
     /// means the type has no sub fields, but the dtype can still have non-empty shape.
-    pub fn scalar_kind(&self) -> Option<DtypeScalarKind> {
+    pub const fn scalar_kind(&self) -> Option<DtypeScalarKind> {
         match &self.0 {
             DtypeInner::Scalar { kind, .. } => Some(*kind),
             DtypeInner::StructOwned { .. } | DtypeInner::StructBorrowed { .. } => None,
@@ -979,7 +980,7 @@ impl Endianness {
 /// This trait is very unsafe, and the caller should implement it carefully, matching the type size,
 /// alignment and inner fields of the type. Types implementing this should most likely be annotated with `#[repr(C)]`
 /// or `#[repr(C, packed)]`, for aligned and packed fields respectively.
-pub unsafe trait Dtyped: Copy + Send + Sync + 'static {
+pub unsafe trait Dtyped: Copy + Send + Sync + Sized + 'static {
     /// Get the dtype representing the type layout and inner fields.
     const DTYPE: Dtype;
 }
@@ -1023,50 +1024,6 @@ unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
         dtype
     };
 }
-
-cfg_if::cfg_if! { if #[cfg(feature = "half")] {
-    pub use half::f16;
-} else {
-    /// A 16-bit floating point type implementing the IEEE 754-2008 standard `binary16` a.k.a "half"
-    /// format.
-    ///
-    /// Doesn't provide any arithmetic operations, but can be converted to/from `u16`.
-    /// Enable the `half` feature to get a fully functional `f16` type.
-    #[derive(Copy, Clone, Debug, Default)]
-    #[repr(transparent)]
-    #[allow(non_camel_case_types)]
-    pub struct f16(u16);
-    impl f16 {
-        #[doc = concat!("Creates a new `f16` from its raw bit representation.")]
-        pub const fn from_bits(bits: u16) -> Self {
-            Self(bits)
-        }
-        #[doc = concat!("Get the raw bit representation of the `f16`.")]
-        pub const fn to_bits(&self) -> u16 {
-            self.0
-        }
-    }
-} }
-
-cfg_if::cfg_if! { if #[cfg(feature = "num-complex")] {
-    pub use num_complex::Complex;
-} else {
-    /// A complex number in Cartesian form.
-    ///
-    /// Doesn't provide any arithmetic operations, but expose the real and imaginary parts.
-    /// Enable the `num-complex` feature to get a fully functional `Complex` type.
-    ///
-    /// `Complex<T>` is memory layout compatible with an array `[T; 2]`, which is compatible with
-    /// libc, numpy, etc.
-    #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-    #[repr(C)]
-    pub struct Complex<T> {
-        /// Real portion of the complex number
-        pub re: T,
-        /// Imaginary portion of the complex number
-        pub im: T,
-    }
-} }
 
 #[derive(Debug, Clone, Copy)]
 struct DtypeShape {

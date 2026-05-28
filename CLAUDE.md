@@ -50,7 +50,13 @@ The central type is `Array<S>` where `S` implements `ArrayStorage`:
 - `read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>`
 - `shape() -> &[u64]`, `dtype() -> &Dtype`
 
-Storage backends: `PlainStorage`, `ScalarStorage`, `CompressedStorage`, `BlockStorage`.
+`ArrayStorage` has two associated types:
+- `type ElementType: ElementType` — compile-time element type, either `Ty<T>` (concrete scalar known at compile time) or `TypeDyn` (runtime only, for arrays loaded from disk).
+- `type Dimension: Dimension` — compile-time dimension, either `Dim<N>` (known statically) or `DimDyn`.
+
+`ArrayStorageTyped` is a supertrait shorthand for `ArrayStorage<ElementType = Ty<T>>`. All element-wise operations (arithmetic, comparisons, cast, reductions) require it.
+
+Storage backends: `Compact<T, D>` (heap-allocated block-compressed), `CompactMmap<T, D>` (memory-mapped), `Plain<A, T, D>` (uncompressed buffer), `Scalar<T>` (broadcast scalar).
 
 ### Lazy Evaluation
 
@@ -66,14 +72,18 @@ Arrays are stored in fixed-size blocks, each independently Zstd-compressed. `Blo
 
 Defined in `zix/src/codec.rs`; codec/filter parameters serialized in protobuf headers.
 
-### Type System (`Dtype`)
+### Type System
 
-Defined in `zix/src/dtype.rs`. Supports:
-- Scalar types: `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f16` (optional), `f32/f64`, `ComplexF32/ComplexF64` (optional), `bool`
+**Runtime element type — `Dtype`** (in `zix/src/dtype.rs`):
+- Scalar types: `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f16` (optional), `f32/f64`, `Complex<f32>/Complex<f64>` (optional), `bool`
 - Struct types: named fields with offsets
 - Inner shapes: dtypes can have up to 4 inner dimensions
+- Alignment and itemsize tracked for safe raw memory access
 
-Alignment and itemsize are tracked explicitly for safe raw memory access.
+**Compile-time element type — `ElementType`** (in `zix/src/storage/mod.rs`):
+- `Ty<T>` — concrete element type `T` known at compile time; enables all element-wise ops
+- `TypeDyn` — runtime-only; arrays from disk start here; call `Array::into_typed::<T>()` to recover `Ty<T>`
+- `f16` and `Complex<T>` live in `zix::scalar` (previously they were in `zix::dtype`)
 
 ### Serialization
 

@@ -1,8 +1,8 @@
-use std::hint::assert_unchecked;
 use std::marker::PhantomData;
 
 use crate::error::Result;
 use crate::storage::ArrayStorage;
+use crate::util::assert_unchecked_eq;
 use crate::{Array, DimDyn, Dimension, Error, ErrorKind};
 
 /// A storage adapter that re-tags an existing array with a specific [`Dimension`] type.
@@ -82,6 +82,7 @@ where
     S: ArrayStorage,
     D: Dimension,
 {
+    type ElementType = S::ElementType;
     type Dimension = D;
 
     fn read_data(
@@ -91,17 +92,14 @@ where
         context: &crate::codec::ReadContext,
     ) -> crate::error::Result<()> {
         if let Some(ndim) = D::NDIM {
-            let shape = self.inner.storage.shape();
-            debug_assert_eq!(ndim, shape.len());
-            unsafe { assert_unchecked(ndim == shape.len()) };
+            unsafe { assert_unchecked_eq!(ndim, self.inner.storage.shape().len()) };
         }
         self.inner.storage.read_data(index, buf, context)
     }
     fn shape(&self) -> &[u64] {
         let shape = self.inner.storage.shape();
         if let Some(ndim) = D::NDIM {
-            debug_assert_eq!(ndim, shape.len());
-            unsafe { assert_unchecked(ndim == shape.len()) };
+            unsafe { assert_unchecked_eq!(ndim, shape.len()) };
         }
         shape
     }
@@ -147,7 +145,7 @@ pub trait SwapDimInplace: ArrayStorage {
     /// Returns `None` if `NewD` has a static ndim (`NewD::NDIM = Some(n)`) and the actual
     /// runtime ndim does not match. Returns `Some` for `DimDyn` (`NewD::NDIM = None`) regardless
     /// of the actual ndim.
-    fn swap_dim<NewD: Dimension>(self) -> Option<Self::SwapDimension<NewD>>;
+    fn swap_dim<NewD: Dimension>(self) -> Result<Self::SwapDimension<NewD>>;
 }
 impl<S> Array<S>
 where
@@ -178,17 +176,17 @@ where
     /// use ndarray::array;
     ///
     /// // compact_array infers Dim<1> from the ndarray type.
-    /// let x: Array<Compact<Dim<1>>> = Array::compact_array(&array![1i32, 2]).unwrap();
+    /// let x: Array<Compact<_, Dim<1>>> = Array::compact_array(&array![1i32, 2]).unwrap();
     ///
     /// // Erase static tracking to DimDyn — always succeeds.
-    /// let dyn_x: Array<Compact<DimDyn>> = x.swap_dim_dyn();
+    /// let dyn_x: Array<Compact<_, DimDyn>> = x.swap_dim_dyn();
     ///
     /// // Recover static tracking: succeeds when ndim matches.
-    /// let restored: Array<Compact<Dim<1>>> = dyn_x.swap_dim::<Dim<1>>().unwrap();
+    /// let restored: Array<Compact<_, Dim<1>>> = dyn_x.swap_dim::<Dim<1>>().unwrap();
     /// assert_eq!(restored.shape(), &[2]);
     /// ```
-    pub fn swap_dim<NewD: Dimension>(self) -> Option<Array<S::SwapDimension<NewD>>> {
-        Some(Array::from_storage(self.into_storage().swap_dim()?))
+    pub fn swap_dim<NewD: Dimension>(self) -> Result<Array<S::SwapDimension<NewD>>> {
+        Ok(Array::from_storage(self.into_storage().swap_dim()?))
     }
 
     /// Re-tag this array's storage dimension as [`DimDyn`], erasing static dimension information.

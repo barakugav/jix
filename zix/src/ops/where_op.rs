@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped};
 use crate::util::{cast_slice, cast_slice_mut};
 use crate::Array;
 
@@ -21,9 +21,9 @@ pub fn where_condition<SC, SX, SY>(
     y: Array<SY>,
 ) -> Array<Where<SC, SX, SY>>
 where
-    SC: ArrayStorage,
+    SC: ArrayStorageTyped<Item = bool>,
     SX: ArrayStorage,
-    SY: ArrayStorage,
+    SY: ArrayStorage<ElementType = SX::ElementType>,
 {
     Array::from_storage(Where::new(condition, x, y).unwrap())
 }
@@ -39,7 +39,7 @@ where
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// This struct is the bare storage implementation, but the operation is also available as
+/// This struct is the bare storage implementation, the operation is also available as
 /// [`where_condition()`].
 ///
 /// # Examples
@@ -69,16 +69,14 @@ pub struct Where<SC, SX, SY> {
     condition: Array<SC>,
     x: Array<SX>,
     y: Array<SY>,
-
-    dtype: Dtype,
 }
 impl<SC, SX, SY> Where<SC, SX, SY> {
     /// Constructs a `Where` storage. See [`Where`] for semantics and examples.
     pub fn new(condition: Array<SC>, x: Array<SX>, y: Array<SY>) -> Result<Self>
     where
-        SC: ArrayStorage,
+        SC: ArrayStorageTyped<Item = bool>,
         SX: ArrayStorage,
-        SY: ArrayStorage,
+        SY: ArrayStorage<ElementType = SX::ElementType>,
     {
         ensure!(
             condition.dtype() == &bool::DTYPE,
@@ -103,20 +101,16 @@ impl<SC, SX, SY> Where<SC, SX, SY> {
             y.shape()
         );
 
-        Ok(Self {
-            dtype: x.dtype().clone(),
-            condition,
-            x,
-            y,
-        })
+        Ok(Self { condition, x, y })
     }
 }
 impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
 where
-    SC: ArrayStorage,
+    SC: ArrayStorageTyped<Item = bool>,
     SX: ArrayStorage,
-    SY: ArrayStorage,
+    SY: ArrayStorage<ElementType = SX::ElementType>,
 {
+    type ElementType = SX::ElementType;
     type Dimension = SC::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
@@ -158,7 +152,7 @@ where
             (4, 4) => unsafe { where_impl::<u32>(condition, buf, y_buf) },
             (8, 4) => unsafe { where_impl::<[u32; 2]>(condition, buf, y_buf) },
             (8, 8) => unsafe { where_impl::<u64>(condition, buf, y_buf) },
-            (16, 8) => unsafe { where_impl::<[u64; 2]>(condition, buf, y_buf) },
+            (16, 8 | 16) => unsafe { where_impl::<[u64; 2]>(condition, buf, y_buf) },
             (itemsize, _) => {
                 let x = buf.chunks_exact_mut(itemsize as usize);
                 let y = y_buf.chunks_exact(itemsize as usize);
@@ -176,7 +170,7 @@ where
         self.condition.shape()
     }
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.x.dtype()
     }
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         self.x.storage._spec()
@@ -192,27 +186,27 @@ mod tests {
 
     use super::{where_condition, Where};
     use crate::array::Array;
-    use crate::storage::Compact;
+    use crate::storage::{Compact, Ty};
     use crate::util::ScalarStrategy;
     use crate::DimDyn;
 
     #[cfg(feature = "half")]
-    use crate::dtype::f16;
+    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f32 = crate::dtype::Complex<f32>;
+    type complex_f32 = crate::scalar::Complex<f32>;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f64 = crate::dtype::Complex<f64>;
+    type complex_f64 = crate::scalar::Complex<f64>;
 
     fn strategy2<T>() -> impl Strategy<
         Value = (
             ndarray::ArrayD<bool>,
             ndarray::ArrayD<T>,
             ndarray::ArrayD<T>,
-            Array<Compact<DimDyn>>,
-            Array<Compact<DimDyn>>,
-            Array<Compact<DimDyn>>,
+            Array<Compact<Ty<bool>, DimDyn>>,
+            Array<Compact<Ty<T>, DimDyn>>,
+            Array<Compact<Ty<T>, DimDyn>>,
         ),
     >
     where
@@ -293,18 +287,14 @@ mod tests {
     // --- error cases ---
 
     #[test]
-    fn condition_not_bool_fails() {
-        let cond = Array::compact_array(&array![0i32, 1, 0]).unwrap();
-        let x = Array::compact_array(&array![1i32, 2, 3]).unwrap();
-        let y = Array::compact_array(&array![4i32, 5, 6]).unwrap();
-        assert!(Where::new(cond, x, y).is_err());
-    }
-
-    #[test]
     fn x_y_dtype_mismatch_fails() {
         let cond = Array::compact_array(&array![true, false, true]).unwrap();
-        let x = Array::compact_array(&array![1i32, 2, 3]).unwrap();
-        let y = Array::compact_array(&array![4.0f64, 5.0, 6.0]).unwrap();
+        let x = Array::compact_array(&array![1i32, 2, 3])
+            .unwrap()
+            .swap_element_type_dyn();
+        let y = Array::compact_array(&array![4.0f64, 5.0, 6.0])
+            .unwrap()
+            .swap_element_type_dyn();
         assert!(Where::new(cond, x, y).is_err());
     }
 

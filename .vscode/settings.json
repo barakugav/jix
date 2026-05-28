@@ -19,6 +19,7 @@
         "Dtyped",
         "getattr",
         "getitem",
+        "Inplace",
         "isnan",
         "itemsize",
         "keepdims",

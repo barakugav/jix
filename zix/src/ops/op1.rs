@@ -2,337 +2,351 @@ use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
-use crate::dtype::{f16, Complex, Dtype, Itemsize};
+use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
-use crate::ops::common::define_array_op1_method;
-use crate::storage::{ArrayStorage, ArrayStorageSpec};
+use crate::ops::common::{bulk_size, define_array_op1_method};
+use crate::storage::{ArrayStorage, ArrayStorageSpec, ArrayStorageTyped, Ty};
+use crate::util::assert_unchecked_eq;
 
-pub(crate) trait Op1Kernel {
-    fn apply(&self, data: Op1KernelData, input_dtype: &Dtype) -> Result<()>;
-
-    fn output_dtype(&self, input_dtype: &Dtype) -> Result<Dtype>;
-}
-pub(crate) struct Op1KernelData<'a> {
-    src_data: *const u8,
-    dst_data: *mut u8, // potentially an alias to src_data
-    nitems: usize,
-    src_itemsize: Itemsize,
-    dst_itemsize: Itemsize,
-    phantom: std::marker::PhantomData<&'a ()>,
-}
-#[allow(unused)]
-impl<'a> Op1KernelData<'a> {
-    pub(crate) fn read_as_bytes(&mut self) -> Option<&[u8]> {
-        (self.nitems > 0).then(|| unsafe {
-            std::slice::from_raw_parts(self.src_data, self.src_itemsize as usize)
-        })
-    }
-
-    pub(crate) unsafe fn read<T>(&mut self) -> Option<T> {
-        debug_assert_eq!(self.src_itemsize as usize, size_of::<T>());
-        (self.nitems > 0).then(|| unsafe { self.src_data.cast::<T>().read() })
-    }
-
-    pub(crate) unsafe fn read_bulk<T, const N: usize>(&mut self) -> Option<[T; N]> {
-        debug_assert_eq!(self.src_itemsize as usize, size_of::<T>());
-        (self.nitems >= N).then(|| unsafe { self.src_data.cast::<[T; N]>().read() })
-    }
-
-    pub(crate) unsafe fn write_bytes(&mut self, data: &[u8]) {
-        assert_eq!(self.dst_itemsize as usize, data.len());
-        assert!(self.nitems > 0);
-        unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), self.dst_data, data.len());
-        }
-        self.nitems -= 1;
-        self.src_data = unsafe { self.src_data.add(self.src_itemsize as usize) };
-        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize) };
-    }
-
-    pub(crate) unsafe fn write<T>(&mut self, data: T) {
-        debug_assert_eq!(self.dst_itemsize as usize, size_of::<T>());
-        assert!(self.nitems > 0);
-        unsafe {
-            self.dst_data.cast::<T>().write(data);
-        }
-        self.nitems -= 1;
-        self.src_data = unsafe { self.src_data.add(self.src_itemsize as usize) };
-        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize) };
-    }
-
-    pub(crate) unsafe fn write_bulk<T, const N: usize>(&mut self, data: [T; N]) {
-        debug_assert_eq!(self.dst_itemsize as usize, size_of::<T>());
-        assert!(self.nitems >= N);
-        unsafe {
-            self.dst_data.cast::<[T; N]>().write(data);
-        }
-        self.nitems -= N;
-        self.src_data = unsafe { self.src_data.add(self.src_itemsize as usize * N) };
-        self.dst_data = unsafe { self.dst_data.add(self.dst_itemsize as usize * N) };
-    }
-}
-
-pub(crate) struct Op1<Op, S> {
-    op: Op,
+pub(crate) struct Op1<S, K> {
     array: Array<S>,
-    output_dtype: Dtype,
+    out_dtype_: Dtype,
+    kernel: K,
 }
-impl<Op, S> Op1<Op, S> {
-    pub(crate) fn new(op: Op, array: Array<S>) -> Result<Self>
+pub(crate) trait Op1Kernel<T> {
+    type Output;
+    fn apply(&self, x: T) -> Self::Output;
+}
+impl<F, T, O> Op1Kernel<T> for F
+where
+    F: Fn(T) -> O,
+{
+    type Output = O;
+    fn apply(&self, x: T) -> Self::Output {
+        self(x)
+    }
+}
+impl<S, K> Op1<S, K> {
+    pub(crate) fn new(array: Array<S>, kernel: K) -> Result<Self>
     where
-        Op: Op1Kernel,
-        S: ArrayStorage,
+        S: ArrayStorageTyped,
+        K: Op1Kernel<S::Item, Output: Dtyped>,
     {
-        let output_dtype = op.output_dtype(array.dtype())?;
         Ok(Self {
-            op,
-            output_dtype,
             array,
+            out_dtype_: K::Output::DTYPE,
+            kernel,
         })
     }
 }
-impl<Op, S> ArrayStorage for Op1<Op, S>
+
+impl<S, K> ArrayStorage for Op1<S, K>
 where
-    Op: Op1Kernel,
-    S: ArrayStorage,
+    S: ArrayStorageTyped,
+    K: Op1Kernel<S::Item, Output: Dtyped>,
 {
+    type ElementType = Ty<K::Output>;
     type Dimension = S::Dimension;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        check_get_range(&self.shape(), index)?;
-        let nitems = check_get_buffer_size(index, &self.output_dtype, buf)?;
-
-        let (src_dtype, dst_dtype) = (self.array.dtype(), &self.output_dtype);
-        let (src_itemsize, dst_itemsize) =
-            (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
-
-        let in_place = src_itemsize == dst_itemsize
-            && (buf.as_ptr() as usize).is_multiple_of(src_dtype.alignment().as_usize());
-        let mut tmp_buf;
-        let (read_buf, dst) = if in_place {
-            let ptr = buf.as_mut_ptr();
-            (buf, ptr)
-        } else {
-            tmp_buf = context.tmp_buf(nitems * src_itemsize, src_dtype.alignment());
-            let tmp_buf = tmp_buf.as_mut_slice();
-            (tmp_buf, buf.as_mut_ptr())
-        };
-        self.array.storage.read_data(index, read_buf, context)?;
-        let src = read_buf.as_ptr();
-
-        self.op.apply(
-            Op1KernelData {
-                src_data: src,
-                dst_data: dst,
-                nitems,
-                src_itemsize: src_dtype.itemsize(),
-                dst_itemsize: dst_dtype.itemsize(),
-                phantom: std::marker::PhantomData,
-            },
-            src_dtype,
-        )
+        unsafe {
+            op1_read_data_unchecked::<S::Item, K::Output>(
+                self.array.shape(),
+                &self.array.storage,
+                &self.kernel,
+                index,
+                buf,
+                context,
+            )
+        }
     }
 
     fn shape(&self) -> &[u64] {
         self.array.shape()
     }
+
     fn dtype(&self) -> &Dtype {
-        &self.output_dtype
+        let dtype = &self.out_dtype_;
+        unsafe { assert_unchecked_eq!(*dtype, K::Output::DTYPE) };
+        dtype
     }
+
     fn _spec(&self) -> ArrayStorageSpec<'_> {
         self.array.storage._spec()
     }
 }
 
+pub(crate) unsafe fn op1_read_data_unchecked<T, Out>(
+    shape: &[u64],
+    array: &impl ArrayStorage,
+    kernel: &impl Op1Kernel<T, Output = Out>,
+    index: &[Range<u64>],
+    buf: &mut [u8],
+    context: &ReadContext,
+) -> Result<()>
+where
+    T: Dtyped,
+    Out: Dtyped,
+{
+    let bulk_size = bulk_size::<T>();
+    assert!(bulk_size.is_power_of_two());
+
+    // this is a compile time check, the compiler knows the value of `bulk_size::<T>()`
+    let read_fn = match bulk_size {
+        1 => op1_read_data_unchecked_impl::<T, Out, 1>,
+        2 => op1_read_data_unchecked_impl::<T, Out, 2>,
+        4 => op1_read_data_unchecked_impl::<T, Out, 4>,
+        8 => op1_read_data_unchecked_impl::<T, Out, 8>,
+        16 => op1_read_data_unchecked_impl::<T, Out, 16>,
+        32 => op1_read_data_unchecked_impl::<T, Out, 32>,
+        64 => op1_read_data_unchecked_impl::<T, Out, 64>,
+        128 => op1_read_data_unchecked_impl::<T, Out, 128>,
+        256 => op1_read_data_unchecked_impl::<T, Out, 256>,
+        512 => op1_read_data_unchecked_impl::<T, Out, 512>,
+        _ => op1_read_data_unchecked_impl::<T, Out, 1024>,
+    };
+    unsafe { read_fn(shape, array, kernel, index, buf, context) }
+}
+unsafe fn op1_read_data_unchecked_impl<T, Out, const BULK: usize>(
+    shape: &[u64],
+    array: &impl ArrayStorage,
+    kernel: &impl Op1Kernel<T, Output = Out>,
+    index: &[Range<u64>],
+    buf: &mut [u8],
+    context: &ReadContext,
+) -> Result<()>
+where
+    T: Dtyped,
+    Out: Dtyped,
+{
+    check_get_range(shape, index)?;
+    let (in_dtype, out_dtype) = (T::DTYPE, Out::DTYPE);
+    let nitems = check_get_buffer_size(index, &out_dtype, buf)?;
+
+    let (src_itemsize, dst_itemsize) =
+        (in_dtype.itemsize() as usize, out_dtype.itemsize() as usize);
+
+    let in_place = src_itemsize == dst_itemsize
+        && (buf.as_ptr() as usize).is_multiple_of(in_dtype.alignment().as_usize());
+    let mut tmp_buf;
+    let (buf, dst) = if in_place {
+        let ptr = buf.as_mut_ptr();
+        (buf, ptr)
+    } else {
+        tmp_buf = context.tmp_buf(nitems * src_itemsize, in_dtype.alignment());
+        let tmp_buf = tmp_buf.as_mut_slice();
+
+        (tmp_buf, buf.as_mut_ptr())
+    };
+
+    unsafe { assert_unchecked_eq!(in_dtype, *array.dtype()) };
+    unsafe { assert_unchecked_eq!(shape, array.shape()) };
+    array.read_data(index, buf, context)?;
+
+    let mut src_data = buf.as_ptr().cast::<T>();
+    let mut dst_data = dst.cast::<Out>();
+    let mut nitems = nitems;
+    unsafe {
+        while nitems >= BULK {
+            let src = src_data.cast::<[T; BULK]>().read();
+            let dst = src.map(|x| kernel.apply(x));
+            dst_data.cast::<[Out; BULK]>().write(dst);
+
+            nitems -= BULK;
+            src_data = src_data.add(BULK);
+            dst_data = dst_data.add(BULK);
+        }
+        while nitems > 0 {
+            let src = src_data.read();
+            dst_data.write(kernel.apply(src));
+            nitems -= 1;
+            src_data = src_data.add(1);
+            dst_data = dst_data.add(1);
+        }
+    }
+    Ok(())
+}
+
 macro_rules! define_op1 {
     (
         $(#[$meta:meta])*
-        $Name:ident,
-        $NameKernel:ident,
-        core_op = ($op_trait:ident, $op_fn:ident),
-        $($kernel_args:tt)*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident,
+        $(core_op = $core_op_trait:ident::$core_op_fn:ident,)?
     ) => {
-        define_op1!(
-            $(#[$meta])*
-            $Name,
-            $NameKernel,
-            $($kernel_args)*
-        );
-
-        impl<S> core::ops::$op_trait for crate::Array<S>
+        struct $Kernel;
+        impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
         where
-            S: crate::storage::ArrayStorage,
+            T: $($trait)::+,
         {
-            type Output = crate::Array<$Name<S>>;
-            #[track_caller]
-            fn $op_fn(self) -> crate::Array<$Name<S>> {
-                let op = $Name::new(self).unwrap();
-                crate::Array::from_storage(op)
+            type Output = <T as $($trait)::+>::Output;
+            fn apply(&self, x: T) -> Self::Output {
+                <T as $($trait)::+>::$kernel_fn(x)
             }
         }
+        $(#[$meta])*
+        pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
+        impl<S> $Op<S> {
+            pub fn new(array: Array<S>) -> crate::error::Result<Self>
+            where
+                S: crate::storage::ArrayStorageTyped,
+                S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            {
+                Ok(Self(crate::ops::op1::Op1::new(array, $Kernel)?))
+            }
+        }
+        impl<S> ArrayStorage for $Op<S>
+        where
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+        {
+            type ElementType = crate::storage::Ty<<S::Item as $($trait)::+>::Output>;
+            type Dimension = S::Dimension;
+            crate::storage::impl_array_storage_forward!();
+        }
+
+        define_op1!(@define_core
+            impl $Op
+            $(core_op = $core_op_trait::$core_op_fn,)?
+        );
     };
 
     (
         $(#[$meta:meta])*
-        $Name:ident,
-        $NameKernel:ident,
-        $($kernel_args:tt)*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident,
+        type Output<T> = T,
     ) => {
-        $(#[$meta])*
-        pub struct $Name<S>(crate::ops::op1::Op1<$NameKernel, S>);
-        impl<S> $Name<S> {
-            /// Creates a new view storage applying the operation element-wise to `array`.
-            ///
-            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
-            pub fn new(array: crate::Array<S>) -> crate::error::Result<Self>
-            where
-                S: crate::storage::ArrayStorage,
-            {
-                Ok(Self(crate::ops::op1::Op1::new($NameKernel, array)?))
+        define_op1!(
+            $(#[$meta])*
+            $Op,
+            $Kernel,
+            <$($trait)::+> :: $kernel_fn,
+            type Output<T> = T,
+            type Output<S> = S::Item,
+        );
+    };
+    (
+        $(#[$meta:meta])*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident,
+        type Output = $output_type:ty,
+    ) => {
+        define_op1!(
+            $(#[$meta])*
+            $Op,
+            $Kernel,
+            <$($trait)::+> :: $kernel_fn,
+            type Output<T> = $output_type,
+            type Output<S> = $output_type,
+        );
+    };
+    (
+        $(#[$meta:meta])*
+        $Op:ident,
+        $Kernel:ident,
+        <$($trait:ident)::+> :: $kernel_fn:ident,
+        type Output<T> = $output_type_t:ty,
+        type Output<S> = $output_type_s:ty,
+    ) => {
+        struct $Kernel;
+        impl<T> crate::ops::op1::Op1Kernel<T> for $Kernel
+        where
+            T: $($trait)::+,
+        {
+            type Output = $output_type_t;
+            fn apply(&self, x: T) -> Self::Output {
+                <T as $($trait)::+>::$kernel_fn(x)
             }
         }
-
-        impl<S> crate::storage::ArrayStorage for $Name<S>
+        $(#[$meta])*
+        pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
+        impl<S> $Op<S> {
+            pub fn new(array: Array<S>) -> crate::error::Result<Self>
+            where
+                S: crate::storage::ArrayStorageTyped,
+                S::Item: $($trait)::+,
+            {
+                Ok(Self(crate::ops::op1::Op1::new(array, $Kernel)?))
+            }
+        }
+        impl<S> ArrayStorage for $Op<S>
         where
-            S: crate::storage::ArrayStorage,
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+,
         {
+            type ElementType = crate::storage::Ty<$output_type_s>;
             type Dimension = S::Dimension;
-
             crate::storage::impl_array_storage_forward!();
         }
-
-        crate::ops::op1::define_op1_kernel!($NameKernel, $($kernel_args)*);
-    };
-}
-macro_rules! define_op1_kernel {
-    (
-        $NameKernel:ident,
-        |$arg:ident| $body:expr,
-        [$($scalar:tt),* $(,)?],
-        output_type = "same"
-    ) => {
-        crate::ops::op1::define_op1_kernel! {
-            $NameKernel,
-            |$arg| $body,
-            [$($scalar => $scalar),*]
-        }
     };
 
     (
-        $NameKernel:ident,
-        |$arg:ident| $body:expr,
-        [$($scalar:tt),* $(,)?],
-        output_type = $output_type:tt
-    ) => {
-        crate::ops::op1::define_op1_kernel! {
-            $NameKernel,
-            |$arg| $body,
-            [$($scalar => $output_type),*]
-        }
-    };
-
+        @define_core
+        impl $Op:ident
+    ) => {};
     (
-        $NameKernel:ident,
-        |$arg:ident| $body:expr,
-        [$($input_type:tt => $output_type:tt),* $(,)?]
+        @define_core
+        impl $Op:ident
+        core_op = $core_op_trait:ident::$core_op_fn:ident,
     ) => {
-        struct $NameKernel;
-        impl crate::ops::op1::Op1Kernel for $NameKernel {
-            fn apply(
-                &self,
-                mut data: crate::ops::op1::Op1KernelData,
-                input_dtype: &crate::dtype::Dtype,
-            ) -> crate::error::Result<()> {
-                macro_rules! apply_loop_impl {
-                    ($input_type2:ty, $output_type2:ty) => {{
-                        unsafe {
-                            use crate::ops::common::BulkInfo;
-                            while let Some(src) = data.read_bulk::<$input_type2, { <$input_type2>::BULK }>() {
-                                let mut dst: [std::mem::MaybeUninit<$output_type2>; <$input_type2>::BULK]
-                                    = std::mem::transmute(std::mem::MaybeUninit::<[$output_type2; <$input_type2>::BULK]>::uninit());
-                                for i in 0..<$input_type2>::BULK {
-                                    dst[i].write({
-                                        let $arg = src[i];
-                                        $body
-                                    });
-                                }
-                                data.write_bulk(dst);
-                            }
-                            while let Some(src) = data.read::<$input_type2>() {
-                                let mut dst = std::mem::MaybeUninit::<$output_type2>::uninit();
-                                dst.write({
-                                    let $arg = src;
-                                    $body
-                                });
-                                data.write(dst);
-                            }
-                        }
-                        return Ok(());
-                    }};
-                }
-                macro_rules! apply_loop {
-                    (f16, $output_type2:ty) => {
-                        #[cfg(feature = "half")]
-                        apply_loop_impl!(f16, $output_type2)
-                    };
-                    ((Complex<f32>), $output_type2:ty) => {
-                        #[cfg(feature = "num-complex")]
-                        apply_loop_impl!(crate::dtype::Complex<f32>, $output_type2)
-                    };
-                    ((Complex<f64>), $output_type2:ty) => {
-                        #[cfg(feature = "num-complex")]
-                        apply_loop_impl!(crate::dtype::Complex<f64>, $output_type2)
-                    };
-                    ($input_type2:ty, $output_type2:ty) => {
-                        apply_loop_impl!($input_type2, $output_type2)
-                    };
-                }
-                #[allow(unused_parens)]
-                match input_dtype.try_to_scalar() {
-                    $(Some(crate::ops::common::scalar_kind!($input_type)) => {
-                        apply_loop!($input_type, $output_type)
-                    },)*
-                    _ => {}
-                }
-                crate::error::bail!(
-                    UnsupportedDtype,
-                    "Op1<{}> not supported for dtype {input_dtype:#?}",
-                    stringify!($NameKernel)
-                );
-            }
-
-            fn output_dtype(&self, input_dtype: &crate::dtype::Dtype) -> crate::error::Result<crate::dtype::Dtype> {
-                #[allow(unused_parens)]
-                match input_dtype.try_to_scalar() {
-                    $(Some(crate::ops::common::scalar_kind!($input_type)) => {
-                        return Ok(<$output_type as crate::dtype::Dtyped>::DTYPE);
-                    },)*
-                    _ => {},
-
-                };
-                crate::error::bail!(
-                    UnsupportedDtype,
-                    "Op1<{}> not supported for dtype {input_dtype:#?}",
-                    stringify!($NameKernel)
-                );
+        impl<S> core::ops::$core_op_trait for Array<S>
+        where
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: core::ops::$core_op_trait<Output: crate::dtype::Dtyped>,
+        {
+            type Output = Array<$Op<S>>;
+            #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+            #[track_caller]
+            fn $core_op_fn(self) -> Self::Output {
+                let op = $Op::new(self).unwrap();
+                Array::from_storage(op)
             }
         }
     };
 }
-pub(crate) use {define_op1, define_op1_kernel};
+
+pub(crate) use define_op1;
+
+pub(crate) mod _traits {
+    #[allow(unused_imports)]
+    use crate::scalar::{f16, Complex};
+
+    use crate::scalar::traits_util::define_op1_trait;
+
+    define_op1_trait!(
+        Abs,
+        abs,
+        |a| a.abs(),
+        [i8, i16, i32, i64, f32, f64] => "same"
+    );
+    #[cfg(feature = "half")]
+    impl Abs for f16 {
+        type Output = f16;
+        fn abs(self) -> Self::Output {
+            // Self::from_f32(self.to_f32().abs())
+            <Self as num_traits::Float>::abs(self)
+        }
+    }
+    impl Abs for Complex<f32> {
+        type Output = f32;
+        fn abs(self) -> Self::Output {
+            self.re.hypot(self.im)
+        }
+    }
+    impl Abs for Complex<f64> {
+        type Output = f64;
+        fn abs(self) -> Self::Output {
+            self.re.hypot(self.im)
+        }
+    }
+}
 
 define_op1!(
     /// Arithmetic negation applied element-wise.
-    ///
-    /// Supported dtypes and output dtype:
-    ///
-    /// | Input dtype | Output dtype |
-    /// |-------------|--------------|
-    /// | `i8`, `i16`, `i32`, `i64` | same |
-    /// | `f16`, `f32`, `f64` | same |
-    /// | `Complex<f32>`, `Complex<f64>` | same |
-    ///
-    /// The output shape equals the input shape.
     ///
     /// For **integer** types the result is the two's-complement negation.
     /// Negating the minimum representable value (e.g. `i32::MIN`) overflows:
@@ -346,7 +360,7 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::neg()`](core::ops::Neg::neg).
     ///
     /// # Examples
@@ -366,22 +380,17 @@ define_op1!(
     /// ```
     Neg,
     NegKernel,
-    core_op = (Neg, neg),
-    |a| -a,
-    [i8, i16, i32, i64, f16, f32, f64, (Complex<f32>), (Complex<f64>)],
-    output_type = "same"
+    <core::ops::Neg>::neg,
+    core_op = Neg::neg,
 );
-// TODO f16
 define_op1!(
     /// Rounds each element down to the nearest integer (towards -inf).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     /// Semantics follow [`f32::floor`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::floor()`](crate::Array::floor).
     ///
     /// # Examples
@@ -401,20 +410,17 @@ define_op1!(
     /// ```
     Floor,
     FloorKernel,
-    |a| a.floor(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::floor,
+    type Output<T> = T,
 );
 define_op1!(
     /// Rounds each element up to the nearest integer (towards +inf).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     /// Semantics follow [`f32::ceil`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::ceil()`](crate::Array::ceil).
     ///
     /// # Examples
@@ -434,15 +440,11 @@ define_op1!(
     /// ```
     Ceil,
     CeilKernel,
-    |a| a.ceil(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::ceil,
+    type Output<T> = T,
 );
 define_op1!(
     /// Rounds each element to the nearest integer.
-    ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     ///
     /// Ties (values exactly halfway between two integers) are broken by rounding
     /// away from zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from
@@ -451,7 +453,7 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::round()`](crate::Array::round).
     ///
     /// # Examples
@@ -471,21 +473,17 @@ define_op1!(
     /// ```
     Round,
     RoundKernel,
-    |a| a.round(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::round,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the square root of each element.
-    ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     ///
     /// Negative inputs produce `NaN`. Semantics follow [`f32::sqrt`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::sqrt()`](crate::Array::sqrt).
     ///
     /// # Examples
@@ -505,20 +503,17 @@ define_op1!(
     /// ```
     Sqrt,
     SqrtKernel,
-    |a| a.sqrt(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::sqrt,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     /// Semantics follow [`f32::exp`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::exp()`](crate::Array::exp).
     ///
     /// # Examples
@@ -539,22 +534,18 @@ define_op1!(
     /// ```
     Exp,
     ExpKernel,
-    |a| a.exp(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::exp,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the natural logarithm (`ln x`) of each element.
-    ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     ///
     /// Negative inputs produce `NaN`; zero produces `-inf`.
     /// Semantics follow [`f32::ln`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::ln()`](crate::Array::ln).
     ///
     /// # Examples
@@ -576,20 +567,17 @@ define_op1!(
     /// ```
     Ln,
     LnKernel,
-    |a| a.ln(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::ln,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the sine of each element (input in radians).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     /// Semantics follow [`f32::sin`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::sin()`](crate::Array::sin).
     ///
     /// # Examples
@@ -609,20 +597,17 @@ define_op1!(
     /// ```
     Sin,
     SinKernel,
-    |a| a.sin(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::sin,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the cosine of each element (input in radians).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     /// Semantics follow [`f32::cos`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::cos()`](crate::Array::cos).
     ///
     /// # Examples
@@ -643,20 +628,17 @@ define_op1!(
     /// ```
     Cos,
     CosKernel,
-    |a| a.cos(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::cos,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the tangent of each element (input in radians).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     /// Semantics follow [`f32::tan`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::tan()`](crate::Array::tan).
     ///
     /// # Examples
@@ -676,21 +658,17 @@ define_op1!(
     /// ```
     Tan,
     TanKernel,
-    |a| a.tan(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::tan,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
-    ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     ///
     /// Inputs outside `[-1, 1]` produce `NaN`. Semantics follow [`f32::asin`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::asin()`](crate::Array::asin).
     ///
     /// # Examples
@@ -711,21 +689,17 @@ define_op1!(
     /// ```
     Asin,
     AsinKernel,
-    |a| a.asin(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::asin,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
-    ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     ///
     /// Inputs outside `[-1, 1]` produce `NaN`. Semantics follow [`f32::acos`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::acos()`](crate::Array::acos).
     ///
     /// # Examples
@@ -746,20 +720,17 @@ define_op1!(
     /// ```
     Acos,
     AcosKernel,
-    |a| a.acos(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::acos,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     /// Semantics follow [`f32::atan`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::atan()`](crate::Array::atan).
     ///
     /// # Examples
@@ -779,15 +750,11 @@ define_op1!(
     /// ```
     Atan,
     AtanKernel,
-    |a| a.atan(),
-    [f32, f64],
-    output_type = "same"
+    <num_traits::Float>::atan,
+    type Output<T> = T,
 );
 define_op1!(
     /// Returns the sign of each element as a floating-point value.
-    ///
-    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype is the same as the input.
-    /// The output shape equals the input shape.
     ///
     /// Returns `+1.0` for positive values and `-1.0` for negative values.
     /// Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns `-1.0`.
@@ -795,7 +762,7 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::signum()`](crate::Array::signum).
     ///
     /// # Examples
@@ -815,9 +782,8 @@ define_op1!(
     /// ```
     Signum,
     SignumKernel,
-    |a| a.signum(),
-    [f16, f32, f64],
-    output_type = "same"
+    <num_traits::Float>::signum,
+    type Output<T> = T,
 );
 define_op1!(
     /// Computes the absolute value of each element.
@@ -831,8 +797,6 @@ define_op1!(
     /// | `Complex<f32>` | `f32` |
     /// | `Complex<f64>` | `f64` |
     ///
-    /// The output shape equals the input shape.
-    ///
     /// For **complex** types the result is the modulus `sqrt(re^2 + im^2)`, computed
     /// via `hypot` for numerical stability. The output dtype is the real component type
     /// (`f32` for `Complex<f32>`, `f64` for `Complex<f64>`).
@@ -844,7 +808,7 @@ define_op1!(
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// This struct is the bare storage implementation, but the operation is also available as
+    /// This struct is the bare storage implementation, the operation is also available as
     /// [`Array::abs()`](crate::Array::abs).
     ///
     /// # Examples
@@ -865,7 +829,7 @@ define_op1!(
     /// use ndarray::array;
     ///
     /// // For complex input the result is the modulus sqrt(re^2 + im^2).
-    /// use zix::dtype::Complex;
+    /// use zix::scalar::Complex;
     /// let b = Array::compact_array(&array![Complex { re: 3.0f32, im: 4.0 }])?;
     /// let result = b.abs().to_ndarray::<f32>()?;
     /// assert!((result[[0]] - 5.0).abs() < 1e-5);
@@ -874,74 +838,39 @@ define_op1!(
     /// ```
     Abs,
     AbsKernel,
-    |a| a.abs(),
-    [
-        i8 => i8,
-        i16 => i16,
-        i32 => i32,
-        i64 => i64,
-        f16 => f16,
-        f32 => f32,
-        f64 => f64,
-        (Complex<f32>) => f32,
-        (Complex<f64>) => f64,
-    ]
+    <crate::scalar::Abs>::abs,
 );
-#[allow(unused)]
-trait AbsImpl {
-    type Output;
-    fn abs(self) -> Self::Output;
-}
-#[cfg(feature = "half")]
-impl AbsImpl for f16 {
-    type Output = f16;
-    fn abs(self) -> Self::Output {
-        Self::from_f32(self.to_f32().abs())
-    }
-}
-impl AbsImpl for Complex<f32> {
-    type Output = f32;
-    fn abs(self) -> Self::Output {
-        self.re.hypot(self.im)
-    }
-}
-impl AbsImpl for Complex<f64> {
-    type Output = f64;
-    fn abs(self) -> Self::Output {
-        self.re.hypot(self.im)
-    }
-}
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op1_method!(floor: Floor);
-    define_array_op1_method!(ceil: Ceil);
-    define_array_op1_method!(round: Round);
-    define_array_op1_method!(sqrt: Sqrt);
-    define_array_op1_method!(exp: Exp);
-    define_array_op1_method!(ln: Ln);
-    define_array_op1_method!(sin: Sin);
-    define_array_op1_method!(cos: Cos);
-    define_array_op1_method!(tan: Tan);
-    define_array_op1_method!(asin: Asin);
-    define_array_op1_method!(acos: Acos);
-    define_array_op1_method!(atan: Atan);
-    define_array_op1_method!(signum: Signum);
-    define_array_op1_method!(abs: Abs);
+    define_array_op1_method!(floor: Floor, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(ceil: Ceil, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(round: Round, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(sqrt: Sqrt, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(exp: Exp, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(ln: Ln, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(sin: Sin, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(cos: Cos, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(tan: Tan, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(asin: Asin, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(acos: Acos, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(atan: Atan, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(signum: Signum, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(abs: Abs, crate::scalar::Abs);
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     #[cfg(feature = "half")]
-    use crate::dtype::f16;
+    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f32 = crate::dtype::Complex<f32>;
+    type complex_f32 = crate::scalar::Complex<f32>;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
-    type complex_f64 = crate::dtype::Complex<f64>;
+    type complex_f64 = crate::scalar::Complex<f64>;
 
     macro_rules! test_op1_dtype {
         ($op_method:ident, |$arg:ident| $body:expr, $dtype:ident, $strategy:ident) => {
@@ -1032,7 +961,7 @@ pub(crate) mod tests {
         use super::{complex_f32, complex_f64};
 
         // abs on complex types: output dtype is the real component type, not the input dtype.
-        // Reference uses hypot to match the AbsImpl kernel exactly.
+        // Reference uses hypot to match the Abs kernel exactly.
         test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f32, op_safe_strategy);
         test_op1_dtype!(abs, |a| a.re.hypot(a.im), complex_f64, op_safe_strategy);
     }
