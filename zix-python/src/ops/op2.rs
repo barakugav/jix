@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use zix_core::dtype::DtypeScalarKind;
+use zix_core::scalar::{f16, Complex};
 
 use crate::ops::common::Precision;
 use crate::ops::{define_op2, promote, Operand, Scalar};
@@ -44,7 +45,8 @@ define_op2!(
     /// assert np.array_equal(result2.numpy(), [11, 12, 13])
     /// ```
     add,
-    Add
+    Add,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
 );
 define_op2!(
     /// Element-wise subtraction of two arrays (`a - b`).
@@ -84,7 +86,8 @@ define_op2!(
     /// assert np.array_equal(result2.numpy(), [9, 19, 29])
     /// ```
     subtract,
-    Sub
+    Sub,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
 );
 define_op2!(
     /// Element-wise multiplication of two arrays.
@@ -124,7 +127,8 @@ define_op2!(
     /// assert np.array_equal(result2.numpy(), [3, 6, 9])
     /// ```
     multiply,
-    Mul
+    Mul,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
 );
 define_op2!(
     /// Element-wise division of two arrays (`a / b`).
@@ -166,7 +170,8 @@ define_op2!(
     /// assert np.array_equal(result2.numpy(), [5, 10, 15])
     /// ```
     divide,
-    Div
+    Div,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
 );
 define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
@@ -202,7 +207,8 @@ define_op2!(
     /// assert np.array_equal(result2.numpy(), [4.0, 9.0, 16.0])
     /// ```
     power,
-    Power
+    Pow,
+    [f32, f64]
 );
 
 pub(crate) fn asarray22<'py>(
@@ -245,18 +251,24 @@ pub(crate) fn asarray22<'py>(
                     DtypeScalarKind::I8
                     | DtypeScalarKind::I16
                     | DtypeScalarKind::I32
-                    | DtypeScalarKind::I64 => Scalar::Int(zix_core::ops::__private::cast($value)),
+                    | DtypeScalarKind::I64 => {
+                        Scalar::Int(<_ as zix_core::scalar::Cast<_>>::cast($value))
+                    }
                     DtypeScalarKind::U8
                     | DtypeScalarKind::U16
                     | DtypeScalarKind::U32
-                    | DtypeScalarKind::U64 => Scalar::UInt(zix_core::ops::__private::cast($value)),
+                    | DtypeScalarKind::U64 => {
+                        Scalar::UInt(<_ as zix_core::scalar::Cast<_>>::cast($value))
+                    }
                     DtypeScalarKind::F16 | DtypeScalarKind::F32 | DtypeScalarKind::F64 => {
-                        Scalar::Float(zix_core::ops::__private::cast($value))
+                        Scalar::Float(<_ as zix_core::scalar::Cast<_>>::cast($value))
                     }
                     DtypeScalarKind::ComplexF32 | DtypeScalarKind::ComplexF64 => {
-                        Scalar::Complex(zix_core::ops::__private::cast($value))
+                        Scalar::Complex(<_ as zix_core::scalar::Cast<_>>::cast($value))
                     }
-                    DtypeScalarKind::Bool => Scalar::Bool(zix_core::ops::__private::cast($value)),
+                    DtypeScalarKind::Bool => {
+                        Scalar::Bool(<_ as zix_core::scalar::Cast<_>>::cast($value))
+                    }
                 }
             };
         }
@@ -267,7 +279,7 @@ pub(crate) fn asarray22<'py>(
             Scalar::Float(value) => do_cast!(*value),
             Scalar::Complex(value) => match target_dtype {
                 DtypeScalarKind::ComplexF32 | DtypeScalarKind::ComplexF64 => {
-                    Scalar::Complex(zix_core::ops::__private::cast(*value))
+                    Scalar::Complex(<_ as zix_core::scalar::Cast<_>>::cast(*value))
                 }
                 _ => unreachable!(),
             },

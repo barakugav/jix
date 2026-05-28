@@ -39,7 +39,8 @@ mod tests {
     use ndarray::{array, Array0, ArrayD, IxDyn};
     use numpy::PyArray;
     use pyo3::prelude::*;
-    use zix_core::dtype::{Complex, Dtyped};
+    use zix_core::dtype::Dtyped;
+    use zix_core::scalar::{f16, Complex};
 
     use super::asarray;
 

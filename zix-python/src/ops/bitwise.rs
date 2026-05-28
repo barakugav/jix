@@ -1,4 +1,7 @@
-use crate::ops::{define_op1, define_op2};
+use zix_core::scalar::{f16, Complex};
+
+use crate::ops::common::define_op1;
+use crate::ops::define_op2;
 
 define_op2!(
     /// Element-wise logical AND of two arrays.
@@ -32,7 +35,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [False, True, False, False])
     /// ```
     logical_and,
-    LogicalAnd
+    LogicalAnd,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
 );
 
 define_op2!(
@@ -66,7 +70,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [False, True, False, True])
     /// ```
     logical_or,
-    LogicalOr
+    LogicalOr,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
 );
 
 define_op2!(
@@ -100,7 +105,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [False, False, True, True])
     /// ```
     logical_xor,
-    LogicalXor
+    LogicalXor,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
 );
 
 define_op1!(
@@ -128,7 +134,8 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [True, False, False, True])
     /// ```
     logical_not,
-    LogicalNot
+    LogicalNot,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
 );
 
 define_op2!(
@@ -161,7 +168,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b1000, 0b0000, 0b0000])
     /// ```
     bitwise_and,
-    BitwiseAnd
+    BitwiseAnd,
+    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
 );
 
 define_op2!(
@@ -194,7 +202,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b1110, 0b1111, 0b1111])
     /// ```
     bitwise_or,
-    BitwiseOr
+    BitwiseOr,
+    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
 );
 
 define_op2!(
@@ -227,7 +236,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b0110, 0b0000, 0b0000])
     /// ```
     bitwise_xor,
-    BitwiseXor
+    BitwiseXor,
+    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
 );
 
 define_op1!(
@@ -253,7 +263,8 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [0b11110000, 0b00001111, 0xFF])
     /// ```
     bitwise_not,
-    BitwiseNot
+    BitwiseNot,
+    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
 );
 
 define_op2!(
@@ -287,7 +298,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b00000010, 0b00001000, 0b00100000])
     /// ```
     bitwise_shift_left,
-    BitwiseShiftLeft
+    BitwiseShiftLeft,
+    [i8, i16, i32, i64, u8, u16, u32, u64]
 );
 
 define_op2!(
@@ -322,7 +334,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b01000000, 0b00001000, 0b00000001])
     /// ```
     bitwise_shift_right,
-    BitwiseShiftRight
+    BitwiseShiftRight,
+    [i8, i16, i32, i64, u8, u16, u32, u64]
 );
 
 define_op2!(
@@ -354,7 +367,17 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b00000011, 0b00001000, 0b00001111])
     /// ```
     bitwise_rotate_left,
-    BitwiseRotateLeft
+    BitwiseRotateLeft,
+    [
+        (i8, u32),
+        (i16, u32),
+        (i32, u32),
+        (i64, u32),
+        (u8, u32),
+        (u16, u32),
+        (u32, u32),
+        (u64, u32)
+    ]
 );
 
 define_op2!(
@@ -386,7 +409,17 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b11000000, 0b00000001, 0b11110000])
     /// ```
     bitwise_rotate_right,
-    BitwiseRotateRight
+    BitwiseRotateRight,
+    [
+        (i8, u32),
+        (i16, u32),
+        (i32, u32),
+        (i64, u32),
+        (u8, u32),
+        (u16, u32),
+        (u32, u32),
+        (u64, u32)
+    ]
 );
 
 define_op1!(
@@ -412,7 +445,8 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [4, 4, 8])
     /// ```
     count_ones,
-    CountOnes
+    CountOnes,
+    [i8, i16, i32, i64, u8, u16, u32, u64]
 );
 
 define_op1!(
@@ -442,7 +476,8 @@ define_op1!(
     /// assert zix.count_zeros(b).numpy()[0] == 8  # u8 has 8 bits
     /// ```
     count_zeros,
-    CountZeros
+    CountZeros,
+    [i8, i16, i32, i64, u8, u16, u32, u64]
 );
 
 define_op1!(
@@ -473,7 +508,8 @@ define_op1!(
     /// assert zix.leading_zeros(b).numpy()[0] == 32
     /// ```
     leading_zeros,
-    LeadingZeros
+    LeadingZeros,
+    [i8, i16, i32, i64, u8, u16, u32, u64]
 );
 
 define_op1!(
@@ -504,7 +540,8 @@ define_op1!(
     /// assert zix.trailing_zeros(b).numpy()[0] == 32
     /// ```
     trailing_zeros,
-    TrailingZeros
+    TrailingZeros,
+    [i8, i16, i32, i64, u8, u16, u32, u64]
 );
 
 define_op1!(
@@ -531,7 +568,8 @@ define_op1!(
     /// assert result.numpy()[0] == 0x78563412
     /// ```
     swap_bytes,
-    SwapBytes
+    SwapBytes,
+    [i16, i32, i64, u16, u32, u64]
 );
 
 define_op1!(
@@ -556,5 +594,6 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [0b10000000, 0b00000001, 0b01010101])
     /// ```
     reverse_bits,
-    ReverseBits
+    ReverseBits,
+    [i8, i16, i32, i64, u8, u16, u32, u64]
 );

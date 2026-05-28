@@ -1,3 +1,5 @@
+use zix_core::scalar::{f16, Complex};
+
 use crate::ops::common::define_op1;
 
 define_op1!(
@@ -22,7 +24,8 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [True, False, False, False])
     /// ```
     is_nan,
-    IsNan
+    IsNan,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
@@ -46,7 +49,8 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [True, False, False, False])
     /// ```
     is_finite,
-    IsFinite
+    IsFinite,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Tests whether each element is infinite (`+inf` or `-inf`).
@@ -70,5 +74,6 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [True, True, False, False])
     /// ```
     is_infinite,
-    IsInfinite
+    IsInfinite,
+    [f16, f32, f64]
 );

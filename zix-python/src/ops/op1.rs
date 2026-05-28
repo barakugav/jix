@@ -1,3 +1,5 @@
+use zix_core::scalar::{f16, Complex};
+
 use crate::ops::common::define_op1;
 
 define_op1!(
@@ -26,12 +28,14 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [-1.0, 2.5, -3.0])
     /// ```
     negative,
-    Neg
+    Neg,
+    [i8, i16, i32, i64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
 );
+
 define_op1!(
     /// Rounds each element down to the nearest integer (towards -inf).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
     ///
@@ -47,12 +51,13 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [1.0, 2.0, -2.0, -3.0])
     /// ```
     floor,
-    Floor
+    Floor,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Rounds each element up to the nearest integer (towards +inf).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
     ///
@@ -68,12 +73,13 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [2.0, 2.0, -1.0, 0.0])
     /// ```
     ceil,
-    Ceil
+    Ceil,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Rounds each element to the nearest integer.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// Ties (values exactly halfway between two integers) are broken by rounding away from
     /// zero: `round(0.5) = 1.0`, `round(-0.5) = -1.0`. This differs from "round-half-to-even"
@@ -93,12 +99,13 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, -1.0])
     /// ```
     round,
-    Round
+    Round,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the square root of each element.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// Negative inputs produce `NaN`.
     ///
@@ -120,12 +127,13 @@ define_op1!(
     /// assert np.isnan(zix.sqrt(b).numpy()[0])
     /// ```
     sqrt,
-    Sqrt
+    Sqrt,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
     ///
@@ -142,12 +150,13 @@ define_op1!(
     /// assert abs(result.numpy()[1] - np.e) < 1e-5
     /// ```
     exp,
-    Exp
+    Exp,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the natural logarithm (`ln x`) of each element.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// Negative inputs produce `NaN`; zero produces `-inf`.
     ///
@@ -172,12 +181,13 @@ define_op1!(
     /// assert np.isnan(result_b.numpy()[1])
     /// ```
     log,
-    Ln
+    Ln,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the sine of each element (input in radians).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
     ///
@@ -194,12 +204,13 @@ define_op1!(
     /// assert abs(result.numpy()[1] - 1.0) < 1e-5  # sin(pi/2) = 1
     /// ```
     sin,
-    Sin
+    Sin,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the cosine of each element (input in radians).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
     ///
@@ -216,12 +227,13 @@ define_op1!(
     /// assert abs(result.numpy()[1] - (-1.0)) < 1e-5  # cos(pi) = -1
     /// ```
     cos,
-    Cos
+    Cos,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the tangent of each element (input in radians).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
     ///
@@ -238,12 +250,13 @@ define_op1!(
     /// assert abs(result.numpy()[1] - 1.0) < 1e-5  # tan(pi/4) = 1
     /// ```
     tan,
-    Tan
+    Tan,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// Inputs outside `[-1, 1]` produce `NaN`.
     ///
@@ -262,12 +275,13 @@ define_op1!(
     /// assert abs(result.numpy()[1] - np.pi / 2) < 1e-5
     /// ```
     asin,
-    Asin
+    Asin,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// Inputs outside `[-1, 1]` produce `NaN`.
     ///
@@ -287,12 +301,13 @@ define_op1!(
     /// assert abs(result.numpy()[2] - np.pi) < 1e-5
     /// ```
     acos,
-    Acos
+    Acos,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported dtypes: `f16`, `f32`, `f64`. Output dtype and shape equal the input.
     ///
     /// The `array` argument may be anything that `zix.asarray()` accepts.
     ///
@@ -309,7 +324,8 @@ define_op1!(
     /// assert abs(result.numpy()[1] - np.pi / 4) < 1e-5
     /// ```
     atan,
-    Atan
+    Atan,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Returns the sign of each element as a floating-point value.
@@ -336,7 +352,8 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [1.0, -1.0, -1.0])
     /// ```
     signum,
-    Signum
+    Signum,
+    [f16, f32, f64]
 );
 define_op1!(
     /// Computes the absolute value of each element.
@@ -370,5 +387,6 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [3, 0, 5, 7])
     /// ```
     absolute,
-    Abs
+    Abs,
+    [i8, i16, i32, i64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
 );

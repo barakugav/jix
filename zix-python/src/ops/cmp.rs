@@ -1,3 +1,5 @@
+use zix_core::scalar::{f16, Complex};
+
 use crate::ops::common::define_op2;
 
 define_op2!(
@@ -37,7 +39,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [False, True])
     /// ```
     equal,
-    Equal
+    Equal,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
 );
 
 define_op2!(
@@ -71,7 +74,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [False, True, False])
     /// ```
     not_equal,
-    NotEqual
+    NotEqual,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
 );
 
 define_op2!(
@@ -105,7 +109,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [True, False, False])
     /// ```
     greater,
-    Greater
+    Greater,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );
 
 define_op2!(
@@ -139,7 +144,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [True, True, False])
     /// ```
     greater_equal,
-    GreaterEqual
+    GreaterEqual,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );
 
 define_op2!(
@@ -173,7 +179,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [True, False, False])
     /// ```
     less,
-    Less
+    Less,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );
 
 define_op2!(
@@ -207,7 +214,8 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [True, True, False])
     /// ```
     less_equal,
-    LessEqual
+    LessEqual,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );
 
 define_op2!(
@@ -248,7 +256,8 @@ define_op2!(
     /// assert result.numpy()[1] == 3.0
     /// ```
     maximum,
-    Maximum
+    Maximum,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );
 
 define_op2!(
@@ -289,5 +298,6 @@ define_op2!(
     /// assert result.numpy()[1] == 1.0
     /// ```
     minimum,
-    Minimum
+    Minimum,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );

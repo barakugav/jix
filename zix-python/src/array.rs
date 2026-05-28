@@ -1071,9 +1071,10 @@ mod tests {
         ndarray: &ndarray::Array<T, D>,
     ) -> Bound<'py, Array>
     where
-        D: ndarray::Dimension + IntoDimension,
+        D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
     {
         let core = ZixArray::compact_array(ndarray).unwrap();
+        let core = core.into_type_dyn().into_dim_dyn();
         let dyn_storage = DynStorage::new(Arc::new(core.into_storage()));
         Bound::new(py, Array::from_storage(dyn_storage)).unwrap()
     }
@@ -1081,7 +1082,7 @@ mod tests {
     fn roundtrip<T, D>(original: &ndarray::Array<T, D>) -> ArrayD<T>
     where
         T: Dtyped + numpy::Element + Copy,
-        D: ndarray::Dimension + IntoDimension,
+        D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
     {
         // ndarray::Array -> zix_core::Array -> zix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {

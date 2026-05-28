@@ -63,6 +63,8 @@ pub fn copy<'py>(
 pub(crate) fn copy_impl<'py, S>(py: Python<'py>, array: &ZixArray<S>) -> PyResult<Bound<'py, Array>>
 where
     S: ArrayStorage + Sync,
+    S::ElementType: 'static,
+    S::Dimension: 'static,
 {
     copy_impl_with(py, array, None, None)
 }
@@ -75,6 +77,8 @@ pub(crate) fn copy_impl_with<'py, S>(
 ) -> PyResult<Bound<'py, Array>>
 where
     S: ArrayStorage + Sync,
+    S::ElementType: 'static,
+    S::Dimension: 'static,
 {
     let params = ArrayParams::resolve(py, params)?;
     let context = context.map(|ctx| ctx.get());

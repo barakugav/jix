@@ -17,12 +17,6 @@ pub use shape_ops::*;
 mod where_op;
 pub use where_op::*;
 
-use pyo3::prelude::*;
-
-use crate::array::Array;
-use crate::dtype::dtype_from_any;
-use crate::util::IntoPyResult;
-
 mod op1;
 pub use op1::*;
 
@@ -40,6 +34,12 @@ pub use copy_op::*;
 
 mod sub_dtype;
 pub use sub_dtype::*;
+
+use pyo3::prelude::*;
+use zix_core::dtype::DtypeScalarKind;
+
+use crate::array::Array;
+use crate::dtype::dtype_from_any;
 
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
@@ -85,6 +85,81 @@ pub fn astype<'py>(
     if dtype == *array.dtype() {
         return Ok(py_arr.clone()); // no-op, same dtype
     }
-    let ret = zix_core::ops::AsType::new(array.clone(), dtype).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core_storage(ret))
+    if let Some((ta, tb)) = array.dtype().try_to_scalar().zip(dtype.try_to_scalar()) {
+        let array = array.clone();
+
+        use zix_core::scalar::{f16, Complex};
+
+        macro_rules! cast_impl {
+            ($src_type:ty, $dst_type:ty) => {{
+                let array = array.into_typed::<$src_type>().unwrap();
+                let array = array.cast::<$dst_type>();
+                Some(Array::from_core_storage(array.into_storage()))
+            }};
+        }
+        macro_rules! cast_num {
+            ($src_type:ty) => {
+                match tb {
+                    DtypeScalarKind::I8 => cast_impl!($src_type, i8),
+                    DtypeScalarKind::I16 => cast_impl!($src_type, i16),
+                    DtypeScalarKind::I32 => cast_impl!($src_type, i32),
+                    DtypeScalarKind::I64 => cast_impl!($src_type, i64),
+                    DtypeScalarKind::U8 => cast_impl!($src_type, u8),
+                    DtypeScalarKind::U16 => cast_impl!($src_type, u16),
+                    DtypeScalarKind::U32 => cast_impl!($src_type, u32),
+                    DtypeScalarKind::U64 => cast_impl!($src_type, u64),
+                    DtypeScalarKind::F16 => cast_impl!($src_type, f16),
+                    DtypeScalarKind::F32 => cast_impl!($src_type, f32),
+                    DtypeScalarKind::F64 => cast_impl!($src_type, f64),
+                    DtypeScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
+                    DtypeScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
+                    DtypeScalarKind::Bool => cast_impl!($src_type, bool),
+                }
+            };
+        }
+        macro_rules! cast_complex {
+            ($src_type:ty) => {
+                match tb {
+                    DtypeScalarKind::I8 => None,
+                    DtypeScalarKind::I16 => None,
+                    DtypeScalarKind::I32 => None,
+                    DtypeScalarKind::I64 => None,
+                    DtypeScalarKind::U8 => None,
+                    DtypeScalarKind::U16 => None,
+                    DtypeScalarKind::U32 => None,
+                    DtypeScalarKind::U64 => None,
+                    DtypeScalarKind::F16 => None,
+                    DtypeScalarKind::F32 => None,
+                    DtypeScalarKind::F64 => None,
+                    DtypeScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
+                    DtypeScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
+                    DtypeScalarKind::Bool => None,
+                }
+            };
+        }
+        let array = match ta {
+            DtypeScalarKind::I8 => cast_num!(i8),
+            DtypeScalarKind::I16 => cast_num!(i16),
+            DtypeScalarKind::I32 => cast_num!(i32),
+            DtypeScalarKind::I64 => cast_num!(i64),
+            DtypeScalarKind::U8 => cast_num!(u8),
+            DtypeScalarKind::U16 => cast_num!(u16),
+            DtypeScalarKind::U32 => cast_num!(u32),
+            DtypeScalarKind::U64 => cast_num!(u64),
+            DtypeScalarKind::F16 => cast_num!(f16),
+            DtypeScalarKind::F32 => cast_num!(f32),
+            DtypeScalarKind::F64 => cast_num!(f64),
+            DtypeScalarKind::ComplexF32 => cast_complex!(Complex<f32>),
+            DtypeScalarKind::ComplexF64 => cast_complex!(Complex<f64>),
+            DtypeScalarKind::Bool => cast_num!(bool),
+        };
+        if let Some(array) = array {
+            return Bound::new(py_arr.py(), array);
+        }
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
+        "Unsupported cast from {:?} to {:?}",
+        array.dtype(),
+        dtype
+    )))
 }

@@ -3,8 +3,9 @@ use pyo3::exceptions::PyOverflowError;
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyFloat, PyInt};
 
-use zix_core::dtype::{f16, Complex, DtypeScalarKind, Dtyped, Itemsize};
-use zix_core::storage::Plain;
+use zix_core::dtype::{DtypeScalarKind, Dtyped, Itemsize};
+use zix_core::scalar::{f16, Complex};
+use zix_core::storage::{Plain, TypeDyn};
 use zix_core::{Array as ZixArray, DimDyn};
 
 use crate::dtype::dtype_from_numpy;
@@ -13,7 +14,7 @@ use crate::Array;
 
 pub(crate) enum Operand {
     Zix(Py<Array>),
-    Numpy(ZixArray<Plain<Py<PyUntypedArray>, DimDyn>>),
+    Numpy(ZixArray<Plain<Py<PyUntypedArray>, TypeDyn, DimDyn>>),
     Scalar {
         value: Scalar,
         shape: Vec<u64>,
@@ -241,7 +242,7 @@ impl Operand {
                     Scalar::Complex(value) => match precision {
                         None | Some(Precision::P8) => create_scalar_array(value, &shape),
                         Some(Precision::P4) => create_scalar_array::<Complex<f32>>(
-                            zix_core::ops::__private::cast(value),
+                            <_ as zix_core::scalar::Cast<_>>::cast(value),
                             &shape,
                         ),
                         Some(_) => unreachable!(),

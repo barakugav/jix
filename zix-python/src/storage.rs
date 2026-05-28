@@ -4,25 +4,30 @@ use std::sync::Arc;
 
 use zix_core::codec::ReadContext;
 use zix_core::dtype::Dtype;
-use zix_core::storage::{ArrayStorage, ArrayStorageSpec};
+use zix_core::storage::{ArrayStorage, ArrayStorageSpec, TypeDyn};
 use zix_core::{DimDyn, NDIM_MAX};
 
 use crate::util::DimArray;
 
 #[derive(Clone)]
 pub(crate) struct DynStorage {
-    inner: Arc<dyn ArrayStorage<Dimension = DimDyn> + Send + Sync>,
+    inner: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
     shape: DimArray<u64>,
+    dtype: Dtype,
 }
 impl DynStorage {
-    pub(crate) fn new(storage: Arc<dyn ArrayStorage<Dimension = DimDyn> + Send + Sync>) -> Self {
+    pub(crate) fn new(
+        storage: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
+    ) -> Self {
         Self {
             shape: storage.shape().try_into().unwrap(),
+            dtype: storage.dtype().clone(),
             inner: storage,
         }
     }
 }
 impl ArrayStorage for DynStorage {
+    type ElementType = TypeDyn;
     type Dimension = DimDyn;
 
     fn read_data(
@@ -42,7 +47,7 @@ impl ArrayStorage for DynStorage {
     }
 
     fn dtype(&self) -> &Dtype {
-        self.inner.dtype()
+        &self.dtype
     }
 
     fn _spec(&self) -> ArrayStorageSpec<'_> {

@@ -1,5 +1,12 @@
+use zix_core::scalar::{f16, Complex};
+
 macro_rules! define_reduction_op {
-    ($(#[$meta:meta])* $name:ident, $core_op:ident $(, extra_args = ($($extra_arg:ident : $extra_ty:ty = $extra_default:expr),+))?) => {
+    (
+        $(#[$meta:meta])* $name:ident,
+        $core_op:ident,
+        [$($type:tt),*]
+        $(, extra_args = ($($extra_arg:ident : $extra_ty:ty = $extra_default:expr),+))?
+    ) => {
         $(#[$meta])*
         #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
@@ -20,27 +27,57 @@ macro_rules! define_reduction_op {
                 Some(axes) => crate::util::normalize_axes(axes.into_vec(), array.ndim())?,
                 None => (0..array.ndim()).collect(),
             };
-            let res = zix_core::ops::$core_op::new(array, &axes $($(, $extra_arg)+)?);
-            let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-            if !keepdims {
-                return Ok(crate::Array::from_core_storage(ret));
+
+            macro_rules! call_op {
+                ($arr:expr, $ax:expr) => {
+                    zix_core::ops::$core_op::new($arr, $ax $($(, $extra_arg)+)?)
+                }
             }
-            let arr = zix_core::Array::from_storage(ret);
-            // keepdims=true: re-insert singleton axes via insert_axis.
-            // insert_axis uses gap indices in the space of the array it receives, so we must
-            // re-map: original sorted axis a_i → result-space gap (a_i - i).
-            axes.sort_unstable();
-            let mapped_axes = axes
-                .iter()
-                .enumerate()
-                .map(|(i, &ax)| ax - i)
-                .collect::<Vec<_>>();
-            let res = zix_core::ops::InsertAxis::new(arr, &mapped_axes);
-            let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-            Ok(crate::Array::from_core_storage(ret))
+
+            let res = match array.dtype().try_to_scalar() {
+                $(
+                    Some(crate::ops::common::scalar_kind!($type)) => {
+                        #[allow(unused_parens)]
+                        let array = array.into_typed::<$type>().unwrap();
+                        call_op!(array, &axes).map(crate::Array::from_core_storage)
+                    }
+                )*
+                _ => Err(zix_core::Error::new(
+                    zix_core::ErrorKind::UnsupportedDtype,
+                    format!(
+                        "Op {} does not support dtype {:#?}",
+                        stringify!($name),
+                        array.dtype()
+                    ),
+                )),
+            };
+            let mut array = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+
+            if keepdims {
+                let arr = array.to_core_array();
+                // keepdims=true: re-insert singleton axes via insert_axis.
+                // insert_axis uses gap indices in the space of the array it receives, so we must
+                // re-map: original sorted axis a_i → result-space gap (a_i - i).
+                axes.sort_unstable();
+                let mapped_axes = axes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &ax)| ax - i)
+                    .collect::<Vec<_>>();
+                let res = zix_core::ops::InsertAxis::new(arr, &mapped_axes);
+                let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+                array = crate::Array::from_core_storage(ret);
+            }
+
+            Ok(array)
         }
     };
-    ($(#[$meta:meta])* $name:ident, $core_op:ident, single_axis = true) => {
+    (
+        $(#[$meta:meta])* $name:ident,
+        $core_op:ident,
+        [$($type:tt),*],
+        single_axis = true
+    ) => {
         $(#[$meta])*
         #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
@@ -66,17 +103,36 @@ macro_rules! define_reduction_op {
                     0
                 },
             };
-            let res = zix_core::ops::$core_op::new(array, axis);
-            let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-            if !keepdims {
-                return Ok(crate::Array::from_core_storage(ret));
+
+            let res = match array.dtype().try_to_scalar() {
+                $(
+                    Some(crate::ops::common::scalar_kind!($type)) => {
+                        #[allow(unused_parens)]
+                        let array = array.into_typed::<$type>().unwrap();
+                        zix_core::ops::$core_op::new(array, axis).map(crate::Array::from_core_storage)
+                    }
+                )*
+                _ => Err(zix_core::Error::new(
+                    zix_core::ErrorKind::UnsupportedDtype,
+                    format!(
+                        "Op {} does not support dtype {:#?}",
+                        stringify!($name),
+                        array.dtype()
+                    ),
+                )),
+            };
+            let mut array = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+
+            if keepdims {
+                let arr = array.to_core_array();
+                // keepdims=true: for a single-axis reduction, the result-space gap equals the
+                // original axis index (only one axis removed, shift = 0).
+                let res = zix_core::ops::InsertAxis::new(arr, &[axis]);
+                let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+                array = crate::Array::from_core_storage(ret);
             }
-            let arr = zix_core::Array::from_storage(ret);
-            // keepdims=true: for a single-axis reduction, the result-space gap equals the
-            // original axis index (only one axis removed, shift = 0).
-            let res = zix_core::ops::InsertAxis::new(arr, &[axis]);
-            let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-            Ok(crate::Array::from_core_storage(ret))
+
+            Ok(array)
         }
     };
 }
@@ -110,7 +166,8 @@ define_reduction_op!(
     /// assert zix.max(a, axis=0, keepdims=True).numpy().shape == (1, 3)
     /// ```
     max,
-    Max
+    Max,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );
 define_reduction_op!(
     /// Reduces one or more axes by taking the minimum element.
@@ -140,7 +197,8 @@ define_reduction_op!(
     /// assert np.array_equal(zix.min(a, axis=0).numpy(), [1, 2, 3])
     /// ```
     min,
-    Min
+    Min,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
 );
 define_reduction_op!(
     /// Returns the index of the maximum element along a single axis.
@@ -172,6 +230,7 @@ define_reduction_op!(
     /// ```
     argmax,
     ArgMax,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
     single_axis = true
 );
 define_reduction_op!(
@@ -202,6 +261,7 @@ define_reduction_op!(
     /// ```
     argmin,
     ArgMin,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
     single_axis = true
 );
 define_reduction_op!(
@@ -231,7 +291,8 @@ define_reduction_op!(
     /// assert np.array_equal(zix.sum(a, axis=0).numpy(), [5, 7, 9])
     /// ```
     sum,
-    Sum
+    Sum,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
 );
 define_reduction_op!(
     /// Reduces one or more axes by multiplying all elements.
@@ -260,7 +321,8 @@ define_reduction_op!(
     /// assert np.array_equal(zix.product(a, axis=0).numpy(), [4, 10, 18])
     /// ```
     product,
-    Product
+    Product,
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
 );
 define_reduction_op!(
     /// Computes the arithmetic mean along one or more axes.
@@ -288,7 +350,8 @@ define_reduction_op!(
     /// assert np.allclose(zix.mean(a, axis=0).numpy(), [2.5, 3.5, 4.5])
     /// ```
     mean,
-    Mean
+    Mean,
+    [f32, f64, (Complex<f32>), (Complex<f64>)]
 );
 define_reduction_op!(
     /// Computes the variance along one or more axes.
@@ -316,6 +379,7 @@ define_reduction_op!(
     /// ```
     var,
     Variance,
+    [f32, f64],
     extra_args = (ddof: f64 = 0.0)
 );
 define_reduction_op!(
@@ -343,6 +407,7 @@ define_reduction_op!(
     /// ```
     std,
     StandardDeviation,
+    [f32, f64],
     extra_args = (ddof: f64 = 0.0)
 );
 define_reduction_op!(
@@ -372,7 +437,9 @@ define_reduction_op!(
     /// assert np.array_equal(zix.all(a, axis=1).numpy(), [True, False])
     /// ```
     all,
-    All
+    All,
+    // [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool] TODO
+    [bool]
 );
 define_reduction_op!(
     /// Reduces one or more axes with logical OR: returns `True` if any element is truthy.
@@ -401,5 +468,7 @@ define_reduction_op!(
     /// assert np.array_equal(zix.any(a, axis=1).numpy(), [False, True])
     /// ```
     any,
-    Any
+    Any,
+    // [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool] TODO
+    [bool]
 );
