@@ -142,8 +142,8 @@ impl Array {
 
     pub(crate) fn from_core_storage(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
         let storage = ZixArray::from_storage(storage)
-            .into_type_dyn()
-            .into_dim_dyn()
+            .to_type_dyn()
+            .to_dim_dyn()
             .into_storage();
         Self::from_storage(DynStorage::new(Arc::new(storage)))
     }
@@ -1074,7 +1074,7 @@ mod tests {
         D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
     {
         let core = ZixArray::compact_array(ndarray).unwrap();
-        let core = core.into_type_dyn().into_dim_dyn();
+        let core = core.to_type_dyn().to_dim_dyn();
         let dyn_storage = DynStorage::new(Arc::new(core.into_storage()));
         Bound::new(py, Array::from_storage(dyn_storage)).unwrap()
     }

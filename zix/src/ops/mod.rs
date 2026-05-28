@@ -64,7 +64,7 @@
 //! ```
 //!
 //! Arrays loaded from disk carry [`TypeDyn`](crate::storage::TypeDyn) because the element type
-//! comes from the file header. Use [`Array::into_typed`](crate::Array::into_typed) to assert the
+//! comes from the file header. Use [`Array::to_typed`](crate::Array::to_typed) to assert the
 //! expected element type and recover compile-time tracking:
 //!
 //! ```no_run
@@ -74,7 +74,7 @@
 //! let src = Array::read_from_file(Path::new("data.zix"), ArrayParams::default())?;
 //! // src is Array<Compact<TypeDyn, DimDyn>> - ops not yet available
 //!
-//! let typed = src.into_typed::<f32>()?;  // validates dtype at runtime
+//! let typed = src.to_typed::<f32>()?;  // validates dtype at runtime
 //! let result = typed.exp().cast::<f64>().copy()?;
 //! # Ok::<(), zix::Error>(())
 //! ```
@@ -138,8 +138,8 @@ pub(crate) mod _traits {
     pub use super::reduction::_traits::*;
 }
 
-mod swap_element_type;
-pub use swap_element_type::*;
+mod to_type;
+pub use to_type::*;
 
-mod swap_dim;
-pub use swap_dim::*;
+mod to_dim;
+pub use to_dim::*;

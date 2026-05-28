@@ -38,7 +38,7 @@ macro_rules! define_reduction_op {
                 $(
                     Some(crate::ops::common::scalar_kind!($type)) => {
                         #[allow(unused_parens)]
-                        let array = array.into_typed::<$type>().unwrap();
+                        let array = array.to_typed::<$type>().unwrap();
                         call_op!(array, &axes).map(crate::Array::from_core_storage)
                     }
                 )*
@@ -108,7 +108,7 @@ macro_rules! define_reduction_op {
                 $(
                     Some(crate::ops::common::scalar_kind!($type)) => {
                         #[allow(unused_parens)]
-                        let array = array.into_typed::<$type>().unwrap();
+                        let array = array.to_typed::<$type>().unwrap();
                         zix_core::ops::$core_op::new(array, axis).map(crate::Array::from_core_storage)
                     }
                 )*

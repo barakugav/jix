@@ -69,7 +69,7 @@ macro_rules! define_op1 {
                 $(
                     Some(crate::ops::common::scalar_kind!($type)) => {
                         #[allow(unused_parens)]
-                        let array = array.into_typed::<$type>().unwrap();
+                        let array = array.to_typed::<$type>().unwrap();
                         zix_core::ops::$core_op::new(array).map(crate::Array::from_core_storage)
                     }
                 )*
@@ -110,9 +110,9 @@ macro_rules! define_op2 {
                         crate::ops::common::scalar_kind!($input_b_type)
                     )) => {
                         #[allow(unused_parens)]
-                        let a = a.into_typed::<$input_a_type>().unwrap();
+                        let a = a.to_typed::<$input_a_type>().unwrap();
                         #[allow(unused_parens)]
-                        let b = b.into_typed::<$input_b_type>().unwrap();
+                        let b = b.to_typed::<$input_b_type>().unwrap();
                         zix_core::ops::$core_op::new(a, b).map(crate::Array::from_core_storage)
                     }
                 )*

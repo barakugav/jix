@@ -191,7 +191,7 @@ where
         &self.decoder_config
     }
 
-    pub(crate) fn swap_element_type<NewET: ElementType>(self) -> Result<BlockTable<S, NewET>>
+    pub(crate) fn into_type<NewET: ElementType>(self) -> Result<BlockTable<S, NewET>>
     where
         ET: ElementType,
     {
@@ -649,7 +649,7 @@ mod tests {
         let len = bytes.len() as u64;
         BlockTable::read_from(Cursor::new(bytes), len)
             .unwrap()
-            .swap_element_type::<Ty<T>>()
+            .into_type::<Ty<T>>()
             .unwrap()
     }
 

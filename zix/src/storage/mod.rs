@@ -39,7 +39,7 @@
 //!
 //! Arrays constructed from typed sources (e.g. [`Array::compact_array`](crate::Array::compact_array))
 //! are automatically typed. Arrays loaded from disk carry [`TypeDyn`]; call
-//! [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
+//! [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert the expected element
 //! type and regain compile-time tracking.
 //!
 //! # Notable items in this module
@@ -128,7 +128,7 @@ pub trait ArrayStorage {
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
     /// cast) are bounded on [`ArrayStorageTyped`], a shorthand for
     /// `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
-    /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
+    /// [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert the expected element
     /// type and re-enable those operations.
     type ElementType: ElementType;
 
@@ -137,7 +137,7 @@ pub trait ArrayStorage {
     /// This associated type lets the compiler track how many axes an array has through a chain
     /// of lazy operations. When the dimension is known statically (e.g. arrays created from a
     /// statically-dimensioned ndarray, or after calling
-    /// [`Array::into_dim::<Dim<N>>`](crate::Array::into_dim)), it is [`Dim<N>`](crate::Dim);
+    /// [`Array::to_dim::<Dim<N>>`](crate::Array::to_dim)), it is [`Dim<N>`](crate::Dim);
     /// when it is only known at runtime (e.g. for arrays loaded from a file or created with
     /// slice-based shape arguments) it is [`DimDyn`](crate::DimDyn).
     ///
@@ -205,7 +205,7 @@ pub struct ArrayStorageSpec<'a> {
 /// - [`Ty<T>`] — the concrete element type `T` is known at compile time. All element-wise
 ///   operations (arithmetic, comparisons, reductions, cast) are available.
 /// - [`TypeDyn`] — the element type is only available at runtime. Arrays loaded from disk
-///   start with this. Call [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert
+///   start with this. Call [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert
 ///   the expected element type and recover compile-time tracking.
 pub trait ElementType: Clone + Send + Sync {
     /// `Some(dtype)` when the element type is statically known ([`Ty<T>`]),
@@ -228,7 +228,7 @@ pub trait ElementType: Clone + Send + Sync {
 /// known at compile time (e.g. arrays loaded from a `.zix` file).
 ///
 /// Arrays with `TypeDyn` do not support most element-wise operations directly; call
-/// [`Array::into_typed::<T>()`](crate::Array::into_typed) first to assert the expected
+/// [`Array::to_typed::<T>()`](crate::Array::to_typed) first to assert the expected
 /// element type and recover [`ArrayStorageTyped`].
 #[derive(Clone)]
 pub struct TypeDyn(Dtype);
@@ -292,7 +292,7 @@ where
 /// to the correct scalar implementation without runtime checks.
 ///
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
-/// [`Array::into_typed::<T>()`](crate::Array::into_typed).
+/// [`Array::to_typed::<T>()`](crate::Array::to_typed).
 pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> {
     type Item: Dtyped;
 }

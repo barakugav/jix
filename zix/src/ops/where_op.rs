@@ -291,10 +291,10 @@ mod tests {
         let cond = Array::compact_array(&array![true, false, true]).unwrap();
         let x = Array::compact_array(&array![1i32, 2, 3])
             .unwrap()
-            .swap_element_type_dyn();
+            .into_type_dyn();
         let y = Array::compact_array(&array![4.0f64, 5.0, 6.0])
             .unwrap()
-            .swap_element_type_dyn();
+            .into_type_dyn();
         assert!(Where::new(cond, x, y).is_err());
     }
 

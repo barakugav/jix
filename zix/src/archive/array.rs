@@ -334,7 +334,7 @@ where
     /// let context = src.read_ctx();
     ///
     /// // Build a lazy view - no data is read yet.
-    /// let view = src.into_typed::<f32>()?.exp() + 1.0f32;
+    /// let view = src.to_typed::<f32>()?.exp() + 1.0f32;
     ///
     /// // Write to a new file: blocks are decompressed, modified by ops, and re-compressed one at
     /// // a time.
@@ -905,7 +905,7 @@ mod tests {
         let mmap_arr = unsafe {
             Array::read_from_file_mmap(tmp.path(), 0, len, ArrayParams::default()).unwrap()
         };
-        let mmap_arr = mmap_arr.swap_element_type::<Ty<i32>>().unwrap();
+        let mmap_arr = mmap_arr.into_typed::<i32>().unwrap();
         let ctx = mmap_arr.read_ctx();
         let view = -mmap_arr.as_ref();
 

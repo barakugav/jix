@@ -175,7 +175,7 @@
 //!
 //! - [`TypeDyn`](storage::TypeDyn) — the element type is only known at runtime. Arrays loaded
 //!   from disk start with this (`Array<Compact<TypeDyn, DimDyn>>`). Call
-//!   [`Array::into_typed::<T>()`](Array::into_typed) to assert the expected element type (checked
+//!   [`Array::to_typed::<T>()`](Array::to_typed) to assert the expected element type (checked
 //!   against the file header at runtime) and unlock element-wise operations:
 //!
 //! ```no_run
@@ -185,7 +185,7 @@
 //! let src = Array::read_from_file(Path::new("data.zix"), ArrayParams::default())?;
 //! // src: Array<Compact<TypeDyn, DimDyn>> - element type unknown at compile time
 //!
-//! let typed = src.into_typed::<f32>()?;  // runtime check: dtype must be f32
+//! let typed = src.to_typed::<f32>()?;  // runtime check: dtype must be f32
 //! let result = typed.exp().sum(0).copy()?;
 //! # Ok::<(), zix::Error>(())
 //! ```
@@ -292,7 +292,7 @@
 //! let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
 //!
 //! // Build a lazy pipeline over the mmap'd data.
-//! let processed = src.into_typed::<f32>()?.exp() + 1.0f32;
+//! let processed = src.to_typed::<f32>()?.exp() + 1.0f32;
 //!
 //! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
 //! processed.write_to(

@@ -4,15 +4,16 @@ use std::ops::Range;
 use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::ops::{IntoCompact, SwapDim, SwapType};
+use crate::ops::{DimensionChange, ElementTypeChange, IntoCompact, ToDim, ToType};
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, Ref, Ty, TypeDyn,
+    ArrayBlockTableStorageBase, ArrayStorage, BlocksLayout, Compact, ElementType, Ref, Ty, TypeDyn,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
 use crate::util::{
-    cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray, Idx, IxIterExt,
+    assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray,
+    Idx, IxIterExt,
 };
 use crate::{ArrayParams, DimDyn, Dimension, IntoDimension};
 
@@ -164,9 +165,9 @@ use crate::{ArrayParams, DimDyn, Dimension, IntoDimension};
 ///
 /// Arrays constructed from typed sources automatically carry `Ty<T>`: `compact_array(&array![1.0f32])`
 /// returns `Array<Compact<Ty<f32>, Dim<1>>>`. Arrays loaded from disk carry `TypeDyn`. Use
-/// [`into_typed::<T>()`](Array::into_typed) to assert the expected element type — validated
+/// [`to_typed::<T>()`](Array::to_typed) to assert the expected element type — validated
 /// against the stored dtype at runtime — and recover `Ty<T>`. Use
-/// [`into_type_dyn()`](Array::into_type_dyn) to erase the static element type.
+/// [`to_type_dyn()`](Array::to_type_dyn) to erase the static element type.
 ///
 /// # Dimension type tracking
 ///
@@ -177,8 +178,8 @@ use crate::{ArrayParams, DimDyn, Dimension, IntoDimension};
 ///
 /// The dimension type propagates automatically: passing a `usize` to `insert_axis` on a
 /// `Dim<N>` array produces `Dim<N+1>`; passing `&[usize]` always produces `DimDyn`. Use
-/// [`into_dim::<Dim<N>>()`](Array::into_dim) to assert a specific ndim and recover static
-/// tracking, or [`into_dim_dyn()`](Array::into_dim_dyn) to erase static dimension info.
+/// [`to_dim::<Dim<N>>()`](Array::to_dim) to assert a specific ndim and recover static
+/// tracking, or [`to_dim_dyn()`](Array::to_dim_dyn) to erase static dimension info.
 #[derive(Clone)]
 pub struct Array<S> {
     pub(crate) storage: S,
@@ -343,12 +344,16 @@ impl<D> Array<Compact<TypeDyn, D>> {
 impl<S: ArrayStorage> Array<S> {
     /// Get the shape of the array, one element per dimension.
     pub fn shape(&self) -> &[u64] {
-        self.storage.shape()
+        let shape = self.storage.shape();
+        if let Some(compile_time_ndim) = S::Dimension::NDIM {
+            unsafe { assert_unchecked_eq!(shape.len(), compile_time_ndim) };
+        }
+        shape
     }
 
     /// Get the number of dimensions.
     pub fn ndim(&self) -> usize {
-        self.storage.shape().len()
+        self.shape().len()
     }
 
     /// Get the element dtype of the array.
@@ -373,7 +378,11 @@ impl<S: ArrayStorage> Array<S> {
     /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn dtype(&self) -> &Dtype {
-        self.storage.dtype()
+        let dtype = self.storage.dtype();
+        if let Some(compile_time_dtype) = S::ElementType::DTYPE {
+            unsafe { assert_unchecked_eq!(dtype, &compile_time_dtype) };
+        }
+        dtype
     }
 
     /// Decode the full array into a heap-allocated [`ndarray::Array`].
@@ -761,85 +770,6 @@ impl<S: ArrayStorage> Array<S> {
         }
     }
 
-    pub fn into_typed<T>(self) -> Result<Array<SwapType<S, Ty<T>>>>
-    where
-        T: Dtyped,
-    {
-        Ok(Array::from_storage(SwapType::<S, Ty<T>>::new(self)?))
-    }
-
-    pub fn into_type_dyn(self) -> Array<SwapType<S, TypeDyn>> {
-        Array::from_storage(SwapType::<S, TypeDyn>::new(self).unwrap())
-    }
-
-    /// Re-tag this array's storage as having dimension `D`, returning an error if the actual
-    /// ndim does not match.
-    ///
-    /// This is the bridge between dynamic and static dimension tracking. Arrays loaded from
-    /// files or produced by slice-based shape operations carry [`DimDyn`] as their dimension
-    /// type because the compiler cannot know the ndim at that point. After you have confirmed
-    /// the ndim (e.g. by reading `array.ndim()` or knowing the data layout ahead of time),
-    /// call `into_dim::<Dim<N>>()` to recover a statically-typed dimension. Subsequent
-    /// operations on the result will propagate the static `Dim<N>` through the type system.
-    ///
-    /// Generally speaking, the compiler can optimize more aggressively when the dimension is
-    /// statically known, which can yield better performance.
-    ///
-    /// This method wraps the storage in a [`SwapDim<S, D>`](crate::storage::SwapDim) adaptor and
-    /// works for any `S: ArrayStorage`. For concrete block-compressed storages
-    /// ([`Compact<D>`](crate::storage::Compact), [`CompactMmap<D>`](crate::storage::CompactMmap)),
-    /// prefer [`swap_dim`](crate::Array::swap_dim) instead — it replaces the `D` parameter
-    /// in-place without adding a wrapper layer.
-    ///
-    /// See [`into_dim_dyn`](Self::into_dim_dyn).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ErrorKind::InvalidShapeOperation`](crate::ErrorKind::InvalidShapeOperation) if
-    /// `D::NDIM` is `Some(n)` and `self.ndim() != n`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use zix::{Array, Dim};
-    ///
-    /// // Passing a dynamically-dimensioned ndarray produces Array<Compact<DimDyn>>.
-    /// // Arrays loaded from files via Array::read_from_file also carry DimDyn.
-    /// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3, 4])))?;
-    ///
-    /// // Assert the array is 3-D; fail gracefully if not.
-    /// let a3d = a.into_dim::<Dim<3>>()?;  // Array<SwapDim<Compact<DimDyn>, Dim<3>>>
-    ///
-    /// // Now insert_axis knows the result is 4-D at compile time.
-    /// let a4d = a3d.insert_axis(0usize); // Array<InsertAxis<..., Dim<4>>>
-    /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
-    /// # Ok::<(), zix::Error>(())
-    /// ```
-    pub fn into_dim<D>(self) -> Result<Array<SwapDim<S, D>>>
-    where
-        D: Dimension,
-    {
-        Ok(Array::from_storage(SwapDim::<S, D>::new(self)?))
-    }
-
-    /// Re-tag this array's storage as [`DimDyn`], erasing any static dimension information.
-    ///
-    /// This is the infallible counterpart to [`into_dim`](Self::into_dim). Every array has a
-    /// runtime ndim regardless of its static type, so converting to `DimDyn` always succeeds.
-    ///
-    /// Like `into_dim`, this wraps the storage in a [`SwapDim`](crate::storage::SwapDim) adaptor.
-    /// For concrete block-compressed storages ([`Compact<D>`](crate::storage::Compact),
-    /// [`CompactMmap<D>`](crate::storage::CompactMmap)), prefer
-    /// [`swap_dim_dyn`](crate::Array::swap_dim_dyn) instead — it replaces the `D` parameter
-    /// in-place without adding a wrapper layer.
-    ///
-    /// After calling `into_dim_dyn`, subsequent shape-changing operations will produce
-    /// `DimDyn` results rather than `Dim<N>`. Call [`into_dim`](Self::into_dim) again to
-    /// re-establish static tracking once the ndim is confirmed.
-    pub fn into_dim_dyn(self) -> Array<SwapDim<S, DimDyn>> {
-        self.into_dim().unwrap()
-    }
-
     /// Check if this array storage is compact block-compressed storage.
     ///
     /// This functions returns `true` for arrays that are stored in compact block-compressed form,
@@ -1107,6 +1037,190 @@ impl<S: ArrayStorage> Array<S> {
             },
         );
         Ok((block_fn, block_compressed_bound))
+    }
+}
+
+/// Methods for converting an array to a different element type or dimension type.
+impl<S> Array<S>
+where
+    S: ArrayStorage,
+{
+    /// Re-tag this array's element type as `ET`, wrapping the storage in a [`ToType`] adaptor.
+    ///
+    /// Works for any `S: ArrayStorage`. See [`ToType`] for details and examples. For storages
+    /// that implement [`ElementTypeChange`], prefer [`into_type`](Self::into_type) to avoid the
+    /// wrapper layer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// `ET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `ET = TypeDyn`.
+    pub fn to_type<ET>(self) -> Result<Array<ToType<S, ET>>>
+    where
+        ET: ElementType,
+    {
+        Ok(Array::from_storage(ToType::<S, ET>::new(self)?))
+    }
+
+    /// Re-tag this array's element type as [`Ty<T>`](crate::storage::Ty), asserting a concrete scalar type.
+    ///
+    /// Sugar for [`to_type::<Ty<T>>()`](Self::to_type). See [`ToType`] for details and examples.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// `self.dtype() != T::DTYPE`.
+    pub fn to_typed<T>(self) -> Result<Array<ToType<S, Ty<T>>>>
+    where
+        T: Dtyped,
+    {
+        self.to_type()
+    }
+
+    /// Re-tag this array's element type as [`TypeDyn`], erasing static element-type information.
+    ///
+    /// Infallible sugar for [`to_type::<TypeDyn>()`](Self::to_type). See [`ToType`] for details.
+    pub fn to_type_dyn(self) -> Array<ToType<S, TypeDyn>> {
+        self.to_type().unwrap()
+    }
+
+    /// Re-tag this array's element type as `NewET` in-place, without adding a wrapper layer.
+    ///
+    /// Requires `S: ElementTypeChange`. See [`ElementTypeChange`] for details and the list of
+    /// implementing storages. Prefer [`to_type`](Self::to_type) when `S` does not implement
+    /// `ElementTypeChange`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// `NewET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
+    pub fn into_type<NewET: ElementType>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
+    where
+        S: ElementTypeChange,
+    {
+        Ok(Array::from_storage(self.into_storage().change_type()?))
+    }
+
+    /// Re-tag this array's element type as [`Ty<T>`](crate::storage::Ty) in-place, asserting a concrete scalar type.
+    ///
+    /// Sugar for [`into_type::<Ty<T>>()`](Self::into_type). Requires `S: ElementTypeChange`.
+    /// See [`ElementTypeChange`] for details. Prefer [`to_typed`](Self::to_typed) when `S` does
+    /// not implement `ElementTypeChange`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// `self.dtype() != T::DTYPE`.
+    pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<Ty<T>>>>
+    where
+        T: Dtyped,
+        S: ElementTypeChange,
+    {
+        self.into_type()
+    }
+
+    /// Re-tag this array's element type as [`TypeDyn`] in-place, erasing static element-type information.
+    ///
+    /// Infallible sugar for [`into_type::<TypeDyn>()`](Self::into_type). Requires
+    /// `S: ElementTypeChange`. See [`ElementTypeChange`] for details.
+    pub fn into_type_dyn(self) -> Array<S::ElementTypeChange<TypeDyn>>
+    where
+        S: ElementTypeChange,
+    {
+        self.into_type().unwrap()
+    }
+
+    /// Re-tag this array's dimension as `D`, returning an error if the actual ndim does not match.
+    ///
+    /// This is the bridge between dynamic and static dimension tracking. Arrays loaded from
+    /// files or produced by slice-based shape operations carry [`DimDyn`] as their dimension
+    /// type because the compiler cannot know the ndim at that point. After you have confirmed
+    /// the ndim (e.g. by reading `array.ndim()` or knowing the data layout ahead of time),
+    /// call `to_dim::<Dim<N>>()` to recover a statically-typed dimension. Subsequent
+    /// operations on the result will propagate the static `Dim<N>` through the type system.
+    ///
+    /// Generally speaking, the compiler can optimize more aggressively when the dimension is
+    /// statically known, which can yield better performance.
+    ///
+    /// This method wraps the storage in a [`ToDim<S, D>`](crate::ops::ToDim) adaptor and works
+    /// for any `S: ArrayStorage`. For storages that implement [`DimensionChange`], prefer
+    /// [`into_dim`](crate::Array::into_dim) instead — it replaces the `D` parameter in-place
+    /// without adding a wrapper layer.
+    ///
+    /// See [`to_dim_dyn`](Self::to_dim_dyn).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidShapeOperation`](crate::ErrorKind::InvalidShapeOperation) if
+    /// `D::NDIM` is `Some(n)` and `self.ndim() != n`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zix::{Array, Dim};
+    ///
+    /// // Passing a dynamically-dimensioned ndarray produces Array<Compact<DimDyn>>.
+    /// // Arrays loaded from files via Array::read_from_file also carry DimDyn.
+    /// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3, 4])))?;
+    ///
+    /// // Assert the array is 3-D; fail gracefully if not.
+    /// let a3d = a.to_dim::<Dim<3>>()?;  // Array<ToDim<Compact<DimDyn>, Dim<3>>>
+    ///
+    /// // Now insert_axis knows the result is 4-D at compile time.
+    /// let a4d = a3d.insert_axis(0usize); // Array<InsertAxis<..., Dim<4>>>
+    /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
+    /// # Ok::<(), zix::Error>(())
+    /// ```
+    pub fn to_dim<D>(self) -> Result<Array<ToDim<S, D>>>
+    where
+        D: Dimension,
+    {
+        Ok(Array::from_storage(ToDim::<S, D>::new(self)?))
+    }
+
+    /// Re-tag this array's dimension as [`DimDyn`], erasing static dimension information.
+    ///
+    /// This is the infallible counterpart to [`to_dim`](Self::to_dim). Every array has a
+    /// runtime ndim regardless of its static type, so converting to `DimDyn` always succeeds.
+    ///
+    /// Like `to_dim`, this wraps the storage in a [`ToDim`](crate::ops::ToDim) adaptor. For
+    /// storages that implement [`DimensionChange`], prefer
+    /// [`into_dim_dyn`](crate::Array::into_dim_dyn) instead — it replaces the `D` parameter
+    /// in-place without adding a wrapper layer.
+    ///
+    /// After calling `to_dim_dyn`, subsequent shape-changing operations will produce
+    /// `DimDyn` results rather than `Dim<N>`. Call [`to_dim`](Self::to_dim) again to
+    /// re-establish static tracking once the ndim is confirmed.
+    pub fn to_dim_dyn(self) -> Array<ToDim<S, DimDyn>> {
+        self.to_dim().unwrap()
+    }
+
+    /// Re-tag this array's storage as having dimension `NewD` in-place, without a wrapper layer.
+    ///
+    /// Requires `S: DimensionChange`. See [`DimensionChange`] for details and the list of
+    /// implementing storages. Prefer [`to_dim`](Self::to_dim) when `S` does not implement
+    /// `DimensionChange`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidShapeOperation`](crate::ErrorKind::InvalidShapeOperation) if
+    /// `NewD::NDIM` is `Some(n)` and `self.ndim() != n`.
+    pub fn into_dim<NewD: Dimension>(self) -> Result<Array<S::DimensionChange<NewD>>>
+    where
+        S: DimensionChange,
+    {
+        Ok(Array::from_storage(self.into_storage().dimension_change()?))
+    }
+
+    /// Re-tag this array's dimension as [`DimDyn`] in-place, erasing static dimension information.
+    ///
+    /// Infallible sugar for [`into_dim::<DimDyn>()`](Self::into_dim). Requires
+    /// `S: DimensionChange`. See [`DimensionChange`] for details.
+    pub fn into_dim_dyn(self) -> Array<S::DimensionChange<DimDyn>>
+    where
+        S: DimensionChange,
+    {
+        self.into_dim::<DimDyn>().unwrap()
     }
 }
 

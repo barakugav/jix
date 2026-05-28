@@ -162,14 +162,14 @@ where
     }
 }
 
-impl<T, D> crate::ops::SwapDimInplace for Scalar<T, D>
+impl<T, D> crate::ops::DimensionChange for Scalar<T, D>
 where
     T: Dtyped,
     D: Dimension,
 {
-    type SwapDimension<NewD: Dimension> = Scalar<T, NewD>;
+    type DimensionChange<NewD: Dimension> = Scalar<T, NewD>;
 
-    fn swap_dim<NewD: Dimension>(self) -> Result<Self::SwapDimension<NewD>> {
+    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
         let shape = NewD::from_slice(self.shape())?;
         Ok(Scalar {
             data: self.data,

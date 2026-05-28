@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::ops::SwapElementTypeInplace;
+use crate::ops::ElementTypeChange;
 use crate::storage::{
     ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ElementType, Ty, TypeDyn,
 };
@@ -191,7 +191,7 @@ impl<T, D> Array<Plain<Vec<T>, Ty<T>, D>> {
 
         let storage = unsafe { Plain::new(allocation, data_ptr, shape, &strides, T::DTYPE) }?;
         let array = Array::from_storage(storage);
-        let array = array.swap_element_type().unwrap();
+        let array = array.into_type().unwrap();
         Ok(array)
     }
 }
@@ -224,7 +224,7 @@ impl<'a, T, ET, D> Array<Plain<PlainRef<'a, T>, ET, D>> {
         let allocation = PlainRef::new();
         let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype) }?;
         let array = Array::from_storage(storage);
-        let array = array.swap_element_type()?;
+        let array = array.into_type()?;
         Ok(array)
     }
 }
@@ -356,14 +356,14 @@ where
     }
 }
 
-impl<S, ET, D> SwapElementTypeInplace for Plain<S, ET, D>
+impl<S, ET, D> ElementTypeChange for Plain<S, ET, D>
 where
     ET: ElementType,
     D: Dimension,
 {
-    type SwapElementType<NewET: ElementType> = Plain<S, NewET, D>;
+    type ElementTypeChange<NewET: ElementType> = Plain<S, NewET, D>;
 
-    fn swap_element_type<NewET: ElementType>(self) -> Result<Self::SwapElementType<NewET>> {
+    fn change_type<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
         Ok(Plain {
             allocation: self.allocation,
             data: self.data,
@@ -375,14 +375,14 @@ where
     }
 }
 
-impl<S, ET, D> crate::ops::SwapDimInplace for Plain<S, ET, D>
+impl<S, ET, D> crate::ops::DimensionChange for Plain<S, ET, D>
 where
     ET: ElementType,
     D: Dimension,
 {
-    type SwapDimension<NewD: Dimension> = Plain<S, ET, NewD>;
+    type DimensionChange<NewD: Dimension> = Plain<S, ET, NewD>;
 
-    fn swap_dim<NewD: Dimension>(self) -> Result<Self::SwapDimension<NewD>> {
+    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
         let shape = NewD::from_slice(self.shape())?;
         Ok(Plain {
             allocation: self.allocation,
