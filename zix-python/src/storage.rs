@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use zix_core::codec::ReadContext;
 use zix_core::dtype::Dtype;
-use zix_core::storage::{ArrayStorage, ArrayStorageSpec};
-use zix_core::{DimDyn, TypeDyn, NDIM_MAX};
+use zix_core::storage::ArrayStorageSpec;
+use zix_core::{ArrayStorage, DimDyn, TypeDyn, NDIM_MAX};
 
 use crate::util::DimArray;
 

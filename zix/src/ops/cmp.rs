@@ -2,8 +2,7 @@ use crate::ops::common::define_array_op2_method;
 use crate::ops::op2::define_op2;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
-use crate::ArrayStorage;
-use crate::Array;
+use crate::{Array, ArrayStorage};
 
 pub(crate) mod _traits {
     #[allow(unused_imports)]
@@ -78,7 +77,6 @@ pub(crate) mod _traits {
     /// For integer and `bool` types the implementation delegates to [`std::cmp::min`], which is
     /// equivalent. The trait therefore provides a single uniform interface usable across all
     /// supported numeric dtypes.
-
     pub trait Minimum<Rhs = Self> {
         /// The output element type of this minimum operation.
         type Output;
@@ -136,13 +134,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
     /// let b = Array::compact_array(&array![1i32, 0, 3])?;
-    /// let result = a.equal(b).to_ndarray::<bool>()?;
+    /// let result = a.equal(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, true]);
     ///
     /// // NaN != NaN per IEEE 754.
     /// let c = Array::compact_array(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_array(&array![f32::NAN, 1.0f32])?;
-    /// let result = c.equal(d).to_ndarray::<bool>()?;
+    /// let result = c.equal(d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -171,13 +169,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
     /// let b = Array::compact_array(&array![1i32, 0, 3])?;
-    /// let result = a.not_equal(b).to_ndarray::<bool>()?;
+    /// let result = a.not_equal(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
     ///
     /// // NaN != NaN is true per IEEE 754.
     /// let c = Array::compact_array(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_array(&array![f32::NAN, 2.0f32])?;
-    /// let result = c.not_equal(d).to_ndarray::<bool>()?;
+    /// let result = c.not_equal(d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -206,13 +204,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![3i32, 1, 2])?;
     /// let b = Array::compact_array(&array![1i32, 1, 3])?;
-    /// let result = a.greater(b).to_ndarray::<bool>()?;
+    /// let result = a.greater(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     ///
     /// // true > false for bool dtype.
     /// let c = Array::compact_array(&array![true, false, true])?;
     /// let d = Array::compact_array(&array![false, false, true])?;
-    /// let result = c.greater(d).to_ndarray::<bool>()?;
+    /// let result = c.greater(d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -241,13 +239,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![3i32, 1, 2])?;
     /// let b = Array::compact_array(&array![1i32, 1, 3])?;
-    /// let result = a.greater_equal(b).to_ndarray::<bool>()?;
+    /// let result = a.greater_equal(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
     ///
     /// // true >= false and false >= false hold.
     /// let c = Array::compact_array(&array![true, false, true])?;
     /// let d = Array::compact_array(&array![false, false, true])?;
-    /// let result = c.greater_equal(d).to_ndarray::<bool>()?;
+    /// let result = c.greater_equal(d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -276,13 +274,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![1i32, 1, 3])?;
     /// let b = Array::compact_array(&array![3i32, 1, 2])?;
-    /// let result = a.less(b).to_ndarray::<bool>()?;
+    /// let result = a.less(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     ///
     /// // false < true for bool dtype.
     /// let c = Array::compact_array(&array![false, false, true])?;
     /// let d = Array::compact_array(&array![true, false, true])?;
-    /// let result = c.less(d).to_ndarray::<bool>()?;
+    /// let result = c.less(d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -311,13 +309,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![1i32, 1, 3])?;
     /// let b = Array::compact_array(&array![3i32, 1, 2])?;
-    /// let result = a.less_equal(b).to_ndarray::<bool>()?;
+    /// let result = a.less_equal(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
     ///
     /// // false <= true and true <= true hold.
     /// let c = Array::compact_array(&array![false, false, true])?;
     /// let d = Array::compact_array(&array![true, false, true])?;
-    /// let result = c.less_equal(d).to_ndarray::<bool>()?;
+    /// let result = c.less_equal(d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -347,13 +345,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![1i32, 5, 3])?;
     /// let b = Array::compact_array(&array![4i32, 2, 3])?;
-    /// let result = a.maximum(b).to_ndarray::<i32>()?;
+    /// let result = a.maximum(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 5, 3]);
     ///
     /// // NaN is propagated: if either operand is NaN the result is NaN.
     /// let c = Array::compact_array(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_array(&array![2.0f32, 3.0f32])?;
-    /// let result = c.maximum(d).to_ndarray::<f32>()?;
+    /// let result = c.maximum(d).to_ndarray()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 3.0);
     /// # Ok::<(), zix::Error>(())
@@ -382,13 +380,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![1i32, 5, 3])?;
     /// let b = Array::compact_array(&array![4i32, 2, 3])?;
-    /// let result = a.minimum(b).to_ndarray::<i32>()?;
+    /// let result = a.minimum(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
     ///
     /// // NaN is propagated: if either operand is NaN the result is NaN.
     /// let c = Array::compact_array(&array![f32::NAN, 1.0f32])?;
     /// let d = Array::compact_array(&array![2.0f32, 3.0f32])?;
-    /// let result = c.minimum(d).to_ndarray::<f32>()?;
+    /// let result = c.minimum(d).to_ndarray()?;
     /// assert!(result[[0]].is_nan());
     /// assert_eq!(result[[1]], 1.0);
     /// # Ok::<(), zix::Error>(())

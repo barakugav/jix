@@ -202,6 +202,7 @@ pub(crate) fn bulk_size2<T1: Dtyped, T2: Dtyped>() -> usize {
 /// let b = a.as_ref().sum(axes.as_slice()); // DimDyn
 /// # Ok::<(), zix::Error>(())
 /// ```
+#[allow(clippy::len_without_is_empty)]
 pub trait AxesArg {
     /// The dimension type of an array produced by a *reducing* operation (e.g. `sum`, `max`,
     /// `remove_axis`) that removes the axes described by `self` from an input of dimension `D`.

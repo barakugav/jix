@@ -13,6 +13,10 @@ where
     /// Returns a view of one named field of a struct dtype. See [`SubDtype`] for details and
     /// examples.
     ///
+    /// The method is generic over the output element type, which must match the field dtype.
+    /// If the field dtype is not statically known, use [`dtype_sub_field_dyn()`](Self::dtype_sub_field_dyn)
+    /// instead.
+    ///
     /// # Panics
     ///
     /// Panics if the array dtype is not a struct dtype or has no field with the given name.
@@ -24,7 +28,11 @@ where
         Array::from_storage(SubDtype::new(self, sub_field).unwrap())
     }
 
+    /// Returns a view of one named field of a struct dtype, for dynamically-typed fields. See
+    /// [`SubDtype`] for details and examples.
     ///
+    /// If the type of the field is statically known, use [`dtype_sub_field()`](Self::dtype_sub_field)
+    /// instead to get better ergonomics and performance.
     #[track_caller]
     pub fn dtype_sub_field_dyn(self, sub_field: &str) -> Array<SubDtype<S, TypeDyn>> {
         Array::from_storage(SubDtype::new(self, sub_field).unwrap())
@@ -56,7 +64,7 @@ where
 ///     Point { x: 3, y: 30 },
 /// ];
 /// let za = Array::compact_array(&pts)?;
-/// let xs = za.dtype_sub_field("x").to_ndarray::<i32>()?;
+/// let xs = za.dtype_sub_field::<i32>("x").to_ndarray()?;
 /// assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
 /// # Ok::<(), zix::Error>(())
 /// ```
@@ -163,12 +171,12 @@ mod tests {
         let xs = za
             .as_ref()
             .dtype_sub_field::<i32>("x")
-            .to_ndarray::<i32>()
+            .to_ndarray()
             .unwrap();
         let ys = za
             .as_ref()
             .dtype_sub_field::<i32>("y")
-            .to_ndarray::<i32>()
+            .to_ndarray()
             .unwrap();
         assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
         assert_eq!(ys.as_slice().unwrap(), &[10, 20, 30]);

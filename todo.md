@@ -18,9 +18,8 @@
 - move pyi gen to a separate crate
 - consider removing EncoderParams and DecoderParams, use ArrayParams for everything
 - modify all ops to have `new() -> Array<Self>` and `new_storage() -> Self`
-- is_empty()
 - squeeze()
 - rename Maximum scalar trait to PartialMax
 - make BlockLayout private
-- move Ty and TypeDyn to element_type.rs
 - refactor ArrayStorage::as_compact
+- align temp buffers to cache line, use ifdef from crossbeam

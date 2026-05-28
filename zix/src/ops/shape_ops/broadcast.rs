@@ -28,13 +28,13 @@ use crate::{Array, ArrayStorage, Dimension};
 ///
 /// // Row vector [1, 3] -> matrix [2, 3]: every row is identical
 /// let a = Array::compact_array(&array![[1i32, 2, 3]])?;
-/// let result = a.broadcast_view(&[2, 3]).to_ndarray::<i32>()?;
+/// let result = a.broadcast_view(&[2, 3]).to_ndarray()?;
 /// assert_eq!(result[[0, 0]], result[[1, 0]]);
 /// assert_eq!(result[[0, 2]], result[[1, 2]]);
 ///
 /// // Column vector [3, 1] -> matrix [3, 2]: every column is identical
 /// let b = Array::compact_array(&array![[10i32], [20], [30]])?;
-/// let result = b.broadcast_view(&[3, 2]).to_ndarray::<i32>()?;
+/// let result = b.broadcast_view(&[3, 2]).to_ndarray()?;
 /// assert_eq!(result[[0, 0]], 10);
 /// assert_eq!(result[[0, 1]], 10);
 /// assert_eq!(result[[2, 0]], 30);

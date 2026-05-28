@@ -63,7 +63,7 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 ///
 /// // Elements are the same regardless of argument style
 /// assert_eq!(
-///     a.reshape_view([6u64]).to_ndarray::<i32>()?.as_slice().unwrap(),
+///     a.reshape_view([6u64]).to_ndarray()?.as_slice().unwrap(),
 ///     &[1, 2, 3, 4, 5, 6]
 /// );
 /// # Ok::<(), zix::Error>(())

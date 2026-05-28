@@ -73,7 +73,10 @@ pub trait ArraySequence: ArraySequenceImpl {
     /// of the result, which is always derived from the first array's dimension.
     type FirstArrayDimension: Dimension;
 
+    /// The compile-time element type of the first array in the sequence.
     ///
+    /// This is used by operations like `stack` and `concatenate` to determine the output element type
+    /// of the result, which is always derived from the first array's element type.
     type FirstArrayElementType: ElementType;
 }
 

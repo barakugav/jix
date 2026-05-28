@@ -42,12 +42,12 @@ where
 /// use ndarray::array;
 ///
 /// let a = Array::compact_array(&array![1i32, 2, 3, 4])?;
-/// let result = a.map(|x: i32| x * x).to_ndarray::<i32>()?;
+/// let result = a.map(|x: i32| x * x).to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1, 4, 9, 16]);
 ///
 /// // Change element type in the mapping function
 /// let b = Array::compact_array(&array![0.0f32, 1.5, -2.0])?;
-/// let result = b.map(|x: f32| x > 0.0).to_ndarray::<bool>()?;
+/// let result = b.map(|x: f32| x > 0.0).to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
 /// # Ok::<(), zix::Error>(())
 /// ```
@@ -85,7 +85,7 @@ mod tests {
     fn map_same_type_1d() {
         let a = array![1i32, 2, 3, 4];
         let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
-        let actual = za.map(|x: i32| x * 2).to_ndarray::<i32>().unwrap();
+        let actual = za.map(|x: i32| x * 2).to_ndarray().unwrap();
         assert_eq!(actual, a.mapv(|x| x * 2).into_dyn());
     }
 
@@ -93,7 +93,7 @@ mod tests {
     fn map_same_type_multi_block() {
         let a = array![1i32, 2, 3, 4, 5, 6];
         let za = Array::compact_array_with(&a, arr_params(&[2])).unwrap();
-        let actual = za.map(|x: i32| x + 10).to_ndarray::<i32>().unwrap();
+        let actual = za.map(|x: i32| x + 10).to_ndarray().unwrap();
         assert_eq!(actual, a.mapv(|x| x + 10).into_dyn());
     }
 
@@ -101,7 +101,7 @@ mod tests {
     fn map_type_change_i32_to_f64() {
         let a = array![1i32, 2, 3, 4];
         let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
-        let actual = za.map(|x: i32| x as f64 * 0.5).to_ndarray::<f64>().unwrap();
+        let actual = za.map(|x: i32| x as f64 * 0.5).to_ndarray().unwrap();
         let expected = a.mapv(|x| x as f64 * 0.5);
         assert_eq!(actual, expected.into_dyn());
     }
@@ -110,7 +110,7 @@ mod tests {
     fn map_type_change_f32_to_bool() {
         let a = array![0.0f32, 1.0, -1.0, 0.0];
         let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
-        let actual = za.map(|x: f32| x != 0.0).to_ndarray::<bool>().unwrap();
+        let actual = za.map(|x: f32| x != 0.0).to_ndarray().unwrap();
         let expected = a.mapv(|x| x != 0.0);
         assert_eq!(actual, expected.into_dyn());
     }
@@ -119,7 +119,7 @@ mod tests {
     fn map_2d_multi_block() {
         let a = ndarray::Array::from_shape_fn((3, 4), |idx| (idx.0 * 4 + idx.1) as i32);
         let za = Array::compact_array_with(&a, arr_params(&[2, 2])).unwrap();
-        let actual = za.map(|x: i32| x * x).to_ndarray::<i32>().unwrap();
+        let actual = za.map(|x: i32| x * x).to_ndarray().unwrap();
         let expected = a.mapv(|x| x * x);
         assert_eq!(actual, expected.into_dyn());
     }
@@ -146,7 +146,7 @@ mod tests {
         let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
         let actual = za
             .map(|v: i32| Point { x: v, y: v * 10 })
-            .to_ndarray::<Point>()
+            .to_ndarray()
             .unwrap();
         let expected = array![
             Point { x: 1, y: 10 },
@@ -183,7 +183,7 @@ mod tests {
                 y: s.y,
                 norm_sq: (s.x as i64) * (s.x as i64) + (s.y as i64) * (s.y as i64),
             })
-            .to_ndarray::<Big>()
+            .to_ndarray()
             .unwrap();
         let expected = array![
             Big {

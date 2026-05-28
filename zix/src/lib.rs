@@ -32,7 +32,7 @@
 //! assert_eq!(a.dtype(), &f32::DTYPE);
 //!
 //! // Decompress into a regular `ndarray::Array<f32>` array.
-//! let decompressed = a.to_ndarray::<f32>()?;
+//! let decompressed = a.to_ndarray()?;
 //! assert_eq!(decompressed[[0, 0]], 1.5);
 //!
 //! // Build a lazy operation pipeline - no data is read yet.
@@ -251,7 +251,7 @@
 //!   for tile_col in 0..7 {
 //!     let row_range = (tile_row * 64)..((tile_row + 2) * 64);
 //!     let col_range = (tile_col * 64)..((tile_col + 2) * 64);
-//!     let tile = array.to_ndarray_sub::<f32>(&[row_range, col_range], &context)?;
+//!     let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
 //!     println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
 //!   }
 //! }

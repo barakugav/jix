@@ -51,14 +51,14 @@ where
 /// let cond = Array::compact_array(&array![true, false, true, false])?;
 /// let x = Array::compact_array(&array![1i32, 2, 3, 4])?;
 /// let y = Array::compact_array(&array![10i32, 20, 30, 40])?;
-/// let result = where_condition(cond, x, y).to_ndarray::<i32>()?;
+/// let result = where_condition(cond, x, y).to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1, 20, 3, 40]);
 ///
 /// // 2-D arrays
 /// let cond = Array::compact_array(&array![[true, false], [false, true]])?;
 /// let x = Array::compact_array(&array![[1.0f64, 2.0], [3.0, 4.0]])?;
 /// let y = Array::compact_array(&array![[10.0f64, 20.0], [30.0, 40.0]])?;
-/// let result = where_condition(cond, x, y).to_ndarray::<f64>()?;
+/// let result = where_condition(cond, x, y).to_ndarray()?;
 /// assert_eq!(result[[0, 0]], 1.0);
 /// assert_eq!(result[[0, 1]], 20.0);
 /// assert_eq!(result[[1, 0]], 30.0);
@@ -321,7 +321,7 @@ mod tests {
         let cond = Array::compact_array(&array![true, true, true, true]).unwrap();
         let x = Array::compact_array(&array![1i32, 2, 3, 4]).unwrap();
         let y = Array::compact_array(&array![10i32, 20, 30, 40]).unwrap();
-        let result = where_condition(cond, x, y).to_ndarray::<i32>().unwrap();
+        let result = where_condition(cond, x, y).to_ndarray().unwrap();
         assert_eq!(result.as_slice().unwrap(), &[1, 2, 3, 4]);
     }
 
@@ -330,7 +330,7 @@ mod tests {
         let cond = Array::compact_array(&array![false, false, false, false]).unwrap();
         let x = Array::compact_array(&array![1i32, 2, 3, 4]).unwrap();
         let y = Array::compact_array(&array![10i32, 20, 30, 40]).unwrap();
-        let result = where_condition(cond, x, y).to_ndarray::<i32>().unwrap();
+        let result = where_condition(cond, x, y).to_ndarray().unwrap();
         assert_eq!(result.as_slice().unwrap(), &[10, 20, 30, 40]);
     }
 
@@ -357,7 +357,7 @@ mod tests {
             Pair { a: 50, b: 60 }
         ])
         .unwrap();
-        let result = where_condition(cond, x, y).to_ndarray::<Pair>().unwrap();
+        let result = where_condition(cond, x, y).to_ndarray().unwrap();
         assert_eq!(result[0], Pair { a: 1, b: 2 }); // cond=true  -> x
         assert_eq!(result[1], Pair { a: 30, b: 40 }); // cond=false -> y
         assert_eq!(result[2], Pair { a: 5, b: 6 }); // cond=true  -> x

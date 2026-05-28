@@ -61,6 +61,7 @@ impl ElementType for TypeDyn {
 pub struct Ty<T>(Dtype, PhantomData<T>);
 impl<T> Ty<T> {
     /// Construct the element type marker.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self
     where
         T: Dtyped,

@@ -448,11 +448,11 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
     /// let b = Array::compact_array(&array![10i32, 20, 30])?;
-    /// let result = (a + b).to_ndarray::<i32>()?;
+    /// let result = (a + b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[11, 22, 33]);
     ///
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
-    /// let result = (a + 10i32).to_ndarray::<i32>()?;
+    /// let result = (a + 10i32).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[11, 12, 13]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -480,11 +480,11 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![10i32, 20, 30])?;
     /// let b = Array::compact_array(&array![1i32, 2, 3])?;
-    /// let result = (a - b).to_ndarray::<i32>()?;
+    /// let result = (a - b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[9, 18, 27]);
     ///
     /// let a = Array::compact_array(&array![10i32, 20, 30])?;
-    /// let result = (a - 5i32).to_ndarray::<i32>()?;
+    /// let result = (a - 5i32).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[5, 15, 25]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -512,11 +512,11 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
     /// let b = Array::compact_array(&array![4i32, 5, 6])?;
-    /// let result = (a * b).to_ndarray::<i32>()?;
+    /// let result = (a * b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 10, 18]);
     ///
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
-    /// let result = (a * 3i32).to_ndarray::<i32>()?;
+    /// let result = (a * 3i32).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[3, 6, 9]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -546,11 +546,11 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![10i32, 20, 30])?;
     /// let b = Array::compact_array(&array![2i32, 4, 5])?;
-    /// let result = (a / b).to_ndarray::<i32>()?;
+    /// let result = (a / b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[5, 5, 6]);
     ///
     /// let a = Array::compact_array(&array![10i32, 20, 30])?;
-    /// let result = (a / 10i32).to_ndarray::<i32>()?;
+    /// let result = (a / 10i32).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -577,13 +577,13 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![2.0f32, 3.0, 4.0])?;
     /// let b = Array::compact_array(&array![3.0f32, 2.0, 0.5])?;
-    /// let result = a.pow(b).to_ndarray::<f32>()?;
+    /// let result = a.pow(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[8.0, 9.0, 2.0]);
     ///
     /// // Raise each element to a scalar exponent.
     /// let a = Array::compact_array(&array![2.0f32, 3.0, 4.0])?;
     /// let exp = Array::plain_scalar(2.0f32, &[3])?;
-    /// let result = a.pow(exp).to_ndarray::<f32>()?;
+    /// let result = a.pow(exp).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4.0, 9.0, 16.0]);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -739,7 +739,7 @@ pub(crate) mod tests {
             let a = ndarray::ArrayD::from_shape_vec(vec![10, 10], vals).unwrap();
             let za = Array::compact_array_with(&a, crate::util::arr_params(&[10, 10])).unwrap();
             let zb = za * 2.0f32 + 1.0f32;
-            let actual = zb.to_ndarray::<f32>().unwrap();
+            let actual = zb.to_ndarray().unwrap();
             let expected = &a * 2.0 + 1.0;
             proptest::prop_assert_eq!(actual, expected);
         }

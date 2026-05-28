@@ -44,7 +44,7 @@ use crate::{Array, ArrayStorage, ElementType, Error, ErrorKind};
 /// // typed_a: Array<Storage::ElementType = Ty<f32>>
 ///
 /// // Element-wise operations are available again.
-/// let result = typed_a.exp().to_ndarray::<f32>()?;
+/// let result = typed_a.exp().to_ndarray()?;
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct ToType<S, ET> {

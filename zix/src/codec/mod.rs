@@ -417,7 +417,7 @@ impl<'a> Decoder<'a> {
 ///
 /// // read_ctx() inherits the decoder config from the array.
 /// let ctx = za.read_ctx();
-/// let out = za.to_ndarray_sub::<i32>(&[1..3], &ctx)?;
+/// let out = za.to_ndarray_sub(&[1..3], &ctx)?;
 /// assert_eq!(out.as_slice().unwrap(), &[2, 3]);
 /// # Ok::<(), zix::Error>(())
 /// ```
@@ -430,7 +430,7 @@ impl<'a> Decoder<'a> {
 /// use zix::codec::ReadContext;
 ///
 /// let za = Array::plain_scalar(42i32, &[5])?;
-/// let out = za.to_ndarray_sub::<i32>(&[0..3], &ReadContext::default())?;
+/// let out = za.to_ndarray_sub(&[0..3], &ReadContext::default())?;
 /// assert_eq!(out.as_slice().unwrap(), &[42, 42, 42]);
 /// # Ok::<(), zix::Error>(())
 /// ```

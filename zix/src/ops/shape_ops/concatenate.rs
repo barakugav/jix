@@ -280,7 +280,7 @@ mod tests {
         let b = array![4i32, 5, 6];
         let za = Array::compact_array(&a).unwrap();
         let zb = Array::compact_array(&b).unwrap();
-        let actual = concatenate((za, zb), 0).to_ndarray::<i32>().unwrap();
+        let actual = concatenate((za, zb), 0).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -292,7 +292,7 @@ mod tests {
         let b = array![3i32, 4, 5, 6];
         let za = Array::compact_array(&a).unwrap();
         let zb = Array::compact_array(&b).unwrap();
-        let actual = concatenate((za, zb), 0).to_ndarray::<i32>().unwrap();
+        let actual = concatenate((za, zb), 0).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -306,7 +306,7 @@ mod tests {
         let za = Array::compact_array(&a).unwrap();
         let zb = Array::compact_array(&b).unwrap();
         let zc = Array::compact_array(&c).unwrap();
-        let actual = concatenate((za, zb, zc), 0).to_ndarray::<i32>().unwrap();
+        let actual = concatenate((za, zb, zc), 0).to_ndarray().unwrap();
         let expected =
             ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
@@ -319,7 +319,7 @@ mod tests {
         let b = array![[7i32, 8, 9]];
         let za = Array::compact_array(&a).unwrap();
         let zb = Array::compact_array(&b).unwrap();
-        let actual = concatenate((za, zb), 0).to_ndarray::<i32>().unwrap();
+        let actual = concatenate((za, zb), 0).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -331,7 +331,7 @@ mod tests {
         let b = array![[7i32, 8, 9], [10, 11, 12], [13, 14, 15]];
         let za = Array::compact_array(&a).unwrap();
         let zb = Array::compact_array(&b).unwrap();
-        let actual = concatenate((za, zb), 1).to_ndarray::<i32>().unwrap();
+        let actual = concatenate((za, zb), 1).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -345,7 +345,7 @@ mod tests {
         let za = Array::compact_array(&a).unwrap();
         let zb = Array::compact_array(&b).unwrap();
         let zc = Array::compact_array(&c).unwrap();
-        let actual = concatenate((za, zb, zc), 1).to_ndarray::<i32>().unwrap();
+        let actual = concatenate((za, zb, zc), 1).to_ndarray().unwrap();
         let expected =
             ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
@@ -358,7 +358,7 @@ mod tests {
         let b = array![4.0f32, 5.0];
         let za = Array::compact_array(&a).unwrap();
         let zb = Array::compact_array(&b).unwrap();
-        let actual = concatenate((za, zb), 0).to_ndarray::<f32>().unwrap();
+        let actual = concatenate((za, zb), 0).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }
@@ -370,7 +370,7 @@ mod tests {
         let b = array![[5.0f32, 6.0, 7.0], [8.0, 9.0, 10.0]];
         let za = Array::compact_array(&a).unwrap();
         let zb = Array::compact_array(&b).unwrap();
-        let actual = concatenate((za, zb), 1).to_ndarray::<f32>().unwrap();
+        let actual = concatenate((za, zb), 1).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected.into_dyn());
     }

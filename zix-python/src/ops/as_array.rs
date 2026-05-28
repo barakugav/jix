@@ -46,7 +46,15 @@ mod tests {
 
     /// Call `asarray` and read back the data as an ndarray.
     fn collect<T: Dtyped>(val: &Bound<'_, PyAny>) -> ArrayD<T> {
-        asarray(val).unwrap().get().arr.to_ndarray::<T>().unwrap()
+        asarray(val)
+            .unwrap()
+            .get()
+            .arr
+            .as_ref()
+            .to_typed::<T>()
+            .unwrap()
+            .to_ndarray()
+            .unwrap()
     }
 
     // -- 0-D: Python scalars --------------------------------------------------

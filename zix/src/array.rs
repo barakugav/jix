@@ -3,10 +3,10 @@ use std::ops::Range;
 
 use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::{DimensionChange, ElementTypeChange, IntoCompact, ToDim, ToType};
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
-use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Compact, Ref};
+use crate::storage::{ArrayBlockTableStorageBase, ArrayStorageTyped, BlocksLayout, Compact, Ref};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
 use crate::util::{
@@ -103,7 +103,7 @@ use crate::{
 /// assert_eq!(array.dtype(), &f32::DTYPE);
 ///
 /// // Decompress and compare.
-/// let decompressed = array.to_ndarray::<f32>()?;
+/// let decompressed = array.to_ndarray()?;
 /// assert_eq!(decompressed[[0, 0]], 1.5);
 /// assert_eq!(decompressed[[1, 1]], 6.17);
 ///
@@ -118,7 +118,7 @@ use crate::{
 /// // access to data execute the pipeline on demand, possibly on a sub set of the original array
 /// assert_eq!(scaled.shape(), &[2, 3]);
 /// assert_eq!(scaled.dtype(), &f32::DTYPE);
-/// assert_eq!(scaled.to_ndarray::<f32>()?[[1, 1]], 957.0);
+/// assert_eq!(scaled.to_ndarray()?[[1, 1]], 957.0);
 ///
 /// // Materialize the result and write to a file.
 /// let result = scaled
@@ -215,7 +215,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// assert_eq!(array.dtype(), &f32::DTYPE);
     ///
     /// // Decompress and compare.
-    /// let decompressed = array.to_ndarray::<f32>()?;
+    /// let decompressed = array.to_ndarray()?;
     /// assert_eq!(decompressed[[0, 0]], 1.5);
     /// assert_eq!(decompressed[[1, 1]], 6.17);
     ///
@@ -228,7 +228,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     ///     + ones;                                      // Array<Add<Mul<...>, Compact>>
     /// assert_eq!(scaled.shape(), &[2, 3]);
     /// assert_eq!(scaled.dtype(), &f32::DTYPE);
-    /// assert_eq!(scaled.to_ndarray::<f32>()?[[1, 1]], 957.0);
+    /// assert_eq!(scaled.to_ndarray()?[[1, 1]], 957.0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn compact_array<S, InD>(array: &ndarray::ArrayBase<S, InD>) -> Result<Self>
@@ -267,7 +267,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     ///   for tile_col in 0..7 {
     ///     let row_range = (tile_row * 64)..((tile_row + 2) * 64);
     ///     let col_range = (tile_col * 64)..((tile_col + 2) * 64);
-    ///     let tile = array.to_ndarray_sub::<f32>(&[row_range, col_range], &context)?;
+    ///     let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
     ///     println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
     ///   }
     /// }
@@ -356,6 +356,16 @@ impl<S: ArrayStorage> Array<S> {
         self.shape().len()
     }
 
+    /// Get the total number of elements in the array.
+    pub fn nitems(&self) -> u64 {
+        self.shape().iter().product()
+    }
+
+    /// Check if the array is empty (has zero elements in any dimension).
+    pub fn is_empty(&self) -> bool {
+        self.shape().contains(&0)
+    }
+
     /// Get the element dtype of the array.
     ///
     /// See [`Dtype`] for details on the supported dtypes and their properties.
@@ -392,12 +402,10 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) - `T` does not match
-    ///   `self.dtype()`.
     /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
-    pub fn to_ndarray<T>(&self) -> Result<ndarray::ArrayD<T>>
+    pub fn to_ndarray(&self) -> Result<ndarray::ArrayD<S::Item>>
     where
-        T: Dtyped,
+        S: ArrayStorageTyped,
     {
         let shape = self.shape();
         let full_range = dim_arr(shape.len(), |dim| 0u64..shape[dim]);
@@ -416,8 +424,6 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Errors
     ///
-    /// - [`UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) - `T` does not match
-    ///   `self.dtype()`.
     /// - [`InvalidIndex`](crate::ErrorKind::InvalidIndex) - `index` is out of bounds or
     ///   has a different number of dimensions than the array.
     /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
@@ -432,24 +438,23 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// let context = a.read_ctx();
     /// assert_eq!(
-    ///     a.to_ndarray_sub::<i32>(&[1..3, 1..3], &context)?,
+    ///     a.to_ndarray_sub(&[1..3, 1..3], &context)?,
     ///     array![[5, 6], [8, 9]].into_dyn()
     /// );
     /// assert_eq!(
-    ///    a.to_ndarray_sub::<i32>(&[0..2, 0..2], &context)?,
+    ///    a.to_ndarray_sub(&[0..2, 0..2], &context)?,
     ///    array![[1, 2], [4, 5]].into_dyn()
     /// );
     /// # Ok::<(), zix::Error>(())
     /// ```
-    pub fn to_ndarray_sub<T>(
+    pub fn to_ndarray_sub(
         &self,
         index: &[Range<u64>],
         context: &ReadContext,
-    ) -> Result<ndarray::ArrayD<T>>
+    ) -> Result<ndarray::ArrayD<S::Item>>
     where
-        T: Dtyped,
+        S: ArrayStorageTyped,
     {
-        self.check_type::<T>()?;
         check_get_range(self.shape(), index)?;
         let ndim = self.ndim();
         let out_shape = dim_arr(ndim, |dim| {
@@ -460,7 +465,7 @@ impl<S: ArrayStorage> Array<S> {
         let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
         self.to_ndarray_buf(
             index,
-            unsafe { cast_slice_mut::<MaybeUninit<T>, u8>(array.as_slice_mut().unwrap()) },
+            unsafe { cast_slice_mut::<MaybeUninit<S::Item>, u8>(array.as_slice_mut().unwrap()) },
             context,
         )?;
         Ok(unsafe { array.assume_init() })
@@ -647,7 +652,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let b = a.copy_with(b_params, &a.read_ctx())?;
     ///
     /// assert_eq!(
-    ///     b.to_ndarray_sub::<f32>(&[0..2, 0..1],
+    ///     b.to_ndarray_sub(&[0..2, 0..1],
     ///     &b.read_ctx())?, array![[1.5], [3.14]].into_dyn()
     /// );
     /// # Ok::<(), zix::Error>(())
@@ -662,7 +667,7 @@ impl<S: ArrayStorage> Array<S> {
         let dtype = self.dtype();
 
         params.override_from_storage(&self.storage);
-        params.tune(shape, &dtype)?;
+        params.tune(shape, dtype)?;
 
         let shape: DimArray<_> = shape.try_into().unwrap();
         let encoder_params = params.encoder_params.clone().unwrap_or_default();
@@ -731,7 +736,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let context = a.read_ctx();
     /// // Reuse the same context for multiple reads, sharing buffers.
     /// for row in 0..3 {
-    ///     let row_data = a.to_ndarray_sub::<i32>(&[row..(row + 1), 0..3], &context)?;
+    ///     let row_data = a.to_ndarray_sub(&[row..(row + 1), 0..3], &context)?;
     ///     println!("row sum: {}", row_data.sum());
     /// }
     /// # Ok::<(), zix::Error>(())
@@ -761,7 +766,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
     /// let b = a.as_ref() + 1.0f32; // Array<Add<Ref<Compact>, Scalar<f32>>>
     /// let c = a.as_ref() * b; // we can use `a` again here because we called as_ref()
-    /// assert_eq!(c.to_ndarray::<f32>()?[[1, 1]], 6.17 * (6.17 + 1.0));
+    /// assert_eq!(c.to_ndarray()?[[1, 1]], 6.17 * (6.17 + 1.0));
     /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn as_ref(&self) -> Array<Ref<'_, S>> {
@@ -867,17 +872,6 @@ impl<S: ArrayStorage> Array<S> {
 
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
         self.storage._spec().blocks_layout
-    }
-
-    fn check_type<T: Dtyped>(&self) -> Result<()> {
-        let t_dtype = T::DTYPE;
-        let self_dtype = self.dtype();
-        ensure!(
-            self_dtype == &t_dtype,
-            UnsupportedDtype,
-            "requested type {t_dtype:?} does not match array dtype {self_dtype:?}"
-        );
-        Ok(())
     }
 
     /// Build a [`BlockFn`] that reads and compresses this array's data block by block.
@@ -1493,7 +1487,7 @@ mod tests {
         let src = array![0u8, 1, 2, 3];
         let a = Array::compact_array_with(&src, arr_params(&[10])).unwrap();
         assert_eq!(a.shape(), &[4]);
-        assert_eq!(a.to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(a.to_ndarray().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -1503,10 +1497,7 @@ mod tests {
         let view = src.slice(ndarray::s![..;2]);
         let a = Array::compact_array_with(&view, arr_params(&[3])).unwrap();
         assert_eq!(a.shape(), &[5]);
-        assert_eq!(
-            a.to_ndarray::<u8>().unwrap(),
-            array![0u8, 2, 4, 6, 8].into_dyn()
-        );
+        assert_eq!(a.to_ndarray().unwrap(), array![0u8, 2, 4, 6, 8].into_dyn());
     }
 
     // -----------------------------------------------------------------------
@@ -1548,7 +1539,7 @@ mod tests {
         ];
         let a = Array::compact_array_with(&src, arr_params(&[2, 3])).unwrap();
         assert_eq!(a.shape(), &[3, 5]);
-        assert_eq!(a.to_ndarray::<i32>().unwrap(), src.into_dyn());
+        assert_eq!(a.to_ndarray().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -1601,7 +1592,7 @@ mod tests {
         assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [4]);
         assert_eq!(
-            b.to_ndarray::<u8>().unwrap(),
+            b.to_ndarray().unwrap(),
             ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap()
         );
     }
@@ -1613,7 +1604,7 @@ mod tests {
         assert_eq!(b.shape(), &[6]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
         assert_eq!(
-            b.to_ndarray::<u8>().unwrap(),
+            b.to_ndarray().unwrap(),
             ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
         );
     }
@@ -1626,7 +1617,7 @@ mod tests {
         let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[5]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
-        assert_eq!(b.to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -1636,7 +1627,7 @@ mod tests {
         assert_eq!(b.shape(), &[8]);
         assert_eq!(b.dtype(), &i32::DTYPE);
         assert_eq!(
-            b.to_ndarray::<i32>().unwrap(),
+            b.to_ndarray().unwrap(),
             ArrayD::from_shape_vec(vec![8], vec![10i32, 20, 30, 40, 50, 60, 70, 80]).unwrap()
         );
     }
@@ -1649,7 +1640,7 @@ mod tests {
         assert_eq!(b.shape(), &[2, 3]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(
-            b.to_ndarray::<u8>().unwrap(),
+            b.to_ndarray().unwrap(),
             ArrayD::from_shape_vec(vec![2, 3], (0u8..6).collect()).unwrap()
         );
     }
@@ -1677,7 +1668,7 @@ mod tests {
         assert_eq!(b.shape(), &[4, 6]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(
-            b.to_ndarray::<u8>().unwrap(),
+            b.to_ndarray().unwrap(),
             ArrayD::from_shape_vec(vec![4, 6], (0u8..24).collect()).unwrap()
         );
     }
@@ -1700,7 +1691,7 @@ mod tests {
         let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[3, 5]);
         assert_eq!(b.dtype(), &i32::DTYPE);
-        assert_eq!(b.to_ndarray::<i32>().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -1715,7 +1706,7 @@ mod tests {
         assert_eq!(b.shape(), &[3, 3, 5]);
         assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 2, 3]);
-        assert_eq!(b.to_ndarray::<u8>().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray().unwrap(), src.into_dyn());
     }
 
     #[test]
@@ -1739,6 +1730,6 @@ mod tests {
         let a = Array::compact_array_with(&src, arr_params(&[4])).unwrap();
         let b = a.copy().unwrap();
         // Both should read back the same data independently.
-        assert_eq!(a.to_ndarray::<u8>().unwrap(), b.to_ndarray::<u8>().unwrap());
+        assert_eq!(a.to_ndarray().unwrap(), b.to_ndarray().unwrap());
     }
 }

@@ -49,14 +49,14 @@ use crate::{Array, ArrayStorage, Dimension};
 /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
 ///
 /// // First two rows, last two columns
-/// let result = a.slice((0..2, 1..)).to_ndarray::<i32>()?;
+/// let result = a.slice((0..2, 1..)).to_ndarray()?;
 /// assert_eq!(result.shape(), &[2, 2]);
 /// assert_eq!(result[[0, 0]], 2);
 /// assert_eq!(result[[1, 1]], 6);
 ///
 /// // Negative index: last row only
 /// let b = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
-/// let result = b.slice(((-1i64..), ..)).to_ndarray::<i32>()?;
+/// let result = b.slice(((-1i64..), ..)).to_ndarray()?;
 /// assert_eq!(result.shape(), &[1, 3]);
 /// assert_eq!(result[[0, 1]], 8);
 /// # Ok::<(), zix::Error>(())

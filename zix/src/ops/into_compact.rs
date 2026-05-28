@@ -137,7 +137,7 @@ mod tests {
                         let result = a.into_compact().unwrap();
                         proptest::prop_assert!(result.storage().as_compact().is_some());
                         proptest::prop_assert_eq!(
-                            result.to_ndarray::<$dtype>().unwrap(),
+                            result.to_ndarray().unwrap(),
                             src
                         );
                         // No re-compression: serialized bytes must be identical.
@@ -179,7 +179,7 @@ mod tests {
                             .unwrap();
                         proptest::prop_assert!(result.storage().as_compact().is_some());
                         proptest::prop_assert_eq!(
-                            result.to_ndarray::<$dtype>().unwrap(),
+                            result.to_ndarray().unwrap(),
                             expected
                         );
                     }
@@ -211,7 +211,7 @@ mod tests {
             .unwrap();
 
         // Values must be negated.
-        assert_eq!(result.to_ndarray::<i32>().unwrap(), -&src);
+        assert_eq!(result.to_ndarray().unwrap(), -&src);
         // The compacted storage must use block shape [2, 2].
         let bs = result
             .storage()
@@ -262,6 +262,6 @@ mod tests {
             .unwrap();
 
         assert!(result.storage().as_compact().is_some());
-        assert_eq!(result.to_ndarray::<i32>().unwrap(), expected);
+        assert_eq!(result.to_ndarray().unwrap(), expected);
     }
 }

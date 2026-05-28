@@ -53,7 +53,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// let plain = Array::plain_ndarray(nd_plain)?;
 ///
 /// // The result is computed lazily - no data is read until to_ndarray() is called.
-/// let result = (compact + plain).to_ndarray::<f32>()?;
+/// let result = (compact + plain).to_ndarray()?;
 /// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
 /// # Ok::<(), zix::Error>(())
 /// ```
@@ -424,7 +424,7 @@ mod tests {
         let nd = array![10i32, 20, 30];
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray::<i32>()
+            .to_ndarray()
             .unwrap();
         assert_eq!(got, nd.into_dyn());
     }
@@ -434,7 +434,7 @@ mod tests {
         let nd = array![[1i32, 2, 3], [4, 5, 6]];
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray::<i32>()
+            .to_ndarray()
             .unwrap();
         assert_eq!(got, nd.into_dyn());
     }
@@ -444,7 +444,7 @@ mod tests {
         let nd = array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray_sub::<i32>(&[1..3, 0..2], &ReadContext::default())
+            .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
         assert_eq!(
             got,
@@ -458,7 +458,7 @@ mod tests {
         let nd = ArrayD::from_shape_vec(vec![2, 3, 4], vals.clone()).unwrap();
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray::<f32>()
+            .to_ndarray()
             .unwrap();
         assert_eq!(got, nd);
     }
@@ -468,7 +468,7 @@ mod tests {
         let nd = array![[1.0f64, 2.0], [3.0, 4.0]];
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray::<f64>()
+            .to_ndarray()
             .unwrap();
         assert_eq!(got, nd.into_dyn());
     }
@@ -478,7 +478,7 @@ mod tests {
         let nd = array![[true, false], [false, true]];
         let got = Array::plain_ndarray(nd.clone())
             .unwrap()
-            .to_ndarray::<bool>()
+            .to_ndarray()
             .unwrap();
         assert_eq!(got, nd.into_dyn());
     }
@@ -490,7 +490,7 @@ mod tests {
         let transposed = nd.clone().reversed_axes(); // shape [3,2], strides swapped
         let got = Array::plain_ndarray(transposed.clone())
             .unwrap()
-            .to_ndarray::<i32>()
+            .to_ndarray()
             .unwrap();
         assert_eq!(got, transposed.into_dyn());
     }
@@ -510,7 +510,7 @@ mod tests {
     fn view_1d_read_i32() {
         let nd = array![10i32, 20, 30];
         let a = Array::plain_ndarray_view(&nd).unwrap();
-        let got = a.to_ndarray::<i32>().unwrap();
+        let got = a.to_ndarray().unwrap();
         assert_eq!(got, nd.into_dyn());
     }
 
@@ -518,7 +518,7 @@ mod tests {
     fn view_2d_read_i32() {
         let nd = array![[1i32, 2, 3], [4, 5, 6]];
         let a = Array::plain_ndarray_view(&nd).unwrap();
-        let got = a.to_ndarray::<i32>().unwrap();
+        let got = a.to_ndarray().unwrap();
         assert_eq!(got, nd.into_dyn());
     }
 
@@ -526,9 +526,7 @@ mod tests {
     fn view_2d_subregion_read() {
         let nd = array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
         let a = Array::plain_ndarray_view(&nd).unwrap();
-        let got = a
-            .to_ndarray_sub::<i32>(&[1..3, 1..3], &a.read_ctx())
-            .unwrap();
+        let got = a.to_ndarray_sub(&[1..3, 1..3], &a.read_ctx()).unwrap();
         assert_eq!(
             got,
             ArrayD::from_shape_vec(vec![2, 2], vec![5i32, 6, 8, 9]).unwrap()

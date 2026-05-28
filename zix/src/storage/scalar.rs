@@ -32,7 +32,7 @@ use crate::{Array, Dimension, IntoDimension};
 ///
 /// let arr = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
-/// let result = (arr * 5.0f32).to_ndarray::<f32>()?; // the scalar is broadcast automatically
+/// let result = (arr * 5.0f32).to_ndarray()?; // the scalar is broadcast automatically
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]].into_dyn());
 /// # Ok::<(), zix::Error>(())
 /// ```
@@ -46,7 +46,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// let arr = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
 /// let scalar_arr = Array::plain_scalar(5.0f32, &[2, 2])?;
-/// let result = (arr * scalar_arr).to_ndarray::<f32>()?;
+/// let result = (arr * scalar_arr).to_ndarray()?;
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]].into_dyn());
 /// # Ok::<(), zix::Error>(())
 /// ```

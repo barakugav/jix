@@ -583,7 +583,8 @@ where
     use proptest::prelude::*;
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
-    let full = actual.to_ndarray::<T>().unwrap();
+    let actual = actual.as_ref().to_typed::<T>().unwrap();
+    let full = actual.to_ndarray().unwrap();
     assert_eq!(&full, expected);
 
     let ctx = actual.read_ctx();
@@ -596,7 +597,7 @@ where
     runner
         .run(&sub_range_strategy(&shape), |ranges| {
             let actual_sub = actual
-                .to_ndarray_sub::<T>(&ranges, &ctx)
+                .to_ndarray_sub(&ranges, &ctx)
                 .map_err(|e| TestCaseError::fail(e.to_string()))?;
             let ranges_usize: Vec<Range<usize>> = ranges
                 .iter()

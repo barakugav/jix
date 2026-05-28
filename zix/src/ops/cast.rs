@@ -156,12 +156,12 @@ pub(crate) mod _traits {
 /// use ndarray::array;
 ///
 /// let za = Array::compact_array(&array![1i32, 2, 3, 4])?;
-/// let result = za.cast::<f64>().to_ndarray::<f64>()?;
+/// let result = za.cast::<f64>().to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1.0f64, 2.0, 3.0, 4.0]);
 ///
 /// // Zero -> false, non-zero -> true
 /// let zb = Array::compact_array(&array![0i32, 1, -2, 0])?;
-/// let result = zb.cast::<bool>().to_ndarray::<bool>()?;
+/// let result = zb.cast::<bool>().to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, true, false]);
 /// # Ok::<(), zix::Error>(())
 /// ```

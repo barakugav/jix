@@ -125,7 +125,8 @@ impl Array<Compact<TypeDyn, DimDyn>> {
     ///
     /// let bytes = buf.into_inner();
     /// let loaded = Array::read_from_reader(Cursor::new(bytes), None, ArrayParams::default())?;
-    /// assert_eq!(loaded.to_ndarray::<i32>()?, array![1i32, 2, 3, 4].into_dyn());
+    /// let loaded = loaded.to_typed::<i32>()?;
+    /// assert_eq!(loaded.to_ndarray()?, array![1i32, 2, 3, 4].into_dyn());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn read_from_reader(
@@ -245,7 +246,8 @@ where
     /// array.write_to_file(&path)?;
     ///
     /// let loaded = Array::read_from_file(&path, ArrayParams::default())?;
-    /// assert_eq!(loaded.to_ndarray::<f32>()?, array![[1.0f32, 2.0], [3.0, 4.0]].into_dyn());
+    /// let loaded = loaded.to_typed::<f32>()?;
+    /// assert_eq!(loaded.to_ndarray()?, array![[1.0f32, 2.0], [3.0, 4.0]].into_dyn());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn write_to_file(&self, path: &Path) -> Result<()> {
@@ -289,7 +291,8 @@ where
     ///     None,
     ///     ArrayParams::default(),
     /// )?;
-    /// assert_eq!(b2.to_ndarray::<u8>()?, array![10u8, 20, 30].into_dyn());
+    /// let b2 = b2.to_typed::<u8>()?;
+    /// assert_eq!(b2.to_ndarray()?, array![10u8, 20, 30].into_dyn());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn write_to(&self, writer: impl Write + Seek) -> Result<()> {
@@ -507,7 +510,9 @@ mod tests {
         let bytes = buf.into_inner();
         Array::read_from_reader(Cursor::new(bytes), None, ArrayParams::default())
             .unwrap()
-            .to_ndarray::<T>()
+            .into_typed::<T>()
+            .unwrap()
+            .to_ndarray()
             .unwrap()
     }
 
@@ -636,7 +641,7 @@ mod tests {
         let r0 = Array::read_from_reader(Cursor::new(&bytes), Some(end0), ArrayParams::default())
             .unwrap();
         assert_eq!(r0.shape(), &[6]);
-        assert_eq!(r0.to_ndarray::<u8>().unwrap(), src0);
+        assert_eq!(r0.to_typed::<u8>().unwrap().to_ndarray().unwrap(), src0);
 
         let r1 = Array::read_from_reader(
             Cursor::new(&bytes[start1 as usize..]),
@@ -645,7 +650,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r1.shape(), &[3, 4]);
-        assert_eq!(r1.to_ndarray::<i32>().unwrap(), src1);
+        assert_eq!(r1.to_typed::<i32>().unwrap().to_ndarray().unwrap(), src1);
 
         let r2 = Array::read_from_reader(
             Cursor::new(&bytes[start2 as usize..]),
@@ -654,7 +659,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r2.shape(), &[2, 3, 5]);
-        assert_eq!(r2.to_ndarray::<f64>().unwrap(), src2);
+        assert_eq!(r2.to_typed::<f64>().unwrap().to_ndarray().unwrap(), src2);
     }
 
     // -----------------------------------------------------------------------
@@ -679,7 +684,9 @@ mod tests {
         let got =
             Array::read_from_reader(Cursor::new(buf.into_inner()), None, ArrayParams::default())
                 .unwrap()
-                .to_ndarray::<i32>()
+                .into_typed::<i32>()
+                .unwrap()
+                .to_ndarray()
                 .unwrap();
         assert_eq!(got, expected);
     }
@@ -700,7 +707,9 @@ mod tests {
         let got =
             Array::read_from_reader(Cursor::new(buf.into_inner()), None, ArrayParams::default())
                 .unwrap()
-                .to_ndarray::<i32>()
+                .into_typed::<i32>()
+                .unwrap()
+                .to_ndarray()
                 .unwrap();
         assert_eq!(got, src);
     }
@@ -723,7 +732,9 @@ mod tests {
         let got =
             Array::read_from_reader(Cursor::new(buf.into_inner()), None, ArrayParams::default())
                 .unwrap()
-                .to_ndarray::<f32>()
+                .into_typed::<f32>()
+                .unwrap()
+                .to_ndarray()
                 .unwrap();
         assert_eq!(got, expected);
     }
@@ -765,7 +776,9 @@ mod tests {
 
         let got = Array::read_from_file(&path, ArrayParams::default())
             .unwrap()
-            .to_ndarray::<u8>()
+            .into_typed::<u8>()
+            .unwrap()
+            .to_ndarray()
             .unwrap();
         assert_eq!(got.shape(), &[4, 6]);
         assert_eq!(got, src);
@@ -805,11 +818,11 @@ mod tests {
         drop(f);
 
         let r0 = Array::read_from_file_section(&path, 0, off1, ArrayParams::default()).unwrap();
-        assert_eq!(r0.to_ndarray::<u8>().unwrap(), src0);
+        assert_eq!(r0.into_typed::<u8>().unwrap().to_ndarray().unwrap(), src0);
 
         let r1 = Array::read_from_file_section(&path, off1, total - off1, ArrayParams::default())
             .unwrap();
-        assert_eq!(r1.to_ndarray::<f32>().unwrap(), src1);
+        assert_eq!(r1.into_typed::<f32>().unwrap().to_ndarray().unwrap(), src1);
     }
 
     // -----------------------------------------------------------------------
@@ -830,7 +843,9 @@ mod tests {
         let got = unsafe {
             Array::read_from_file_mmap(tmp.path(), 0, len, ArrayParams::default()).unwrap()
         }
-        .to_ndarray::<i64>()
+        .into_typed::<i64>()
+        .unwrap()
+        .to_ndarray()
         .unwrap();
         assert_eq!(got, src);
     }
@@ -860,7 +875,9 @@ mod tests {
         let got = unsafe {
             Array::read_from_file_mmap(&path, offset, len, ArrayParams::default()).unwrap()
         }
-        .to_ndarray::<f32>()
+        .into_typed::<f32>()
+        .unwrap()
+        .to_ndarray()
         .unwrap();
         assert_eq!(got, src1);
     }
@@ -880,7 +897,9 @@ mod tests {
         let got = unsafe {
             Array::read_from_file_mmap(tmp.path(), 0, len, ArrayParams::default()).unwrap()
         }
-        .to_ndarray::<i32>()
+        .into_typed::<i32>()
+        .unwrap()
+        .to_ndarray()
         .unwrap();
         assert_eq!(got, src);
     }
@@ -917,7 +936,9 @@ mod tests {
             ArrayParams::default(),
         )
         .unwrap()
-        .to_ndarray::<i32>()
+        .into_typed::<i32>()
+        .unwrap()
+        .to_ndarray()
         .unwrap();
         assert_eq!(got, expected);
     }

@@ -31,7 +31,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?;
 /// let t = a.permute_axes(&[1, 0]);
 /// assert_eq!(t.shape(), &[3, 2]);
-/// let result = t.to_ndarray::<i32>()?;
+/// let result = t.to_ndarray()?;
 /// assert_eq!(result[[0, 0]], 1);
 /// assert_eq!(result[[0, 1]], 4);
 /// assert_eq!(result[[2, 1]], 6);
@@ -184,7 +184,7 @@ mod tests {
     fn test_i32_2d_transpose() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
         let za = Array::compact_array(&a).unwrap();
-        let actual = za.permute_axes(&[1, 0]).to_ndarray::<i32>().unwrap();
+        let actual = za.permute_axes(&[1, 0]).to_ndarray().unwrap();
         let expected = a
             .view()
             .permuted_axes([1, 0])
@@ -199,7 +199,7 @@ mod tests {
     fn test_f32_2d_transpose() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
         let za = Array::compact_array(&a).unwrap();
-        let actual = za.permute_axes(&[1, 0]).to_ndarray::<f32>().unwrap();
+        let actual = za.permute_axes(&[1, 0]).to_ndarray().unwrap();
         let expected = a
             .view()
             .permuted_axes([1, 0])
@@ -214,7 +214,7 @@ mod tests {
     fn test_i32_3d_axes_2_0_1() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::compact_array(&a).unwrap();
-        let actual = za.permute_axes(&[2, 0, 1]).to_ndarray::<i32>().unwrap();
+        let actual = za.permute_axes(&[2, 0, 1]).to_ndarray().unwrap();
         let expected = a
             .view()
             .permuted_axes([2, 0, 1])
@@ -229,7 +229,7 @@ mod tests {
     fn test_i32_3d_axes_0_2_1() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::compact_array(&a).unwrap();
-        let actual = za.permute_axes(&[0, 2, 1]).to_ndarray::<i32>().unwrap();
+        let actual = za.permute_axes(&[0, 2, 1]).to_ndarray().unwrap();
         let expected = a
             .view()
             .permuted_axes([0, 2, 1])
@@ -244,7 +244,7 @@ mod tests {
     fn test_i32_3d_identity() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::compact_array(&a).unwrap();
-        let actual = za.permute_axes(&[0, 1, 2]).to_ndarray::<i32>().unwrap();
+        let actual = za.permute_axes(&[0, 1, 2]).to_ndarray().unwrap();
         assert_eq!(actual, a.into_dyn());
     }
 

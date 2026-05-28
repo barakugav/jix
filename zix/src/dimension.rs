@@ -341,6 +341,7 @@ macro_rules! impl_into_dimension_ndarray {
             type Dimension = Dim<$n>;
             fn into_dimension(self) -> Result<Self::Dimension> {
                 let mut arr = [0u64; $n];
+                #[allow(clippy::reversed_empty_ranges)]
                 for i in 0..$n {
                     arr[i] = self[i] as u64;
                 }
