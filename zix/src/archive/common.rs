@@ -5,6 +5,7 @@ use prost::Message;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::archive::schema::{self, ArchiveType};
+use crate::archive::version::VERSION_U64;
 use crate::error::{ensure, Error, Result};
 
 const MAGIC: &[u8; 4] = b"ZIX1";
@@ -46,7 +47,7 @@ impl<W> ArchiveWriter<W> {
 
         let file_metadata = schema::FileMetadata {
             archive_type: archive_type as i32,
-            lib_version_semver: 0, // TODO
+            lib_version_semver: VERSION_U64,
         };
         writer.write_message(&file_metadata)?;
 
