@@ -933,11 +933,11 @@ impl<S: ArrayStorage> Array<S> {
         let alignment = encoder.dtype.alignment().as_usize();
         let block_size_bytes = block_size as usize * itemsize;
         let block_strides = default_strides(&block_shape, itemsize as _);
-        let mut tmp_block_plain = AlignedBytes::new(encoder.dtype.alignment().as_usize());
+        let mut tmp_block_plain = AlignedBytes::new_padded(alignment);
         let block_compressed_bound = encoder.encode_bound(block_size_bytes);
         let block_fn = BlockFnWithState::from_fn(
             TmpBufs {
-                tmp_block_compressed: AlignedBytes::new(16.max(alignment)),
+                tmp_block_compressed: AlignedBytes::new_padded(alignment),
                 tmp_block_offsets: Vec::new(),
             },
             move |blocks: Range<u64>, base_offset: u64, tmp_bufs| {

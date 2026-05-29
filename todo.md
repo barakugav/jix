@@ -22,4 +22,6 @@
 - rename Maximum scalar trait to PartialMax
 - make BlockLayout private
 - refactor ArrayStorage::as_compact
-- align temp buffers to cache line, use ifdef from crossbeam
+- Plain *u8 should be a different type
+- a user available map2
+- support an arbitrary python reader in zix-python/src/archive.rs read_array

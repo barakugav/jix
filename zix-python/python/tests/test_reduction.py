@@ -330,7 +330,15 @@ def test_std(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        # np.int8, np.int16, np.int32, np.int64,  # not supported
+        # np.uint8, np.uint16, np.uint32, np.uint64,  # not supported
+        # np.float16, np.float32, np.float64,  # not supported
+        np.bool_,
+    ],
+)
 @given(st.data())
 def test_all(dtype: np.dtype, data: DataObject):
     np_a, za, axis, keepdims = data.draw(
@@ -343,7 +351,15 @@ def test_all(dtype: np.dtype, data: DataObject):
     )
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        # np.int8, np.int16, np.int32, np.int64,  # not supported
+        # np.uint8, np.uint16, np.uint32, np.uint64,  # not supported
+        # np.float16, np.float32, np.float64,  # not supported
+        np.bool_,
+    ],
+)
 @given(st.data())
 def test_any(dtype: np.dtype, data: DataObject):
     np_a, za, axis, keepdims = data.draw(

@@ -11,6 +11,8 @@ use core::ops::{Deref, DerefMut};
 
 use raw::RawAlignedBytes;
 
+use crate::util::cpu_cache::CACHE_LINE_SIZE;
+
 mod raw;
 extern crate alloc;
 
@@ -91,7 +93,7 @@ impl AlignedBytes {
     #[inline]
     #[must_use]
     #[track_caller]
-    pub fn new(align: usize) -> Self {
+    pub fn new_exact(align: usize) -> Self {
         unsafe {
             Self {
                 buf: RawAlignedBytes::new_unchecked(RuntimeAlign::new(align).alignment()),
@@ -100,16 +102,19 @@ impl AlignedBytes {
         }
     }
 
-    /// Creates a new empty vector with enough capacity for at least `capacity` elements to
-    /// be inserted in the vector. If `capacity` is 0, the vector will not allocate.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the capacity exceeds `isize::MAX` bytes.
+    /// Returns a new [`AlignedBytes`] with the provided alignment or a larger alignment matching the cache line size.
     #[inline]
     #[must_use]
     #[track_caller]
-    pub fn with_capacity(align: usize, capacity: usize) -> Self {
+    pub fn new_padded(align: usize) -> Self {
+        Self::new_exact(align.max(CACHE_LINE_SIZE))
+    }
+
+    /// Creates a new empty vector with the provided capacity and alignment.
+    #[inline]
+    #[must_use]
+    #[track_caller]
+    pub fn with_capacity_exact(align: usize, capacity: usize) -> Self {
         unsafe {
             Self {
                 buf: RawAlignedBytes::with_capacity_unchecked(
@@ -119,6 +124,15 @@ impl AlignedBytes {
                 len: 0,
             }
         }
+    }
+
+    /// Creates a new empty vector with the provided capacity and alignment or a larger alignment matching
+    /// the cache line size.
+    #[inline]
+    #[must_use]
+    #[track_caller]
+    pub fn with_capacity_padded(align: usize, capacity: usize) -> Self {
+        Self::with_capacity_exact(align.max(CACHE_LINE_SIZE), capacity)
     }
 
     /// Returns a new [`AlignedBytes`] from its raw parts.
@@ -313,7 +327,7 @@ impl AlignedBytes {
         u8: Clone,
     {
         let len = slice.len();
-        let mut vec = AlignedBytes::with_capacity(align, len);
+        let mut vec = AlignedBytes::with_capacity_exact(align, len);
         {
             let len = &mut vec.len;
             let ptr: *mut u8 = vec.buf.ptr.as_ptr();
@@ -328,7 +342,7 @@ impl AlignedBytes {
 
     fn from_iter_impl<I: Iterator<Item = u8>>(mut iter: I, align: usize) -> Self {
         let (lower_bound, upper_bound) = iter.size_hint();
-        let mut this = Self::with_capacity(align, lower_bound);
+        let mut this = Self::with_capacity_exact(align, lower_bound);
 
         if upper_bound == Some(lower_bound) {
             let len = &mut this.len;
@@ -448,13 +462,13 @@ mod tests {
 
     #[test]
     fn new() {
-        let v = AlignedBytes::new(32);
+        let v = AlignedBytes::new_exact(32);
         assert_eq!(v.len(), 0);
         assert_eq!(v.capacity(), 0);
         assert_eq!(v.alignment(), 32);
         assert_eq!(v.as_ptr().align_offset(32), 0);
 
-        let v = AlignedBytes::new(4096);
+        let v = AlignedBytes::new_exact(4096);
         assert_eq!(v.len(), 0);
         assert_eq!(v.capacity(), 0);
         assert_eq!(v.alignment(), 4096);
@@ -472,7 +486,7 @@ mod tests {
 
     #[test]
     fn push() {
-        let mut v = AlignedBytes::new(16);
+        let mut v = AlignedBytes::new_exact(16);
         v.push(0);
         v.push(1);
         v.push(2);
@@ -489,7 +503,7 @@ mod tests {
 
     #[test]
     fn shrink() {
-        let mut v = AlignedBytes::with_capacity(16, 10);
+        let mut v = AlignedBytes::with_capacity_exact(16, 10);
         v.push(0);
         v.push(1);
         v.push(2);
@@ -499,7 +513,7 @@ mod tests {
         assert_eq!(v.len(), 3);
         assert_eq!(v.capacity(), 3);
 
-        let mut v = AlignedBytes::with_capacity(16, 10);
+        let mut v = AlignedBytes::with_capacity_exact(16, 10);
         v.push(0);
         v.push(1);
         v.push(2);
@@ -512,7 +526,7 @@ mod tests {
 
     #[test]
     fn truncate() {
-        let mut v = AlignedBytes::new(16);
+        let mut v = AlignedBytes::new_exact(16);
         v.push(0);
         v.push(1);
         v.push(2);
@@ -528,7 +542,7 @@ mod tests {
 
     #[test]
     fn extend_from_slice() {
-        let mut v = AlignedBytes::new(16);
+        let mut v = AlignedBytes::new_exact(16);
         v.extend_from_slice(&[0, 1, 2, 3]);
         v.extend_from_slice(&[4, 5, 6, 7, 8]);
         assert_eq!(&*v, &[0, 1, 2, 3, 4, 5, 6, 7, 8]);
@@ -536,7 +550,7 @@ mod tests {
 
     #[test]
     fn resize() {
-        let mut v = AlignedBytes::new(16);
+        let mut v = AlignedBytes::new_exact(16);
         v.push(0);
         v.push(1);
         v.push(2);

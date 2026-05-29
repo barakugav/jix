@@ -37,16 +37,16 @@ use crate::util::{Idx, IxIterExt};
 
 /// A type alignment in bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Alignment(NonZero<u8>);
+pub struct Alignment(NonZero<u16>);
 
 impl Alignment {
     /// Creates a new `Alignment` from an integer value in bytes.
     ///
     /// The value must be non-zero, a power of two, and less than the supported maximum
-    /// alignment (currently 128 bytes, may change in the future).
+    /// alignment (currently 32768 bytes, may change in the future).
     pub const fn new(value: usize) -> Option<Self> {
-        if 1 <= value && value <= 128 && value.is_power_of_two() {
-            Some(Self(NonZero::new(value as u8).unwrap()))
+        if 1 <= value && value <= 32768 && value.is_power_of_two() {
+            Some(Self(NonZero::new(value as u16).unwrap()))
         } else {
             None
         }
@@ -82,7 +82,7 @@ impl TryFrom<usize> for Alignment {
             Error::new(
                 ErrorKind::InvalidArgument,
                 format!(
-                    "invalid alignment {value}: must be a non-zero power of two, and less than or equal to 128"
+                    "invalid alignment {value}: must be a non-zero power of two, and less than or equal to 32768"
                 ),
             )
         })
@@ -255,17 +255,24 @@ enum DtypeInner {
     },
     StructOwned {
         itemsize: Itemsize,
-        alignment: (Alignment, bool),
+        alignment: Alignment,
+        is_aligned: bool,
         shape: DtypeShape,
         fields: Box<[(Cow<'static, str>, Itemsize, Dtype)]>,
     },
     StructBorrowed {
         itemsize: Itemsize,
-        alignment: (Alignment, bool),
+        alignment: Alignment,
+        is_aligned: bool,
         shape: DtypeShape,
         fields: &'static [(Cow<'static, str>, Itemsize, Dtype)],
     },
 }
+const _: () = {
+    if size_of::<usize>() == 8 {
+        assert!(size_of::<Dtype>() <= 32);
+    }
+};
 
 /// The kind of a scalar dtype, representing all primitive scalar types supported by the library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -479,7 +486,8 @@ impl Dtype {
             fields,
             shape: DtypeShape::new(),
             itemsize,
-            alignment: (alignment, is_aligned),
+            alignment,
+            is_aligned,
         }))
     }
 
@@ -574,7 +582,8 @@ impl Dtype {
             fields,
             shape,
             itemsize,
-            alignment: (alignment, is_aligned),
+            alignment,
+            is_aligned,
         }))
     }
 
@@ -589,7 +598,8 @@ impl Dtype {
             fields,
             shape: DtypeShape::new(),
             itemsize,
-            alignment: (alignment, is_aligned),
+            alignment,
+            is_aligned,
         })
     }
 
@@ -724,8 +734,8 @@ impl Dtype {
     pub const fn alignment(&self) -> Alignment {
         match &self.0 {
             DtypeInner::Scalar { alignment, .. } => *alignment,
-            DtypeInner::StructOwned { alignment, .. } => alignment.0,
-            DtypeInner::StructBorrowed { alignment, .. } => alignment.0,
+            DtypeInner::StructOwned { alignment, .. } => *alignment,
+            DtypeInner::StructBorrowed { alignment, .. } => *alignment,
         }
     }
 
@@ -748,8 +758,8 @@ impl Dtype {
     pub fn is_aligned(&self) -> bool {
         match &self.0 {
             DtypeInner::Scalar { .. } => true,
-            DtypeInner::StructOwned { alignment, .. } => alignment.1,
-            DtypeInner::StructBorrowed { alignment, .. } => alignment.1,
+            DtypeInner::StructOwned { is_aligned, .. } => *is_aligned,
+            DtypeInner::StructBorrowed { is_aligned, .. } => *is_aligned,
         }
     }
 

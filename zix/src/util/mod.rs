@@ -4,7 +4,7 @@ pub(crate) use aligned_vec::AlignedBytes;
 mod arr_sequence;
 pub use arr_sequence::ArraySequence;
 
-pub(crate) mod cache_size;
+pub(crate) mod cpu_cache;
 pub(crate) mod iter;
 
 use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
@@ -355,7 +355,7 @@ mod tests {
     // --- AlternatingBuffers ---
 
     fn empty_buf() -> AlignedBytes {
-        AlignedBytes::new(1)
+        AlignedBytes::new_exact(1)
     }
 
     /// data() on a freshly created Init state returns the original slice.

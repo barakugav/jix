@@ -231,14 +231,35 @@ def carrays2_strategy(draw, dtype: np.dtype, element_st=None):
     Generate two (numpy_arr, zix_arr) pairs sharing a shape but with independent
     data and block shapes. Mirrors Rust's carrays2_strategy_generic().
     """
-    if element_st is None:
-        element_st = op_safe_element_strategy(dtype)
+    return draw(
+        carrays2_mixed_strategy(
+            dtype, dtype, element_st_a=element_st, element_st_b=element_st
+        )
+    )
+
+
+@st.composite
+def carrays2_mixed_strategy(
+    draw, dtype_a: np.dtype, dtype_b: np.dtype, element_st_a=None, element_st_b=None
+):
+    """
+    Generate two (numpy_arr, zix_arr) pairs sharing a shape but with different dtypes.
+    Useful for ops where LHS and RHS have distinct types (e.g. rotate: value=T, amount=u32).
+    """
+    if element_st_a is None:
+        element_st_a = op_safe_element_strategy(dtype_a)
+    if element_st_b is None:
+        element_st_b = op_safe_element_strategy(dtype_b)
 
     shape = tuple(draw(shape_strategy(), label="shape"))
     ndim = len(shape)
 
-    np_a = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st), label="np_a")
-    np_b = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st), label="np_b")
+    np_a = draw(
+        np_arrays(dtype=dtype_a, shape=shape, elements=element_st_a), label="np_a"
+    )
+    np_b = draw(
+        np_arrays(dtype=dtype_b, shape=shape, elements=element_st_b), label="np_b"
+    )
 
     block_shape_a = draw(
         st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape_a"

@@ -292,7 +292,7 @@ define_reduction_op!(
     /// ```
     sum,
     Sum,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
 );
 define_reduction_op!(
     /// Reduces one or more axes by multiplying all elements.
@@ -327,8 +327,8 @@ define_reduction_op!(
 define_reduction_op!(
     /// Computes the arithmetic mean along one or more axes.
     ///
-    /// Supported dtypes: `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Output dtype equals
-    /// the input dtype.
+    /// Supported dtypes: all integers, floats, complex types, and `bool`.
+    /// Output dtype equals the input dtype.
     ///
     /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
     /// over all axes, returning a scalar.
@@ -351,12 +351,13 @@ define_reduction_op!(
     /// ```
     mean,
     Mean,
-    [f32, f64, (Complex<f32>), (Complex<f64>)]
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
 );
 define_reduction_op!(
     /// Computes the variance along one or more axes.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype equals the input dtype.
+    /// Supported dtypes: all integers, floats, complex types, and `bool`.
+    /// Output dtype equals the input dtype.
     ///
     /// `ddof` (delta degrees of freedom) defaults to `0.0` (population variance). Use
     /// `ddof=1.0` for the sample (Bessel-corrected) variance.
@@ -379,13 +380,14 @@ define_reduction_op!(
     /// ```
     var,
     Variance,
-    [f32, f64],
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
     extra_args = (ddof: f64 = 0.0)
 );
 define_reduction_op!(
     /// Computes the standard deviation along one or more axes.
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype equals the input dtype.
+    /// Supported dtypes: all integers, floats, complex types, and `bool`.
+    /// Output dtype equals the input dtype.
     ///
     /// `ddof` (delta degrees of freedom) defaults to `0.0` (population standard deviation).
     /// Use `ddof=1.0` for the sample (Bessel-corrected) standard deviation.
@@ -407,14 +409,13 @@ define_reduction_op!(
     /// ```
     std,
     StandardDeviation,
-    [f32, f64],
+    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
     extra_args = (ddof: f64 = 0.0)
 );
 define_reduction_op!(
     /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy.
     ///
-    /// Supported dtypes: all integer types, `f16`, `f32`, `f64`, `Complex<f32>`,
-    /// `Complex<f64>`, and `bool`. Output dtype is `bool`.
+    /// Supported dtypes: `bool`. Output dtype is `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, non-zero -> `True`), then the
     /// AND reduction is applied. Returns `True` only if every element in the reduced
@@ -444,8 +445,7 @@ define_reduction_op!(
 define_reduction_op!(
     /// Reduces one or more axes with logical OR: returns `True` if any element is truthy.
     ///
-    /// Supported dtypes: all integer types, `f16`, `f32`, `f64`, `Complex<f32>`,
-    /// `Complex<f64>`, and `bool`. Output dtype is `bool`.
+    /// Supported dtypes: `bool`. Output dtype is `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, non-zero -> `True`), then the
     /// OR reduction is applied. Returns `True` if at least one element in the reduced

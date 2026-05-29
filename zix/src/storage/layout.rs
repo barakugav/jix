@@ -127,7 +127,7 @@ impl BlocksLayout {
         check_ndim(ndim)?;
         let itemsize = itemsize as u64;
 
-        let cache_sizes = crate::util::cache_size::cache_sizes();
+        let cache_sizes = crate::util::cpu_cache::cache_sizes();
 
         ensure!(
             block_shape_tag.is_none() || block_shape.is_some(),

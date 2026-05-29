@@ -53,6 +53,7 @@ use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype};
 use crate::error::{ensure, Error, ErrorKind, Result};
+use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::{AlignedBytes, AlternatingBuffers};
 
 /// The compression algorithm applied to each block.
@@ -213,7 +214,7 @@ pub(crate) enum Compressor {
 }
 impl Encoder {
     pub(crate) fn new(params: &EncoderParams, dtype: Dtype) -> Result<Self> {
-        let tmp_buf1 = AlignedBytes::new(dtype.alignment().as_usize());
+        let tmp_buf1 = AlignedBytes::new_padded(dtype.alignment().as_usize());
         let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {
             dtype,
@@ -453,7 +454,7 @@ impl ReadContext {
     /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly - it
     /// automatically uses the decoder parameters that match the array's stored codec configuration.
     pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
-        let tmp_buf1 = AlignedBytes::new(16);
+        let tmp_buf1 = AlignedBytes::new_exact(CACHE_LINE_SIZE);
         let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {
             tmp_buffers: TmpBufferPool::new(),
@@ -498,15 +499,15 @@ impl Default for ReadContext {
 ///
 /// The pool is not thread-safe, it is intended to be owned and used by a single thread.
 pub(crate) struct TmpBufferPool {
-    /// Free list for alignments <= 16; all buffers are allocated at 16-byte alignment.
-    align16: UnsafeCell<Vec<AlignedBytes>>,
-    /// Free lists for alignments > 16, sorted by alignment value.
+    /// Free list for alignments <= CACHE_LINE_SIZE; all buffers are allocated at CACHE_LINE_SIZE-byte alignment.
+    align_standard: UnsafeCell<Vec<AlignedBytes>>,
+    /// Free lists for alignments > CACHE_LINE_SIZE, sorted by alignment value.
     align_other: UnsafeCell<Vec<(Alignment, Vec<AlignedBytes>)>>,
 }
 impl TmpBufferPool {
     fn new() -> Self {
         Self {
-            align16: UnsafeCell::new(Vec::new()),
+            align_standard: UnsafeCell::new(Vec::new()),
             align_other: UnsafeCell::new(Vec::new()),
         }
     }
@@ -521,7 +522,7 @@ impl TmpBufferPool {
         let pool = unsafe { &mut *pool };
         let tmp_buf = pool
             .pop()
-            .unwrap_or_else(|| AlignedBytes::with_capacity(pool_align.as_usize(), size));
+            .unwrap_or_else(|| AlignedBytes::with_capacity_exact(pool_align.as_usize(), size));
         let mut buf = TmpBuf {
             buf: tmp_buf,
             buffers: self,
@@ -544,29 +545,31 @@ impl TmpBufferPool {
     /// Alignments <= 16 are folded into the single `align16` list (allocated at 16 bytes).
     /// Larger alignments are looked up (or inserted) in the sorted `align_other` list.
     fn get_pool(&self, alignment: Alignment) -> (*mut Vec<AlignedBytes>, Alignment) {
-        match alignment.as_usize() {
-            1 | 2 | 4 | 8 | 16 => (self.align16.get(), 16.try_into().unwrap()),
-            _ => {
-                let align_other = unsafe { &mut *self.align_other.get() };
-                debug_assert!(align_other
-                    .iter()
-                    .zip(align_other.iter().skip(1))
-                    .all(|((align1, _pool1), (align2, _pool2))| align1 < align2));
+        let standard_alignment = Alignment::new(CACHE_LINE_SIZE).unwrap();
+        let alignment = alignment.max(standard_alignment);
 
-                let (idx, exists) = align_other
-                    .iter()
-                    .map(|(align, _pool)| *align)
-                    .enumerate()
-                    .find(|(_idx, align)| *align >= alignment)
-                    .map(|(idx, align)| (idx, align == alignment))
-                    .unwrap_or((align_other.len(), false));
+        if alignment.as_usize() <= CACHE_LINE_SIZE {
+            (self.align_standard.get(), standard_alignment)
+        } else {
+            let align_other = unsafe { &mut *self.align_other.get() };
+            debug_assert!(align_other
+                .iter()
+                .zip(align_other.iter().skip(1))
+                .all(|((align1, _pool1), (align2, _pool2))| align1 < align2));
 
-                if !exists {
-                    align_other.insert(idx, (alignment, Vec::new()));
-                }
-                let pool = &mut align_other[idx].1;
-                (pool, alignment)
+            let (idx, exists) = align_other
+                .iter()
+                .map(|(align, _pool)| *align)
+                .enumerate()
+                .find(|(_idx, align)| *align >= alignment)
+                .map(|(idx, align)| (idx, align == alignment))
+                .unwrap_or((align_other.len(), false));
+
+            if !exists {
+                align_other.insert(idx, (alignment, Vec::new()));
             }
+            let pool = &mut align_other[idx].1;
+            (pool, alignment)
         }
     }
 }
@@ -599,7 +602,7 @@ impl TmpBuf<'_> {
 impl Drop for TmpBuf<'_> {
     fn drop(&mut self) {
         // Swap out self.buf so we can pass ownership to return_buf.
-        let mut buf = AlignedBytes::new(self.buf.alignment());
+        let mut buf = AlignedBytes::new_exact(self.buf.alignment());
         std::mem::swap(&mut self.buf, &mut buf);
 
         self.buffers.return_buf(buf);
