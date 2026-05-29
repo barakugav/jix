@@ -107,7 +107,7 @@ impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
             ensure!(
                 dtype_i == dtype,
                 UnsupportedDtype,
-                "cannot stack arrays of different dtypes: {dtype:?} != {dtype_i:?}"
+                "cannot stack arrays of different dtypes: {dtype} != {dtype_i}"
             );
 
             shape[axis] += shape_i[axis];
@@ -117,7 +117,7 @@ impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
         let shape = ArraysT::FirstArrayDimension::from_slice(&shape).unwrap();
         Ok(Self {
             shape,
-            blocks_layout: arrays._spec(0).blocks_layout.clone(),
+            blocks_layout: arrays.spec(0).blocks_layout.clone(),
             arrays,
             concat_axis: axis,
             borders,
@@ -255,10 +255,10 @@ where
     fn dtype(&self) -> &Dtype {
         self.arrays.dtype(0)
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.arrays._spec(0)
+            ..self.arrays.spec(0)
         }
     }
 }
@@ -282,7 +282,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = concatenate((za, zb), 0).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // 1D i32: concatenate two arrays of unequal sizes along axis 0
@@ -294,7 +294,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = concatenate((za, zb), 0).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // 1D i32: concatenate three arrays along axis 0
@@ -309,7 +309,7 @@ mod tests {
         let actual = concatenate((za, zb, zc), 0).to_ndarray().unwrap();
         let expected =
             ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // 2D i32: concatenate along axis 0 - in-place path
@@ -321,7 +321,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = concatenate((za, zb), 0).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // 2D i32: concatenate along axis 1 - scatter path
@@ -333,7 +333,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = concatenate((za, zb), 1).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // 2D i32: three arrays along axis 1 with unequal sizes - scatter path
@@ -348,7 +348,7 @@ mod tests {
         let actual = concatenate((za, zb, zc), 1).to_ndarray().unwrap();
         let expected =
             ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view(), c.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // 1D f32: concatenate two arrays along axis 0
@@ -360,7 +360,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = concatenate((za, zb), 0).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // 2D f32: concatenate along axis 1 - scatter path
@@ -372,7 +372,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = concatenate((za, zb), 1).to_ndarray().unwrap();
         let expected = ndarray::concatenate(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     #[test]

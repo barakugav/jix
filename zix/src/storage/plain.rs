@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::codec::ReadContext;
@@ -18,19 +17,19 @@ use crate::{Array, Dimension, IntoDimension};
 /// This storage is useful when regular ndarray objects need to behave like `Array`, for example
 /// to participate in math operations with compressed arrays.
 ///
-/// `Plain<S, D>` holds a raw `*const u8` pointer into a buffer owned by `S`,
-/// together with a per-dimension shape and byte-stride description.  The
+/// `Plain<A, ...>` holds a raw `*const u8` pointer into a buffer owned by `A`,
+/// together with a per-dimension shape and byte-stride description. The
 /// buffer may be laid out in any order (C-contiguous, Fortran-contiguous,
 /// transposed, sliced with gaps, etc.) - reads use the strides to copy the
 /// requested sub-region into a C-contiguous output buffer.
 ///
-/// The type parameter `S` is the *owner* of the underlying memory.  Keeping
-/// `S` alive alongside the pointer ensures the data remains valid.  Two
+/// The type parameter `A` is the *owner* of the underlying memory, and potentially can be any type.
+/// Keeping `A` alive alongside the pointer ensures the data remains valid. Two
 /// concrete owners are provided:
 ///
-/// * `Plain<Vec<T>, ...>` - owns the data (see [`Array::plain_ndarray`]).
-/// * `Plain<PlainRef<'a, T>, ...>` - borrows from an `ndarray` view
-///   (see [`Array::plain_ndarray_view`]).
+/// * `Plain<Vec<T>, ...>` - owns the data, `Vec<T>` is the data allocation (see [`Array::plain_ndarray`]).
+/// * `Plain<&'a (), ...>` - borrows the data, `&'a ()` is a marker for the borrowed allocation
+///   (see [`Array::plain_ndarray_ref`]).
 ///
 /// `ET: ElementType` tracks the element type at the type level and follows the same semantics as
 /// [`Compact<ET, D>`](crate::storage::Compact): `ET` is inferred from the dtype argument type.
@@ -54,7 +53,7 @@ use crate::{Array, Dimension, IntoDimension};
 ///
 /// // The result is computed lazily - no data is read until to_ndarray() is called.
 /// let result = (compact + plain).to_ndarray()?;
-/// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]].into_dyn());
+/// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]]);
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Plain<A, ET, D> {
@@ -72,7 +71,7 @@ impl<A, D> Plain<A, TypeDyn, D> {
     ///
     /// `storage` is any value that owns (or keeps alive) the memory pointed to
     /// by `data`; it is stored alongside the pointer so the borrow checker can
-    /// enforce lifetime constraints through `S`'s type parameter.
+    /// enforce lifetime constraints through `A`'s type parameter.
     ///
     /// # Arguments
     ///
@@ -196,54 +195,16 @@ impl<T, D> Array<Plain<Vec<T>, Ty<T>, D>> {
     }
 }
 
-/// Marker type used as the `S` parameter of [`Plain`] when borrowing from an
-/// ndarray view rather than owning the allocation.
-///
-/// The lifetime `'a` ties the [`Plain`] storage to the ndarray it was created
-/// from, so the borrow checker prevents the underlying data from being freed
-/// while the `Plain` array is still alive.
-pub struct PlainRef<'a, A>(PhantomData<&'a A>);
-impl<'a, A> PlainRef<'a, A> {
-    pub(crate) fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<'a, T, ET, D> Array<Plain<PlainRef<'a, T>, ET, D>> {
-    unsafe fn plain_ndarray_ptr_impl<Sh>(
-        data_ptr: *const u8,
-        shape: Sh,
-        strides: &[usize],
-        dtype: Dtype,
-    ) -> Result<Self>
-    where
-        ET: ElementType,
-        D: Dimension,
-        Sh: IntoDimension<Dimension = D>,
-    {
-        let allocation = PlainRef::new();
-        let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype) }?;
-        let array = Array::from_storage(storage);
-        let array = array.into_type()?;
-        Ok(array)
-    }
-}
-impl<'a, T, D> Array<Plain<PlainRef<'a, T>, Ty<T>, D>> {
-    /// Create a [`Plain`] array that borrows from an ndarray view.
+impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
+    /// Internal implementation for creating a `Plain` array that borrows from an ndarray view.
     ///
-    /// No element data is copied.  The resulting array shares memory with
-    /// `arr` and is valid for its lifetime `'a`.  Any layout supported by
-    /// ndarray (C-order, Fortran-order, non-contiguous slices, transposed
-    /// views, etc.) is handled correctly.
+    /// Note this function does have any lifetime bounds on the input array.
     ///
-    /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
-    /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
+    /// # Safety
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the ndarray's number of dimensions exceeds the
-    /// maximum supported ndim.
-    pub fn plain_ndarray_view<S, D2>(arr: &ndarray::ArrayBase<S, D2>) -> Result<Self>
+    /// The caller must ensure that the lifetime `'a` correctly reflects the lifetime of the
+    /// borrowed *data* in `arr`.
+    unsafe fn plain_ndarray_ref_impl<S, D2>(arr: &ndarray::ArrayBase<S, D2>) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
         D: Dimension,
@@ -260,10 +221,49 @@ impl<'a, T, D> Array<Plain<PlainRef<'a, T>, Ty<T>, D>> {
 
         let data_ptr = arr.as_ptr().cast::<u8>();
 
-        unsafe { Self::plain_ndarray_ptr_impl(data_ptr, shape, &strides, T::DTYPE) }
+        unsafe { Self::plain_ndarray_ptr(data_ptr, shape, &strides, T::DTYPE) }
+    }
+
+    /// Create a [`Plain`] array that borrows from an ndarray.
+    ///
+    /// No element data is copied.  The resulting array shares memory with
+    /// `arr` and is valid for its lifetime `'a`.  Any layout supported by
+    /// ndarray (C-order, Fortran-order, non-contiguous slices, transposed
+    /// views, etc.) is handled correctly.
+    ///
+    /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
+    /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ndarray's number of dimensions exceeds the
+    /// maximum supported ndim.
+    pub fn plain_ndarray_ref<S, D2>(arr: &'a ndarray::ArrayBase<S, D2>) -> Result<Self>
+    where
+        S: ndarray::Data<Elem = T>,
+        D: Dimension,
+        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        T: Dtyped,
+    {
+        // SAFETY: `arr` is 'a, so the returned `Plain` will not outlive the data in `arr`.
+        unsafe { Self::plain_ndarray_ref_impl(arr) }
+    }
+
+    /// Create a [`Plain`] array that borrows from an ndarray view.
+    ///
+    /// Similar to [`Self::plain_ndarray_ref`] but takes an `ArrayView` instead of an `ArrayBase`.
+    /// See `plain_ndarray_ref` for more details.
+    pub fn plain_ndarray_view<D2>(arr: ndarray::ArrayView<'a, T, D2>) -> Result<Self>
+    where
+        D: Dimension,
+        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        T: Dtyped,
+    {
+        // SAFETY: `arr` *data* is 'a, so the returned `Plain` will not outlive the data in `arr`.
+        unsafe { Self::plain_ndarray_ref_impl(&arr) }
     }
 }
-impl<'a, ET, D> Array<Plain<PlainRef<'a, ()>, ET, D>> {
+impl<ET, D> Array<Plain<&(), ET, D>> {
     /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an external
     /// allocation.
     ///
@@ -273,6 +273,13 @@ impl<'a, ET, D> Array<Plain<PlainRef<'a, ()>, ET, D>> {
     ///
     /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
     /// buffers as `Array`, for example to participate in math operations with compressed arrays.
+    ///
+    /// # Arguments
+    ///
+    /// * `data_ptr` - pointer to the first element.
+    /// * `shape` - number of elements along each dimension.
+    /// * `strides` - the array element strides in bytes. Must have the same length as `shape`.
+    /// * `dtype` - element type descriptor; used for itemsize and alignment checks.
     ///
     /// # Safety
     ///
@@ -293,11 +300,15 @@ impl<'a, ET, D> Array<Plain<PlainRef<'a, ()>, ET, D>> {
         D: Dimension,
         Sh: IntoDimension<Dimension = D>,
     {
-        unsafe { Self::plain_ndarray_ptr_impl(data_ptr, shape, strides, dtype) }
+        let allocation = &();
+        let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype) }?;
+        let array = Array::from_storage(storage);
+        let array = array.into_type()?;
+        Ok(array)
     }
 }
 
-impl<S, ET, D> ArrayStorage for Plain<S, ET, D>
+impl<A, ET, D> ArrayStorage for Plain<A, ET, D>
 where
     ET: ElementType,
     D: Dimension,
@@ -345,7 +356,7 @@ where
     fn dtype(&self) -> &Dtype {
         self.element_type.dtype()
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
             encoder_params: None,
@@ -355,12 +366,12 @@ where
     }
 }
 
-impl<S, ET, D> ElementTypeChange for Plain<S, ET, D>
+impl<A, ET, D> ElementTypeChange for Plain<A, ET, D>
 where
     ET: ElementType,
     D: Dimension,
 {
-    type ElementTypeChange<NewET: ElementType> = Plain<S, NewET, D>;
+    type ElementTypeChange<NewET: ElementType> = Plain<A, NewET, D>;
 
     fn change_type<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
         Ok(Plain {
@@ -374,12 +385,12 @@ where
     }
 }
 
-impl<S, ET, D> crate::ops::DimensionChange for Plain<S, ET, D>
+impl<A, ET, D> crate::ops::DimensionChange for Plain<A, ET, D>
 where
     ET: ElementType,
     D: Dimension,
 {
-    type DimensionChange<NewD: Dimension> = Plain<S, ET, NewD>;
+    type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;
 
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
         let shape = NewD::from_slice(self.shape())?;
@@ -425,7 +436,7 @@ mod tests {
             .unwrap()
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, nd.into_dyn());
+        assert_eq!(got, nd);
     }
 
     #[test]
@@ -435,7 +446,7 @@ mod tests {
             .unwrap()
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, nd.into_dyn());
+        assert_eq!(got, nd);
     }
 
     #[test]
@@ -445,10 +456,7 @@ mod tests {
             .unwrap()
             .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 2], vec![4i32, 5, 7, 8]).unwrap()
-        );
+        assert_eq!(got, array![[4i32, 5], [7, 8]]);
     }
 
     #[test]
@@ -469,7 +477,7 @@ mod tests {
             .unwrap()
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, nd.into_dyn());
+        assert_eq!(got, nd);
     }
 
     #[test]
@@ -479,7 +487,7 @@ mod tests {
             .unwrap()
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, nd.into_dyn());
+        assert_eq!(got, nd);
     }
 
     // Non-contiguous (transposed) array - column-major strides
@@ -491,45 +499,42 @@ mod tests {
             .unwrap()
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, transposed.into_dyn());
+        assert_eq!(got, transposed);
     }
 
     // -----------------------------------------------------------------------
-    // plain_ndarray_view (borrowed)
+    // plain_ndarray_ref (borrowed)
     // -----------------------------------------------------------------------
 
     #[test]
     fn view_1d_shape() {
         let nd = array![1i32, 2, 3];
-        let a = Array::plain_ndarray_view(&nd).unwrap();
+        let a = Array::plain_ndarray_ref(&nd).unwrap();
         assert_eq!(a.shape(), &[3u64]);
     }
 
     #[test]
     fn view_1d_read_i32() {
         let nd = array![10i32, 20, 30];
-        let a = Array::plain_ndarray_view(&nd).unwrap();
+        let a = Array::plain_ndarray_ref(&nd).unwrap();
         let got = a.to_ndarray().unwrap();
-        assert_eq!(got, nd.into_dyn());
+        assert_eq!(got, nd);
     }
 
     #[test]
     fn view_2d_read_i32() {
         let nd = array![[1i32, 2, 3], [4, 5, 6]];
-        let a = Array::plain_ndarray_view(&nd).unwrap();
+        let a = Array::plain_ndarray_ref(&nd).unwrap();
         let got = a.to_ndarray().unwrap();
-        assert_eq!(got, nd.into_dyn());
+        assert_eq!(got, nd);
     }
 
     #[test]
     fn view_2d_subregion_read() {
         let nd = array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]];
-        let a = Array::plain_ndarray_view(&nd).unwrap();
+        let a = Array::plain_ndarray_ref(&nd).unwrap();
         let got = a.to_ndarray_sub(&[1..3, 1..3], &a.read_ctx()).unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 2], vec![5i32, 6, 8, 9]).unwrap()
-        );
+        assert_eq!(got, array![[5i32, 6], [8, 9]]);
     }
 
     #[test]
@@ -537,25 +542,19 @@ mod tests {
         // Take every-other column via an ndarray slice, then read it back.
         let nd = array![[1i32, 2, 3, 4], [5, 6, 7, 8]];
         let sliced = nd.slice(s![.., ..;2]); // columns 0 and 2: [[1,3],[5,7]]
-        let a = Array::plain_ndarray_view(&sliced).unwrap();
-        let got: ArrayD<i32> = a.to_ndarray().unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 2], vec![1i32, 3, 5, 7]).unwrap()
-        );
+        let a = Array::plain_ndarray_ref(&sliced).unwrap();
+        let got = a.to_ndarray().unwrap();
+        assert_eq!(got, array![[1i32, 3], [5, 7]]);
     }
 
     #[test]
     fn view_transposed_read() {
         let nd = array![[1i32, 2, 3], [4, 5, 6]];
         let t = nd.t(); // shape [3, 2]
-        let a = Array::plain_ndarray_view(&t).unwrap();
-        let got: ArrayD<i32> = a.to_ndarray().unwrap();
+        let a = Array::plain_ndarray_ref(&t).unwrap();
+        let got = a.to_ndarray().unwrap();
         // t[[0,0]]=1, t[[0,1]]=4, t[[1,0]]=2, t[[1,1]]=5, t[[2,0]]=3, t[[2,1]]=6
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3, 2], vec![1i32, 4, 2, 5, 3, 6]).unwrap()
-        );
+        assert_eq!(got, array![[1i32, 4], [2, 5], [3, 6]]);
     }
 
     // -----------------------------------------------------------------------
@@ -565,28 +564,22 @@ mod tests {
     #[test]
     fn max_over_plain_2d() {
         let nd = array![[1i32, 5, 3], [4, 2, 6]];
-        let got: ArrayD<i32> = Array::plain_ndarray(nd)
+        let got = Array::plain_ndarray(nd)
             .unwrap()
             .max(0)
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3], vec![4i32, 5, 6]).unwrap()
-        );
+        assert_eq!(got, array![4i32, 5, 6]);
     }
 
     #[test]
     fn sum_over_plain_2d() {
         let nd = array![[1i32, 2, 3], [4, 5, 6]];
-        let got: ArrayD<i64> = Array::plain_ndarray(nd)
+        let got = Array::plain_ndarray(nd)
             .unwrap()
             .sum(1)
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2], vec![6i64, 15]).unwrap()
-        );
+        assert_eq!(got, array![6i64, 15]);
     }
 }

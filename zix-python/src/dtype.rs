@@ -142,13 +142,11 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Zi
                 "Unsupported complex itemsize: {itemsize}"
             ))),
             ('m' | 'M' | 'O' | 'S' | 'U' | 'V', _) => Err(PyValueError::new_err(format!(
-                "Unsupported dtype: {:?}",
-                numpy_base
+                "Unsupported dtype: {numpy_base:?}"
             ))),
             (_, _) => {
                 return Err(PyValueError::new_err(format!(
-                    "Unsupported dtype: {:?}",
-                    numpy_base
+                    "Unsupported dtype: {numpy_base:?}"
                 )));
             }
         }?;

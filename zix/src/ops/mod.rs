@@ -91,8 +91,8 @@
 //! `&[Array<S>]`, fixed-length arrays `[Array<S>; N]`, and heterogeneous tuples of up to ten
 //! arrays. See [`ArraySequence`](crate::util::ArraySequence) for details.
 
-mod into_compact;
-pub use into_compact::*;
+mod maybe_compact;
+pub use maybe_compact::*;
 
 mod cast;
 pub use cast::Cast;

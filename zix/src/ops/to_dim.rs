@@ -29,7 +29,7 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 /// ```
 /// use zix::{Array, Dim};
 ///
-/// // Arrays loaded from files (or built from IxDyn) carry DimDyn.
+/// // Arrays loaded from files (or built from ndarray::IxDyn) carry DimDyn.
 /// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3, 4])))?;
 /// // a: Array<Compact<TypeDyn, DimDyn>>
 /// // a: Array<Storage::Dimension = DimDyn>
@@ -111,8 +111,8 @@ where
     fn dtype(&self) -> &crate::dtype::Dtype {
         self.inner.storage.dtype()
     }
-    fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
-        self.inner.storage._spec()
+    fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
+        self.inner.storage.spec()
     }
 }
 

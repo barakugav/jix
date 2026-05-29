@@ -19,7 +19,7 @@ pub(crate) trait ArraySequenceImpl {
     ) -> Result<()>;
     fn shape(&self, arr: usize) -> &[u64];
     fn dtype(&self, arr: usize) -> &Dtype;
-    fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_>;
+    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_>;
 }
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
@@ -106,8 +106,8 @@ where
         self[arr].dtype()
     }
 
-    fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].storage._spec()
+    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].storage.spec()
     }
 }
 impl<S, const N: usize> ArraySequence for [Array<S>; N]
@@ -144,8 +144,8 @@ where
         self[arr].dtype()
     }
 
-    fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].storage._spec()
+    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].storage.spec()
     }
 }
 impl<S: ArrayStorage> ArraySequence for Vec<Array<S>> {
@@ -179,8 +179,8 @@ where
         self[arr].dtype()
     }
 
-    fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
-        self[arr].storage._spec()
+    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+        self[arr].storage.spec()
     }
 }
 impl<S: ArrayStorage> ArraySequence for &[Array<S>] {
@@ -232,9 +232,9 @@ macro_rules! impl_array_sequence_for_tuple {
                 }
             }
 
-            fn _spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+            fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
                 match arr {
-                    $($idx => self.$idx.storage._spec(),)+
+                    $($idx => self.$idx.storage.spec(),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }

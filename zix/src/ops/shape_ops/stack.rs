@@ -83,7 +83,7 @@ impl<ArraysT: ArraySequence> Stack<ArraysT> {
             ensure!(
                 dtype_i == dtype,
                 UnsupportedDtype,
-                "cannot stack arrays of different dtypes: {dtype:?} != {dtype_i:?}"
+                "cannot stack arrays of different dtypes: {dtype} != {dtype_i}"
             );
         }
         ensure!(
@@ -99,7 +99,7 @@ impl<ArraysT: ArraySequence> Stack<ArraysT> {
             <ArraysT::FirstArrayDimension as crate::Dimension>::Larger::from_slice(&new_shape)
                 .unwrap();
 
-        let mut b_layout = arrays._spec(0).blocks_layout.clone();
+        let mut b_layout = arrays.spec(0).blocks_layout.clone();
         b_layout.block_shape_hint.insert(axis, 1);
         b_layout.block_shape_tag.insert(axis, BlockShapeTag::Any);
         b_layout.preferred_read_shape.insert(axis, 1);
@@ -196,10 +196,10 @@ where
     fn dtype(&self) -> &Dtype {
         self.arrays.dtype(0)
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.arrays._spec(0)
+            ..self.arrays.spec(0)
         }
     }
 }
@@ -224,7 +224,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = stack(vec![za, zb], 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // stack two 1D i32 arrays along axis 1 -> shape [N, 2]
@@ -236,7 +236,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = stack([za, zb], 1).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // stack two 2D i32 arrays along axis 0 -> shape [2, M, N]
@@ -248,7 +248,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = stack((za, zb.as_ref()), 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // stack two 2D i32 arrays along axis 1 -> shape [M, 2, N]
@@ -262,7 +262,7 @@ mod tests {
             .to_ndarray()
             .unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // stack three 1D i32 arrays along axis 0 -> shape [3, N]
@@ -276,7 +276,7 @@ mod tests {
         let zc = Array::compact_array(&c).unwrap();
         let actual = stack([za, zb, zc], 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // stack two 1D f32 arrays along axis 0 -> shape [2, N]
@@ -288,7 +288,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = stack([za, zb], 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // stack two 2D f32 arrays along axis 1 -> shape [M, 2, N]
@@ -300,7 +300,7 @@ mod tests {
         let zb = Array::compact_array(&b).unwrap();
         let actual = stack([za.as_ref(), zb.as_ref()], 1).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     // stack three f32 arrays along axis 0 with multi-block layout
@@ -314,7 +314,7 @@ mod tests {
         let zc = Array::compact_array_with(&c, arr_params(&[2])).unwrap();
         let actual = stack((za, zb, zc.as_ref()), 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     #[test]

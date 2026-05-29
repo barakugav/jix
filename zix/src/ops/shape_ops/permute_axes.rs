@@ -162,10 +162,10 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage._spec()
+            ..self.array.storage.spec()
         }
     }
 }
@@ -188,7 +188,6 @@ mod tests {
         let expected = a
             .view()
             .permuted_axes([1, 0])
-            .into_dyn()
             .as_standard_layout()
             .into_owned();
         assert_eq!(actual, expected);
@@ -203,7 +202,6 @@ mod tests {
         let expected = a
             .view()
             .permuted_axes([1, 0])
-            .into_dyn()
             .as_standard_layout()
             .into_owned();
         assert_eq!(actual, expected);
@@ -218,7 +216,6 @@ mod tests {
         let expected = a
             .view()
             .permuted_axes([2, 0, 1])
-            .into_dyn()
             .as_standard_layout()
             .into_owned();
         assert_eq!(actual, expected);
@@ -233,7 +230,6 @@ mod tests {
         let expected = a
             .view()
             .permuted_axes([0, 2, 1])
-            .into_dyn()
             .as_standard_layout()
             .into_owned();
         assert_eq!(actual, expected);
@@ -245,7 +241,7 @@ mod tests {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
         let za = Array::compact_array(&a).unwrap();
         let actual = za.permute_axes(&[0, 1, 2]).to_ndarray().unwrap();
-        assert_eq!(actual, a.into_dyn());
+        assert_eq!(actual, a);
     }
 
     // Panic: axes length does not match ndim

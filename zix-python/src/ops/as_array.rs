@@ -36,7 +36,7 @@ pub(crate) fn any_to_core_array<'py>(
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{array, Array0, ArrayD, IxDyn};
+    use ndarray::{array, Array0, ArrayD};
     use numpy::PyArray;
     use pyo3::prelude::*;
     use zix_core::dtype::Dtyped;
@@ -222,8 +222,7 @@ mod tests {
     #[test]
     fn test_2d_u8() {
         Python::attach(|py| {
-            let orig: ArrayD<u8> =
-                ArrayD::from_shape_vec(IxDyn(&[3, 4]), (0u8..12).collect()).unwrap();
+            let orig = ArrayD::from_shape_vec(vec![3, 4], (0u8..12).collect()).unwrap();
             let data = collect::<u8>(&npd(py, orig.clone()));
             assert_eq!(data, orig);
         });
@@ -232,8 +231,7 @@ mod tests {
     #[test]
     fn test_3d_i32() {
         Python::attach(|py| {
-            let orig: ArrayD<i32> =
-                ArrayD::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+            let orig = ArrayD::from_shape_vec(vec![2, 3, 4], (0..24).collect()).unwrap();
             let data = collect::<i32>(&npd(py, orig.clone()));
             assert_eq!(data, orig);
         });
@@ -242,9 +240,8 @@ mod tests {
     #[test]
     fn test_shape_preserved() {
         Python::attach(|py| {
-            let orig: ArrayD<f32> =
-                ArrayD::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).map(|x| x as f32).collect())
-                    .unwrap();
+            let orig =
+                ArrayD::from_shape_vec(vec![2, 3, 4], (0..24).map(|x| x as f32).collect()).unwrap();
             let arr = asarray(&npd(py, orig)).unwrap();
             assert_eq!(arr.get().arr.shape(), &[2u64, 3, 4]);
         });

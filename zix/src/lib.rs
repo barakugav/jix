@@ -75,8 +75,7 @@
 //! |------|-------------|
 //! | [`Array<Compact<...>>`](storage::Compact) | Heap-allocated block-compressed array. The main backend of the library. |
 //! | [`Array<Op<...>>`](ops) | Lazy operation views defined in [`ops`]. Wrap one or more arrays; apply their transformation on each read. |
-//! | [`Array<Ref<'_, S>>`](storage::Ref) | Borrow of a storage without cloning. Created by [`Array::as_ref`]. |
-//! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray_view`]. |
+//! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray_ref`]. |
 //! | [`Array<Scalar<T>>`](storage::Scalar) | A single scalar broadcast to any shape, used as an operand in expressions like `array + 1.0`. |
 //!
 //! # Operations
@@ -104,31 +103,6 @@
 //!
 //! **Type cast** - `cast::<T>()` converts each element to T.
 //!
-//! ## Shape-changing operations and performance
-//!
-//! Shape-changing operations (`reshape`, `permute_axes`, `broadcast`) remap how output indices
-//! translate to positions in the underlying blocks. When the new layout crosses block boundaries
-//! that the original layout respected, a single read may decompress many more blocks than
-//! needed.
-//!
-//! To avoid this, call [`.copy()`](Array::copy) (or the eager variants `reshape`,
-//! `broadcast`) after a shape change to re-encode with a freshly derived block shape:
-//!
-//! ```
-//! use zix::{Array, ArrayParams};
-//!
-//! // Compress with column-friendly blocks.
-//! let mut params = ArrayParams::new();
-//! params.block_shape(&[64, 64]);
-//! let a = Array::compact_array_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
-//!
-//! // Transpose and re-encode with row-friendly blocks.
-//! let mut out_params = ArrayParams::new();
-//! out_params.block_shape(&[128, 128]);
-//! let ctx = a.read_ctx();
-//! let transposed = a.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
-//! # Ok::<(), zix::Error>(())
-//! ```
 //!
 //! # Element types
 //!
@@ -192,6 +166,7 @@
 //! # Ok::<(), zix::Error>(())
 //! ```
 //!
+//!
 //! # Dimension types
 //!
 //! Every [`ArrayStorage`] carries an associated `type Dimension:
@@ -202,16 +177,17 @@
 //! The dimension type propagates through every shape-changing operation automatically.
 //! See [`Dimension`] for details.
 //!
+//!
 //! # Codec pipeline
 //!
 //! Each compressed block passes through the following pipeline on write:
 //!
 //! ```text
-//! raw element bytes  ->  [ByteShuffle filter]  ->  Zstd compress  ->  stored bytes
+//! raw element bytes  ->  filters  ->  codec compress  ->  stored bytes
 //! ```
 //!
-//! On read, the pipeline is reversed. The byte-shuffle filter (enabled by default) rearranges
-//! bytes by significance before compression, improving Zstd's ratio on numerical data.
+//! On read, the pipeline is reversed. Filters include the byte-shuffle filter (enabled by default),
+//! and bit shuffle, improving the codec's ratio on numerical data.
 //!
 //! Codec settings are controlled via [`ArrayParams`]:
 //!
@@ -220,6 +196,7 @@
 //!
 //! The codec and filter configuration is serialized into the array archive, so readers never need
 //! to know ahead of time which settings were used.
+//!
 //!
 //! # Block layout and performance
 //!
@@ -257,6 +234,31 @@
 //! }
 //! # Ok::<(), zix::Error>(())
 //! ```
+//!
+//! Shape-changing operations (`reshape`, `permute_axes`, `broadcast`) remap how output indices
+//! translate to positions in the underlying blocks. When the new layout crosses block boundaries
+//! that the original layout respected, a single read may decompress many more blocks than
+//! needed.
+//!
+//! To avoid this, call [`.copy()`](Array::copy) (or the eager variants `reshape`,
+//! `broadcast`) after a shape change to re-encode with a freshly derived block shape:
+//!
+//! ```
+//! use zix::{Array, ArrayParams};
+//!
+//! // Compress with column-friendly blocks.
+//! let mut params = ArrayParams::new();
+//! params.block_shape(&[64, 64]);
+//! let a = Array::compact_array_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
+//!
+//! // Transpose and re-encode with row-friendly blocks.
+//! let mut out_params = ArrayParams::new();
+//! out_params.block_shape(&[128, 128]);
+//! let ctx = a.read_ctx();
+//! let transposed = a.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
+//! # Ok::<(), zix::Error>(())
+//! ```
+//!
 //!
 //! # Serialization (`.zix` files)
 //!
@@ -303,6 +305,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
+//!
 //! # Limits
 //!
 //! - Maximum array dimensions: [`NDIM_MAX`] (8).
@@ -310,6 +313,7 @@
 //! - Little-endian targets only - enforced by a compile-time assertion.
 //! - Element types must implement [`Dtyped`](dtype::Dtyped); they must be `Copy + Send + Sync +
 //!   'static` and must not implement `Drop`.
+//!
 //!
 //! # Disclaimer
 //!

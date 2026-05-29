@@ -197,10 +197,10 @@ where
         unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
         dtype
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage._spec()
+            ..self.array.storage.spec()
         }
     }
 }
@@ -1725,7 +1725,7 @@ pub(crate) mod tests {
             .map(|(_, view)| f(&view))
             .collect();
 
-        ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&out_shape), values).unwrap()
+        ndarray::ArrayD::from_shape_vec(out_shape, values).unwrap()
     }
 
     /// Iterates over all index combinations of the **kept** axes (i.e. axes NOT in `axes`),
@@ -1785,17 +1785,16 @@ pub(crate) mod tests {
 
     mod ndarray_reduce_tests {
         use super::{ndarray_reduce, ndarray_reduction_iter};
-        use ndarray::*;
 
         #[cfg(test)]
         mod tests {
             use super::*;
-            use ndarray::{array, Array, ArrayD, IxDyn};
+            use ndarray::{array, Array};
 
             #[test]
             fn single_axis_0() {
                 // Shape [2, 3], reduce axis 0 -> 3 views of shape [2]
-                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
                 let views: Vec<_> = ndarray_reduction_iter(&a, &[0]).collect();
 
                 assert_eq!(views.len(), 3);
@@ -1818,7 +1817,7 @@ pub(crate) mod tests {
             #[test]
             fn single_axis_1() {
                 // Shape [2, 3], reduce axis 1 -> 2 views of shape [3]
-                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
                 let views: Vec<_> = ndarray_reduction_iter(&a, &[1]).collect();
 
                 assert_eq!(views.len(), 2);
@@ -1838,7 +1837,7 @@ pub(crate) mod tests {
             #[test]
             fn multi_axis_3d() {
                 // Shape [2, 3, 4], reduce axes [0, 2] -> 3 views of shape [2, 4]
-                let a = Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3, 4], (0..24).collect()).unwrap();
                 let views: Vec<_> = ndarray_reduction_iter(&a, &[0, 2]).collect();
 
                 assert_eq!(views.len(), 3);
@@ -1870,8 +1869,7 @@ pub(crate) mod tests {
             #[test]
             fn reduce_all_axes() {
                 // Shape [2, 3], reduce both -> 1 view of shape [2, 3] (no kept axes)
-                let a =
-                    Array::from_shape_vec(IxDyn(&[2, 3]), vec![10, 20, 30, 40, 50, 60]).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3], vec![10, 20, 30, 40, 50, 60]).unwrap();
                 let views: Vec<_> = ndarray_reduction_iter(&a, &[0, 1]).collect();
 
                 assert_eq!(views.len(), 1);
@@ -1882,7 +1880,7 @@ pub(crate) mod tests {
             #[test]
             fn no_axes_returns_scalar_views() {
                 // Reduce no axes -> 6 scalar views (iterate over everything)
-                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
                 let views: Vec<_> = ndarray_reduction_iter(&a, &[]).collect();
 
                 assert_eq!(views.len(), 6);
@@ -1901,7 +1899,7 @@ pub(crate) mod tests {
             #[test]
             fn axes_order_independent() {
                 // [0, 2] and [2, 0] should yield identical results
-                let a = Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3, 4], (0..24).collect()).unwrap();
 
                 let v1: Vec<_> = ndarray_reduction_iter(&a, &[0, 2]).collect();
                 let v2: Vec<_> = ndarray_reduction_iter(&a, &[2, 0]).collect();
@@ -1916,7 +1914,7 @@ pub(crate) mod tests {
             #[test]
             fn dim_1_reduce_axis_0() {
                 // Shape [5], reduce axis 0 -> 1 view of shape [5] (no kept axes)
-                let a = Array::from_shape_vec(IxDyn(&[5]), vec![10, 20, 30, 40, 50]).unwrap();
+                let a = Array::from_shape_vec(vec![5], vec![10, 20, 30, 40, 50]).unwrap();
                 let views: Vec<_> = ndarray_reduction_iter(&a, &[0]).collect();
 
                 assert_eq!(views.len(), 1);
@@ -1927,7 +1925,7 @@ pub(crate) mod tests {
             #[test]
             fn reduce_middle_axis() {
                 // Shape [2, 3, 4], reduce axis 1 -> 2*4=8 views of shape [3]
-                let a = Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3, 4], (0..24).collect()).unwrap();
                 let views: Vec<_> = ndarray_reduction_iter(&a, &[1]).collect();
 
                 assert_eq!(views.len(), 8);
@@ -1955,7 +1953,7 @@ pub(crate) mod tests {
             #[test]
             fn reduce_sum_axis_0() {
                 // np.sum(a, axis=0) for shape [2, 3]
-                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
                 let result = ndarray_reduce(&a, &[0], |v| v.iter().sum::<i32>());
 
                 assert_eq!(result.shape(), &[3]);
@@ -1965,7 +1963,7 @@ pub(crate) mod tests {
             #[test]
             fn reduce_sum_axis_1() {
                 // np.sum(a, axis=1) for shape [2, 3]
-                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
                 let result = ndarray_reduce(&a, &[1], |v| v.iter().sum::<i32>());
 
                 assert_eq!(result.shape(), &[2]);
@@ -1975,8 +1973,7 @@ pub(crate) mod tests {
             #[test]
             fn reduce_sum_multi_axis() {
                 // np.sum(a, axis=(0, 2)) for shape [2, 3, 4]
-                let a: ArrayD<i32> =
-                    Array::from_shape_vec(IxDyn(&[2, 3, 4]), (0..24).collect()).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3, 4], (0..24).collect()).unwrap();
                 let result = ndarray_reduce(&a, &[0, 2], |v| v.iter().sum::<i32>());
 
                 assert_eq!(result.shape(), &[3]);
@@ -1989,8 +1986,7 @@ pub(crate) mod tests {
             #[test]
             fn reduce_all_axes_to_scalar() {
                 // np.sum(a) - reduce everything
-                let a: ArrayBase<OwnedRepr<i32>, Dim<IxDynImpl>, i32> =
-                    Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
                 let result = ndarray_reduce(&a, &[0, 1], |v| v.iter().sum::<i32>());
 
                 assert_eq!(result.shape(), &[] as &[usize]);
@@ -2000,7 +1996,7 @@ pub(crate) mod tests {
             #[test]
             fn reduce_no_axes_identity() {
                 // Reducing no axes -> same shape, each element passed through f
-                let a = Array::from_shape_vec(IxDyn(&[2, 3]), vec![1, 2, 3, 4, 5, 6]).unwrap();
+                let a = Array::from_shape_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
                 let result = ndarray_reduce(&a, &[], |v| *v.first().unwrap());
 
                 assert_eq!(result.shape(), &[2, 3]);
@@ -2010,7 +2006,7 @@ pub(crate) mod tests {
             #[test]
             fn reduce_max_axis() {
                 // np.max(a, axis=0)
-                let a = Array::from_shape_vec(IxDyn(&[3, 2]), vec![5, 1, 3, 8, 7, 2]).unwrap();
+                let a = Array::from_shape_vec(vec![3, 2], vec![5, 1, 3, 8, 7, 2]).unwrap();
                 let result = ndarray_reduce(&a, &[0], |v| *v.iter().max().unwrap());
 
                 assert_eq!(result.shape(), &[2]);

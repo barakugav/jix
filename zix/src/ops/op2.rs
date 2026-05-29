@@ -87,8 +87,18 @@ where
         dtype
     }
 
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
-        self.a.storage._spec()
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        self.a.storage.spec()
+    }
+}
+
+impl<F, T1, T2, O> Op2Kernel<T1, T2> for F
+where
+    F: Fn(T1, T2) -> O,
+{
+    type Output = O;
+    fn apply(&self, a: T1, b: T2) -> Self::Output {
+        self(a, b)
     }
 }
 
@@ -608,9 +618,9 @@ pub(crate) mod tests {
             c_vals in proptest::collection::vec(<f32 as crate::util::ScalarStrategy>::op_safe_strategy(), 6usize),
         ) {
             use crate::array::Array;
-            let nd_a = ndarray::ArrayD::from_shape_vec(vec![2, 3], a_vals).unwrap();
-            let nd_b = ndarray::ArrayD::from_shape_vec(vec![2, 3], b_vals).unwrap();
-            let nd_c = ndarray::ArrayD::from_shape_vec(vec![2, 3], c_vals).unwrap();
+            let nd_a = ndarray::Array::from_shape_vec([2, 3], a_vals).unwrap();
+            let nd_b = ndarray::Array::from_shape_vec([2, 3], b_vals).unwrap();
+            let nd_c = ndarray::Array::from_shape_vec([2, 3], c_vals).unwrap();
             let za = Array::compact_array_with(&nd_a, crate::util::arr_params(&[2, 3])).unwrap();
             let zb = Array::compact_array_with(&nd_b, crate::util::arr_params(&[2, 3])).unwrap();
             let zc = Array::compact_array_with(&nd_c, crate::util::arr_params(&[1, 2])).unwrap();
@@ -626,7 +636,7 @@ pub(crate) mod tests {
             vals in proptest::collection::vec(<f32 as crate::util::ScalarStrategy>::op_safe_strategy(), 100usize)
         ) {
             use crate::array::Array;
-            let a = ndarray::ArrayD::from_shape_vec(vec![10, 10], vals).unwrap();
+            let a = ndarray::Array::from_shape_vec([10, 10], vals).unwrap();
             let za = Array::compact_array_with(&a, crate::util::arr_params(&[10, 10])).unwrap();
             let zb = za * 2.0f32 + 1.0f32;
             let actual = zb.to_ndarray().unwrap();

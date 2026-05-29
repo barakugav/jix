@@ -45,7 +45,7 @@ macro_rules! define_reduction_op {
                 _ => Err(zix_core::Error::new(
                     zix_core::ErrorKind::UnsupportedDtype,
                     format!(
-                        "Op {} does not support dtype {:#?}",
+                        "Op {} does not support dtype {}",
                         stringify!($name),
                         array.dtype()
                     ),
@@ -115,7 +115,7 @@ macro_rules! define_reduction_op {
                 _ => Err(zix_core::Error::new(
                     zix_core::ErrorKind::UnsupportedDtype,
                     format!(
-                        "Op {} does not support dtype {:#?}",
+                        "Op {} does not support dtype {}",
                         stringify!($name),
                         array.dtype()
                     ),

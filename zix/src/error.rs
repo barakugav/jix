@@ -116,7 +116,7 @@ pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
     ensure!(
         actual == expected,
         UnsupportedDtype,
-        "expected dtype {expected:?} but got {actual:?}",
+        "expected dtype {expected} but got {actual}",
     );
     Ok(())
 }
@@ -155,12 +155,12 @@ pub(crate) fn check_get_buffer_size(
     ensure!(
         buf_len == required_size,
         InvalidBufferSize,
-        "Unexpected buffer size {buf_len} requested index {index:?} with dtype {dtype:?} (required size: {required_size})"
+        "Unexpected buffer size {buf_len} requested index {index:?} with dtype {dtype} (required size: {required_size})"
     );
     ensure!(
         (buf.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize()),
         InvalidArgument,
-        "Buffer pointer is not aligned to required alignment {} for dtype {dtype:?}",
+        "Buffer pointer is not aligned to required alignment {} for dtype {dtype}",
         dtype.alignment(),
     );
     Ok(nitems)

@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
-use crate::ops::{DimensionChange, ElementTypeChange, IntoCompact, ToDim, ToType};
+use crate::ops::{DimensionChange, ElementTypeChange, MaybeCompact, ToDim, ToType};
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
 use crate::storage::{ArrayBlockTableStorageBase, ArrayStorageTyped, BlocksLayout, Compact, Ref};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
@@ -38,8 +38,7 @@ use crate::{
 /// |------|-------------|
 /// | [`Array<Compact>`](crate::storage::Compact) | Heap-allocated block-compressed array. The main storage backend. |
 /// | [`Array<Add<S1, S2>> or Array<Neg<S>> ...`](crate::ops) | Lazy operations views that wrap one or more arrays and apply a transformation at read time. Created by methods in [`ops`](crate::ops). |
-/// | [`Array<Ref<'a, S>>`](crate::storage::Ref) | A reference to another storage, used to let multiple operations consume an array without cloning its storage. Created by [`as_ref`](Array::as_ref). |
-/// | [`Array<Plain<...>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_view`](Array::plain_ndarray_view). |
+/// | [`Array<Plain<...>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_ref`](Array::plain_ndarray_ref). |
 /// | [`Array<Scalar<T>>`](crate::storage::Scalar) | A single scalar broadcast to any shape, used as the operand in expressions like `array + 1.0`. |
 ///
 /// # Operations and lazy evaluation
@@ -81,7 +80,7 @@ use crate::{
 /// let compact = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
 ///
 /// // Zero-copy view of an existing ndarray (any layout).
-/// let plain = Array::plain_ndarray_view(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
+/// let plain = Array::plain_ndarray_ref(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
 /// // Read a previously serialized array back from a file.
 /// let tmp_dir = tempfile::tempdir()?;
@@ -283,7 +282,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
         S: ndarray::Data<Elem = T>,
         T: Dtyped,
     {
-        let array = Array::plain_ndarray_view(array)?;
+        let array = Array::plain_ndarray_ref(array)?;
         params.tune(array.shape(), array.dtype())?;
         let context = ReadContext::new(&params.decoder_params.clone().unwrap_or_default())?;
         array.copy_with(params, &context)
@@ -325,16 +324,7 @@ impl<D> Array<Compact<TypeDyn, D>> {
         Sh: IntoDimension<Dimension = D>,
         D: Dimension,
     {
-        let plain_storage = unsafe {
-            crate::storage::Plain::new(
-                crate::storage::PlainRef::<'_, u8>::new(),
-                ptr,
-                shape,
-                strides,
-                dtype,
-            )?
-        };
-        let array = Array::from_storage(plain_storage);
+        let array = unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype)? };
         params.tune(array.shape(), array.dtype())?;
         let context = ReadContext::new(&params.decoder_params.clone().unwrap_or_default())?;
         array.copy_with(params, &context)
@@ -378,12 +368,12 @@ impl<S: ArrayStorage> Array<S> {
     /// let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
     /// assert_eq!(a.dtype(), &f32::DTYPE);
     ///
-    /// let b = Array::plain_ndarray_view(&array![[false, true]])?;
+    /// let b = Array::plain_ndarray_ref(&array![[false, true]])?;
     /// assert_eq!(b.dtype(), &bool::DTYPE);
     ///
     /// #[derive(Dtyped, Copy, Clone)]
     /// struct Point { x: f32, y: f32 }
-    /// let c = Array::plain_ndarray_view(&array![Point { x: 1.0, y: 2.0 }])?;
+    /// let c = Array::plain_ndarray_ref(&array![Point { x: 1.0, y: 2.0 }])?;
     /// assert_eq!(c.dtype(), &Point::DTYPE);
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -403,7 +393,9 @@ impl<S: ArrayStorage> Array<S> {
     /// # Errors
     ///
     /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
-    pub fn to_ndarray(&self) -> Result<ndarray::ArrayD<S::Item>>
+    pub fn to_ndarray(
+        &self,
+    ) -> Result<ndarray::Array<S::Item, <S::Dimension as ndarray::IntoDimension>::Dim>>
     where
         S: ArrayStorage + ArrayStorageTyped,
     {
@@ -439,11 +431,11 @@ impl<S: ArrayStorage> Array<S> {
     /// let context = a.read_ctx();
     /// assert_eq!(
     ///     a.to_ndarray_sub(&[1..3, 1..3], &context)?,
-    ///     array![[5, 6], [8, 9]].into_dyn()
+    ///     array![[5, 6], [8, 9]]
     /// );
     /// assert_eq!(
     ///    a.to_ndarray_sub(&[0..2, 0..2], &context)?,
-    ///    array![[1, 2], [4, 5]].into_dyn()
+    ///    array![[1, 2], [4, 5]]
     /// );
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -451,7 +443,7 @@ impl<S: ArrayStorage> Array<S> {
         &self,
         index: &[Range<u64>],
         context: &ReadContext,
-    ) -> Result<ndarray::ArrayD<S::Item>>
+    ) -> Result<ndarray::Array<S::Item, <S::Dimension as ndarray::IntoDimension>::Dim>>
     where
         S: ArrayStorage + ArrayStorageTyped,
     {
@@ -462,7 +454,10 @@ impl<S: ArrayStorage> Array<S> {
             let len: usize = len.try_into().unwrap();
             len
         });
-        let mut array = ndarray::ArrayD::uninit(&out_shape[..]);
+        let array = ndarray::ArrayD::uninit(&out_shape[..]);
+        let mut array = array
+            .into_dimensionality::<<S::Dimension as ndarray::IntoDimension>::Dim>()
+            .unwrap();
         self.to_ndarray_buf(
             index,
             unsafe { cast_slice_mut::<MaybeUninit<S::Item>, u8>(array.as_slice_mut().unwrap()) },
@@ -515,7 +510,7 @@ impl<S: ArrayStorage> Array<S> {
         check_get_range(shape, index)?;
         check_get_buffer_size(index, dtype, buf)?;
 
-        let read_shape = self.storage._spec().blocks_layout.preferred_read_shape();
+        let read_shape = self.storage.spec().blocks_layout.preferred_read_shape();
         debug_assert!(read_shape.iter().all(|l| *l > 0));
 
         // Fast path for small reads
@@ -653,7 +648,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// assert_eq!(
     ///     b.to_ndarray_sub(&[0..2, 0..1],
-    ///     &b.read_ctx())?, array![[1.5], [3.14]].into_dyn()
+    ///     &b.read_ctx())?, array![[1.5], [3.14]]
     /// );
     /// # Ok::<(), zix::Error>(())
     /// ```
@@ -742,7 +737,7 @@ impl<S: ArrayStorage> Array<S> {
     /// # Ok::<(), zix::Error>(())
     /// ```
     pub fn read_ctx(&self) -> ReadContext {
-        let params = self.storage._spec().decoder_params;
+        let params = self.storage.spec().decoder_params;
         let context = match params {
             Some(params) => ReadContext::new(params),
             None => ReadContext::new(&DecoderParams::default()),
@@ -807,7 +802,7 @@ impl<S: ArrayStorage> Array<S> {
     /// block into a new [`Compact`](crate::storage::Compact) storage using
     /// default [`ArrayParams`].
     ///
-    /// Use [`into_compact_with`](Self::into_compact_with) to control the block
+    /// Use [`maybe_compact_with`](Self::maybe_compact_with) to control the block
     /// shape and codec parameters.
     ///
     /// # Example
@@ -817,34 +812,34 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// let a = Array::compact_array(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
     /// assert!(a.is_compact());
-    /// let a = a.into_compact()?; // a is already compact, so this is a no-op
+    /// let a = a.maybe_compact()?; // a is already compact, so this is a no-op
     ///
     /// let b = a * 2.0f32; // Array<Mul<Compact, Scalar<f32>>>
     /// assert!(!b.is_compact()); // b is a lazy view
-    /// let b = b.into_compact()?; // materialize b into compact form
+    /// let b = b.maybe_compact()?; // materialize b into compact form
     /// assert!(b.is_compact());
     /// # Ok::<(), zix::Error>(())
     /// ```
-    pub fn into_compact(self) -> Result<Array<IntoCompact<S>>> {
+    pub fn maybe_compact(self) -> Result<Array<MaybeCompact<S>>> {
         let context = self.read_ctx();
-        self.into_compact_with(ArrayParams::default(), &context)
+        self.maybe_compact_with(ArrayParams::default(), &context)
     }
 
     /// Ensure this array is in compact block-compressed form, re-compressing
     /// if needed, with explicit control over parameters.
     ///
-    /// Similar to [`into_compact`](Self::into_compact) but with explicit [`ArrayParams`].
+    /// Similar to [`maybe_compact`](Self::maybe_compact) but with explicit [`ArrayParams`].
     ///
     /// `params` controls the target block shape and compression settings. It is
     /// **only used when the source is not already compact** - if `is_compact()`
     /// returns `true`, the existing storage is wrapped zero-cost and `params` is
     /// ignored.
-    pub fn into_compact_with(
+    pub fn maybe_compact_with(
         self,
         params: ArrayParams,
         context: &ReadContext,
-    ) -> Result<Array<IntoCompact<S>>> {
-        Ok(Array::from_storage(IntoCompact::new(
+    ) -> Result<Array<MaybeCompact<S>>> {
+        Ok(Array::from_storage(MaybeCompact::new(
             self, params, context,
         )?))
     }
@@ -871,12 +866,12 @@ impl<S: ArrayStorage> Array<S> {
     }
 
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
-        self.storage._spec().blocks_layout
+        self.storage.spec().blocks_layout
     }
 
     /// Build a [`BlockFn`] that reads and compresses this array's data block by block.
     ///
-    /// Called by [`Array::into_compact`] (and its variants) to feed [`build_block_table`] with
+    /// Called by [`Array::maybe_compact`] (and its variants) to feed [`build_block_table`] with
     /// compressed block data without materializing all blocks at once.
     ///
     /// # Block layout
@@ -1155,7 +1150,7 @@ where
     ///
     /// // Passing a dynamically-dimensioned ndarray produces Array<Compact<DimDyn>>.
     /// // Arrays loaded from files via Array::read_from_file also carry DimDyn.
-    /// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3, 4])))?;
+    /// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(vec![2, 3, 4]))?;
     ///
     /// // Assert the array is 3-D; fail gracefully if not.
     /// let a3d = a.to_dim::<Dim<3>>()?;  // Array<ToDim<Compact<DimDyn>, Dim<3>>>
@@ -1229,7 +1224,7 @@ impl<S: ArrayStorage> std::fmt::Debug for Array<S> {
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{array, ArrayD};
+    use ndarray::array;
 
     use super::Array;
     use crate::array::{ArrayBlockTableStorageBase, Compact};
@@ -1238,20 +1233,23 @@ mod tests {
     use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::{BlockShapeTag, BlocksLayout};
     use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
-    use crate::{DimDyn, Dimension, IntoDimension, Ty};
+    use crate::{Dimension, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // compact_array roundtrip helper
     // -----------------------------------------------------------------------
 
-    fn roundtrip<T, S, D>(src: &ndarray::ArrayBase<S, D>, block_shape: &[usize]) -> ArrayD<T>
+    fn roundtrip<T, S, D>(
+        src: &ndarray::ArrayBase<S, D>,
+        block_shape: &[usize],
+    ) -> ndarray::Array<T, D>
     where
         T: Dtyped,
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension + IntoDimension,
     {
         let a = Array::compact_array_with(&src, arr_params(block_shape)).unwrap();
-        a.to_ndarray().unwrap()
+        a.to_ndarray().unwrap().into_dimensionality().unwrap()
     }
 
     // -----------------------------------------------------------------------
@@ -1269,12 +1267,21 @@ mod tests {
         BlockTable::build_from_data(&data, T::DTYPE, block_len, &EncoderParams::default()).unwrap()
     }
 
-    fn array<T: Dtyped>(
+    fn array<T, Sh>(
         blocks: &[&[T]],
-        shape: &[usize],
+        shape: Sh,
         block_shape: &[usize],
-    ) -> Array<Compact<Ty<T>, DimDyn>> {
-        let shape = shape.iter().map(|&x| x as u64).collect::<DimArray<_>>();
+    ) -> Array<Compact<Ty<T>, Sh::Dimension>>
+    where
+        T: Dtyped,
+        Sh: IntoDimension,
+    {
+        let shape = shape.into_dimension().unwrap();
+        let shape = shape
+            .as_slice()
+            .iter()
+            .map(|&x| x as u64)
+            .collect::<DimArray<_>>();
         let ndim = block_shape.len();
         let block_shape_hint = block_shape
             .iter()
@@ -1290,7 +1297,7 @@ mod tests {
         Array {
             storage: Compact(ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),
-                DimDyn::from_slice(&shape).unwrap(),
+                Sh::Dimension::from_slice(&shape).unwrap(),
                 layout,
                 EncoderParams::default(),
                 DecoderParams::default(),
@@ -1317,31 +1324,22 @@ mod tests {
     #[test]
     fn to_ndarray_1d_single_block() {
         let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
-        let got: ArrayD<u8> = a.to_ndarray().unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![4], vec![0, 1, 2, 3]).unwrap()
-        );
+        let got = a.to_ndarray().unwrap();
+        assert_eq!(got, array![0, 1, 2, 3]);
     }
 
     #[test]
     fn to_ndarray_1d_two_blocks() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.to_ndarray().unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
-        );
+        let got = a.to_ndarray().unwrap();
+        assert_eq!(got, array![0, 1, 2, 3, 4, 5]);
     }
 
     #[test]
     fn to_ndarray_1d_i32() {
         let a = array(&[&[10i32, 20, 30, 40], &[50, 60, 70, 80]], &[8], &[4]);
-        let got: ArrayD<i32> = a.to_ndarray().unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![8], vec![10, 20, 30, 40, 50, 60, 70, 80]).unwrap()
-        );
+        let got = a.to_ndarray().unwrap();
+        assert_eq!(got, array![10, 20, 30, 40, 50, 60, 70, 80]);
     }
 
     // -----------------------------------------------------------------------
@@ -1367,10 +1365,10 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let got: ArrayD<u8> = a.to_ndarray().unwrap();
+        let got = a.to_ndarray().unwrap();
         assert_eq!(
             got,
-            ArrayD::from_shape_vec(vec![4, 6], (0u8..24).collect()).unwrap()
+            ndarray::Array::from_shape_vec([4, 6], (0u8..24).collect()).unwrap()
         );
     }
 
@@ -1381,38 +1379,32 @@ mod tests {
     #[test]
     fn to_ndarray_sub_1d_full_range() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.to_ndarray_sub(&[0..6], &a.read_ctx()).unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
-        );
+        let got = a.to_ndarray_sub(&[0..6], &a.read_ctx()).unwrap();
+        assert_eq!(got, array![0, 1, 2, 3, 4, 5]);
     }
 
     #[test]
     fn to_ndarray_sub_1d_aligned_second_block() {
         // range [3..6) -> output shape [3], values [3,4,5]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.to_ndarray_sub(&[3..6], &a.read_ctx()).unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![3, 4, 5]).unwrap());
+        let got = a.to_ndarray_sub(&[3..6], &a.read_ctx()).unwrap();
+        assert_eq!(got, array![3, 4, 5]);
     }
 
     #[test]
     fn to_ndarray_sub_1d_cross_block_boundary() {
         // range [1..5) -> output shape [4], values [1,2,3,4]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![4], vec![1, 2, 3, 4]).unwrap()
-        );
+        let got = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
+        assert_eq!(got, array![1, 2, 3, 4]);
     }
 
     #[test]
     fn to_ndarray_sub_1d_within_single_block() {
         // range [1..2) -> output shape [1], value [1]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..2], &a.read_ctx()).unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![1], vec![1]).unwrap());
+        let got = a.to_ndarray_sub(&[1..2], &a.read_ctx()).unwrap();
+        assert_eq!(got, array![1]);
     }
 
     // -----------------------------------------------------------------------
@@ -1436,11 +1428,8 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 3], vec![8, 9, 10, 14, 15, 16]).unwrap()
-        );
+        let got = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
+        assert_eq!(got, array![[8u8, 9, 10], [14, 15, 16]]);
     }
 
     // -----------------------------------------------------------------------
@@ -1450,13 +1439,13 @@ mod tests {
     #[test]
     fn compact_array_1d_single_block() {
         let src = array![0u8, 1, 2, 3];
-        assert_eq!(roundtrip(&src, &[4]), src.into_dyn());
+        assert_eq!(roundtrip(&src, &[4]), src);
     }
 
     #[test]
     fn compact_array_1d_multi_block() {
         let src = array![0u8, 1, 2, 3, 4, 5];
-        assert_eq!(roundtrip(&src, &[3]), src.into_dyn());
+        assert_eq!(roundtrip(&src, &[3]), src);
     }
 
     #[test]
@@ -1465,20 +1454,20 @@ mod tests {
         let src = array![0u8, 1, 2, 3, 4];
         let a = Array::compact_array_with(&src, arr_params(&[3])).unwrap();
         assert_eq!(a.shape(), &[5]);
-        let got: ArrayD<u8> = a.to_ndarray().unwrap();
-        assert_eq!(got, src.into_dyn());
+        let got = a.to_ndarray().unwrap();
+        assert_eq!(got, src);
     }
 
     #[test]
     fn compact_array_1d_i32() {
         let src = array![0i32, 10, 20, 30, 40, 50, 60, 70];
-        assert_eq!(roundtrip(&src, &[4]), src.into_dyn());
+        assert_eq!(roundtrip(&src, &[4]), src);
     }
 
     #[test]
     fn compact_array_1d_f32() {
         let src = array![0.0f32, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5];
-        assert_eq!(roundtrip(&src, &[4]), src.into_dyn());
+        assert_eq!(roundtrip(&src, &[4]), src);
     }
 
     #[test]
@@ -1487,7 +1476,7 @@ mod tests {
         let src = array![0u8, 1, 2, 3];
         let a = Array::compact_array_with(&src, arr_params(&[10])).unwrap();
         assert_eq!(a.shape(), &[4]);
-        assert_eq!(a.to_ndarray().unwrap(), src.into_dyn());
+        assert_eq!(a.to_ndarray().unwrap(), src);
     }
 
     #[test]
@@ -1497,7 +1486,7 @@ mod tests {
         let view = src.slice(ndarray::s![..;2]);
         let a = Array::compact_array_with(&view, arr_params(&[3])).unwrap();
         assert_eq!(a.shape(), &[5]);
-        assert_eq!(a.to_ndarray().unwrap(), array![0u8, 2, 4, 6, 8].into_dyn());
+        assert_eq!(a.to_ndarray().unwrap(), array![0u8, 2, 4, 6, 8]);
     }
 
     // -----------------------------------------------------------------------
@@ -1525,7 +1514,7 @@ mod tests {
             [12,  13, 14, 15, 16, 17],
             [18,  19, 20, 21, 22, 23],
         ];
-        assert_eq!(roundtrip(&src, &[2, 3]), src.into_dyn());
+        assert_eq!(roundtrip(&src, &[2, 3]), src);
     }
 
     #[test]
@@ -1539,7 +1528,7 @@ mod tests {
         ];
         let a = Array::compact_array_with(&src, arr_params(&[2, 3])).unwrap();
         assert_eq!(a.shape(), &[3, 5]);
-        assert_eq!(a.to_ndarray().unwrap(), src.into_dyn());
+        assert_eq!(a.to_ndarray().unwrap(), src);
     }
 
     #[test]
@@ -1550,7 +1539,7 @@ mod tests {
             (0..12).collect(),
         )
         .unwrap();
-        assert_eq!(roundtrip(&src, &[2, 2]), src.into_dyn());
+        assert_eq!(roundtrip(&src, &[2, 2]), src);
     }
 
     // -----------------------------------------------------------------------
@@ -1561,8 +1550,8 @@ mod tests {
     fn compact_array_then_to_ndarray_sub_1d() {
         let src = array![0u8, 1, 2, 3, 4, 5];
         let a = Array::compact_array_with(&src, arr_params(&[3])).unwrap();
-        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
-        assert_eq!(got, array![1u8, 2, 3, 4].into_dyn());
+        let got = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
+        assert_eq!(got, array![1u8, 2, 3, 4]);
     }
 
     #[test]
@@ -1575,8 +1564,8 @@ mod tests {
             [18,  19, 20, 21, 22, 23],
         ];
         let a = Array::compact_array_with(&src, arr_params(&[2, 3])).unwrap();
-        let got: ArrayD<u8> = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
-        assert_eq!(got, array![[8u8, 9, 10], [14, 15, 16]].into_dyn());
+        let got = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
+        assert_eq!(got, array![[8u8, 9, 10], [14, 15, 16]]);
     }
 
     // -----------------------------------------------------------------------
@@ -1591,10 +1580,7 @@ mod tests {
         assert_eq!(b.ndim(), 1);
         assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [4]);
-        assert_eq!(
-            b.to_ndarray().unwrap(),
-            ArrayD::from_shape_vec(vec![4], vec![0u8, 1, 2, 3]).unwrap()
-        );
+        assert_eq!(b.to_ndarray().unwrap(), array![0, 1, 2, 3]);
     }
 
     #[test]
@@ -1603,10 +1589,7 @@ mod tests {
         let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[6]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
-        assert_eq!(
-            b.to_ndarray().unwrap(),
-            ArrayD::from_shape_vec(vec![6], (0u8..6).collect()).unwrap()
-        );
+        assert_eq!(b.to_ndarray().unwrap(), array![0, 1, 2, 3, 4, 5]);
     }
 
     #[test]
@@ -1617,7 +1600,7 @@ mod tests {
         let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[5]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
-        assert_eq!(b.to_ndarray().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray().unwrap(), src);
     }
 
     #[test]
@@ -1628,7 +1611,7 @@ mod tests {
         assert_eq!(b.dtype(), &i32::DTYPE);
         assert_eq!(
             b.to_ndarray().unwrap(),
-            ArrayD::from_shape_vec(vec![8], vec![10i32, 20, 30, 40, 50, 60, 70, 80]).unwrap()
+            array![10, 20, 30, 40, 50, 60, 70, 80]
         );
     }
 
@@ -1639,10 +1622,7 @@ mod tests {
         let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[2, 3]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
-        assert_eq!(
-            b.to_ndarray().unwrap(),
-            ArrayD::from_shape_vec(vec![2, 3], (0u8..6).collect()).unwrap()
-        );
+        assert_eq!(b.to_ndarray().unwrap(), array![[0, 1, 2], [3, 4, 5]]);
     }
 
     #[test]
@@ -1669,7 +1649,7 @@ mod tests {
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(
             b.to_ndarray().unwrap(),
-            ArrayD::from_shape_vec(vec![4, 6], (0u8..24).collect()).unwrap()
+            ndarray::Array::from_shape_vec([4, 6], (0u8..24).collect()).unwrap()
         );
     }
 
@@ -1691,7 +1671,7 @@ mod tests {
         let b = a.copy().unwrap();
         assert_eq!(b.shape(), &[3, 5]);
         assert_eq!(b.dtype(), &i32::DTYPE);
-        assert_eq!(b.to_ndarray().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray().unwrap(), src);
     }
 
     #[test]
@@ -1706,7 +1686,7 @@ mod tests {
         assert_eq!(b.shape(), &[3, 3, 5]);
         assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 2, 3]);
-        assert_eq!(b.to_ndarray().unwrap(), src.into_dyn());
+        assert_eq!(b.to_ndarray().unwrap(), src);
     }
 
     #[test]

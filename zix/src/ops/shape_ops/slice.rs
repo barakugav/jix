@@ -254,10 +254,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage._spec()
+            ..self.array.storage.spec()
         }
     }
 }
@@ -424,7 +424,7 @@ impl DimSlice {
 
 #[cfg(test)]
 mod tests {
-    use ndarray::ArrayD;
+    use ndarray::{array, ArrayD};
     use proptest::prelude::*;
 
     use super::SliceItem;
@@ -432,15 +432,15 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{DimDyn, Ty};
+    use crate::{Dim, DimDyn, Ty};
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ndarray::ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
+        let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ndarray::ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, Dim<3>>> {
+        let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
@@ -495,51 +495,39 @@ mod tests {
 
     #[test]
     fn full_read_slice_rows() {
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .slice((1..3, ..))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 4], vec![4, 5, 6, 7, 8, 9, 10, 11]).unwrap()
-        );
+        assert_eq!(got, array![[4, 5, 6, 7], [8, 9, 10, 11]]);
     }
 
     #[test]
     fn full_read_slice_cols() {
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .slice((.., 1..3))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3, 2], vec![1, 2, 5, 6, 9, 10]).unwrap()
-        );
+        assert_eq!(got, array![[1, 2], [5, 6], [9, 10]]);
     }
 
     #[test]
     fn full_read_slice_subblock() {
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .slice((1..3, 1..3))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 2], vec![5, 6, 9, 10]).unwrap()
-        );
+        assert_eq!(got, array![[5, 6], [9, 10]]);
     }
 
     #[test]
     fn full_read_3d_slice() {
         // [2,3,4] -> (0..2, 1..3, 1..3)
-        let got: ArrayD<i32> = make3d(arange(24), 2, 3, 4)
+        let got = make3d(arange(24), 2, 3, 4)
             .slice((0..2, 1..3, 1..3))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 2, 2], vec![5, 6, 9, 10, 17, 18, 21, 22]).unwrap()
-        );
+        assert_eq!(got, array![[[5, 6], [9, 10]], [[17, 18], [21, 22]]]);
     }
 
     // -----------------------------------------------------------------------
@@ -549,60 +537,49 @@ mod tests {
     #[test]
     fn full_read_strided_axis1_step2() {
         // [3, 8], step 2 on axis 1 -> cols 0,2,4,6
-        let got: ArrayD<i32> = make2d(arange(24), 3, 8)
+        let got = make2d(arange(24), 3, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3, 4], vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22])
-                .unwrap()
-        );
+        assert_eq!(got, array![[0, 2, 4, 6], [8, 10, 12, 14], [16, 18, 20, 22]]);
     }
 
     #[test]
     fn full_read_strided_axis0_step2() {
         // [6, 4], step 2 on axis 0 -> rows 0, 2, 4
-        let got: ArrayD<i32> = make2d(arange(24), 6, 4)
+        let got = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(None, None, 2), ..))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3, 4], vec![0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19])
-                .unwrap()
-        );
+        assert_eq!(got, array![[0, 1, 2, 3], [8, 9, 10, 11], [16, 17, 18, 19]]);
     }
 
     #[test]
     fn full_read_strided_both_axes() {
         // [4, 6], step 2 on both -> rows 0,2; cols 0,2,4
-        let got: ArrayD<i32> = make2d(arange(24), 4, 6)
+        let got = make2d(arange(24), 4, 6)
             .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 3], vec![0, 2, 4, 12, 14, 16]).unwrap()
-        );
+        assert_eq!(got, array![[0, 2, 4], [12, 14, 16]]);
     }
 
     #[test]
     fn full_read_strided_with_start_offset() {
         // [6, 8]: axis 1 from index 1, step 2 -> indices 1,3,5,7
-        let got: ArrayD<i32> = make2d(arange(48), 6, 8)
+        let got = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(Some(1), None, 2)))
             .to_ndarray()
             .unwrap();
         let expected_row = |r: i32| vec![r * 8 + 1, r * 8 + 3, r * 8 + 5, r * 8 + 7];
         let vals: Vec<i32> = (0..6).flat_map(expected_row).collect();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![6, 4], vals).unwrap());
+        assert_eq!(got, ndarray::Array::from_shape_vec([6, 4], vals).unwrap());
     }
 
     #[test]
     fn full_read_strided_3d() {
         // [4, 4, 4], step 2 on middle axis
-        let got: ArrayD<i32> = make3d(arange(64), 4, 4, 4)
+        let got = make3d(arange(64), 4, 4, 4)
             .slice((.., SliceItem::new(None, None, 2), ..))
             .to_ndarray()
             .unwrap();
@@ -617,7 +594,7 @@ mod tests {
         }
         assert_eq!(
             got,
-            ArrayD::from_shape_vec(vec![4, 2, 4], expected).unwrap()
+            ndarray::Array::from_shape_vec([4, 2, 4], expected).unwrap()
         );
     }
 
@@ -628,56 +605,43 @@ mod tests {
     #[test]
     fn negative_start_last_two_rows() {
         // (-2..) on axis 0 of [5, 4] -> rows 3 and 4
-        let got: ArrayD<i32> = make2d(arange(20), 5, 4)
+        let got = make2d(arange(20), 5, 4)
             .slice((-2.., ..))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 4], vec![12, 13, 14, 15, 16, 17, 18, 19]).unwrap()
-        );
+        assert_eq!(got, array![[12, 13, 14, 15], [16, 17, 18, 19]]);
     }
 
     #[test]
     fn negative_end_all_but_last_col() {
         // (..-1) on axis 1 of [3, 4] -> cols 0,1,2
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .slice((.., ..-1))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3, 3], vec![0, 1, 2, 4, 5, 6, 8, 9, 10]).unwrap()
-        );
+        assert_eq!(got, array![[0, 1, 2], [4, 5, 6], [8, 9, 10]]);
     }
 
     #[test]
     fn negative_start_and_end() {
         // [3, 6]: axis 1 with (-4..-1) -> indices 2,3,4
-        let got: ArrayD<i32> = make2d(arange(18), 3, 6)
+        let got = make2d(arange(18), 3, 6)
             .slice((.., -4..-1))
             .to_ndarray()
             .unwrap();
         // row 0: [2,3,4]; row 1: [8,9,10]; row 2: [14,15,16]
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3, 3], vec![2, 3, 4, 8, 9, 10, 14, 15, 16]).unwrap()
-        );
+        assert_eq!(got, array![[2, 3, 4], [8, 9, 10], [14, 15, 16]]);
     }
 
     #[test]
     fn negative_start_strided() {
         // [6, 4]: axis 0 from -6 (= 0) step 2 -> rows 0, 2, 4
         // negative start + step requires SliceItem since range syntax has no step
-        let got: ArrayD<i32> = make2d(arange(24), 6, 4)
+        let got = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(Some(-6), None, 2), ..))
             .to_ndarray()
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![3, 4], vec![0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19])
-                .unwrap()
-        );
+        assert_eq!(got, array![[0, 1, 2, 3], [8, 9, 10, 11], [16, 17, 18, 19]]);
     }
 
     // -----------------------------------------------------------------------
@@ -686,27 +650,21 @@ mod tests {
 
     #[test]
     fn sub_read_within_contiguous_slice() {
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .slice((1..3, ..))
             .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![1, 4], vec![4, 5, 6, 7]).unwrap()
-        );
+        assert_eq!(got, array![[4, 5, 6, 7]]);
     }
 
     #[test]
     fn sub_read_within_strided_slice() {
         // [6, 8] step 2 on axis 1 -> shape [6, 4]; then read only row 0
-        let got: ArrayD<i32> = make2d(arange(48), 6, 8)
+        let got = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![1, 4], vec![0, 2, 4, 6]).unwrap()
-        );
+        assert_eq!(got, array![[0, 2, 4, 6]]);
     }
 
     // -----------------------------------------------------------------------

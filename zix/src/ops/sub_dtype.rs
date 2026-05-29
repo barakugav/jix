@@ -84,7 +84,7 @@ impl<S, ET> SubDtype<S, ET> {
         ensure!(
             src_dtype.shape().is_empty(),
             UnsupportedDtype,
-            "Can only take sub-field of a struct dtype with non-custom shape, but got dtype {src_dtype:?}"
+            "Can only take sub-field of a struct dtype with non-custom shape, but got dtype {src_dtype}"
         );
         let sub_field_spec = src_dtype
             .fields()
@@ -93,7 +93,7 @@ impl<S, ET> SubDtype<S, ET> {
         ensure!(
             sub_field_spec.is_some(),
             UnsupportedDtype,
-            "dtype {src_dtype:?} does not have a field named '{sub_field}'"
+            "dtype {src_dtype} does not have a field named '{sub_field}'"
         );
         let (offset, dtype) = sub_field_spec.unwrap();
 
@@ -144,8 +144,8 @@ where
     fn dtype(&self) -> &Dtype {
         self.dst_type.dtype()
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
-        self.array.storage._spec()
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        self.array.storage.spec()
     }
 }
 
@@ -205,14 +205,12 @@ mod tests {
         ) {
             let pair_structs: Vec<Pair> = pairs.iter().map(|&(x, y)| Pair { x, y }).collect();
             let n = pair_structs.len();
-            let nd = ndarray::ArrayD::from_shape_vec(vec![n], pair_structs).unwrap();
+            let nd = ndarray::Array::from_shape_vec([n], pair_structs).unwrap();
             let za = Array::compact_array(&nd).unwrap();
-            let expected_x = ndarray::ArrayD::from_shape_vec(
-                vec![n],
+            let expected_x = ndarray::Array::from_shape_vec([n],
                 pairs.iter().map(|&(x, _)| x).collect::<Vec<_>>(),
             ).unwrap();
-            let expected_y = ndarray::ArrayD::from_shape_vec(
-                vec![n],
+            let expected_y = ndarray::Array::from_shape_vec([n],
                 pairs.iter().map(|&(_, y)| y).collect::<Vec<_>>(),
             ).unwrap();
             crate::util::assert_array_matches(&za.as_ref().dtype_sub_field::<i32>("x"), &expected_x);

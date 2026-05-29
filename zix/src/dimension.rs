@@ -51,7 +51,7 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// // Passing a dynamically-dimensioned ndarray produces Array<Compact<DimDyn>>.
 /// // Arrays loaded from files via Array::read_from_file also carry DimDyn.
-/// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3])))?;
+/// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(vec![2, 3]))?;
 /// // a: Array<Compact<DimDyn>>
 ///
 /// // Asserting "I know this is 2-D" converts to static Dim<2>.
@@ -72,7 +72,9 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// Every `Dimension` value also implements [`IntoDimension`] (with `Dimension = Self`), so a
 /// `Dim<N>` or `DimDyn` can be passed directly to any function that accepts `IntoDimension`.
-pub trait Dimension: IntoDimension<Dimension = Self> + Clone + Send + Sync {
+pub trait Dimension:
+    IntoDimension<Dimension = Self> + ndarray::IntoDimension<Dim: IntoDimension> + Clone + Send + Sync
+{
     /// The number of axes, if known at compile time.
     ///
     /// - `Some(N)` for [`Dim<N>`]: the compiler can prove `ndim == N`.
@@ -159,6 +161,17 @@ impl Dimension for DimDyn {
         s
     }
 }
+impl ndarray::IntoDimension for DimDyn {
+    type Dim = ndarray::IxDyn;
+    fn into_dimension(self) -> Self::Dim {
+        let dim = self.as_slice();
+        let mut nd_dim = Self::Dim::zeros(dim.len());
+        for (i, &size) in dim.iter().enumerate() {
+            nd_dim[i] = size as usize;
+        }
+        nd_dim
+    }
+}
 
 /// A statically-dimensioned shape with exactly `NDIM` axes, known at compile time.
 ///
@@ -184,6 +197,9 @@ impl<const NDIM: usize> Dim<NDIM> {
 }
 macro_rules! impl_dim {
     ($dim:literal, smaller = $smaller:ty, larger = $larger:ty) => {
+        impl_dim!($dim, nd_dim = ndarray::Dim<[usize; $dim]>, smaller = $smaller, larger = $larger);
+    };
+    ($dim:literal, nd_dim=$nd_dim:ty, smaller = $smaller:ty, larger = $larger:ty) => {
         impl Dimension for Dim<$dim> {
             const NDIM: Option<usize> = Some($dim);
             type Smaller = $smaller;
@@ -201,9 +217,20 @@ macro_rules! impl_dim {
                 self.0.as_slice()
             }
         }
+        impl ndarray::IntoDimension for Dim<$dim> {
+            type Dim = $nd_dim;
+            fn into_dimension(self) -> Self::Dim {
+                let dim = self.as_slice();
+                let mut nd_dim = <Self::Dim as ndarray::Dimension>::zeros(dim.len());
+                for (i, &size) in dim.iter().enumerate() {
+                    nd_dim[i] = size as usize;
+                }
+                nd_dim
+            }
+        }
     };
-    ($dim:literal) => {
-        impl_dim!($dim, smaller = Dim<{ $dim - 1 }>, larger = Dim<{ $dim + 1 }>);
+    ($dim:literal $(, nd_dim=$nd_dim:ty)?) => {
+        impl_dim!($dim $(, nd_dim = $nd_dim)?, smaller = Dim<{ $dim - 1 }>, larger = Dim<{ $dim + 1 }>);
     };
 }
 impl_dim!(0, smaller = DimDyn, larger = Dim<1>);
@@ -213,8 +240,8 @@ impl_dim!(3);
 impl_dim!(4);
 impl_dim!(5);
 impl_dim!(6);
-impl_dim!(7);
-impl_dim!(8, smaller = Dim<7>, larger = DimDyn);
+impl_dim!(7, nd_dim = ndarray::IxDyn);
+impl_dim!(8, nd_dim = ndarray::IxDyn, smaller = Dim<7>, larger = DimDyn);
 
 /// Conversion into a [`Dimension`] value, encoding the ndim in the type.
 ///

@@ -73,18 +73,6 @@ pub use scalar::*;
 
 pub(crate) mod block;
 
-/// Internal metadata of ArrayStorage.
-///
-/// Carries the information [`Array`](crate::Array) needs when creating a new storage
-/// from an existing one - such as during `copy`, `copy_with`, and lazy view operations.
-/// Not intended to be used directly.
-pub struct ArrayStorageSpec<'a> {
-    pub(crate) blocks_layout: &'a BlocksLayout,
-    pub(crate) encoder_params: Option<&'a EncoderParams>,
-    pub(crate) decoder_params: Option<&'a DecoderParams>,
-    // pub(crate) decoder_config: Option<&'a DecoderCodecConfig>,
-}
-
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
 ///
 /// `ArrayStorageTyped` is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. It exposes the
@@ -104,6 +92,48 @@ where
     T: Dtyped,
 {
     type Item = T;
+}
+
+/// Internal metadata of ArrayStorage.
+///
+/// Carries the information [`Array`](crate::Array) needs when creating a new storage
+/// from an existing one - such as during `copy`, `copy_with`, and lazy view operations.
+/// Not intended to be used directly.
+pub struct ArrayStorageSpec<'a> {
+    pub(crate) blocks_layout: &'a BlocksLayout,
+    pub(crate) encoder_params: Option<&'a EncoderParams>,
+    pub(crate) decoder_params: Option<&'a DecoderParams>,
+    // pub(crate) decoder_config: Option<&'a DecoderCodecConfig>,
+}
+impl ArrayStorageSpec<'_> {
+    /// Returns the block layout metadata for this storage.
+    ///
+    /// Note that if the storage is not block-compressed, rather a view or adapter, the block layout
+    /// should be treated as a hint for how to choose block shapes for operations on this storage,
+    /// rather than a strict description of how the data is actually laid out on disk.
+    pub fn blocks_layout(&self) -> &BlocksLayout {
+        self.blocks_layout
+    }
+
+    /// Returns the encoder params of this storage, if any.
+    ///
+    /// Note that if the storage is not block-compressed, rather a view or adapter, the encoder params
+    /// should be treated as a hint for how to choose encoder params for arrays crated from a chain of
+    /// operations applied to this storage. This allows propagating encoder params from between arrays
+    /// that are in the same context.
+    pub fn encoder_params(&self) -> Option<&EncoderParams> {
+        self.encoder_params
+    }
+
+    /// Returns the decoder params of this storage, if any.
+    ///
+    /// Note that if the storage is not block-compressed, rather a view or adapter, the decoder params
+    /// should be treated as a hint for how to choose decoder params for arrays crated from a chain of
+    /// operations applied to this storage. This allows propagating decoder params from between arrays
+    /// that are in the same context.
+    pub fn decoder_params(&self) -> Option<&DecoderParams> {
+        self.decoder_params
+    }
 }
 
 /// A borrowed reference to an [`ArrayStorage`], itself implementing [`ArrayStorage`].
@@ -160,8 +190,8 @@ macro_rules! impl_array_storage_forward {
         fn dtype(&self) -> &crate::dtype::Dtype {
             self.0.dtype()
         }
-        fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
-            self.0._spec()
+        fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
+            self.0.spec()
         }
         fn as_compact(
             &self,
@@ -176,6 +206,11 @@ pub(crate) use impl_array_storage_forward;
 pub trait ReadData<T> {
     /// The total number of items available to read.
     fn len(&self) -> usize;
+
+    /// Returns `true` if there are no items to read.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Read a contiguous chunk of `N` items starting from the given offset.
     ///
@@ -199,12 +234,12 @@ pub trait ReadData<T> {
         ensure!(
                 buf_len == required_size,
                 InvalidBufferSize,
-                "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype:?} (required size: {required_size})",
+                "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
             );
         ensure!(
             (buf.as_ptr() as usize).is_multiple_of(align_of::<T>()),
             InvalidArgument,
-            "Buffer pointer is not aligned to required alignment {} for dtype {dtype:?}",
+            "Buffer pointer is not aligned to required alignment {} for dtype {dtype}",
             align_of::<T>(),
         );
         let buf = unsafe { cast_slice_mut::<u8, T>(buf) };

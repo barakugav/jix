@@ -191,26 +191,30 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage._spec()
+            ..self.array.storage.spec()
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use ndarray::ArrayD;
+    use ndarray::array;
 
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::{Array, DimDyn, Ty, NDIM_MAX};
+    use crate::{Array, DimDyn, IntoDimension, Ty, NDIM_MAX};
 
-    fn make(vals: Vec<i32>, shape: &[usize]) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
-        Array::compact_array(&nd).unwrap()
+    fn make<Sh>(vals: Vec<i32>, shape: Sh) -> Array<Compact<Ty<i32>, Sh::Dimension>>
+    where
+        Sh: IntoDimension,
+    {
+        let shape = shape.into_dimension().unwrap();
+        let nd = ndarray::Array::from_shape_vec(shape, vals).unwrap();
+        Array::compact_array(&nd).unwrap().into_dim().unwrap()
     }
 
     fn arange(n: usize) -> Vec<i32> {
@@ -274,63 +278,60 @@ mod tests {
     #[test]
     fn full_read_broadcast_axis0() {
         // [1, 4] -> [3, 4]: each row is [0,1,2,3]
-        let got: ArrayD<i32> = make(arange(4), &[1, 4])
+        let got = make(arange(4), &[1, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray()
             .unwrap();
-        let expected =
-            ArrayD::from_shape_vec(vec![3, 4], vec![0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]).unwrap();
-        assert_eq!(got, expected);
+        assert_eq!(got, array![[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3]]);
     }
 
     #[test]
     fn full_read_broadcast_axis1() {
         // [3, 1] -> [3, 4]: each col is [0,1,2]
-        let got: ArrayD<i32> = make(arange(3), &[3, 1])
+        let got = make(arange(3), &[3, 1])
             .broadcast_view(&[3, 4])
             .to_ndarray()
             .unwrap();
-        let expected =
-            ArrayD::from_shape_vec(vec![3, 4], vec![0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2]).unwrap();
-        assert_eq!(got, expected);
+        assert_eq!(got, array![[0, 0, 0, 0], [1, 1, 1, 1], [2, 2, 2, 2]]);
     }
 
     #[test]
     fn full_read_broadcast_both() {
         // [1, 1] -> [2, 3]: all elements == 7
-        let got: ArrayD<i32> = make(vec![7], &[1, 1])
+        let got = make(vec![7], &[1, 1])
             .broadcast_view(&[2, 3])
             .to_ndarray()
             .unwrap();
-        let expected = ArrayD::from_shape_vec(vec![2, 3], vec![7; 6]).unwrap();
-        assert_eq!(got, expected);
+        assert_eq!(got, array![[7, 7, 7], [7, 7, 7]]);
     }
 
     #[test]
     fn full_read_no_broadcast() {
-        let got: ArrayD<i32> = make(arange(12), &[3, 4])
+        let got = make(arange(12), &[3, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
+        assert_eq!(
+            got,
+            ndarray::Array::from_shape_vec([3, 4], arange(12)).unwrap()
+        );
     }
 
     #[test]
     fn full_read_broadcast_3d_middle() {
         // [2, 1, 3] -> [2, 4, 3]: axis 1 repeats 4 times
-        let got: ArrayD<i32> = make(arange(6), &[2, 1, 3])
+        let got = make(arange(6), &[2, 1, 3])
             .broadcast_view(&[2, 4, 3])
             .to_ndarray()
             .unwrap();
         // row 0 of inner: [0,1,2], row 1: [3,4,5], each repeated 4 times along axis 1
-        let expected = ArrayD::from_shape_vec(
-            vec![2, 4, 3],
-            vec![
-                0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 3, 4, 5, 3, 4, 5, 3, 4, 5, 3, 4, 5,
-            ],
-        )
-        .unwrap();
-        assert_eq!(got, expected);
+        assert_eq!(
+            got,
+            array![
+                [[0, 1, 2], [0, 1, 2], [0, 1, 2], [0, 1, 2]],
+                [[3, 4, 5], [3, 4, 5], [3, 4, 5], [3, 4, 5]]
+            ]
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -340,25 +341,23 @@ mod tests {
     #[test]
     fn sub_read_broadcast_axis0() {
         // [1, 4] -> [3, 4]: read rows 1..3, cols 1..3
-        let got: ArrayD<i32> = make(arange(4), &[1, 4])
+        let got = make(arange(4), &[1, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
         // each row is [1, 2]
-        let expected = ArrayD::from_shape_vec(vec![2, 2], vec![1, 2, 1, 2]).unwrap();
-        assert_eq!(got, expected);
+        assert_eq!(got, array![[1, 2], [1, 2]]);
     }
 
     #[test]
     fn sub_read_broadcast_axis1() {
         // [3, 1] -> [3, 5]: read rows 0..2, cols 2..5 (all same element per row)
-        let got: ArrayD<i32> = make(arange(3), &[3, 1])
+        let got = make(arange(3), &[3, 1])
             .broadcast_view(&[3, 5])
             .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
             .unwrap();
         // row 0: [0,0,0], row 1: [1,1,1]
-        let expected = ArrayD::from_shape_vec(vec![2, 3], vec![0, 0, 0, 1, 1, 1]).unwrap();
-        assert_eq!(got, expected);
+        assert_eq!(got, array![[0, 0, 0], [1, 1, 1]]);
     }
 
     // -----------------------------------------------------------------------
@@ -381,24 +380,24 @@ mod tests {
 
     #[test]
     fn identity_full_read_correct() {
-        let got: ArrayD<i32> = make(arange(12), &[3, 4])
+        let got = make(arange(12), &[3, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
+        assert_eq!(
+            got,
+            ndarray::Array::from_shape_vec([3, 4], arange(12)).unwrap()
+        );
     }
 
     #[test]
     fn identity_sub_read_correct() {
-        let got: ArrayD<i32> = make(arange(12), &[3, 4])
+        let got = make(arange(12), &[3, 4])
             .broadcast_view(&[3, 4])
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
         // rows 1..3, cols 1..3 of [[0,1,2,3],[4,5,6,7],[8,9,10,11]] = [[5,6],[9,10]]
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 2], vec![5, 6, 9, 10]).unwrap()
-        );
+        assert_eq!(got, array![[5, 6], [9, 10]]);
     }
 
     // -----------------------------------------------------------------------
@@ -468,7 +467,7 @@ mod tests {
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             )
         ) {
-            let expected = nd.broadcast(ndarray::IxDyn(&[n])).unwrap().to_owned();
+            let expected = nd.broadcast(vec![n]).unwrap().to_owned();
             crate::util::assert_array_matches(&za.broadcast_view(&[n as u64]), &expected);
         }
 
@@ -477,7 +476,7 @@ mod tests {
         fn proptest_broadcast_2d_axis0(
             (nd, za, n, m) in broadcast_2d_axis0_strategy()
         ) {
-            let expected = nd.broadcast(ndarray::IxDyn(&[n, m])).unwrap().to_owned();
+            let expected = nd.broadcast(vec![n, m]).unwrap().to_owned();
             crate::util::assert_array_matches(&za.broadcast_view(&[n as u64, m as u64]), &expected);
         }
 
@@ -486,7 +485,7 @@ mod tests {
         fn proptest_broadcast_2d_axis1(
             (nd, za, n, m) in broadcast_2d_axis1_strategy()
         ) {
-            let expected = nd.broadcast(ndarray::IxDyn(&[n, m])).unwrap().to_owned();
+            let expected = nd.broadcast(vec![n, m]).unwrap().to_owned();
             crate::util::assert_array_matches(&za.broadcast_view(&[n as u64, m as u64]), &expected);
         }
 
@@ -507,7 +506,7 @@ mod tests {
         fn broadcast_generic(
             (nd, za, broadcast_shape) in broadcast_axes_strategy::<i32>()
         ) {
-            let expected = nd.broadcast(ndarray::IxDyn(&broadcast_shape)).unwrap().to_owned();
+            let expected = nd.broadcast(broadcast_shape.clone()).unwrap().to_owned();
             let broadcast_shape = broadcast_shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
             let actual = za.broadcast_view(&broadcast_shape);
             crate::util::assert_array_matches(&actual, &expected);

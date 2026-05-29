@@ -7,7 +7,7 @@ use crate::{Array, ArrayParams, ArrayStorage};
 /// Storage adaptor that guarantees the wrapped array is always in compact
 /// block-compressed form.
 ///
-/// Returned by [`Array::into_compact`] and [`Array::into_compact_with`]. The
+/// Returned by [`Array::maybe_compact`] and [`Array::maybe_compact_with`]. The
 /// adaptor handles two cases transparently:
 ///
 /// - **Already compact**: the original storage is kept as is — no copy or re-compression.
@@ -17,9 +17,9 @@ use crate::{Array, ArrayParams, ArrayStorage};
 /// In both cases all [`ArrayStorage`] methods delegate to the inner variant,
 /// and the storage is guaranteed to be a materialized compact storage, not a view.
 /// The dimension type `S::Dimension` is preserved in both paths.
-pub struct IntoCompact<S: ArrayStorage>(pub(crate) ToCompactInner<S>);
+pub struct MaybeCompact<S: ArrayStorage>(pub(crate) ToCompactInner<S>);
 
-/// The two internal states of an [`IntoCompact<S>`] storage.
+/// The two internal states of an [`MaybeCompact<S>`] storage.
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum ToCompactInner<S: ArrayStorage> {
     /// The source was already compact; the original storage is kept as-is.
@@ -27,11 +27,11 @@ pub(crate) enum ToCompactInner<S: ArrayStorage> {
     /// The source was not compact; it was materialized into a new `Compact`.
     Compact(Compact<S::ElementType, S::Dimension>),
 }
-impl<S> IntoCompact<S>
+impl<S> MaybeCompact<S>
 where
     S: ArrayStorage,
 {
-    /// Constructs a [`IntoCompact`] storage. See the struct docs for semantics and examples.
+    /// Constructs a [`MaybeCompact`] storage. See the struct docs for semantics and examples.
     pub fn new(array: Array<S>, params: ArrayParams, context: &ReadContext) -> Result<Self> {
         Ok(Self(if array.storage.as_compact().is_some() {
             ToCompactInner::Original(array.into_storage())
@@ -40,7 +40,7 @@ where
         }))
     }
 }
-impl<S> ArrayStorage for IntoCompact<S>
+impl<S> ArrayStorage for MaybeCompact<S>
 where
     S: ArrayStorage,
 {
@@ -58,6 +58,7 @@ where
             ToCompactInner::Compact(c) => c.read_data(index, buf, context),
         }
     }
+
     fn shape(&self) -> &[u64] {
         match &self.0 {
             ToCompactInner::Original(s) => s.shape(),
@@ -70,10 +71,10 @@ where
             ToCompactInner::Compact(c) => c.dtype(),
         }
     }
-    fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
+    fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
         match &self.0 {
-            ToCompactInner::Original(s) => s._spec(),
-            ToCompactInner::Compact(c) => c._spec(),
+            ToCompactInner::Original(s) => s.spec(),
+            ToCompactInner::Compact(c) => c.spec(),
         }
     }
     fn as_compact(
@@ -117,15 +118,15 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Proptest: into_compact on already-compact arrays
+    // Proptest: maybe_compact on already-compact arrays
     //
-    // For any compact array, into_compact must:
+    // For any compact array, maybe_compact must:
     //   - return the same values
     //   - always produce as_compact() == Some
     //   - produce byte-for-byte identical output (no re-compression)
     // -----------------------------------------------------------------------
 
-    macro_rules! test_into_compact_passthrough_dtype {
+    macro_rules! test_maybe_compact_passthrough_dtype {
         ($dtype:ident) => {
             paste::paste! {
                 proptest::proptest! {
@@ -134,7 +135,7 @@ mod tests {
                         (src, a) in carray_strategy_any::<$dtype>()
                     ) {
                         let original_bytes = to_bytes(&a);
-                        let result = a.into_compact().unwrap();
+                        let result = a.maybe_compact().unwrap();
                         proptest::prop_assert!(result.storage().as_compact().is_some());
                         proptest::prop_assert_eq!(
                             result.to_ndarray().unwrap(),
@@ -150,21 +151,21 @@ mod tests {
         };
     }
 
-    test_into_compact_passthrough_dtype!(u8);
-    test_into_compact_passthrough_dtype!(i32);
-    test_into_compact_passthrough_dtype!(i64);
-    test_into_compact_passthrough_dtype!(f32);
-    test_into_compact_passthrough_dtype!(f64);
+    test_maybe_compact_passthrough_dtype!(u8);
+    test_maybe_compact_passthrough_dtype!(i32);
+    test_maybe_compact_passthrough_dtype!(i64);
+    test_maybe_compact_passthrough_dtype!(f32);
+    test_maybe_compact_passthrough_dtype!(f64);
 
     // -----------------------------------------------------------------------
-    // Proptest: into_compact_with on lazy neg views
+    // Proptest: maybe_compact_with on lazy neg views
     //
     // For any compact array of a signed dtype, wrapping it in a neg view and
-    // calling into_compact_with must produce the negated values and always
+    // calling maybe_compact_with must produce the negated values and always
     // yield as_compact() == Some.
     // -----------------------------------------------------------------------
 
-    macro_rules! test_into_compact_neg_view_dtype {
+    macro_rules! test_maybe_compact_neg_view_dtype {
         ($dtype:ident) => {
             paste::paste! {
                 proptest::proptest! {
@@ -175,7 +176,7 @@ mod tests {
                         let expected = -&src;
                         let ctx = a.read_ctx();
                         let result = (-a.as_ref())
-                            .into_compact_with(ArrayParams::default(), &ctx)
+                            .maybe_compact_with(ArrayParams::default(), &ctx)
                             .unwrap();
                         proptest::prop_assert!(result.storage().as_compact().is_some());
                         proptest::prop_assert_eq!(
@@ -188,17 +189,17 @@ mod tests {
         };
     }
 
-    test_into_compact_neg_view_dtype!(i32);
-    test_into_compact_neg_view_dtype!(i64);
-    test_into_compact_neg_view_dtype!(f32);
-    test_into_compact_neg_view_dtype!(f64);
+    test_maybe_compact_neg_view_dtype!(i32);
+    test_maybe_compact_neg_view_dtype!(i64);
+    test_maybe_compact_neg_view_dtype!(f32);
+    test_maybe_compact_neg_view_dtype!(f64);
 
     // -----------------------------------------------------------------------
-    // Explicit: into_compact_with respects block shape for non-compact sources
+    // Explicit: maybe_compact_with respects block shape for non-compact sources
     // -----------------------------------------------------------------------
 
     #[test]
-    fn into_compact_with_block_shape_respected() {
+    fn maybe_compact_with_block_shape_respected() {
         // Build a lazy neg view, then compact it with a known block shape.
         // Verify the resulting block_shape matches the requested one.
         let vals: Vec<i32> = (1..=12i32).collect();
@@ -207,7 +208,7 @@ mod tests {
         let ctx = a.read_ctx();
 
         let result = (-a.as_ref())
-            .into_compact_with(arr_params(&[2, 2]), &ctx)
+            .maybe_compact_with(arr_params(&[2, 2]), &ctx)
             .unwrap();
 
         // Values must be negated.
@@ -224,20 +225,20 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Explicit: into_compact_with for compact source ignores params
+    // Explicit: maybe_compact_with for compact source ignores params
     // -----------------------------------------------------------------------
 
     #[test]
-    fn into_compact_with_compact_source_ignores_params() {
+    fn maybe_compact_with_compact_source_ignores_params() {
         // A compact source with block shape [4] must be kept as-is even when
-        // into_compact_with is called with a different block shape.
+        // maybe_compact_with is called with a different block shape.
         let vals: Vec<i32> = (0..16i32).collect();
         let a = compact::<i32>(vals, &[16], &[4]);
         let ctx = a.read_ctx();
         let original_bytes = to_bytes(&a);
 
         // Pass a different block shape - it must be ignored.
-        let result = a.into_compact_with(arr_params(&[8]), &ctx).unwrap();
+        let result = a.maybe_compact_with(arr_params(&[8]), &ctx).unwrap();
         let mut result_bytes = Cursor::new(Vec::new());
         result.write_to(&mut result_bytes).unwrap();
 
@@ -249,8 +250,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn into_compact_3d_add_chain_i32() {
-        // (a + a) over a 3-D array compressed via into_compact_with.
+    fn maybe_compact_3d_add_chain_i32() {
+        // (a + a) over a 3-D array compressed via maybe_compact_with.
         let vals: Vec<i32> = (1..=60i32).collect();
         let src = ArrayD::from_shape_vec(vec![3, 4, 5], vals.clone()).unwrap();
         let expected = &src + &src;
@@ -258,7 +259,7 @@ mod tests {
         let ctx = a.read_ctx();
 
         let result = (a.as_ref() + a.as_ref())
-            .into_compact_with(arr_params(&[2, 2, 3]), &ctx)
+            .maybe_compact_with(arr_params(&[2, 2, 3]), &ctx)
             .unwrap();
 
         assert!(result.storage().as_compact().is_some());

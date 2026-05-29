@@ -170,8 +170,9 @@ pub trait ArrayStorage {
     /// parameters through lazy view operations and when re-encoding via `copy` / `copy_with`.
     /// Not intended to be called directly.
     #[doc(hidden)]
-    fn _spec(&self) -> ArrayStorageSpec<'_>;
+    fn spec(&self) -> ArrayStorageSpec<'_>;
 
+    /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]
     fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
         None

@@ -53,6 +53,8 @@ impl ReadContext {
 #[pymethods]
 impl ReadContext {
     /// Creates a new `ReadContext` with default decoder parameters.
+    ///
+    /// Prefer `Array.read_ctx()`, which derives the context's decoder parameters from the array's storage.
     #[new]
     pub fn new() -> PyResult<Self> {
         let ctx = zix_core::codec::ReadContext::new(&DecoderParams::default()).into_py_result()?;

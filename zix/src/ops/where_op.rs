@@ -81,13 +81,13 @@ impl<SC, SX, SY> Where<SC, SX, SY> {
         ensure!(
             condition.dtype() == &bool::DTYPE,
             UnsupportedDtype,
-            "where condition must have boolean dtype, got {:?}",
+            "where condition must have boolean dtype, got {}",
             condition.dtype()
         );
         ensure!(
             x.dtype() == y.dtype(),
             UnsupportedDtype,
-            "x and y arrays must have the same dtype, got {:?} and {:?}",
+            "x and y arrays must have the same dtype, got {} and {}",
             x.dtype(),
             y.dtype()
         );
@@ -192,8 +192,8 @@ where
     fn dtype(&self) -> &Dtype {
         self.x.dtype()
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
-        self.x.storage._spec()
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        self.x.storage.spec()
     }
 }
 

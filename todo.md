@@ -16,12 +16,9 @@
 - cast types automatically in python bindings
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
-- consider removing EncoderParams and DecoderParams, use ArrayParams for everything
 - modify all ops to have `new() -> Array<Self>` and `new_storage() -> Self`
 - squeeze()
 - rename Maximum scalar trait to PartialMax
-- make BlockLayout private
-- refactor ArrayStorage::as_compact
-- Plain *u8 should be a different type
 - a user available map2
 - support an arbitrary python reader in zix-python/src/archive.rs read_array
+- refactor schema

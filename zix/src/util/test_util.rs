@@ -575,17 +575,21 @@ pub(crate) fn sub_range_strategy(shape: &[u64]) -> BoxedStrategy<Vec<Range<u64>>
 
 /// Asserts that `actual` contains the same values as `expected`.
 /// Checks the full array first, then 16 random sub-ranges via `to_ndarray_sub`.
-pub(crate) fn assert_array_matches<S, T>(actual: &crate::Array<S>, expected: &ndarray::ArrayD<T>)
-where
+pub(crate) fn assert_array_matches<S, T, D>(
+    actual: &crate::Array<S>,
+    expected: &ndarray::Array<T, D>,
+) where
     S: crate::ArrayStorage,
     T: crate::dtype::Dtyped + std::fmt::Debug + Clone + PartialEq,
+    D: ndarray::Dimension,
 {
     use proptest::prelude::*;
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
+    let expected = expected.view().into_dyn();
     let actual = actual.as_ref().to_typed::<T>().unwrap();
     let full = actual.to_ndarray().unwrap();
-    assert_eq!(&full, expected);
+    assert_eq!(&full.into_dyn(), expected);
 
     let ctx = actual.read_ctx();
     let shape = actual.shape();
@@ -603,8 +607,8 @@ where
                 .iter()
                 .map(|r| r.start as usize..r.end as usize)
                 .collect();
-            let expected_sub = ndarray_slice(expected, &ranges_usize);
-            prop_assert_eq!(actual_sub, expected_sub);
+            let expected_sub = ndarray_slice(&expected, &ranges_usize);
+            prop_assert_eq!(actual_sub.into_dyn(), expected_sub);
             Ok(())
         })
         .unwrap();
@@ -626,7 +630,5 @@ where
             ndarray::Slice::from(range.start as isize..range.end as isize),
         );
     }
-    view.to_owned()
-        .into_dimensionality::<ndarray::IxDyn>()
-        .unwrap()
+    view.to_owned().into_dimensionality().unwrap()
 }

@@ -50,7 +50,7 @@ impl ArrayStorage for DynStorage {
         &self.dtype
     }
 
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
-        self.inner._spec()
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        self.inner.spec()
     }
 }

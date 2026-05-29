@@ -158,7 +158,7 @@ pub fn astype<'py>(
         }
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
-        "Unsupported cast from {:?} to {:?}",
+        "Unsupported cast from {} to {}",
         array.dtype(),
         dtype
     )))

@@ -155,6 +155,7 @@ pub fn write_array(
                 let file = if !append {
                     std::fs::File::create_new(path)?
                 } else {
+                    #[allow(clippy::ineffective_open_options)]
                     let mut file = std::fs::OpenOptions::new()
                         .write(true)
                         .create(true)
@@ -333,7 +334,7 @@ impl Seek for PyWriter<'_> {
 
 /// Convert a PyErr into std::io::Error.
 fn py_to_io_err(e: PyErr) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, e.to_string())
+    io::Error::other(e.to_string())
 }
 
 #[cfg(test)]

@@ -140,7 +140,7 @@ impl EncoderParams {
     }
 
     /// Get the compression codec.
-    pub fn get_codec(&self) -> &Codec {
+    pub fn codec_get(&self) -> &Codec {
         &self.codec
     }
 
@@ -162,7 +162,7 @@ impl EncoderParams {
     }
 
     /// Get the compression level.
-    pub fn get_level(&self) -> u8 {
+    pub fn level_get(&self) -> u8 {
         self.level
     }
 
@@ -193,7 +193,7 @@ impl EncoderParams {
     }
 
     /// Returns the filter pipeline.
-    pub fn get_filters(&self) -> &[Filter] {
+    pub fn filters_get(&self) -> &[Filter] {
         &self.filters
     }
 }

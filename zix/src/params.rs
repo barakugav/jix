@@ -96,14 +96,8 @@ impl ArrayParams {
     }
 
     /// Returns the explicit block shape, or `None` if it has not been set.
-    pub fn get_block_shape(&self) -> Option<&[BlockSize]> {
+    pub fn block_shape_get(&self) -> Option<&[BlockSize]> {
         self.block_shape.as_deref()
-    }
-
-    /// Clears the explicit block shape.
-    pub fn clear_block_shape(&mut self) -> &mut Self {
-        self.block_shape = None;
-        self
     }
 
     /// Sets per-dimension tags that control how [`block_shape`](Self::block_shape) is scaled
@@ -118,14 +112,8 @@ impl ArrayParams {
     }
 
     /// Returns the per-dimension block shape tags, or `None` if not set.
-    pub fn get_block_shape_tag(&self) -> Option<&[BlockShapeTag]> {
+    pub fn block_shape_tag_get(&self) -> Option<&[BlockShapeTag]> {
         self.block_shape_tag.as_deref()
-    }
-
-    /// Clears the block shape tags.
-    pub fn clear_block_shape_tag(&mut self) -> &mut Self {
-        self.block_shape_tag = None;
-        self
     }
 
     /// Sets the target block size in bytes, used when auto-computing the block shape.
@@ -139,14 +127,8 @@ impl ArrayParams {
     }
 
     /// Returns the block size hint in bytes, or `None` if not set.
-    pub fn get_block_size_hint(&self) -> Option<u64> {
+    pub fn block_size_hint_get(&self) -> Option<u64> {
         self.block_size_hint
-    }
-
-    /// Clears the block size hint, reverting to the default.
-    pub fn clear_block_size_hint(&mut self) -> &mut Self {
-        self.block_size_hint = None;
-        self
     }
 
     /// Sets the preferred read shape, in items per dimension.
@@ -161,14 +143,8 @@ impl ArrayParams {
     }
 
     /// Returns the preferred read shape, or `None` if not set.
-    pub fn get_preferred_read_shape(&self) -> Option<&[BlockSize]> {
+    pub fn preferred_read_shape_get(&self) -> Option<&[BlockSize]> {
         self.preferred_read_shape.as_deref()
-    }
-
-    /// Clears the preferred read shape, reverting to auto-computation.
-    pub fn clear_preferred_read_shape(&mut self) -> &mut Self {
-        self.preferred_read_shape = None;
-        self
     }
 
     /// Sets the target size in bytes for a single preferred read region.
@@ -185,12 +161,6 @@ impl ArrayParams {
         self.preferred_read_size_hint
     }
 
-    /// Clears the preferred read size hint, reverting to the default (L2 cache size).
-    pub fn clear_preferred_read_size_hint(&mut self) -> &mut Self {
-        self.preferred_read_size_hint = None;
-        self
-    }
-
     /// Sets the encoder (compression) parameters used when writing blocks.
     ///
     /// Controls the codec (e.g. Zstd), compression level, and pre-compression filters (byte shuffle).
@@ -201,14 +171,8 @@ impl ArrayParams {
     }
 
     /// Returns the encoder params, or `None` if not set.
-    pub fn get_encoder_params(&self) -> Option<&EncoderParams> {
+    pub fn encoder_params_get(&self) -> Option<&EncoderParams> {
         self.encoder_params.as_ref()
-    }
-
-    /// Clears the encoder params, reverting to the default configuration.
-    pub fn clear_encoder_params(&mut self) -> &mut Self {
-        self.encoder_params = None;
-        self
     }
 
     /// Sets the decoder (decompression) parameters used when reading blocks.
@@ -218,14 +182,8 @@ impl ArrayParams {
     }
 
     /// Returns the decoder params, or `None` if not set.
-    pub fn get_decoder_params(&self) -> Option<&DecoderParams> {
+    pub fn decoder_params_get(&self) -> Option<&DecoderParams> {
         self.decoder_params.as_ref()
-    }
-
-    /// Clears the decoder params, reverting to the default.
-    pub fn clear_decoder_params(&mut self) -> &mut Self {
-        self.decoder_params = None;
-        self
     }
 
     /// Fills in any unset fields in `self` from `array`'s storage params.
@@ -258,7 +216,7 @@ impl ArrayParams {
     }
 
     pub(crate) fn override_from_storage(&mut self, storage: &impl ArrayStorage) {
-        let spec = storage._spec();
+        let spec = storage.spec();
         self.encoder_params
             .get_or_insert_with(|| spec.encoder_params.cloned().unwrap_or_default());
         self.decoder_params

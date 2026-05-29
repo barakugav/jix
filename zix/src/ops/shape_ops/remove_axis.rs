@@ -191,37 +191,37 @@ where
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage._spec()
+            ..self.array.storage.spec()
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use ndarray::ArrayD;
+    use ndarray::array;
     use proptest::prelude::*;
 
     use crate::array::Array;
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{DimDyn, Ty, NDIM_MAX};
+    use crate::{Dim, DimDyn, Ty, NDIM_MAX};
 
-    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ndarray::ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
+    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, Dim<1>>> {
+        let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ndarray::ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
+        let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ndarray::ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, Dim<3>>> {
+        let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
@@ -279,51 +279,60 @@ mod tests {
 
     #[test]
     fn full_read_remove_leading() {
-        let got: ArrayD<i32> = make1d(arange(6), 6)
+        let got = make1d(arange(6), 6)
             .insert_axis(&[0])
             .remove_axis(&[0])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![6], arange(6)).unwrap());
+        assert_eq!(got, ndarray::Array::from_shape_vec([6], arange(6)).unwrap());
     }
 
     #[test]
     fn full_read_remove_trailing() {
-        let got: ArrayD<i32> = make1d(arange(6), 6)
+        let got = make1d(arange(6), 6)
             .insert_axis(&[1])
             .remove_axis(&[1])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![6], arange(6)).unwrap());
+        assert_eq!(got, ndarray::Array::from_shape_vec([6], arange(6)).unwrap());
     }
 
     #[test]
     fn full_read_remove_middle() {
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .insert_axis(&[1])
             .remove_axis(&[1])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
+        assert_eq!(
+            got,
+            ndarray::Array::from_shape_vec([3, 4], arange(12)).unwrap()
+        );
     }
 
     #[test]
     fn full_read_remove_multiple() {
-        let got: ArrayD<i32> = make2d(arange(6), 2, 3)
+        let got = make2d(arange(6), 2, 3)
             .insert_axis(&[0, 1, 2])
             .remove_axis(&[0, 2, 4])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![2, 3], arange(6)).unwrap());
+        assert_eq!(
+            got,
+            ndarray::Array::from_shape_vec([2, 3], arange(6)).unwrap()
+        );
     }
 
     #[test]
     fn full_read_identity_empty_axes() {
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .remove_axis(&[])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
+        assert_eq!(
+            got,
+            ndarray::Array::from_shape_vec([3, 4], arange(12)).unwrap()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -333,27 +342,24 @@ mod tests {
     #[test]
     fn sub_read_after_remove_leading() {
         // [1, 6] -> remove axis 0 -> [6]; read elements 2..5
-        let got: ArrayD<i32> = make1d(arange(6), 6)
+        let got = make1d(arange(6), 6)
             .insert_axis(&[0])
             .remove_axis(&[0])
             .to_ndarray_sub(&[2..5], &ReadContext::default())
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3], vec![2, 3, 4]).unwrap());
+        assert_eq!(got, array![2, 3, 4]);
     }
 
     #[test]
     fn sub_read_after_remove_middle() {
         // [3, 1, 4] -> remove axis 1 -> [3, 4]; read rows 1..3, cols 0..2
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .insert_axis(&[1])
             .remove_axis(&[1])
             .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
         // row1=[4,5], row2=[8,9]
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 2], vec![4, 5, 8, 9]).unwrap()
-        );
+        assert_eq!(got, array![[4, 5], [8, 9]]);
     }
 
     // -----------------------------------------------------------------------

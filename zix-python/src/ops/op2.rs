@@ -220,7 +220,7 @@ pub(crate) fn asarray22<'py>(
     let mut b = Operand::from_any(b)?;
 
     // returns None for scalars
-    fn extract_shape<'a>(asarray: &'a Operand) -> Option<&'a [u64]> {
+    fn extract_shape(asarray: &Operand) -> Option<&[u64]> {
         match asarray {
             Operand::Zix(array) => Some(array.get().arr.shape()),
             Operand::Numpy(array) => Some(array.shape()),

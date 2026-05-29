@@ -811,6 +811,30 @@ impl std::fmt::Debug for Dtype {
             .finish()
     }
 }
+impl std::fmt::Display for Dtype {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(scalar) = self.try_to_scalar() {
+            match scalar {
+                DtypeScalarKind::I8 => f.write_str("i8"),
+                DtypeScalarKind::I16 => f.write_str("i16"),
+                DtypeScalarKind::I32 => f.write_str("i32"),
+                DtypeScalarKind::I64 => f.write_str("i64"),
+                DtypeScalarKind::U8 => f.write_str("u8"),
+                DtypeScalarKind::U16 => f.write_str("u16"),
+                DtypeScalarKind::U32 => f.write_str("u32"),
+                DtypeScalarKind::U64 => f.write_str("u64"),
+                DtypeScalarKind::F16 => f.write_str("f16"),
+                DtypeScalarKind::F32 => f.write_str("f32"),
+                DtypeScalarKind::F64 => f.write_str("f64"),
+                DtypeScalarKind::ComplexF32 => f.write_str("Complex<f32>"),
+                DtypeScalarKind::ComplexF64 => f.write_str("Complex<f64>"),
+                DtypeScalarKind::Bool => f.write_str("bool"),
+            }
+        } else {
+            <_ as std::fmt::Debug>::fmt(self, f)
+        }
+    }
+}
 impl PartialEq for Dtype {
     fn eq(&self, other: &Self) -> bool {
         if !(self.itemsize() == other.itemsize()

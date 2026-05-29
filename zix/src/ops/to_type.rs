@@ -3,10 +3,10 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtyped;
-use crate::error::Result;
+use crate::error::{check_dtype, Result};
 use crate::storage::ReadData;
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, ElementType, Error, ErrorKind};
+use crate::{Array, ArrayStorage, ElementType};
 
 /// A lazy storage adapter that re-tags an array's element-type parameter without copying data.
 ///
@@ -63,15 +63,7 @@ impl<S, ET> ToType<S, ET> {
         ET: ElementType,
     {
         if let Some(expected_dtype) = ET::DTYPE {
-            let actual_dtype = array.dtype();
-            if actual_dtype != &expected_dtype {
-                return Err(Error::new(
-                    ErrorKind::UnsupportedDtype,
-                    format!(
-                        "Cannot convert array with dtype {actual_dtype:?} to expected dtype {expected_dtype:?}"
-                    ),
-                ));
-            }
+            check_dtype(array.dtype(), &expected_dtype)?;
         }
         Ok(Self {
             inner: array,
@@ -118,8 +110,8 @@ where
         }
         dtype
     }
-    fn _spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
-        self.inner.storage._spec()
+    fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
+        self.inner.storage.spec()
     }
 }
 

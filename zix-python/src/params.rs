@@ -145,7 +145,7 @@ impl ArrayParams {
     /// value is `"zstd"`. Defaults to `"zstd"` when left unset.
     ///
     /// **`compression_level`** - compression level passed to the codec. For Zstd the valid
-    /// range is 1–22; higher values compress more but are slower to encode. Defaults to 3.
+    /// range is 1-22; higher values compress more but are slower to encode. Defaults to 3.
     ///
     /// **`filters`** - list of filters applied to the raw block bytes *before*
     /// compression. Filters improve the compression ratio for typed numeric data:
@@ -166,6 +166,7 @@ impl ArrayParams {
         compression_level=None,
         filters=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         block_shape: Option<Vec<u32>>,
         #[gen_stub(override_type(type_repr="typing.Optional[typing.Sequence[typing.Literal['fixed', 'multiple-of', 'any']]]", imports=("typing")))]

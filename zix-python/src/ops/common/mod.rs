@@ -76,7 +76,7 @@ macro_rules! define_op1 {
                 _ => Err(zix_core::Error::new(
                     zix_core::ErrorKind::UnsupportedDtype,
                     format!(
-                        "Op {} does not support dtype {:#?}",
+                        "Op {} does not support dtype {}",
                         stringify!($name),
                         array.dtype()
                     ),
@@ -119,7 +119,7 @@ macro_rules! define_op2 {
                 _ => Err(zix_core::Error::new(
                     zix_core::ErrorKind::UnsupportedDtype,
                     format!(
-                        "Op {} does not support dtypes {:#?} and {:#?}",
+                        "Op {} does not support dtypes {} and {}",
                         stringify!($name),
                         a.dtype(),
                         b.dtype()

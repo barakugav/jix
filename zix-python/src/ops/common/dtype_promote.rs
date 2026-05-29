@@ -60,7 +60,7 @@ pub(crate) fn promote(ops: &[&Operand]) -> Option<DtypeScalarKind> {
         .collect::<Option<Vec<_>>>()?
         .into_iter();
 
-    let (mut result_rank, mut result_precision) = ranks_precisions.next().unwrap().clone();
+    let (mut result_rank, mut result_precision) = ranks_precisions.next().unwrap();
     for (mut b_rank, mut b_precision) in ranks_precisions {
         let (mut a_rank, mut a_precision) = (result_rank, result_precision);
 

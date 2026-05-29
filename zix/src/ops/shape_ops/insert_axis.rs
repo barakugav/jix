@@ -247,37 +247,37 @@ where
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage._spec()
+            ..self.array.storage.spec()
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use ndarray::ArrayD;
+    use ndarray::array;
     use proptest::prelude::*;
 
     use crate::codec::ReadContext;
     use crate::ops::InsertAxis;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Array, DimDyn, Ty, NDIM_MAX};
+    use crate::{Array, Dim, DimDyn, Ty, NDIM_MAX};
 
-    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ArrayD::from_shape_vec(vec![vals.len()], vals).unwrap();
+    fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, Dim<1>>> {
+        let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
-    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ArrayD::from_shape_vec(vec![rows, cols], vals).unwrap();
+    fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
+        let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
-    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, DimDyn>> {
-        let nd = ArrayD::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
+    fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, Dim<3>>> {
+        let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
         Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
@@ -357,60 +357,69 @@ mod tests {
 
     #[test]
     fn full_read_insert_before_first() {
-        let got: ArrayD<i32> = make1d(arange(6), 6).insert_axis(&[0]).to_ndarray().unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![1, 6], arange(6)).unwrap());
+        let got = make1d(arange(6), 6).insert_axis(&[0]).to_ndarray().unwrap();
+        assert_eq!(
+            got,
+            ndarray::Array::from_shape_vec([1, 6], arange(6)).unwrap()
+        );
     }
 
     #[test]
     fn full_read_insert_after_last() {
-        let got: ArrayD<i32> = make1d(arange(6), 6).insert_axis(&[1]).to_ndarray().unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![6, 1], arange(6)).unwrap());
+        let got = make1d(arange(6), 6).insert_axis(&[1]).to_ndarray().unwrap();
+        assert_eq!(
+            got,
+            ndarray::Array::from_shape_vec([6, 1], arange(6)).unwrap()
+        );
     }
 
     #[test]
     fn full_read_insert_between_dims() {
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .insert_axis(&[1])
             .to_ndarray()
             .unwrap();
         assert_eq!(
             got,
-            ArrayD::from_shape_vec(vec![3, 1, 4], arange(12)).unwrap()
+            ndarray::Array::from_shape_vec([3, 1, 4], arange(12)).unwrap()
         );
     }
 
     #[test]
     fn full_read_insert_front_and_back() {
-        let got: ArrayD<i32> = make1d(arange(6), 6)
+        let got = make1d(arange(6), 6)
             .insert_axis(&[0, 1])
             .to_ndarray()
             .unwrap();
         assert_eq!(
             got,
-            ArrayD::from_shape_vec(vec![1, 6, 1], arange(6)).unwrap()
+            ndarray::Array::from_shape_vec([1, 6, 1], arange(6)).unwrap()
         );
     }
 
     #[test]
     fn full_read_insert_user_example() {
         // axes=(0,1,1,1,3) on (2,3,4) -> (1,2,1,1,1,3,4,1), elements unchanged
-        let got: ArrayD<i32> = make3d(arange(24), 2, 3, 4)
+        let got = make3d(arange(24), 2, 3, 4)
             .insert_axis(&[0, 1, 1, 1, 3])
             .to_ndarray()
             .unwrap();
         assert_eq!(
             got,
-            ArrayD::from_shape_vec(vec![1, 2, 1, 1, 1, 3, 4, 1], arange(24)).unwrap()
+            ndarray::ArrayD::from_shape_vec(vec![1, 2, 1, 1, 1, 3, 4, 1], arange(24)).unwrap()
         );
     }
 
     #[test]
     fn full_read_identity_empty_axes() {
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .insert_axis(&[])
             .to_ndarray()
             .unwrap();
-        assert_eq!(got, ArrayD::from_shape_vec(vec![3, 4], arange(12)).unwrap());
+        assert_eq!(
+            got,
+            ndarray::Array::from_shape_vec([3, 4], arange(12)).unwrap()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -420,28 +429,22 @@ mod tests {
     #[test]
     fn sub_read_inserted_dim_is_stripped() {
         // [1, 6]: read [0..1, 2..5] -> same as reading [2..5] from the 1D inner
-        let got: ArrayD<i32> = make1d(arange(6), 6)
+        let got = make1d(arange(6), 6)
             .insert_axis(&[0])
             .to_ndarray_sub(&[0..1, 2..5], &ReadContext::default())
             .unwrap();
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![1, 3], vec![2, 3, 4]).unwrap()
-        );
+        assert_eq!(got, array![[2, 3, 4]]);
     }
 
     #[test]
     fn sub_read_2d_with_inserted_middle() {
         // [3, 1, 4]: read rows 1..3, inserted dim 0..1, cols 0..2
-        let got: ArrayD<i32> = make2d(arange(12), 3, 4)
+        let got = make2d(arange(12), 3, 4)
             .insert_axis(&[1])
             .to_ndarray_sub(&[1..3, 0..1, 0..2], &ReadContext::default())
             .unwrap();
         // row1=[4,5], row2=[8,9]
-        assert_eq!(
-            got,
-            ArrayD::from_shape_vec(vec![2, 1, 2], vec![4, 5, 8, 9]).unwrap()
-        );
+        assert_eq!(got, array![[[4, 5]], [[8, 9]]]);
     }
 
     // -----------------------------------------------------------------------

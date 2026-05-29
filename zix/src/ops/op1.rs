@@ -18,15 +18,6 @@ pub(crate) trait Op1Kernel<T> {
     type Output;
     fn apply(&self, x: T) -> Self::Output;
 }
-impl<F, T, O> Op1Kernel<T> for F
-where
-    F: Fn(T) -> O,
-{
-    type Output = O;
-    fn apply(&self, x: T) -> Self::Output {
-        self(x)
-    }
-}
 impl<S, K> Op1<S, K> {
     pub(crate) fn new(array: Array<S>, kernel: K) -> Result<Self>
     where
@@ -84,8 +75,18 @@ where
         dtype
     }
 
-    fn _spec(&self) -> ArrayStorageSpec<'_> {
-        self.array.storage._spec()
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        self.array.storage.spec()
+    }
+}
+
+impl<F, T, O> Op1Kernel<T> for F
+where
+    F: Fn(T) -> O,
+{
+    type Output = O;
+    fn apply(&self, x: T) -> Self::Output {
+        self(x)
     }
 }
 

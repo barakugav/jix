@@ -1,6 +1,6 @@
 use crate::dtype::Dtyped;
 use crate::error::Result;
-use crate::ops::Op1;
+use crate::ops::{Op1, Op2};
 use crate::storage::ArrayStorageTyped;
 use crate::{Array, ArrayStorage, Ty};
 
@@ -27,9 +27,8 @@ where
 
 /// Applies a function element-wise to an array.
 ///
-/// `T` must match the array's element dtype at runtime; each element is passed to
-/// `F: Fn(T) -> R` and the result written as `R`. The output dtype is `R::DTYPE` and the output
-/// shape equals the input shape.
+/// The output array has the same shape as the input, and dtype determined by the output of
+/// `F: Fn(S::Item) -> O`.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -74,6 +73,64 @@ where
     crate::storage::impl_array_storage_forward!(<S, O, F>);
 }
 
+/// Applies a binary function element-wise to two arrays.
+///
+/// The two input arrays must have the same shape. The output array has the same shape, and dtype
+/// determined by the output of `F: Fn(S1::Item, S2::Item) -> O`.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation, the operation is also available as [`map2`].
+///
+/// # Examples
+/// ```
+/// use zix::{Array, ArrayParams};
+/// use ndarray::array;
+///
+/// let a = Array::compact_array(&array![1i32, 2, 3, 4])?;
+/// let b = Array::compact_array(&array![10i32, 20, 30, 40])?;
+///
+/// let result = zix::ops::map2(a, b, |x, y| x + y).to_ndarray()?;
+/// assert_eq!(result, array![11, 22, 33, 44]);
+/// # Ok::<(), zix::Error>(())
+/// ```
+pub struct Map2<S1, S2, F>(Op2<S1, S2, F>);
+impl<S1, S2, F> Map2<S1, S2, F> {
+    /// Constructs a [`Map2`] storage. See the struct docs for semantics and examples.
+    pub fn new<O>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Result<Self>
+    where
+        S1: ArrayStorage + ArrayStorageTyped,
+        S2: ArrayStorage + ArrayStorageTyped,
+        F: Fn(S1::Item, S2::Item) -> O,
+        O: Dtyped,
+    {
+        Ok(Self(Op2::new(a, b, map_fn)?))
+    }
+}
+impl<S1, S2, O, F> ArrayStorage for Map2<S1, S2, F>
+where
+    S1: ArrayStorage + ArrayStorageTyped,
+    S2: ArrayStorage + ArrayStorageTyped,
+    O: Dtyped,
+    F: Fn(S1::Item, S2::Item) -> O,
+{
+    type ElementType = Ty<O>;
+    type Dimension = S1::Dimension;
+    crate::storage::impl_array_storage_forward!(<S1, S2, O, F>);
+}
+
+/// Applies a binary function element-wise to two arrays. See [`Map2`] for details and examples.
+#[track_caller]
+pub fn map2<S1, S2, O, F>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Array<Map2<S1, S2, F>>
+where
+    S1: ArrayStorage + ArrayStorageTyped,
+    S2: ArrayStorage + ArrayStorageTyped,
+    O: Dtyped,
+    F: Fn(S1::Item, S2::Item) -> O,
+{
+    Array::from_storage(Map2::new(a, b, map_fn).unwrap())
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::array;
@@ -86,7 +143,7 @@ mod tests {
         let a = array![1i32, 2, 3, 4];
         let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: i32| x * 2).to_ndarray().unwrap();
-        assert_eq!(actual, a.mapv(|x| x * 2).into_dyn());
+        assert_eq!(actual, a.mapv(|x| x * 2));
     }
 
     #[test]
@@ -94,7 +151,7 @@ mod tests {
         let a = array![1i32, 2, 3, 4, 5, 6];
         let za = Array::compact_array_with(&a, arr_params(&[2])).unwrap();
         let actual = za.map(|x: i32| x + 10).to_ndarray().unwrap();
-        assert_eq!(actual, a.mapv(|x| x + 10).into_dyn());
+        assert_eq!(actual, a.mapv(|x| x + 10));
     }
 
     #[test]
@@ -103,7 +160,7 @@ mod tests {
         let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: i32| x as f64 * 0.5).to_ndarray().unwrap();
         let expected = a.mapv(|x| x as f64 * 0.5);
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -112,7 +169,7 @@ mod tests {
         let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: f32| x != 0.0).to_ndarray().unwrap();
         let expected = a.mapv(|x| x != 0.0);
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -121,7 +178,7 @@ mod tests {
         let za = Array::compact_array_with(&a, arr_params(&[2, 2])).unwrap();
         let actual = za.map(|x: i32| x * x).to_ndarray().unwrap();
         let expected = a.mapv(|x| x * x);
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -154,7 +211,7 @@ mod tests {
             Point { x: 3, y: 30 },
             Point { x: 4, y: 40 },
         ];
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -207,7 +264,7 @@ mod tests {
                 norm_sq: 41
             },
         ];
-        assert_eq!(actual, expected.into_dyn());
+        assert_eq!(actual, expected);
     }
 
     proptest::proptest! {
