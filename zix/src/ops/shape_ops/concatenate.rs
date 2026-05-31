@@ -78,7 +78,7 @@ impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
         );
 
         let shape0 = arrays.shape(0);
-        let mut shape: DimArray<_> = shape0.try_into().unwrap();
+        let mut shape = DimArray::from_slice(shape0).unwrap();
         ensure!(
             axis < shape.len(),
             InvalidShapeOperation,

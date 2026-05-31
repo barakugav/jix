@@ -57,7 +57,7 @@ impl<S> NdIterExtStridesPtrMut<S> {
         S: Copy,
     {
         Self {
-            strides: strides.try_into().unwrap(),
+            strides: DimArray::from_slice(strides).unwrap(),
             current_ptr: initial_ptr,
         }
     }
@@ -103,7 +103,7 @@ where
 {
     pub fn new(strides: &[Ix], initial_offset: Ix) -> Self {
         Self {
-            strides: strides.try_into().unwrap(),
+            strides: DimArray::from_slice(strides).unwrap(),
             offset: initial_offset,
         }
     }

@@ -2,21 +2,21 @@ use std::io::{self, Read, Seek, Write};
 use std::ops::{Deref, DerefMut};
 
 use prost::Message;
-use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::archive::schema::{self, ArchiveType};
 use crate::archive::version::VERSION_U64;
 use crate::error::{ensure, Error, Result};
+use crate::util::{value_as_bytes, value_from_io};
 
 const MAGIC: &[u8; 4] = b"ZIX1";
 
-#[derive(Default, FromBytes, IntoBytes, Immutable)]
+#[derive(Default, Clone, Copy)]
 #[repr(C)]
 struct Header {
     magic: [u8; 4],
 }
 
-#[derive(Default, Clone, Copy, FromBytes, IntoBytes, Immutable)]
+#[derive(Default, Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Section {
     /// Offsets in bytes from the beginning of the archive.
@@ -43,7 +43,7 @@ impl<W> ArchiveWriter<W> {
         };
 
         let header = Header { magic: *MAGIC };
-        writer.write_all(header.as_bytes())?;
+        writer.write_all(unsafe { value_as_bytes(&header) })?;
 
         let file_metadata = schema::FileMetadata {
             archive_type: archive_type as i32,
@@ -120,7 +120,7 @@ impl<R> ArchiveReader<R> {
             reader.limit()
         );
 
-        let header = Header::read_from_io(&mut reader).map_err(Error::io)?;
+        let header = unsafe { value_from_io::<Header>(&mut reader).map_err(Error::io)? };
         ensure!(
             &header.magic == MAGIC,
             InvalidArchive,

@@ -1,7 +1,7 @@
 use crate::dtype::Itemsize;
 use crate::error::{check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::util::{dim_arr, DimArray, Idx};
+use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
 
 /// Block geometry hints for an nd-array storage.
 ///
@@ -170,8 +170,9 @@ impl BlocksLayout {
             );
         }
         // Update block_size_hint to block_shape.product() if it is not specified
-        let block_size_hint = block_size_hint
-            .unwrap_or_else(|| block_shape.iter().map(|&b| b as u64).product::<u64>() * itemsize);
+        let block_size_hint = block_size_hint.unwrap_or_else(|| {
+            block_shape.iter().map(|&b| b as u64).try_product().unwrap() * itemsize
+        });
         // Compute preferred_read_size_hint if not specified, and if it cant be computed from preferred_read_shape
         if preferred_read_size_hint.is_none() && preferred_read_shape.is_none() {
             preferred_read_size_hint = Some(cache_sizes.l2 as u64);
@@ -203,7 +204,8 @@ impl BlocksLayout {
             preferred_read_shape
                 .iter()
                 .map(|&b| b as u64)
-                .product::<u64>()
+                .try_product()
+                .unwrap()
                 * itemsize
         });
 

@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 zix-macros = { path = "../zix-macros" }
 ndarray = "0.17.0"
-arrayvec = "0.7"
 cfg-if = "1"
 libc = "0.2"
 memmap2 = "0.9"
@@ -25,7 +24,6 @@ zstd = "0.13"
 
 # schema
 prost = "0.14"
-zerocopy = { version = "0.8", features = ["derive", "std"] }
 
 
 [features]

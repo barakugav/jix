@@ -7,7 +7,7 @@ use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::DimensionChange;
 use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IxIterExt};
 use crate::{ArrayStorage, Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape_view`].
@@ -83,10 +83,10 @@ impl<S, D> Reshape<S, D> {
         Sh: IntoDimension<Dimension = D>,
     {
         let new_shape_raw = shape.into_dimension()?;
-        let new_shape: DimArray<_> = new_shape_raw.as_slice().try_into().unwrap();
-        let orig_shape: DimArray<_> = array.shape().try_into().unwrap();
-        let nitems = orig_shape.iter().product::<u64>();
-        let new_nitems = new_shape.iter().product::<u64>();
+        let new_shape = DimArray::from_slice(new_shape_raw.as_slice()).unwrap();
+        let orig_shape = DimArray::from_slice(array.shape()).unwrap();
+        let nitems = orig_shape.iter().cloned().try_product().unwrap();
+        let new_nitems = new_shape.iter().cloned().try_product().unwrap();
         ensure!(
             nitems == new_nitems,
             InvalidShapeOperation,

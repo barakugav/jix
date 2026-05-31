@@ -93,7 +93,7 @@ impl<ArraysT: ArraySequence> Stack<ArraysT> {
             shape0.len()
         );
         check_ndim(shape0.len() + 1)?;
-        let mut new_shape: DimArray<_> = shape0.try_into().unwrap();
+        let mut new_shape = DimArray::from_slice(shape0).unwrap();
         new_shape.insert(axis, narrays as u64);
         let new_shape =
             <ArraysT::FirstArrayDimension as crate::Dimension>::Larger::from_slice(&new_shape)

@@ -12,7 +12,7 @@ use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Compact, CompactMmap};
 use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
-use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, TypeDyn};
+use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ErrorKind, TypeDyn};
 
 impl Array<Compact<TypeDyn, DimDyn>> {
     /// Load a compressed array from a `.zix` file, allocating storage on the heap.
@@ -357,8 +357,8 @@ where
         let dtype = self.dtype();
         params.override_from_storage(&self.storage);
         params.tune(shape, dtype)?;
-        let block_shape: DimArray<_> = if let Some(storage) = self.storage.as_compact() {
-            storage.0.block_shape().try_into().unwrap()
+        let block_shape = if let Some(storage) = self.storage.as_compact() {
+            DimArray::from_slice(storage.0.block_shape()).unwrap()
         } else {
             params.block_shape.clone().unwrap()
         };
@@ -430,7 +430,7 @@ where
             .map_err(Error::io)?;
         let ndim = header.shape.len();
         check_ndim(ndim)?;
-        let shape: DimArray<_> = header.shape.as_slice().try_into().unwrap();
+        let shape = DimArray::from_slice(header.shape.as_slice()).unwrap();
         ensure!(
             header.block_shape.len() == ndim,
             InvalidArchive,
@@ -449,7 +449,15 @@ where
                     s.ceil_to_multiple(b)
                 }
             })
-            .product::<u64>();
+            .try_product()
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidArchive,
+                    format!(
+                        "array shape {shape:?} with block shape {block_shape:?} has too many items"
+                    ),
+                )
+            })?;
 
         let blocks = BlockTable::read_content(&mut reader, storage)?;
         ensure!(
@@ -489,7 +497,7 @@ mod tests {
     use crate::dtype::Dtyped;
     use crate::storage::Compact;
     use crate::util::{arr_params, carray_strategy_any};
-    use crate::{Array, ArrayParams, DimDyn, Dimension, IntoDimension, Ty};
+    use crate::{Array, ArrayParams, Dimension, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // Helpers

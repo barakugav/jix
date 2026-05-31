@@ -1,9 +1,12 @@
 mod aligned_vec;
+use std::mem::MaybeUninit;
+
 pub(crate) use aligned_vec::AlignedBytes;
 
 mod arr_sequence;
 pub use arr_sequence::ArraySequence;
 
+pub(crate) mod arrayvec;
 pub(crate) mod cpu_cache;
 pub(crate) mod iter;
 
@@ -337,6 +340,37 @@ macro_rules! assert_unchecked_eq {
     }};
 }
 pub(crate) use assert_unchecked_eq;
+
+pub(crate) unsafe fn value_as_bytes<T>(val: &T) -> &[u8]
+where
+    T: Sized + Send + Sync + Copy + 'static,
+{
+    let val: *const T = val;
+    unsafe { std::slice::from_raw_parts(val.cast::<u8>(), size_of::<T>()) }
+}
+
+// pub(crate) unsafe fn value_from_bytes<T>(bytes: &[u8]) -> T
+// where
+//     T: Sized + Send + Sync + Copy + 'static,
+// {
+//     assert!(bytes.len() == size_of::<T>());
+//     let ptr = bytes.as_ptr().cast::<T>();
+//     unsafe { *ptr }
+// }
+
+pub(crate) unsafe fn value_from_io<T>(mut src: impl std::io::Read) -> std::io::Result<T>
+where
+    T: Sized + Send + Sync + Copy + 'static,
+{
+    let mut val = MaybeUninit::<T>::uninit();
+    {
+        let buf = unsafe {
+            std::slice::from_raw_parts_mut(val.as_mut_ptr().cast::<u8>(), size_of::<T>())
+        };
+        src.read_exact(buf)?;
+    }
+    Ok(unsafe { val.assume_init() })
+}
 
 #[cfg(test)]
 mod tests {

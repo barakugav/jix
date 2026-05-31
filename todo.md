@@ -1,5 +1,3 @@
-- overflow checks in shape.iter().product()
-- use u8 for DimArray len
 - ops
     - clip, clamp
     - split
@@ -19,6 +17,4 @@
 - modify all ops to have `new() -> Array<Self>` and `new_storage() -> Self`
 - squeeze()
 - rename Maximum scalar trait to PartialMax
-- a user available map2
 - support an arbitrary python reader in zix-python/src/archive.rs read_array
-- refactor schema

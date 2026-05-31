@@ -38,8 +38,8 @@ where
 
     /// Creates an iterator over `[begin, end)` in every dimension.
     pub(crate) fn new_with_begin(begin: &[Ix], end: &[Ix], extensions: E) -> Self {
-        let begin: DimArray<_> = begin.try_into().unwrap();
-        let end: DimArray<_> = end.try_into().unwrap();
+        let begin = DimArray::from_slice(begin).unwrap();
+        let end = DimArray::from_slice(end).unwrap();
         let ndim = begin.len();
         assert_eq!(begin.len(), ndim);
         assert_eq!(end.len(), ndim);

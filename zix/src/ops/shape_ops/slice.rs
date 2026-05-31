@@ -424,7 +424,7 @@ impl DimSlice {
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{array, ArrayD};
+    use ndarray::array;
     use proptest::prelude::*;
 
     use super::SliceItem;

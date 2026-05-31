@@ -664,13 +664,13 @@ impl<S: ArrayStorage> Array<S> {
         params.override_from_storage(&self.storage);
         params.tune(shape, dtype)?;
 
-        let shape: DimArray<_> = shape.try_into().unwrap();
+        let shape = DimArray::from_slice(shape).unwrap();
         let encoder_params = params.encoder_params.clone().unwrap_or_default();
 
         let block_shape = params.block_shape.as_ref().unwrap();
         let block_size = block_shape.iter().cloned().try_product().unwrap();
         let grid_shape = dim_arr(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
-        let nblocks = grid_shape.iter().cloned().product::<u64>();
+        let nblocks = grid_shape.iter().cloned().try_product().unwrap();
 
         let decoder_cfg = DecoderCodecConfig {
             codec: encoder_params.codec.clone(),

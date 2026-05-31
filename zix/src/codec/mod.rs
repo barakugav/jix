@@ -53,6 +53,7 @@ use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype};
 use crate::error::{ensure, Error, ErrorKind, Result};
+use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::{AlignedBytes, AlternatingBuffers};
 
@@ -114,14 +115,14 @@ pub enum Codec {
 pub struct EncoderParams {
     pub(crate) codec: Codec,
     pub(crate) level: u8,
-    pub(crate) filters: arrayvec::ArrayVec<Filter, 4>,
+    pub(crate) filters: ArrayVec<Filter, 4>,
 }
 impl Default for EncoderParams {
     fn default() -> Self {
         Self {
             codec: Codec::Zstd,
             level: 3,
-            filters: ([Filter::ByteShuffle].as_slice()).try_into().unwrap(),
+            filters: ArrayVec::from_slice([Filter::ByteShuffle].as_slice()).unwrap(),
         }
     }
 }
@@ -188,7 +189,7 @@ impl EncoderParams {
             InvalidArgument,
             "At most 4 filters are supported"
         );
-        self.filters = filters.try_into().unwrap();
+        self.filters = ArrayVec::from_slice(filters).unwrap();
         Ok(self)
     }
 
@@ -200,7 +201,7 @@ impl EncoderParams {
 
 pub(crate) struct Encoder {
     pub(crate) dtype: Dtype,
-    pub(crate) filters: arrayvec::ArrayVec<Filter, 4>,
+    pub(crate) filters: ArrayVec<Filter, 4>,
     pub(crate) compressor: Compressor,
     tmp_buf1: AlignedBytes,
     tmp_buf2: AlignedBytes,
@@ -318,7 +319,7 @@ pub struct DecoderParams {
 #[derive(Clone, Debug)]
 pub(crate) struct DecoderCodecConfig {
     pub(crate) codec: Codec,
-    pub(crate) filters: arrayvec::ArrayVec<Filter, 4>,
+    pub(crate) filters: ArrayVec<Filter, 4>,
     pub(crate) dtype: Dtype,
 }
 

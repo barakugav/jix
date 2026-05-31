@@ -80,7 +80,7 @@ where
         let inner_offset = dim_arr(ndim, |dim| borders[dim].0.inner_offset);
         let current_block_size = dim_arr(ndim, |dim| borders[dim].0.length);
         Self {
-            block_shape: block_shape.try_into().unwrap(),
+            block_shape: DimArray::from_slice(block_shape).unwrap(),
             borders,
             inner_offset,
             current_block_size,

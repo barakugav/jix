@@ -119,7 +119,7 @@ impl<A, D> Plain<A, TypeDyn, D> {
             "Strides length {} does not match number of dimensions {ndim}",
             strides.len()
         );
-        let strides: DimArray<_> = strides.try_into().unwrap();
+        let strides = DimArray::from_slice(strides).unwrap();
 
         let alignment = dtype.alignment().as_usize();
         ensure!(

@@ -14,7 +14,6 @@ use raw::RawAlignedBytes;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 
 mod raw;
-extern crate alloc;
 
 /// Type wrapping a runtime alignment value.
 #[derive(Copy, Clone)]

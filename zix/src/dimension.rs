@@ -22,8 +22,8 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// - **[`Dim<N>`]** — static dimension. The compiler knows `ndim == N` at compile time. The
 ///   const generic `N` is the number of axes. Implemented for `N = 0..=8`.
-/// - **[`DimDyn`]** — dynamic dimension. The ndim is only known at runtime, stored inline on
-///   the stack in an [`arrayvec::ArrayVec`] with capacity [`NDIM_MAX`].
+/// - **[`DimDyn`]** — dynamic dimension. The ndim is only known at runtime, and stored in a
+///   dynamic allocated array.
 ///
 /// # How operations propagate dimension
 ///
@@ -127,8 +127,8 @@ pub trait Dimension:
 
 /// A dynamically-dimensioned shape whose ndim is only known at runtime.
 ///
-/// `DimDyn` stores the shape in a stack-allocated [`arrayvec::ArrayVec`] with capacity
-/// [`NDIM_MAX`]. It is the fallback when the number of axes cannot be determined at compile
+/// `DimDyn` stores the shape in a stack-allocated array with capacity [`NDIM_MAX`].
+/// It is the fallback when the number of axes cannot be determined at compile
 /// time: arrays loaded from files, operations that take `&[usize]` axis arguments, and
 /// dimension-changing operations applied to a `DimDyn` array all produce `DimDyn`.
 ///
@@ -144,7 +144,7 @@ impl Dimension for DimDyn {
     type Larger = Self;
 
     fn from_slice(slice: &[u64]) -> Result<Self> {
-        Ok(Self(slice.try_into().map_err(|_| {
+        Ok(Self(DimArray::from_slice(slice).ok_or_else(|| {
             Error::new(
                 ErrorKind::TooManyDimensions,
                 format!(
@@ -410,7 +410,7 @@ impl IntoDimension for ndarray::IxDyn {
 /// Used throughout the library to store shapes, strides, block shapes, and other per-axis
 /// values without heap allocation. The capacity is always exactly [`NDIM_MAX`] (8), so no
 /// array with more dimensions than supported can overflow this container.
-pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
+pub(crate) type DimArray<T> = crate::util::arrayvec::ArrayVec<T, NDIM_MAX>;
 
 /// Build a [`DimArray`] by applying `f` to each axis index `0..ndim`.
 ///

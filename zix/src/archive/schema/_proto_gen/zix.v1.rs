@@ -240,52 +240,25 @@ pub struct BlockTableHeader {
     /// A table with { offset: i64, size: u64 } (C struct) rows exists immediately after this message.
     /// Each row describes the offset and size of a section in the block table file.
     /// The table_of_contents field specifies which sections exist in the table of contents, like a tag per row.
-    /// The TOC is encoded in this way instead of repeated protobuf messages so it will have a fixed
-    /// size and we can override it in-place after writing the file body.
-    #[prost(enumeration = "block_table_header::TableOfContents", repeated, tag = "6")]
-    pub table_of_contents: ::prost::alloc::vec::Vec<i32>,
+    #[prost(oneof = "block_table_header::BodyDescription", tags = "7")]
+    pub body_description: ::core::option::Option<block_table_header::BodyDescription>,
 }
 /// Nested message and enum types in `BlockTableHeader`.
 pub mod block_table_header {
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
-    #[repr(i32)]
-    pub enum TableOfContents {
-        Unspecified = 0,
-        BlockDataContinuous = 1,
-        BlockOffsets = 2,
-    }
-    impl TableOfContents {
-        /// String value of the enum field names used in the ProtoBuf definition.
-        ///
-        /// The values are not transformed in any way and thus are considered stable
-        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-        pub fn as_str_name(&self) -> &'static str {
-            match self {
-                Self::Unspecified => "TABLE_OF_CONTENTS_UNSPECIFIED",
-                Self::BlockDataContinuous => "TABLE_OF_CONTENTS_BLOCK_DATA_CONTINUOUS",
-                Self::BlockOffsets => "TABLE_OF_CONTENTS_BLOCK_OFFSETS",
-            }
-        }
-        /// Creates an enum from field names used in the ProtoBuf definition.
-        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-            match value {
-                "TABLE_OF_CONTENTS_UNSPECIFIED" => Some(Self::Unspecified),
-                "TABLE_OF_CONTENTS_BLOCK_DATA_CONTINUOUS" => {
-                    Some(Self::BlockDataContinuous)
-                }
-                "TABLE_OF_CONTENTS_BLOCK_OFFSETS" => Some(Self::BlockOffsets),
-                _ => None,
-            }
-        }
+    /// The sections that exist in the table of contents of the block table.
+    ///
+    /// A table with { offset: i64, size: u64 } (C struct) rows exists immediately after this message.
+    /// Each row describes the offset and size of a section in the block table file.
+    /// The table_of_contents field specifies which sections exist in the table of contents, like a tag per row.
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum BodyDescription {
+        /// The data is stored as two continuous sections: one for the compressed block data and one for the block offsets.
+        /// A table with { offset: i64, size: u64 } (C struct) rows exists immediately after this message,
+        /// with the first row describing the compressed block data section and the second row describing the block offsets
+        /// section.
+        /// The TOC is encoded in this way instead of repeated protobuf messages so it will have a fixed
+        /// size and we can override it in-place after writing the file body.
+        #[prost(message, tag = "7")]
+        ContinuousV1(()),
     }
 }

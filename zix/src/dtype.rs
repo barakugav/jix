@@ -27,17 +27,36 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::hint::assert_unchecked;
-use std::mem::MaybeUninit;
-use std::num::NonZero;
-use std::ops::Deref;
 
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::scalar::{f16, Complex};
+use crate::util::arrayvec::ArrayVec;
 use crate::util::{Idx, IxIterExt};
 
 /// A type alignment in bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Alignment(NonZero<u16>);
+pub struct Alignment(AlignmentInner);
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[allow(dead_code)]
+#[repr(u16)]
+enum AlignmentInner {
+    A1 = 1 << 0,
+    A2 = 1 << 1,
+    A4 = 1 << 2,
+    A8 = 1 << 3,
+    A16 = 1 << 4,
+    A32 = 1 << 5,
+    A64 = 1 << 6,
+    A128 = 1 << 7,
+    A256 = 1 << 8,
+    A512 = 1 << 9,
+    A1024 = 1 << 10,
+    A2048 = 1 << 11,
+    A4096 = 1 << 12,
+    A8192 = 1 << 13,
+    A16384 = 1 << 14,
+    A32768 = 1 << 15,
+}
 
 impl Alignment {
     /// Creates a new `Alignment` from an integer value in bytes.
@@ -46,7 +65,11 @@ impl Alignment {
     /// alignment (currently 32768 bytes, may change in the future).
     pub const fn new(value: usize) -> Option<Self> {
         if 1 <= value && value <= 32768 && value.is_power_of_two() {
-            Some(Self(NonZero::new(value as u16).unwrap()))
+            // SAFETY: By precondition, this must be a power of two, and
+            // our variants encompass all possible powers of two.
+            Some(Self(unsafe {
+                std::mem::transmute::<u16, AlignmentInner>(value as u16)
+            }))
         } else {
             None
         }
@@ -59,19 +82,19 @@ impl Alignment {
 
     /// Returns the underlying value of the alignment in bytes.
     pub const fn as_usize(self) -> usize {
-        let align = self.0.get() as usize;
+        let align = self.0 as usize;
         unsafe { assert_unchecked(align != 0 && align.is_power_of_two()) };
         align
     }
 }
 impl std::fmt::Debug for Alignment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        std::fmt::Debug::fmt(&self.as_usize(), f)
     }
 }
 impl std::fmt::Display for Alignment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        std::fmt::Display::fmt(&self.as_usize(), f)
     }
 }
 impl TryFrom<usize> for Alignment {
@@ -98,6 +121,7 @@ pub type Itemsize = u16;
 ///
 /// Note this is not the shape of the array, but rather the inner shape of a dtype.
 pub const DTYPE_MAX_NDIM: usize = 4;
+type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 
 /// Runtime descriptor of an element type: captures all layout information needed to interpret
 /// the raw bytes stored in an [`Array`](crate::Array).
@@ -450,7 +474,7 @@ impl Dtype {
                     .iter()
                     .map(|(_name, _offset, dtype)| dtype.alignment())
                     .max()
-                    .unwrap_or(Alignment(NonZero::new(1).unwrap()));
+                    .unwrap_or(Alignment::new(1).unwrap());
                 let itemsize =
                     expected_offset.ceil_to_multiple(max_alignment.as_usize() as Itemsize);
                 return Ok((itemsize, (max_alignment, true)));
@@ -466,7 +490,7 @@ impl Dtype {
             });
             if is_packed {
                 let itemsize = expected_offset;
-                return Ok((itemsize, (Alignment(NonZero::new(1).unwrap()), false)));
+                return Ok((itemsize, (Alignment::new(1).unwrap(), false)));
             }
 
             bail!(
@@ -544,7 +568,15 @@ impl Dtype {
         itemsize: Itemsize,
         alignment: Alignment,
     ) -> Result<Self> {
-        let shape = DtypeShape::try_from_slice(shape)?;
+        let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "Dtype shape length exceeds the maximum supported dim number {}",
+                    DTYPE_MAX_NDIM
+                ),
+            )
+        })?;
         let shape_prod = shape
             .iter()
             .try_fold(1 as Itemsize, |acc, &dim| acc.checked_mul(dim))
@@ -612,7 +644,7 @@ impl Dtype {
             .iter()
             .map(|(_name, _offset, dtype)| dtype.alignment())
             .max()
-            .unwrap_or(Alignment(NonZero::new(1).unwrap()));
+            .unwrap_or(Alignment::new(1).unwrap());
         if alignment != max_alignment {
             return false;
         }
@@ -776,7 +808,15 @@ impl Dtype {
     ///
     /// The itemsize will be updated to `itemsize *= new_shape.product() / old_shape.product()`.
     pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<()> {
-        let shape = DtypeShape::try_from_slice(shape)?; // too many dims
+        let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "Dtype shape length exceeds the maximum supported dim number {}",
+                    DTYPE_MAX_NDIM
+                ),
+            )
+        })?;
         let shape_prod = shape
             .iter()
             .cloned()
@@ -1055,83 +1095,6 @@ unsafe impl<T: Dtyped, const N: usize> Dtyped for [T; N] {
         *dtype.itemsize_mut() *= n;
         dtype
     };
-}
-
-#[derive(Debug, Clone, Copy)]
-struct DtypeShape {
-    len: u8,
-    data: [MaybeUninit<Itemsize>; DTYPE_MAX_NDIM],
-}
-impl DtypeShape {
-    pub const fn new() -> Self {
-        Self {
-            len: 0,
-            data: unsafe { MaybeUninit::uninit().assume_init() },
-        }
-    }
-
-    pub const fn len(&self) -> usize {
-        self.len as usize
-    }
-
-    pub const fn capacity(&self) -> usize {
-        DTYPE_MAX_NDIM
-    }
-
-    pub const fn insert_first_const(&mut self, value: Itemsize) {
-        assert!(self.len() < self.capacity(), "ArrayVec capacity exceeded");
-        let mut new_data: [MaybeUninit<Itemsize>; DTYPE_MAX_NDIM] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-        let (first, new_data_tail) = new_data.split_first_mut().unwrap();
-        first.write(value);
-        new_data_tail.copy_from_slice(self.data.split_last().unwrap().1);
-
-        *self = Self {
-            len: self.len + 1,
-            data: new_data,
-        }
-    }
-
-    pub fn as_slice(&self) -> &[Itemsize] {
-        // SAFETY: We only read the initialized part of the array.
-        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const Itemsize, self.len()) }
-    }
-
-    pub fn try_from_slice(data: &[Itemsize]) -> Result<Self> {
-        ensure!(
-            data.len() <= DTYPE_MAX_NDIM,
-            InvalidArgument,
-            "Dtype shape length exceeds the maximum supported dim number"
-        );
-        let mut array = Self::new();
-        array.data[..data.len()].write_copy_of_slice(data);
-        array.len = data.len() as _;
-        Ok(array)
-    }
-}
-
-impl Deref for DtypeShape {
-    type Target = [Itemsize];
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.as_slice()
-    }
-}
-impl PartialEq for DtypeShape {
-    fn eq(&self, other: &Self) -> bool {
-        **self == **other
-    }
-}
-impl PartialEq<[Itemsize]> for DtypeShape {
-    fn eq(&self, other: &[Itemsize]) -> bool {
-        **self == *other
-    }
-}
-impl Eq for DtypeShape {}
-impl Default for DtypeShape {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[cfg(test)]

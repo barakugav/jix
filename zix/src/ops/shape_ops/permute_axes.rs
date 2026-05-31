@@ -64,7 +64,7 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             "axes length {} does not match array ndim {ndim}",
             axes.len()
         );
-        let axes: DimArray<_> = axes.try_into().unwrap();
+        let axes = DimArray::from_slice(axes).unwrap();
         let mut seen = dim_arr(ndim, |_| false);
         for &ax in axes.iter() {
             ensure!(
