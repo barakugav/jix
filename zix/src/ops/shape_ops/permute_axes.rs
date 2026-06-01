@@ -44,7 +44,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct PermuteAxes<S: ArrayStorage> {
-    array: Array<S>,
+    array: S,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.
     axes: DimArray<usize>,
     /// `inv_axes[d]` = index of the output dimension that maps from input dimension `d`.
@@ -56,7 +56,7 @@ pub struct PermuteAxes<S: ArrayStorage> {
 
 impl<S: ArrayStorage> PermuteAxes<S> {
     /// Constructs a [`PermuteAxes`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: Array<S>, axes: &[usize]) -> Result<Self> {
+    pub fn new(array: S, axes: &[usize]) -> Result<Self> {
         let ndim = array.shape().len();
         ensure!(
             axes.len() == ndim,
@@ -88,7 +88,7 @@ impl<S: ArrayStorage> PermuteAxes<S> {
         let input_shape = array.shape();
         let shape = dim_arr(ndim, |i| input_shape[axes[i]]);
 
-        let mut b_layout = array.blocks_layout().clone();
+        let mut b_layout = array.spec().blocks_layout.clone();
         b_layout.block_shape_hint = dim_arr(ndim, |i| b_layout.block_shape_hint[axes[i]]);
         b_layout.block_shape_tag = dim_arr(ndim, |i| b_layout.block_shape_tag[axes[i]]);
         b_layout.preferred_read_shape = dim_arr(ndim, |i| b_layout.preferred_read_shape[axes[i]]);
@@ -101,6 +101,11 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             axes,
             inv_axes,
         })
+    }
+
+    /// Constructs an array with [`PermuteAxes`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(array: Array<S>, axes: &[usize]) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), axes).map(Array::from_storage)
     }
 }
 
@@ -129,9 +134,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let n_bytes = nitems * itemsize;
         let mut tmp_buf = context.tmp_buf(n_bytes, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
-        self.array
-            .storage
-            .read_data(&input_index, tmp_buf, context)?;
+        self.array.read_data(&input_index, tmp_buf, context)?;
 
         // Strides in tmp_buf (C-contiguous over input dims).
         let src_strides_in = default_strides(&sub_shape_in, itemsize);
@@ -165,7 +168,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.spec()
         }
     }
 }

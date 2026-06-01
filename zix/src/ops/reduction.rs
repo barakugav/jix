@@ -15,7 +15,7 @@ use crate::{Array, ArrayStorage, Dimension, Ty};
 pub(crate) struct ReductionOp<S, K, D> {
     kernel: K,
 
-    array: Array<S>,
+    array: S,
     is_reduced: DimArray<bool>,
 
     out_dtype_: Dtype,
@@ -28,7 +28,7 @@ pub(crate) trait ReductionOpKernel<T> {
     fn supports_empty(&self) -> bool;
 }
 impl<S, K, D> ReductionOp<S, K, D> {
-    pub(crate) fn new<Ax>(array: Array<S>, kernel: K, axes: Ax) -> Result<Self>
+    pub(crate) fn new<Ax>(array: S, kernel: K, axes: Ax) -> Result<Self>
     where
         S: ArrayStorage + ArrayStorageTyped,
         K: ReductionOpKernel<S::Item, Output: Dtyped>,
@@ -70,7 +70,7 @@ impl<S, K, D> ReductionOp<S, K, D> {
             .collect::<DimArray<_>>();
         let shape = D::from_slice(&shape).unwrap();
 
-        let mut b_layout = array.blocks_layout().clone();
+        let mut b_layout = array.spec().blocks_layout.clone();
         b_layout.block_shape_hint = (0..input_ndim)
             .filter_map(|d| is_reduced[d].not().then_some(b_layout.block_shape_hint[d]))
             .collect();
@@ -145,9 +145,7 @@ where
         let tmp_buf_size = n_inner * src_dtype.itemsize() as usize;
         let mut tmp_buf = context.tmp_buf(tmp_buf_size, src_dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
-        self.array
-            .storage
-            .read_data(&inner_index, tmp_buf, context)?;
+        self.array.read_data(&inner_index, tmp_buf, context)?;
 
         // C-contiguous byte strides for inner and output layouts.
         let inner_strides = default_strides(&inner_read_shape, src_dtype.itemsize() as usize);
@@ -200,7 +198,7 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.spec()
         }
     }
 }
@@ -221,18 +219,18 @@ macro_rules! define_reduction_op {
             S: crate::ArrayStorage;
         impl<S> $Op<S>
         where
-            S: crate::ArrayStorage,
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
-            /// Creates a new view storage applying the operation by reducing the specified axis.
-            ///
-            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
-            pub fn new(array: crate::Array<S>, axis: usize $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
-            where
-                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-                S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
-            {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
+            pub fn new(array: S, axis: usize $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self> {
                 let kernel = $Kernel { $($extra_arg),* };
                 Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, &[axis])?))
+            }
+
+            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
+            pub fn new_array(array: crate::Array<S>, axis: usize $(, $extra_arg: $extra_ty)*) -> crate::error::Result<crate::Array<Self>> {
+                Self::new(array.into_storage(), axis $(, $extra_arg)*).map(crate::Array::from_storage)
             }
         }
 
@@ -266,19 +264,27 @@ macro_rules! define_reduction_op {
     ) => {
         $(#[$meta])*
         pub struct $Op<S, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
-        impl<S, D> $Op<S, D> {
-            /// Creates a new view storage applying the operation by reducing the specified axes.
-            ///
-            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
-            pub fn new<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
+        impl<S, D> $Op<S, D>
+        where
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            D: crate::Dimension,
+        {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
+            pub fn new<Ax>(array: S, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
-                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-                S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
-                D: crate::Dimension,
                 Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
             {
                 let kernel = $Kernel { $($extra_arg),* };
                 Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, axes)?))
+            }
+
+            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
+            pub fn new_array<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<crate::Array<Self>>
+            where
+                Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
+            {
+                Self::new(array.into_storage(), axes $(, $extra_arg)*).map(crate::Array::from_storage)
             }
         }
 
@@ -341,18 +347,26 @@ macro_rules! define_reduction_op {
     ) => {
         $(#[$meta])*
         pub struct $Op<S, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
-        impl<S, D> $Op<S, D> {
-            /// Creates a new view storage applying the operation by reducing the specified axes.
-            ///
-            /// See the struct-level documentation for details on supported dtypes, output dtype, and semantics.
-            pub fn new<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
+        impl<S, D> $Op<S, D>
+        where
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $in_type>,
+            D: crate::Dimension,
+        {
+            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
+            pub fn new<Ax>(array: S, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
             where
-                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $in_type>,
-                D: crate::Dimension,
                 Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
             {
                 let kernel = $Kernel { $($extra_arg),* };
                 Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, axes)?))
+            }
+
+            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
+            pub fn new_array<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<crate::Array<Self>>
+            where
+                Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
+            {
+                Self::new(array.into_storage(), axes $(, $extra_arg)*).map(crate::Array::from_storage)
             }
         }
 
@@ -1181,8 +1195,7 @@ macro_rules! define_array_reduction_method {
             S::Item: $($trait)::+,
             <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
         {
-            let op = $Op::new(self, axis $($(, $extra_arg)*)?).unwrap();
-            crate::Array::from_storage(op)
+            $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
         }
     };
     ($method:ident : $Op:ident, $($trait:ident)::+ $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
@@ -1195,8 +1208,7 @@ macro_rules! define_array_reduction_method {
             <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
             Ax: AxesArg,
         {
-            let op = $Op::new(self, axis $($(, $extra_arg)*)?).unwrap();
-            crate::Array::from_storage(op)
+            $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
         }
     };
     ($method:ident : $Op:ident, $in_type:ty => $out_type:ty $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
@@ -1207,8 +1219,7 @@ macro_rules! define_array_reduction_method {
             S: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $in_type>,
             Ax: AxesArg,
         {
-            let op = $Op::new(self, axis $($(, $extra_arg)*)?).unwrap();
-            crate::Array::from_storage(op)
+            $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
         }
     };
 }

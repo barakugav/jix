@@ -10,7 +10,7 @@ use crate::util::assert_unchecked_eq;
 use crate::{ArrayStorage, Ty};
 
 pub(crate) struct Op1<S, K> {
-    array: Array<S>,
+    array: S,
     out_dtype_: Dtype,
     kernel: K,
 }
@@ -19,7 +19,7 @@ pub(crate) trait Op1Kernel<T> {
     fn apply(&self, x: T) -> Self::Output;
 }
 impl<S, K> Op1<S, K> {
-    pub(crate) fn new(array: Array<S>, kernel: K) -> Result<Self>
+    pub(crate) fn new(array: S, kernel: K) -> Result<Self>
     where
         S: ArrayStorage + ArrayStorageTyped,
         K: Op1Kernel<S::Item, Output: Dtyped>,
@@ -57,7 +57,6 @@ where
 
         let data = self
             .array
-            .storage
             .read_data_typed(index, context)?
             .map_items(|x| self.kernel.apply(x));
 
@@ -76,7 +75,7 @@ where
     }
 
     fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.array.storage.spec()
+        self.array.spec()
     }
 }
 
@@ -110,14 +109,19 @@ macro_rules! define_op1 {
         }
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
-        impl<S> $Op<S> {
+        impl<S> $Op<S>
+        where
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+        {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new(array: Array<S>) -> crate::error::Result<Self>
-            where
-                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-                S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
-            {
+            pub fn new(array: S) -> crate::error::Result<Self> {
                 Ok(Self(crate::ops::op1::Op1::new(array, $Kernel)?))
+            }
+
+            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
+            pub fn new_array(array: crate::Array<S>) -> crate::error::Result<crate::Array<Self>> {
+                Self::new(array.into_storage()).map(crate::Array::from_storage)
             }
         }
         impl<S> ArrayStorage for $Op<S>
@@ -188,14 +192,19 @@ macro_rules! define_op1 {
         }
         $(#[$meta])*
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
-        impl<S> $Op<S> {
+        impl<S> $Op<S>
+        where
+            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S::Item: $($trait)::+,
+        {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new(array: Array<S>) -> crate::error::Result<Self>
-            where
-                S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-                S::Item: $($trait)::+,
-            {
+            pub fn new(array: S) -> crate::error::Result<Self> {
                 Ok(Self(crate::ops::op1::Op1::new(array, $Kernel)?))
+            }
+
+            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
+            pub fn new_array(array: crate::Array<S>) -> crate::error::Result<crate::Array<Self>> {
+                Self::new(array.into_storage()).map(crate::Array::from_storage)
             }
         }
         impl<S> ArrayStorage for $Op<S>
@@ -227,8 +236,7 @@ macro_rules! define_op1 {
             #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
             #[track_caller]
             fn $core_op_fn(self) -> Self::Output {
-                let op = $Op::new(self).unwrap();
-                Array::from_storage(op)
+                $Op::new_array(self).unwrap()
             }
         }
     };

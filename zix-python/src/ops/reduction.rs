@@ -30,7 +30,7 @@ macro_rules! define_reduction_op {
 
             macro_rules! call_op {
                 ($arr:expr, $ax:expr) => {
-                    zix_core::ops::$core_op::new($arr, $ax $($(, $extra_arg)+)?)
+                    zix_core::ops::$core_op::new_array($arr, $ax $($(, $extra_arg)+)?)
                 }
             }
 
@@ -39,7 +39,7 @@ macro_rules! define_reduction_op {
                     Some(crate::ops::common::scalar_kind!($type)) => {
                         #[allow(unused_parens)]
                         let array = array.to_typed::<$type>().unwrap();
-                        call_op!(array, &axes).map(crate::Array::from_core_storage)
+                        call_op!(array, &axes).map(crate::Array::from_core_array)
                     }
                 )*
                 _ => Err(zix_core::Error::new(
@@ -64,9 +64,9 @@ macro_rules! define_reduction_op {
                     .enumerate()
                     .map(|(i, &ax)| ax - i)
                     .collect::<Vec<_>>();
-                let res = zix_core::ops::InsertAxis::new(arr, &mapped_axes);
+                let res = zix_core::ops::InsertAxis::new_array(arr, &mapped_axes);
                 let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-                array = crate::Array::from_core_storage(ret);
+                array = crate::Array::from_core_array(ret);
             }
 
             Ok(array)
@@ -109,7 +109,7 @@ macro_rules! define_reduction_op {
                     Some(crate::ops::common::scalar_kind!($type)) => {
                         #[allow(unused_parens)]
                         let array = array.to_typed::<$type>().unwrap();
-                        zix_core::ops::$core_op::new(array, axis).map(crate::Array::from_core_storage)
+                        zix_core::ops::$core_op::new_array(array, axis).map(crate::Array::from_core_array)
                     }
                 )*
                 _ => Err(zix_core::Error::new(
@@ -127,9 +127,9 @@ macro_rules! define_reduction_op {
                 let arr = array.to_core_array();
                 // keepdims=true: for a single-axis reduction, the result-space gap equals the
                 // original axis index (only one axis removed, shift = 0).
-                let res = zix_core::ops::InsertAxis::new(arr, &[axis]);
+                let res = zix_core::ops::InsertAxis::new_array(arr, &[axis]);
                 let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-                array = crate::Array::from_core_storage(ret);
+                array = crate::Array::from_core_array(ret);
             }
 
             Ok(array)

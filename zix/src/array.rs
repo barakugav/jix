@@ -839,9 +839,7 @@ impl<S: ArrayStorage> Array<S> {
         params: ArrayParams,
         context: &ReadContext,
     ) -> Result<Array<MaybeCompact<S>>> {
-        Ok(Array::from_storage(MaybeCompact::new(
-            self, params, context,
-        )?))
+        MaybeCompact::new_array(self, params, context)
     }
 
     /// Return a reference to the underlying storage backend.
@@ -865,6 +863,7 @@ impl<S: ArrayStorage> Array<S> {
         self.storage
     }
 
+    #[allow(dead_code)]
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
         self.storage.spec().blocks_layout
     }
@@ -1048,7 +1047,7 @@ where
     where
         ET: ElementType,
     {
-        Ok(Array::from_storage(ToType::<S, ET>::new(self)?))
+        ToType::new_array(self)
     }
 
     /// Re-tag this array's element type as [`Ty<T>`](crate::Ty), asserting a concrete scalar type.
@@ -1164,7 +1163,7 @@ where
     where
         D: Dimension,
     {
-        Ok(Array::from_storage(ToDim::<S, D>::new(self)?))
+        ToDim::new_array(self)
     }
 
     /// Re-tag this array's dimension as [`DimDyn`], erasing static dimension information.

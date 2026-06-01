@@ -51,6 +51,7 @@ pub fn dtype_sub_field<'py>(
 ) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let array = crate::ops::as_array::any_to_core_array(array)?;
-    let res = zix_core::ops::SubDtype::<_, TypeDyn>::new(array, &sub_field).into_py_result()?;
-    Bound::new(py, crate::Array::from_core_storage(res))
+    let res =
+        zix_core::ops::SubDtype::<_, TypeDyn>::new_array(array, &sub_field).into_py_result()?;
+    Bound::new(py, crate::Array::from_core_array(res))
 }

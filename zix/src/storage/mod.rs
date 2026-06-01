@@ -156,6 +156,11 @@ where
 
     impl_array_storage_forward!('b, T, <S>);
 }
+impl<'a, S> Clone for Ref<'a, S> {
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
 
 macro_rules! impl_array_storage_forward {
     (<$($generics:tt),* $(,)?>) => {

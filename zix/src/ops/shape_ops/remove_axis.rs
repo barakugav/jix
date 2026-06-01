@@ -60,7 +60,7 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct RemoveAxis<S, D> {
-    array: Array<S>,
+    array: S,
     /// `is_removed[input_dim]` is `true` for every input dimension that was removed.
     is_removed: DimArray<bool>,
 
@@ -74,7 +74,7 @@ where
     D: Dimension,
 {
     /// Constructs a [`RemoveAxis`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
+    pub fn new<Ax>(array: S, axis: Ax) -> Result<Self>
     where
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
@@ -105,7 +105,7 @@ where
         let mut is_removed = DimArray::new();
         let mut shape = DimArray::new();
 
-        let inner_layout = array.blocks_layout();
+        let inner_layout = array.spec().blocks_layout;
         let mut hint = DimArray::new();
         let mut tag = DimArray::new();
         let mut preferred = DimArray::new();
@@ -133,6 +133,14 @@ where
             shape,
             blocks_layout: b_layout,
         })
+    }
+
+    /// Constructs an array with [`RemoveAxis`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<Ax>(array: Array<S>, axis: Ax) -> Result<Array<Self>>
+    where
+        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+    {
+        Self::new(array.into_storage(), axis).map(Array::from_storage)
     }
 
     fn transform_index(&self, index: &[Range<u64>]) -> Result<DimArray<Range<u64>>> {
@@ -168,7 +176,6 @@ where
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         self.array
-            .storage
             .read_data(&self.transform_index(index)?, buf, context)
     }
 
@@ -181,7 +188,6 @@ where
         T: Dtyped,
     {
         self.array
-            .storage
             .read_data_typed(&self.transform_index(index)?, context)
     }
 
@@ -194,7 +200,7 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.spec()
         }
     }
 }
@@ -370,21 +376,21 @@ mod tests {
     fn error_axis_out_of_bounds() {
         let a = make2d(arange(4), 2, 2);
         // ndim=2, valid axes are 0..2; axis 3 is out of bounds
-        assert!(super::RemoveAxis::new(a, &[3]).is_err());
+        assert!(super::RemoveAxis::new_array(a, &[3]).is_err());
     }
 
     #[test]
     fn error_axis_not_size_one() {
         let a = make2d(arange(12), 3, 4);
         // axis 0 has size 3, cannot remove
-        assert!(super::RemoveAxis::new(a, &[0]).is_err());
+        assert!(super::RemoveAxis::new_array(a, &[0]).is_err());
     }
 
     #[test]
     fn error_duplicate_axis() {
         let a = make3d(arange(6), 1, 2, 3);
         // axis 0 appears twice
-        assert!(super::RemoveAxis::new(a, &[0, 0]).is_err());
+        assert!(super::RemoveAxis::new_array(a, &[0, 0]).is_err());
     }
 
     fn remove_axes_strategy<T>() -> impl proptest::strategy::Strategy<

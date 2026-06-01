@@ -62,7 +62,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Slice<S: ArrayStorage> {
-    array: Array<S>,
+    array: S,
     /// Resolved slice for each dimension.
     slice: DimArray<DimSlice>,
     /// `true` when every dimension has `step == 1`.  Enables a cheaper read path.
@@ -74,7 +74,7 @@ pub struct Slice<S: ArrayStorage> {
 
 impl<S: ArrayStorage> Slice<S> {
     /// Constructs a [`Slice`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: Array<S>, slice: SliceSpec) -> Result<Self> {
+    pub fn new(array: S, slice: SliceSpec) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
 
@@ -92,7 +92,7 @@ impl<S: ArrayStorage> Slice<S> {
 
         let shape = dim_arr(ndim, |d| slice[d].len());
 
-        let mut b_layout = array.blocks_layout().clone();
+        let mut b_layout = array.spec().blocks_layout.clone();
         for dim in 0..ndim {
             if shape[dim] == input_shape[dim] {
                 continue;
@@ -114,6 +114,11 @@ impl<S: ArrayStorage> Slice<S> {
             shape,
             blocks_layout: b_layout,
         })
+    }
+
+    /// Constructs an array with [`Slice`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(array: Array<S>, slice: SliceSpec) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), slice).map(Array::from_storage)
     }
 }
 
@@ -148,7 +153,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 let off = self.slice[d].start;
                 (index[d].start + off)..(index[d].end + off)
             });
-            return self.array.storage.read_data(&inner_index, buf, context);
+            return self.array.read_data(&inner_index, buf, context);
         }
 
         // -----------------------------------------------------------------------
@@ -227,7 +232,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 }
             });
             let tmp = tmp_buf.as_mut_slice();
-            self.array.storage.read_data(&inner_index, tmp, context)?;
+            self.array.read_data(&inner_index, tmp, context)?;
 
             let dst_byte_offset = (0..ndim)
                 .filter(|&d| !self.slice[d].is_contiguous())
@@ -257,7 +262,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.spec()
         }
     }
 }
@@ -674,14 +679,18 @@ mod tests {
     #[test]
     fn no_steps_flag_set_for_contiguous() {
         let a = make2d(arange(12), 3, 4);
-        let s = super::Slice::new(a.as_ref(), (1..3, ..).into()).unwrap();
+        let s = super::Slice::new_array(a.as_ref(), (1..3, ..).into())
+            .unwrap()
+            .into_storage();
         assert!(s.no_steps);
     }
 
     #[test]
     fn no_steps_flag_unset_for_strided() {
         let a = make2d(arange(12), 3, 4);
-        let s = super::Slice::new(a.as_ref(), (.., SliceItem::new(None, None, 2)).into()).unwrap();
+        let s = super::Slice::new_array(a.as_ref(), (.., SliceItem::new(None, None, 2)).into())
+            .unwrap()
+            .into_storage();
         assert!(!s.no_steps);
     }
 
@@ -692,14 +701,15 @@ mod tests {
     #[test]
     fn error_wrong_number_of_items() {
         let a = make2d(arange(12), 3, 4);
-        assert!(super::Slice::new(a.as_ref(), (0..3,).into()).is_err());
+        assert!(super::Slice::new_array(a.as_ref(), (0..3,).into()).is_err());
     }
 
     #[test]
     fn error_negative_step() {
         let a = make2d(arange(12), 3, 4);
         assert!(
-            super::Slice::new(a.as_ref(), (SliceItem::new(None, None, -1), ..).into()).is_err()
+            super::Slice::new_array(a.as_ref(), (SliceItem::new(None, None, -1), ..).into())
+                .is_err()
         );
     }
 

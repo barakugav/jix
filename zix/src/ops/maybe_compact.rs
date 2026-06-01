@@ -32,12 +32,25 @@ where
     S: ArrayStorage,
 {
     /// Constructs a [`MaybeCompact`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: Array<S>, params: ArrayParams, context: &ReadContext) -> Result<Self> {
-        Ok(Self(if array.storage.as_compact().is_some() {
-            ToCompactInner::Original(array.into_storage())
+    pub fn new(array: S, params: ArrayParams, context: &ReadContext) -> Result<Self> {
+        Ok(Self(if array.as_compact().is_some() {
+            ToCompactInner::Original(array)
         } else {
-            ToCompactInner::Compact(array.copy_with(params, context)?.into_storage())
+            ToCompactInner::Compact(
+                Array::from_storage(array)
+                    .copy_with(params, context)?
+                    .into_storage(),
+            )
         }))
+    }
+
+    /// Constructs an array with [`MaybeCompact`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(
+        array: Array<S>,
+        params: ArrayParams,
+        context: &ReadContext,
+    ) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), params, context).map(Array::from_storage)
     }
 }
 impl<S> ArrayStorage for MaybeCompact<S>

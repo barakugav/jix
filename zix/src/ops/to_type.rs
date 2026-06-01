@@ -52,16 +52,16 @@ use crate::{Array, ArrayStorage, ElementType};
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct ToType<S, ET> {
-    inner: Array<S>,
+    inner: S,
     element_type: PhantomData<ET>,
 }
-impl<S, ET> ToType<S, ET> {
+impl<S, ET> ToType<S, ET>
+where
+    S: ArrayStorage,
+    ET: ElementType,
+{
     /// Constructs a [`ToType`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: Array<S>) -> Result<Self>
-    where
-        S: ArrayStorage,
-        ET: ElementType,
-    {
+    pub fn new(array: S) -> Result<Self> {
         if let Some(expected_dtype) = ET::DTYPE {
             check_dtype(array.dtype(), &expected_dtype)?;
         }
@@ -69,6 +69,11 @@ impl<S, ET> ToType<S, ET> {
             inner: array,
             element_type: PhantomData,
         })
+    }
+
+    /// Constructs an array with [`ToType`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(array: Array<S>) -> Result<Array<Self>> {
+        Self::new(array.into_storage()).map(Array::from_storage)
     }
 }
 impl<S, ET> ArrayStorage for ToType<S, ET>
@@ -81,9 +86,9 @@ where
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         if let Some(dtype) = ET::DTYPE {
-            unsafe { assert_unchecked_eq!(self.inner.storage.dtype(), &dtype) };
+            unsafe { assert_unchecked_eq!(self.inner.dtype(), &dtype) };
         }
-        self.inner.storage.read_data(index, buf, context)
+        self.inner.read_data(index, buf, context)
     }
 
     fn read_data_typed<'a, T>(
@@ -95,23 +100,23 @@ where
         T: Dtyped,
     {
         if let Some(dtype) = ET::DTYPE {
-            unsafe { assert_unchecked_eq!(self.inner.storage.dtype(), &dtype) };
+            unsafe { assert_unchecked_eq!(self.inner.dtype(), &dtype) };
         }
-        self.inner.storage.read_data_typed(index, context)
+        self.inner.read_data_typed(index, context)
     }
 
     fn shape(&self) -> &[u64] {
-        self.inner.storage.shape()
+        self.inner.shape()
     }
     fn dtype(&self) -> &crate::dtype::Dtype {
-        let dtype = self.inner.storage.dtype();
+        let dtype = self.inner.dtype();
         if let Some(expected_dtype) = ET::DTYPE {
             unsafe { assert_unchecked_eq!(dtype, &expected_dtype) };
         }
         dtype
     }
     fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
-        self.inner.storage.spec()
+        self.inner.spec()
     }
 }
 

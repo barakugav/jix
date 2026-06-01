@@ -74,7 +74,7 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct InsertAxis<S, D> {
-    array: Array<S>,
+    array: S,
     /// `is_inserted[output_dim]` is `true` for every output dimension that was inserted
     /// (length 1, no corresponding input dimension).
     is_inserted: DimArray<bool>,
@@ -89,7 +89,7 @@ where
     D: Dimension,
 {
     /// Constructs a [`InsertAxis`] storage. See the struct docs for semantics and examples.
-    pub fn new<Ax>(array: Array<S>, axis: Ax) -> Result<Self>
+    pub fn new<Ax>(array: S, axis: Ax) -> Result<Self>
     where
         Ax: AxesArg<ExpandedDimension<S::Dimension> = D>,
     {
@@ -139,7 +139,7 @@ where
 
         // Build blocks_layout: inserted dims get block_shape = 1 (Any); non-inserted dims
         // inherit the corresponding input dim's layout unchanged.
-        let inner_layout = array.blocks_layout();
+        let inner_layout = array.spec().blocks_layout;
         let mut hint = DimArray::new();
         let mut tag = DimArray::new();
         let mut preferred = DimArray::new();
@@ -167,6 +167,14 @@ where
             shape,
             blocks_layout: b_layout,
         })
+    }
+
+    /// Constructs an array with [`InsertAxis`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<Ax>(array: Array<S>, axis: Ax) -> Result<Array<Self>>
+    where
+        Ax: AxesArg<ExpandedDimension<S::Dimension> = D>,
+    {
+        Self::new(array.into_storage(), axis).map(Array::from_storage)
     }
 
     fn transform_index(&self, index: &[Range<u64>]) -> Result<Option<DimArray<Range<u64>>>> {
@@ -203,7 +211,7 @@ where
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         if let Some(inner_index) = self.transform_index(index)? {
-            self.array.storage.read_data(&inner_index, buf, context)
+            self.array.read_data(&inner_index, buf, context)
         } else {
             Ok(())
         }
@@ -219,7 +227,7 @@ where
     {
         let data = self
             .transform_index(index)?
-            .map(|inner_index| self.array.storage.read_data_typed(&inner_index, context))
+            .map(|inner_index| self.array.read_data_typed(&inner_index, context))
             .transpose()?;
         struct ReadDataOptional<R>(Option<R>);
         impl<T, R> ReadData<T> for ReadDataOptional<R>
@@ -250,7 +258,7 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.spec()
         }
     }
 }
@@ -455,7 +463,7 @@ mod tests {
     fn error_axis_out_of_bounds() {
         let a = make1d(arange(4), 4);
         // orig_ndim=1, valid gaps are 0..=1; axis 2 is out of bounds
-        assert!(InsertAxis::new(a, &[2]).is_err());
+        assert!(InsertAxis::new_array(a, &[2]).is_err());
     }
 
     // -----------------------------------------------------------------------

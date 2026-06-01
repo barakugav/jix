@@ -58,7 +58,7 @@ where
     where
         Sh: IntoDimension,
     {
-        Array::from_storage(Reshape::new(self, shape).unwrap())
+        Reshape::new_array(self, shape).unwrap()
     }
 
     /// Returns a lazy view of a sub-region of the array. See [`Slice`] for details and examples.
@@ -71,7 +71,7 @@ where
     /// Panics if the number of items != `self.ndim()` or any `step < 1`.
     #[track_caller]
     pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
-        Array::from_storage(Slice::new(self, slice.into()).unwrap())
+        Slice::new_array(self, slice.into()).unwrap()
     }
 
     /// Returns a lazy view of the array with its axes reordered. See [`PermuteAxes`] for details
@@ -84,7 +84,7 @@ where
     /// Panics if `axes` is not a valid permutation of `0..ndim`.
     #[track_caller]
     pub fn permute_axes(self, axes: &[usize]) -> Array<PermuteAxes<S>> {
-        Array::from_storage(PermuteAxes::new(self, axes).unwrap())
+        PermuteAxes::new_array(self, axes).unwrap()
     }
 
     /// Expands the array to `shape` by repeating length-1 dimensions and returns a
@@ -114,7 +114,7 @@ where
     /// Panics if `shape.len() != self.ndim()` or any dimension with size > 1 is expanded.
     #[track_caller]
     pub fn broadcast_view(self, shape: &[u64]) -> Array<Broadcast<S>> {
-        Array::from_storage(Broadcast::new(self, shape).unwrap())
+        Broadcast::new_array(self, shape).unwrap()
     }
 
     /// Returns a lazy view of the array with the specified length-1 dimensions removed.
@@ -133,7 +133,7 @@ where
     where
         Ax: AxesArg,
     {
-        Array::from_storage(RemoveAxis::new(self, axis).unwrap())
+        RemoveAxis::new_array(self, axis).unwrap()
     }
 
     /// Returns a lazy view of the array with new length-1 dimensions inserted. See [`InsertAxis`]
@@ -153,6 +153,6 @@ where
     where
         Ax: AxesArg,
     {
-        Array::from_storage(InsertAxis::new(self, axis).unwrap())
+        InsertAxis::new_array(self, axis).unwrap()
     }
 }

@@ -12,8 +12,7 @@ macro_rules! define_array_op1_method {
             S::Item: $($trait)::+,
             <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
         {
-            let op = $Op::new(self).unwrap();
-            crate::Array::from_storage(op)
+            $Op::new_array(self).unwrap()
         }
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
@@ -24,8 +23,7 @@ macro_rules! define_array_op1_method {
             S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
         {
-            let op = $Op::new(self).unwrap();
-            crate::Array::from_storage(op)
+            $Op::new_array(self).unwrap()
         }
     };
 }
@@ -40,8 +38,7 @@ macro_rules! define_array_op2_method {
             S::Item: $($trait)::+<S2::Item>,
             <S::Item as $($trait)::+<S2::Item>>::Output: crate::dtype::Dtyped,
         {
-            let op = $Op::new(self, other).unwrap();
-            crate::Array::from_storage(op)
+            $Op::new_array(self, other).unwrap()
         }
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
@@ -53,8 +50,7 @@ macro_rules! define_array_op2_method {
             S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<S2::Item>,
         {
-            let op = $Op::new(self, other).unwrap();
-            crate::Array::from_storage(op)
+            $Op::new_array(self, other).unwrap()
         }
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_lhs_type = $lhs_type:ty) => {
@@ -66,8 +62,7 @@ macro_rules! define_array_op2_method {
             S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $lhs_type>,
             S::Item: $($trait)::+,
         {
-            let op = $Op::new(self, other).unwrap();
-            crate::Array::from_storage(op)
+            $Op::new_array(self, other).unwrap()
         }
     };
 }

@@ -69,14 +69,14 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Reshape<S, D> {
-    array: Array<S>,
+    array: S,
 
     new_shape: D,
     blocks_layout: BlocksLayout,
 }
 impl<S, D> Reshape<S, D> {
     /// Constructs a [`Reshape`] storage. See the struct docs for semantics and examples.
-    pub fn new<Sh>(array: Array<S>, shape: Sh) -> Result<Self>
+    pub fn new<Sh>(array: S, shape: Sh) -> Result<Self>
     where
         S: ArrayStorage,
         D: Dimension,
@@ -109,7 +109,7 @@ impl<S, D> Reshape<S, D> {
             })
             .collect::<DimArray<_>>();
 
-        let mut b_layout = array.blocks_layout().clone();
+        let mut b_layout = array.spec().blocks_layout.clone();
         let mut block_shape_hint = DimArray::new();
         let mut block_shape_tag = DimArray::new();
         let mut preferred_read_shape = DimArray::new();
@@ -146,6 +146,16 @@ impl<S, D> Reshape<S, D> {
             blocks_layout: b_layout,
             array,
         })
+    }
+
+    /// Constructs an array with [`Reshape`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<Sh>(array: Array<S>, shape: Sh) -> Result<Array<Self>>
+    where
+        S: ArrayStorage,
+        D: Dimension,
+        Sh: IntoDimension<Dimension = D>,
+    {
+        Self::new(array.into_storage(), shape).map(Array::from_storage)
     }
 }
 impl<S, D> ArrayStorage for Reshape<S, D>
@@ -350,9 +360,7 @@ where
             });
 
             let tmp_buf = tmp_buf.as_mut_slice();
-            self.array
-                .storage
-                .read_data(&read_range, tmp_buf, context)?;
+            self.array.read_data(&read_range, tmp_buf, context)?;
 
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&d| same_logical_stride[d].is_none())
@@ -383,7 +391,7 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
             blocks_layout: &self.blocks_layout,
-            ..self.array.storage.spec()
+            ..self.array.spec()
         }
     }
 }
@@ -499,7 +507,7 @@ mod tests {
     #[test]
     fn reshape_wrong_size_errors() {
         let a = make1d(u8s(12), 12);
-        assert!(super::Reshape::new(a, &[3, 5]).is_err());
+        assert!(super::Reshape::new_array(a, &[3, 5]).is_err());
     }
 
     // -----------------------------------------------------------------------

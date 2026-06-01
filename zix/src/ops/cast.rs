@@ -176,16 +176,21 @@ where
         x.cast()
     }
 }
-impl<S, T> Cast<S, T> {
+impl<S, T> Cast<S, T>
+where
+    S: ArrayStorage + ArrayStorageTyped,
+    S::Item: crate::scalar::Cast<T>,
+    T: Dtyped,
+{
     /// Constructs a [`Cast`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: Array<S>) -> crate::error::Result<Self>
-    where
-        S: ArrayStorage + ArrayStorageTyped,
-        S::Item: crate::scalar::Cast<T>,
-        T: Dtyped,
-    {
+    pub fn new(array: S) -> crate::error::Result<Self> {
         let kernel = CastKernel(std::marker::PhantomData);
         Ok(Self(crate::ops::op1::Op1::new(array, kernel)?))
+    }
+
+    /// Constructs an array with [`Cast`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(array: Array<S>) -> crate::error::Result<Array<Self>> {
+        Self::new(array.into_storage()).map(Array::from_storage)
     }
 }
 impl<S, T> ArrayStorage for Cast<S, T>
@@ -211,7 +216,7 @@ where
         S::Item: crate::scalar::Cast<T>,
         T: Dtyped,
     {
-        Array::from_storage(Cast::new(self).unwrap())
+        Cast::new_array(self).unwrap()
     }
 }
 

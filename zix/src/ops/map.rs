@@ -21,7 +21,7 @@ where
         R: Dtyped,
         F: Fn(S::Item) -> R,
     {
-        Array::from_storage(Map::new(self, map_fn).unwrap())
+        Map::new_array(self, map_fn).unwrap()
     }
 }
 
@@ -53,13 +53,23 @@ where
 pub struct Map<S, F>(Op1<S, F>);
 impl<S, F> Map<S, F> {
     /// Constructs a [`Map`] storage. See the struct docs for semantics and examples.
-    pub fn new<O>(array: Array<S>, map_fn: F) -> Result<Self>
+    pub fn new<O>(array: S, map_fn: F) -> Result<Self>
     where
         S: ArrayStorage + ArrayStorageTyped,
         F: Fn(S::Item) -> O,
         O: Dtyped,
     {
         Ok(Self(Op1::new(array, map_fn)?))
+    }
+
+    /// Constructs an array with [`Map`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<O>(array: Array<S>, map_fn: F) -> Result<Array<Self>>
+    where
+        S: ArrayStorage + ArrayStorageTyped,
+        F: Fn(S::Item) -> O,
+        O: Dtyped,
+    {
+        Self::new(array.into_storage(), map_fn).map(Array::from_storage)
     }
 }
 impl<S, O, F> ArrayStorage for Map<S, F>
@@ -97,7 +107,7 @@ where
 pub struct Map2<S1, S2, F>(Op2<S1, S2, F>);
 impl<S1, S2, F> Map2<S1, S2, F> {
     /// Constructs a [`Map2`] storage. See the struct docs for semantics and examples.
-    pub fn new<O>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Result<Self>
+    pub fn new<O>(a: S1, b: S2, map_fn: F) -> Result<Self>
     where
         S1: ArrayStorage + ArrayStorageTyped,
         S2: ArrayStorage + ArrayStorageTyped,
@@ -105,6 +115,17 @@ impl<S1, S2, F> Map2<S1, S2, F> {
         O: Dtyped,
     {
         Ok(Self(Op2::new(a, b, map_fn)?))
+    }
+
+    /// Constructs an array with [`Map2`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<O>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Result<Array<Self>>
+    where
+        S1: ArrayStorage + ArrayStorageTyped,
+        S2: ArrayStorage + ArrayStorageTyped,
+        F: Fn(S1::Item, S2::Item) -> O,
+        O: Dtyped,
+    {
+        Self::new(a.into_storage(), b.into_storage(), map_fn).map(Array::from_storage)
     }
 }
 impl<S1, S2, O, F> ArrayStorage for Map2<S1, S2, F>
@@ -128,7 +149,7 @@ where
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {
-    Array::from_storage(Map2::new(a, b, map_fn).unwrap())
+    Map2::new_array(a, b, map_fn).unwrap()
 }
 
 #[cfg(test)]

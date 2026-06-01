@@ -45,16 +45,16 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct ToDim<S, D> {
-    inner: Array<S>,
+    inner: S,
     dim: PhantomData<D>,
 }
-impl<S, D> ToDim<S, D> {
+impl<S, D> ToDim<S, D>
+where
+    S: ArrayStorage,
+    D: Dimension,
+{
     /// Constructs a [`ToDim`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: Array<S>) -> Result<Self>
-    where
-        S: ArrayStorage,
-        D: Dimension,
-    {
+    pub fn new(array: S) -> Result<Self> {
         if let Some(ndim) = D::NDIM {
             let shape = array.shape();
             if shape.len() != ndim {
@@ -71,6 +71,11 @@ impl<S, D> ToDim<S, D> {
             dim: PhantomData,
         })
     }
+
+    /// Constructs an array with [`ToDim`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(array: Array<S>) -> Result<Array<Self>> {
+        Self::new(array.into_storage()).map(Array::from_storage)
+    }
 }
 impl<S, D> ArrayStorage for ToDim<S, D>
 where
@@ -82,9 +87,9 @@ where
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         if let Some(ndim) = D::NDIM {
-            unsafe { assert_unchecked_eq!(ndim, self.inner.storage.shape().len()) };
+            unsafe { assert_unchecked_eq!(ndim, self.inner.shape().len()) };
         }
-        self.inner.storage.read_data(index, buf, context)
+        self.inner.read_data(index, buf, context)
     }
 
     fn read_data_typed<'a, T>(
@@ -96,23 +101,23 @@ where
         T: Dtyped,
     {
         if let Some(ndim) = D::NDIM {
-            unsafe { assert_unchecked_eq!(ndim, self.inner.storage.shape().len()) };
+            unsafe { assert_unchecked_eq!(ndim, self.inner.shape().len()) };
         }
-        self.inner.storage.read_data_typed(index, context)
+        self.inner.read_data_typed(index, context)
     }
 
     fn shape(&self) -> &[u64] {
-        let shape = self.inner.storage.shape();
+        let shape = self.inner.shape();
         if let Some(ndim) = D::NDIM {
             unsafe { assert_unchecked_eq!(ndim, shape.len()) };
         }
         shape
     }
     fn dtype(&self) -> &crate::dtype::Dtype {
-        self.inner.storage.dtype()
+        self.inner.dtype()
     }
     fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
-        self.inner.storage.spec()
+        self.inner.spec()
     }
 }
 

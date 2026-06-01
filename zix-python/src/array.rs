@@ -140,12 +140,15 @@ impl Array {
         }
     }
 
-    pub(crate) fn from_core_storage(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
-        let storage = ZixArray::from_storage(storage)
-            .to_type_dyn()
-            .to_dim_dyn()
-            .into_storage();
+    pub(crate) fn from_core_array(
+        array: ZixArray<impl ArrayStorage + Send + Sync + 'static>,
+    ) -> Self {
+        let storage = array.to_type_dyn().to_dim_dyn().into_storage();
         Self::from_storage(DynStorage::new(Arc::new(storage)))
+    }
+
+    pub(crate) fn from_core_storage(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
+        Self::from_core_array(ZixArray::from_storage(storage))
     }
 
     pub(crate) fn to_core_array(&self) -> ZixArray<DynStorage> {

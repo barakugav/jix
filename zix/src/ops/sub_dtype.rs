@@ -25,7 +25,7 @@ where
     where
         T: Dtyped,
     {
-        Array::from_storage(SubDtype::new(self, sub_field).unwrap())
+        SubDtype::new_array(self, sub_field).unwrap()
     }
 
     /// Returns a view of one named field of a struct dtype, for dynamically-typed fields. See
@@ -35,7 +35,7 @@ where
     /// instead to get better ergonomics and performance.
     #[track_caller]
     pub fn dtype_sub_field_dyn(self, sub_field: &str) -> Array<SubDtype<S, TypeDyn>> {
-        Array::from_storage(SubDtype::new(self, sub_field).unwrap())
+        SubDtype::new_array(self, sub_field).unwrap()
     }
 }
 /// Extracts one named field from a struct dtype array.
@@ -69,17 +69,17 @@ where
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct SubDtype<S, ET> {
-    array: Array<S>,
+    array: S,
     dst_type: ET,
     sub_field_offset: Itemsize,
 }
-impl<S, ET> SubDtype<S, ET> {
+impl<S, ET> SubDtype<S, ET>
+where
+    S: ArrayStorage,
+    ET: ElementType,
+{
     /// Constructs a [`SubDtype`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: Array<S>, sub_field: &str) -> Result<Self>
-    where
-        S: ArrayStorage,
-        ET: ElementType,
-    {
+    pub fn new(array: S, sub_field: &str) -> Result<Self> {
         let src_dtype = array.dtype();
         ensure!(
             src_dtype.shape().is_empty(),
@@ -104,6 +104,11 @@ impl<S, ET> SubDtype<S, ET> {
             array,
         })
     }
+
+    /// Constructs an array with [`SubDtype`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(array: Array<S>, sub_field: &str) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), sub_field).map(Array::from_storage)
+    }
 }
 impl<S, ET> ArrayStorage for SubDtype<S, ET>
 where
@@ -126,7 +131,7 @@ where
 
         let mut tmp_buf = context.tmp_buf(nitems * src_itemsize, src_dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.storage.read_data(index, tmp_buf, context)?;
+        self.array.read_data(index, tmp_buf, context)?;
 
         let src_items = tmp_buf.chunks_exact(src_itemsize);
         let dst_items = buf.chunks_exact_mut(dst_itemsize);
@@ -145,7 +150,7 @@ where
         self.dst_type.dtype()
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.array.storage.spec()
+        self.array.spec()
     }
 }
 
@@ -185,14 +190,14 @@ mod tests {
     #[test]
     fn error_not_struct_dtype() {
         let a = Array::compact_array(&ndarray::array![1i32, 2, 3]).unwrap();
-        assert!(super::SubDtype::<_, TypeDyn>::new(a, "x").is_err());
+        assert!(super::SubDtype::<_, TypeDyn>::new_array(a, "x").is_err());
     }
 
     #[test]
     fn error_field_not_found() {
         let pts = ndarray::array![Pair { x: 1, y: 10 }];
         let za = Array::compact_array(&pts).unwrap();
-        assert!(super::SubDtype::<_, TypeDyn>::new(za, "z").is_err());
+        assert!(super::SubDtype::<_, TypeDyn>::new_array(za, "z").is_err());
     }
 
     proptest::proptest! {

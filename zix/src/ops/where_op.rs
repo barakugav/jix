@@ -25,7 +25,7 @@ where
     SX: ArrayStorage,
     SY: ArrayStorage<ElementType = SX::ElementType>,
 {
-    Array::from_storage(Where::new(condition, x, y).unwrap())
+    Where::new_array(condition, x, y).unwrap()
 }
 
 /// Selects elements element-wise from `x` or `y` depending on `condition`
@@ -66,18 +66,18 @@ where
 /// # Ok::<(), zix::Error>(())
 /// ```
 pub struct Where<SC, SX, SY> {
-    condition: Array<SC>,
-    x: Array<SX>,
-    y: Array<SY>,
+    condition: SC,
+    x: SX,
+    y: SY,
 }
-impl<SC, SX, SY> Where<SC, SX, SY> {
+impl<SC, SX, SY> Where<SC, SX, SY>
+where
+    SC: ArrayStorage + ArrayStorageTyped<Item = bool>,
+    SX: ArrayStorage,
+    SY: ArrayStorage<ElementType = SX::ElementType>,
+{
     /// Constructs a [`Where`] storage. See the struct docs for semantics and examples.
-    pub fn new(condition: Array<SC>, x: Array<SX>, y: Array<SY>) -> Result<Self>
-    where
-        SC: ArrayStorage + ArrayStorageTyped<Item = bool>,
-        SX: ArrayStorage,
-        SY: ArrayStorage<ElementType = SX::ElementType>,
-    {
+    pub fn new(condition: SC, x: SX, y: SY) -> Result<Self> {
         ensure!(
             condition.dtype() == &bool::DTYPE,
             UnsupportedDtype,
@@ -103,6 +103,12 @@ impl<SC, SX, SY> Where<SC, SX, SY> {
 
         Ok(Self { condition, x, y })
     }
+
+    /// Constructs an array with [`Where`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(condition: Array<SC>, x: Array<SX>, y: Array<SY>) -> Result<Array<Self>> {
+        Self::new(condition.into_storage(), x.into_storage(), y.into_storage())
+            .map(Array::from_storage)
+    }
 }
 impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
 where
@@ -124,11 +130,9 @@ where
         let mut y_buf = context.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
         let y_buf = y_buf.as_mut_slice();
 
-        self.condition
-            .storage
-            .read_data(index, condition_buf, context)?;
-        self.x.storage.read_data(index, buf, context)?; // read 'x' data directly into output buffer
-        self.y.storage.read_data(index, y_buf, context)?;
+        self.condition.read_data(index, condition_buf, context)?;
+        self.x.read_data(index, buf, context)?; // read 'x' data directly into output buffer
+        self.y.read_data(index, y_buf, context)?;
 
         let condition = unsafe { cast_slice::<_, bool>(condition_buf) };
 
@@ -174,12 +178,9 @@ where
     where
         T: Dtyped,
     {
-        let condition = self
-            .condition
-            .storage
-            .read_data_typed::<bool>(index, context)?;
-        let x = self.x.storage.read_data_typed::<T>(index, context)?;
-        let y = self.y.storage.read_data_typed::<T>(index, context)?;
+        let condition = self.condition.read_data_typed::<bool>(index, context)?;
+        let x = self.x.read_data_typed::<T>(index, context)?;
+        let y = self.y.read_data_typed::<T>(index, context)?;
 
         Ok(condition
             .zip_items(x.zip_items(y))
@@ -193,7 +194,7 @@ where
         self.x.dtype()
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
-        self.x.storage.spec()
+        self.x.spec()
     }
 }
 
@@ -315,7 +316,7 @@ mod tests {
         let y = Array::compact_array(&array![4.0f64, 5.0, 6.0])
             .unwrap()
             .into_type_dyn();
-        assert!(Where::new(cond, x, y).is_err());
+        assert!(Where::new_array(cond, x, y).is_err());
     }
 
     #[test]
@@ -323,7 +324,7 @@ mod tests {
         let cond = Array::compact_array(&array![true, false]).unwrap();
         let x = Array::compact_array(&array![1i32, 2, 3]).unwrap();
         let y = Array::compact_array(&array![4i32, 5, 6]).unwrap();
-        assert!(Where::new(cond, x, y).is_err());
+        assert!(Where::new_array(cond, x, y).is_err());
     }
 
     #[test]
@@ -331,7 +332,7 @@ mod tests {
         let cond = Array::compact_array(&array![true, false, true]).unwrap();
         let x = Array::compact_array(&array![1i32, 2, 3]).unwrap();
         let y = Array::compact_array(&array![4i32, 5]).unwrap();
-        assert!(Where::new(cond, x, y).is_err());
+        assert!(Where::new_array(cond, x, y).is_err());
     }
 
     // --- edge cases ---
