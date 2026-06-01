@@ -132,7 +132,6 @@ pub(crate) use common::bulk_size;
 pub use common::AxesArg;
 
 pub(crate) mod _traits {
-    pub use super::bitwise::_traits::*;
     pub use super::cast::_traits::*;
     pub use super::cmp::_traits::*;
     pub use super::op1::_traits::*;

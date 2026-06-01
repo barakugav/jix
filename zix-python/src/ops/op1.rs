@@ -1,6 +1,6 @@
 use zix_core::scalar::{f16, Complex};
 
-use crate::ops::define_op1;
+use crate::ops::common::define_op1;
 
 define_op1!(
     /// Arithmetic negation applied element-wise (`-array`).
@@ -29,7 +29,10 @@ define_op1!(
     /// ```
     negative,
     Neg,
-    [i8, i16, i32, i64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    dispatch = {
+        [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        Safe
+    }
 );
 
 define_op1!(
@@ -52,7 +55,10 @@ define_op1!(
     /// ```
     floor,
     Floor,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        None
+    }
 );
 define_op1!(
     /// Rounds each element up to the nearest integer (towards +inf).
@@ -74,7 +80,10 @@ define_op1!(
     /// ```
     ceil,
     Ceil,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        None
+    }
 );
 define_op1!(
     /// Rounds each element to the nearest integer.
@@ -100,7 +109,10 @@ define_op1!(
     /// ```
     round,
     Round,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        None
+    }
 );
 define_op1!(
     /// Computes the square root of each element.
@@ -128,7 +140,10 @@ define_op1!(
     /// ```
     sqrt,
     Sqrt,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
@@ -151,7 +166,10 @@ define_op1!(
     /// ```
     exp,
     Exp,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Computes the natural logarithm (`ln x`) of each element.
@@ -182,7 +200,10 @@ define_op1!(
     /// ```
     log,
     Ln,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Computes the sine of each element (input in radians).
@@ -205,7 +226,10 @@ define_op1!(
     /// ```
     sin,
     Sin,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Computes the cosine of each element (input in radians).
@@ -228,7 +252,10 @@ define_op1!(
     /// ```
     cos,
     Cos,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Computes the tangent of each element (input in radians).
@@ -251,7 +278,10 @@ define_op1!(
     /// ```
     tan,
     Tan,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`.
@@ -276,7 +306,10 @@ define_op1!(
     /// ```
     asin,
     Asin,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`.
@@ -302,7 +335,10 @@ define_op1!(
     /// ```
     acos,
     Acos,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`.
@@ -325,7 +361,10 @@ define_op1!(
     /// ```
     atan,
     Atan,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        Safe
+    }
 );
 define_op1!(
     /// Returns the sign of each element as a floating-point value.
@@ -353,7 +392,10 @@ define_op1!(
     /// ```
     signum,
     Signum,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64], // TODO: signed integers
+        Safe
+    }
 );
 define_op1!(
     /// Computes the absolute value of each element.
@@ -388,5 +430,8 @@ define_op1!(
     /// ```
     absolute,
     Abs,
-    [i8, i16, i32, i64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    dispatch = {
+        [i8, i16, i32, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        None
+    }
 );

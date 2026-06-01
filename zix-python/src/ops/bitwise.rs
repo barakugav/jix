@@ -1,6 +1,4 @@
-use zix_core::scalar::Complex;
-
-use crate::ops::{define_op1, define_op2};
+use crate::ops::common::{define_op1, define_op2};
 
 define_op2!(
     /// Element-wise logical AND of two arrays.
@@ -34,9 +32,11 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [False, True, False, False])
     /// ```
     logical_and,
-    LogicalAnd,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, (Complex<f32>), (Complex<f64>), bool]
-    // TODO: f16
+    And,
+    dispatch = {
+        [bool],
+        Unsafe
+    }
 );
 
 define_op2!(
@@ -70,9 +70,11 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [False, True, False, True])
     /// ```
     logical_or,
-    LogicalOr,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, (Complex<f32>), (Complex<f64>), bool]
-    // TODO: f16
+    Or,
+    dispatch = {
+        [bool],
+        Unsafe
+    }
 );
 
 define_op2!(
@@ -106,9 +108,11 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [False, False, True, True])
     /// ```
     logical_xor,
-    LogicalXor,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, (Complex<f32>), (Complex<f64>), bool]
-    // TODO: f16
+    Xor,
+    dispatch = {
+        [bool],
+        Unsafe
+    }
 );
 
 define_op1!(
@@ -136,9 +140,11 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [True, False, False, True])
     /// ```
     logical_not,
-    LogicalNot,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, (Complex<f32>), (Complex<f64>), bool]
-    // TODO: f16
+    Not,
+    dispatch = {
+        [bool],
+        Unsafe
+    }
 );
 
 define_op2!(
@@ -171,8 +177,11 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b1000, 0b0000, 0b0000])
     /// ```
     bitwise_and,
-    BitwiseAnd,
-    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
+    And,
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64],
+        Safe
+    }
 );
 
 define_op2!(
@@ -205,8 +214,11 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b1110, 0b1111, 0b1111])
     /// ```
     bitwise_or,
-    BitwiseOr,
-    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
+    Or,
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64],
+        Safe
+    }
 );
 
 define_op2!(
@@ -239,8 +251,11 @@ define_op2!(
     /// assert np.array_equal(result.numpy(), [0b0110, 0b0000, 0b0000])
     /// ```
     bitwise_xor,
-    BitwiseXor,
-    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
+    Xor,
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64],
+        Safe
+    }
 );
 
 define_op1!(
@@ -266,8 +281,11 @@ define_op1!(
     /// assert np.array_equal(result.numpy(), [0b11110000, 0b00001111, 0xFF])
     /// ```
     bitwise_not,
-    BitwiseNot,
-    [i8, i16, i32, i64, u8, u16, u32, u64, bool]
+    Not,
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64],
+        None
+    }
 );
 
 define_op2!(
@@ -297,12 +315,15 @@ define_op2!(
     ///
     /// a = zix.compact([0b00000001, 0b00000010, 0b00000100], dtype=np.uint8)
     /// b = zix.compact([1, 2, 3], dtype=np.uint8)
-    /// result = zix.bitwise_shift_left(a, b)
+    /// result = zix.bitwise_left_shift(a, b)
     /// assert np.array_equal(result.numpy(), [0b00000010, 0b00001000, 0b00100000])
     /// ```
-    bitwise_shift_left,
+    bitwise_left_shift,
     BitwiseShiftLeft,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
+        Safe
+    }
 );
 
 define_op2!(
@@ -333,12 +354,15 @@ define_op2!(
     ///
     /// a = zix.compact([0b10000000, 0b00100000, 0b00001000], dtype=np.uint8)
     /// b = zix.compact([1, 2, 3], dtype=np.uint8)
-    /// result = zix.bitwise_shift_right(a, b)
+    /// result = zix.bitwise_right_shift(a, b)
     /// assert np.array_equal(result.numpy(), [0b01000000, 0b00001000, 0b00000001])
     /// ```
-    bitwise_shift_right,
+    bitwise_right_shift,
     BitwiseShiftRight,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
+        Safe
+    }
 );
 
 define_op2!(
@@ -371,16 +395,19 @@ define_op2!(
     /// ```
     bitwise_rotate_left,
     BitwiseRotateLeft,
-    [
-        (i8, u32),
-        (i16, u32),
-        (i32, u32),
-        (i64, u32),
-        (u8, u32),
-        (u16, u32),
-        (u32, u32),
-        (u64, u32)
-    ]
+    dispatch = {
+        [
+            (i8, u32),
+            (u8, u32),
+            (i16, u32),
+            (u16, u32),
+            (i32, u32),
+            (u32, u32),
+            (i64, u32),
+            (u64, u32)
+        ],
+        Safe
+    }
 );
 
 define_op2!(
@@ -413,16 +440,19 @@ define_op2!(
     /// ```
     bitwise_rotate_right,
     BitwiseRotateRight,
-    [
-        (i8, u32),
-        (i16, u32),
-        (i32, u32),
-        (i64, u32),
-        (u8, u32),
-        (u16, u32),
-        (u32, u32),
-        (u64, u32)
-    ]
+    dispatch = {
+        [
+            (i8, u32),
+            (u8, u32),
+            (i16, u32),
+            (u16, u32),
+            (i32, u32),
+            (u32, u32),
+            (i64, u32),
+            (u64, u32)
+        ],
+        Safe
+    }
 );
 
 define_op1!(
@@ -449,7 +479,10 @@ define_op1!(
     /// ```
     count_ones,
     CountOnes,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
+        None
+    }
 );
 
 define_op1!(
@@ -480,7 +513,10 @@ define_op1!(
     /// ```
     count_zeros,
     CountZeros,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
+        None
+    }
 );
 
 define_op1!(
@@ -512,7 +548,10 @@ define_op1!(
     /// ```
     leading_zeros,
     LeadingZeros,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
+        None
+    }
 );
 
 define_op1!(
@@ -544,7 +583,10 @@ define_op1!(
     /// ```
     trailing_zeros,
     TrailingZeros,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
+        None
+    }
 );
 
 define_op1!(
@@ -572,7 +614,10 @@ define_op1!(
     /// ```
     swap_bytes,
     SwapBytes,
-    [i16, i32, i64, u16, u32, u64]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
+        None
+    }
 );
 
 define_op1!(
@@ -598,5 +643,8 @@ define_op1!(
     /// ```
     reverse_bits,
     ReverseBits,
-    [i8, i16, i32, i64, u8, u16, u32, u64]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
+        None
+    }
 );

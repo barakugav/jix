@@ -40,7 +40,10 @@ define_op2!(
     /// ```
     equal,
     Equal,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>, bool],
+        Safe
+    }
 );
 
 define_op2!(
@@ -75,7 +78,10 @@ define_op2!(
     /// ```
     not_equal,
     NotEqual,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>, bool],
+        Safe
+    }
 );
 
 define_op2!(
@@ -110,7 +116,10 @@ define_op2!(
     /// ```
     greater,
     Greater,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        Safe
+    }
 );
 
 define_op2!(
@@ -145,7 +154,10 @@ define_op2!(
     /// ```
     greater_equal,
     GreaterEqual,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        Safe
+    }
 );
 
 define_op2!(
@@ -180,7 +192,10 @@ define_op2!(
     /// ```
     less,
     Less,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        Safe
+    }
 );
 
 define_op2!(
@@ -215,7 +230,10 @@ define_op2!(
     /// ```
     less_equal,
     LessEqual,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        Safe
+    }
 );
 
 define_op2!(
@@ -257,7 +275,10 @@ define_op2!(
     /// ```
     maximum,
     Maximum,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        Safe
+    }
 );
 
 define_op2!(
@@ -299,5 +320,8 @@ define_op2!(
     /// ```
     minimum,
     Minimum,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, bool],
+        Safe
+    }
 );

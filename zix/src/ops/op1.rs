@@ -260,7 +260,6 @@ pub(crate) mod _traits {
     impl Abs for f16 {
         type Output = f16;
         fn abs(self) -> Self::Output {
-            // Self::from_f32(self.to_f32().abs())
             <Self as num_traits::Float>::abs(self)
         }
     }

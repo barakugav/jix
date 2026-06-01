@@ -1,11 +1,6 @@
-use pyo3::prelude::*;
-use zix_core::dtype::DtypeScalarKind;
 use zix_core::scalar::{f16, Complex};
 
-use crate::ops::common::Precision;
-use crate::ops::{define_op2, promote, Operand, Scalar};
-use crate::util::IntoPyResult;
-use crate::Array;
+use crate::ops::common::define_op2;
 
 define_op2!(
     /// Element-wise addition of two arrays.
@@ -46,8 +41,12 @@ define_op2!(
     /// ```
     add,
     Add,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        Safe
+    }
 );
+
 define_op2!(
     /// Element-wise subtraction of two arrays (`a - b`).
     ///
@@ -87,7 +86,10 @@ define_op2!(
     /// ```
     subtract,
     Sub,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        Safe
+    }
 );
 define_op2!(
     /// Element-wise multiplication of two arrays.
@@ -128,7 +130,10 @@ define_op2!(
     /// ```
     multiply,
     Mul,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        Safe
+    }
 );
 define_op2!(
     /// Element-wise division of two arrays (`a / b`).
@@ -171,7 +176,10 @@ define_op2!(
     /// ```
     divide,
     Div,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        Safe
+    }
 );
 define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
@@ -208,122 +216,9 @@ define_op2!(
     /// ```
     power,
     Pow,
-    [f32, f64]
+    dispatch = {
+        // [u8, i8, u16, i16, u32, i32, u64, i64, f32, f64], // TODO
+        [f32, f64],
+        Safe
+    }
 );
-
-pub(crate) fn asarray22<'py>(
-    a: &Bound<'py, PyAny>,
-    b: &Bound<'py, PyAny>,
-) -> PyResult<(Bound<'py, Array>, Bound<'py, Array>)> {
-    let py = a.py();
-    let mut a = Operand::from_any(a)?;
-    let mut b = Operand::from_any(b)?;
-
-    // returns None for scalars
-    fn extract_shape(asarray: &Operand) -> Option<&[u64]> {
-        match asarray {
-            Operand::Zix(array) => Some(array.get().arr.shape()),
-            Operand::Numpy(array) => Some(array.shape()),
-            Operand::Scalar { .. } => None,
-        }
-    }
-    let shape = [&a, &b]
-        .into_iter()
-        .map(extract_shape)
-        .filter_map(|s| s.map(|s| s.to_vec()))
-        .next();
-
-    let dtype = promote(&[&a, &b]);
-
-    fn operand_cast_if_scalar(
-        value: &mut Operand,
-        target_dtype: DtypeScalarKind,
-    ) -> Result<(), zix_core::Error> {
-        let Operand::Scalar {
-            value, precision, ..
-        } = value
-        else {
-            return Ok(());
-        };
-        macro_rules! do_cast {
-            ($value:expr) => {
-                match target_dtype {
-                    DtypeScalarKind::I8
-                    | DtypeScalarKind::I16
-                    | DtypeScalarKind::I32
-                    | DtypeScalarKind::I64 => {
-                        Scalar::Int(<_ as zix_core::scalar::Cast<_>>::cast($value))
-                    }
-                    DtypeScalarKind::U8
-                    | DtypeScalarKind::U16
-                    | DtypeScalarKind::U32
-                    | DtypeScalarKind::U64 => {
-                        Scalar::UInt(<_ as zix_core::scalar::Cast<_>>::cast($value))
-                    }
-                    DtypeScalarKind::F16 | DtypeScalarKind::F32 | DtypeScalarKind::F64 => {
-                        Scalar::Float(<_ as zix_core::scalar::Cast<_>>::cast($value))
-                    }
-                    DtypeScalarKind::ComplexF32 | DtypeScalarKind::ComplexF64 => {
-                        Scalar::Complex(<_ as zix_core::scalar::Cast<_>>::cast($value))
-                    }
-                    DtypeScalarKind::Bool => {
-                        Scalar::Bool(<_ as zix_core::scalar::Cast<_>>::cast($value))
-                    }
-                }
-            };
-        }
-        *value = match value {
-            Scalar::Bool(value) => do_cast!(*value),
-            Scalar::UInt(value) => do_cast!(*value),
-            Scalar::Int(value) => do_cast!(*value),
-            Scalar::Float(value) => do_cast!(*value),
-            Scalar::Complex(value) => match target_dtype {
-                DtypeScalarKind::ComplexF32 | DtypeScalarKind::ComplexF64 => {
-                    Scalar::Complex(<_ as zix_core::scalar::Cast<_>>::cast(*value))
-                }
-                _ => unreachable!(),
-            },
-        };
-        *precision = Some(match target_dtype {
-            DtypeScalarKind::I8 => Precision::P1,
-            DtypeScalarKind::I16 => Precision::P2,
-            DtypeScalarKind::I32 => Precision::P4,
-            DtypeScalarKind::I64 => Precision::P8,
-            DtypeScalarKind::U8 => Precision::P1,
-            DtypeScalarKind::U16 => Precision::P2,
-            DtypeScalarKind::U32 => Precision::P4,
-            DtypeScalarKind::U64 => Precision::P8,
-            DtypeScalarKind::F16 => Precision::P2,
-            DtypeScalarKind::F32 => Precision::P4,
-            DtypeScalarKind::F64 => Precision::P8,
-            DtypeScalarKind::ComplexF32 => Precision::P4,
-            DtypeScalarKind::ComplexF64 => Precision::P8,
-            DtypeScalarKind::Bool => Precision::P1,
-        });
-        Ok(())
-    }
-
-    fn asarray_broadcast_if_scalar(
-        value: &mut Operand,
-        broadcast: &[u64],
-    ) -> Result<(), zix_core::Error> {
-        if let Operand::Scalar { shape, .. } = value {
-            *shape = broadcast.to_vec();
-        }
-        Ok(())
-    }
-
-    if let Some(dtype) = dtype {
-        operand_cast_if_scalar(&mut a, dtype).into_py_result()?;
-        operand_cast_if_scalar(&mut b, dtype).into_py_result()?;
-    }
-
-    if let Some(shape) = shape {
-        asarray_broadcast_if_scalar(&mut a, &shape).into_py_result()?;
-        asarray_broadcast_if_scalar(&mut b, &shape).into_py_result()?;
-    }
-
-    let a = a.into_py_array(py)?;
-    let b = b.into_py_array(py)?;
-    Ok((a, b))
-}

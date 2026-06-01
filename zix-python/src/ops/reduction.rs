@@ -1,10 +1,39 @@
+use pyo3::prelude::*;
 use zix_core::scalar::{f16, Complex};
+use zix_core::ArrayAny;
+
+fn keepdims_after_reduction(
+    array: ArrayAny,
+    original_reduced_axes: &[usize],
+) -> PyResult<ArrayAny> {
+    // keepdims=true: re-insert singleton axes via insert_axis.
+    // insert_axis uses gap indices in the space of the array it receives, so we must
+    // re-map: original sorted axis a_i → result-space gap (a_i - i).
+    let mut axes = original_reduced_axes.to_vec();
+    axes.sort_unstable();
+    let mapped_axes = axes
+        .iter()
+        .enumerate()
+        .map(|(i, &ax)| ax - i)
+        .collect::<Vec<_>>();
+    let res = zix_core::ops::InsertAxis::new_array(array, &mapped_axes);
+    let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+    Ok(ret.into_any())
+}
+
+fn keepdim_after_reduction(array: ArrayAny, original_reduced_axis: usize) -> PyResult<ArrayAny> {
+    // keepdims=true: for a single-axis reduction, the result-space gap equals the
+    // original axis index (only one axis removed, shift = 0).
+    let res = zix_core::ops::InsertAxis::new_array(array, &[original_reduced_axis]);
+    let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+    Ok(ret.into_any())
+}
 
 macro_rules! define_reduction_op {
     (
         $(#[$meta:meta])* $name:ident,
         $core_op:ident,
-        [$($type:tt),*]
+        dispatch = { $($dispatch:tt)* }
         $(, extra_args = ($($extra_arg:ident : $extra_ty:ty = $extra_default:expr),+))?
     ) => {
         $(#[$meta])*
@@ -22,120 +51,76 @@ macro_rules! define_reduction_op {
             keepdims: bool,
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
-            let array = crate::ops::as_array::any_to_core_array(array)?;
-            let mut axes = match axis {
-                Some(axes) => crate::util::normalize_axes(axes.into_vec(), array.ndim())?,
-                None => (0..array.ndim()).collect(),
-            };
-
-            macro_rules! call_op {
-                ($arr:expr, $ax:expr) => {
-                    zix_core::ops::$core_op::new_array($arr, $ax $($(, $extra_arg)+)?)
-                }
+            struct DispatchArgs {
+                axes: Vec<usize>,
+                $($($extra_arg: $extra_ty),*)?
             }
-
-            let res = match array.dtype().try_to_scalar() {
-                $(
-                    Some(crate::ops::common::scalar_kind!($type)) => {
-                        #[allow(unused_parens)]
-                        let array = array.to_typed::<$type>().unwrap();
-                        call_op!(array, &axes).map(|a| crate::Array::from_core(a.to_type_dyn().into_any()))
-                    }
-                )*
-                _ => Err(zix_core::Error::new(
-                    zix_core::ErrorKind::UnsupportedDtype,
-                    format!(
-                        "Op {} does not support dtype {}",
-                        stringify!($name),
-                        array.dtype()
+            static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<1, DispatchArgs>> = ::std::sync::LazyLock::new(|| {
+                crate::ops::common::OpDescriptor::new(
+                    stringify!($name),
+                    crate::ops::common::define_op1_desc!(
+                        $core_op,
+                        extra_args = DispatchArgs { axes $($(, $extra_arg)+)? },
+                        $($dispatch)*
                     ),
-                )),
-            };
-            let mut array = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
+                )
+            });
 
+            let array = crate::ops::as_array::any_to_core_array(array)?;
+            let axes = crate::util::normalize_axes_optional(axis.map(|a| a.into_vec()), array.ndim())?;
+            let mut res = DISPATCH_TABLE.dispatch_args(
+                [crate::ops::common::Operand::Array(array)],
+                DispatchArgs { axes: axes.clone(), $($($extra_arg),+)? }
+            )?;
             if keepdims {
-                let arr = array.to_core();
-                // keepdims=true: re-insert singleton axes via insert_axis.
-                // insert_axis uses gap indices in the space of the array it receives, so we must
-                // re-map: original sorted axis a_i → result-space gap (a_i - i).
-                axes.sort_unstable();
-                let mapped_axes = axes
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &ax)| ax - i)
-                    .collect::<Vec<_>>();
-                let res = zix_core::ops::InsertAxis::new_array(arr, &mapped_axes);
-                let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-                array = crate::Array::from_core(ret.into_any());
+                res = keepdims_after_reduction(res, &axes)?;
             }
-
-            Ok(array)
+            Ok(crate::Array::from_core(res))
         }
     };
+
     (
         $(#[$meta:meta])* $name:ident,
         $core_op:ident,
-        [$($type:tt),*],
-        single_axis = true
+        single_axis = true,
+        dispatch = { $($dispatch:tt)* }
     ) => {
         $(#[$meta])*
         #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
-        #[pyo3(signature = (
-            array,
-            axis=None,
-            keepdims=false,
-        ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
             axis: Option<i32>,
             keepdims: bool,
         ) -> pyo3::PyResult<crate::Array> {
-            let array = crate::ops::as_array::any_to_core_array(array)?;
-            let axis = match axis {
-                Some(axis) => crate::util::normalize_axis(axis, array.ndim())?,
-                None => {
-                    if array.ndim() != 1 {
-                        return Err(pyo3::exceptions::PyValueError::new_err(
-                            "axis must be specified for arrays with ndim != 1",
-                        ));
-                    }
-                    0
-                },
-            };
-
-            let res = match array.dtype().try_to_scalar() {
-                $(
-                    Some(crate::ops::common::scalar_kind!($type)) => {
-                        #[allow(unused_parens)]
-                        let array = array.to_typed::<$type>().unwrap();
-                        zix_core::ops::$core_op::new_array(array, axis).map(|a| crate::Array::from_core(a.to_type_dyn().into_any()))
-                    }
-                )*
-                _ => Err(zix_core::Error::new(
-                    zix_core::ErrorKind::UnsupportedDtype,
-                    format!(
-                        "Op {} does not support dtype {}",
-                        stringify!($name),
-                        array.dtype()
-                    ),
-                )),
-            };
-            let mut array = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-
-            if keepdims {
-                let arr = array.to_core();
-                // keepdims=true: for a single-axis reduction, the result-space gap equals the
-                // original axis index (only one axis removed, shift = 0).
-                let res = zix_core::ops::InsertAxis::new_array(arr, &[axis]);
-                let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
-                array = crate::Array::from_core(ret.into_any());
+            struct DispatchArgs {
+                axis: usize,
             }
+            static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<1, DispatchArgs>> = ::std::sync::LazyLock::new(|| {
+                crate::ops::common::OpDescriptor::new(
+                    stringify!($name),
+                    crate::ops::common::define_op1_desc!(
+                        $core_op,
+                        extra_args = DispatchArgs { axis },
+                        $($dispatch)*
+                    ),
+                )
+            });
 
-            Ok(array)
+            let array = crate::ops::as_array::any_to_core_array(array)?;
+            let axis = crate::util::normalize_axis_optional(axis, array.ndim())?;
+            let mut res = DISPATCH_TABLE.dispatch_args(
+                [crate::ops::common::Operand::Array(array)],
+                DispatchArgs { axis }
+            )?;
+            if keepdims {
+                res = keepdim_after_reduction(res, axis)?;
+            }
+            Ok(crate::Array::from_core(res))
         }
     };
 }
+
 define_reduction_op!(
     /// Reduces one or more axes by taking the maximum element.
     ///
@@ -167,7 +152,10 @@ define_reduction_op!(
     /// ```
     max,
     Max,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        None
+    }
 );
 define_reduction_op!(
     /// Reduces one or more axes by taking the minimum element.
@@ -198,7 +186,10 @@ define_reduction_op!(
     /// ```
     min,
     Min,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool]
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
+        None
+    }
 );
 define_reduction_op!(
     /// Returns the index of the maximum element along a single axis.
@@ -230,8 +221,11 @@ define_reduction_op!(
     /// ```
     argmax,
     ArgMax,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-    single_axis = true
+    single_axis = true,
+    dispatch = {
+        [bool, u8, i8, u16, i16, u16, i32, u32, i64, u64, f16, f32, f64],
+        None
+    }
 );
 define_reduction_op!(
     /// Returns the index of the minimum element along a single axis.
@@ -261,8 +255,11 @@ define_reduction_op!(
     /// ```
     argmin,
     ArgMin,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, bool],
-    single_axis = true
+    single_axis = true,
+    dispatch = {
+        [bool, u8, i8, u16, i16, u16, i32, u32, i64, u64, f16, f32, f64],
+        None
+    }
 );
 define_reduction_op!(
     /// Reduces one or more axes by summing all elements.
@@ -292,7 +289,10 @@ define_reduction_op!(
     /// ```
     sum,
     Sum,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        None
+    }
 );
 define_reduction_op!(
     /// Reduces one or more axes by multiplying all elements.
@@ -322,7 +322,10 @@ define_reduction_op!(
     /// ```
     product,
     Product,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>)]
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        None
+    }
 );
 define_reduction_op!(
     /// Computes the arithmetic mean along one or more axes.
@@ -351,7 +354,10 @@ define_reduction_op!(
     /// ```
     mean,
     Mean,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool]
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        None
+    }
 );
 define_reduction_op!(
     /// Computes the variance along one or more axes.
@@ -380,7 +386,10 @@ define_reduction_op!(
     /// ```
     var,
     Variance,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        None
+    },
     extra_args = (ddof: f64 = 0.0)
 );
 define_reduction_op!(
@@ -409,7 +418,10 @@ define_reduction_op!(
     /// ```
     std,
     StandardDeviation,
-    [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool],
+    dispatch = {
+        [bool, u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        None
+    },
     extra_args = (ddof: f64 = 0.0)
 );
 define_reduction_op!(
@@ -439,8 +451,10 @@ define_reduction_op!(
     /// ```
     all,
     All,
-    // [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool] TODO
-    [bool]
+    dispatch = {
+        [bool],
+        Unsafe
+    }
 );
 define_reduction_op!(
     /// Reduces one or more axes with logical OR: returns `True` if any element is truthy.
@@ -469,6 +483,8 @@ define_reduction_op!(
     /// ```
     any,
     Any,
-    // [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, (Complex<f32>), (Complex<f64>), bool] TODO
-    [bool]
+    dispatch = {
+        [bool],
+        Unsafe
+    }
 );

@@ -248,6 +248,17 @@ impl AxesArg for &[usize] {
         self[idx]
     }
 }
+impl AxesArg for Vec<usize> {
+    type ReducedDimension<D: Dimension> = DimDyn;
+    type ExpandedDimension<D: Dimension> = DimDyn;
+
+    fn len(&self) -> usize {
+        <Vec<_>>::len(self)
+    }
+    fn get(&self, idx: usize) -> usize {
+        self[idx]
+    }
+}
 impl AxesArg for &Vec<usize> {
     type ReducedDimension<D: Dimension> = DimDyn;
     type ExpandedDimension<D: Dimension> = DimDyn;

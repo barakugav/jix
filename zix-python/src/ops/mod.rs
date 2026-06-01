@@ -1,6 +1,4 @@
 mod common;
-use common::{define_op1, define_op2, promote};
-pub(crate) use common::{Operand, Scalar};
 
 mod as_array;
 pub use as_array::*;
@@ -36,7 +34,8 @@ mod sub_dtype;
 pub use sub_dtype::*;
 
 use pyo3::prelude::*;
-use zix_core::dtype::DtypeScalarKind;
+use zix_core::dtype::{Dtype, DtypeScalarKind};
+use zix_core::ArrayAny;
 
 use crate::array::Array;
 use crate::dtype::dtype_from_any;
@@ -82,24 +81,27 @@ pub fn astype<'py>(
     let py_arr = array;
     let array = &py_arr.get().arr;
     let dtype = dtype_from_any(dtype)?;
-    if dtype == *array.dtype() {
-        return Ok(py_arr.clone()); // no-op, same dtype
+    let array = astype_impl(array.clone(), &dtype)?;
+    Bound::new(py_arr.py(), Array::from_core(array))
+}
+#[inline(never)]
+pub(crate) fn astype_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
+    if array.dtype() == dtype {
+        return Ok(array); // no-op, same dtype
     }
-    if let Some((ta, tb)) = array.dtype().try_to_scalar().zip(dtype.try_to_scalar()) {
-        let array = array.clone();
-
+    if let Some((src, dst)) = array.dtype().try_to_scalar().zip(dtype.try_to_scalar()) {
         use zix_core::scalar::{f16, Complex};
 
         macro_rules! cast_impl {
             ($src_type:ty, $dst_type:ty) => {{
                 let array = array.to_typed::<$src_type>().unwrap();
                 let array = array.cast::<$dst_type>();
-                Some(Array::from_core(array.to_type_dyn().into_any()))
+                return Ok(array.to_type_dyn().into_any());
             }};
         }
         macro_rules! cast_num {
             ($src_type:ty) => {
-                match tb {
+                match dst {
                     DtypeScalarKind::I8 => cast_impl!($src_type, i8),
                     DtypeScalarKind::I16 => cast_impl!($src_type, i16),
                     DtypeScalarKind::I32 => cast_impl!($src_type, i32),
@@ -119,25 +121,25 @@ pub fn astype<'py>(
         }
         macro_rules! cast_complex {
             ($src_type:ty) => {
-                match tb {
-                    DtypeScalarKind::I8 => None,
-                    DtypeScalarKind::I16 => None,
-                    DtypeScalarKind::I32 => None,
-                    DtypeScalarKind::I64 => None,
-                    DtypeScalarKind::U8 => None,
-                    DtypeScalarKind::U16 => None,
-                    DtypeScalarKind::U32 => None,
-                    DtypeScalarKind::U64 => None,
-                    DtypeScalarKind::F16 => None,
-                    DtypeScalarKind::F32 => None,
-                    DtypeScalarKind::F64 => None,
+                match dst {
+                    DtypeScalarKind::I8 => {}
+                    DtypeScalarKind::I16 => {}
+                    DtypeScalarKind::I32 => {}
+                    DtypeScalarKind::I64 => {}
+                    DtypeScalarKind::U8 => {}
+                    DtypeScalarKind::U16 => {}
+                    DtypeScalarKind::U32 => {}
+                    DtypeScalarKind::U64 => {}
+                    DtypeScalarKind::F16 => {}
+                    DtypeScalarKind::F32 => {}
+                    DtypeScalarKind::F64 => {}
                     DtypeScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
                     DtypeScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
-                    DtypeScalarKind::Bool => None,
+                    DtypeScalarKind::Bool => cast_impl!($src_type, bool),
                 }
             };
         }
-        let array = match ta {
+        match src {
             DtypeScalarKind::I8 => cast_num!(i8),
             DtypeScalarKind::I16 => cast_num!(i16),
             DtypeScalarKind::I32 => cast_num!(i32),
@@ -153,9 +155,6 @@ pub fn astype<'py>(
             DtypeScalarKind::ComplexF64 => cast_complex!(Complex<f64>),
             DtypeScalarKind::Bool => cast_num!(bool),
         };
-        if let Some(array) = array {
-            return Bound::new(py_arr.py(), array);
-        }
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
         "Unsupported cast from {} to {}",

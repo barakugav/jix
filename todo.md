@@ -11,7 +11,6 @@
 - full/zeros/ones/
 - array::from_fn
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
-- cast types automatically in python bindings
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
 - squeeze()
@@ -19,3 +18,5 @@
 - support an arbitrary python reader in zix-python/src/archive.rs read_array
 - remove broadcast_view, broadcast itself should be view without copy
 - op2 should force S1::Dimension == S2::Dimension
+- add #[inline] annotations
+- document python `zix.negative`, differ from numpy, cast uint to int

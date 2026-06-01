@@ -54,6 +54,7 @@ macro_rules! define_op1_trait {
 
 pub(crate) use define_op1_trait;
 
+#[allow(unused)]
 macro_rules! define_op2_trait {
     (
         $trait_name:ident,
@@ -184,6 +185,7 @@ macro_rules! define_op2_trait {
     };
 }
 
+#[allow(unused)]
 pub(crate) use define_op2_trait;
 
 // macro_rules! impl_for_pairs {

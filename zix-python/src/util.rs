@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::mem::MaybeUninit;
 
 use numpy::npyffi::npy_intp;
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray};
@@ -66,9 +67,31 @@ pub(crate) fn normalize_axis(axis: i32, ndim: usize) -> pyo3::PyResult<usize> {
         axis as usize
     })
 }
+pub(crate) fn normalize_axis_optional(axis: Option<i32>, ndim: usize) -> pyo3::PyResult<usize> {
+    match axis {
+        Some(axis) => normalize_axis(axis, ndim),
+        None => {
+            if ndim != 1 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "axis must be specified for arrays with ndim != 1",
+                ));
+            }
+            Ok(0)
+        }
+    }
+}
 
 pub(crate) fn normalize_axes(axes: Vec<i32>, ndim: usize) -> pyo3::PyResult<Vec<usize>> {
     axes.into_iter().map(|a| normalize_axis(a, ndim)).collect()
+}
+pub(crate) fn normalize_axes_optional(
+    axes: Option<Vec<i32>>,
+    ndim: usize,
+) -> pyo3::PyResult<Vec<usize>> {
+    match axes {
+        Some(axes) => normalize_axes(axes, ndim),
+        None => Ok((0..ndim).collect()),
+    }
 }
 
 #[derive(FromPyObject)]
@@ -82,6 +105,21 @@ impl<T> ItemOrSequence<T> {
             ItemOrSequence::Item(item) => vec![item],
             ItemOrSequence::Sequence(seq) => seq,
         }
+    }
+}
+impl<T> From<T> for ItemOrSequence<T> {
+    fn from(item: T) -> Self {
+        ItemOrSequence::Item(item)
+    }
+}
+impl<T> From<Vec<T>> for ItemOrSequence<T> {
+    fn from(seq: Vec<T>) -> Self {
+        ItemOrSequence::Sequence(seq)
+    }
+}
+impl<T, const N: usize> From<[T; N]> for ItemOrSequence<T> {
+    fn from(arr: [T; N]) -> Self {
+        ItemOrSequence::Sequence(arr.into())
     }
 }
 impl_stub_type!(ItemOrSequence<i32> = i32 | Vec<i32>);
@@ -109,6 +147,30 @@ pub enum OrKwargs<T> {
 }
 impl_stub_type!(OrKwargs< ArrayParams> = ArrayParams | PyDict);
 impl_stub_type!(OrKwargs< Bound<'_, ArrayParams>> = Bound<'_, ArrayParams> | PyDict);
+
+pub(crate) trait IterExt: Iterator {
+    fn try_collect_array<T, E, const N: usize>(self) -> Result<Option<[T; N]>, E>
+    where
+        Self: Sized + Iterator<Item = Result<T, E>>,
+        T: Sized,
+    {
+        let mut iter = self;
+        let mut res = unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() };
+        let mut res_iter = res.iter_mut();
+        loop {
+            match (iter.next(), res_iter.next()) {
+                (Some(item), Some(res)) => {
+                    res.write(item?);
+                }
+                (None, None) => break,
+                (_, _) => return Ok(None), // length mismatch
+            }
+        }
+        let res = unsafe { std::mem::transmute_copy::<[MaybeUninit<T>; N], [T; N]>(&res) };
+        Ok(Some(res))
+    }
+}
+impl<I> IterExt for I where I: Iterator {}
 
 #[cfg(test)]
 mod tests {

@@ -5,200 +5,16 @@ use crate::ops::{define_op1, define_op2_rhs_fixed};
 use crate::scalar::{f16, Complex};
 use crate::{Array, ArrayStorage};
 
-pub(crate) mod _traits {
-    use crate::scalar::traits_util::{define_op1_trait, define_op2_trait};
-    #[allow(unused_imports)]
-    use crate::scalar::{f16, Complex};
-
-    define_op2_trait!(
-        LogicalAnd,
-        logical_and,
-        |a, b| <_ as crate::scalar::Cast<bool>>::cast(a) && <_ as crate::scalar::Cast<bool>>::cast(b),
-        [pairs_of[i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Complex<f32>, Complex<f64>, bool] => bool]
-        // TODO: f16
-    );
-
-    define_op2_trait!(
-        LogicalOr,
-        logical_or,
-        |a, b| <_ as crate::scalar::Cast<bool>>::cast(a) || <_ as crate::scalar::Cast<bool>>::cast(b),
-        [pairs_of[i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Complex<f32>, Complex<f64>, bool] => bool]
-        // TODO: f16
-    );
-
-    define_op2_trait!(
-        LogicalXor,
-        logical_xor,
-        |a, b| <_ as crate::scalar::Cast<bool>>::cast(a) ^ <_ as crate::scalar::Cast<bool>>::cast(b),
-        [pairs_of[i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Complex<f32>, Complex<f64>, bool] => bool]
-        // TODO: f16
-    );
-
-    define_op1_trait!(
-        LogicalNot,
-        logical_not,
-        |a| !<_ as crate::scalar::Cast<bool>>::cast(a),
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, Complex<f32>, Complex<f64>, bool] => bool
-        // TODO: f16
-    );
-}
-
-define_op2!(
-    /// Element-wise logical AND of two arrays.
-    ///
-    /// Output dtype is `bool`.
-    ///
-    /// Each element is first cast to `bool` (zero -> `false`, any non-zero value -> `true`;
-    /// for `bool` this is the identity; for complex, non-zero means at least one component
-    /// is non-zero), then the logical AND is applied. Returns `true` only when both elements
-    /// are truthy.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::logical_and()`](crate::Array::logical_and).
-    ///
-    /// # Examples
-    /// ```
-    /// use zix::{Array, ArrayParams};
-    /// use ndarray::array;
-    ///
-    /// let a = Array::compact_array(&array![0i32, 1, 0, 5])?;
-    /// let b = Array::compact_array(&array![1i32, 1, 0, 0])?;
-    /// let result = a.logical_and(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[false, true, false, false]);
-    ///
-    /// // Works on bool arrays directly.
-    /// let c = Array::compact_array(&array![true, false, true])?;
-    /// let d = Array::compact_array(&array![true, true, false])?;
-    /// let result = c.logical_and(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, false]);
-    /// # Ok::<(), zix::Error>(())
-    /// ```
-    LogicalAnd,
-    LogicalAndKernel,
-    <crate::scalar::LogicalAnd>::logical_and(a, b),
-);
-
-define_op2!(
-    /// Element-wise logical OR of two arrays.
-    ///
-    /// Output dtype is `bool`.
-    ///
-    /// Each element is first cast to `bool` (zero -> `false`, any non-zero value -> `true`;
-    /// for `bool` this is the identity; for complex, non-zero means at least one component
-    /// is non-zero), then the logical OR is applied. Returns `true` when at least one element
-    /// is truthy.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::logical_or()`](crate::Array::logical_or).
-    ///
-    /// # Examples
-    /// ```
-    /// use zix::{Array, ArrayParams};
-    /// use ndarray::array;
-    ///
-    /// let a = Array::compact_array(&array![0i32, 1, 0, 5])?;
-    /// let b = Array::compact_array(&array![0i32, 0, 0, 0])?;
-    /// let result = a.logical_or(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[false, true, false, true]);
-    ///
-    /// // Works on bool arrays directly.
-    /// let c = Array::compact_array(&array![true, false, false])?;
-    /// let d = Array::compact_array(&array![false, true, false])?;
-    /// let result = c.logical_or(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
-    /// # Ok::<(), zix::Error>(())
-    /// ```
-    LogicalOr,
-    LogicalOrKernel,
-    <crate::scalar::LogicalOr>::logical_or(a, b),
-);
-
-define_op2!(
-    /// Element-wise logical XOR of two arrays.
-    ///
-    /// Output dtype is `bool`.
-    ///
-    /// Each element is first cast to `bool` (zero -> `false`, any non-zero value -> `true`;
-    /// for `bool` this is the identity; for complex, non-zero means at least one component
-    /// is non-zero), then the logical XOR is applied. Returns `true` when exactly one element
-    /// is truthy.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::logical_xor()`](crate::Array::logical_xor).
-    ///
-    /// # Examples
-    /// ```
-    /// use zix::{Array, ArrayParams};
-    /// use ndarray::array;
-    ///
-    /// let a = Array::compact_array(&array![0i32, 1, 0, 5])?;
-    /// let b = Array::compact_array(&array![0i32, 1, 1, 0])?;
-    /// let result = a.logical_xor(b).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[false, false, true, true]);
-    ///
-    /// // Works on bool arrays directly.
-    /// let c = Array::compact_array(&array![true, false, true])?;
-    /// let d = Array::compact_array(&array![true, false, false])?;
-    /// let result = c.logical_xor(d).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[false, false, true]);
-    /// # Ok::<(), zix::Error>(())
-    /// ```
-    LogicalXor,
-    LogicalXorKernel,
-    <crate::scalar::LogicalXor>::logical_xor(a, b),
-);
-
-define_op1!(
-    /// Element-wise logical NOT.
-    ///
-    /// Output dtype is `bool`.
-    ///
-    /// Each element is first cast to `bool` (zero -> `false`, any non-zero value -> `true`;
-    /// for `bool` this is the identity; for complex, non-zero means at least one component
-    /// is non-zero), then negated. Returns `true` for zero (falsy) elements and `false` for
-    /// non-zero (truthy) elements.
-    ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::logical_not()`](crate::Array::logical_not).
-    ///
-    /// # Examples
-    /// ```
-    /// use zix::{Array, ArrayParams};
-    /// use ndarray::array;
-    ///
-    /// let a = Array::compact_array(&array![0i32, 1, -3, 0])?;
-    /// let result = a.logical_not().to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[true, false, false, true]);
-    ///
-    /// // Works on bool arrays directly.
-    /// let b = Array::compact_array(&array![true, false, true])?;
-    /// let result = b.logical_not().to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
-    /// # Ok::<(), zix::Error>(())
-    /// ```
-    LogicalNot,
-    LogicalNotKernel,
-    <crate::ops::bitwise::_traits::LogicalNot>::logical_not,
-);
-
 define_op2!(
     /// Element-wise bitwise AND of two arrays.
     ///
     /// Applies the bitwise AND to each pair of corresponding bits. For `bool` this is
-    /// equivalent to logical AND.
+    /// equivalent to logical AND (`&&`).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::bitwise_and()`](crate::Array::bitwise_and).
+    /// as the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand).
     ///
     /// # Examples
     /// ```
@@ -207,30 +23,31 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b1111])?;
     /// let b = Array::compact_array(&array![0b1010u8, 0b0101, 0b0000])?;
-    /// let result = a.bitwise_and(b).to_ndarray()?;
+    /// let result = (a & b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b1000, 0b0000, 0b0000]);
     ///
     /// // Mask out the lower nibble.
     /// let c = Array::compact_array(&array![0xABu8, 0xCDu8])?;
     /// let d = Array::compact_array(&array![0xF0u8, 0xF0u8])?;
-    /// let result = c.bitwise_and(d).to_ndarray()?;
+    /// let result = (c & d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xA0, 0xC0]);
     /// # Ok::<(), zix::Error>(())
     /// ```
-    BitwiseAnd,
-    BitwiseAndKernel,
+    And,
+    AndKernel,
     <core::ops::BitAnd>::bitand(a, b),
+    core_op = BitAnd::bitand,
 );
 define_op2!(
     /// Element-wise bitwise OR of two arrays.
     ///
     /// Applies the bitwise OR to each pair of corresponding bits. For `bool` this is
-    /// equivalent to logical OR.
+    /// equivalent to logical OR (`||`).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::bitwise_or()`](crate::Array::bitwise_or).
+    /// the `|` operator or [`Array::bitor()`](core::ops::BitOr::bitor).
     ///
     /// # Examples
     /// ```
@@ -239,19 +56,20 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b0000])?;
     /// let b = Array::compact_array(&array![0b1010u8, 0b0101, 0b1111])?;
-    /// let result = a.bitwise_or(b).to_ndarray()?;
+    /// let result = (a | b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b1110, 0b1111, 0b1111]);
     ///
     /// // Set a specific bit pattern.
     /// let c = Array::compact_array(&array![0x0Fu8, 0x00u8])?;
     /// let d = Array::compact_array(&array![0xF0u8, 0xF0u8])?;
-    /// let result = c.bitwise_or(d).to_ndarray()?;
+    /// let result = (c | d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xFF, 0xF0]);
     /// # Ok::<(), zix::Error>(())
     /// ```
-    BitwiseOr,
-    BitwiseOrKernel,
+    Or,
+    OrKernel,
     <core::ops::BitOr>::bitor(a, b),
+    core_op = BitOr::bitor,
 );
 define_op2!(
     /// Element-wise bitwise XOR of two arrays.
@@ -262,7 +80,7 @@ define_op2!(
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::bitwise_xor()`](crate::Array::bitwise_xor).
+    /// the `^` operator or [`Array::bitxor()`](core::ops::BitXor::bitxor).
     ///
     /// # Examples
     /// ```
@@ -271,31 +89,31 @@ define_op2!(
     ///
     /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b1111])?;
     /// let b = Array::compact_array(&array![0b1010u8, 0b1010, 0b1111])?;
-    /// let result = a.bitwise_xor(b).to_ndarray()?;
+    /// let result = (a ^ b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b0110, 0b0000, 0b0000]);
     ///
     /// // Toggle bits using a mask.
     /// let c = Array::compact_array(&array![0xFFu8, 0x0Fu8])?;
     /// let d = Array::compact_array(&array![0x0Fu8, 0x0Fu8])?;
-    /// let result = c.bitwise_xor(d).to_ndarray()?;
+    /// let result = (c ^ d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xF0, 0x00]);
     /// # Ok::<(), zix::Error>(())
     /// ```
-    BitwiseXor,
-    BitwiseXorKernel,
+    Xor,
+    XorKernel,
     <core::ops::BitXor>::bitxor(a, b),
+    core_op = BitXor::bitxor,
 );
 
 define_op1!(
-    /// Element-wise bitwise NOT (one's complement).
+    /// Element-wise bitwise NOT.
     ///
     /// Flips every bit. For `bool` this is equivalent to logical NOT.
-    /// For signed integers the result is `-(x + 1)` (e.g. `!0i32 == -1`).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::bitwise_not()`](crate::Array::bitwise_not).
+    /// the `!` operator or [`Array::not()`](core::ops::Not::not).
     ///
     /// # Examples
     /// ```
@@ -303,18 +121,19 @@ define_op1!(
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b00001111u8, 0b11110000u8, 0u8])?;
-    /// let result = a.bitwise_not().to_ndarray()?;
+    /// let result = (!a).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b11110000, 0b00001111, 0xFF]);
     ///
     /// // For bool arrays, bitwise NOT is equivalent to logical NOT.
     /// let b = Array::compact_array(&array![true, false])?;
-    /// let result = b.bitwise_not().to_ndarray()?;
+    /// let result = (!b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
     /// # Ok::<(), zix::Error>(())
     /// ```
-    BitwiseNot,
-    BitwiseNotKernel,
+    Not,
+    NotKernel,
     <core::ops::Not>::not,
+    core_op = Not::not,
 );
 
 define_op2!(
@@ -662,14 +481,6 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_op2_method!(logical_and: LogicalAnd, crate::scalar::LogicalAnd);
-    define_array_op2_method!(logical_or: LogicalOr, crate::scalar::LogicalOr);
-    define_array_op2_method!(logical_xor: LogicalXor, crate::scalar::LogicalXor);
-    define_array_op1_method!(logical_not: LogicalNot, crate::scalar::LogicalNot);
-    define_array_op2_method!(bitwise_and: BitwiseAnd, core::ops::BitAnd);
-    define_array_op2_method!(bitwise_or: BitwiseOr, core::ops::BitOr);
-    define_array_op2_method!(bitwise_xor: BitwiseXor, core::ops::BitXor);
-    define_array_op1_method!(bitwise_not: BitwiseNot, core::ops::Not);
     define_array_op2_method!(bitwise_shift_left: BitwiseShiftLeft, core::ops::Shl);
     define_array_op2_method!(bitwise_shift_right: BitwiseShiftRight, core::ops::Shr);
     define_array_op2_method!(bitwise_rotate_left: BitwiseRotateLeft, num_traits::PrimInt, fixed_lhs_type = u32);
@@ -684,30 +495,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "num-complex")]
-    #[allow(non_camel_case_types)]
-    type complex_f32 = crate::scalar::Complex<f32>;
-    #[cfg(feature = "num-complex")]
-    #[allow(non_camel_case_types)]
-    type complex_f64 = crate::scalar::Complex<f64>;
+    use std::ops::{BitAnd, BitOr, BitXor, Not};
+
     use crate::ops::op1::tests::test_op1;
     use crate::ops::op2::tests::test_op2;
 
-    // any_strategy: need zeros in the sample to exercise the true branch of logical_not.
-    // Reference: a == Default::default() is equivalent to !cast::<_, bool>(a) for all types.
-    test_op1!(
-        logical_not,
-        |a| a == Default::default(),
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        logical_op_strategy,
-        // #[cfg(feature = "half")]
-        // [f16], // TODO
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
     // bitwise_not: !a, full range is valid (no overflow for bitwise complement)
     test_op1!(
-        bitwise_not,
+        not,
         |a| !a,
         [i8, i16, i32, i64, u8, u16, u32, u64, bool],
         any_strategy
@@ -753,19 +548,19 @@ mod tests {
 
     // bitwise_and/or/xor: same output type, full range valid
     test_op2!(
-        bitwise_and,
+        bitand,
         |a, b| a & b,
         [i8, i16, i32, i64, u8, u16, u32, u64, bool],
         any_strategy
     );
     test_op2!(
-        bitwise_or,
+        bitor,
         |a, b| a | b,
         [i8, i16, i32, i64, u8, u16, u32, u64, bool],
         any_strategy
     );
     test_op2!(
-        bitwise_xor,
+        bitxor,
         |a, b| a ^ b,
         [i8, i16, i32, i64, u8, u16, u32, u64, bool],
         any_strategy
@@ -799,36 +594,4 @@ mod tests {
     //     [i8, i16, i32, i64, u8, u16, u32, u64],
     //     any_strategy
     // );
-
-    // logical ops: bool output; reference uses != Default::default() to match cast::<T, bool>
-    test_op2!(
-        logical_and,
-        |a, b| (a != Default::default()) && (b != Default::default()),
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        logical_op_strategy,
-        // #[cfg(feature = "half")]
-        // [f16], // TODO
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
-    test_op2!(
-        logical_or,
-        |a, b| (a != Default::default()) || (b != Default::default()),
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        logical_op_strategy,
-        // #[cfg(feature = "half")]
-        // [f16], // TODO
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
-    test_op2!(
-        logical_xor,
-        |a, b| (a != Default::default()) ^ (b != Default::default()),
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        logical_op_strategy,
-        // #[cfg(feature = "half")]
-        // [f16], // TODO
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
 }

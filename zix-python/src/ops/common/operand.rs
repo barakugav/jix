@@ -3,101 +3,50 @@ use pyo3::exceptions::PyOverflowError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
-use zix_core::dtype::{DtypeScalarKind, Dtyped, Itemsize};
+use zix_core::dtype::{DtypeScalarKind, Dtyped};
 use zix_core::scalar::{f16, Complex};
-use zix_core::storage::Plain;
-use zix_core::{Array as ZixArray, DimDyn, TypeDyn};
+use zix_core::{Array as ZixArray, ArrayAny};
 
 use crate::dtype::dtype_from_numpy;
+use crate::ops::common::{Precision, Rank};
 use crate::util::{check_ndim, DimArray, IntoPyResult};
 use crate::Array;
 
-#[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum Operand {
-    Zix(Py<Array>),
-    Numpy(ZixArray<Plain<Py<PyUntypedArray>, TypeDyn, DimDyn>>),
+    Array(ArrayAny),
     Scalar {
         value: Scalar,
-        shape: Vec<u64>,
+        shape: DimArray<u64>,
         precision: Option<Precision>,
     },
 }
-#[derive(Debug)]
-pub(crate) enum Scalar {
-    Bool(bool),
-    UInt(u64),
-    Int(i64),
-    Float(f64),
-    Complex(Complex<f64>),
-}
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub enum Precision {
-    P1 = 0,
-    P2 = 1,
-    P4 = 2,
-    P8 = 3,
-}
-
-impl Precision {
-    pub(crate) fn from_itemsize(itemsize: Itemsize) -> Self {
-        match itemsize {
-            1 => Self::P1,
-            2 => Self::P2,
-            4 => Self::P4,
-            8 => Self::P8,
-            _ => unreachable!(),
-        }
-    }
-
-    pub(crate) fn higher(self) -> Option<Self> {
-        match self {
-            Self::P1 => Some(Self::P2),
-            Self::P2 => Some(Self::P4),
-            Self::P4 => Some(Self::P8),
-            Self::P8 => None,
-        }
-    }
-}
-
 impl Operand {
     pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
         if let Ok(array) = value.cast::<Array>() {
-            return Ok(Self::Zix(array.clone().unbind()));
+            return Ok(Self::Array(array.get().arr.clone()));
         };
 
         let py = value.py();
         let np = numpy::get_array_module(py)?;
         if !value.is_instance(&np.getattr("generic")?)? {
+            let mut scalar = None;
             if let Ok(value) = value.cast::<PyBool>() {
-                return Ok(Self::Scalar {
-                    value: Scalar::Bool(value.extract()?),
-                    precision: None,
-                    shape: Vec::new(),
-                });
+                scalar = Some(Scalar::Bool(value.extract()?));
+            } else if let Ok(value) = value.cast::<PyInt>() {
+                scalar = Some(Scalar::Int(value.extract()?));
+            } else if let Ok(value) = value.cast::<PyFloat>() {
+                scalar = Some(Scalar::Float(value.extract()?));
+            } else if let Ok(value) = value.cast::<PyComplex>() {
+                scalar = Some(Scalar::Complex(Complex {
+                    re: value.real(),
+                    im: value.imag(),
+                }));
             }
-            if let Ok(value) = value.cast::<PyInt>() {
+            if let Some(scalar) = scalar {
                 return Ok(Self::Scalar {
-                    value: Scalar::Int(value.extract()?),
+                    value: scalar,
                     precision: None,
-                    shape: Vec::new(),
-                });
-            }
-            if let Ok(value) = value.cast::<PyFloat>() {
-                return Ok(Self::Scalar {
-                    value: Scalar::Float(value.extract()?),
-                    precision: None,
-                    shape: Vec::new(),
-                });
-            }
-            if let Ok(value) = value.cast::<PyComplex>() {
-                return Ok(Self::Scalar {
-                    value: Scalar::Complex(Complex {
-                        re: value.real(),
-                        im: value.imag(),
-                    }),
-                    precision: None,
-                    shape: Vec::new(),
+                    shape: DimArray::new(),
                 });
             }
         }
@@ -175,7 +124,7 @@ impl Operand {
             return Ok(Self::Scalar {
                 value,
                 precision,
-                shape: Vec::new(),
+                shape: DimArray::new(),
             });
         }
 
@@ -204,26 +153,25 @@ impl Operand {
         };
         let storage = storage.into_py_result()?;
 
-        Ok(Self::Numpy(ZixArray::from_storage(storage)))
+        Ok(Self::Array(ZixArray::from_storage(storage).into_any()))
     }
 
-    pub(crate) fn into_py_array<'py>(self, py: Python<'py>) -> PyResult<Bound<'py, Array>> {
+    pub(crate) fn into_array(self) -> PyResult<ArrayAny> {
         match self {
-            Operand::Zix(array) => Ok(array.into_bound(py)),
-            Operand::Numpy(array) => Bound::new(py, Array::from_core(array.into_any())),
+            Operand::Array(array) => Ok(array),
             Operand::Scalar {
                 value,
                 precision,
                 shape,
             } => {
-                fn create_scalar_array<T>(value: T, shape: &[u64]) -> PyResult<Array>
+                fn create_scalar_array<T>(value: T, shape: &[u64]) -> PyResult<ArrayAny>
                 where
                     T: Dtyped,
                 {
                     let array = zix_core::Array::from_storage(
                         zix_core::storage::Scalar::new(value, shape).into_py_result()?,
                     );
-                    Ok(Array::from_core(array.to_type_dyn().into_any()))
+                    Ok(array.to_type_dyn().into_any())
                 }
                 #[allow(clippy::unnecessary_cast)]
                 let array = match value {
@@ -260,8 +208,52 @@ impl Operand {
                         Some(_) => unreachable!(),
                     },
                 };
-                Bound::new(py, array?)
+                array
             }
         }
     }
+
+    pub(crate) fn rank_precision(&self) -> Option<(Rank, Option<Precision>)> {
+        match self {
+            Operand::Array(arr) => arr
+                .dtype()
+                .try_to_scalar()
+                .map(scalar_kind_to_rank_precision),
+            Operand::Scalar {
+                value,
+                precision,
+                shape: _,
+            } => {
+                let kind = match value {
+                    Scalar::Bool(_) => Rank::Bool,
+                    Scalar::UInt(_) => Rank::UInt,
+                    Scalar::Int(_) => Rank::Int,
+                    Scalar::Float(_) => Rank::Float,
+                    Scalar::Complex(_) => Rank::Complex,
+                };
+                Some((kind, *precision))
+            }
+        }
+    }
+}
+
+pub(crate) fn scalar_kind_to_rank_precision(kind: DtypeScalarKind) -> (Rank, Option<Precision>) {
+    let (rank, precision) = match kind {
+        _ if kind.is_bool() => (Rank::Bool, 1),
+        _ if kind.is_unsigned_integer() => (Rank::UInt, kind.itemsize()),
+        _ if kind.is_integer() => (Rank::Int, kind.itemsize()),
+        _ if kind.is_float() => (Rank::Float, kind.itemsize()),
+        _ if kind.is_complex() => (Rank::Complex, kind.itemsize() / 2),
+        _ => unreachable!(),
+    };
+    (rank, Some(Precision::from_itemsize(precision)))
+}
+
+#[derive(Debug)]
+pub(crate) enum Scalar {
+    Bool(bool),
+    UInt(u64),
+    Int(i64),
+    Float(f64),
+    Complex(Complex<f64>),
 }

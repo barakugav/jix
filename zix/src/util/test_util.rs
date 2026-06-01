@@ -47,6 +47,7 @@ pub(crate) trait ScalarStrategy:
     Dtyped + Default + core::fmt::Debug + Clone + 'static
 {
     fn any_strategy() -> BoxedStrategy<Self>;
+    #[allow(unused)]
     fn logical_op_strategy() -> BoxedStrategy<Self> {
         Self::any_strategy()
             .prop_union(Just(Self::default()).boxed())

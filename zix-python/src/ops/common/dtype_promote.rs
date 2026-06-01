@@ -1,168 +1,118 @@
-use zix_core::dtype::DtypeScalarKind;
+use zix_core::dtype::{DtypeScalarKind, Itemsize};
 
-use crate::ops::common::Precision;
-use crate::ops::{Operand, Scalar};
+use crate::ops::common::scalar_kind_to_rank_precision;
 
-pub(crate) fn promote(ops: &[&Operand]) -> Option<DtypeScalarKind> {
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    pub enum Rank {
-        Bool = 0,
-        UInt = 1,
-        Int = 2,
-        Float = 3,
-        Complex = 4,
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Rank {
+    Bool = 0,
+    UInt = 1,
+    Int = 2,
+    Float = 3,
+    Complex = 4,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Precision {
+    P1 = 0,
+    P2 = 1,
+    P4 = 2,
+    P8 = 3,
+}
+
+impl Precision {
+    pub(crate) fn from_itemsize(itemsize: Itemsize) -> Self {
+        match itemsize {
+            1 => Self::P1,
+            2 => Self::P2,
+            4 => Self::P4,
+            8 => Self::P8,
+            _ => unreachable!(),
+        }
     }
 
-    fn to_rank_precision(value: &Operand) -> Option<(Rank, Option<Precision>)> {
-        fn to_rank_precision_impl(kind: DtypeScalarKind) -> (Rank, Option<Precision>) {
-            let (rank, precision) = match kind {
-                _ if kind.is_bool() => return (Rank::Bool, None),
-                _ if kind.is_unsigned_integer() => (Rank::UInt, kind.itemsize()),
-                _ if kind.is_integer() => (Rank::Int, kind.itemsize()),
-                _ if kind.is_float() => (Rank::Float, kind.itemsize()),
-                _ if kind.is_complex() => (Rank::Complex, kind.itemsize() / 2),
-                _ => unreachable!(),
-            };
-            (rank, Some(Precision::from_itemsize(precision)))
+    pub(crate) fn higher(self) -> Option<Self> {
+        match self {
+            Self::P1 => Some(Self::P2),
+            Self::P2 => Some(Self::P4),
+            Self::P4 => Some(Self::P8),
+            Self::P8 => None,
         }
+    }
+}
 
-        match value {
-            Operand::Zix(arr) => arr
-                .get()
-                .arr
-                .dtype()
-                .try_to_scalar()
-                .map(to_rank_precision_impl),
-            Operand::Numpy(arr) => arr.dtype().try_to_scalar().map(to_rank_precision_impl),
-            Operand::Scalar {
-                value,
-                precision,
-                shape: _,
-            } => {
-                let kind = match value {
-                    Scalar::Bool(_) => Rank::Bool,
-                    Scalar::UInt(_) => Rank::UInt,
-                    Scalar::Int(_) => Rank::Int,
-                    Scalar::Float(_) => Rank::Float,
-                    Scalar::Complex(_) => Rank::Complex,
-                };
-                Some((kind, *precision))
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CastKind {
+    None,
+    Safe,
+    Unsafe,
+}
+
+impl CastKind {
+    pub(crate) fn is_cast_allowed(
+        &self,
+        src: (Rank, Option<Precision>),
+        dst: DtypeScalarKind,
+    ) -> bool {
+        let (src_rank, src_precision) = src;
+        let (dst_rank, dst_precision) = scalar_kind_to_rank_precision(dst);
+        let dst_precision = dst_precision.unwrap();
+
+        match self {
+            CastKind::None => {
+                src_rank == dst_rank && src_precision.map_or(true, |p| p == dst_precision)
             }
-        }
-    }
+            CastKind::Safe => {
+                if src_rank > dst_rank {
+                    return false;
+                }
 
-    if ops.is_empty() {
-        return None;
-    }
-    let mut ranks_precisions = ops
-        .iter()
-        .map(|op| to_rank_precision(op))
-        .collect::<Option<Vec<_>>>()?
-        .into_iter();
+                match (src_rank, dst_rank) {
+                    // bool can be cast to anything
+                    (Rank::Bool, _) => true,
 
-    let (mut result_rank, mut result_precision) = ranks_precisions.next().unwrap();
-    for (mut b_rank, mut b_precision) in ranks_precisions {
-        let (mut a_rank, mut a_precision) = (result_rank, result_precision);
-
-        if a_rank < b_rank {
-            std::mem::swap(&mut a_rank, &mut b_rank);
-            std::mem::swap(&mut a_precision, &mut b_precision);
-        }
-        debug_assert!(a_rank >= b_rank);
-
-        (result_rank, result_precision) = match (a_rank, b_rank) {
-            (Rank::Bool, Rank::Bool)
-            | (Rank::UInt, Rank::UInt)
-            | (Rank::Int, Rank::Int)
-            | (Rank::Float, Rank::Float)
-            | (Rank::Complex, Rank::Complex) => (a_rank, std::cmp::max(a_precision, b_precision)),
-
-            (Rank::Bool, _) => (b_rank, b_precision),
-            (_, Rank::Bool) => unreachable!(), // a_rank >= b_rank
-
-            (Rank::Int, Rank::UInt) => {
-                if let Some(b_precision) = b_precision {
-                    // increase unsigned precision to prevent overflow, e.g. u8 + i8 -> i16 instead of i8
-                    if let Some(b_promoted_prec) = b_precision.higher() {
-                        (Rank::Int, std::cmp::max(a_precision, Some(b_promoted_prec)))
-                    } else {
-                        // if unsigned precision is already max (u64), promote to f64
-                        (Rank::Float, Some(Precision::P8))
+                    // equal rank
+                    (Rank::UInt, Rank::UInt)
+                    | (Rank::Int, Rank::Int)
+                    | (Rank::Float, Rank::Float)
+                    | (Rank::Complex, Rank::Complex) |
+                    // float to complex
+                    (Rank::Float, Rank::Complex) => {
+                        // Same precision is OK
+                        if src_precision.is_none() {
+                            true
+                        } else {
+                            src_precision.unwrap() <= dst_precision
+                        }
                     }
-                } else {
-                    (Rank::Int, a_precision)
-                }
-            }
-            (Rank::UInt, Rank::Int) => unreachable!(), // a_rank >= b_rank
-            (Rank::Float, Rank::UInt | Rank::Int) => {
-                let mut precision = a_precision;
-                if let Some(b_precision) = b_precision {
-                    // when promoting int/uint to float, increase number of bytes to preserve precision
-                    // f32 + i/u8 -> f32
-                    // f32 + i/u16 -> f32
-                    // f32 + i/u32 -> f64
-                    // f32 + i/u64 -> f64
-                    let b_promoted_prec = b_precision.higher().unwrap_or(Precision::P8);
-                    precision = std::cmp::max(a_precision, Some(b_promoted_prec));
-                }
-                (Rank::Float, precision)
-            }
-            (Rank::UInt | Rank::Int, Rank::Float) => unreachable!(), // a_rank >= b_rank
 
-            (Rank::Complex, Rank::UInt | Rank::Int) => {
-                let mut precision = a_precision;
-                if let Some(b_precision) = b_precision {
-                    // when promoting int/uint to complex, increase number of bytes to preserve precision
-                    // c<f32> + i/u8 -> c<f32>
-                    // c<f32> + i/u16 -> c<f32>
-                    // c<f32> + i/u32 -> c<f64>
-                    // c<f32> + i/u64 -> c<f64>
-                    let b_promoted_prec = b_precision.higher().unwrap_or(Precision::P8);
-                    precision = std::cmp::max(a_precision, Some(b_promoted_prec));
+                    // uint to int
+                    (Rank::UInt, Rank::Int)
+                    // u/int to float/complex
+                    | (Rank::UInt | Rank::Int, Rank::Float)
+                    | (Rank::UInt | Rank::Int, Rank::Complex) => {
+                        // Higher precision is required
+                        if src_precision.is_none() {
+                            true
+                        } else if let Some(src_precision) = src_precision.unwrap().higher() {
+                            src_precision <= dst_precision
+                        } else {
+                            false
+                        }
+                    }
+
+                    (_, Rank::Bool)
+                    | (Rank::Int, Rank::UInt)
+                    | (Rank::Float, Rank::UInt | Rank::Int)
+                    | (Rank::Complex, Rank::UInt | Rank::Int | Rank::Float) => {
+                        unreachable!() // src_rank <= dst_rank
+                    }
                 }
-                (Rank::Complex, precision)
             }
-            (Rank::Complex, Rank::Float) => {
-                (Rank::Complex, std::cmp::max(a_precision, b_precision))
-            }
-            (Rank::UInt | Rank::Int | Rank::Float, Rank::Complex) => {
-                unreachable!() // a_rank >= b_rank
-            }
-        };
+            CastKind::Unsafe => match (src_rank, dst_rank) {
+                (Rank::Bool | Rank::UInt | Rank::Int | Rank::Float, _) => true,
+                (Rank::Complex, Rank::Bool | Rank::Complex) => true,
+                (Rank::Complex, Rank::UInt | Rank::Int | Rank::Float) => false,
+            },
+        }
     }
-
-    let (rank, precision) = (result_rank, result_precision);
-    Some(match rank {
-        Rank::Bool => match precision {
-            None => DtypeScalarKind::Bool,
-            Some(_) => unreachable!(),
-        },
-        Rank::UInt => match precision {
-            Some(Precision::P1) => DtypeScalarKind::U8,
-            Some(Precision::P2) => DtypeScalarKind::U16,
-            Some(Precision::P4) => DtypeScalarKind::U32,
-            Some(Precision::P8) => DtypeScalarKind::U64,
-            None => DtypeScalarKind::U64,
-        },
-        Rank::Int => match precision {
-            Some(Precision::P1) => DtypeScalarKind::I8,
-            Some(Precision::P2) => DtypeScalarKind::I16,
-            Some(Precision::P4) => DtypeScalarKind::I32,
-            Some(Precision::P8) => DtypeScalarKind::I64,
-            None => DtypeScalarKind::I64,
-        },
-        Rank::Float => match precision {
-            Some(Precision::P1) => unreachable!(),
-            Some(Precision::P2) => DtypeScalarKind::F16,
-            Some(Precision::P4) => DtypeScalarKind::F32,
-            Some(Precision::P8) => DtypeScalarKind::F64,
-            None => DtypeScalarKind::F64,
-        },
-        Rank::Complex => match precision {
-            Some(Precision::P1) | Some(Precision::P2) => unreachable!(),
-            Some(Precision::P4) => DtypeScalarKind::ComplexF32,
-            Some(Precision::P8) => DtypeScalarKind::ComplexF64,
-            None => DtypeScalarKind::ComplexF64,
-        },
-    })
 }

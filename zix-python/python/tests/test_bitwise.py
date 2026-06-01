@@ -15,6 +15,7 @@ from tests_util import (
     carrays2_mixed_strategy,
     carrays2_strategy,
     complexes,
+    floats,
     ints,
     logical_op_element_strategy,
     shift_safe_element_strategy,
@@ -25,17 +26,7 @@ import zix
 
 _int_dtypes = ints + uints
 _int_bool_dtypes = ints + uints + [np.bool_]
-_logical_dtypes = (
-    ints
-    + uints
-    + [
-        # np.float16,  # not supported, TODO
-        np.float32,
-        np.float64,
-    ]
-    + complexes
-    + [np.bool_]
-)
+_logical_dtypes = ints + uints + floats + complexes + [np.bool_]
 _multibyte_int_dtypes = [np.int16, np.int32, np.int64, np.uint16, np.uint32, np.uint64]
 
 # ---------------------------------------------------------------------------
@@ -244,22 +235,22 @@ def test_bitwise_xor(dtype: np.dtype, data: DataObject):
 # shift ops: shift amount must be in [0, bit_width) to avoid debug panic
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
-def test_bitwise_shift_left(dtype: np.dtype, data: DataObject):
+def test_bitwise_left_shift(dtype: np.dtype, data: DataObject):
     shift_st = shift_safe_element_strategy(dtype)
     (np_a, za), (np_b, zb) = data.draw(
         carrays2_strategy(dtype, element_st=shift_st), label="arrays"
     )
-    assert_array_matches(zix.bitwise_shift_left(za, zb), np_a << np_b, data=data)
+    assert_array_matches(zix.bitwise_left_shift(za, zb), np_a << np_b, data=data)
 
 
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
-def test_bitwise_shift_right(dtype: np.dtype, data: DataObject):
+def test_bitwise_right_shift(dtype: np.dtype, data: DataObject):
     shift_st = shift_safe_element_strategy(dtype)
     (np_a, za), (np_b, zb) = data.draw(
         carrays2_strategy(dtype, element_st=shift_st), label="arrays"
     )
-    assert_array_matches(zix.bitwise_shift_right(za, zb), np_a >> np_b, data=data)
+    assert_array_matches(zix.bitwise_right_shift(za, zb), np_a >> np_b, data=data)
 
 
 # rotate ops: LHS is any integer dtype; RHS (rotation amount) is always u32
@@ -268,7 +259,8 @@ def test_bitwise_shift_right(dtype: np.dtype, data: DataObject):
 def test_bitwise_rotate_left(dtype: np.dtype, data: DataObject):
     (np_a, za), (np_b, zb) = data.draw(
         carrays2_mixed_strategy(
-            dtype, np.uint32,
+            dtype,
+            np.uint32,
             element_st_a=any_element_strategy(dtype),
             element_st_b=any_element_strategy(np.uint32),
         ),
@@ -284,7 +276,8 @@ def test_bitwise_rotate_left(dtype: np.dtype, data: DataObject):
 def test_bitwise_rotate_right(dtype: np.dtype, data: DataObject):
     (np_a, za), (np_b, zb) = data.draw(
         carrays2_mixed_strategy(
-            dtype, np.uint32,
+            dtype,
+            np.uint32,
             element_st_a=any_element_strategy(dtype),
             element_st_b=any_element_strategy(np.uint32),
         ),

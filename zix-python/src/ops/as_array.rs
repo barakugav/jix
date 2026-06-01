@@ -3,7 +3,7 @@ use pyo3_stub_gen::derive::gen_stub_pyfunction;
 use zix_core::ArrayAny;
 
 use crate::array::Array;
-use crate::ops::Operand;
+use crate::ops::common::Operand;
 
 /// Convert any array-like object to a zix [`Array`].
 ///
@@ -25,7 +25,8 @@ use crate::ops::Operand;
 #[gen_stub_pyfunction]
 #[pyfunction]
 pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
-    Operand::from_any(value)?.into_py_array(value.py())
+    let array = Operand::from_any(value)?.into_array()?;
+    Bound::new(value.py(), Array::from_core(array))
 }
 
 pub(crate) fn any_to_core_array<'py>(value: &Bound<'py, PyAny>) -> PyResult<ArrayAny> {

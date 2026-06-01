@@ -13,7 +13,6 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
-use crate::ops::Operand;
 use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence, OrKwargs};
 use crate::ArrayParams;
 
@@ -761,14 +760,14 @@ impl Array {
         crate::ops::bitwise_not(slf)
     }
 
-    /// Element-wise left shift (`a << b`). See :func:`zix.bitwise_shift_left()`.
+    /// Element-wise left shift (`a << b`). See :func:`zix.bitwise_left_shift()`.
     pub fn __lshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_shift_left(slf, other)
+        crate::ops::bitwise_left_shift(slf, other)
     }
 
-    /// Element-wise left shift (`a << b`). See :func:`zix.bitwise_shift_left()`.
+    /// Element-wise left shift (`a << b`). See :func:`zix.bitwise_left_shift()`.
     pub fn __rlshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
-        crate::ops::bitwise_shift_left(other, slf)
+        crate::ops::bitwise_left_shift(other, slf)
     }
 
     // == comparison ops ==
@@ -1030,30 +1029,22 @@ impl Array {
 /// - If the array has negative strides (e.g. a reversed slice `a[::-1]`).
 #[gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, dtype=None, *, params=None))]
+#[pyo3(signature = (array, *, dtype=None, params=None))]
 pub fn compact(
     array: &Bound<'_, PyAny>,
     dtype: Option<&Bound<'_, PyAny>>,
     params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
 ) -> PyResult<Array> {
     let py = array.py();
+    let mut array = crate::asarray(array)?;
     let params = ArrayParams::resolve(py, params)?;
 
-    let array = Operand::from_any(array)?;
+    if let Some(dtype) = dtype {
+        array = crate::ops::astype(&array, dtype)?;
+    }
+    let array = &array.get().arr;
+    let array = py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?;
 
-    let array = match array {
-        Operand::Numpy(array) => {
-            py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?
-        }
-        _ => {
-            let mut array = array.into_py_array(py)?;
-            if let Some(dtype) = dtype {
-                array = crate::ops::astype(&array, dtype)?;
-            }
-            let array = &array.get().arr;
-            py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?
-        }
-    };
     Ok(Array::from_core(array.into_any()))
 }
 

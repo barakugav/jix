@@ -1,6 +1,6 @@
 use zix_core::scalar::f16;
 
-use crate::ops::define_op1;
+use crate::ops::common::define_op1;
 
 define_op1!(
     /// Tests whether each element is `NaN` (not a number).
@@ -25,7 +25,10 @@ define_op1!(
     /// ```
     is_nan,
     IsNan,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        None
+    }
 );
 define_op1!(
     /// Tests whether each element is finite (not `+/-inf` and not `NaN`).
@@ -50,7 +53,10 @@ define_op1!(
     /// ```
     is_finite,
     IsFinite,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        None
+    }
 );
 define_op1!(
     /// Tests whether each element is infinite (`+inf` or `-inf`).
@@ -75,5 +81,8 @@ define_op1!(
     /// ```
     is_infinite,
     IsInfinite,
-    [f16, f32, f64]
+    dispatch = {
+        [f16, f32, f64],
+        None
+    }
 );
