@@ -14,12 +14,6 @@
 //!   legacy Intel Mac keys (`hw.l*cachesize`).
 //! - Anything else: the defaults, unmodified.
 //!
-//! # Cargo.toml
-//! ```toml
-//! [target.'cfg(target_os = "macos")'.dependencies]
-//! libc = "0.2"
-//! ```
-//!
 //! # Caveats
 //! - On big.LITTLE / heterogeneous ARM systems, `cpu0` may be a small core
 //!   with smaller caches than the big cores. The sysfs layout exposes per-cpu

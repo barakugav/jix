@@ -1,3 +1,36 @@
+#![cfg_attr(deny_warnings, deny(missing_docs))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+//! Procedural macros for the [`zix`] crate.
+//!
+//! ## `#[derive(Dtyped)]`
+//!
+//! Implements the [`zix::dtype::Dtyped`] trait for a `#[repr(C)]` or `#[repr(C, packed)]`
+//! struct, making it usable as an element type in a [`zix::Array`].
+//!
+//! `Dtyped` maps the struct's layout to a [`zix::dtype::Dtype`] at compile time: it walks the
+//! fields, computes byte offsets respecting C alignment rules (or packed layout when
+//! `#[repr(packed)]` is used), and records field names so that individual fields can be accessed
+//! as array views at runtime.
+//!
+//! ```rust,ignore
+//! use zix::dtype::Dtyped;
+//!
+//! #[derive(Copy, Clone, Dtyped)]
+//! #[repr(C)]
+//! struct Pixel { r: u8, g: u8, b: u8 }
+//!
+//! // Pixel::DTYPE is a struct dtype with three u8 fields at offsets 0, 1, 2.
+//! assert_eq!(Pixel::DTYPE.itemsize(), 3);
+//! ```
+//!
+//! ### Requirements
+//!
+//! - The struct must be `#[repr(C)]` or `#[repr(C, packed)]` / `#[repr(packed)]`.
+//! - Every field must itself implement `Dtyped`.
+//! - Unit structs and enums are not supported.
+//! - Tuple structs must be `#[repr(transparent)]` and contain exactly one field.
+
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
@@ -5,6 +38,8 @@ use syn::spanned::Spanned;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Meta};
 
 /// Derive macro generating an impl of the trait `Dtyped`.
+///
+/// See `zix::dtype::Dtyped` for more details on the trait and its requirements.
 #[proc_macro_derive(Dtyped)]
 pub fn derive_dtyped(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

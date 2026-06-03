@@ -176,7 +176,7 @@ impl<I> IterExt for I where I: Iterator {}
 mod tests {
     use pyo3::prelude::*;
 
-    #[ctor::ctor]
+    #[ctor::ctor(unsafe)]
     fn init_python() {
         // Usually when writing tests for Python bindings, we need add the modules using `append_to_inittab`, but
         // because we are using the venv, `zix` is already installed and we can import it directly.

@@ -550,7 +550,10 @@ impl Array {
     /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.
     ///
     /// This function is identical to `numpy()`, see that method for details.
-    fn __getitem__<'py>(&self, index: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyUntypedArray>> {
+    pub fn __getitem__<'py>(
+        &self,
+        index: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyUntypedArray>> {
         self.numpy(index.py(), Some(index), None)
     }
 
@@ -571,13 +574,13 @@ impl Array {
     /// ctx = a.read_ctx()
     /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
     /// ```
-    fn read_ctx<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, ReadContext>> {
+    pub fn read_ctx<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, ReadContext>> {
         Bound::new(py, ReadContext::from_core(self.arr.read_ctx()))
     }
 
     /// Copies the data of an array into a new compact array by compressing it into new blocks. See :func:`zix.copy()`.
     #[pyo3(signature = (*, params=None, context=None))]
-    fn copy<'py>(
+    pub fn copy<'py>(
         slf: &Bound<'py, Self>,
         params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
         context: Option<&Bound<'_, ReadContext>>,
@@ -586,7 +589,7 @@ impl Array {
     }
 
     /// Return a string representation of the array as `Array { shape: ..., dtype: ... }`.
-    fn __str__(&self) -> String {
+    pub fn __str__(&self) -> String {
         let arr = &self.arr;
         format!(
             "Array {{ shape: {:?}, dtype: {} }}",
@@ -596,7 +599,7 @@ impl Array {
     }
 
     /// Return a string representation of the array as `Array { shape: ..., dtype: ... }`.
-    fn __repr__(&self) -> String {
+    pub fn __repr__(&self) -> String {
         self.__str__()
     }
 

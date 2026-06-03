@@ -6,7 +6,7 @@ use zix_core::ops::ToType;
 use zix_core::storage::ArrayStorageAny;
 use zix_core::{Array as ZixArray, ArrayAny, Ty};
 
-use crate::astype_impl;
+use crate::ops::astype_impl;
 use crate::ops::common::{CastKind, Operand, Precision, Scalar};
 use crate::util::{IntoPyResult, ItemOrSequence, IterExt};
 

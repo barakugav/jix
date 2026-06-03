@@ -1,8 +1,7 @@
 #![cfg_attr(deny_warnings, deny(missing_docs))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! A high-performance multi-dimensional array library with block-compressed, lazy-evaluated
-//! storage.
+//! Multi-dimensional array library with block-compressed, lazy-evaluated storage.
 //!
 //! Zix arrays behave like regular n-dimensional arrays, but store their data in compressed blocks
 //! and decode them on demand. The library is designed around two ideas:

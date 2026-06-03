@@ -224,18 +224,18 @@ impl Encoder {
             tmp_buf2,
             tmp_buffers: TmpBufferPool::new(),
             compressor: match params.codec {
-                Codec::Zstd => Compressor::Zstd({
-                    cfg_if::cfg_if! { if #[cfg(not(miri))] {
-                        zstd::bulk::Compressor::new(params.level as _).map_err(|e| {
-                            Error::new(
-                                ErrorKind::CodecError,
-                                format!("Failed to create Zstd compressor: {e}"),
-                            )
-                        })?
-                    } else {
-                        ()
-                    }}
-                }),
+                Codec::Zstd => {
+                    #[cfg(not(miri))]
+                    let inner = zstd::bulk::Compressor::new(params.level as _).map_err(|e| {
+                        Error::new(
+                            ErrorKind::CodecError,
+                            format!("Failed to create Zstd compressor: {e}"),
+                        )
+                    })?;
+                    #[cfg(miri)]
+                    let inner = ();
+                    Compressor::Zstd(inner)
+                }
             },
         })
     }
@@ -261,17 +261,20 @@ impl Encoder {
 
         match &mut self.compressor {
             Compressor::Zstd(compressor) => {
-                cfg_if::cfg_if! { if #[cfg(not(miri))] {
-                    compressor.compress_to_buffer(data, dst).map_err(|e| {
-                        Error::new(
-                            ErrorKind::CodecError,
-                            format!("Failed to compress data with Zstd: {e}"),
-                        )
-                    })
-                } else {
+                #[cfg(not(miri))]
+                let result = compressor.compress_to_buffer(data, dst).map_err(|e| {
+                    Error::new(
+                        ErrorKind::CodecError,
+                        format!("Failed to compress data with Zstd: {e}"),
+                    )
+                });
+                #[cfg(miri)]
+                let result = {
+                    let _ = compressor;
                     dst.copy_from_slice(data);
                     Ok(data.len())
-                } }
+                };
+                result
             }
         }
     }
@@ -279,11 +282,14 @@ impl Encoder {
     pub(crate) fn encode_bound(&self, src_size: usize) -> usize {
         match &self.compressor {
             Compressor::Zstd(_) => {
-                cfg_if::cfg_if! { if #[cfg(not(miri))] {
+                #[cfg(not(miri))]
+                {
                     zstd::zstd_safe::compress_bound(src_size)
-                } else {
+                }
+                #[cfg(miri)]
+                {
                     src_size
-                } }
+                }
             }
         }
     }
@@ -362,18 +368,23 @@ impl<'a> Decoder<'a> {
             tmp_buf.as_mut_slice()
         };
 
-        cfg_if::cfg_if! { if #[cfg(not(miri))] {
+        #[cfg(not(miri))]
+        let nbytes = {
             let inner = unsafe { &mut *self.inner.get() };
-            let nbytes = inner.decompress_to_buffer(src, decompress_out).map_err(|e| {
-                Error::new(
-                    ErrorKind::CodecError,
-                    format!("Failed to decompress data with Zstd: {e}"),
-                )
-            })?;
-        } else {
+            inner
+                .decompress_to_buffer(src, decompress_out)
+                .map_err(|e| {
+                    Error::new(
+                        ErrorKind::CodecError,
+                        format!("Failed to decompress data with Zstd: {e}"),
+                    )
+                })?
+        };
+        #[cfg(miri)]
+        let nbytes = {
             decompress_out.copy_from_slice(src);
-            let nbytes = src.len();
-        } }
+            src.len()
+        };
 
         // Apply filters in reverse order
         for (f_idx, filter) in self.filters.iter().enumerate().rev() {
