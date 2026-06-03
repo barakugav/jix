@@ -951,13 +951,12 @@ impl Array {
     }
 
     /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See :func:`zix.broadcast()`.
-    #[pyo3(signature = (shape, *, copy=true))]
+    #[pyo3(signature = (shape))]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Array>,
         shape: ItemOrSequence<i64>,
-        copy: bool,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::broadcast(slf, shape, copy)
+        crate::ops::broadcast(slf, shape)
     }
 
     /// Removes length-1 dimensions from the array's shape. See :func:`zix.squeeze()`.

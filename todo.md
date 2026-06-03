@@ -15,4 +15,3 @@
 - move pyi gen to a separate crate
 - squeeze()
 - rename Maximum scalar trait to PartialMax
-- support an arbitrary python reader in zix-python/src/archive.rs read_array

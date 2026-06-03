@@ -46,13 +46,10 @@ use crate::Array;
 #[pyo3(signature = (
     array,
     shape,
-    *,
-    copy=true,
 ))]
 pub fn broadcast<'py>(
     array: &Bound<'py, Array>,
     shape: ItemOrSequence<i64>,
-    copy: bool,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = array;
     let array = &py_arr.get().arr;
@@ -83,19 +80,11 @@ pub fn broadcast<'py>(
 
     if new_shape == array.shape() {
         // no-op if already the right shape
-        return if !copy {
-            Ok(py_arr.clone())
-        } else {
-            copy_impl(py_arr.py(), array)
-        };
+        return Ok(py_arr.clone());
     }
 
     let ret = zix_core::ops::Broadcast::new_array(array.clone(), &new_shape).into_py_result()?;
-    if !copy {
-        Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
-    } else {
-        copy_impl(py_arr.py(), &ret)
-    }
+    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
 
 // TODO slice

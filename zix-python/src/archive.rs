@@ -1,4 +1,4 @@
-use std::io::{self, BufWriter, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use pyo3::prelude::*;
@@ -7,19 +7,22 @@ use zix_core::ArrayAny;
 use crate::util::{IntoPyResult, OrKwargs};
 use crate::{Array, ArrayParams, ReadContext};
 
-/// Load a compressed array from a `.zix` file.
+/// Load a compressed array from a `.zix` file or a file-like object.
 ///
-/// `path` is the path to the `.zix` file.
+/// `path_or_reader` is either a file path or any seekable binary file-like object with
+/// `.read()`, `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle).
 ///
 /// `offset` and `len` allow reading a single array from a byte range within a larger file -
 /// useful when multiple arrays have been packed into the same file with back-to-back
 /// writes. `offset` defaults to `0`; `len` defaults to the remaining file size from `offset`.
+/// When `path_or_reader` is a file-like object, `offset` must be `None` and the reader is used
+/// at its current position; `len` is still used for bounds checking if provided.
 ///
 /// `mmap` maps the file into virtual address space instead of copying its bytes onto the heap.
 /// The OS pages blocks in on demand, so startup is fast and only the blocks you actually read
 /// are loaded into physical memory. Defaults to `False`. **Caution:** if the underlying file
 /// is modified while the returned array (or any view derived from it) is live, the behavior is
-/// undefined.
+/// undefined. `mmap=True` is not supported when `path_or_reader` is a file-like object.
 ///
 /// `params` controls how the array is read and decoded. Accepts a :class:`zix.ArrayParams`
 /// instance or a plain `dict`. See :class:`zix.ArrayParams` for details.
@@ -27,6 +30,7 @@ use crate::{Array, ArrayParams, ReadContext};
 /// # Examples
 /// ```python,ignore
 /// import zix
+/// import io
 ///
 /// # Read the whole file
 /// a = zix.read_array("data.zix")
@@ -42,42 +46,69 @@ use crate::{Array, ArrayParams, ReadContext};
 ///
 /// # Memory-mapped read (zero-copy, fast startup)
 /// c = zix.read_array("large.zix", mmap=True)
+///
+/// # Read from an in-memory buffer
+/// buf = io.BytesIO()
+/// zix.write_array(a, buf)
+/// buf.seek(0)
+/// d = zix.read_array(buf)
 /// ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (path, *, params=None, offset=0, len=None, mmap=false))]
+#[pyo3(signature = (path_or_reader, *, params=None, offset=None, len=None, mmap=false))]
 pub fn read_array(
     py: Python,
-    path: PathBuf,
+    path_or_reader: &Bound<'_, PyAny>,
     params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
-    offset: u64,
+    offset: Option<u64>,
     len: Option<u64>,
     mmap: bool,
 ) -> PyResult<Array> {
     let params = ArrayParams::resolve(py, params)?;
+    let path_or_reader = PathOrReader::from_pyany(path_or_reader)?;
 
-    py.detach(|| {
-        let len = match len {
-            Some(len) => len,
-            None => {
-                let file_len = path.metadata()?.len();
-                file_len.checked_sub(offset).ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>("offset is out of bounds")
-                })?
-            }
-        };
-
-        Ok(if !mmap {
-            let array = zix_core::Array::read_from_file_section(&path, offset, len, params)
-                .into_py_result()?;
-            Array::from_core(array.into_any())
-        } else {
-            let array = unsafe {
-                zix_core::Array::read_from_file_mmap(&path, offset, len, params).into_py_result()?
+    match path_or_reader {
+        PathOrReader::Path(path) => py.detach(|| {
+            let offset = offset.unwrap_or(0);
+            let len = match len {
+                Some(len) => len,
+                None => {
+                    let file_len = path.metadata()?.len();
+                    file_len.checked_sub(offset).ok_or_else(|| {
+                        PyErr::new::<pyo3::exceptions::PyValueError, _>("offset is out of bounds")
+                    })?
+                }
             };
-            Array::from_core(array.into_any())
-        })
-    })
+
+            Ok(if !mmap {
+                let array = zix_core::Array::read_from_file_section(&path, offset, len, params)
+                    .into_py_result()?;
+                Array::from_core(array.into_any())
+            } else {
+                let array = unsafe {
+                    zix_core::Array::read_from_file_mmap(&path, offset, len, params)
+                        .into_py_result()?
+                };
+                Array::from_core(array.into_any())
+            })
+        }),
+        PathOrReader::PyReader(reader) => {
+            if offset.is_some() {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "offset is not supported for file-like readers",
+                ));
+            }
+            if mmap {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "mmap=True is not supported for file-like readers",
+                ));
+            }
+            // Can't detach the GIL since the reader is a Python object.
+            let reader = BufReader::new(reader);
+            let array = zix_core::Array::read_from_reader(reader, len, params).into_py_result()?;
+            Ok(Array::from_core(array.into_any()))
+        }
+    }
 }
 
 /// Write a compressed array to a file or a file-like object.
@@ -155,12 +186,13 @@ pub fn write_array(
                 let file = if !append {
                     std::fs::File::create_new(path)?
                 } else {
-                    #[allow(clippy::ineffective_open_options)]
+                    // O_APPEND would force every write to EOF, breaking the
+                    // seek-then-write used to patch the block TOC placeholder.
+                    // Instead, open for writing and seek to the end manually.
                     let mut file = std::fs::OpenOptions::new()
                         .write(true)
                         .create(true)
                         .truncate(false)
-                        .append(true)
                         .open(path)?;
                     file.seek(std::io::SeekFrom::End(0))?;
                     file
@@ -202,6 +234,88 @@ where
     Ok(())
 }
 
+enum PathOrReader<'a> {
+    Path(PathBuf),
+    PyReader(PyReader<'a>),
+}
+impl<'a> PathOrReader<'a> {
+    fn from_pyany(pyany: &'a Bound<'a, PyAny>) -> PyResult<Self> {
+        if let Ok(path) = pyany.extract::<PathBuf>() {
+            Ok(Self::Path(path))
+        } else if pyany.hasattr("read")? {
+            Ok(Self::PyReader(PyReader::new(pyany.clone())?))
+        } else {
+            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "Expected a file path or a file-like object with a 'read' method",
+            ))
+        }
+    }
+}
+
+/// Wraps any Python file-like object that has `.read()`, `.seek()`, and `.tell()` methods.
+#[derive(Debug)]
+struct PyReader<'py> {
+    read_fn: Bound<'py, PyAny>,
+    seek_fn: Bound<'py, PyAny>,
+    tell_fn: Bound<'py, PyAny>,
+}
+
+impl<'py> PyReader<'py> {
+    fn new(inner: Bound<'py, PyAny>) -> PyResult<Self> {
+        let read_fn = inner.getattr("read").map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'read' method")
+        })?;
+        let seek_fn = inner.getattr("seek").map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'seek' method")
+        })?;
+        let tell_fn = inner.getattr("tell").map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("Object must have a 'tell' method")
+        })?;
+        Ok(Self {
+            read_fn,
+            seek_fn,
+            tell_fn,
+        })
+    }
+}
+
+impl Read for PyReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let result = self.read_fn.call1((buf.len(),)).map_err(py_to_io_err)?;
+        if result.is_none() {
+            return Ok(0); // EOF signalled by None
+        }
+        let bytes: Vec<u8> = result.extract::<Vec<u8>>().map_err(py_to_io_err)?;
+        let n = bytes.len();
+        buf[..n].copy_from_slice(&bytes);
+        Ok(n)
+    }
+}
+
+impl Seek for PyReader<'_> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let (offset, whence): (i64, i32) = match pos {
+            SeekFrom::Start(n) => (n as i64, 0),
+            SeekFrom::Current(n) => (n, 1),
+            SeekFrom::End(n) => (n, 2),
+        };
+        let result = self.seek_fn.call1((offset, whence)).map_err(py_to_io_err)?;
+        if !result.is_none() {
+            result.extract::<u64>().map_err(py_to_io_err)
+        } else {
+            self.stream_position()
+        }
+    }
+
+    fn stream_position(&mut self) -> io::Result<u64> {
+        self.tell_fn
+            .call0()
+            .map_err(py_to_io_err)?
+            .extract::<u64>()
+            .map_err(py_to_io_err)
+    }
+}
+
 enum PathOrWriter<'a> {
     Path(PathBuf),
     PyWriter(PyWriter<'a>),
@@ -223,7 +337,6 @@ impl<'a> PathOrWriter<'a> {
 /// Wraps any Python file-like object that has `.write()`, `.seek()`, `.tell()` methods, and optionally `.flush()`.
 #[derive(Debug)]
 struct PyWriter<'py> {
-    inner: Bound<'py, PyAny>,
     write_fn: Bound<'py, PyAny>,
     seek_fn: Bound<'py, PyAny>,
     tell_fn: Bound<'py, PyAny>,
@@ -243,7 +356,6 @@ impl<'py> PyWriter<'py> {
         })?;
         let flush_fn = inner.getattr("flush").ok();
         Ok(Self {
-            inner,
             write_fn,
             seek_fn,
             tell_fn,
@@ -254,7 +366,7 @@ impl<'py> PyWriter<'py> {
 
 impl Write for PyWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let py = self.inner.py();
+        let py = self.write_fn.py();
 
         // SAFETY: We create a read-only memoryview pointing directly into
         // `buf`.  This is sound as long as the memoryview does not outlive
@@ -1093,6 +1205,374 @@ class BadReturn:
             let result = read_bytesio(&bio);
             assert_eq!(result.len(), 4096);
             assert!(result.iter().all(|&b| b == 0));
+        });
+    }
+
+    // =======================================================================
+    // PyReader — Construction
+    // =======================================================================
+
+    /// Write bytes into a BytesIO and return it seeked to the start.
+    fn make_bytesio_with<'py>(py: Python<'py>, data: &[u8]) -> Bound<'py, PyAny> {
+        let bio = make_bytesio(py);
+        bio.call_method1("write", (data,)).unwrap();
+        bio.call_method1("seek", (0,)).unwrap();
+        bio
+    }
+
+    #[test]
+    fn test_reader_new_with_bytesio() {
+        with_py(|py| {
+            let bio = make_bytesio(py);
+            assert!(PyReader::new(bio).is_ok());
+        });
+    }
+
+    #[test]
+    fn test_reader_new_missing_read_method() {
+        with_py(|py| {
+            let obj = PyDict::new(py);
+            let err = PyReader::new(obj.into_any()).unwrap_err();
+            assert!(err.to_string().contains("read"));
+        });
+    }
+
+    #[test]
+    fn test_reader_new_missing_seek_method() {
+        with_py(|py| {
+            let code = c"
+class ReadOnly:
+    def read(self, n): return b''
+    def tell(self): return 0
+";
+            let locals = PyDict::new(py);
+            py.run(code, None, Some(&locals)).unwrap();
+            let obj = locals
+                .get_item("ReadOnly")
+                .unwrap()
+                .unwrap()
+                .call0()
+                .unwrap();
+            let err = PyReader::new(obj).unwrap_err();
+            assert!(err.to_string().contains("seek"));
+        });
+    }
+
+    #[test]
+    fn test_reader_new_missing_tell_method() {
+        with_py(|py| {
+            let code = c"
+class ReadSeekOnly:
+    def read(self, n): return b''
+    def seek(self, offset, whence=0): return 0
+";
+            let locals = PyDict::new(py);
+            py.run(code, None, Some(&locals)).unwrap();
+            let obj = locals
+                .get_item("ReadSeekOnly")
+                .unwrap()
+                .unwrap()
+                .call0()
+                .unwrap();
+            let err = PyReader::new(obj).unwrap_err();
+            assert!(err.to_string().contains("tell"));
+        });
+    }
+
+    // =======================================================================
+    // PyReader — Read
+    // =======================================================================
+
+    #[test]
+    fn test_reader_read_empty() {
+        with_py(|py| {
+            let bio = make_bytesio_with(py, b"");
+            let mut pr = PyReader::new(bio).unwrap();
+            let mut buf = [0u8; 8];
+            let n = pr.read(&mut buf).unwrap();
+            assert_eq!(n, 0);
+        });
+    }
+
+    #[test]
+    fn test_reader_read_small() {
+        with_py(|py| {
+            let bio = make_bytesio_with(py, b"hello");
+            let mut pr = PyReader::new(bio).unwrap();
+            let mut buf = [0u8; 16];
+            let n = pr.read(&mut buf).unwrap();
+            assert_eq!(n, 5);
+            assert_eq!(&buf[..5], b"hello");
+        });
+    }
+
+    #[test]
+    fn test_reader_read_exact() {
+        with_py(|py| {
+            let data: Vec<u8> = (0..=255).collect();
+            let bio = make_bytesio_with(py, &data);
+            let mut pr = PyReader::new(bio).unwrap();
+            let mut buf = vec![0u8; 256];
+            pr.read_exact(&mut buf).unwrap();
+            assert_eq!(buf, data);
+        });
+    }
+
+    #[test]
+    fn test_reader_read_none_means_eof() {
+        with_py(|py| {
+            let code = c"
+class NoneReader:
+    def read(self, n): return None
+    def seek(self, offset, whence=0): return 0
+    def tell(self): return 0
+";
+            let locals = PyDict::new(py);
+            py.run(code, None, Some(&locals)).unwrap();
+            let obj = locals
+                .get_item("NoneReader")
+                .unwrap()
+                .unwrap()
+                .call0()
+                .unwrap();
+            let mut pr = PyReader::new(obj).unwrap();
+            let mut buf = [0u8; 4];
+            let n = pr.read(&mut buf).unwrap();
+            assert_eq!(n, 0);
+        });
+    }
+
+    #[test]
+    fn test_reader_read_error_propagates() {
+        with_py(|py| {
+            let code = c"
+class BrokenReader:
+    def read(self, n):
+        raise IOError('read failed')
+    def seek(self, offset, whence=0): return 0
+    def tell(self): return 0
+";
+            let locals = PyDict::new(py);
+            py.run(code, None, Some(&locals)).unwrap();
+            let obj = locals
+                .get_item("BrokenReader")
+                .unwrap()
+                .unwrap()
+                .call0()
+                .unwrap();
+            let mut pr = PyReader::new(obj).unwrap();
+            let mut buf = [0u8; 4];
+            let err = pr.read(&mut buf).unwrap_err();
+            assert!(err.to_string().contains("read failed"));
+        });
+    }
+
+    // =======================================================================
+    // PyReader — Seek / tell
+    // =======================================================================
+
+    #[test]
+    fn test_reader_seek_start() {
+        with_py(|py| {
+            let bio = make_bytesio_with(py, b"abcdefghij");
+            let mut pr = PyReader::new(bio).unwrap();
+            let pos = pr.seek(SeekFrom::Start(3)).unwrap();
+            assert_eq!(pos, 3);
+        });
+    }
+
+    #[test]
+    fn test_reader_seek_current() {
+        with_py(|py| {
+            let bio = make_bytesio_with(py, b"abcdefghij");
+            let mut pr = PyReader::new(bio).unwrap();
+            pr.seek(SeekFrom::Start(2)).unwrap();
+            let pos = pr.seek(SeekFrom::Current(3)).unwrap();
+            assert_eq!(pos, 5);
+        });
+    }
+
+    #[test]
+    fn test_reader_seek_end() {
+        with_py(|py| {
+            let bio = make_bytesio_with(py, b"abcdefghij");
+            let mut pr = PyReader::new(bio).unwrap();
+            let pos = pr.seek(SeekFrom::End(-2)).unwrap();
+            assert_eq!(pos, 8);
+        });
+    }
+
+    #[test]
+    fn test_reader_stream_position() {
+        with_py(|py| {
+            let bio = make_bytesio_with(py, b"hello");
+            let mut pr = PyReader::new(bio).unwrap();
+            assert_eq!(pr.stream_position().unwrap(), 0);
+            let mut buf = [0u8; 3];
+            pr.read_exact(&mut buf).unwrap();
+            assert_eq!(pr.stream_position().unwrap(), 3);
+        });
+    }
+
+    #[test]
+    fn test_reader_seek_returns_none_falls_back_to_tell() {
+        with_py(|py| {
+            let code = c"
+class SeekReturnsNone:
+    def __init__(self):
+        self.pos = 0
+        self.data = b'abcdef'
+    def read(self, n):
+        chunk = self.data[self.pos:self.pos+n]
+        self.pos += len(chunk)
+        return chunk
+    def seek(self, offset, whence=0):
+        if whence == 0:
+            self.pos = offset
+        elif whence == 1:
+            self.pos += offset
+        return None
+    def tell(self):
+        return self.pos
+";
+            let locals = PyDict::new(py);
+            py.run(code, None, Some(&locals)).unwrap();
+            let obj = locals
+                .get_item("SeekReturnsNone")
+                .unwrap()
+                .unwrap()
+                .call0()
+                .unwrap();
+            let mut pr = PyReader::new(obj).unwrap();
+            let pos = pr.seek(SeekFrom::Start(2)).unwrap();
+            assert_eq!(pos, 2);
+        });
+    }
+
+    #[test]
+    fn test_reader_seek_error_propagates() {
+        with_py(|py| {
+            let code = c"
+class BrokenSeeker:
+    def read(self, n): return b''
+    def seek(self, offset, whence=0):
+        raise IOError('unseekable stream')
+    def tell(self): return 0
+";
+            let locals = PyDict::new(py);
+            py.run(code, None, Some(&locals)).unwrap();
+            let obj = locals
+                .get_item("BrokenSeeker")
+                .unwrap()
+                .unwrap()
+                .call0()
+                .unwrap();
+            let mut pr = PyReader::new(obj).unwrap();
+            let err = pr.seek(SeekFrom::Start(0)).unwrap_err();
+            assert!(err.to_string().contains("unseekable"));
+        });
+    }
+
+    #[test]
+    fn test_reader_tell_error_propagates() {
+        with_py(|py| {
+            let code = c"
+class BrokenTell:
+    def read(self, n): return b''
+    def seek(self, offset, whence=0): return None
+    def tell(self):
+        raise IOError('tell broken')
+";
+            let locals = PyDict::new(py);
+            py.run(code, None, Some(&locals)).unwrap();
+            let obj = locals
+                .get_item("BrokenTell")
+                .unwrap()
+                .unwrap()
+                .call0()
+                .unwrap();
+            let mut pr = PyReader::new(obj).unwrap();
+            let err = pr.seek(SeekFrom::Start(0)).unwrap_err();
+            assert!(err.to_string().contains("tell broken"));
+        });
+    }
+
+    // =======================================================================
+    // PyReader — Integration: BufReader<PyReader>
+    // =======================================================================
+
+    #[test]
+    fn test_bufreader_wrapping() {
+        with_py(|py| {
+            let bio = make_bytesio_with(py, b"hello world");
+            let pr = PyReader::new(bio).unwrap();
+            let mut br = std::io::BufReader::with_capacity(4, pr);
+            let mut buf = [0u8; 5];
+            br.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, b"hello");
+        });
+    }
+
+    #[test]
+    fn test_bufreader_seek_after_buffered_read() {
+        with_py(|py| {
+            let bio = make_bytesio_with(py, b"0123456789");
+            let pr = PyReader::new(bio).unwrap();
+            let mut br = std::io::BufReader::with_capacity(8, pr);
+            // Consume 3 bytes (BufReader pulls up to 8 from Python).
+            let mut buf = [0u8; 3];
+            br.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, b"012");
+            // Seek back to position 0.
+            br.seek(SeekFrom::Start(0)).unwrap();
+            br.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, b"012");
+        });
+    }
+
+    #[test]
+    fn test_bufreader_many_small_reads() {
+        with_py(|py| {
+            let code = c"
+class CountingReader:
+    def __init__(self, data):
+        self.data = data
+        self.pos = 0
+        self.read_count = 0
+    def read(self, n):
+        self.read_count += 1
+        chunk = self.data[self.pos:self.pos+n]
+        self.pos += len(chunk)
+        return chunk
+    def seek(self, offset, whence=0):
+        if whence == 0:
+            self.pos = offset
+        elif whence == 1:
+            self.pos += offset
+        return self.pos
+    def tell(self):
+        return self.pos
+";
+            let locals = PyDict::new(py);
+            py.run(code, None, Some(&locals)).unwrap();
+            let data: Vec<u8> = (0..200u8).collect();
+            let cls = locals.get_item("CountingReader").unwrap().unwrap();
+            let obj = cls.call1((data.clone(),)).unwrap();
+            let pr = PyReader::new(obj.clone()).unwrap();
+            let mut br = std::io::BufReader::with_capacity(1024, pr);
+
+            // 100 tiny reads of 2 bytes each.
+            let mut buf = [0u8; 2];
+            for _ in 0..100 {
+                br.read_exact(&mut buf).unwrap();
+            }
+
+            let read_count: i32 = obj.getattr("read_count").unwrap().extract().unwrap();
+            // BufReader should batch Python calls — far fewer than 100.
+            assert!(
+                read_count < 10,
+                "expected batching, got {read_count} Python read calls for 100 reads"
+            );
         });
     }
 }
