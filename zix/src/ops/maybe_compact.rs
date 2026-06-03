@@ -60,6 +60,7 @@ where
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
+    #[inline]
     fn read_data(
         &self,
         index: &[core::ops::Range<u64>],
@@ -72,12 +73,14 @@ where
         }
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         match &self.0 {
             ToCompactInner::Original(s) => s.shape(),
             ToCompactInner::Compact(c) => c.shape(),
         }
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         match &self.0 {
             ToCompactInner::Original(s) => s.dtype(),

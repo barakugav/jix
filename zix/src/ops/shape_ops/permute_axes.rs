@@ -113,6 +113,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
+    #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
@@ -159,9 +160,11 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         Ok(())
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.shape.as_slice()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }

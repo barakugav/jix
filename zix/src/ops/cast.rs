@@ -22,6 +22,7 @@ pub(crate) mod _traits {
     macro_rules! impl_cast {
         ($src_type:ident => $dst_type:ident) => {
             impl Cast<$dst_type> for $src_type {
+                #[inline(always)]
                 fn cast(self) -> $dst_type {
                     #![allow(clippy::redundant_locals)]
                     let value = self;
@@ -75,6 +76,7 @@ pub(crate) mod _traits {
 
         (@impl_to_complex, $src_type:ident, Complex<$dst_type:ident>) => {
             impl Cast<Complex<$dst_type>> for $src_type {
+                #[inline(always)]
                 fn cast(self) -> Complex<$dst_type> {
                     Complex {
                         re: <_ as crate::scalar::Cast<$dst_type>>::cast(self),
@@ -100,6 +102,7 @@ pub(crate) mod _traits {
 
     #[cfg(not(feature = "half"))]
     impl Cast<f16> for f16 {
+        #[inline(always)]
         fn cast(self) -> f16 {
             self
         }
@@ -108,6 +111,7 @@ pub(crate) mod _traits {
     macro_rules! impl_cast_complex_to_complex {
         ($src_type:ident, $dst_type:ident) => {
             impl Cast<Complex<$dst_type>> for Complex<$src_type> {
+                #[inline(always)]
                 fn cast(self) -> Complex<$dst_type> {
                     Complex {
                         re: <_ as crate::scalar::Cast<$dst_type>>::cast(self.re),
@@ -125,6 +129,7 @@ pub(crate) mod _traits {
             impl_cast_complex_to_complex!($src_type, f64);
 
             impl Cast<bool> for Complex<$src_type> {
+                #[inline(always)]
                 fn cast(self) -> bool {
                     self != (<_ as crate::scalar::Cast<Self>>::cast(false))
                 }
@@ -181,13 +186,14 @@ where
     T1: crate::scalar::Cast<T2>,
 {
     type Output = T2;
+    #[inline(always)]
     fn apply(&self, x: T1) -> Self::Output {
         x.cast()
     }
 }
 impl<S, T> Cast<S, T>
 where
-    S: ArrayStorage + ArrayStorageTyped,
+    S: ArrayStorageTyped,
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
@@ -204,7 +210,7 @@ where
 }
 impl<S, T> ArrayStorage for Cast<S, T>
 where
-    S: ArrayStorage + ArrayStorageTyped,
+    S: ArrayStorageTyped,
     S::Item: crate::scalar::Cast<T>,
     T: Dtyped,
 {
@@ -221,7 +227,7 @@ where
     #[track_caller]
     pub fn cast<T>(self) -> Array<Cast<S, T>>
     where
-        S: ArrayStorage + ArrayStorageTyped,
+        S: ArrayStorageTyped,
         S::Item: crate::scalar::Cast<T>,
         T: Dtyped,
     {

@@ -15,7 +15,7 @@ const _: () = const {
     );
 };
 
-pub type BlockSize = u32;
+pub(crate) type BlockSize = u32;
 
 /// Compressed 1D storage of typed items, divided into independently-encoded fixed-size blocks.
 ///
@@ -109,6 +109,7 @@ where
     }
 
     /// Get the dtype of items in this storage.
+    #[inline(always)]
     pub(crate) fn dtype(&self) -> &Dtype
     where
         ET: ElementType,
@@ -117,6 +118,7 @@ where
     }
 
     /// Get the total number of items in this storage.
+    #[inline(always)]
     pub(crate) fn nitems(&self) -> u64 {
         self.nitems
     }
@@ -124,6 +126,7 @@ where
     /// Get the length of a block in this storage.
     ///
     /// Note that the units are in items, not bytes.
+    #[inline(always)]
     pub(crate) fn block_len(&self) -> BlockSize {
         self.block_size
     }
@@ -183,6 +186,7 @@ where
         }
     }
 
+    #[inline(always)]
     pub(crate) fn decoder_config(&self) -> &DecoderCodecConfig
     where
         ET: ElementType,
@@ -409,6 +413,7 @@ pub struct MmapData<T: 'static> {
     pub(crate) data: (SendSyncPtr<T>, usize),
 }
 impl<T: 'static> AsRef<[T]> for MmapData<T> {
+    #[inline(always)]
     fn as_ref(&self) -> &[T] {
         unsafe { std::slice::from_raw_parts(self.data.0.as_ptr(), self.data.1) }
     }

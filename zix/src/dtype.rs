@@ -63,6 +63,7 @@ impl Alignment {
     ///
     /// The value must be non-zero, a power of two, and less than the supported maximum
     /// alignment (currently 32768 bytes, may change in the future).
+    #[inline(always)]
     pub const fn new(value: usize) -> Option<Self> {
         if 1 <= value && value <= 32768 && value.is_power_of_two() {
             // SAFETY: By precondition, this must be a power of two, and
@@ -76,11 +77,13 @@ impl Alignment {
     }
 
     /// Creates a new `Alignment` for the given type `T`, using its natural alignment.
+    #[inline(always)]
     pub const fn of<T>() -> Self {
         Self::new(align_of::<T>()).unwrap()
     }
 
     /// Returns the underlying value of the alignment in bytes.
+    #[inline(always)]
     pub const fn as_usize(self) -> usize {
         let align = self.0 as usize;
         unsafe { assert_unchecked(align != 0 && align.is_power_of_two()) };
@@ -100,6 +103,7 @@ impl std::fmt::Display for Alignment {
 impl TryFrom<usize> for Alignment {
     type Error = Error;
 
+    #[inline(always)]
     fn try_from(value: usize) -> Result<Self> {
         Self::new(value).ok_or_else(|| {
             Error::new(
@@ -371,6 +375,7 @@ impl Dtype {
     /// assert_eq!(f64_dtype, f64::DTYPE);
     /// assert_eq!(complex_f32_dtype, zix::scalar::Complex::<f32>::DTYPE);
     /// ```
+    #[inline(always)]
     pub const fn of_scalar(kind: DtypeScalarKind) -> Self {
         // assert!(Endianness::native() == Endianness::Little);
 
@@ -704,6 +709,7 @@ impl Dtype {
     ///
     /// Note that even if the function returns `Some`, the dtype may not be a plain scalar, it just
     /// means the type has no sub fields, but the dtype can still have non-empty shape.
+    #[inline(always)]
     pub const fn scalar_kind(&self) -> Option<DtypeScalarKind> {
         match &self.0 {
             DtypeInner::Scalar { kind, .. } => Some(*kind),
@@ -712,6 +718,7 @@ impl Dtype {
     }
 
     /// Get the fields of the dtype, if it is a struct dtype.
+    #[inline(always)]
     pub fn fields(&self) -> Option<&[(Cow<'static, str>, Itemsize, Dtype)]> {
         match &self.0 {
             DtypeInner::Scalar { .. } => None,
@@ -723,6 +730,7 @@ impl Dtype {
     /// Get the shape of the dtype.
     ///
     /// Empty shape means a single element of the dtype.
+    #[inline(always)]
     pub fn shape(&self) -> &[Itemsize] {
         match &self.0 {
             DtypeInner::Scalar { shape, .. } => shape,
@@ -742,6 +750,7 @@ impl Dtype {
     /// Get the itemsize of the dtype.
     ///
     /// If this dtype has a shape, the itemsize is the product of the shape dimensions and the base itemsize.
+    #[inline(always)]
     pub const fn itemsize(&self) -> Itemsize {
         match &self.0 {
             DtypeInner::Scalar { itemsize, .. } => *itemsize,
@@ -763,6 +772,7 @@ impl Dtype {
     /// For scalar dtypes, the alignment is the same as [`DtypeScalarKind::alignment()`].
     /// For struct dtypes, the alignment is either `1` for packed dtypes, or the maximum alignment of the inner fields
     /// for aligned structs.
+    #[inline(always)]
     pub const fn alignment(&self) -> Alignment {
         match &self.0 {
             DtypeInner::Scalar { alignment, .. } => *alignment,
@@ -787,6 +797,7 @@ impl Dtype {
     ///
     /// The "packed vs aligned" distinction only applies to struct dtypes, scalar dtypes are always
     /// considered aligned.
+    #[inline]
     pub fn is_aligned(&self) -> bool {
         match &self.0 {
             DtypeInner::Scalar { .. } => true,
@@ -796,6 +807,7 @@ impl Dtype {
     }
 
     /// Try to convert this dtype to a scalar dtype, if it matches the scalar dtype exactly.
+    #[inline(always)]
     pub fn try_to_scalar(&self) -> Option<DtypeScalarKind> {
         let scalar = self.scalar_kind()?;
         (Self::of_scalar(scalar) == *self).then_some(scalar)
@@ -876,6 +888,7 @@ impl std::fmt::Display for Dtype {
     }
 }
 impl PartialEq for Dtype {
+    #[inline(always)]
     fn eq(&self, other: &Self) -> bool {
         if !(self.itemsize() == other.itemsize()
             && self.alignment() == other.alignment()
@@ -893,6 +906,7 @@ impl PartialEq for Dtype {
 
 impl DtypeScalarKind {
     /// Get the size of the scalar in bytes.
+    #[inline(always)]
     pub const fn itemsize(&self) -> Itemsize {
         match self {
             Self::I8 => 1,
@@ -911,7 +925,9 @@ impl DtypeScalarKind {
             Self::Bool => 1,
         }
     }
+
     /// Get the alignment of the scalar in bytes.
+    #[inline(always)]
     pub const fn alignment(&self) -> Alignment {
         let align = match self {
             Self::I8 => 1,
@@ -935,6 +951,7 @@ impl DtypeScalarKind {
     /// Check if this scalar is an integer type (signed or unsigned).
     ///
     /// Returns true for `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    #[inline(always)]
     pub fn is_integer(&self) -> bool {
         self.is_signed_integer() || self.is_unsigned_integer()
     }
@@ -942,6 +959,7 @@ impl DtypeScalarKind {
     /// Check if this scalar is a signed integer type.
     ///
     /// Returns true for `i8`, `i16`, `i32`, `i64`.
+    #[inline(always)]
     pub fn is_signed_integer(&self) -> bool {
         matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
     }
@@ -949,6 +967,7 @@ impl DtypeScalarKind {
     /// Check if this scalar is an unsigned integer type.
     ///
     /// Returns true for `u8`, `u16`, `u32`, `u64`.
+    #[inline(always)]
     pub fn is_unsigned_integer(&self) -> bool {
         matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
     }
@@ -956,6 +975,7 @@ impl DtypeScalarKind {
     /// Check if this scalar is a floating point type.
     ///
     /// Returns true for `f16`, `f32`, `f64`.
+    #[inline(always)]
     pub fn is_float(&self) -> bool {
         matches!(self, Self::F16 | Self::F32 | Self::F64)
     }
@@ -963,6 +983,7 @@ impl DtypeScalarKind {
     /// Check if this scalar is a complex type.
     ///
     /// Returns true for `Complex<f32>` and `Complex<f64>`.
+    #[inline(always)]
     pub fn is_complex(&self) -> bool {
         matches!(self, Self::ComplexF32 | Self::ComplexF64)
     }
@@ -970,6 +991,7 @@ impl DtypeScalarKind {
     /// Check if this scalar is a boolean type.
     ///
     /// Returns true for `bool`.
+    #[inline(always)]
     pub fn is_bool(&self) -> bool {
         matches!(self, Self::Bool)
     }
@@ -982,6 +1004,7 @@ impl DtypeScalarKind {
     /// - `Some(I32)` for `I32` and `U32`
     /// - `Some(I64)` for `I64` and `U64`
     /// - `None` for others
+    #[inline(always)]
     pub fn to_signed_integer(&self) -> Option<Self> {
         Some(match self {
             Self::U8 | Self::I8 => Self::I8,
@@ -1000,6 +1023,7 @@ impl DtypeScalarKind {
     /// - `Some(U32)` for `I32` and `U32`
     /// - `Some(U64)` for `I64` and `U64`
     /// - `None` for others
+    #[inline(always)]
     pub fn to_unsigned_integer(&self) -> Option<Self> {
         Some(match self {
             Self::I8 | Self::U8 => Self::U8,
@@ -1013,6 +1037,7 @@ impl DtypeScalarKind {
 #[allow(unused)]
 impl Endianness {
     /// Get the native endianness.
+    #[inline(always)]
     pub const fn native() -> Self {
         if cfg!(target_endian = "little") {
             Endianness::Little

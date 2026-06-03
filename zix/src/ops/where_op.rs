@@ -21,9 +21,9 @@ pub fn where_condition<SC, SX, SY>(
     y: Array<SY>,
 ) -> Array<Where<SC, SX, SY>>
 where
-    SC: ArrayStorage + ArrayStorageTyped<Item = bool>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
+    SC: ArrayStorageTyped<Item = bool>,
+    SX: ArrayStorage<Dimension = SC::Dimension>,
+    SY: ArrayStorage<ElementType = SX::ElementType, Dimension = SC::Dimension>,
 {
     Where::new_array(condition, x, y).unwrap()
 }
@@ -72,9 +72,9 @@ pub struct Where<SC, SX, SY> {
 }
 impl<SC, SX, SY> Where<SC, SX, SY>
 where
-    SC: ArrayStorage + ArrayStorageTyped<Item = bool>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
+    SC: ArrayStorageTyped<Item = bool>,
+    SX: ArrayStorage<Dimension = SC::Dimension>,
+    SY: ArrayStorage<ElementType = SX::ElementType, Dimension = SC::Dimension>,
 {
     /// Constructs a [`Where`] storage. See the struct docs for semantics and examples.
     pub fn new(condition: SC, x: SX, y: SY) -> Result<Self> {
@@ -112,13 +112,14 @@ where
 }
 impl<SC, SX, SY> ArrayStorage for Where<SC, SX, SY>
 where
-    SC: ArrayStorage + ArrayStorageTyped<Item = bool>,
-    SX: ArrayStorage,
-    SY: ArrayStorage<ElementType = SX::ElementType>,
+    SC: ArrayStorageTyped<Item = bool>,
+    SX: ArrayStorage<Dimension = SC::Dimension>,
+    SY: ArrayStorage<ElementType = SX::ElementType, Dimension = SC::Dimension>,
 {
     type ElementType = SX::ElementType;
     type Dimension = SC::Dimension;
 
+    #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(self.shape(), index)?;
         let dtype = self.dtype();
@@ -170,6 +171,7 @@ where
         Ok(())
     }
 
+    #[inline(always)]
     fn read_data_typed<'a, T>(
         &'a self,
         index: &[Range<u64>],
@@ -187,9 +189,11 @@ where
             .map_items(|(cond, (x, y))| if cond { x } else { y }))
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.condition.shape()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         self.x.dtype()
     }

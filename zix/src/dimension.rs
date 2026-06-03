@@ -113,6 +113,7 @@ pub trait Dimension:
     ///
     /// Equivalent to `self.as_slice().len()`. For `Dim<N>` the compiler can constant-fold this
     /// to `N`; for `DimDyn` it is a runtime array length.
+    #[inline(always)]
     fn ndim(&self) -> usize {
         self.as_slice().len()
     }
@@ -120,6 +121,7 @@ pub trait Dimension:
     /// Return the size of dimension `dim`.
     ///
     /// Panics if `dim >= self.ndim()`.
+    #[inline(always)]
     fn size(&self, dim: usize) -> u64 {
         self.as_slice()[dim]
     }
@@ -143,6 +145,7 @@ impl Dimension for DimDyn {
     type Smaller = Self;
     type Larger = Self;
 
+    #[inline(always)]
     fn from_slice(slice: &[u64]) -> Result<Self> {
         Ok(Self(DimArray::from_slice(slice).ok_or_else(|| {
             Error::new(
@@ -155,6 +158,8 @@ impl Dimension for DimDyn {
             )
         })?))
     }
+
+    #[inline(always)]
     fn as_slice(&self) -> &[u64] {
         let s = self.0.as_slice();
         unsafe { assert_unchecked(s.len() <= NDIM_MAX) };
@@ -163,6 +168,8 @@ impl Dimension for DimDyn {
 }
 impl ndarray::IntoDimension for DimDyn {
     type Dim = ndarray::IxDyn;
+
+    #[inline(always)]
     fn into_dimension(self) -> Self::Dim {
         let dim = self.as_slice();
         let mut nd_dim = Self::Dim::zeros(dim.len());
@@ -191,6 +198,7 @@ impl ndarray::IntoDimension for DimDyn {
 pub struct Dim<const NDIM: usize>([u64; NDIM]);
 impl<const NDIM: usize> Dim<NDIM> {
     /// Construct a `Dim<NDIM>` from a fixed-size array of axis sizes.
+    #[inline(always)]
     pub fn from_array(arr: [u64; NDIM]) -> Self {
         Self(arr)
     }
@@ -205,6 +213,7 @@ macro_rules! impl_dim {
             type Smaller = $smaller;
             type Larger = $larger;
 
+            #[inline(always)]
             fn from_slice(slice: &[u64]) -> Result<Self> {
                 Ok(Self(slice.try_into().map_err(|_| {
                     Error::new(
@@ -213,12 +222,16 @@ macro_rules! impl_dim {
                     )
                 })?))
             }
+
+            #[inline(always)]
             fn as_slice(&self) -> &[u64] {
                 self.0.as_slice()
             }
         }
         impl ndarray::IntoDimension for Dim<$dim> {
             type Dim = $nd_dim;
+
+            #[inline(always)]
             fn into_dimension(self) -> Self::Dim {
                 let dim = self.as_slice();
                 let mut nd_dim = <Self::Dim as ndarray::Dimension>::zeros(dim.len());
@@ -282,6 +295,8 @@ where
     D: Dimension,
 {
     type Dimension = D;
+
+    #[inline(always)]
     fn into_dimension(self) -> Result<Self::Dimension> {
         Ok(self)
     }
@@ -289,18 +304,24 @@ where
 
 impl IntoDimension for u64 {
     type Dimension = Dim<1>;
+
+    #[inline(always)]
     fn into_dimension(self) -> Result<Self::Dimension> {
         Ok(Dim::<1>::from_array([self]))
     }
 }
 impl IntoDimension for &[u64] {
     type Dimension = DimDyn;
+
+    #[inline(always)]
     fn into_dimension(self) -> Result<Self::Dimension> {
         DimDyn::from_slice(self)
     }
 }
 impl IntoDimension for &Vec<u64> {
     type Dimension = DimDyn;
+
+    #[inline(always)]
     fn into_dimension(self) -> Result<Self::Dimension> {
         self.as_slice().into_dimension()
     }
@@ -310,12 +331,16 @@ macro_rules! impl_into_dimension_array {
     ($n:expr) => {
         impl IntoDimension for [u64; $n] {
             type Dimension = Dim<$n>;
+
+            #[inline(always)]
             fn into_dimension(self) -> Result<Self::Dimension> {
                 Ok(Dim::<$n>::from_array(self))
             }
         }
         impl IntoDimension for &[u64; $n] {
             type Dimension = Dim<$n>;
+
+            #[inline(always)]
             fn into_dimension(self) -> Result<Self::Dimension> {
                 Ok(Dim::<$n>::from_array(*self))
             }
@@ -336,6 +361,8 @@ macro_rules! impl_into_dimension_tuple {
     ($($idx:tt),+ $(,)?) => {
         impl IntoDimension for ($(impl_into_dimension_tuple!(@replace $idx u64),)+) {
             type Dimension = Dim<{ impl_into_dimension_tuple!(@count $($idx)*) }>;
+
+            #[inline(always)]
             fn into_dimension(self) -> Result<Self::Dimension> {
                 Ok(Dim::from_array([$(self.$idx,)+]))
             }
@@ -349,6 +376,8 @@ macro_rules! impl_into_dimension_tuple {
 
 impl IntoDimension for () {
     type Dimension = Dim<0>;
+
+    #[inline(always)]
     fn into_dimension(self) -> Result<Self::Dimension> {
         Ok(Dim::from_array([]))
     }
@@ -366,6 +395,8 @@ macro_rules! impl_into_dimension_ndarray {
     ($n:expr) => {
         impl IntoDimension for ndarray::Dim<[usize; $n]> {
             type Dimension = Dim<$n>;
+
+            #[inline(always)]
             fn into_dimension(self) -> Result<Self::Dimension> {
                 let mut arr = [0u64; $n];
                 #[allow(clippy::reversed_empty_ranges)]
@@ -389,6 +420,8 @@ impl_into_dimension_ndarray!(6);
 // impl_into_dimension_ndarray!(8);
 impl IntoDimension for ndarray::IxDyn {
     type Dimension = DimDyn;
+
+    #[inline(always)]
     fn into_dimension(self) -> Result<Self::Dimension> {
         let dim = <Self as ndarray::Dimension>::as_array_view(&self);
         let dim = dim.as_slice().unwrap();
@@ -415,6 +448,7 @@ pub(crate) type DimArray<T> = crate::util::arrayvec::ArrayVec<T, NDIM_MAX>;
 /// Build a [`DimArray`] by applying `f` to each axis index `0..ndim`.
 ///
 /// Panics if `ndim > NDIM_MAX`.
+#[inline(always)]
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
     (0..ndim).map(f).collect()
 }
@@ -423,6 +457,7 @@ pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> 
 ///
 /// Returns the first error encountered, or `Ok` with the full array on success.
 /// Panics if `ndim > NDIM_MAX`.
+#[inline(always)]
 pub(crate) fn try_dim_arr<T, E>(
     ndim: usize,
     f: impl FnMut(usize) -> Result<T, E>,

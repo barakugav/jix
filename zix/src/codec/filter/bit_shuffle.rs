@@ -327,6 +327,7 @@ fn untrans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) 
 ///
 /// Only little-endian targets are supported - a big-endian transpose would
 /// require a mirrored mask schedule. A compile-time assert enforces this.
+#[inline(always)]
 fn transpose8x8(x: [u8; 8]) -> [u8; 8] {
     const _: () = const {
         assert!(

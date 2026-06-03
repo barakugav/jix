@@ -80,6 +80,7 @@ macro_rules! impl_array_storage {
             type ElementType = ET;
             type Dimension = D;
 
+            #[inline(always)]
             fn read_data(
                 &self,
                 index: &[Range<u64>],
@@ -89,9 +90,11 @@ macro_rules! impl_array_storage {
                 self.0.read_data(index, buf, context)
             }
 
+            #[inline(always)]
             fn shape(&self) -> &[u64] {
                 self.0.shape()
             }
+            #[inline(always)]
             fn dtype(&self) -> &Dtype {
                 self.0.blocks.dtype()
             }
@@ -212,10 +215,12 @@ where
     }
 
     /// Returns the nd-block shape (items per dimension) used by this storage.
+    #[inline(always)]
     pub(crate) fn block_shape(&self) -> &[BlockSize] {
         &self.blocks_layout.block_shape_hint
     }
 
+    #[inline(always)]
     pub(crate) fn shape(&self) -> &[u64]
     where
         D: Dimension,
@@ -258,6 +263,7 @@ where
     ///      position of the active region relative to `index`.
     ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
     ///      respecting both strides.
+    #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>
     where
         ET: ElementType,

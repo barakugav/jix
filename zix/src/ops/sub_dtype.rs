@@ -118,6 +118,7 @@ where
     type ElementType = ET;
     type Dimension = S::Dimension;
 
+    #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         check_get_range(self.shape(), index)?;
         let dst_dtype = self.dtype();
@@ -143,9 +144,11 @@ where
         Ok(())
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.array.shape()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         self.dst_type.dtype()
     }

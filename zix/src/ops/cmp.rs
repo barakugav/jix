@@ -35,6 +35,8 @@ pub(crate) mod _traits {
         ($($t:ty),* $(,)?) => {
             $(impl Maximum for $t {
                 type Output = Self;
+
+                #[inline(always)]
                 fn maximum(self, other: Self) -> Self {
                     std::cmp::max(self, other)
                 }
@@ -45,6 +47,8 @@ pub(crate) mod _traits {
         ($($t:ty),* $(,)?) => {
             $(impl Maximum for $t {
                 type Output = Self;
+
+                #[inline(always)]
                 fn maximum(self, other: Self) -> Self {
                     if self.is_nan() | other.is_nan() {
                         Self::NAN
@@ -87,6 +91,8 @@ pub(crate) mod _traits {
     ($($t:ty),* $(,)?) => {
         $(impl Minimum for $t { // TODO: rename
             type Output = Self;
+
+            #[inline(always)]
             fn minimum(self, other: Self) -> Self {
                 std::cmp::min(self, other)
             }
@@ -97,6 +103,8 @@ pub(crate) mod _traits {
     ($($t:ty),* $(,)?) => {
         $(impl Minimum for $t {
             type Output = Self;
+
+            #[inline(always)]
             fn minimum(self, other: Self) -> Self {
                 if self.is_nan() | other.is_nan() {
                     Self::NAN

@@ -111,6 +111,7 @@ pub trait ArrayStorage {
     /// # Returns
     ///
     /// A `ReadData<T>` that can be used to read the requested region as typed elements.
+    #[inline(always)]
     fn read_data_typed<'a, T>(
         &'a self,
         index: &[Range<u64>],
@@ -174,6 +175,7 @@ pub trait ArrayStorage {
 
     /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]
+    #[inline(always)]
     fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
         None
     }

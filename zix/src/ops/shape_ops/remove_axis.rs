@@ -143,6 +143,7 @@ where
         Self::new(array.into_storage(), axis).map(Array::from_storage)
     }
 
+    #[inline]
     fn transform_index(&self, index: &[Range<u64>]) -> Result<DimArray<Range<u64>>> {
         check_get_range(self.shape(), index)?;
 
@@ -174,11 +175,13 @@ where
     type ElementType = S::ElementType;
     type Dimension = D;
 
+    #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         self.array
             .read_data(&self.transform_index(index)?, buf, context)
     }
 
+    #[inline(always)]
     fn read_data_typed<'a, T>(
         &'a self,
         index: &[Range<u64>],
@@ -191,9 +194,11 @@ where
             .read_data_typed(&self.transform_index(index)?, context)
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.shape.as_slice()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }

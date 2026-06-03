@@ -235,13 +235,13 @@
 //! # Ok::<(), zix::Error>(())
 //! ```
 //!
-//! Shape-changing operations (`reshape`, `permute_axes`, `broadcast`) remap how output indices
+//! Shape-changing operations (`reshape_view`, `permute_axes`, `broadcast`) remap how output indices
 //! translate to positions in the underlying blocks. When the new layout crosses block boundaries
 //! that the original layout respected, a single read may decompress many more blocks than
 //! needed.
 //!
-//! To avoid this, call [`.copy()`](Array::copy) (or the eager variants `reshape`,
-//! `broadcast`) after a shape change to re-encode with a freshly derived block shape:
+//! To avoid this, call [`.copy()`](Array::copy) (or the eager variant `reshape`)
+//! after a shape change to re-encode with a freshly derived block shape:
 //!
 //! ```
 //! use zix::{Array, ArrayParams};

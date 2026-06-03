@@ -17,7 +17,7 @@ where
     #[track_caller]
     pub fn map<R, F>(self, map_fn: F) -> Array<Map<S, F>>
     where
-        S: ArrayStorage + ArrayStorageTyped,
+        S: ArrayStorageTyped,
         R: Dtyped,
         F: Fn(S::Item) -> R,
     {
@@ -55,7 +55,7 @@ impl<S, F> Map<S, F> {
     /// Constructs a [`Map`] storage. See the struct docs for semantics and examples.
     pub fn new<O>(array: S, map_fn: F) -> Result<Self>
     where
-        S: ArrayStorage + ArrayStorageTyped,
+        S: ArrayStorageTyped,
         F: Fn(S::Item) -> O,
         O: Dtyped,
     {
@@ -65,7 +65,7 @@ impl<S, F> Map<S, F> {
     /// Constructs an array with [`Map`] storage. See the storage struct docs for semantics and examples.
     pub fn new_array<O>(array: Array<S>, map_fn: F) -> Result<Array<Self>>
     where
-        S: ArrayStorage + ArrayStorageTyped,
+        S: ArrayStorageTyped,
         F: Fn(S::Item) -> O,
         O: Dtyped,
     {
@@ -74,7 +74,7 @@ impl<S, F> Map<S, F> {
 }
 impl<S, O, F> ArrayStorage for Map<S, F>
 where
-    S: ArrayStorage + ArrayStorageTyped,
+    S: ArrayStorageTyped,
     O: Dtyped,
     F: Fn(S::Item) -> O,
 {
@@ -109,8 +109,8 @@ impl<S1, S2, F> Map2<S1, S2, F> {
     /// Constructs a [`Map2`] storage. See the struct docs for semantics and examples.
     pub fn new<O>(a: S1, b: S2, map_fn: F) -> Result<Self>
     where
-        S1: ArrayStorage + ArrayStorageTyped,
-        S2: ArrayStorage + ArrayStorageTyped,
+        S1: ArrayStorageTyped,
+        S2: ArrayStorageTyped<Dimension = S1::Dimension>,
         F: Fn(S1::Item, S2::Item) -> O,
         O: Dtyped,
     {
@@ -120,8 +120,8 @@ impl<S1, S2, F> Map2<S1, S2, F> {
     /// Constructs an array with [`Map2`] storage. See the storage struct docs for semantics and examples.
     pub fn new_array<O>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Result<Array<Self>>
     where
-        S1: ArrayStorage + ArrayStorageTyped,
-        S2: ArrayStorage + ArrayStorageTyped,
+        S1: ArrayStorageTyped,
+        S2: ArrayStorageTyped<Dimension = S1::Dimension>,
         F: Fn(S1::Item, S2::Item) -> O,
         O: Dtyped,
     {
@@ -130,8 +130,8 @@ impl<S1, S2, F> Map2<S1, S2, F> {
 }
 impl<S1, S2, O, F> ArrayStorage for Map2<S1, S2, F>
 where
-    S1: ArrayStorage + ArrayStorageTyped,
-    S2: ArrayStorage + ArrayStorageTyped,
+    S1: ArrayStorageTyped,
+    S2: ArrayStorageTyped<Dimension = S1::Dimension>,
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {
@@ -144,8 +144,8 @@ where
 #[track_caller]
 pub fn map2<S1, S2, O, F>(a: Array<S1>, b: Array<S2>, map_fn: F) -> Array<Map2<S1, S2, F>>
 where
-    S1: ArrayStorage + ArrayStorageTyped,
-    S2: ArrayStorage + ArrayStorageTyped,
+    S1: ArrayStorageTyped,
+    S2: ArrayStorageTyped<Dimension = S1::Dimension>,
     O: Dtyped,
     F: Fn(S1::Item, S2::Item) -> O,
 {

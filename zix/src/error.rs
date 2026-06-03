@@ -103,6 +103,7 @@ macro_rules! ensure {
 }
 pub(crate) use {bail, ensure};
 
+#[inline(always)]
 pub(crate) fn check_ndim(ndim: usize) -> Result<()> {
     ensure!(
         ndim <= NDIM_MAX,
@@ -112,6 +113,7 @@ pub(crate) fn check_ndim(ndim: usize) -> Result<()> {
     Ok(())
 }
 
+#[inline(always)]
 pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
     ensure!(
         actual == expected,
@@ -121,6 +123,7 @@ pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
     Ok(())
 }
 
+#[inline(always)]
 pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
     ensure!(
         shape.len() == index.len(),
@@ -144,6 +147,7 @@ pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()>
     Ok(())
 }
 
+#[inline(always)]
 pub(crate) fn check_get_buffer_size(
     index: &[Range<u64>],
     dtype: &Dtype,

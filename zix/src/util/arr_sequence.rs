@@ -84,10 +84,12 @@ impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
 where
     S: ArrayStorage,
 {
+    #[inline(always)]
     fn narrays(&self) -> usize {
         self.len()
     }
 
+    #[inline(always)]
     fn read_data(
         &self,
         arr: usize,
@@ -98,10 +100,12 @@ where
         self[arr].storage.read_data(index, buf, context)
     }
 
+    #[inline(always)]
     fn shape(&self, arr: usize) -> &[u64] {
         self[arr].shape()
     }
 
+    #[inline(always)]
     fn dtype(&self, arr: usize) -> &Dtype {
         self[arr].dtype()
     }
@@ -122,10 +126,12 @@ impl<S> ArraySequenceImpl for Vec<Array<S>>
 where
     S: ArrayStorage,
 {
+    #[inline(always)]
     fn narrays(&self) -> usize {
         self.len()
     }
 
+    #[inline(always)]
     fn read_data(
         &self,
         arr: usize,
@@ -136,10 +142,12 @@ where
         self[arr].storage.read_data(index, buf, context)
     }
 
+    #[inline(always)]
     fn shape(&self, arr: usize) -> &[u64] {
         self[arr].shape()
     }
 
+    #[inline(always)]
     fn dtype(&self, arr: usize) -> &Dtype {
         self[arr].dtype()
     }
@@ -157,10 +165,12 @@ impl<S> ArraySequenceImpl for &[Array<S>]
 where
     S: ArrayStorage,
 {
+    #[inline(always)]
     fn narrays(&self) -> usize {
         self.len()
     }
 
+    #[inline(always)]
     fn read_data(
         &self,
         arr: usize,
@@ -171,10 +181,12 @@ where
         self[arr].storage.read_data(index, buf, context)
     }
 
+    #[inline(always)]
     fn shape(&self, arr: usize) -> &[u64] {
         self[arr].shape()
     }
 
+    #[inline(always)]
     fn dtype(&self, arr: usize) -> &Dtype {
         self[arr].dtype()
     }
@@ -201,10 +213,12 @@ macro_rules! impl_array_sequence_for_tuple {
         where
             $($S: ArrayStorage,)+
         {
+            #[inline(always)]
             fn narrays(&self) -> usize {
                 impl_array_sequence_for_tuple!(@count $($idx)+)
             }
 
+            #[inline(always)]
             fn read_data(
                 &self,
                 arr: usize,
@@ -218,6 +232,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 }
             }
 
+            #[inline(always)]
             fn shape(&self, arr: usize) -> &[u64] {
                 match arr {
                     $($idx => self.$idx.shape(),)+
@@ -225,6 +240,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 }
             }
 
+            #[inline(always)]
             fn dtype(&self, arr: usize) -> &Dtype {
                 match arr {
                     $($idx => self.$idx.dtype(),)+

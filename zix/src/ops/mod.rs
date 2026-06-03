@@ -38,8 +38,7 @@
 //!   [`ArrayParams`](crate::ArrayParams), giving full control over the new block shape. Use this
 //!   to guarantee your access pattern is well-aligned.
 //!
-//! The eager variants ([`Array::reshape`](crate::Array::reshape),
-//! [`Array::broadcast`](crate::Array::broadcast)) call `.copy()` internally.
+//! The eager variant ([`Array::reshape`](crate::Array::reshape)) calls `.copy()` internally.
 //! Use the `_view` variants with care.
 //!
 //! # Typed element requirements

@@ -39,6 +39,7 @@ where
     /// # Panics
     ///
     /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
+    #[inline]
     #[track_caller]
     pub fn reshape<Sh>(self, shape: Sh) -> Array<Compact<S::ElementType, Sh::Dimension>>
     where
@@ -57,6 +58,7 @@ where
     /// # Panics
     ///
     /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
+    #[inline]
     #[track_caller]
     pub fn reshape_view<Sh>(self, shape: Sh) -> Array<Reshape<S, Sh::Dimension>>
     where
@@ -73,6 +75,7 @@ where
     /// # Panics
     ///
     /// Panics if the number of items != `self.ndim()` or any `step < 1`.
+    #[inline]
     #[track_caller]
     pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
         Slice::new_array(self, slice.into()).unwrap()
@@ -86,38 +89,21 @@ where
     /// # Panics
     ///
     /// Panics if `axes` is not a valid permutation of `0..ndim`.
+    #[inline]
     #[track_caller]
     pub fn permute_axes(self, axes: &[usize]) -> Array<PermuteAxes<S>> {
         PermuteAxes::new_array(self, axes).unwrap()
     }
 
-    /// Expands the array to `shape` by repeating length-1 dimensions and returns a
-    /// materialized copy. See [`Broadcast`] for details and examples.
-    ///
-    /// Preferred over [`broadcast_view`](Self::broadcast_view) when the result will be read more
-    /// than once: the copy stores each element once at its expanded position, avoiding repeated
-    /// reads of the same source blocks on future accesses.
-    ///
-    /// # Panics
-    ///
-    /// See [`broadcast_view`](Self::broadcast_view) for validity rules.
-    #[track_caller]
-    pub fn broadcast(self, shape: &[u64]) -> Array<Compact<S::ElementType, S::Dimension>> {
-        self.broadcast_view(shape).copy().unwrap()
-    }
-
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.
     /// See [`Broadcast`] for details and examples.
-    ///
-    /// No data is copied, but reads may be slow - the same source blocks are decompressed
-    /// repeatedly. Call [`.copy()`](Array::copy) to materialize, or prefer
-    /// [`broadcast`](Self::broadcast) directly.
     ///
     /// # Panics
     ///
     /// Panics if `shape.len() != self.ndim()` or any dimension with size > 1 is expanded.
+    #[inline]
     #[track_caller]
-    pub fn broadcast_view(self, shape: &[u64]) -> Array<Broadcast<S>> {
+    pub fn broadcast(self, shape: &[u64]) -> Array<Broadcast<S>> {
         Broadcast::new_array(self, shape).unwrap()
     }
 
@@ -129,6 +115,7 @@ where
     /// # Panics
     ///
     /// Panics if any axis is out of bounds, duplicated, or has length != 1.
+    #[inline]
     #[track_caller]
     pub fn remove_axis<Ax>(
         self,
@@ -149,6 +136,7 @@ where
     /// # Panics
     ///
     /// Panics if any value in `axis` is > `self.ndim()` or the resulting ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
+    #[inline]
     #[track_caller]
     pub fn insert_axis<Ax>(
         self,

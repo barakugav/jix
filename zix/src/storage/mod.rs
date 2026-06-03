@@ -85,7 +85,7 @@ pub(crate) mod block;
 ///
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
 /// [`Array::to_typed::<T>()`](crate::Array::to_typed).
-pub trait ArrayStorageTyped {
+pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> {
     /// The concrete Rust element type stored in this array (e.g. `f32`, `i64`).
     type Item: Dtyped;
 }
@@ -114,6 +114,7 @@ impl ArrayStorageSpec<'_> {
     /// Note that if the storage is not block-compressed, rather a view or adapter, the block layout
     /// should be treated as a hint for how to choose block shapes for operations on this storage,
     /// rather than a strict description of how the data is actually laid out on disk.
+    #[inline(always)]
     pub fn blocks_layout(&self) -> &BlocksLayout {
         self.blocks_layout
     }
@@ -124,6 +125,7 @@ impl ArrayStorageSpec<'_> {
     /// should be treated as a hint for how to choose encoder params for arrays crated from a chain of
     /// operations applied to this storage. This allows propagating encoder params from between arrays
     /// that are in the same context.
+    #[inline(always)]
     pub fn encoder_params(&self) -> Option<&EncoderParams> {
         self.encoder_params
     }
@@ -134,6 +136,7 @@ impl ArrayStorageSpec<'_> {
     /// should be treated as a hint for how to choose decoder params for arrays crated from a chain of
     /// operations applied to this storage. This allows propagating decoder params from between arrays
     /// that are in the same context.
+    #[inline(always)]
     pub fn decoder_params(&self) -> Option<&DecoderParams> {
         self.decoder_params
     }
@@ -146,6 +149,7 @@ impl ArrayStorageSpec<'_> {
 pub struct Ref<'a, S>(pub(crate) &'a S);
 impl<'a, S> Ref<'a, S> {
     /// Create a new `Ref` wrapper around the given storage reference.
+    #[inline(always)]
     pub fn new(storage: &'a S) -> Self {
         Self(storage)
     }
@@ -171,6 +175,7 @@ macro_rules! impl_array_storage_forward {
     };
 
     ($lifetime:tt, $generic:ident, <$($generics:tt),* $(,)?>) => {
+        #[inline(always)]
         fn read_data(
             &self,
             index: &[::core::ops::Range<u64>],
@@ -181,6 +186,7 @@ macro_rules! impl_array_storage_forward {
         }
 
         #[allow(refining_impl_trait)]
+        #[inline(always)]
         fn read_data_typed<$lifetime, $generic>(
             &$lifetime self,
             index: &[::core::ops::Range<u64>],
@@ -192,9 +198,11 @@ macro_rules! impl_array_storage_forward {
             self.0.read_data_typed(index, context)
         }
 
+        #[inline(always)]
         fn shape(&self) -> &[u64] {
             self.0.shape()
         }
+        #[inline(always)]
         fn dtype(&self) -> &crate::dtype::Dtype {
             self.0.dtype()
         }
@@ -216,6 +224,7 @@ pub trait ReadData<T> {
     fn len(&self) -> usize;
 
     /// Returns `true` if there are no items to read.
+    #[inline(always)]
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -313,9 +322,11 @@ where
             R: ReadData<T>,
             F: FnMut(T) -> U,
         {
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [U; N] {
                 self.inner.read_bulk::<N>(offset).map(&mut self.f)
             }
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.inner.len()
             }
@@ -345,11 +356,13 @@ where
             T: Copy + Send + Sync + Sized + 'static,
             U: Copy + Send + Sync + Sized + 'static,
         {
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [(T, U); N] {
                 let left = self.left.read_bulk::<N>(offset);
                 let right = self.right.read_bulk::<N>(offset);
                 std::array::from_fn(|i| (left[i], right[i]))
             }
+            #[inline(always)]
             fn len(&self) -> usize {
                 assert_eq!(self.left.len(), self.right.len());
                 self.left.len()
@@ -377,6 +390,7 @@ where
             T: Copy + Send + Sync + Sized + 'static,
             U: Copy + Send + Sync + Sized + 'static,
         {
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [U; N] {
                 const {
                     assert!(
@@ -387,6 +401,7 @@ where
                 let chunk: [T; N] = self.inner.read_bulk::<N>(offset);
                 unsafe { std::mem::transmute_copy::<[T; N], [U; N]>(&chunk) }
             }
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.inner.len()
             }

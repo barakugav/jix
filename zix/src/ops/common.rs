@@ -5,10 +5,11 @@ use crate::{DimDyn, Dimension};
 macro_rules! define_array_op1_method {
     ($method:ident : $Op:ident, $($trait:ident)::+) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[inline]
         #[track_caller]
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
             <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
         {
@@ -17,10 +18,11 @@ macro_rules! define_array_op1_method {
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[inline]
         #[track_caller]
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
         {
             $Op::new_array(self).unwrap()
@@ -30,11 +32,12 @@ macro_rules! define_array_op1_method {
 macro_rules! define_array_op2_method {
     ($method:ident : $Op:ident, $($trait:ident)::+) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[inline]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Dimension = S::Dimension>,
             S::Item: $($trait)::+<S2::Item>,
             <S::Item as $($trait)::+<S2::Item>>::Output: crate::dtype::Dtyped,
         {
@@ -43,11 +46,12 @@ macro_rules! define_array_op2_method {
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[inline]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Dimension = S::Dimension>,
             S::Item: $($trait)::+<S2::Item>,
         {
             $Op::new_array(self, other).unwrap()
@@ -55,11 +59,12 @@ macro_rules! define_array_op2_method {
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_lhs_type = $lhs_type:ty) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
+        #[inline]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $lhs_type>,
+            S: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Item = $lhs_type, Dimension = S::Dimension>,
             S::Item: $($trait)::+,
         {
             $Op::new_array(self, other).unwrap()
@@ -227,9 +232,12 @@ impl AxesArg for usize {
     type ReducedDimension<D: Dimension> = D::Smaller;
     type ExpandedDimension<D: Dimension> = D::Larger;
 
+    #[inline(always)]
     fn len(&self) -> usize {
         1
     }
+
+    #[inline(always)]
     fn get(&self, idx: usize) -> usize {
         match idx {
             0 => *self,
@@ -252,9 +260,12 @@ impl AxesArg for Vec<usize> {
     type ReducedDimension<D: Dimension> = DimDyn;
     type ExpandedDimension<D: Dimension> = DimDyn;
 
+    #[inline(always)]
     fn len(&self) -> usize {
         <Vec<_>>::len(self)
     }
+
+    #[inline(always)]
     fn get(&self, idx: usize) -> usize {
         self[idx]
     }
@@ -263,9 +274,12 @@ impl AxesArg for &Vec<usize> {
     type ReducedDimension<D: Dimension> = DimDyn;
     type ExpandedDimension<D: Dimension> = DimDyn;
 
+    #[inline(always)]
     fn len(&self) -> usize {
         <Vec<_>>::len(self)
     }
+
+    #[inline(always)]
     fn get(&self, idx: usize) -> usize {
         self[idx]
     }
@@ -277,9 +291,12 @@ macro_rules! impl_axes_array {
             type ReducedDimension<D: Dimension> = impl_axes_array!(@shrink D, $($idx),+);
             type ExpandedDimension<D: Dimension> = impl_axes_array!(@expand D, $($idx),+);
 
+            #[inline(always)]
             fn len(&self) -> usize {
                 impl_axes_array!(@count $($idx)*)
             }
+
+            #[inline(always)]
             fn get(&self, idx: usize) -> usize {
                 self[idx]
             }
@@ -288,9 +305,12 @@ macro_rules! impl_axes_array {
             type ReducedDimension<D: Dimension> = impl_axes_array!(@shrink D, $($idx),+);
             type ExpandedDimension<D: Dimension> = impl_axes_array!(@expand D, $($idx),+);
 
+            #[inline(always)]
             fn len(&self) -> usize {
                 impl_axes_array!(@count $($idx)*)
             }
+
+            #[inline(always)]
             fn get(&self, idx: usize) -> usize {
                 self[idx]
             }
@@ -315,9 +335,12 @@ impl AxesArg for [usize; 0] {
     type ReducedDimension<D: Dimension> = D;
     type ExpandedDimension<D: Dimension> = D;
 
+    #[inline(always)]
     fn len(&self) -> usize {
         0
     }
+
+    #[inline(always)]
     fn get(&self, _idx: usize) -> usize {
         unreachable!()
     }
@@ -326,9 +349,12 @@ impl AxesArg for &[usize; 0] {
     type ReducedDimension<D: Dimension> = D;
     type ExpandedDimension<D: Dimension> = D;
 
+    #[inline(always)]
     fn len(&self) -> usize {
         0
     }
+
+    #[inline(always)]
     fn get(&self, _idx: usize) -> usize {
         unreachable!()
     }
@@ -348,10 +374,12 @@ macro_rules! impl_axes_tuple {
             type ReducedDimension<D: Dimension> = impl_axes_tuple!(@shrink D, $($idx),+);
             type ExpandedDimension<D: Dimension> = impl_axes_tuple!(@expand D, $($idx),+);
 
+            #[inline(always)]
             fn len(&self) -> usize {
                 impl_axes_tuple!(@count $($idx)*)
             }
 
+            #[inline(always)]
             fn get(&self, idx: usize) -> usize {
                 match idx {
                     $($idx => self.$idx,)+
@@ -379,9 +407,12 @@ impl AxesArg for () {
     type ReducedDimension<D: Dimension> = D;
     type ExpandedDimension<D: Dimension> = D;
 
+    #[inline(always)]
     fn len(&self) -> usize {
         0
     }
+
+    #[inline(always)]
     fn get(&self, _idx: usize) -> usize {
         unreachable!()
     }

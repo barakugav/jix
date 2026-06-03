@@ -42,10 +42,12 @@ pub struct TypeDyn(Dtype);
 impl ElementType for TypeDyn {
     const DTYPE: Option<Dtype> = None;
 
+    #[inline(always)]
     fn from_dtype(dtype: Dtype) -> Result<Self> {
         Ok(Self(dtype))
     }
 
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         &self.0
     }
@@ -62,6 +64,7 @@ pub struct Ty<T>(Dtype, PhantomData<T>);
 impl<T> Ty<T> {
     /// Construct the element type marker.
     #[allow(clippy::new_without_default)]
+    #[inline(always)]
     pub fn new() -> Self
     where
         T: Dtyped,
@@ -75,11 +78,13 @@ where
 {
     const DTYPE: Option<Dtype> = Some(T::DTYPE);
 
+    #[inline(always)]
     fn from_dtype(dtype: Dtype) -> Result<Self> {
         check_dtype(&dtype, &T::DTYPE)?;
         Ok(Self::new())
     }
 
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         unsafe { assert_unchecked_eq!(self.0, T::DTYPE) };
         &self.0

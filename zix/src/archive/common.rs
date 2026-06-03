@@ -91,11 +91,13 @@ impl<W> ArchiveWriter<W> {
 }
 impl<W> Deref for ArchiveWriter<W> {
     type Target = W;
+    #[inline(always)]
     fn deref(&self) -> &W {
         &self.writer
     }
 }
 impl<W> DerefMut for ArchiveWriter<W> {
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut W {
         &mut self.writer
     }

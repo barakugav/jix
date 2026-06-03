@@ -382,9 +382,11 @@ where
         Ok(())
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.new_shape.as_slice()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }

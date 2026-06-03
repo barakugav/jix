@@ -45,6 +45,7 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
         }
     }
 
+    #[inline(always)]
     pub fn from_slice(slice: &[T]) -> Option<Self>
     where
         T: Clone,

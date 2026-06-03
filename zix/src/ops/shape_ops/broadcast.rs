@@ -8,7 +8,7 @@ use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
-/// returned by [`Array::broadcast_view`](crate::Array::broadcast_view).
+/// returned by [`Array::broadcast`](crate::Array::broadcast).
 ///
 /// The new shape (`shape`) must have the same number of dimensions as the input. For each dimension `d`,
 /// either `shape[d] == input_shape[d]` (kept as-is) or `input_shape[d] == 1` (broadcast:
@@ -28,13 +28,13 @@ use crate::{Array, ArrayStorage, Dimension};
 ///
 /// // Row vector [1, 3] -> matrix [2, 3]: every row is identical
 /// let a = Array::compact_array(&array![[1i32, 2, 3]])?;
-/// let result = a.broadcast_view(&[2, 3]).to_ndarray()?;
+/// let result = a.broadcast(&[2, 3]).to_ndarray()?;
 /// assert_eq!(result[[0, 0]], result[[1, 0]]);
 /// assert_eq!(result[[0, 2]], result[[1, 2]]);
 ///
 /// // Column vector [3, 1] -> matrix [3, 2]: every column is identical
 /// let b = Array::compact_array(&array![[10i32], [20], [30]])?;
-/// let result = b.broadcast_view(&[3, 2]).to_ndarray()?;
+/// let result = b.broadcast(&[3, 2]).to_ndarray()?;
 /// assert_eq!(result[[0, 0]], 10);
 /// assert_eq!(result[[0, 1]], 10);
 /// assert_eq!(result[[2, 0]], 30);
@@ -134,6 +134,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
+    #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         // Fast path: no dimension was actually broadcast - forward directly.
         if self.is_identity {
@@ -191,9 +192,11 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         Ok(())
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.new_shape.as_slice()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
@@ -234,34 +237,25 @@ mod tests {
     #[test]
     fn shape_broadcast_axis0() {
         // [1, 4] -> [3, 4]
-        assert_eq!(
-            make(arange(4), &[1, 4]).broadcast_view(&[3, 4]).shape(),
-            &[3, 4]
-        );
+        assert_eq!(make(arange(4), &[1, 4]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_broadcast_axis1() {
         // [3, 1] -> [3, 4]
-        assert_eq!(
-            make(arange(3), &[3, 1]).broadcast_view(&[3, 4]).shape(),
-            &[3, 4]
-        );
+        assert_eq!(make(arange(3), &[3, 1]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_broadcast_both_axes() {
         // [1, 1] -> [3, 4]
-        assert_eq!(
-            make(vec![7], &[1, 1]).broadcast_view(&[3, 4]).shape(),
-            &[3, 4]
-        );
+        assert_eq!(make(vec![7], &[1, 1]).broadcast(&[3, 4]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_no_broadcast_is_identity() {
         assert_eq!(
-            make(arange(12), &[3, 4]).broadcast_view(&[3, 4]).shape(),
+            make(arange(12), &[3, 4]).broadcast(&[3, 4]).shape(),
             &[3, 4]
         );
     }
@@ -270,9 +264,7 @@ mod tests {
     fn shape_broadcast_3d_middle() {
         // [2, 1, 4] -> [2, 3, 4]
         assert_eq!(
-            make(arange(8), &[2, 1, 4])
-                .broadcast_view(&[2, 3, 4])
-                .shape(),
+            make(arange(8), &[2, 1, 4]).broadcast(&[2, 3, 4]).shape(),
             &[2, 3, 4]
         );
     }
@@ -285,7 +277,7 @@ mod tests {
     fn full_read_broadcast_axis0() {
         // [1, 4] -> [3, 4]: each row is [0,1,2,3]
         let got = make(arange(4), &[1, 4])
-            .broadcast_view(&[3, 4])
+            .broadcast(&[3, 4])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, array![[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3]]);
@@ -295,7 +287,7 @@ mod tests {
     fn full_read_broadcast_axis1() {
         // [3, 1] -> [3, 4]: each col is [0,1,2]
         let got = make(arange(3), &[3, 1])
-            .broadcast_view(&[3, 4])
+            .broadcast(&[3, 4])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, array![[0, 0, 0, 0], [1, 1, 1, 1], [2, 2, 2, 2]]);
@@ -305,7 +297,7 @@ mod tests {
     fn full_read_broadcast_both() {
         // [1, 1] -> [2, 3]: all elements == 7
         let got = make(vec![7], &[1, 1])
-            .broadcast_view(&[2, 3])
+            .broadcast(&[2, 3])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, array![[7, 7, 7], [7, 7, 7]]);
@@ -314,7 +306,7 @@ mod tests {
     #[test]
     fn full_read_no_broadcast() {
         let got = make(arange(12), &[3, 4])
-            .broadcast_view(&[3, 4])
+            .broadcast(&[3, 4])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -327,7 +319,7 @@ mod tests {
     fn full_read_broadcast_3d_middle() {
         // [2, 1, 3] -> [2, 4, 3]: axis 1 repeats 4 times
         let got = make(arange(6), &[2, 1, 3])
-            .broadcast_view(&[2, 4, 3])
+            .broadcast(&[2, 4, 3])
             .to_ndarray()
             .unwrap();
         // row 0 of inner: [0,1,2], row 1: [3,4,5], each repeated 4 times along axis 1
@@ -348,7 +340,7 @@ mod tests {
     fn sub_read_broadcast_axis0() {
         // [1, 4] -> [3, 4]: read rows 1..3, cols 1..3
         let got = make(arange(4), &[1, 4])
-            .broadcast_view(&[3, 4])
+            .broadcast(&[3, 4])
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
         // each row is [1, 2]
@@ -359,7 +351,7 @@ mod tests {
     fn sub_read_broadcast_axis1() {
         // [3, 1] -> [3, 5]: read rows 0..2, cols 2..5 (all same element per row)
         let got = make(arange(3), &[3, 1])
-            .broadcast_view(&[3, 5])
+            .broadcast(&[3, 5])
             .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
             .unwrap();
         // row 0: [0,0,0], row 1: [1,1,1]
@@ -391,7 +383,7 @@ mod tests {
     #[test]
     fn identity_full_read_correct() {
         let got = make(arange(12), &[3, 4])
-            .broadcast_view(&[3, 4])
+            .broadcast(&[3, 4])
             .to_ndarray()
             .unwrap();
         assert_eq!(
@@ -403,7 +395,7 @@ mod tests {
     #[test]
     fn identity_sub_read_correct() {
         let got = make(arange(12), &[3, 4])
-            .broadcast_view(&[3, 4])
+            .broadcast(&[3, 4])
             .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
             .unwrap();
         // rows 1..3, cols 1..3 of [[0,1,2,3],[4,5,6,7],[8,9,10,11]] = [[5,6],[9,10]]
@@ -478,7 +470,7 @@ mod tests {
             )
         ) {
             let expected = nd.broadcast(vec![n]).unwrap().to_owned();
-            crate::util::assert_array_matches(&za.broadcast_view(&[n as u64]), &expected);
+            crate::util::assert_array_matches(&za.broadcast(&[n as u64]), &expected);
         }
 
         // [1, M] -> [N, M]: broadcast axis 0
@@ -487,7 +479,7 @@ mod tests {
             (nd, za, n, m) in broadcast_2d_axis0_strategy()
         ) {
             let expected = nd.broadcast(vec![n, m]).unwrap().to_owned();
-            crate::util::assert_array_matches(&za.broadcast_view(&[n as u64, m as u64]), &expected);
+            crate::util::assert_array_matches(&za.broadcast(&[n as u64, m as u64]), &expected);
         }
 
         // [N, 1] -> [N, M]: broadcast axis 1
@@ -496,7 +488,7 @@ mod tests {
             (nd, za, n, m) in broadcast_2d_axis1_strategy()
         ) {
             let expected = nd.broadcast(vec![n, m]).unwrap().to_owned();
-            crate::util::assert_array_matches(&za.broadcast_view(&[n as u64, m as u64]), &expected);
+            crate::util::assert_array_matches(&za.broadcast(&[n as u64, m as u64]), &expected);
         }
 
         // [N, M] -> [N, M]: identity (no broadcast)
@@ -509,7 +501,7 @@ mod tests {
         ) {
             let shape: Vec<u64> = nd.shape().iter().map(|&s| s as u64).collect();
             let expected = nd.clone();
-            crate::util::assert_array_matches(&za.broadcast_view(&shape), &expected);
+            crate::util::assert_array_matches(&za.broadcast(&shape), &expected);
         }
 
         #[test]
@@ -518,7 +510,7 @@ mod tests {
         ) {
             let expected = nd.broadcast(broadcast_shape.clone()).unwrap().to_owned();
             let broadcast_shape = broadcast_shape.iter().map(|&s| s as u64).collect::<Vec<_>>();
-            let actual = za.broadcast_view(&broadcast_shape);
+            let actual = za.broadcast(&broadcast_shape);
             crate::util::assert_array_matches(&actual, &expected);
         }
     }

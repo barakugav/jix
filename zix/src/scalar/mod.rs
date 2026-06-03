@@ -41,10 +41,13 @@ cfg_if::cfg_if! { if #[cfg(feature = "half")] {
     pub struct f16(u16);
     impl f16 {
         #[doc = concat!("Creates a new `f16` from its raw bit representation.")]
+        #[inline(always)]
         pub const fn from_bits(bits: u16) -> Self {
             Self(bits)
         }
+
         #[doc = concat!("Get the raw bit representation of the `f16`.")]
+        #[inline(always)]
         pub const fn to_bits(&self) -> u16 {
             self.0
         }

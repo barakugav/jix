@@ -38,6 +38,7 @@ impl ArrayStorage for ArrayStorageAny {
     type ElementType = TypeDyn;
     type Dimension = DimDyn;
 
+    #[inline(always)]
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -47,6 +48,7 @@ impl ArrayStorage for ArrayStorageAny {
         self.inner.read_data(index, buf, context)
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         let s = self.shape.as_slice();
         debug_assert!(s.len() <= NDIM_MAX);
@@ -54,6 +56,7 @@ impl ArrayStorage for ArrayStorageAny {
         s
     }
 
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }

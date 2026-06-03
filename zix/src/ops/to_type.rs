@@ -84,6 +84,7 @@ where
     type ElementType = ET;
     type Dimension = S::Dimension;
 
+    #[inline(always)]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         if let Some(dtype) = ET::DTYPE {
             unsafe { assert_unchecked_eq!(self.inner.dtype(), &dtype) };
@@ -91,6 +92,7 @@ where
         self.inner.read_data(index, buf, context)
     }
 
+    #[inline(always)]
     fn read_data_typed<'a, T>(
         &'a self,
         index: &[Range<u64>],
@@ -105,9 +107,11 @@ where
         self.inner.read_data_typed(index, context)
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.inner.shape()
     }
+    #[inline(always)]
     fn dtype(&self) -> &crate::dtype::Dtype {
         let dtype = self.inner.dtype();
         if let Some(expected_dtype) = ET::DTYPE {

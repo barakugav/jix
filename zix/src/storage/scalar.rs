@@ -95,6 +95,7 @@ impl<T, D> Scalar<T, D> {
     }
 
     /// Get the (singular) value of this storage.
+    #[inline(always)]
     pub fn data(&self) -> &T {
         &self.data
     }
@@ -131,6 +132,7 @@ where
     type ElementType = Ty<T>;
     type Dimension = D;
 
+    #[inline(always)]
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -146,6 +148,7 @@ where
         Ok(())
     }
 
+    #[inline(always)]
     fn read_data_typed<'a, T2>(
         &'a self,
         index: &[Range<u64>],
@@ -186,9 +189,11 @@ where
         })
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.shape.as_slice()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         &self.dtype
     }

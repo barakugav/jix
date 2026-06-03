@@ -466,14 +466,17 @@ impl ReadContext {
         })
     }
 
+    #[inline]
     pub(crate) fn decoder<'a>(&'a self, config: &'a DecoderCodecConfig) -> Decoder<'a> {
         Decoder::new(self, config)
     }
 
+    #[inline]
     pub(crate) fn tmp_buf(&self, size: usize, alignment: Alignment) -> TmpBuf<'_> {
         self.tmp_buffers.get(size, alignment)
     }
 
+    #[inline]
     pub(crate) fn tmp_buf_typed<T>(&self, nitems: usize) -> TmpBuf<'_> {
         self.tmp_buffers
             .get(nitems * size_of::<T>(), Alignment::of::<T>())
@@ -586,16 +589,19 @@ pub(crate) struct TmpBuf<'a> {
 }
 impl TmpBuf<'_> {
     /// Resizes the buffer to `new_len` bytes. The new contents are uninitialized.
+    #[inline]
     pub(crate) fn set_len(&mut self, new_len: usize) {
         self.buf.clear();
         self.buf.reserve(new_len);
         unsafe { self.buf.set_len(new_len) };
     }
 
+    #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[u8] {
         self.buf.as_slice()
     }
 
+    #[inline(always)]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
         self.buf.as_mut_slice()
     }

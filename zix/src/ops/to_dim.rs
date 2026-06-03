@@ -85,6 +85,7 @@ where
     type ElementType = S::ElementType;
     type Dimension = D;
 
+    #[inline(always)]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         if let Some(ndim) = D::NDIM {
             unsafe { assert_unchecked_eq!(ndim, self.inner.shape().len()) };
@@ -92,6 +93,7 @@ where
         self.inner.read_data(index, buf, context)
     }
 
+    #[inline(always)]
     fn read_data_typed<'a, T>(
         &'a self,
         index: &[Range<u64>],
@@ -106,6 +108,7 @@ where
         self.inner.read_data_typed(index, context)
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         let shape = self.inner.shape();
         if let Some(ndim) = D::NDIM {
@@ -113,6 +116,7 @@ where
         }
         shape
     }
+    #[inline(always)]
     fn dtype(&self) -> &crate::dtype::Dtype {
         self.inner.dtype()
     }

@@ -292,6 +292,7 @@ impl BlocksLayout {
     /// (reduction, broadcast, reshape, etc.) may update it to reflect a recommended shape
     /// for arrays constructed from their views. Callers should treat it as a recommendation,
     /// not a guarantee.
+    #[inline(always)]
     pub fn block_shape_hint(&self) -> &[BlockSize] {
         &self.block_shape_hint
     }
@@ -305,6 +306,7 @@ impl BlocksLayout {
     /// change the logical shape (reduction, broadcast, reshape, etc.) may tag affected
     /// dimensions as `Any` or `MultipleOf` to let the heuristic freely pick a suitable
     /// size for those dimensions.
+    #[inline(always)]
     pub fn block_shape_tag(&self) -> &[BlockShapeTag] {
         &self.block_shape_tag
     }
@@ -316,6 +318,7 @@ impl BlocksLayout {
     /// a shape and a hint were provided independently, or when a lazy operation updated
     /// one without changing the other. Defaults to the L1 data cache size when no block
     /// shape or hint has been set explicitly.
+    #[inline(always)]
     pub fn block_size_hint(&self) -> u64 {
         self.block_size_hint
     }
@@ -326,6 +329,7 @@ impl BlocksLayout {
     /// approximately this shape. Typically larger than `block_shape_hint` (targeting the
     /// L2 cache), it guides operations like `copy` to issue larger read requests. Like
     /// `block_shape_hint`, lazy operations may update this independently.
+    #[inline(always)]
     pub fn preferred_read_shape(&self) -> &[BlockSize] {
         &self.preferred_read_shape
     }
@@ -335,6 +339,7 @@ impl BlocksLayout {
     /// Analogous to `block_size_hint` but for the preferred read shape. May differ from
     /// `preferred_read_shape.iter().product() * itemsize` for the same reasons.
     /// Defaults to the L2 cache size when not set explicitly.
+    #[inline(always)]
     pub fn preferred_read_size_hint(&self) -> u64 {
         self.preferred_read_size_hint
     }

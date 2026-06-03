@@ -316,6 +316,7 @@ where
     type ElementType = ET;
     type Dimension = D;
 
+    #[inline]
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -350,9 +351,11 @@ where
         Ok(())
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.shape.as_slice()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         self.element_type.dtype()
     }

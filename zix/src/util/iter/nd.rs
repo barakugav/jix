@@ -179,6 +179,7 @@ where
     }
 
     /// Returns the next multi-dimensional index, or `None` when exhausted.
+    #[inline(always)]
     pub(crate) fn next(&mut self) -> Option<&[Ix]> {
         Some(self.0.next()?.0)
     }
@@ -191,9 +192,13 @@ where
 
 impl<Ix> NdIterExtension<Ix> for () {
     type Item<'a> = ();
+    #[inline(always)]
     fn on_increase(&mut self, _dim: usize, _before: Ix, _after: Ix, _diff: Ix) {}
+    #[inline(always)]
     fn on_decrease(&mut self, _dim: usize, _before: Ix, _after: Ix, _diff: Ix) {}
+    #[inline(always)]
     fn next(&self) {}
+    #[inline(always)]
     fn assert_ndim(&self, _ndim: usize) {}
 }
 impl<Ix, T1> NdIterExtension<Ix> for (T1,)
@@ -204,15 +209,19 @@ where
         = (T1::Item<'a>,)
     where
         T1: 'a;
+    #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: Ix, after: Ix, diff: Ix) {
         self.0.on_increase(dim, before, after, diff);
     }
+    #[inline(always)]
     fn on_decrease(&mut self, dim: usize, before: Ix, after: Ix, diff: Ix) {
         self.0.on_decrease(dim, before, after, diff);
     }
+    #[inline(always)]
     fn next<'a>(&'a self) -> (T1::Item<'a>,) {
         (self.0.next(),)
     }
+    #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
         self.0.assert_ndim(ndim);
     }
@@ -228,17 +237,21 @@ where
     where
         T1: 'a,
         T2: 'a;
+    #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: Ix, after: Ix, diff: Ix) {
         self.0.on_increase(dim, before, after, diff);
         self.1.on_increase(dim, before, after, diff);
     }
+    #[inline(always)]
     fn on_decrease(&mut self, dim: usize, before: Ix, after: Ix, diff: Ix) {
         self.0.on_decrease(dim, before, after, diff);
         self.1.on_decrease(dim, before, after, diff);
     }
+    #[inline(always)]
     fn next<'a>(&'a self) -> (T1::Item<'a>, T2::Item<'a>) {
         (self.0.next(), self.1.next())
     }
+    #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
         self.0.assert_ndim(ndim);
         self.1.assert_ndim(ndim);
@@ -257,19 +270,23 @@ where
         T1: 'a,
         T2: 'a,
         T3: 'a;
+    #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: Ix, after: Ix, diff: Ix) {
         self.0.on_increase(dim, before, after, diff);
         self.1.on_increase(dim, before, after, diff);
         self.2.on_increase(dim, before, after, diff);
     }
+    #[inline(always)]
     fn on_decrease(&mut self, dim: usize, before: Ix, after: Ix, diff: Ix) {
         self.0.on_decrease(dim, before, after, diff);
         self.1.on_decrease(dim, before, after, diff);
         self.2.on_decrease(dim, before, after, diff);
     }
+    #[inline(always)]
     fn next<'a>(&'a self) -> (T1::Item<'a>, T2::Item<'a>, T3::Item<'a>) {
         (self.0.next(), self.1.next(), self.2.next())
     }
+    #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
         self.0.assert_ndim(ndim);
         self.1.assert_ndim(ndim);

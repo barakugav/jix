@@ -253,9 +253,11 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         Ok(())
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.shape.as_slice()
     }
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }

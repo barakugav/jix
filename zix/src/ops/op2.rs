@@ -21,8 +21,8 @@ pub(crate) trait Op2Kernel<T1, T2> {
 impl<S1, S2, K> Op2<S1, S2, K> {
     pub(crate) fn new(a: S1, b: S2, kernel: K) -> Result<Self>
     where
-        S1: ArrayStorage + ArrayStorageTyped,
-        S2: ArrayStorage + ArrayStorageTyped,
+        S1: ArrayStorageTyped,
+        S2: ArrayStorageTyped<Dimension = S1::Dimension>,
         K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
     {
         ensure!(
@@ -43,18 +43,20 @@ impl<S1, S2, K> Op2<S1, S2, K> {
 
 impl<S1, S2, K> ArrayStorage for Op2<S1, S2, K>
 where
-    S1: ArrayStorage + ArrayStorageTyped,
-    S2: ArrayStorage + ArrayStorageTyped,
+    S1: ArrayStorageTyped,
+    S2: ArrayStorageTyped<Dimension = S1::Dimension>,
     K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
 {
     type ElementType = Ty<K::Output>;
     type Dimension = S1::Dimension;
 
+    #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         self.read_data_typed::<K::Output>(index, context)?
             .to_buf(buf)
     }
 
+    #[inline(always)]
     fn read_data_typed<'a, T>(
         &'a self,
         index: &[Range<u64>],
@@ -75,12 +77,14 @@ where
         Ok(unsafe { data.transmute_items::<T>() })
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         let shape = self.a.shape();
         unsafe { assert_unchecked_eq!(shape, self.b.shape()) };
         shape
     }
 
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         let dtype = &self.out_dtype_;
         unsafe { assert_unchecked_eq!(*dtype, K::Output::DTYPE) };
@@ -97,6 +101,7 @@ where
     F: Fn(T1, T2) -> O,
 {
     type Output = O;
+    #[inline(always)]
     fn apply(&self, a: T1, b: T2) -> Self::Output {
         self(a, b)
     }
@@ -121,8 +126,8 @@ macro_rules! define_op2 {
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2>
         where
-            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
             S1::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -137,8 +142,8 @@ macro_rules! define_op2 {
         }
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
-            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
             S1::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type ElementType = crate::Ty<<S1::Item as $($trait)::+<S2::Item>>::Output>;
@@ -169,8 +174,8 @@ macro_rules! define_op2 {
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2>
         where
-            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
             S1::Item: $($trait)::+<S2::Item>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -185,8 +190,8 @@ macro_rules! define_op2 {
         }
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
-            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
             S1::Item: $($trait)::+<S2::Item>,
         {
             type ElementType = crate::Ty<$output_type>;
@@ -242,6 +247,7 @@ macro_rules! define_op2 {
             T1: $($trait)::+<T2>,
         {
             type Output = $output_type;
+            #[inline(always)]
             fn apply(&self, $a: T1, $b: T2) -> Self::Output {
                 <T1 as $($trait)::+<T2>>::$kernel_fn($($call_args)*)
             }
@@ -259,8 +265,8 @@ macro_rules! define_op2 {
     ) => {
         impl<S1, S2> core::ops::$core_op_trait<Array<S2>> for Array<S1>
         where
-            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Dimension = S1::Dimension>,
             S1::Item: core::ops::$core_op_trait<S2::Item, Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S1, S2>>;
@@ -273,7 +279,7 @@ macro_rules! define_op2 {
 
         impl<S1, T2> core::ops::$core_op_trait<T2> for Array<S1>
         where
-            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S1: crate::storage::ArrayStorageTyped,
             T2: crate::dtype::Dtyped,
             S1::Item: core::ops::$core_op_trait<T2, Output: crate::dtype::Dtyped>,
         {
@@ -305,6 +311,7 @@ macro_rules! define_op2_rhs_fixed {
             T1: $($trait)::+,
         {
             type Output = $output_type_t;
+            #[inline(always)]
             fn apply(&self, $a: T1, $b: $rhs) -> Self::Output {
                 <T1 as $($trait)::+>::$kernel_fn($a, $b)
             }
@@ -313,8 +320,8 @@ macro_rules! define_op2_rhs_fixed {
         pub struct $Op<S1, S2>(crate::ops::op2::Op2<S1, S2, $Kernel>);
         impl<S1, S2> $Op<S1, S2>
         where
-            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $rhs>,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Item = $rhs, Dimension = S1::Dimension>,
             S1::Item: $($trait)::+
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -329,8 +336,8 @@ macro_rules! define_op2_rhs_fixed {
         }
         impl<S1, S2> ArrayStorage for $Op<S1, S2>
         where
-            S1: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
-            S2: crate::ArrayStorage + crate::storage::ArrayStorageTyped<Item = $rhs>,
+            S1: crate::storage::ArrayStorageTyped,
+            S2: crate::storage::ArrayStorageTyped<Item = $rhs, Dimension = S1::Dimension>,
             S1::Item: $($trait)::+
         {
             type ElementType = crate::Ty<$output_type_s>;

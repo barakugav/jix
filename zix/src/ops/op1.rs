@@ -21,7 +21,7 @@ pub(crate) trait Op1Kernel<T> {
 impl<S, K> Op1<S, K> {
     pub(crate) fn new(array: S, kernel: K) -> Result<Self>
     where
-        S: ArrayStorage + ArrayStorageTyped,
+        S: ArrayStorageTyped,
         K: Op1Kernel<S::Item, Output: Dtyped>,
     {
         Ok(Self {
@@ -34,17 +34,19 @@ impl<S, K> Op1<S, K> {
 
 impl<S, K> ArrayStorage for Op1<S, K>
 where
-    S: ArrayStorage + ArrayStorageTyped,
+    S: ArrayStorageTyped,
     K: Op1Kernel<S::Item, Output: Dtyped>,
 {
     type ElementType = Ty<K::Output>;
     type Dimension = S::Dimension;
 
+    #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         self.read_data_typed::<K::Output>(index, context)?
             .to_buf(buf)
     }
 
+    #[inline(always)]
     fn read_data_typed<'a, T>(
         &'a self,
         index: &[Range<u64>],
@@ -64,10 +66,12 @@ where
         Ok(unsafe { data.transmute_items::<T>() })
     }
 
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.array.shape()
     }
 
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         let dtype = &self.out_dtype_;
         unsafe { assert_unchecked_eq!(*dtype, K::Output::DTYPE) };
@@ -84,6 +88,7 @@ where
     F: Fn(T) -> O,
 {
     type Output = O;
+    #[inline(always)]
     fn apply(&self, x: T) -> Self::Output {
         self(x)
     }
@@ -103,6 +108,8 @@ macro_rules! define_op1 {
             T: $($trait)::+,
         {
             type Output = <T as $($trait)::+>::Output;
+
+            #[inline(always)]
             fn apply(&self, x: T) -> Self::Output {
                 <T as $($trait)::+>::$kernel_fn(x)
             }
@@ -111,7 +118,7 @@ macro_rules! define_op1 {
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
         impl<S> $Op<S>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -126,7 +133,7 @@ macro_rules! define_op1 {
         }
         impl<S> ArrayStorage for $Op<S>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
@@ -186,6 +193,8 @@ macro_rules! define_op1 {
             T: $($trait)::+,
         {
             type Output = $output_type_t;
+
+            #[inline(always)]
             fn apply(&self, x: T) -> Self::Output {
                 <T as $($trait)::+>::$kernel_fn(x)
             }
@@ -194,7 +203,7 @@ macro_rules! define_op1 {
         pub struct $Op<S>(crate::ops::op1::Op1<S, $Kernel>);
         impl<S> $Op<S>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
@@ -209,7 +218,7 @@ macro_rules! define_op1 {
         }
         impl<S> ArrayStorage for $Op<S>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
             S::Item: $($trait)::+,
         {
             type ElementType = crate::Ty<$output_type_s>;
@@ -229,7 +238,7 @@ macro_rules! define_op1 {
     ) => {
         impl<S> core::ops::$core_op_trait for Array<S>
         where
-            S: crate::ArrayStorage + crate::storage::ArrayStorageTyped,
+            S: crate::storage::ArrayStorageTyped,
             S::Item: core::ops::$core_op_trait<Output: crate::dtype::Dtyped>,
         {
             type Output = Array<$Op<S>>;
@@ -259,18 +268,24 @@ pub(crate) mod _traits {
     #[cfg(feature = "half")]
     impl Abs for f16 {
         type Output = f16;
+
+        #[inline(always)]
         fn abs(self) -> Self::Output {
             <Self as num_traits::Float>::abs(self)
         }
     }
     impl Abs for Complex<f32> {
         type Output = f32;
+
+        #[inline(always)]
         fn abs(self) -> Self::Output {
             self.re.hypot(self.im)
         }
     }
     impl Abs for Complex<f64> {
         type Output = f64;
+
+        #[inline(always)]
         fn abs(self) -> Self::Output {
             self.re.hypot(self.im)
         }

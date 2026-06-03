@@ -41,11 +41,13 @@ pub(crate) trait Idx:
     fn div_ceil(self, rhs: Self) -> Self;
     fn checked_mul(self, rhs: Self) -> Option<Self>;
 
+    #[inline(always)]
     fn ceil_to_multiple(self, m: Self) -> Self {
         assert!(m > Self::ZERO);
         self.div_ceil(m) * m
     }
 
+    #[inline(always)]
     fn floor_to_multiple(self, m: Self) -> Self {
         assert!(m > Self::ZERO);
         (self / m) * m
@@ -57,10 +59,12 @@ macro_rules! impl_idx_for_primitive {
             const ZERO: Self = 0;
             const ONE: Self = 1;
 
+            #[inline(always)]
             fn div_ceil(self, rhs: Self) -> Self {
                 self.div_ceil(rhs)
             }
 
+            #[inline(always)]
             fn checked_mul(self, rhs: Self) -> Option<Self> {
                 self.checked_mul(rhs)
             }
@@ -83,6 +87,7 @@ pub(crate) fn default_strides<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<I
     strides
 }
 
+#[inline(always)]
 pub(crate) unsafe fn cast_slice<T, U>(slice: &[T]) -> &[U]
 where
     T: Copy + Sized,
@@ -94,6 +99,7 @@ where
     assert!(size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
     unsafe { std::slice::from_raw_parts(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
+#[inline(always)]
 pub(crate) unsafe fn cast_slice_mut<T, U>(slice: &mut [T]) -> &mut [U]
 where
     T: Copy + Sized,
@@ -328,6 +334,7 @@ impl<T> SendSyncPtr<T> {
         Self(ptr)
     }
 
+    #[inline(always)]
     pub fn as_ptr(&self) -> *const T {
         self.0
     }
@@ -341,6 +348,7 @@ macro_rules! assert_unchecked_eq {
 }
 pub(crate) use assert_unchecked_eq;
 
+#[inline(always)]
 pub(crate) unsafe fn value_as_bytes<T>(val: &T) -> &[u8]
 where
     T: Sized + Send + Sync + Copy + 'static,

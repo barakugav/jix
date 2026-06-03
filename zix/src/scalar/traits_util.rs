@@ -15,6 +15,8 @@ macro_rules! define_op1_trait {
         $(
             impl $trait_name for $input_type {
                 type Output = $output_type;
+
+                #[inline]
                 fn $method_name(self) -> Self::Output {
                     let $a = self;
                     $kernel_expr
@@ -69,6 +71,8 @@ macro_rules! define_op2_trait {
         $(
             impl $trait_name<$input_b_type> for $input_a_type {
                 type Output = $output_type;
+
+                #[inline]
                 fn $method_name(self, rhs: $input_b_type) -> Self::Output {
                     let $a = self;
                     let $b = rhs;
@@ -175,6 +179,8 @@ macro_rules! define_op2_trait {
         $(
             impl $trait_name<$rhs_ty> for $lhs_ty {
                 type Output = $output_type;
+
+                #[inline]
                 fn $method_name(self, rhs: $rhs_ty) -> Self::Output {
                     let $a = self;
                     let $b = rhs;

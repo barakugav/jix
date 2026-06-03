@@ -24,17 +24,21 @@ where
 {
     type Item<'a> = *const u8;
 
+    #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: Ix, after: Ix, diff: Ix) {
         self.0.on_increase(dim, before, after, diff);
     }
+    #[inline(always)]
     fn on_decrease(&mut self, dim: usize, before: Ix, after: Ix, diff: Ix) {
         self.0.on_decrease(dim, before, after, diff);
     }
 
+    #[inline(always)]
     fn next(&self) -> *const u8 {
         <NdIterExtStridesPtrMut<S> as NdIterExtension<Ix>>::next(&self.0).cast_const()
     }
 
+    #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
         <NdIterExtStridesPtrMut<S> as NdIterExtension<Ix>>::assert_ndim(&self.0, ndim);
     }
@@ -69,17 +73,20 @@ where
 {
     type Item<'a> = *mut u8;
 
+    #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: Ix, _after: Ix, diff: Ix) {
         let diff: usize = diff.try_into().unwrap();
         let stride: usize = self.strides[dim].try_into().unwrap();
         self.current_ptr = unsafe { self.current_ptr.add(diff * stride) };
     }
+    #[inline(always)]
     fn on_decrease(&mut self, dim: usize, _before: Ix, _after: Ix, diff: Ix) {
         let diff: usize = diff.try_into().unwrap();
         let stride: usize = self.strides[dim].try_into().unwrap();
         self.current_ptr = unsafe { self.current_ptr.sub(diff * stride) };
     }
 
+    #[inline(always)]
     fn next(&self) -> *mut u8 {
         self.current_ptr
     }
@@ -117,13 +124,16 @@ where
     where
         Self: 'a;
 
+    #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: Ix, _after: Ix, diff: Ix) {
         self.offset += diff * self.strides[dim];
     }
+    #[inline(always)]
     fn on_decrease(&mut self, dim: usize, _before: Ix, _after: Ix, diff: Ix) {
         self.offset -= diff * self.strides[dim];
     }
 
+    #[inline(always)]
     fn next(&self) -> Ix {
         self.offset
     }

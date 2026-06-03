@@ -148,12 +148,12 @@ use crate::{
 /// user block shape as much as possible while respecting the new shape and layout.
 ///
 /// Shape-changing operations - [`reshape_view`](Array::reshape_view),
-/// [`broadcast_view`](Array::broadcast_view), [`permute_axes`](Array::permute_axes) - remap how
+/// [`broadcast`](Array::broadcast), [`permute_axes`](Array::permute_axes) - remap how
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
 /// than necessary. To avoid this, materialize with [`copy`](Array::copy) (automatic block shape)
-/// or [`copy_with`](Array::copy_with) (explicit [`ArrayParams`]) after a shape change. The eager
-/// variants [`reshape`](Array::reshape) and [`broadcast`](Array::broadcast) call `copy`
+/// or [`copy_with`](Array::copy_with) (explicit [`ArrayParams`]) after a shape change.
+/// Some operations, like "reshape", have an eager variant [`reshape`](Array::reshape) call `copy`
 /// internally. To ensure a well-aligned block layout, pass explicit `ArrayParams` with a block
 /// shape that matches the expected access pattern.
 ///
@@ -336,6 +336,7 @@ impl<D> Array<Compact<TypeDyn, D>> {
 
 impl<S: ArrayStorage> Array<S> {
     /// Get the shape of the array, one element per dimension.
+    #[inline(always)]
     pub fn shape(&self) -> &[u64] {
         let shape = self.storage.shape();
         if let Some(compile_time_ndim) = S::Dimension::NDIM {
@@ -345,6 +346,7 @@ impl<S: ArrayStorage> Array<S> {
     }
 
     /// Get the number of dimensions.
+    #[inline(always)]
     pub fn ndim(&self) -> usize {
         self.shape().len()
     }
@@ -380,6 +382,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(c.dtype(), &Point::DTYPE);
     /// # Ok::<(), zix::Error>(())
     /// ```
+    #[inline(always)]
     pub fn dtype(&self) -> &Dtype {
         let dtype = self.storage.dtype();
         if let Some(compile_time_dtype) = S::ElementType::DTYPE {
@@ -400,7 +403,7 @@ impl<S: ArrayStorage> Array<S> {
         &self,
     ) -> Result<ndarray::Array<S::Item, <S::Dimension as ndarray::IntoDimension>::Dim>>
     where
-        S: ArrayStorage + ArrayStorageTyped,
+        S: ArrayStorageTyped,
     {
         let shape = self.shape();
         let full_range = dim_arr(shape.len(), |dim| 0u64..shape[dim]);
@@ -448,7 +451,7 @@ impl<S: ArrayStorage> Array<S> {
         context: &ReadContext,
     ) -> Result<ndarray::Array<S::Item, <S::Dimension as ndarray::IntoDimension>::Dim>>
     where
-        S: ArrayStorage + ArrayStorageTyped,
+        S: ArrayStorageTyped,
     {
         check_get_range(self.shape(), index)?;
         let ndim = self.ndim();
@@ -767,6 +770,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(c.to_ndarray()?[[1, 1]], 6.17 * (6.17 + 1.0));
     /// # Ok::<(), zix::Error>(())
     /// ```
+    #[inline(always)]
     pub fn as_ref(&self) -> Array<Ref<'_, S>> {
         Array {
             storage: Ref(self.storage()),
@@ -780,6 +784,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// Only arrays that are already dynamically typed (`TypeDyn`, `DimDyn`) can be erased this
     /// way. Call [`Array::to_type_dyn`] and [`Array::to_dim_dyn`] first if needed.
+    #[inline]
     pub fn into_any(self) -> ArrayAny
     where
         S: ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync + 'static,
@@ -807,6 +812,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert!(!b.is_compact()); // b is a lazy view
     /// # Ok::<(), zix::Error>(())
     /// ```
+    #[inline]
     pub fn is_compact(&self) -> bool {
         self.storage().as_compact().is_some()
     }
@@ -862,6 +868,7 @@ impl<S: ArrayStorage> Array<S> {
     /// Return a reference to the underlying storage backend.
     ///
     /// Rarely needed to be used directly by users.
+    #[inline(always)]
     pub fn storage(&self) -> &S {
         &self.storage
     }
@@ -869,6 +876,7 @@ impl<S: ArrayStorage> Array<S> {
     /// Construct an `Array` by wrapping a storage backend directly.
     ///
     /// Rarely needed to be used directly by users.
+    #[inline(always)]
     pub fn from_storage(storage: S) -> Self {
         Self { storage }
     }
@@ -876,11 +884,13 @@ impl<S: ArrayStorage> Array<S> {
     /// Consume this array and return the underlying storage backend.
     ///
     /// Rarely needed to be used directly by users.
+    #[inline(always)]
     pub fn into_storage(self) -> S {
         self.storage
     }
 
     #[allow(dead_code)]
+    #[inline(always)]
     pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
         self.storage.spec().blocks_layout
     }
@@ -1060,6 +1070,7 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `ET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `ET = TypeDyn`.
+    #[inline(always)]
     pub fn to_type<ET>(self) -> Result<Array<ToType<S, ET>>>
     where
         ET: ElementType,
@@ -1075,6 +1086,7 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `self.dtype() != T::DTYPE`.
+    #[inline(always)]
     pub fn to_typed<T>(self) -> Result<Array<ToType<S, Ty<T>>>>
     where
         T: Dtyped,
@@ -1085,6 +1097,7 @@ where
     /// Re-tag this array's element type as [`TypeDyn`], erasing static element-type information.
     ///
     /// Infallible sugar for [`to_type::<TypeDyn>()`](Self::to_type). See [`ToType`] for details.
+    #[inline(always)]
     pub fn to_type_dyn(self) -> Array<ToType<S, TypeDyn>> {
         self.to_type().unwrap()
     }
@@ -1099,6 +1112,7 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `NewET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
+    #[inline(always)]
     pub fn into_type<NewET>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
     where
         S: ElementTypeChange,
@@ -1117,6 +1131,7 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `self.dtype() != T::DTYPE`.
+    #[inline(always)]
     pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<Ty<T>>>>
     where
         T: Dtyped,
@@ -1129,6 +1144,7 @@ where
     ///
     /// Infallible sugar for [`into_type::<TypeDyn>()`](Self::into_type). Requires
     /// `S: ElementTypeChange`. See [`ElementTypeChange`] for details.
+    #[inline(always)]
     pub fn into_type_dyn(self) -> Array<S::ElementTypeChange<TypeDyn>>
     where
         S: ElementTypeChange,
@@ -1177,6 +1193,7 @@ where
     /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
     /// # Ok::<(), zix::Error>(())
     /// ```
+    #[inline(always)]
     pub fn to_dim<D>(self) -> Result<Array<ToDim<S, D>>>
     where
         D: Dimension,
@@ -1197,6 +1214,7 @@ where
     /// After calling `to_dim_dyn`, subsequent shape-changing operations will produce
     /// `DimDyn` results rather than `Dim<N>`. Call [`to_dim`](Self::to_dim) again to
     /// re-establish static tracking once the ndim is confirmed.
+    #[inline(always)]
     pub fn to_dim_dyn(self) -> Array<ToDim<S, DimDyn>> {
         self.to_dim().unwrap()
     }
@@ -1211,6 +1229,7 @@ where
     ///
     /// Returns [`ErrorKind::InvalidShapeOperation`](crate::ErrorKind::InvalidShapeOperation) if
     /// `NewD::NDIM` is `Some(n)` and `self.ndim() != n`.
+    #[inline(always)]
     pub fn into_dim<NewD: Dimension>(self) -> Result<Array<S::DimensionChange<NewD>>>
     where
         S: DimensionChange,
@@ -1222,6 +1241,7 @@ where
     ///
     /// Infallible sugar for [`into_dim::<DimDyn>()`](Self::into_dim). Requires
     /// `S: DimensionChange`. See [`DimensionChange`] for details.
+    #[inline(always)]
     pub fn into_dim_dyn(self) -> Array<S::DimensionChange<DimDyn>>
     where
         S: DimensionChange,
