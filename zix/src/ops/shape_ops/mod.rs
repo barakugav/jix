@@ -35,6 +35,10 @@ where
     /// Preferred over [`reshape_view`](Self::reshape_view) when the result will be read more than
     /// once: the copy realigns blocks to the new shape, avoiding read-amplification on future
     /// reads.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[track_caller]
     pub fn reshape<Sh>(self, shape: Sh) -> Array<Compact<S::ElementType, Sh::Dimension>>
     where
@@ -64,7 +68,7 @@ where
     /// Returns a lazy view of a sub-region of the array. See [`Slice`] for details and examples.
     ///
     /// Accepts a tuple of Rust ranges or [`SliceItem`]s, one per dimension. Negative integer
-    /// range bounds are supported (Python-style end-relative indexing). No data is copied.
+    /// range bounds are supported (Python-style end-relative indexing).
     ///
     /// # Panics
     ///
@@ -77,7 +81,7 @@ where
     /// Returns a lazy view of the array with its axes reordered. See [`PermuteAxes`] for details
     /// and examples.
     ///
-    /// `axes[i]` names the input axis that maps to output axis `i`. No data is copied.
+    /// `axes[i]` names the input axis that maps to output axis `i`.
     ///
     /// # Panics
     ///
@@ -120,7 +124,7 @@ where
     /// Returns a lazy view of the array with the specified length-1 dimensions removed.
     /// See [`RemoveAxis`] for details and examples.
     ///
-    /// Each axis in `axis` must have length 1. No data is copied.
+    /// Each axis in `axis` must have length 1.
     ///
     /// # Panics
     ///
@@ -140,7 +144,7 @@ where
     /// for details and examples.
     ///
     /// Each value in `axis` is a gap index: `0` inserts before dim 0, `ndim` appends after the
-    /// last dim. Duplicates are allowed and each inserts one dimension. No data is copied.
+    /// last dim. Duplicates are allowed and each inserts one dimension.
     ///
     /// # Panics
     ///

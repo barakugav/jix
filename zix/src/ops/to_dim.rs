@@ -40,7 +40,7 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 /// // a3d: Array<Storage::Dimension = Dim<3>>
 ///
 /// // Subsequent operations propagate Dim<3> through the type system.
-/// let a4d = a3d.insert_axis(0usize); // Array<InsertAxis<..., Dim<4>>>
+/// let a4d = a3d.insert_axis(0); // Array<InsertAxis<..., Dim<4>>>
 /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
 /// # Ok::<(), zix::Error>(())
 /// ```

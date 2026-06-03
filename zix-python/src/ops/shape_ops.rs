@@ -92,7 +92,7 @@ pub fn broadcast<'py>(
 
     let ret = zix_core::ops::Broadcast::new_array(array.clone(), &new_shape).into_py_result()?;
     if !copy {
-        Bound::new(py_arr.py(), Array::from_core_array(ret))
+        Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
     } else {
         copy_impl(py_arr.py(), &ret)
     }
@@ -142,13 +142,13 @@ pub fn insert_axis<'py>(
     // NOTE: API different than numpy: axes are specified with respect to the original ndim, not the new ndim. Same
     // axis can be specified multiple times to insert multiple axes in the same place.
     let py_arr = array;
-    let array = py_arr.get().to_core_array();
+    let array = py_arr.get().to_core();
     let axes = normalize_axes(axis.into_vec(), array.ndim() + 1)?;
     if axes.is_empty() {
         return Ok(py_arr.clone()); // no-op if no axes to insert
     }
     let ret = zix_core::ops::InsertAxis::new_array(array, &axes).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core_array(ret))
+    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
 /// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for :func:`zix.insert_axis()`.
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
@@ -189,13 +189,13 @@ pub fn remove_axis<'py>(
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = array;
-    let array = py_arr.get().to_core_array();
+    let array = py_arr.get().to_core();
     let axes = normalize_axes(axis.into_vec(), array.ndim())?;
     if axes.is_empty() {
         return Ok(py_arr.clone()); // no-op if no axes to remove
     }
     let ret = zix_core::ops::RemoveAxis::new_array(array, &axes).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core_array(ret))
+    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
 
 /// Removes length-1 dimensions from an array's shape.
@@ -278,13 +278,13 @@ pub fn permute_axes<'py>(
     axes: Option<Vec<usize>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = array;
-    let array = py_arr.get().to_core_array();
+    let array = py_arr.get().to_core();
     let axes = axes.unwrap_or_else(|| (0..array.ndim()).rev().collect());
     if axes.len() == array.ndim() && axes.iter().enumerate().all(|(i, &ax)| i == ax) {
         return Ok(py_arr.clone()); // no-op permutation
     }
     let ret = zix_core::ops::PermuteAxes::new_array(array, &axes).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core_array(ret))
+    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
 
 /// Reinterprets an array with a different shape.
@@ -378,7 +378,7 @@ pub fn reshape<'py>(
 
     let ret = zix_core::ops::Reshape::new_array(array.clone(), &new_shape).into_py_result()?;
     if !copy {
-        Bound::new(py_arr.py(), Array::from_core_array(ret))
+        Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
     } else {
         copy_impl(py_arr.py(), &ret)
     }
@@ -482,23 +482,24 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
         }
         2 => {
             let [arr1, arr2] = arrays.try_into().unwrap();
-            let ret = zix_core::ops::Concatenate::new([arr1, arr2], axis).into_py_result()?;
-            Bound::new(py, Array::from_core_storage(ret))
+            let ret = zix_core::ops::Concatenate::new_array([arr1, arr2], axis).into_py_result()?;
+            Bound::new(py, Array::from_core(ret.into_any()))
         }
         3 => {
             let [arr1, arr2, arr3] = arrays.try_into().unwrap();
-            let ret = zix_core::ops::Concatenate::new([arr1, arr2, arr3], axis).into_py_result()?;
-            Bound::new(py, Array::from_core_storage(ret))
+            let ret =
+                zix_core::ops::Concatenate::new_array([arr1, arr2, arr3], axis).into_py_result()?;
+            Bound::new(py, Array::from_core(ret.into_any()))
         }
         4 => {
             let [arr1, arr2, arr3, arr4] = arrays.try_into().unwrap();
-            let ret =
-                zix_core::ops::Concatenate::new([arr1, arr2, arr3, arr4], axis).into_py_result()?;
-            Bound::new(py, Array::from_core_storage(ret))
+            let ret = zix_core::ops::Concatenate::new_array([arr1, arr2, arr3, arr4], axis)
+                .into_py_result()?;
+            Bound::new(py, Array::from_core(ret.into_any()))
         }
         _ => {
-            let ret = zix_core::ops::Concatenate::new(arrays, axis).into_py_result()?;
-            Bound::new(py, Array::from_core_storage(ret))
+            let ret = zix_core::ops::Concatenate::new_array(arrays, axis).into_py_result()?;
+            Bound::new(py, Array::from_core(ret.into_any()))
         }
     }
 }
@@ -565,22 +566,23 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
     match arrays.len() {
         2 => {
             let [arr1, arr2] = arrays.try_into().unwrap();
-            let ret = zix_core::ops::Stack::new([arr1, arr2], axis).into_py_result()?;
-            Ok(Array::from_core_storage(ret))
+            let ret = zix_core::ops::Stack::new_array([arr1, arr2], axis).into_py_result()?;
+            Ok(Array::from_core(ret.into_any()))
         }
         3 => {
             let [arr1, arr2, arr3] = arrays.try_into().unwrap();
-            let ret = zix_core::ops::Stack::new([arr1, arr2, arr3], axis).into_py_result()?;
-            Ok(Array::from_core_storage(ret))
+            let ret = zix_core::ops::Stack::new_array([arr1, arr2, arr3], axis).into_py_result()?;
+            Ok(Array::from_core(ret.into_any()))
         }
         4 => {
             let [arr1, arr2, arr3, arr4] = arrays.try_into().unwrap();
-            let ret = zix_core::ops::Stack::new([arr1, arr2, arr3, arr4], axis).into_py_result()?;
-            Ok(Array::from_core_storage(ret))
+            let ret =
+                zix_core::ops::Stack::new_array([arr1, arr2, arr3, arr4], axis).into_py_result()?;
+            Ok(Array::from_core(ret.into_any()))
         }
         _ => {
-            let ret = zix_core::ops::Stack::new(arrays, axis).into_py_result()?;
-            Ok(Array::from_core_storage(ret))
+            let ret = zix_core::ops::Stack::new_array(arrays, axis).into_py_result()?;
+            Ok(Array::from_core(ret.into_any()))
         }
     }
 }

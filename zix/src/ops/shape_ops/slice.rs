@@ -319,7 +319,7 @@ impl_from_tuple_for_slice_spec!(I1, I2, I3, I4, I5, I6, I7, I8 ; 8 ; 0, 1, 2, 3,
 ///
 /// `start` and `end` may be negative (Python-style: `-1` means last element).
 /// `None` means "use the natural boundary" (0 for start, dim length for end).
-/// `step` must be >= 1 (negative steps are not supported).
+/// `step` must be >= 1 (negative steps are currently not supported).
 #[derive(Debug, Clone, Copy)]
 pub struct SliceItem {
     /// First element to include. Negative values count from the end; `None` means the start of the dimension.

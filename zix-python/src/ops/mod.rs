@@ -94,7 +94,7 @@ pub fn astype<'py>(
             ($src_type:ty, $dst_type:ty) => {{
                 let array = array.to_typed::<$src_type>().unwrap();
                 let array = array.cast::<$dst_type>();
-                Some(Array::from_core_storage(array.into_storage()))
+                Some(Array::from_core(array.to_type_dyn().into_any()))
             }};
         }
         macro_rules! cast_num {

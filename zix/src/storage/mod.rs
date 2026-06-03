@@ -71,6 +71,9 @@ pub use plain::*;
 mod scalar;
 pub use scalar::*;
 
+mod any;
+pub use any::*;
+
 pub(crate) mod block;
 
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.

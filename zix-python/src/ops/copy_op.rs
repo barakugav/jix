@@ -94,7 +94,7 @@ where
         };
 
         let ret = array.copy_with(params, context).into_py_result()?;
-        Ok(Array::from_core_storage(ret.into_storage()))
+        Ok(Array::from_core(ret.to_type_dyn().to_dim_dyn().into_any()))
     })?;
     Bound::new(py, array)
 }

@@ -169,7 +169,6 @@ pub(crate) fn bulk_size<T: Dtyped>() -> usize {
 /// | `usize` | `D::Smaller` | `D::Larger` |
 /// | `[usize; 0]` / `()` | `D` | `D` |
 /// | `[usize; N]` / `(usize, ...)` (N ≥ 1) | `D::Smaller` repeated N times | `D::Larger` repeated N times |
-/// | `&[usize; N]` (any N) | same as fixed array | same as fixed array |
 /// | `&[usize]` / `&Vec<usize>` | `DimDyn` | `DimDyn` |
 ///
 /// When the argument is a slice reference (`&[usize]`), the ndim of the result is only known at

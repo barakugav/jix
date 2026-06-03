@@ -1,12 +1,15 @@
 use std::mem::MaybeUninit;
 use std::ops::Range;
+use std::sync::Arc;
 
 use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::{DimensionChange, ElementTypeChange, MaybeCompact, ToDim, ToType};
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
-use crate::storage::{ArrayBlockTableStorageBase, ArrayStorageTyped, BlocksLayout, Compact, Ref};
+use crate::storage::{
+    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlocksLayout, Compact, Ref,
+};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::NdIter;
 use crate::util::{
@@ -14,7 +17,7 @@ use crate::util::{
     Idx, IxIterExt,
 };
 use crate::{
-    ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
+    ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -770,6 +773,20 @@ impl<S: ArrayStorage> Array<S> {
         }
     }
 
+    /// Convert this array into a type-erased [`ArrayAny`](crate::ArrayAny).
+    ///
+    /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the
+    /// resulting array can be stored alongside arrays of other concrete storage types.
+    ///
+    /// Only arrays that are already dynamically typed (`TypeDyn`, `DimDyn`) can be erased this
+    /// way. Call [`Array::to_type_dyn`] and [`Array::to_dim_dyn`] first if needed.
+    pub fn into_any(self) -> ArrayAny
+    where
+        S: ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync + 'static,
+    {
+        Array::from_storage(ArrayStorageAny::new(Arc::new(self.into_storage())))
+    }
+
     /// Check if this array storage is compact block-compressed storage.
     ///
     /// This functions returns `true` for arrays that are stored in compact block-compressed form,
@@ -1082,9 +1099,10 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `NewET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
-    pub fn into_type<NewET: ElementType>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
+    pub fn into_type<NewET>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
     where
         S: ElementTypeChange,
+        NewET: ElementType,
     {
         Ok(Array::from_storage(self.into_storage().change_type()?))
     }
@@ -1155,7 +1173,7 @@ where
     /// let a3d = a.to_dim::<Dim<3>>()?;  // Array<ToDim<Compact<DimDyn>, Dim<3>>>
     ///
     /// // Now insert_axis knows the result is 4-D at compile time.
-    /// let a4d = a3d.insert_axis(0usize); // Array<InsertAxis<..., Dim<4>>>
+    /// let a4d = a3d.insert_axis(0); // Array<InsertAxis<..., Dim<4>>>
     /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
     /// # Ok::<(), zix::Error>(())
     /// ```

@@ -17,7 +17,6 @@ pub use archive::*;
 mod ops;
 pub use ops::*;
 
-mod storage;
 mod util;
 
 #[pymodule]

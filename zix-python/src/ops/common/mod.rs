@@ -70,7 +70,8 @@ macro_rules! define_op1 {
                     Some(crate::ops::common::scalar_kind!($type)) => {
                         #[allow(unused_parens)]
                         let array = array.to_typed::<$type>().unwrap();
-                        zix_core::ops::$core_op::new_array(array).map(crate::Array::from_core_array)
+                        zix_core::ops::$core_op::new_array(array)
+                            .map(|a| crate::Array::from_core(a.to_type_dyn().into_any()))
                     }
                 )*
                 _ => Err(zix_core::Error::new(
@@ -101,8 +102,8 @@ macro_rules! define_op2 {
             b: &pyo3::Bound<'py, pyo3::PyAny>,
         ) -> pyo3::PyResult<crate::Array> {
             let (a, b) = crate::ops::op2::asarray22(a, b)?;
-            let a = a.get().to_core_array();
-            let b = b.get().to_core_array();
+            let a = a.get().to_core();
+            let b = b.get().to_core();
             let res = match a.dtype().try_to_scalar().zip(b.dtype().try_to_scalar()) {
                 $(
                     Some((
@@ -113,7 +114,8 @@ macro_rules! define_op2 {
                         let a = a.to_typed::<$input_a_type>().unwrap();
                         #[allow(unused_parens)]
                         let b = b.to_typed::<$input_b_type>().unwrap();
-                        zix_core::ops::$core_op::new_array(a, b).map(crate::Array::from_core_array)
+                        zix_core::ops::$core_op::new_array(a, b)
+                            .map(|a| crate::Array::from_core(a.to_type_dyn().into_any()))
                     }
                 )*
                 _ => Err(zix_core::Error::new(

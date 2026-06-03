@@ -350,3 +350,13 @@ pub use util::ArraySequence;
 
 mod error;
 pub use error::{Error, ErrorKind};
+
+/// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn ArrayStorage>`.
+///
+/// Use `ArrayAny` when you need to hold arrays of different concrete storage types in the same
+/// place — for example a `Vec<ArrayAny>` mixing on-disk, in-memory, and lazy views.  All runtime
+/// metadata (shape, dtype) is available; element-wise operations that require a known scalar type
+/// at compile time are not.
+///
+/// Create one with [`Array::into_any`] or [`ArrayStorageAny::new`](storage::ArrayStorageAny::new).
+pub type ArrayAny = Array<storage::ArrayStorageAny>;

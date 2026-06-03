@@ -123,6 +123,11 @@ impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
             borders,
         })
     }
+
+    /// Constructs an array with [`Concatenate`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(arrays: ArraysT, axis: usize) -> Result<Array<Self>> {
+        Self::new(arrays, axis).map(Array::from_storage)
+    }
 }
 impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where

@@ -58,8 +58,8 @@ pub const NDIM_MAX: usize = 8;
 /// // Returns Err if a.ndim() != 2.
 /// let a2d = a.to_dim::<Dim<2>>()?;
 ///
-/// // insert_axis(0usize): usize arg → D::Larger = Dim<3>
-/// let a3d = a2d.insert_axis(0usize);
+/// // insert_axis(0): usize arg → D::Larger = Dim<3>
+/// let a3d = a2d.insert_axis(0);
 ///
 /// // reshape_view([6u64]): [u64; 1] arg → Dim<1> output
 /// let flat = a3d.reshape_view([6u64]);
@@ -185,7 +185,7 @@ impl ndarray::IntoDimension for DimDyn {
 /// `Dim<N>::Smaller = Dim<N-1>` (for N ≥ 1; `Dim<0>::Smaller = DimDyn`).
 /// `Dim<N>::Larger  = Dim<N+1>` (for N ≤ 7; `Dim<8>::Larger  = DimDyn`).
 ///
-/// This means that N consecutive `insert_axis(0usize)` calls on a `Dim<M>` array produce a
+/// This means that N consecutive `insert_axis(0)` calls on a `Dim<M>` array produce a
 /// `Dim<M+N>` result, as long as `M + N ≤ 8`.
 #[derive(Clone)]
 pub struct Dim<const NDIM: usize>([u64; NDIM]);

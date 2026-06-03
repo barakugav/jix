@@ -278,7 +278,7 @@ impl<ET, D> Array<Plain<&(), ET, D>> {
     ///
     /// * `data_ptr` - pointer to the first element.
     /// * `shape` - number of elements along each dimension.
-    /// * `strides` - the array element strides in bytes. Must have the same length as `shape`.
+    /// * `strides` - the array element strides in **bytes units**. Must have the same length as `shape`.
     /// * `dtype` - element type descriptor; used for itemsize and alignment checks.
     ///
     /// # Safety

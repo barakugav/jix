@@ -1,9 +1,9 @@
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
+use zix_core::ArrayAny;
 
 use crate::array::Array;
 use crate::ops::Operand;
-use crate::storage::DynStorage;
 
 /// Convert any array-like object to a zix [`Array`].
 ///
@@ -28,10 +28,8 @@ pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     Operand::from_any(value)?.into_py_array(value.py())
 }
 
-pub(crate) fn any_to_core_array<'py>(
-    value: &Bound<'py, PyAny>,
-) -> PyResult<zix_core::Array<DynStorage>> {
-    Ok(asarray(value)?.get().to_core_array())
+pub(crate) fn any_to_core_array<'py>(value: &Bound<'py, PyAny>) -> PyResult<ArrayAny> {
+    Ok(asarray(value)?.get().to_core())
 }
 
 #[cfg(test)]

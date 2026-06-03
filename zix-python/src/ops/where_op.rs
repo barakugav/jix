@@ -45,5 +45,5 @@ pub fn r#where<'py>(
     let x = any_to_core_array(x)?;
     let y = any_to_core_array(y)?;
     let ret = zix_core::ops::Where::new_array(condition, x, y).into_py_result()?;
-    Ok(Array::from_core_array(ret))
+    Ok(Array::from_core(ret.into_any()))
 }

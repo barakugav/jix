@@ -15,8 +15,8 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// the input dimensions:
 ///
 /// ```text
-/// gap:   0     1     2       orig_ndim
-///         |  d0  |  d1  |  d2  |
+/// gap:   0      1      2   orig_ndim
+///        |  d0  |  d1  |  d2  |
 /// ```
 ///
 /// * Gap `0` — before the first input dimension.

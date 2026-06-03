@@ -314,8 +314,8 @@ where
     ///
     /// # Streaming pipeline example
     ///
-    /// The following reads a large array from disk via mmap, applies a lazy slice and a
-    /// negation, and writes the result directly to a new file - without ever holding the full
+    /// The following reads a large array from disk via mmap, applies some lazy operations,
+    /// and writes the result directly to a new file - without ever holding the full
     /// array (compressed or decompressed) in memory:
     ///
     /// ```
@@ -338,7 +338,7 @@ where
     /// let view = src.to_typed::<f32>()?.exp() + 1.0f32;
     ///
     /// // Write to a new file: blocks are decompressed, modified by ops, and re-compressed one at
-    /// // a time.
+    /// // a time. The full array is never held in memory, not even in its compressed form.
     /// view.write_to_with(
     ///     BufWriter::new(File::create(tmp_dir.path().join("modified.zix"))?),
     ///     ArrayParams::default(),

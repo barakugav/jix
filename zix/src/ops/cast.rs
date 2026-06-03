@@ -6,8 +6,17 @@ pub(crate) mod _traits {
     #[allow(unused_imports)]
     use crate::scalar::{f16, Complex};
 
-    #[doc(hidden)]
+    /// Cast a scalar value to another scalar type.
+    ///
+    /// Supported casts:
+    /// - Between any two integer types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    /// - Between any two floating-point types: `f16` (requires the `half` feature), `f32`, `f64`.
+    /// - Between any two complex types: `Complex<f32>`, `Complex<f64>`.
+    /// - Between any integer to floating-point type, or vice versa.
+    /// - Between any integer or floating-point type to complex type, but NOT from complex to integer.
+    /// - Between `bool` and any other scalar, and visa versa: zero -> `false`, any non-zero value -> `true`.
     pub trait Cast<D> {
+        /// Casts `self` to `D`.
         fn cast(self) -> D;
     }
     macro_rules! impl_cast {
@@ -131,12 +140,12 @@ pub(crate) mod _traits {
 /// Casts each element to a new element type, returned by [`Array::cast`].
 ///
 /// Supported casts:
-/// - Between any two scalar types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-///   `f16` (requires the `half` feature), `f32`, `f64`, `bool`.
-/// - Between the two complex types: `Complex<f32>` <-> `Complex<f64>`.
-///
-/// `bool` conversions follow C semantics: zero -> `false`, any non-zero value -> `true`.
-/// Casting between complex and non-complex types, or involving struct dtypes, is not supported.
+/// - Between any two integer types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+/// - Between any two floating-point types: `f16` (requires the `half` feature), `f32`, `f64`.
+/// - Between any two complex types: `Complex<f32>`, `Complex<f64>`.
+/// - Between any integer to floating-point type, or vice versa.
+/// - Between any integer or floating-point type to complex type, but NOT from complex to integer.
+/// - Between `bool` and any other scalar, and visa versa: zero -> `false`, any non-zero value -> `true`.
 ///
 /// The cast is checked via the [`Cast<T>`](crate::scalar::Cast) trait bound on the source element
 /// type; unsupported source-to-target type pairs are rejected at compile time.

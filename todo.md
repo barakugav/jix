@@ -14,7 +14,8 @@
 - cast types automatically in python bindings
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
-- modify all ops to have `new() -> Array<Self>` and `new_storage() -> Self`
 - squeeze()
 - rename Maximum scalar trait to PartialMax
 - support an arbitrary python reader in zix-python/src/archive.rs read_array
+- remove broadcast_view, broadcast itself should be view without copy
+- op2 should force S1::Dimension == S2::Dimension

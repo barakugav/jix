@@ -210,7 +210,7 @@ impl Operand {
     pub(crate) fn into_py_array<'py>(self, py: Python<'py>) -> PyResult<Bound<'py, Array>> {
         match self {
             Operand::Zix(array) => Ok(array.into_bound(py)),
-            Operand::Numpy(array) => Bound::new(py, Array::from_core_storage(array.into_storage())),
+            Operand::Numpy(array) => Bound::new(py, Array::from_core(array.into_any())),
             Operand::Scalar {
                 value,
                 precision,
@@ -220,9 +220,10 @@ impl Operand {
                 where
                     T: Dtyped,
                 {
-                    let scalar_storage =
-                        zix_core::storage::Scalar::new(value, shape).into_py_result()?;
-                    Ok(Array::from_core_storage(scalar_storage))
+                    let array = zix_core::Array::from_storage(
+                        zix_core::storage::Scalar::new(value, shape).into_py_result()?,
+                    );
+                    Ok(Array::from_core(array.to_type_dyn().into_any()))
                 }
                 #[allow(clippy::unnecessary_cast)]
                 let array = match value {

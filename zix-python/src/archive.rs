@@ -2,8 +2,8 @@ use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use pyo3::prelude::*;
+use zix_core::ArrayAny;
 
-use crate::storage::DynStorage;
 use crate::util::{IntoPyResult, OrKwargs};
 use crate::{Array, ArrayParams, ReadContext};
 
@@ -70,12 +70,12 @@ pub fn read_array(
         Ok(if !mmap {
             let array = zix_core::Array::read_from_file_section(&path, offset, len, params)
                 .into_py_result()?;
-            Array::from_core_storage(array.into_storage())
+            Array::from_core(array.into_any())
         } else {
             let array = unsafe {
                 zix_core::Array::read_from_file_mmap(&path, offset, len, params).into_py_result()?
             };
-            Array::from_core_storage(array.into_storage())
+            Array::from_core(array.into_any())
         })
     })
 }
@@ -177,7 +177,7 @@ pub fn write_array(
     }
 }
 fn write_array_impl<W>(
-    array: &zix_core::Array<DynStorage>,
+    array: &ArrayAny,
     mut writer: W,
     params: zix_core::ArrayParams,
     context: Option<&ReadContext>,

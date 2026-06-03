@@ -1,12 +1,11 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyEllipsis, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
 use zix_core::ops::SliceItem;
-use zix_core::Array as ZixArray;
-use zix_core::ArrayStorage;
+use zix_core::{Array as ZixArray, ArrayAny};
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::{PyAnyMethods, PySlice};
@@ -15,7 +14,6 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
 use crate::ops::Operand;
-use crate::storage::DynStorage;
 use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence, OrKwargs};
 use crate::ArrayParams;
 
@@ -126,32 +124,21 @@ use crate::ArrayParams;
 #[gen_stub_pyclass]
 #[pyclass(module = "zix", frozen)]
 pub struct Array {
-    pub(crate) arr: ZixArray<DynStorage>,
+    pub(crate) arr: ArrayAny,
     cache: Mutex<ArrayCache>,
 }
 struct ArrayCache {
     numpy_dtype: Option<Py<PyArrayDescr>>,
 }
 impl Array {
-    pub(crate) fn from_storage(storage: DynStorage) -> Self {
+    pub(crate) fn from_core(array: ArrayAny) -> Self {
         Self {
-            arr: ZixArray::from_storage(storage),
+            arr: array,
             cache: Mutex::new(ArrayCache { numpy_dtype: None }),
         }
     }
 
-    pub(crate) fn from_core_array(
-        array: ZixArray<impl ArrayStorage + Send + Sync + 'static>,
-    ) -> Self {
-        let storage = array.to_type_dyn().to_dim_dyn().into_storage();
-        Self::from_storage(DynStorage::new(Arc::new(storage)))
-    }
-
-    pub(crate) fn from_core_storage(storage: impl ArrayStorage + Send + Sync + 'static) -> Self {
-        Self::from_core_array(ZixArray::from_storage(storage))
-    }
-
-    pub(crate) fn to_core_array(&self) -> ZixArray<DynStorage> {
+    pub(crate) fn to_core(&self) -> ArrayAny {
         ZixArray::from_storage(self.arr.storage().clone())
     }
 
@@ -1067,13 +1054,11 @@ pub fn compact(
             py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?
         }
     };
-    Ok(Array::from_core_storage(array.into_storage()))
+    Ok(Array::from_core(array.into_any()))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use ndarray::{array, ArrayD};
     use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
     use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
@@ -1082,7 +1067,7 @@ mod tests {
     use zix_core::dtype::Dtyped;
     use zix_core::{Array as ZixArray, IntoDimension};
 
-    use super::{Array, DynStorage};
+    use super::Array;
 
     fn make_py_array<'py, T: Dtyped, D>(
         py: Python<'py>,
@@ -1093,8 +1078,7 @@ mod tests {
     {
         let core = ZixArray::compact_array(ndarray).unwrap();
         let core = core.to_type_dyn().to_dim_dyn();
-        let dyn_storage = DynStorage::new(Arc::new(core.into_storage()));
-        Bound::new(py, Array::from_storage(dyn_storage)).unwrap()
+        Bound::new(py, Array::from_core(core.into_any())).unwrap()
     }
 
     fn roundtrip<T, D>(original: &ndarray::Array<T, D>) -> ndarray::Array<T, D>
