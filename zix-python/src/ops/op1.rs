@@ -6,7 +6,7 @@ define_op1!(
     /// Arithmetic negation applied element-wise (`-array`).
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`,
-    /// `Complex<f32>`, `Complex<f64>`. Output dtype and shape equal the input.
+    /// `Complex<f32>`, `Complex<f64>`.
     ///
     /// For **integer** types the result is the two's-complement negation. Negating the
     /// minimum representable value (e.g. `int8` `-128`) overflows and wraps.
@@ -14,7 +14,11 @@ define_op1!(
     ///
     /// Available via the unary `-` operator on arrays: `-arr`.
     ///
-    /// The `array` argument may be anything that `zix.asarray()` accepts.
+    /// The `array` argument may be anything that `zix.asarray()` accepts. Unsigned integer
+    /// inputs are automatically cast to the next larger signed integer type before negation
+    /// (Safe casting rules): `u8 -> i16`, `u16 -> i32`, `u32 -> i64`. This differs from
+    /// numpy, which overflow for unsigned negation.
+    /// A `bool` input is cast to `i8` (False -> 0, True -> -1).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -26,6 +30,12 @@ define_op1!(
     /// a = zix.compact([1.0, -2.5, 3.0], dtype=np.float32)
     /// result = zix.negative(a)
     /// assert np.array_equal(result.numpy(), [-1.0, 2.5, -3.0])
+    ///
+    /// # Unsigned integers are auto-cast to the next larger signed type.
+    /// b = zix.compact([1, 2, 3], dtype=np.uint8)
+    /// result = zix.negative(b)
+    /// assert result.dtype == np.int16
+    /// assert np.array_equal(result.numpy(), [-1, -2, -3])
     /// ```
     negative,
     Neg,

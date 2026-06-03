@@ -3,21 +3,17 @@ use crate::ops::common::{define_op1, define_op2};
 define_op2!(
     /// Element-wise logical AND of two arrays.
     ///
-    /// Supported dtypes: all integer types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
-    /// `u64`), `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, and `bool`.
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Accepted input dtypes: any integer (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), `f16`, `f32`, `f64`,
+    /// and `bool`. Output dtype is always `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`;
-    /// for `bool` this is the identity; for complex, non-zero means at least one component
-    /// is non-zero), then the logical AND is applied.
+    /// for `bool` this is the identity), then the logical AND is applied.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts. Mixed dtypes are
+    /// allowed: each operand is independently cast to `bool` before the operation.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -30,6 +26,11 @@ define_op2!(
     /// b = zix.compact([1, 1, 0, 0], dtype=np.int32)
     /// result = zix.logical_and(a, b)
     /// assert np.array_equal(result.numpy(), [False, True, False, False])
+    ///
+    /// # Mixed dtypes: float and int both cast to bool
+    /// c = zix.compact([0.0, 1.5], dtype=np.float32)
+    /// d = zix.compact([1, 0], dtype=np.int32)
+    /// assert np.array_equal(zix.logical_and(c, d).numpy(), [False, False])
     /// ```
     logical_and,
     And,
@@ -42,20 +43,14 @@ define_op2!(
 define_op2!(
     /// Element-wise logical OR of two arrays.
     ///
-    /// Supported dtypes: all integer types, `f32`, `f64`, `Complex<f32>`,
-    /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
-    /// shape.
+    /// Accepted input dtypes: any integer (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), `f16`, `f32`, `f64`,
+    /// and `bool`. Output dtype is always `bool`.
     ///
-    /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`),
-    /// then the logical OR is applied. Returns `True` when at least one element is truthy.
+    /// Each element is first cast to `bool` (zero -> `False`, any non-zero -> `True`), then the
+    /// logical OR is applied. Returns `True` when at least one element is truthy.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
-    ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts. Mixed dtypes are
+    /// allowed. Broadcasting follows numpy rules exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -80,20 +75,14 @@ define_op2!(
 define_op2!(
     /// Element-wise logical XOR of two arrays.
     ///
-    /// Supported dtypes: all integer types, `f32`, `f64`, `Complex<f32>`,
-    /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
-    /// shape.
+    /// Accepted input dtypes: any integer (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), `f16`, `f32`, `f64`,
+    /// and `bool`. Output dtype is always `bool`.
     ///
-    /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`),
-    /// then the logical XOR is applied. Returns `True` when exactly one element is truthy.
+    /// Each element is first cast to `bool` (zero -> `False`, any non-zero -> `True`), then the
+    /// logical XOR is applied. Returns `True` when exactly one element is truthy.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
-    ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts. Mixed dtypes are
+    /// allowed. Broadcasting follows numpy rules exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -118,9 +107,8 @@ define_op2!(
 define_op1!(
     /// Element-wise logical NOT.
     ///
-    /// Supported dtypes: all integer types, `f32`, `f64`, `Complex<f32>`,
-    /// `Complex<f64>`, and `bool`. Output dtype is `bool`. The output shape equals the input
-    /// shape.
+    /// Accepted input dtypes: any integer (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), `f16`, `f32`, `f64`,
+    /// and `bool`. Output dtype is always `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`),
     /// then negated. Returns `True` for zero (falsy) elements and `False` for non-zero
@@ -151,18 +139,19 @@ define_op2!(
     /// Element-wise bitwise AND of two arrays.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
-    /// Output dtype and shape equal the input.
+    /// Output dtype equals the promoted input type.
     ///
     /// Applies the bitwise AND to each pair of corresponding bits. For `bool` this is
     /// equivalent to logical AND.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
+    /// to the smallest integer type that can represent both (Safe casting rules).
+    /// For example `u8 & u16 -> u16`, `i8 & u16 -> i32`.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -188,18 +177,18 @@ define_op2!(
     /// Element-wise bitwise OR of two arrays.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
-    /// Output dtype and shape equal the input.
+    /// Output dtype equals the promoted input type.
     ///
     /// Applies the bitwise OR to each pair of corresponding bits. For `bool` this is
     /// equivalent to logical OR.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
+    /// to the smallest integer type that can represent both (Safe casting rules).
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -225,18 +214,18 @@ define_op2!(
     /// Element-wise bitwise XOR of two arrays.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`.
-    /// Output dtype and shape equal the input.
+    /// Output dtype equals the promoted input type.
     ///
     /// Applies the bitwise XOR to each pair of corresponding bits. For `bool` this is
     /// equivalent to logical XOR.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
+    /// to the smallest integer type that can represent both (Safe casting rules).
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -292,19 +281,19 @@ define_op2!(
     /// Element-wise left shift (`a << b`).
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// Output dtype and shape equal the input.
+    /// Output dtype equals the promoted input type.
     ///
     /// Shifts the bits of each element of `a` left by the corresponding value in `b`.
     /// Vacated bits are filled with zeros. Shifting by a value greater than or equal to the
     /// bit width of the type produces zero.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different integer dtypes, both are cast to
+    /// the smallest integer type that can represent both (Safe casting rules).
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -330,20 +319,20 @@ define_op2!(
     /// Element-wise right shift (`a >> b`).
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// Output dtype and shape equal the input.
+    /// Output dtype equals the promoted input type.
     ///
     /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
     /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
     /// sign bit (the result preserves the sign). Shifting by a value greater than or equal
     /// to the bit width produces zero (unsigned) or the sign-extended value (signed).
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different integer dtypes, both are cast to
+    /// the smallest integer type that can represent both (Safe casting rules).
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -368,8 +357,8 @@ define_op2!(
 define_op2!(
     /// Element-wise bitwise left rotation.
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// Output dtype and shape equal the input.
+    /// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    /// The rotation amount (`b`) must be castable to `u32`. Output dtype equals `a`'s dtype.
     ///
     /// Rotates the bits of each element of `a` left by the corresponding value in `b`
     /// (interpreted as `u32`). Unlike a left shift, bits shifted out of the most-significant
@@ -378,8 +367,8 @@ define_op2!(
     ///
     /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy (which has no equivalent) in that both inputs
-    /// must have the same dtype and shape.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -389,7 +378,7 @@ define_op2!(
     /// import numpy as np
     ///
     /// a = zix.compact([0b10000001, 0b00000001, 0b11110000], dtype=np.uint8)
-    /// b = zix.compact([1, 3, 4], dtype=np.uint8)
+    /// b = zix.compact([1, 3, 4], dtype=np.uint32)
     /// result = zix.bitwise_rotate_left(a, b)
     /// assert np.array_equal(result.numpy(), [0b00000011, 0b00001000, 0b00001111])
     /// ```
@@ -413,8 +402,8 @@ define_op2!(
 define_op2!(
     /// Element-wise bitwise right rotation.
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    /// Output dtype and shape equal the input.
+    /// Supported value dtypes (`a`): `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    /// The rotation amount (`b`) must be castable to `u32`. Output dtype equals `a`'s dtype.
     ///
     /// Rotates the bits of each element of `a` right by the corresponding value in `b`
     /// (interpreted as `u32`). Unlike a right shift, bits shifted out of the least-significant
@@ -423,8 +412,8 @@ define_op2!(
     ///
     /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy (which has no equivalent) in that both inputs
-    /// must have the same dtype and shape.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -434,7 +423,7 @@ define_op2!(
     /// import numpy as np
     ///
     /// a = zix.compact([0b10000001, 0b00001000, 0b00001111], dtype=np.uint8)
-    /// b = zix.compact([1, 3, 4], dtype=np.uint8)
+    /// b = zix.compact([1, 3, 4], dtype=np.uint32)
     /// result = zix.bitwise_rotate_right(a, b)
     /// assert np.array_equal(result.numpy(), [0b11000000, 0b00000001, 0b11110000])
     /// ```

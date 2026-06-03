@@ -7,18 +7,18 @@ define_op2!(
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// For **float** types, `NaN != NaN` per IEEE 754: comparing two `NaN` values returns
     /// `False`. For **complex** types, both the real and imaginary components must be equal.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+    /// common type (Safe casting rules) before comparison.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -51,18 +51,18 @@ define_op2!(
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`, `bool`.
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// For **float** types, `NaN != NaN` returns `True` per IEEE 754.
     /// For **complex** types, returns `True` if either the real or imaginary component differs.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+    /// common type (Safe casting rules) before comparison.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -89,18 +89,18 @@ define_op2!(
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
     /// For **bool**: `True > False`.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+    /// common type (Safe casting rules) before comparison.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -127,18 +127,18 @@ define_op2!(
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
     /// For **bool**: `True >= False`, and both `True >= True` and `False >= False` hold.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+    /// common type (Safe casting rules) before comparison.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -165,18 +165,18 @@ define_op2!(
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
     /// For **bool**: `False < True`.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+    /// common type (Safe casting rules) before comparison.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -203,18 +203,18 @@ define_op2!(
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`. Complex types are not supported (no total ordering).
-    /// Output dtype is `bool`. The output shape equals the input shape.
+    /// Output dtype is `bool`.
     ///
     /// For **float** types, any comparison involving `NaN` returns `False` (IEEE 754).
     /// For **bool**: `False <= True`, and both `False <= False` and `True <= True` hold.
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+    /// common type (Safe casting rules) before comparison.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -240,19 +240,19 @@ define_op2!(
     /// Element-wise maximum of two arrays.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype and shape equal the input.
+    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the promoted input dtype.
     ///
     /// For **integer** and **bool** types the result is `max(a, b)`.
     /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
     /// the result is `NaN`. This matches `numpy.maximum` (not `numpy.fmax`, which ignores NaN).
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+    /// common type (Safe casting rules).
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -285,19 +285,19 @@ define_op2!(
     /// Element-wise minimum of two arrays.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype and shape equal the input.
+    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the promoted input dtype.
     ///
     /// For **integer** and **bool** types the result is `min(a, b)`.
     /// For **float** types this operation is NaN-propagating: if either operand is `NaN`,
     /// the result is `NaN`. This matches `numpy.minimum` (not `numpy.fmin`, which ignores NaN).
     ///
-    /// Both `a` and `b` may be anything that `zix.asarray()` accepts; a Python scalar
-    /// is broadcast to the other operand's shape.
+    /// Both `a` and `b` may be anything that `zix.asarray()` accepts.
     ///
-    /// This function deviates from numpy in a few ways:
-    /// - both inputs must have the same dtype (numpy will upcast if they differ)
-    /// - if both inputs are arrays they must have the same shape; a scalar operand is
-    ///   broadcast to match (numpy broadcasts any pair of shapes)
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
+    /// common type (Safe casting rules).
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
+    /// exactly.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///

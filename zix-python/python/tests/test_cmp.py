@@ -29,7 +29,7 @@ _ordered_dtypes = ints + uints + floats + [np.bool_]
 
 
 def _ordering_st(dtype):
-    """any for integers/bool, maybe_non_finite for floats (exercises NaN → False paths)."""
+    """any for integers/bool, maybe_non_finite for floats (exercises NaN -> False paths)."""
     if np.issubdtype(dtype, np.floating):
         return maybe_non_finite_element_strategy(dtype)
     return any_element_strategy(dtype)
@@ -65,7 +65,7 @@ def test_not_equal(dtype: np.dtype, data: DataObject):
     assert_array_matches(zix.not_equal(za, zb), np_a != np_b, data=data)
 
 
-# Ordering ops: integers use any_strategy; floats use maybe_non_finite to cover NaN → False paths.
+# Ordering ops: integers use any_strategy; floats use maybe_non_finite to cover NaN -> False paths.
 
 @pytest.mark.parametrize("dtype", _ordered_dtypes)
 @given(st.data())

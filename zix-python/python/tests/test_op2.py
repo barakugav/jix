@@ -3,6 +3,11 @@ Property tests for element-wise binary ops. Mirrors the test block in zix/src/op
 
 One test per dtype, parametrized via @pytest.mark.parametrize, analogous to the
 test_op2! macro which expands to one proptest per (op, dtype) pair.
+
+Mixed-dtype section verifies the automatic casting / dispatch rules:
+- Safe cast: the first impl in the dispatch table that can accept both operands wins.
+- Scalars without explicit precision (Python int, float) are untyped and match any
+  same-rank impl; scalars with precision (np.int32, np.float32) match precisely.
 """
 
 import numpy as np
@@ -12,10 +17,12 @@ from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
 from tests_util import (
     assert_array_matches,
+    carrays2_mixed_strategy,
     carrays2_strategy,
     complexes,
     floats,
     ints,
+    op_safe_element_strategy,
     op_safe_non_zero_element_strategy,
     uints,
 )
@@ -268,3 +275,230 @@ def test_power_custom_inputs():
     check(zix.power(2.0, zaf64), 2.0**df64)  # scalar first
     check(zix.power(zaf64, [3.0, 2.0, 0.5]), df64 ** [3.0, 2.0, 0.5])  # list
     check(zix.power(zaf64, (3.0, 2.0, 0.5)), df64 ** (3.0, 2.0, 0.5))  # tuple
+
+
+# ---------------------------------------------------------------------------
+# Mixed-dtype op2 tests
+#
+# The dispatch table is consulted left-to-right; the first impl where *both*
+# operands pass the CastKind::Safe rules is selected.  Expected result dtypes:
+#   u8  + u16  -> u16   (UInt P1 -> UInt P2, safe same-rank)
+#   u8  + i32  -> i32   (UInt P1 -> Int P4, needs higher prec: P2 <= P4, ok)
+#   u8  + f32  -> f32   (UInt P1 -> Float P4, needs higher prec: P2 <= P4, ok)
+#   i8  + i32  -> i32   (Int P1 -> Int P4, P1 <= P4)
+#   i32 + f32  -> f64   (Int P4 -> Float P4, needs higher prec: P8 <= P4? no -> f64)
+#   i32 + f64  -> f64   (Int P4 -> Float P8, P8 <= P8, ok)
+#   f32 + f64  -> f64   (Float P4 -> Float P8, P4 <= P8)
+#   bool + i32 -> i32   (Bool -> anything is always safe)
+#   f32 + c64  -> c64   (Float P4 -> Complex P4, P4 <= P4)
+# ---------------------------------------------------------------------------
+
+_MIXED_ARITH_CASES = [
+    # (dtype_a, dtype_b, expected_result_dtype)
+    (np.uint8, np.uint16, np.uint16),
+    (np.uint8, np.int32, np.int32),
+    (np.uint8, np.float32, np.float32),
+    (np.int8, np.int32, np.int32),
+    (np.int16, np.int64, np.int64),
+    (np.int32, np.float64, np.float64),
+    (np.float32, np.float64, np.float64),
+    (np.bool_, np.int32, np.int32),
+    (np.bool_, np.float64, np.float64),
+    (np.float32, np.complex64, np.complex64),
+]
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
+@given(st.data())
+def test_add_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+    """add(a, b) with different dtypes casts both to expected_dtype, values match."""
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(
+            dtype_a,
+            dtype_b,
+            element_st_a=op_safe_element_strategy(dtype_a),
+            element_st_b=op_safe_element_strategy(dtype_b),
+        ),
+        label="arrays",
+    )
+    result = zix.add(za, zb)
+    assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
+    expected = np_a.astype(expected_dtype) + np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
+@given(st.data())
+def test_multiply_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+    """multiply(a, b) with different dtypes casts both to expected_dtype, values match."""
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(
+            dtype_a,
+            dtype_b,
+            element_st_a=op_safe_element_strategy(dtype_a),
+            element_st_b=op_safe_element_strategy(dtype_b),
+        ),
+        label="arrays",
+    )
+    result = zix.multiply(za, zb)
+    assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
+    expected = np_a.astype(expected_dtype) * np_b.astype(expected_dtype)
+    rtol = 1e-5 if np.issubdtype(expected_dtype, np.complexfloating) else 0.0
+    np.testing.assert_allclose(result.numpy(), expected, rtol=rtol)
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
+@given(st.data())
+def test_subtract_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+    """subtract(a, b) with different dtypes casts both to expected_dtype, values match."""
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(
+            dtype_a,
+            dtype_b,
+            element_st_a=op_safe_element_strategy(dtype_a),
+            element_st_b=op_safe_element_strategy(dtype_b),
+        ),
+        label="arrays",
+    )
+    # Unsigned subtypes that would underflow: restrict to uint cases
+    if np.issubdtype(expected_dtype, np.unsignedinteger):
+        # skip: unsigned underflow panics in debug mode
+        return
+    result = zix.subtract(za, zb)
+    assert result.dtype == np.dtype(expected_dtype)
+    expected = np_a.astype(expected_dtype) - np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+@pytest.mark.parametrize(
+    "dtype_a,dtype_b,expected_dtype",
+    [
+        (np.uint8, np.uint16, np.uint16),
+        (np.uint8, np.int32, np.int32),
+        (np.uint8, np.float32, np.float32),
+        (np.int8, np.int32, np.int32),
+        (np.int32, np.float64, np.float64),
+        (np.float32, np.float64, np.float64),
+        (np.bool_, np.int32, np.int32),
+    ],
+)
+@given(st.data())
+def test_equal_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+    """equal(a, b) with different dtypes casts both to expected_dtype, output is bool."""
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(
+            dtype_a,
+            dtype_b,
+            element_st_a=op_safe_element_strategy(dtype_a),
+            element_st_b=op_safe_element_strategy(dtype_b),
+        ),
+        label="arrays",
+    )
+    result = zix.equal(za, zb)
+    assert result.dtype == np.bool_
+    expected = np_a.astype(expected_dtype) == np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+def test_mixed_dtype_result_dtype_determinism():
+    """The result dtype for common mixed-type pairs is stable and matches documented rules."""
+
+    def check(da, db, expected):
+        a = zix.compact(np.array([1, 2, 3], dtype=da))
+        b = zix.compact(np.array([4, 5, 6], dtype=db))
+        result = zix.add(a, b)
+        assert result.dtype == np.dtype(expected), (
+            f"add({da.__name__}, {db.__name__}): got {result.dtype}, expected {np.dtype(expected)}"
+        )
+
+    check(np.uint8, np.uint16, np.uint16)
+    check(np.uint8, np.int32, np.int32)
+    check(np.uint8, np.float32, np.float32)
+    check(np.int8, np.int32, np.int32)
+    check(np.int32, np.float64, np.float64)
+    check(np.float32, np.float64, np.float64)
+    check(np.bool_, np.int32, np.int32)
+
+
+def test_mixed_dtype_op2_does_not_error_on_safe_combos():
+    """All 'safe' up-cast pairs must succeed, not raise UnsupportedDtype."""
+    combos = [
+        (np.uint8, np.uint16),
+        (np.uint8, np.uint32),
+        (np.uint8, np.int16),
+        (np.uint8, np.int32),
+        (np.uint8, np.float32),
+        (np.uint8, np.float64),
+        (np.int8, np.int16),
+        (np.int8, np.int32),
+        (np.int8, np.int64),
+        (np.int16, np.int32),
+        (np.int32, np.int64),
+        (np.int32, np.float64),
+        (np.float32, np.float64),
+        (np.bool_, np.uint8),
+        (np.bool_, np.int32),
+        (np.bool_, np.float32),
+    ]
+    for da, db in combos:
+        a = zix.compact(np.array([1, 2], dtype=da))
+        b = zix.compact(np.array([3, 4], dtype=db))
+        try:
+            r = zix.add(a, b)
+            _ = r.numpy()
+        except Exception as e:
+            pytest.fail(f"add({da.__name__}, {db.__name__}) raised: {e}")
+
+
+def test_mixed_dtype_op2_errors_on_complex_arithmetic():
+    """Complex + int64/uint64 should fail: no impl can hold Int/P8 cast to Complex."""
+    for int_dtype in [np.int64, np.uint64]:
+        a = zix.compact(np.array([1 + 2j, 3 + 4j], dtype=np.complex64))
+        b = zix.compact(np.array([1, 2], dtype=int_dtype))
+        with pytest.raises(Exception):
+            _ = zix.add(a, b).numpy()
+
+
+def test_complex_plus_small_int_upcasts_to_complex128():
+    """complex64 + int32 upcast to complex128 (the only fitting impl)."""
+    a = zix.compact(np.array([1 + 2j, 3 + 0j], dtype=np.complex64))
+    b = zix.compact(np.array([10, 20], dtype=np.int32))
+    result = zix.add(a, b)
+    assert result.dtype == np.complex128
+    np.testing.assert_array_equal(result.numpy(), np.array([11 + 2j, 23 + 0j]))
+
+
+# ---------------------------------------------------------------------------
+# Mixed dtype + broadcasting combined
+# ---------------------------------------------------------------------------
+
+
+def test_mixed_dtype_broadcasting():
+    """Mixed-dtype inputs also get properly broadcast before the op."""
+    # (3, 1) i8 + (1, 4) i32  -> (3, 4) i32
+    np_a = np.arange(3, dtype=np.int8).reshape(3, 1)
+    np_b = np.arange(4, dtype=np.int32).reshape(1, 4)
+    za = zix.compact(np_a)
+    zb = zix.compact(np_b)
+
+    result = zix.add(za, zb)
+    expected = np_a.astype(np.int32) + np_b
+
+    assert result.dtype == np.int32
+    assert result.shape == (3, 4)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+def test_mixed_dtype_broadcasting_float():
+    """Mixed dtype broadcast: (3,) u8 + (2, 3) f32 -> (2, 3) f32."""
+    np_a = np.array([1, 2, 3], dtype=np.uint8)
+    np_b = np.array([[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]], dtype=np.float32)
+    za = zix.compact(np_a)
+    zb = zix.compact(np_b)
+
+    result = zix.add(za, zb)
+    expected = np_a.astype(np.float32) + np_b
+
+    assert result.dtype == np.float32
+    assert result.shape == (2, 3)
+    np.testing.assert_array_equal(result.numpy(), expected)

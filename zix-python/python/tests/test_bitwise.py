@@ -1,6 +1,10 @@
 """
 Property tests for bitwise and logical ops.
 Mirrors the test block in zix/src/ops/bitwise.rs.
+
+Auto-cast section verifies that Safe/Unsafe dispatch rules work for non-matching inputs:
+- bitwise_and/or/xor use CastKind::Safe, so e.g. u8+u16 -> u16.
+- logical_and/or/xor use CastKind::Unsafe, so any non-complex input casts to bool.
 """
 
 import numpy as np
@@ -321,3 +325,108 @@ def test_logical_xor(dtype: np.dtype, data: DataObject):
         label="arrays",
     )
     assert_array_matches(zix.logical_xor(za, zb), np.logical_xor(np_a, np_b), data=data)
+
+
+# ---------------------------------------------------------------------------
+# Mixed-dtype bitwise ops (CastKind::Safe auto-cast)
+# ---------------------------------------------------------------------------
+
+_BITWISE_MIXED_CASES = [
+    # (dtype_a, dtype_b, expected_result_dtype)
+    (np.uint8, np.uint16, np.uint16),
+    (np.uint8, np.int32, np.int32),
+    (np.int8, np.uint16, np.int32),  # i8->u16: needs higher: P2.higher=P4, i32
+    (np.uint16, np.uint32, np.uint32),
+    (np.int16, np.int64, np.int64),
+    (np.bool_, np.uint8, np.uint8),
+    (np.bool_, np.int32, np.int32),
+]
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _BITWISE_MIXED_CASES)
+def test_bitwise_and_mixed_dtypes(dtype_a, dtype_b, expected_dtype):
+    """bitwise_and with different integer dtypes casts both to the expected result dtype."""
+    np_a = np.array([0b1010, 0b1100, 0b1111], dtype=dtype_a)
+    np_b = np.array([0b1111, 0b1010, 0b0000], dtype=dtype_b)
+    za = zix.compact(np_a)
+    zb = zix.compact(np_b)
+    result = zix.bitwise_and(za, zb)
+    assert result.dtype == np.dtype(expected_dtype), (
+        f"bitwise_and({dtype_a.__name__}, {dtype_b.__name__}): "
+        f"got {result.dtype}, expected {expected_dtype.__name__}"
+    )
+    expected = np_a.astype(expected_dtype) & np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _BITWISE_MIXED_CASES)
+def test_bitwise_or_mixed_dtypes(dtype_a, dtype_b, expected_dtype):
+    """bitwise_or with different integer dtypes casts both to the expected result dtype."""
+    np_a = np.array([0b1010, 0b0000, 0b1111], dtype=dtype_a)
+    np_b = np.array([0b0101, 0b1111, 0b1010], dtype=dtype_b)
+    za = zix.compact(np_a)
+    zb = zix.compact(np_b)
+    result = zix.bitwise_or(za, zb)
+    assert result.dtype == np.dtype(expected_dtype)
+    expected = np_a.astype(expected_dtype) | np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _BITWISE_MIXED_CASES)
+def test_bitwise_xor_mixed_dtypes(dtype_a, dtype_b, expected_dtype):
+    """bitwise_xor with different integer dtypes casts both to the expected result dtype."""
+    np_a = np.array([0b1010, 0b1100, 0b0000], dtype=dtype_a)
+    np_b = np.array([0b1111, 0b1010, 0b1111], dtype=dtype_b)
+    za = zix.compact(np_a)
+    zb = zix.compact(np_b)
+    result = zix.bitwise_xor(za, zb)
+    assert result.dtype == np.dtype(expected_dtype)
+    expected = np_a.astype(expected_dtype) ^ np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+# ---------------------------------------------------------------------------
+# Mixed-dtype logical ops (CastKind::Unsafe auto-cast to bool)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "dtype_a, dtype_b",
+    [
+        (np.float32, np.int32),
+        (np.float64, np.uint8),
+        (np.int8, np.float32),
+        (np.uint16, np.bool_),
+        (np.float32, np.float64),
+    ],
+)
+def test_logical_and_mixed_dtypes(dtype_a, dtype_b):
+    """logical_and with different dtypes: both cast to bool (Unsafe), output is bool."""
+    np_a = np.array([0, 1, 0, 1], dtype=dtype_a)
+    np_b = np.array([1, 1, 0, 0], dtype=dtype_b)
+    za = zix.compact(np_a)
+    zb = zix.compact(np_b)
+    result = zix.logical_and(za, zb)
+    assert result.dtype == np.bool_
+    expected = np.logical_and(np_a, np_b)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+@pytest.mark.parametrize(
+    "dtype_a, dtype_b",
+    [
+        (np.float32, np.int32),
+        (np.float64, np.uint8),
+        (np.int16, np.float64),
+    ],
+)
+def test_logical_or_mixed_dtypes(dtype_a, dtype_b):
+    """logical_or with different dtypes: both cast to bool (Unsafe), output is bool."""
+    np_a = np.array([0, 1, 0, 1], dtype=dtype_a)
+    np_b = np.array([0, 0, 1, 1], dtype=dtype_b)
+    za = zix.compact(np_a)
+    zb = zix.compact(np_b)
+    result = zix.logical_or(za, zb)
+    assert result.dtype == np.bool_
+    expected = np.logical_or(np_a, np_b)
+    np.testing.assert_array_equal(result.numpy(), expected)

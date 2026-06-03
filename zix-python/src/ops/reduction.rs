@@ -42,6 +42,7 @@ macro_rules! define_reduction_op {
         #[pyo3(signature = (
             array,
             axis=None,
+            *,
             keepdims=false,
             $($($extra_arg=$extra_default,)+)?
         ))]
@@ -88,6 +89,12 @@ macro_rules! define_reduction_op {
         $(#[$meta])*
         #[pyo3_stub_gen::derive::gen_stub_pyfunction]
         #[pyo3::pyfunction]
+        #[pyo3(signature = (
+            array,
+            axis=None,
+            *,
+            keepdims=false,
+        ))]
         pub fn $name<'py>(
             array: &pyo3::Bound<'py, pyo3::PyAny>,
             axis: Option<i32>,

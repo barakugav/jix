@@ -5,9 +5,9 @@ One test per dtype, parametrized via @pytest.mark.parametrize, analogous to the
 test_op1! macro which expands to one proptest per (op, dtype) pair.
 
 Python name differences vs Rust:
-  ln  → log
-  neg → negative
-  abs → absolute
+  ln  -> log
+  neg -> negative
+  abs -> absolute
 """
 
 import numpy as np
@@ -35,14 +35,14 @@ def test_negative(dtype: np.dtype, data: DataObject):
     assert_array_matches(zix.negative(za), -np_a, data=data)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_floor(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
     assert_array_matches(zix.floor(za), np.floor(np_a), data=data)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_ceil(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
@@ -54,7 +54,7 @@ def _round_half_away_from_zero(a: np.ndarray) -> np.ndarray:
     return np.sign(a) * np.floor(np.abs(a) + 0.5)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_round(dtype: np.dtype, data: DataObject):
     # numpy.round uses banker's rounding (half-to-even); zix.round rounds half away from zero.
@@ -63,64 +63,65 @@ def test_round(dtype: np.dtype, data: DataObject):
     assert_array_matches(zix.round(za), _round_half_away_from_zero(np_a), data=data)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_sqrt(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(
         carray_strategy(dtype, element_st=op_safe_non_negative_element_strategy(dtype)),
         label="array",
     )
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(zix.sqrt(za), np.sqrt(np_a), data=data, rtol=rtol)
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(zix.sqrt(za), np.sqrt(np_a).astype(dtype), data=data, rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_exp(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(zix.exp(za), np.exp(np_a), data=data, rtol=rtol)
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(zix.exp(za), np.exp(np_a).astype(dtype), data=data, rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_log(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(
         carray_strategy(dtype, element_st=op_safe_non_negative_element_strategy(dtype)),
         label="array",
     )
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(zix.log(za), np.log(np_a), data=data, rtol=rtol)
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(zix.log(za), np.log(np_a).astype(dtype), data=data, rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_sin(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(zix.sin(za), np.sin(np_a), data=data, rtol=rtol)
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(zix.sin(za), np.sin(np_a).astype(dtype), data=data, rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_cos(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(zix.cos(za), np.cos(np_a), data=data, rtol=rtol)
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(zix.cos(za), np.cos(np_a).astype(dtype), data=data, rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_tan(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(zix.tan(za), np.tan(np_a), data=data, rtol=rtol)
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(zix.tan(za), np.tan(np_a).astype(dtype), data=data, rtol=rtol)
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 @given(st.data())
 def test_asin(dtype: np.dtype, data: DataObject):
     # Domain [-1, 1]; use unit_element_strategy to avoid NaN comparison failures.
+    # f16 excluded: asin is in [-pi/2, pi/2], not representable precisely in f16.
     np_a, za = data.draw(
         carray_strategy(dtype, element_st=unit_element_strategy(dtype)),
         label="array",
@@ -141,12 +142,12 @@ def test_acos(dtype: np.dtype, data: DataObject):
     assert_array_matches(zix.acos(za), np.arccos(np_a), data=data, rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_atan(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(zix.atan(za), np.arctan(np_a), data=data, rtol=rtol)
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(zix.atan(za), np.arctan(np_a).astype(dtype), data=data, rtol=rtol)
 
 
 @pytest.mark.parametrize("dtype", floats)
@@ -172,7 +173,45 @@ def test_absolute_complex(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
     result = zix.absolute(za)
     expected = np.abs(np_a)
-    # Output dtype: complex64 → float32, complex128 → float64
+    # Output dtype: complex64 -> float32, complex128 -> float64
     expected_dtype = np.float32 if dtype == np.complex64 else np.float64
     assert result.dtype == expected_dtype
     assert_array_matches(result, expected, data=data, rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Auto-cast (Safe dispatch) for op1
+#
+# When the input dtype is not directly in the dispatch list, the first impl
+# whose CastKind::Safe rule accepts the input dtype is selected.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "dtype, expected_dtype",
+    [
+        # uint types auto-cast to the smallest signed type with higher precision
+        (np.uint8, np.int16),    # UInt P1 -> Int P2 (higher prec needed)
+        (np.uint16, np.int32),   # UInt P2 -> Int P4
+        (np.uint32, np.int64),   # UInt P4 -> Int P8
+    ],
+)
+def test_negative_auto_cast_uint(dtype, expected_dtype):
+    """negative() on uint dtypes auto-casts to the next larger signed integer."""
+    np_a = np.array([1, 2, 3], dtype=dtype)
+    za = zix.compact(np_a)
+    result = zix.negative(za)
+    assert result.dtype == np.dtype(expected_dtype), (
+        f"negative({dtype.__name__}): got {result.dtype}, expected {expected_dtype.__name__}"
+    )
+    np.testing.assert_array_equal(result.numpy(), -np_a.astype(expected_dtype))
+
+
+def test_negative_on_bool_auto_casts():
+    """negative(bool) auto-casts to the first signed integer impl (i8)."""
+    np_a = np.array([True, False, True], dtype=np.bool_)
+    za = zix.compact(np_a)
+    result = zix.negative(za)
+    # bool is Rank::Bool -> first Int impl: i8
+    assert result.dtype == np.int8
+    np.testing.assert_array_equal(result.numpy(), -(np_a.astype(np.int8)))

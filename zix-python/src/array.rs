@@ -805,7 +805,7 @@ impl Array {
     // == reduction ops ==
 
     /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy. See :func:`zix.all()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -815,7 +815,7 @@ impl Array {
     }
 
     /// Reduces one or more axes with logical OR: returns `True` if any element is truthy. See :func:`zix.any()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -825,7 +825,7 @@ impl Array {
     }
 
     /// Reduces one or more axes by taking the maximum element. See :func:`zix.max()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -835,7 +835,7 @@ impl Array {
     }
 
     /// Reduces one or more axes by taking the minimum element. See :func:`zix.min()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -845,19 +845,19 @@ impl Array {
     }
 
     /// Returns the index of the maximum element along a single axis. See :func:`zix.argmax()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn argmax(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
         crate::ops::argmax(slf, axis, keepdims)
     }
 
     /// Returns the index of the minimum element along a single axis. See :func:`zix.argmin()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn argmin(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
         crate::ops::argmin(slf, axis, keepdims)
     }
 
     /// Reduces one or more axes by summing all elements. See :func:`zix.sum()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -867,7 +867,7 @@ impl Array {
     }
 
     /// Computes the arithmetic mean along one or more axes. See :func:`zix.mean()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -877,7 +877,7 @@ impl Array {
     }
 
     /// Reduces one or more axes by multiplying all elements. See :func:`zix.product()`.
-    #[pyo3(signature = (axis=None, keepdims=false))]
+    #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -887,7 +887,7 @@ impl Array {
     }
 
     /// Computes the standard deviation along one or more axes. See :func:`zix.std()`.
-    #[pyo3(signature = (axis=None, keepdims=false, ddof=0.0))]
+    #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -898,7 +898,7 @@ impl Array {
     }
 
     /// Computes the variance along one or more axes. See :func:`zix.var()`.
-    #[pyo3(signature = (axis=None, keepdims=false, ddof=0.0))]
+    #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,

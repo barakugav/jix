@@ -19,4 +19,3 @@
 - remove broadcast_view, broadcast itself should be view without copy
 - op2 should force S1::Dimension == S2::Dimension
 - add #[inline] annotations
-- document python `zix.negative`, differ from numpy, cast uint to int
