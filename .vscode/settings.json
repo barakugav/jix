@@ -3,11 +3,11 @@
         "jix/Cargo.toml",
         "jix/schema/Cargo.toml",
         "jix-macros/Cargo.toml",
-        "jix-python/Cargo.toml"
+        "jix-py/Cargo.toml"
     ],
     "rust-analyzer.cargo.features": "all",
     "python.analysis.extraPaths": [
-        "jix-python/python/tests/"
+        "jix-py/python/tests/"
     ],
     "cSpell.words": [
         "arange",

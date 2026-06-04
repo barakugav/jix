@@ -42,7 +42,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// Mix a plain array with a compressed array in an element-wise operation:
 ///
 /// ```
-/// # use jix::{Array, ArrayParams};
+/// # use jix::Array;
 /// use ndarray::array;
 ///
 /// let nd_compact = array![[1.0f32, 2.0], [3.0, 4.0]];

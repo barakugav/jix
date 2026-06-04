@@ -1,6 +1,6 @@
-use pyo3::prelude::*;
 use jix_core::Array as CoreArray;
 use jix_core::ArrayStorage;
+use pyo3::prelude::*;
 
 use crate::codec::ReadContext;
 use crate::util::{IntoPyResult, OrKwargs};
@@ -8,7 +8,7 @@ use crate::{Array, ArrayParams};
 
 /// Copies the data of an array into a new compact array by compressing it into new blocks.
 ///
-/// The primary use of `copy` is to materialize a lazy operation chain. A `jix.Array` can
+/// The primary use of `copy` is to materialize a lazy operation chain. A [`jix.Array`][jix.Array] can
 /// wrap an arbitrary lazy computation - for example the result of `a * 2.0 + b`. Reads to
 /// such lazy arrays always perform the whole computation pipeline on the fly, which is very
 /// flexible but can be inefficient for repeated access. Calling `copy` breaks the lazy
@@ -24,27 +24,38 @@ use crate::{Array, ArrayParams};
 ///
 /// Codec settings (compression level, filters, etc.) are inherited from the source storage.
 ///
-/// `params` controls the block layout and codec of the output. Accepts a `jix.ArrayParams`
+/// `params` controls the block layout and codec of the output. Accepts a [`jix.ArrayParams`][jix.ArrayParams]
 /// instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). Any field not set is
-/// inherited from the source array's storage. See `jix.ArrayParams` for details.
+/// inherited from the source array's storage. See [`jix.ArrayParams`][jix.ArrayParams] for details.
 ///
-/// `context` is an optional `jix.ReadContext` to reuse when decoding the source array.
-/// When omitted, a context is created internally. See `jix.ReadContext` for details.
+/// `context` is an optional [`jix.ReadContext`][jix.ReadContext] to reuse when decoding the source array.
+/// When omitted, a context is created internally. See [`jix.ReadContext`][jix.ReadContext] for details.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     array: The array to copy. May be any [`jix.Array`][jix.Array], including lazy views.
+///     params: Controls the block layout and codec of the output. Accepts a [`jix.ArrayParams`][jix.ArrayParams]
+///         instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). Unset fields are
+///         inherited from the source array. See [`jix.ArrayParams`][jix.ArrayParams] for details.
+///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse when decoding the source array.
+///         When omitted, a context is created internally.
 ///
-/// a = jix.compact(np.array([[1.5, 2.0], [3.14, 6.17]], dtype=np.float32))
-/// # Materialize an arithmetic pipeline
-/// b = (a * 7.399) \    # Array<Mul<Compact, Scalar<f32>>> (lazy views, rust internal types)
-///     .floor() \       # Array<Floor<Mul<Compact, Scalar<f32>>>>
-///     .copy()          # Array<Compact> - materialize the pipeline
+/// Returns:
+///     A new copied compact [`jix.Array`][jix.Array].
 ///
-/// # After a shape-changing op, pin the block shape explicitly
-/// c = jix.copy(a.T, params={"block_shape": [2, 1]})
-/// ```
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact(np.array([[1.5, 2.0], [3.14, 6.17]], dtype=np.float32))
+///     # Materialize an arithmetic pipeline
+///     b = (a * 7.399) \    # Array<Mul<Compact, Scalar<f32>>> (lazy views, rust internal types)
+///         .floor() \       # Array<Floor<Mul<Compact, Scalar<f32>>>>
+///         .copy()          # Array<Compact> - materialize the pipeline
+///
+///     # After a shape-changing op, pin the block shape explicitly
+///     c = jix.copy(a.T, params={"block_shape": [2, 1]})
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (

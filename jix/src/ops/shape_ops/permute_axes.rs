@@ -24,7 +24,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// # Examples
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// // 2-D transpose: [2, 3] -> [3, 2]

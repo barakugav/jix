@@ -10,27 +10,34 @@ use crate::Array;
 /// must have the same shape. Output dtype equals the dtype of `x` and `y`. Output shape equals
 /// the input shape.
 ///
-/// All three arguments may be anything that `jix.asarray()` accepts.
-///
 /// This function deviates from numpy in a few ways:
 /// - `x` and `y` must have the same dtype (numpy will upcast if they differ)
 /// - all three arrays must have the same shape (numpy will broadcast if they differ)
-/// - `condition` must already have `bool` dtype; use `jix.astype(condition, 'bool')` if needed
+/// - `condition` must already have `bool` dtype; use [`jix.astype(condition, 'bool')`][jix.astype] if needed
 ///   (numpy implicitly casts the condition to bool)
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     condition: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+///     x: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+///     y: May be anything that [`jix.asarray()`][jix.asarray] accepts.
 ///
-/// cond = jix.compact([True, False, True, False])
-/// x = jix.compact([1, 2, 3, 4], dtype=np.int32)
-/// y = jix.compact([10, 20, 30, 40], dtype=np.int32)
-/// result = jix.where(cond, x, y)
-/// assert np.array_equal(result.numpy(), [1, 20, 3, 40])
-/// ```
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] with the same shape as the broadcast of `condition`, `x`, and `y`.
+///     Elements are drawn from `x` where `condition` is `True`, and from `y` elsewhere.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     cond = jix.compact([True, False, True, False])
+///     x = jix.compact([1, 2, 3, 4], dtype=np.int32)
+///     y = jix.compact([10, 20, 30, 40], dtype=np.int32)
+///     result = jix.where(cond, x, y)
+///     assert np.array_equal(result.numpy(), [1, 20, 3, 40])
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyo3::pyfunction]
 #[pyo3(name = "where")]

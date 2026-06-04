@@ -37,7 +37,7 @@ where
 ///
 /// # Examples
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_array(&array![1i32, 2, 3, 4])?;
@@ -94,7 +94,7 @@ where
 ///
 /// # Examples
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_array(&array![1i32, 2, 3, 4])?;

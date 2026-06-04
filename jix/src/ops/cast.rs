@@ -165,7 +165,7 @@ pub(crate) mod _traits {
 ///
 /// # Examples
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use jix::dtype::Dtyped;
 /// use ndarray::array;
 ///

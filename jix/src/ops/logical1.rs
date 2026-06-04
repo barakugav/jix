@@ -20,7 +20,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![f32::NAN, 1.0f32, f32::INFINITY, -1.0f32])?;
@@ -55,7 +55,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY])?;
@@ -90,7 +90,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![f32::INFINITY, f32::NEG_INFINITY, f32::NAN, 1.0f32])?;

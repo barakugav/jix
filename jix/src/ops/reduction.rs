@@ -778,7 +778,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
@@ -815,7 +815,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
@@ -854,7 +854,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
@@ -896,7 +896,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
@@ -943,7 +943,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
@@ -987,7 +987,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
@@ -1024,7 +1024,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
@@ -1066,7 +1066,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
@@ -1104,7 +1104,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
@@ -1142,7 +1142,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[true, false, true], [true, true, true]];
@@ -1179,7 +1179,7 @@ define_reduction_op!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let nd = array![[false, false, false], [true, true, true]];

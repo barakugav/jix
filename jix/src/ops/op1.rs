@@ -312,7 +312,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1.0f32, -2.5, 3.0])?;
@@ -342,7 +342,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1.1f32, 2.9, 3.0])?;
@@ -372,7 +372,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1.1f32, 2.0, 3.9])?;
@@ -405,7 +405,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1.4f32, 1.6, 2.0])?;
@@ -435,7 +435,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![4.0f32, 9.0, 16.0])?;
@@ -465,7 +465,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1.0f32, 2.0, 3.0])?;
@@ -497,7 +497,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E])?;
@@ -529,7 +529,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![std::f32::consts::FRAC_PI_2, std::f32::consts::PI])?;
@@ -559,7 +559,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0.0f32, std::f32::consts::PI])?;
@@ -590,7 +590,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_2 * 0.5])?;
@@ -620,7 +620,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0.0f32, 1.0, -1.0])?;
@@ -651,7 +651,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1.0f32, 0.0, -1.0])?;
@@ -682,7 +682,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0.0f32, -1.0, 1.0])?;
@@ -714,7 +714,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![3.0f32, -5.0, -0.1])?;
@@ -760,7 +760,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![-3i32, 0, 5, -7])?;
@@ -772,7 +772,7 @@ define_op1!(
     /// ```
     /// # #[cfg(feature = "num-complex")]
     /// # {
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// // For complex input the result is the modulus sqrt(re^2 + im^2).

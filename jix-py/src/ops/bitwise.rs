@@ -9,29 +9,32 @@ define_op2!(
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`;
     /// for `bool` this is the identity), then the logical AND is applied.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts. Mixed dtypes are
-    /// allowed: each operand is independently cast to `bool` before the operation.
+    /// Mixed dtypes are allowed: each operand is independently cast to `bool` before the
+    /// operation.
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Args:
+    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
     ///
-    /// a = jix.compact([0, 1, 0, 5], dtype=np.int32)
-    /// b = jix.compact([1, 1, 0, 0], dtype=np.int32)
-    /// result = jix.logical_and(a, b)
-    /// assert np.array_equal(result.numpy(), [False, True, False, False])
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Mixed dtypes: float and int both cast to bool
-    /// c = jix.compact([0.0, 1.5], dtype=np.float32)
-    /// d = jix.compact([1, 0], dtype=np.int32)
-    /// assert np.array_equal(jix.logical_and(c, d).numpy(), [False, False])
-    /// ```
+    ///     a = jix.compact([0, 1, 0, 5], dtype=np.int32)
+    ///     b = jix.compact([1, 1, 0, 0], dtype=np.int32)
+    ///     result = jix.logical_and(a, b)
+    ///     assert np.array_equal(result.numpy(), [False, True, False, False])
+    ///
+    ///     # Mixed dtypes: float and int both cast to bool
+    ///     c = jix.compact([0.0, 1.5], dtype=np.float32)
+    ///     d = jix.compact([1, 0], dtype=np.int32)
+    ///     assert np.array_equal(jix.logical_and(c, d).numpy(), [False, False])
+    ///     ```
     logical_and,
     And,
     dispatch = {
@@ -49,21 +52,22 @@ define_op2!(
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero -> `True`), then the
     /// logical OR is applied. Returns `True` when at least one element is truthy.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts. Mixed dtypes are
-    /// allowed. Broadcasting follows numpy rules exactly.
-    ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Args:
+    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
     ///
-    /// a = jix.compact([0, 1, 0, 5], dtype=np.int32)
-    /// b = jix.compact([0, 0, 0, 0], dtype=np.int32)
-    /// result = jix.logical_or(a, b)
-    /// assert np.array_equal(result.numpy(), [False, True, False, True])
-    /// ```
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([0, 1, 0, 5], dtype=np.int32)
+    ///     b = jix.compact([0, 0, 0, 0], dtype=np.int32)
+    ///     result = jix.logical_or(a, b)
+    ///     assert np.array_equal(result.numpy(), [False, True, False, True])
+    ///     ```
     logical_or,
     Or,
     dispatch = {
@@ -81,21 +85,22 @@ define_op2!(
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero -> `True`), then the
     /// logical XOR is applied. Returns `True` when exactly one element is truthy.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts. Mixed dtypes are
-    /// allowed. Broadcasting follows numpy rules exactly.
-    ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Args:
+    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
     ///
-    /// a = jix.compact([0, 1, 0, 5], dtype=np.int32)
-    /// b = jix.compact([0, 1, 1, 0], dtype=np.int32)
-    /// result = jix.logical_xor(a, b)
-    /// assert np.array_equal(result.numpy(), [False, False, True, True])
-    /// ```
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([0, 1, 0, 5], dtype=np.int32)
+    ///     b = jix.compact([0, 1, 1, 0], dtype=np.int32)
+    ///     result = jix.logical_xor(a, b)
+    ///     assert np.array_equal(result.numpy(), [False, False, True, True])
+    ///     ```
     logical_xor,
     Xor,
     dispatch = {
@@ -114,19 +119,20 @@ define_op1!(
     /// then negated. Returns `True` for zero (falsy) elements and `False` for non-zero
     /// (truthy) elements.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
-    ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
     ///
-    /// a = jix.compact([0, 1, -3, 0], dtype=np.int32)
-    /// result = jix.logical_not(a)
-    /// assert np.array_equal(result.numpy(), [True, False, False, True])
-    /// ```
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([0, 1, -3, 0], dtype=np.int32)
+    ///     result = jix.logical_not(a)
+    ///     assert np.array_equal(result.numpy(), [True, False, False, True])
+    ///     ```
     logical_not,
     Not,
     dispatch = {
@@ -144,27 +150,30 @@ define_op2!(
     /// Applies the bitwise AND to each pair of corresponding bits. For `bool` this is
     /// equivalent to logical AND.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts.
-    ///
     /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
     /// to the smallest integer type that can represent both (Safe casting rules).
     /// For example `u8 & u16 -> u16`, `i8 & u16 -> i32`.
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Args:
+    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
+    ///     occurs until the result is read.
     ///
-    /// a = jix.compact([0b1100, 0b1010, 0b1111], dtype=np.uint8)
-    /// b = jix.compact([0b1010, 0b0101, 0b0000], dtype=np.uint8)
-    /// result = jix.bitwise_and(a, b)
-    /// assert np.array_equal(result.numpy(), [0b1000, 0b0000, 0b0000])
-    /// ```
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([0b1100, 0b1010, 0b1111], dtype=np.uint8)
+    ///     b = jix.compact([0b1010, 0b0101, 0b0000], dtype=np.uint8)
+    ///     result = jix.bitwise_and(a, b)
+    ///     assert np.array_equal(result.numpy(), [0b1000, 0b0000, 0b0000])
+    ///     ```
     bitwise_and,
     And,
     dispatch = {
@@ -182,26 +191,29 @@ define_op2!(
     /// Applies the bitwise OR to each pair of corresponding bits. For `bool` this is
     /// equivalent to logical OR.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts.
-    ///
     /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
     /// to the smallest integer type that can represent both (Safe casting rules).
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Args:
+    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
+    ///     occurs until the result is read.
     ///
-    /// a = jix.compact([0b1100, 0b1010, 0b0000], dtype=np.uint8)
-    /// b = jix.compact([0b1010, 0b0101, 0b1111], dtype=np.uint8)
-    /// result = jix.bitwise_or(a, b)
-    /// assert np.array_equal(result.numpy(), [0b1110, 0b1111, 0b1111])
-    /// ```
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([0b1100, 0b1010, 0b0000], dtype=np.uint8)
+    ///     b = jix.compact([0b1010, 0b0101, 0b1111], dtype=np.uint8)
+    ///     result = jix.bitwise_or(a, b)
+    ///     assert np.array_equal(result.numpy(), [0b1110, 0b1111, 0b1111])
+    ///     ```
     bitwise_or,
     Or,
     dispatch = {
@@ -219,26 +231,29 @@ define_op2!(
     /// Applies the bitwise XOR to each pair of corresponding bits. For `bool` this is
     /// equivalent to logical XOR.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts.
-    ///
     /// **Type promotion**: if `a` and `b` have different integer/bool dtypes, both are cast
     /// to the smallest integer type that can represent both (Safe casting rules).
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Args:
+    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
+    ///     occurs until the result is read.
     ///
-    /// a = jix.compact([0b1100, 0b1010, 0b1111], dtype=np.uint8)
-    /// b = jix.compact([0b1010, 0b1010, 0b1111], dtype=np.uint8)
-    /// result = jix.bitwise_xor(a, b)
-    /// assert np.array_equal(result.numpy(), [0b0110, 0b0000, 0b0000])
-    /// ```
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([0b1100, 0b1010, 0b1111], dtype=np.uint8)
+    ///     b = jix.compact([0b1010, 0b1010, 0b1111], dtype=np.uint8)
+    ///     result = jix.bitwise_xor(a, b)
+    ///     assert np.array_equal(result.numpy(), [0b0110, 0b0000, 0b0000])
+    ///     ```
     bitwise_xor,
     Xor,
     dispatch = {
@@ -256,19 +271,22 @@ define_op1!(
     /// Flips every bit. For `bool` this is equivalent to logical NOT.
     /// For signed integers the result is `-(x + 1)` (e.g. `~0` on `int32` gives `-1`).
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+    ///     the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0b00001111, 0b11110000, 0], dtype=np.uint8)
-    /// result = jix.bitwise_not(a)
-    /// assert np.array_equal(result.numpy(), [0b11110000, 0b00001111, 0xFF])
-    /// ```
+    ///     a = jix.compact([0b00001111, 0b11110000, 0], dtype=np.uint8)
+    ///     result = jix.bitwise_not(a)
+    ///     assert np.array_equal(result.numpy(), [0b11110000, 0b00001111, 0xFF])
+    ///     ```
     bitwise_not,
     Not,
     dispatch = {
@@ -287,26 +305,29 @@ define_op2!(
     /// Vacated bits are filled with zeros. Shifting by a value greater than or equal to the
     /// bit width of the type produces zero.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts.
-    ///
     /// **Type promotion**: if `a` and `b` have different integer dtypes, both are cast to
     /// the smallest integer type that can represent both (Safe casting rules).
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Args:
+    ///     a: May be anything that jix.asarray() accepts.
+    ///     b: May be anything that jix.asarray() accepts.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
+    ///     occurs until the result is read.
     ///
-    /// a = jix.compact([0b00000001, 0b00000010, 0b00000100], dtype=np.uint8)
-    /// b = jix.compact([1, 2, 3], dtype=np.uint8)
-    /// result = jix.bitwise_left_shift(a, b)
-    /// assert np.array_equal(result.numpy(), [0b00000010, 0b00001000, 0b00100000])
-    /// ```
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([0b00000001, 0b00000010, 0b00000100], dtype=np.uint8)
+    ///     b = jix.compact([1, 2, 3], dtype=np.uint8)
+    ///     result = jix.bitwise_left_shift(a, b)
+    ///     assert np.array_equal(result.numpy(), [0b00000010, 0b00001000, 0b00100000])
+    ///     ```
     bitwise_left_shift,
     BitwiseShiftLeft,
     dispatch = {
@@ -326,26 +347,29 @@ define_op2!(
     /// sign bit (the result preserves the sign). Shifting by a value greater than or equal
     /// to the bit width produces zero (unsigned) or the sign-extended value (signed).
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts.
-    ///
     /// **Type promotion**: if `a` and `b` have different integer dtypes, both are cast to
     /// the smallest integer type that can represent both (Safe casting rules).
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Args:
+    ///     a: May be anything that jix.asarray() accepts.
+    ///     b: May be anything that jix.asarray() accepts.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
+    ///     occurs until the result is read.
     ///
-    /// a = jix.compact([0b10000000, 0b00100000, 0b00001000], dtype=np.uint8)
-    /// b = jix.compact([1, 2, 3], dtype=np.uint8)
-    /// result = jix.bitwise_right_shift(a, b)
-    /// assert np.array_equal(result.numpy(), [0b01000000, 0b00001000, 0b00000001])
-    /// ```
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([0b10000000, 0b00100000, 0b00001000], dtype=np.uint8)
+    ///     b = jix.compact([1, 2, 3], dtype=np.uint8)
+    ///     result = jix.bitwise_right_shift(a, b)
+    ///     assert np.array_equal(result.numpy(), [0b01000000, 0b00001000, 0b00000001])
+    ///     ```
     bitwise_right_shift,
     BitwiseShiftRight,
     dispatch = {
@@ -365,23 +389,26 @@ define_op2!(
     /// position wrap around to the least-significant position, so no bits are lost.
     /// The rotation amount is taken modulo the bit width of the type.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly.
+    /// Args:
+    ///     a: May be anything that jix.asarray() accepts.
+    ///     b: May be anything that jix.asarray() accepts. Must be castable to `u32`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
+    ///     occurs until the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0b10000001, 0b00000001, 0b11110000], dtype=np.uint8)
-    /// b = jix.compact([1, 3, 4], dtype=np.uint32)
-    /// result = jix.bitwise_rotate_left(a, b)
-    /// assert np.array_equal(result.numpy(), [0b00000011, 0b00001000, 0b00001111])
-    /// ```
+    ///     a = jix.compact([0b10000001, 0b00000001, 0b11110000], dtype=np.uint8)
+    ///     b = jix.compact([1, 3, 4], dtype=np.uint32)
+    ///     result = jix.bitwise_rotate_left(a, b)
+    ///     assert np.array_equal(result.numpy(), [0b00000011, 0b00001000, 0b00001111])
+    ///     ```
     bitwise_rotate_left,
     BitwiseRotateLeft,
     dispatch = {
@@ -410,23 +437,26 @@ define_op2!(
     /// position wrap around to the most-significant position, so no bits are lost.
     /// The rotation amount is taken modulo the bit width of the type.
     ///
-    /// Both `a` and `b` may be anything that `jix.asarray()` accepts.
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
-    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules
-    /// exactly.
+    /// Args:
+    ///     a: May be anything that jix.asarray() accepts.
+    ///     b: May be anything that jix.asarray() accepts. Must be castable to `u32`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
+    ///     occurs until the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0b10000001, 0b00001000, 0b00001111], dtype=np.uint8)
-    /// b = jix.compact([1, 3, 4], dtype=np.uint32)
-    /// result = jix.bitwise_rotate_right(a, b)
-    /// assert np.array_equal(result.numpy(), [0b11000000, 0b00000001, 0b11110000])
-    /// ```
+    ///     a = jix.compact([0b10000001, 0b00001000, 0b00001111], dtype=np.uint8)
+    ///     b = jix.compact([1, 3, 4], dtype=np.uint32)
+    ///     result = jix.bitwise_rotate_right(a, b)
+    ///     assert np.array_equal(result.numpy(), [0b11000000, 0b00000001, 0b11110000])
+    ///     ```
     bitwise_rotate_right,
     BitwiseRotateRight,
     dispatch = {
@@ -453,19 +483,22 @@ define_op1!(
     /// Also known as the Hamming weight. For signed integers the bit representation
     /// (including the sign bit) is used.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Args:
+    ///     array: May be anything that jix.asarray() accepts.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
+    ///     dtype. No computation occurs until the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0b00001111, 0b11001100, 0b11111111], dtype=np.uint8)
-    /// result = jix.count_ones(a)
-    /// assert np.array_equal(result.numpy(), [4, 4, 8])
-    /// ```
+    ///     a = jix.compact([0b00001111, 0b11001100, 0b11111111], dtype=np.uint8)
+    ///     result = jix.count_ones(a)
+    ///     assert np.array_equal(result.numpy(), [4, 4, 8])
+    ///     ```
     count_ones,
     CountOnes,
     dispatch = {
@@ -483,23 +516,26 @@ define_op1!(
     /// Equivalent to `bit_width - count_ones`. For signed integers the full bit
     /// representation (including the sign bit) is used.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Args:
+    ///     array: May be anything that jix.asarray() accepts.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
+    ///     dtype. No computation occurs until the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0b11110000, 0b00001111, 0b11111111], dtype=np.uint8)
-    /// result = jix.count_zeros(a)
-    /// assert np.array_equal(result.numpy(), [4, 4, 0])
+    ///     a = jix.compact([0b11110000, 0b00001111, 0b11111111], dtype=np.uint8)
+    ///     result = jix.count_zeros(a)
+    ///     assert np.array_equal(result.numpy(), [4, 4, 0])
     ///
-    /// # Zero has all bits unset: count_zeros == bit width.
-    /// b = jix.compact([0], dtype=np.uint8)
-    /// assert jix.count_zeros(b).numpy()[0] == 8  # u8 has 8 bits
-    /// ```
+    ///     # Zero has all bits unset: count_zeros == bit width.
+    ///     b = jix.compact([0], dtype=np.uint8)
+    ///     assert jix.count_zeros(b).numpy()[0] == 8  # u8 has 8 bits
+    ///     ```
     count_zeros,
     CountZeros,
     dispatch = {
@@ -518,23 +554,26 @@ define_op1!(
     /// set bit. Returns the bit width of the type for a value of zero (e.g. `32` for a
     /// `uint32` zero).
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Args:
+    ///     array: May be anything that jix.asarray() accepts.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
+    ///     dtype. No computation occurs until the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0x00010000, 0x80000000, 0x00000001], dtype=np.uint32)
-    /// result = jix.leading_zeros(a)
-    /// assert np.array_equal(result.numpy(), [15, 0, 31])
+    ///     a = jix.compact([0x00010000, 0x80000000, 0x00000001], dtype=np.uint32)
+    ///     result = jix.leading_zeros(a)
+    ///     assert np.array_equal(result.numpy(), [15, 0, 31])
     ///
-    /// # Zero returns the bit width of the type (32 for uint32).
-    /// b = jix.compact([0], dtype=np.uint32)
-    /// assert jix.leading_zeros(b).numpy()[0] == 32
-    /// ```
+    ///     # Zero returns the bit width of the type (32 for uint32).
+    ///     b = jix.compact([0], dtype=np.uint32)
+    ///     assert jix.leading_zeros(b).numpy()[0] == 32
+    ///     ```
     leading_zeros,
     LeadingZeros,
     dispatch = {
@@ -553,23 +592,26 @@ define_op1!(
     /// set bit. Returns the bit width of the type for a value of zero (e.g. `32` for a
     /// `uint32` zero).
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Args:
+    ///     array: May be anything that jix.asarray() accepts.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
+    ///     dtype. No computation occurs until the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0x00010000, 0x80000000, 0x00000001], dtype=np.uint32)
-    /// result = jix.trailing_zeros(a)
-    /// assert np.array_equal(result.numpy(), [16, 31, 0])
+    ///     a = jix.compact([0x00010000, 0x80000000, 0x00000001], dtype=np.uint32)
+    ///     result = jix.trailing_zeros(a)
+    ///     assert np.array_equal(result.numpy(), [16, 31, 0])
     ///
-    /// # Zero returns the bit width of the type (32 for uint32).
-    /// b = jix.compact([0], dtype=np.uint32)
-    /// assert jix.trailing_zeros(b).numpy()[0] == 32
-    /// ```
+    ///     # Zero returns the bit width of the type (32 for uint32).
+    ///     b = jix.compact([0], dtype=np.uint32)
+    ///     assert jix.trailing_zeros(b).numpy()[0] == 32
+    ///     ```
     trailing_zeros,
     TrailingZeros,
     dispatch = {
@@ -588,19 +630,22 @@ define_op1!(
     /// representation). Single-byte types (`i8`, `u8`) are not supported since swapping
     /// one byte is a no-op.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Args:
+    ///     array: May be anything that jix.asarray() accepts.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+    ///     the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0x12345678], dtype=np.uint32)
-    /// result = jix.swap_bytes(a)
-    /// assert result.numpy()[0] == 0x78563412
-    /// ```
+    ///     a = jix.compact([0x12345678], dtype=np.uint32)
+    ///     result = jix.swap_bytes(a)
+    ///     assert result.numpy()[0] == 0x78563412
+    ///     ```
     swap_bytes,
     SwapBytes,
     dispatch = {
@@ -617,19 +662,22 @@ define_op1!(
     ///
     /// The most-significant bit becomes the least-significant and vice versa.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Args:
+    ///     array: May be anything that jix.asarray() accepts.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+    ///     the result is read.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([0b00000001, 0b10000000, 0b10101010], dtype=np.uint8)
-    /// result = jix.reverse_bits(a)
-    /// assert np.array_equal(result.numpy(), [0b10000000, 0b00000001, 0b01010101])
-    /// ```
+    ///     a = jix.compact([0b00000001, 0b10000000, 0b10101010], dtype=np.uint8)
+    ///     result = jix.reverse_bits(a)
+    ///     assert np.array_equal(result.numpy(), [0b10000000, 0b00000001, 0b01010101])
+    ///     ```
     reverse_bits,
     ReverseBits,
     dispatch = {

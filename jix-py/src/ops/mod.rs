@@ -33,9 +33,9 @@ pub use copy_op::*;
 mod sub_dtype;
 pub use sub_dtype::*;
 
-use pyo3::prelude::*;
 use jix_core::dtype::{Dtype, DtypeScalarKind};
 use jix_core::ArrayAny;
+use pyo3::prelude::*;
 
 use crate::array::Array;
 use crate::dtype::dtype_from_any;
@@ -60,20 +60,29 @@ use crate::dtype::dtype_from_any;
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     array: The array to cast. May be anything that [`jix.asarray()`][jix.asarray] accepts.
+///     dtype: The target dtype. Accepts a numpy dtype object, a dtype string (e.g.
+///         `'float32'`), or a Python type like `np.float32`.
 ///
-/// a = jix.compact([1, 2, 3, 4], dtype=np.int32)
-/// result = jix.astype(a, np.float64)
-/// assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, 4.0])
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the new dtype. No computation occurs until the result
+///     is read.
 ///
-/// # Zero -> False, non-zero -> True
-/// b = jix.compact([0, 1, -2, 0], dtype=np.int32)
-/// result = jix.astype(b, bool)
-/// assert np.array_equal(result.numpy(), [False, True, True, False])
-/// ```
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([1, 2, 3, 4], dtype=np.int32)
+///     result = jix.astype(a, np.float64)
+///     assert np.array_equal(result.numpy(), [1.0, 2.0, 3.0, 4.0])
+///
+///     # Zero -> False, non-zero -> True
+///     b = jix.compact([0, 1, -2, 0], dtype=np.int32)
+///     result = jix.astype(b, bool)
+///     assert np.array_equal(result.numpy(), [False, True, True, False])
+///     ```
 pub fn astype<'py>(
     array: &Bound<'py, Array>,
     dtype: &Bound<'_, PyAny>,

@@ -10,7 +10,7 @@ Jix is a high-performance multi-dimensional array library written in Rust with P
 
 - **`jix/`** - Core Rust library (`Array<S>`, dtype system, ops, storage, archive)
 - **`jix-macros/`** - Procedural macros used by the core library
-- **`jix-python/`** - PyO3 Python bindings (`jix-pyo3` crate, publishes as `jix` Python package)
+- **`jix-py/`** - PyO3 Python bindings (`jix-pyo3` crate, publishes as `jix` Python package)
 
 There is no workspace-level `Cargo.toml`; each crate is built independently.
 
@@ -33,10 +33,10 @@ cargo test -p jix <test_name>
 cargo fmt
 
 # Build and install Python package (development mode)
-cd jix-python && maturin develop
+cd jix-py && maturin develop
 
 # Run Python tests
-cd jix-python && pytest python/tests/
+cd jix-py && pytest python/tests/
 
 # Generate Python type stubs (.pyi)
 cargo run -p jix-pyo3 --bin gen_pyi
@@ -89,9 +89,9 @@ Defined in `jix/src/codec.rs`; codec/filter parameters serialized in protobuf he
 
 Protocol Buffers (via `prost`) define the archive format under `jix/proto/jix/v1/`. `build.rs` compiles these to Rust at build time. Archive structs live in `jix/src/archive/`.
 
-### Python Bindings (`jix-python`)
+### Python Bindings (`jix-py`)
 
-PyO3 + `numpy` crate. The Python `Array` class wraps a type-erased `AnyArray` enum. Operations return new `Array` objects. `pyo3-stub-gen` generates `.pyi` stubs via the `gen_pyi` binary. The Python source lives in `jix-python/python/`.
+PyO3 + `numpy` crate. The Python `Array` class wraps a type-erased `AnyArray` enum. Operations return new `Array` objects. `pyo3-stub-gen` generates `.pyi` stubs via the `gen_pyi` binary. The Python source lives in `jix-py/python/`.
 
 ## Developer Guides
 

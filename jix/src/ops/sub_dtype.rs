@@ -51,7 +51,7 @@ where
 ///
 /// # Examples
 /// ```rust,ignore
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// #[derive(Copy, Clone, jix::dtype::Dtyped)]

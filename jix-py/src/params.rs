@@ -1,7 +1,7 @@
+use jix_core::codec::{Codec, EncoderParams};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
-use jix_core::codec::{Codec, EncoderParams};
 
 use crate::util::{IntoPyResult, OrKwargs};
 
@@ -19,38 +19,37 @@ use crate::util::{IntoPyResult, OrKwargs};
 /// All fields are optional. Fields left unset are filled in automatically using cache-size
 /// heuristics or inherited from the source array when copying.
 ///
-/// Functions that accept a `params` argument (such as `jix.compact()` and `jix.copy()`)
+/// Functions that accept a `params` argument (such as [`jix.compact()`][jix.compact] and [`jix.copy()`][jix.copy])
 /// also accept a plain `dict` as a shorthand - any key omitted from the dict uses its
 /// default value:
 ///
-/// ```python,ignore
+/// ```python
 /// # These are equivalent:
 /// jix.compact(data, params=jix.ArrayParams(block_shape=[64, 64]))
 /// jix.compact(data, params={"block_shape": [64, 64]})
 /// ```
 ///
-/// # When params are applied
+/// Note:
+///     **On construction** (e.g. [`jix.compact()`][jix.compact]): data is split into blocks according to the
+///     block layout, and each block is compressed with the codec settings.
+///     **On copy** (e.g. [`jix.copy()`][jix.copy]): a new compressed array is created, inheriting any
+///     unset fields from the source array's storage. After shape-changing operations
+///     (`reshape`, `permute_axes`, etc.) the inherited block layout may not suit the new
+///     shape - consider passing explicit params to [`jix.copy()`][jix.copy] after such ops.
 ///
-/// - **On construction** (e.g. `jix.compact()`): data is split into blocks according to the
-///   block layout, and each block is compressed with the codec settings.
-/// - **On copy** (e.g. `jix.copy()`): a new compressed array is created, inheriting any
-///   unset fields from the source array's storage. After shape-changing operations
-///   (`reshape`, `permute_axes`, etc.) the inherited block layout may not suit the new
-///   shape - consider passing explicit params to `jix.copy()` after such ops.
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+///     data = np.zeros((1024, 1024), dtype=np.float32)
 ///
-/// data = np.zeros((1024, 1024), dtype=np.float32)
+///     # Store with a block shape tuned for row access
+///     a = jix.compact(data, params=jix.ArrayParams(block_shape=[1, 1024]))
 ///
-/// # Store with a block shape tuned for row access
-/// a = jix.compact(data, params=jix.ArrayParams(block_shape=[1, 1024]))
-///
-/// # After a transpose, pin the block shape for the new layout
-/// b = jix.copy(a.T, params={"block_shape": [1024, 1]})
-/// ```
+///     # After a transpose, pin the block shape for the new layout
+///     b = jix.copy(a.T, params={"block_shape": [1024, 1]})
+///     ```
 #[gen_stub_pyclass]
 #[pyclass(module = "jix", frozen)]
 pub struct ArrayParams(pub(crate) jix_core::ArrayParams);
@@ -111,49 +110,42 @@ impl ArrayParams {
     /// shape defaults to a size that fits in the L1 data cache, codec defaults to Zstd level 3
     /// with byte shuffling.
     ///
-    /// **`block_shape`** - explicit storage block shape, as a list of integers (one per
-    /// dimension). When set, array data is divided into nd-blocks of exactly this shape (each
-    /// dimension is clamped to the array boundary). Choosing a block shape that matches your
-    /// access pattern is the most important tuning knob: if you always read row slices, a block
-    /// shape of `[1, <row_length>]` avoids decompressing neighboring rows. When not set, the
-    /// shape is auto-computed to fit approximately `block_size_hint` bytes.
+    /// Args:
+    ///     block_shape: Explicit storage block shape, as a list of integers (one per
+    ///         dimension). When set, array data is divided into nd-blocks of exactly this shape
+    ///         (each dimension is clamped to the array boundary). Choosing a block shape that
+    ///         matches your access pattern is the most important tuning knob: if you always read
+    ///         row slices, a block shape of `[1, <row_length>]` avoids decompressing neighboring
+    ///         rows. When not set, the shape is auto-computed to fit approximately
+    ///         `block_size_hint` bytes.
+    ///     block_shape_tag: Per-dimension constraint on how `block_shape` is scaled when a
+    ///         downstream operation auto-computes a new block shape. One string per dimension:
+    ///         `"fixed"` pins the block size exactly (the default when `block_shape` is set by
+    ///         the user); `"multiple-of"` allows scaling up while keeping it a multiple of the
+    ///         given value; `"any"` allows free choice (used when an op makes the original size
+    ///         irrelevant, e.g. a broadcast dimension). Requires `block_shape` to also be set.
+    ///         Length must equal the number of dimensions.
+    ///     block_size_hint: Target block size in bytes, used when auto-computing or scaling the
+    ///         block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
+    ///         are `"fixed"`. Defaults to the L1 data cache size.
+    ///     preferred_read_shape: Recommended region size to request in a single read, as a list
+    ///         of integers (one per dimension). Reads that cover a region of approximately this
+    ///         shape avoid decompressing unnecessary blocks. Typically larger than `block_shape`
+    ///         and targets the L2 cache. When not set, auto-computed from
+    ///         `preferred_read_size_hint`.
+    ///     preferred_read_size_hint: Target size in bytes for the preferred read region, used
+    ///         when auto-computing `preferred_read_shape`. Defaults to the L2 cache size.
+    ///     codec: Compression algorithm applied to each block. Currently the only accepted
+    ///         value is `"zstd"`. Defaults to `"zstd"` when left unset.
+    ///     compression_level: Compression level passed to the codec. For Zstd the valid range
+    ///         is 1-22; higher values compress more but are slower to encode. Defaults to 3.
+    ///     filters: List of filters applied to the raw block bytes *before* compression.
+    ///         Filters improve the compression ratio for typed numeric data: `"byte-shuffle"`
+    ///         groups bytes by significance (e.g. all high bytes together, then all low bytes);
+    ///         `"bit-shuffle"` groups bits across elements. Defaults to `["byte-shuffle"]`.
     ///
-    /// **`block_shape_tag`** - per-dimension constraint on how `block_shape` is scaled when
-    /// a downstream operation auto-computes a new block shape. One string per dimension:
-    /// - `"fixed"` - the block size for this dimension is pinned exactly; shape-changing ops
-    ///   preserve it as-is. This is the default when `block_shape` is set by the user.
-    /// - `"multiple-of"` - the block size may be scaled up, but must remain a multiple of the
-    ///   given value. Used internally when an op constrains granularity without fixing the size.
-    /// - `"any"` - the block size for this dimension can be freely chosen. Used internally when
-    ///   an op makes the original size irrelevant (e.g. a broadcast dimension).
-    ///
-    /// Requires `block_shape` to also be set. Length must equal the number of dimensions.
-    ///
-    /// **`block_size_hint`** - target block size in bytes, used when auto-computing or scaling
-    /// the block shape for dimensions that are not `"fixed"`. Ignored when all dimensions are
-    /// `"fixed"`. Defaults to the L1 data cache size.
-    ///
-    /// **`preferred_read_shape`** - recommended region size to request in a single read, as a
-    /// list of integers (one per dimension). Reads that cover a region of approximately this
-    /// shape avoid decompressing unnecessary blocks. It is typically larger than `block_shape`
-    /// and targets the L2 cache. When not set, auto-computed from `preferred_read_size_hint`.
-    ///
-    /// **`preferred_read_size_hint`** - target size in bytes for the preferred read region,
-    /// used when auto-computing `preferred_read_shape`. Defaults to the L2 cache size.
-    ///
-    /// **`codec`** - compression algorithm applied to each block. Currently the only accepted
-    /// value is `"zstd"`. Defaults to `"zstd"` when left unset.
-    ///
-    /// **`compression_level`** - compression level passed to the codec. For Zstd the valid
-    /// range is 1-22; higher values compress more but are slower to encode. Defaults to 3.
-    ///
-    /// **`filters`** - list of filters applied to the raw block bytes *before*
-    /// compression. Filters improve the compression ratio for typed numeric data:
-    /// - `"byte-shuffle"` - groups bytes by significance (e.g. all high bytes together, then
-    ///   all low bytes).
-    /// - `"bit-shuffle"` - groups bits across elements.
-    ///
-    /// Defaults to `["byte-shuffle"]`.
+    /// Returns:
+    ///     A new [`jix.ArrayParams`][jix.ArrayParams] with the specified settings.
     #[new]
     #[pyo3(signature = (
         *,

@@ -44,7 +44,7 @@ where
 ///
 /// # Examples
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use jix::ops::where_condition;
 /// use ndarray::array;
 ///

@@ -363,7 +363,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
@@ -395,7 +395,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![10i32, 20, 30])?;
@@ -427,7 +427,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![1i32, 2, 3])?;
@@ -461,7 +461,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![10i32, 20, 30])?;

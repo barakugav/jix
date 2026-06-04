@@ -27,7 +27,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// **Implicit** - the operator accepts a raw scalar and broadcasts it automatically:
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let arr = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
@@ -40,7 +40,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// **Explicit** - construct a `Scalar` array first, then apply the operation:
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let arr = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;

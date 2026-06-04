@@ -1,11 +1,11 @@
 use std::sync::Mutex;
 
+use jix_core::ops::SliceItem;
+use jix_core::{Array as CoreArray, ArrayAny};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyEllipsis, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
-use jix_core::ops::SliceItem;
-use jix_core::{Array as CoreArray, ArrayAny};
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::{PyAnyMethods, PySlice};
@@ -29,11 +29,11 @@ use crate::ArrayParams;
 ///
 /// | Function | Description |
 /// |---|---|
-/// | `jix.compact(data)` | Compress any array-like (NumPy array, list, scalar) into a new jix array. |
-/// | `jix.asarray(data)` | Create a jix array *view* of any array-like. Useful for mixing plain data with jix arrays in operations. |
-/// | `jix.read_array(path)` | Load an array from a `.jix` file. |
+/// | [`jix.compact(data)`][jix.compact] | Compress any array-like (NumPy array, list, scalar) into a new jix array. |
+/// | [`jix.asarray(data)`][jix.asarray] | Create a jix array *view* of any array-like. Useful for mixing plain data with jix arrays in operations. |
+/// | [`jix.read_array(path)`][jix.read_array] | Load an array from a `.jix` file. |
 ///
-/// ```python,ignore
+/// ```python
 /// import jix
 /// import numpy as np
 ///
@@ -53,7 +53,7 @@ use crate::ArrayParams;
 /// array. The result is always a fresh allocation; mutations to it do not affect the
 /// source array. Both forms accept the same index syntax:
 ///
-/// ```python,ignore
+/// ```python
 /// a.numpy()           # full array
 /// a.numpy(0)          # row 0 (integer drops that axis)
 /// a.numpy(slice(1,4)) # rows 1-3 (slice keeps the axis)
@@ -61,10 +61,10 @@ use crate::ArrayParams;
 /// a[..., -1]          # last column of any-rank array
 /// ```
 ///
-/// For tight loops that read many slices, pass an explicit [`jix.ReadContext`](crate::codec::ReadContext)
+/// For tight loops that read many slices, pass an explicit [`jix.ReadContext`][jix.ReadContext]
 /// to amortize decompressor initialization:
 ///
-/// ```python,ignore
+/// ```python
 /// ctx = a.read_ctx()
 /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
 /// ```
@@ -75,8 +75,8 @@ use crate::ArrayParams;
 /// No data is copied or computed at call time - the computation runs in a single pass when
 /// you read the result. Chains compose without intermediate allocations:
 ///
-/// ```python,ignore
-/// result = (a.astype('float64') - mean).abs().sum(axis=0).numpy()
+/// ```python
+/// result = (a.astype('float64') - a.mean()).abs().sum(axis=0).numpy()
 /// ```
 ///
 /// ## Shape operations
@@ -89,22 +89,22 @@ use crate::ArrayParams;
 ///
 /// # Persistence
 ///
-/// Save an array with [`.write_to(path)`](Array::write_to) or [`jix.write_array()`](crate::archive::write_array),
-/// and reload it with [`jix.read_array()`](crate::archive::read_array). Multiple arrays can
+/// Save an array with [`.write_to(path)`][jix.Array.write_to] or [`jix.write_array()`][jix.write_array],
+/// and reload it with [`jix.read_array()`][jix.read_array]. Multiple arrays can
 /// be written back-to-back into a single file and read back by supplying `offset` and `len`.
 ///
-/// ```python,ignore
+/// ```python
 /// a.write_to("data.jix")
 /// b = jix.read_array("data.jix")
 /// ```
 ///
 /// # Copying and re-encoding
 ///
-/// [`copy()`](Array::copy) materializes the current array (including any pending lazy
+/// [`.copy()`][jix.Array.copy] materializes the current array (including any pending lazy
 /// operations) into a new compressed array. This is also the way to tune the block layout
 /// after shape-changing operations:
 ///
-/// ```python,ignore
+/// ```python
 /// # Transpose and re-encode with a block layout suited for column access
 /// b = jix.copy(a.T, params={"block_shape": [1024, 1]})
 /// ```
@@ -203,7 +203,10 @@ impl Array {
 impl Array {
     /// The shape of the array: a tuple of axis lengths.
     ///
-    /// ```python,ignore
+    /// Returns:
+    ///     The shape as a tuple of integers.
+    ///
+    /// ```python
     /// import jix
     ///
     /// a = jix.compact([1, 2, 3, 4])
@@ -219,7 +222,10 @@ impl Array {
 
     /// The number of dimensions (axes) of the array.
     ///
-    /// ```python,ignore
+    /// Returns:
+    ///     The number of dimensions as an integer.
+    ///
+    /// ```python
     /// import jix
     ///
     /// a = jix.compact([1, 2, 3, 4])
@@ -235,7 +241,10 @@ impl Array {
 
     /// The total number of elements in the array (the product of the axis lengths).
     ///
-    /// ```python,ignore
+    /// Returns:
+    ///     The total element count as an integer.
+    ///
+    /// ```python
     /// import jix
     ///
     /// a = jix.compact([1, 2, 3, 4])
@@ -251,7 +260,10 @@ impl Array {
 
     /// The length of the array along the first axis (axis 0).
     ///
-    /// ```python,ignore
+    /// Returns:
+    ///     The length of axis 0 as an integer.
+    ///
+    /// ```python
     /// import jix
     ///
     /// a = jix.compact([1, 2, 3, 4])
@@ -271,7 +283,10 @@ impl Array {
 
     /// The data type of the array elements, as a NumPy dtype object.
     ///
-    /// ```python,ignore
+    /// Returns:
+    ///     The element dtype as a `numpy.dtype` object.
+    ///
+    /// ```python
     /// import jix
     /// import numpy as np
     ///
@@ -296,98 +311,61 @@ impl Array {
 
     /// Decode the array (or a sub-region of it) into a NumPy array.
     ///
-    /// This is the primary way to materialize a `jix.Array` into a form that ordinary Python
+    /// This is the primary way to materialize a [`jix.Array`][jix.Array] into a form that ordinary Python
     /// and NumPy code can consume. It decodes the compressed block data, copies it into a
     /// freshly-allocated NumPy array, and returns that array. The returned array is fully
     /// independent: mutations to one do not affect the other.
     ///
-    /// # Return value
+    /// Args:
+    ///     index: Selects a sub-region to read. Accepts the same syntax Python uses inside
+    ///         `[...]`:
     ///
-    /// * **dtype** - identical to `self.dtype`. No casting is performed.
-    /// * **shape** - determined by the `index` argument (see below). When no index is
-    ///   supplied the shape equals `self.shape`.
-    /// * **memory layout** - always C-contiguous (row-major).
-    /// * **ownership** - a brand-new allocation; the caller owns it outright.
+    ///         | Form | Example | Effect |
+    ///         |---|---|---|
+    ///         | omitted / `None` | `arr.numpy()` | read the whole array |
+    ///         | integer | `arr[2]` or `arr.numpy(2)` | select a single position along axis 0 |
+    ///         | slice | `arr[1:4]` or `arr.numpy(slice(1, 4))` | select a range along axis 0 |
+    ///         | `...` (Ellipsis) | `arr[...]` or `arr.numpy(...)` | fill all remaining axes with full slices |
+    ///         | tuple of the above | `arr[0, 1:3, ..., :-2]` | index each axis independently |
     ///
-    /// # The `index` argument
+    ///         Most callers use `__getitem__` (`arr[...]`) instead; the two are equivalent.
     ///
-    /// `index` selects a sub-region to read. It accepts the same syntax Python uses inside `[...]`:
+    ///         **Integers:** Select one position along the corresponding axis and **remove** that
+    ///         axis from the output shape (just like NumPy). Negative indices are supported
+    ///         (`-1` means the last element). Out-of-bounds raises `IndexError`.
     ///
-    /// | Form | Example | Effect |
-    /// |---|---|---|
-    /// | omitted / `None` argument | `arr.numpy()` | read the whole array |
-    /// | integer | `arr[2]` or `arr.numpy(2)` | select a single position along axis 0 |
-    /// | slice | `arr[1:4]` or `arr.numpy(slice(1, 4))` | select a range along axis 0 |
-    /// | `...` (Ellipsis) | `arr[...]` or `arr.numpy(...)` | fill all remaining axes with full slices |
-    /// | tuple of the above | `arr[0, 1:3, ..., :-2]` or `arr.numpy((0, slice(1,3)))` | index each axis independently |
+    ///         **Slices:** Select a contiguous range and **keep** that axis in the output.
+    ///         `start` defaults to `0`; `stop` defaults to the axis length. Both may be
+    ///         negative. The **step must be 1**. An empty slice (`start == stop`) is valid and
+    ///         produces an axis of length 0. Bounds are checked strictly (unlike NumPy, which
+    ///         silently clamps out-of-range endpoints).
     ///
-    /// Most callers use `__getitem__` (`arr[...]`) instead of calling `numpy` directly; the two
-    /// are equivalent.
+    ///         **Ellipsis (`...`):** Expands to as many full-range slices as needed to cover all
+    ///         remaining axes. At most one ellipsis is allowed.
     ///
-    /// ## Integers
+    ///         **Omitted trailing axes:** If the index covers fewer axes than the array has
+    ///         dimensions, the remaining axes receive implicit full-range slices.
     ///
-    /// An integer selects one position along the corresponding axis and **removes** that axis
-    /// from the output shape (just like NumPy).
+    ///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse across multiple reads. When omitted,
+    ///         a context is created internally for each call. Pass one explicitly when calling
+    ///         `numpy()` many times in a loop to avoid repeated decompressor initialization:
     ///
-    /// * **Negative indices** are supported: `-1` means the last element, `-n` means the
-    ///   first.
-    /// * **Out-of-bounds** raises `IndexError`. The valid range is `[-len, len-1]` where
-    ///   `len` is the size of that axis.
+    ///         ```python
+    ///         ctx = jix.ReadContext()
+    ///         rows = [a.numpy(i, context=ctx) for i in range(len(a))]
+    ///         ```
     ///
-    /// ## Slices
+    /// Returns:
+    ///     A NumPy array with the same dtype as `self`, shape determined by the `index`
+    ///     argument (or `self.shape` when no index is supplied), in C-contiguous (row-major)
+    ///     memory order. A brand-new allocation; the caller owns it outright.
     ///
-    /// A slice selects a contiguous range along the corresponding axis and **keeps** that axis
-    /// in the output (possibly with a smaller size).
-    ///
-    /// * `start` defaults to `0`; `stop` defaults to the axis length.
-    /// * Both `start` and `stop` may be negative (counted from the end).
-    /// * The **step must be 1** (explicit or omitted). Any other step raises `ValueError`.
-    /// * **Bounds**: after normalizing negative values, `start` must satisfy
-    ///   `0 <= start < len` and `stop` must satisfy `0 <= stop <= len`. This is stricter than
-    ///   NumPy, which silently clamps out-of-range slice endpoints.
-    /// * An empty slice (where `start == stop`) is valid and produces an axis of length 0.
-    ///
-    /// ## Ellipsis (`...`)
-    ///
-    /// Expands to as many full-range slices as needed to account for all axes not covered by
-    /// the rest of the index. At most one ellipsis is allowed; a second one raises
-    /// `IndexError`.
-    ///
-    /// ## Omitted trailing axes
-    ///
-    /// If the index covers fewer axes than the array has dimensions, the remaining axes are
-    /// implicitly given full-range slices (equivalent to appending `...`).
-    ///
-    /// ## Too many indices
-    ///
-    /// If the number of integer/slice items exceeds the array's number of dimensions,
-    /// `IndexError` is raised.
-    ///
-    /// ## Unsupported index types
-    ///
-    /// Anything other than an integer, slice, `...`, or tuple of these raises `TypeError`.
-    ///
-    /// # Errors
-    ///
-    /// | Exception | Condition |
-    /// |---|---|
-    /// | `IndexError` | integer out of bounds |
-    /// | `IndexError` | slice `start` or `stop` out of bounds |
-    /// | `IndexError` | more index items than array dimensions |
-    /// | `IndexError` | more than one ellipsis |
-    /// | `ValueError` | slice step other than 1 |
-    /// | `TypeError` | unsupported index item type |
-    ///
-    /// # The `context` argument
-    ///
-    /// An optional `jix.ReadContext` to reuse across multiple reads. When omitted, a context
-    /// is created internally for each call. Pass one explicitly when calling `numpy()` many
-    /// times in a loop to avoid repeated decompressor initialization:
-    ///
-    /// ```python,ignore
-    /// ctx = jix.ReadContext()
-    /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
-    /// ```
+    /// Raises:
+    ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,
+    ///         more index items than array dimensions, or more than one ellipsis.
+    ///     ValueError: Slice step other than 1.
+    ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
+    ///         or tuple of these).
     #[pyo3(signature = (index=None, *, context=None))]
     pub fn numpy<'py>(
         &self,
@@ -550,6 +528,12 @@ impl Array {
     /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.
     ///
     /// This function is identical to `numpy()`, see that method for details.
+    ///
+    /// Args:
+    ///     index: See `numpy()` for accepted index types and behavior.
+    ///
+    /// Returns:
+    ///     A NumPy array. See `numpy()` for details.
     pub fn __getitem__<'py>(
         &self,
         index: &Bound<'py, PyAny>,
@@ -557,16 +541,16 @@ impl Array {
         self.numpy(index.py(), Some(index), None)
     }
 
-    /// Creates a `jix.ReadContext` with decoder parameters derived from this array's storage.
+    /// Creates a [`jix.ReadContext`][jix.ReadContext] with decoder parameters derived from this array's storage.
     ///
     /// The returned context inherits the decoder configuration stored alongside the array data,
     /// ensuring that reads use the same settings the array was written with. Prefer this over
-    /// constructing `jix.ReadContext()` directly when reading a specific array.
+    /// constructing [`jix.ReadContext`][jix.ReadContext] directly when reading a specific array.
     ///
-    /// Pass the returned context to `Array.numpy()` or `jix.copy()` to amortize decompressor
-    /// initialization across many successive reads. See `jix.ReadContext` for details.
+    /// Pass the returned context to [`Array.numpy()`][jix.Array.numpy] or [`jix.copy()`][jix.copy] to amortize decompressor
+    /// initialization across many successive reads. See [`jix.ReadContext`][jix.ReadContext] for details.
     ///
-    /// ```python,ignore
+    /// ```python
     /// import jix
     /// import numpy as np
     ///
@@ -574,11 +558,14 @@ impl Array {
     /// ctx = a.read_ctx()
     /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
     /// ```
+    ///
+    /// Returns:
+    ///     A [`jix.ReadContext`][jix.ReadContext] configured for this array's codec settings.
     pub fn read_ctx<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, ReadContext>> {
         Bound::new(py, ReadContext::from_core(self.arr.read_ctx()))
     }
 
-    /// Copies the data of an array into a new compact array by compressing it into new blocks. See :func:`jix.copy()`.
+    /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.copy()`][jix.copy].
     #[pyo3(signature = (*, params=None, context=None))]
     pub fn copy<'py>(
         slf: &Bound<'py, Self>,
@@ -588,24 +575,32 @@ impl Array {
         crate::ops::copy(slf, params, context)
     }
 
-    /// Return a string representation of the array as `Array { shape: ..., dtype: ... }`.
+    /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
+    ///
+    /// Returns:
+    ///     A string of the form `Array(shape=..., dtype=...)`.
     pub fn __str__(&self) -> String {
         let arr = &self.arr;
-        format!(
-            "Array {{ shape: {:?}, dtype: {} }}",
-            arr.shape(),
-            arr.dtype(),
-        )
+        let shape_str = arr
+            .shape()
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<DimArray<_>>()
+            .join(", ");
+        format!("Array(shape=({}), dtype={})", shape_str, arr.dtype())
     }
 
-    /// Return a string representation of the array as `Array { shape: ..., dtype: ... }`.
+    /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
+    ///
+    /// Returns:
+    ///     A string of the form `Array(shape=..., dtype=...)`.
     pub fn __repr__(&self) -> String {
         self.__str__()
     }
 
     // == archive I/O ==
 
-    /// Write the array to a file or a file-like object. See :func:`jix.write_array`.
+    /// Write the array to a file or a file-like object. See [`jix.write_array()`][jix.write_array].
     #[pyo3(signature = (path_or_writer, *, append=false, params=None, context=None))]
     pub fn write_to(
         slf: &Bound<'_, Array>,
@@ -619,195 +614,195 @@ impl Array {
 
     // == arithmetic ops ==
 
-    /// Element-wise addition of two arrays. See :func:`jix.add()`.
+    /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
     pub fn add(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::add(slf, other)
     }
 
-    /// Element-wise addition of two arrays. See :func:`jix.add()`.
+    /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
     pub fn __add__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::add(slf, other)
     }
 
-    /// Element-wise addition of two arrays. See :func:`jix.add()`.
+    /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
     pub fn __radd__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::add(other, slf)
     }
 
-    /// Element-wise subtraction of two arrays. See :func:`jix.subtract()`.
+    /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
     pub fn subtract(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(slf, other)
     }
 
-    /// Element-wise subtraction of two arrays. See :func:`jix.subtract()`.
+    /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
     pub fn __sub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(slf, other)
     }
 
-    /// Element-wise subtraction of two arrays. See :func:`jix.subtract()`.
+    /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
     pub fn __rsub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(other, slf)
     }
 
-    /// Element-wise multiplication of two arrays. See :func:`jix.multiply()`.
+    /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
     pub fn multiply(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(slf, other)
     }
 
-    /// Element-wise multiplication of two arrays. See :func:`jix.multiply()`.
+    /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
     pub fn __mul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(slf, other)
     }
 
-    /// Element-wise multiplication of two arrays. See :func:`jix.multiply()`.
+    /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
     pub fn __rmul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(other, slf)
     }
 
-    /// Element-wise division of two arrays. See :func:`jix.divide()`.
+    /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
     pub fn divide(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::divide(slf, other)
     }
 
-    /// Element-wise division of two arrays. See :func:`jix.divide()`.
+    /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
     pub fn __truediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(slf, other)
     }
 
-    /// Element-wise division of two arrays. See :func:`jix.divide()`.
+    /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
     pub fn __rtruediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(other, slf)
     }
 
     // TODO: __pow__
 
-    /// Arithmetic negation applied element-wise. See :func:`jix.negative()`.
+    /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
     pub fn negative(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::negative(slf)
     }
 
-    /// Arithmetic negation applied element-wise. See :func:`jix.negative()`.
+    /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
     pub fn __neg__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::negative(slf)
     }
 
-    /// Computes the absolute value of each element. See :func:`jix.absolute()`.
+    /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
     pub fn abs(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::absolute(slf)
     }
 
-    /// Computes the absolute value of each element. See :func:`jix.absolute()`.
+    /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
     pub fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::absolute(slf)
     }
 
-    /// Computes the natural exponential (`e^x`) of each element. See :func:`jix.exp()`.
+    /// Computes the natural exponential (`e^x`) of each element. See [`jix.exp()`][jix.exp].
     pub fn exp(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::exp(slf)
     }
 
-    /// Computes the square root of each element. See :func:`jix.sqrt()`.
+    /// Computes the square root of each element. See [`jix.sqrt()`][jix.sqrt].
     pub fn sqrt(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sqrt(slf)
     }
 
-    /// Rounds each element up to the nearest integer (towards +inf). See :func:`jix.ceil()`.
+    /// Rounds each element up to the nearest integer (towards +inf). See [`jix.ceil()`][jix.ceil].
     pub fn ceil(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::ceil(slf)
     }
 
-    /// Rounds each element down to the nearest integer (towards -inf). See :func:`jix.floor()`.
+    /// Rounds each element down to the nearest integer (towards -inf). See [`jix.floor()`][jix.floor].
     pub fn floor(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::floor(slf)
     }
 
-    /// Rounds each element to the nearest integer. See :func:`jix.round()`.
+    /// Rounds each element to the nearest integer. See [`jix.round()`][jix.round].
     pub fn round(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::round(slf)
     }
 
     // == bitwise ops ==
 
-    /// Element-wise bitwise AND of two arrays. See :func:`jix.bitwise_and()`.
+    /// Element-wise bitwise AND of two arrays. See [`jix.bitwise_and()`][jix.bitwise_and].
     pub fn __and__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_and(slf, other)
     }
 
-    /// Element-wise bitwise AND of two arrays. See :func:`jix.bitwise_and()`.
+    /// Element-wise bitwise AND of two arrays. See [`jix.bitwise_and()`][jix.bitwise_and].
     pub fn __rand__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_and(other, slf)
     }
 
-    /// Element-wise bitwise OR of two arrays. See :func:`jix.bitwise_or()`.
+    /// Element-wise bitwise OR of two arrays. See [`jix.bitwise_or()`][jix.bitwise_or].
     pub fn __or__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_or(slf, other)
     }
 
-    /// Element-wise bitwise OR of two arrays. See :func:`jix.bitwise_or()`.
+    /// Element-wise bitwise OR of two arrays. See [`jix.bitwise_or()`][jix.bitwise_or].
     pub fn __ror__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_or(other, slf)
     }
 
-    /// Element-wise bitwise XOR of two arrays. See :func:`jix.bitwise_xor()`.
+    /// Element-wise bitwise XOR of two arrays. See [`jix.bitwise_xor()`][jix.bitwise_xor].
     pub fn __xor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_xor(slf, other)
     }
 
-    /// Element-wise bitwise XOR of two arrays. See :func:`jix.bitwise_xor()`.
+    /// Element-wise bitwise XOR of two arrays. See [`jix.bitwise_xor()`][jix.bitwise_xor].
     pub fn __rxor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_xor(other, slf)
     }
 
-    /// Element-wise bitwise NOT (one's complement). See :func:`jix.bitwise_not()`.
+    /// Element-wise bitwise NOT (one's complement). See [`jix.bitwise_not()`][jix.bitwise_not].
     pub fn __invert__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::bitwise_not(slf)
     }
 
-    /// Element-wise left shift (`a << b`). See :func:`jix.bitwise_left_shift()`.
+    /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
     pub fn __lshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_left_shift(slf, other)
     }
 
-    /// Element-wise left shift (`a << b`). See :func:`jix.bitwise_left_shift()`.
+    /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
     pub fn __rlshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_left_shift(other, slf)
     }
 
     // == comparison ops ==
 
-    /// Element-wise less-than test (`a < b`). See :func:`jix.less()`.
+    /// Element-wise less-than test (`a < b`). See [`jix.less()`][jix.less].
     pub fn __lt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::less(slf, other)
     }
 
-    /// Element-wise less-than-or-equal test (`a <= b`). See :func:`jix.less_equal()`.
+    /// Element-wise less-than-or-equal test (`a <= b`). See [`jix.less_equal()`][jix.less_equal].
     pub fn __le__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::less_equal(slf, other)
     }
 
-    /// Element-wise greater-than test (`a > b`). See :func:`jix.greater()`.
+    /// Element-wise greater-than test (`a > b`). See [`jix.greater()`][jix.greater].
     pub fn __gt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::greater(slf, other)
     }
 
-    /// Element-wise greater-than-or-equal test (`a >= b`). See :func:`jix.greater_equal()`.
+    /// Element-wise greater-than-or-equal test (`a >= b`). See [`jix.greater_equal()`][jix.greater_equal].
     pub fn __ge__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::greater_equal(slf, other)
     }
 
-    /// Element-wise equality test (`a == b`). See :func:`jix.equal()`.
+    /// Element-wise equality test (`a == b`). See [`jix.equal()`][jix.equal].
     pub fn __eq__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::equal(slf, other)
     }
 
-    /// Element-wise inequality test (`a != b`). See :func:`jix.not_equal()`.
+    /// Element-wise inequality test (`a != b`). See [`jix.not_equal()`][jix.not_equal].
     pub fn __ne__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::not_equal(slf, other)
     }
 
     // == reduction ops ==
 
-    /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy. See :func:`jix.all()`.
+    /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy. See [`jix.all()`][jix.all].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn all(
         slf: &Bound<'_, Self>,
@@ -817,7 +812,7 @@ impl Array {
         crate::ops::all(slf, axis, keepdims)
     }
 
-    /// Reduces one or more axes with logical OR: returns `True` if any element is truthy. See :func:`jix.any()`.
+    /// Reduces one or more axes with logical OR: returns `True` if any element is truthy. See [`jix.any()`][jix.any].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn any(
         slf: &Bound<'_, Self>,
@@ -827,7 +822,7 @@ impl Array {
         crate::ops::any(slf, axis, keepdims)
     }
 
-    /// Reduces one or more axes by taking the maximum element. See :func:`jix.max()`.
+    /// Reduces one or more axes by taking the maximum element. See [`jix.max()`][jix.max].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn max(
         slf: &Bound<'_, Self>,
@@ -837,7 +832,7 @@ impl Array {
         crate::ops::max(slf, axis, keepdims)
     }
 
-    /// Reduces one or more axes by taking the minimum element. See :func:`jix.min()`.
+    /// Reduces one or more axes by taking the minimum element. See [`jix.min()`][jix.min].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn min(
         slf: &Bound<'_, Self>,
@@ -847,19 +842,19 @@ impl Array {
         crate::ops::min(slf, axis, keepdims)
     }
 
-    /// Returns the index of the maximum element along a single axis. See :func:`jix.argmax()`.
+    /// Returns the index of the maximum element along a single axis. See [`jix.argmax()`][jix.argmax].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn argmax(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
         crate::ops::argmax(slf, axis, keepdims)
     }
 
-    /// Returns the index of the minimum element along a single axis. See :func:`jix.argmin()`.
+    /// Returns the index of the minimum element along a single axis. See [`jix.argmin()`][jix.argmin].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn argmin(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
         crate::ops::argmin(slf, axis, keepdims)
     }
 
-    /// Reduces one or more axes by summing all elements. See :func:`jix.sum()`.
+    /// Reduces one or more axes by summing all elements. See [`jix.sum()`][jix.sum].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn sum(
         slf: &Bound<'_, Self>,
@@ -869,7 +864,7 @@ impl Array {
         crate::ops::sum(slf, axis, keepdims)
     }
 
-    /// Computes the arithmetic mean along one or more axes. See :func:`jix.mean()`.
+    /// Computes the arithmetic mean along one or more axes. See [`jix.mean()`][jix.mean].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn mean(
         slf: &Bound<'_, Self>,
@@ -879,7 +874,7 @@ impl Array {
         crate::ops::mean(slf, axis, keepdims)
     }
 
-    /// Reduces one or more axes by multiplying all elements. See :func:`jix.product()`.
+    /// Reduces one or more axes by multiplying all elements. See [`jix.product()`][jix.product].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
     pub fn prod(
         slf: &Bound<'_, Self>,
@@ -889,7 +884,7 @@ impl Array {
         crate::ops::product(slf, axis, keepdims)
     }
 
-    /// Computes the standard deviation along one or more axes. See :func:`jix.std()`.
+    /// Computes the standard deviation along one or more axes. See [`jix.std()`][jix.std].
     #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
     pub fn std(
         slf: &Bound<'_, Self>,
@@ -900,7 +895,7 @@ impl Array {
         crate::ops::std(slf, axis, keepdims, ddof)
     }
 
-    /// Computes the variance along one or more axes. See :func:`jix.var()`.
+    /// Computes the variance along one or more axes. See [`jix.var()`][jix.var].
     #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
     pub fn var(
         slf: &Bound<'_, Self>,
@@ -911,7 +906,7 @@ impl Array {
         crate::ops::var(slf, axis, keepdims, ddof)
     }
 
-    /// Casts each element of the array to a new dtype. See :func:`jix.astype()`.
+    /// Casts each element of the array to a new dtype. See [`jix.astype()`][jix.astype].
     pub fn astype<'py>(
         slf: &Bound<'py, Self>,
         dtype: &Bound<'_, PyAny>,
@@ -921,7 +916,7 @@ impl Array {
 
     // == shape ops ==
 
-    /// Reinterprets an array with a different shape. See :func:`jix.reshape()`.
+    /// Reinterprets an array with a different shape. See [`jix.reshape()`][jix.reshape].
     #[pyo3(signature = (shape, *, copy=true))]
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
@@ -931,13 +926,13 @@ impl Array {
         crate::ops::reshape(slf, shape, copy)
     }
 
-    /// Collapses the array into a single dimension. See :func:`jix.flatten()`.
+    /// Collapses the array into a single dimension. See [`jix.flatten()`][jix.flatten].
     #[pyo3(signature = (*, copy=true))]
     pub fn flatten<'py>(slf: &Bound<'py, Self>, copy: bool) -> PyResult<Bound<'py, Self>> {
         crate::ops::flatten(slf, copy)
     }
 
-    /// Reorders the axes of an array (generalized transpose). See :func:`jix.permute_axes()`.
+    /// Reorders the axes of an array (generalized transpose). See [`jix.permute_axes()`][jix.permute_axes].
     #[pyo3(signature = (axes=None))]
     pub fn permute_axes<'py>(
         slf: &Bound<'py, Self>,
@@ -946,14 +941,14 @@ impl Array {
         crate::ops::permute_axes(slf, axes)
     }
 
-    /// Reverses all axes; shorthand for `permute_axes()` with no arguments. See :func:`jix.permute_axes()`.
+    /// Reverses all axes; shorthand for `permute_axes()` with no arguments. See [`jix.permute_axes()`][jix.permute_axes].
     #[allow(non_snake_case)]
     #[getter]
     pub fn T<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
         crate::ops::permute_axes(slf, None)
     }
 
-    /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See :func:`jix.broadcast()`.
+    /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See [`jix.broadcast()`][jix.broadcast].
     #[pyo3(signature = (shape))]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Array>,
@@ -962,7 +957,7 @@ impl Array {
         crate::ops::broadcast(slf, shape)
     }
 
-    /// Removes length-1 dimensions from the array's shape. See :func:`jix.squeeze()`.
+    /// Removes length-1 dimensions from the array's shape. See [`jix.squeeze()`][jix.squeeze].
     #[pyo3(signature = (axis=None))]
     pub fn squeeze<'py>(
         slf: &Bound<'py, Array>,
@@ -971,7 +966,7 @@ impl Array {
         crate::ops::squeeze(slf, axis)
     }
 
-    /// Inserts new length-1 dimensions at specified positions in the array's shape. See :func:`jix.unsqueeze()`.
+    /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Array>,
         axis: ItemOrSequence<i32>,
@@ -981,38 +976,38 @@ impl Array {
 
     // == trigonometric ops ==
 
-    /// Computes the sine of each element (input in radians). See :func:`jix.sin()`.
+    /// Computes the sine of each element (input in radians). See [`jix.sin()`][jix.sin].
     pub fn sin(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sin(slf)
     }
 
-    /// Computes the cosine of each element (input in radians). See :func:`jix.cos()`.
+    /// Computes the cosine of each element (input in radians). See [`jix.cos()`][jix.cos].
     pub fn cos(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::cos(slf)
     }
 
-    /// Computes the tangent of each element (input in radians). See :func:`jix.tan()`.
+    /// Computes the tangent of each element (input in radians). See [`jix.tan()`][jix.tan].
     pub fn tan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::tan(slf)
     }
 
-    /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`. See :func:`jix.asin()`.
+    /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`. See [`jix.asin()`][jix.asin].
     pub fn asin(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::asin(slf)
     }
 
-    /// Computes the arccosine of each element; output is in radians in `[0, pi]`. See :func:`jix.acos()`.
+    /// Computes the arccosine of each element; output is in radians in `[0, pi]`. See [`jix.acos()`][jix.acos].
     pub fn acos(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::acos(slf)
     }
 
-    /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`. See :func:`jix.atan()`.
+    /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`. See [`jix.atan()`][jix.atan].
     pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::atan(slf)
     }
 }
 
-/// Compact any array-like object to a new jix [`Array`].
+/// Compact any array-like object to a new [`jix.Array`][jix.Array].
 ///
 /// Accepts Python scalars, lists, tuples, NumPy arrays, and any other object accepted by
 /// [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
@@ -1020,15 +1015,22 @@ impl Array {
 /// A new jix compact array is created, with all the input data compressed into blocks. The data
 /// is compressed even if the input is already a jix array.
 ///
-/// `params` controls the block layout and codec configuration. It accepts either a
-/// `jix.ArrayParams` instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). When
-/// omitted, defaults are chosen automatically. See `jix.ArrayParams` for details.
+/// Args:
+///     array: The input data to compress. May be a Python scalar, list, tuple, NumPy array,
+///         or any other object accepted by `numpy.asarray`.
+///     dtype: Optional dtype to cast the array to before compressing. Accepts anything
+///         `numpy.dtype()` accepts. When omitted the input dtype is preserved.
+///     params: Controls the block layout and codec configuration. Accepts either a
+///         [`jix.ArrayParams`][jix.ArrayParams] instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`).
+///         When omitted, defaults are chosen automatically. See [`jix.ArrayParams`][jix.ArrayParams] for details.
 ///
-/// # Errors
+/// Returns:
+///     A new compact [`jix.Array`][jix.Array] with all data compressed into blocks.
 ///
-/// - If the input is not a jix array and it cannot be converted by `numpy.asarray`.
-/// - If the array has more dimensions than jix supports.
-/// - If the array has negative strides (e.g. a reversed slice `a[::-1]`).
+/// Raises:
+///     ValueError: If the input cannot be converted by `numpy.asarray`, the array has more
+///         dimensions than jix supports, or the array has negative strides (e.g. a reversed
+///         slice `a[::-1]`).
 #[gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, *, dtype=None, params=None))]
@@ -1052,13 +1054,13 @@ pub fn compact(
 
 #[cfg(test)]
 mod tests {
+    use jix_core::dtype::Dtyped;
+    use jix_core::{Array as CoreArray, IntoDimension};
     use ndarray::{array, ArrayD};
     use numpy::{PyArrayDyn, PyArrayMethods, PyUntypedArrayMethods};
     use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
     use pyo3::types::{PyAny, PyEllipsis, PySlice, PyTuple};
     use pyo3::{Bound, IntoPyObject, Python};
-    use jix_core::dtype::Dtyped;
-    use jix_core::{Array as CoreArray, IntoDimension};
 
     use super::Array;
 

@@ -40,7 +40,7 @@ pub(crate) trait ArraySequenceImpl {
 /// Stack with a fixed-length array (homogeneous):
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_array(&array![1i32, 2, 3])?;
@@ -53,7 +53,7 @@ pub(crate) trait ArraySequenceImpl {
 /// Stack a tuple of arrays with different storage types (heterogeneous):
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let a = Array::compact_array(&array![1i32, 2, 3])?;

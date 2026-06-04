@@ -37,7 +37,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// // 1-D: join two arrays end-to-end

@@ -10,14 +10,15 @@ input(s) and records the transformation, nothing is computed until data is expli
 The full pipeline runs in a single decompression pass the moment you ask for output.
 
 ```rust
-use jix::{Array, ArrayParams};
+use jix::Array;
 use ndarray::array;
 
 // Compress a 2-D f32 ndarray into block-compressed storage.
 let a = Array::compact_array(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 
 // Build a lazy pipeline — no data is read yet.
-// The full chain is a single static type: Array<Sum<Exp<Compact<...>>>>
+// The full chain is a single static type:
+//     Array<Sub<Sum<Exp<Compact>>, Scalar<f32>>>
 let result = a.exp().sum(0) - 1.0;
 
 // Materialize and persist. Blocks are decompressed, transformed,

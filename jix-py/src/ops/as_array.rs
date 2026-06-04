@@ -5,23 +5,34 @@ use pyo3_stub_gen::derive::gen_stub_pyfunction;
 use crate::array::Array;
 use crate::ops::common::Operand;
 
-/// Convert any array-like object to a jix [`Array`].
+/// Convert any array-like object to a [`jix.Array`][jix.Array].
+///
+/// This function differ from [`jix.compact()`][jix.compact] in that it does not compress the data -
+/// it always produces a view of the input data. In Some cases a copy may be necessary, for example
+/// to convert from a raw python list to a typed buffer, but in general this function tries to avoid
+/// copying data when possible, and it never compresses the data.
 ///
 /// Accepts Python scalars, lists, tuples, NumPy arrays, and any other object accepted by
 /// [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
 ///
-/// # Storage
+/// Args:
+///     value: The array-like to convert. Accepts Python scalars, lists, tuples, NumPy arrays,
+///         or any object accepted by `numpy.asarray`.
 ///
-/// - If `value` is already an `Array`, it is returned as-is with no copy.
-/// - 0-dimensional inputs produce a scalar array backed by a single value (no buffer).
-/// - All other inputs share the underlying buffer with the intermediate NumPy array (zero-copy);
-///   the NumPy array is kept alive for as long as the returned `Array` is alive.
+/// Note:
+///     - If `value` is already an `Array`, it is returned as-is with no copy.
+///     - 0-dimensional inputs produce a scalar array backed by a single value (no buffer).
+///     - All other inputs share the underlying buffer with the intermediate NumPy array (zero-copy);
+///       the NumPy array is kept alive for as long as the returned `Array` is alive.
 ///
-/// # Errors
+/// Raises:
+///     ValueError: If the input cannot be converted by `numpy.asarray`.
+///     ValueError: If the array has more dimensions than jix supports.
+///     ValueError: If the array has negative strides (e.g. a reversed slice `a[::-1]`).
 ///
-/// - If the input cannot be converted by `numpy.asarray`.
-/// - If the array has more dimensions than jix supports.
-/// - If the array has negative strides (e.g. a reversed slice `a[::-1]`).
+/// Returns:
+///     A [`jix.Array`][jix.Array] view of the input. If `value` is already a [`jix.Array`][jix.Array], it is returned
+///     unchanged with no copy.
 #[gen_stub_pyfunction]
 #[pyfunction]
 pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {

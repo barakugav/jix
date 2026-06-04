@@ -21,7 +21,7 @@
 //! # Quick start
 //!
 //! ```
-//! use jix::{Array, ArrayParams};
+//! use jix::Array;
 //! use jix::dtype::Dtyped;
 //! use ndarray::array;
 //!

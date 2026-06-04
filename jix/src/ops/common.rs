@@ -183,7 +183,7 @@ pub(crate) fn bulk_size<T: Dtyped>() -> usize {
 /// # Examples
 ///
 /// ```rust
-/// use jix::{Array, Dim, ArrayParams};
+/// use jix::{Array, Dim};
 /// use ndarray::array;
 ///
 /// let a = Array::compact_array(&array![[1i32, 2], [3, 4]])?;

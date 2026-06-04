@@ -18,7 +18,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b1111])?;
@@ -51,7 +51,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b0000])?;
@@ -84,7 +84,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b1111])?;
@@ -117,7 +117,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b00001111u8, 0b11110000u8, 0u8])?;
@@ -150,7 +150,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b00000001u8, 0b00000010u8, 0b00000100u8])?;
@@ -186,7 +186,7 @@ define_op2!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b10000000u8, 0b00100000u8, 0b00001000u8])?;
@@ -220,7 +220,7 @@ define_op2_rhs_fixed!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b10000001u8, 0b00000001u8, 0b11110000u8])?;
@@ -258,7 +258,7 @@ define_op2_rhs_fixed!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b10000001u8, 0b00001000u8, 0b00001111u8])?;
@@ -295,7 +295,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b00001111u8, 0b11001100u8, 0b11111111u8])?;
@@ -328,7 +328,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b11110000u8, 0b00001111u8, 0b11111111u8])?;
@@ -362,7 +362,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0x00010000u32, 0x80000000u32, 0x00000001u32])?;
@@ -396,7 +396,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0x00010000u32, 0x80000000u32, 0x00000001u32])?;
@@ -428,7 +428,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0x00FF0000u32, 0x0000FF00u32])?;
@@ -458,7 +458,7 @@ define_op1!(
     ///
     /// # Examples
     /// ```
-    /// use jix::{Array, ArrayParams};
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![0b00000001u8, 0b10000000u8, 0b10101010u8])?;

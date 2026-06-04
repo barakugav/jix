@@ -1,58 +1,57 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use pyo3::prelude::*;
 use jix_core::ArrayAny;
+use pyo3::prelude::*;
 
 use crate::util::{IntoPyResult, OrKwargs};
 use crate::{Array, ArrayParams, ReadContext};
 
 /// Load a compressed array from a `.jix` file or a file-like object.
 ///
-/// `path_or_reader` is either a file path or any seekable binary file-like object with
-/// `.read()`, `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle).
+/// Args:
+///     path_or_reader: A file path or any seekable binary file-like object with `.read()`,
+///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle).
+///     offset: Byte offset within the file to start reading from. Only supported when
+///         `path_or_reader` is a file path. Defaults to `0`.
+///     len: Number of bytes to read. Defaults to the remaining file size from `offset`.
+///         When `path_or_reader` is a file-like object, still used for bounds checking if provided.
+///     mmap: If `True`, maps the file into virtual address space instead of copying bytes onto
+///         the heap; blocks are paged in on demand. Defaults to `False`. **Caution:** modifying
+///         the file while the returned array is live has undefined behavior. Not supported for
+///         file-like objects.
+///     params: Controls how the array is read and decoded. Accepts a [`jix.ArrayParams`][jix.ArrayParams] instance
+///         or a plain `dict`. See [`jix.ArrayParams`][jix.ArrayParams] for details.
 ///
-/// `offset` and `len` allow reading a single array from a byte range within a larger file -
-/// useful when multiple arrays have been packed into the same file with back-to-back
-/// writes. `offset` defaults to `0`; `len` defaults to the remaining file size from `offset`.
-/// When `path_or_reader` is a file-like object, `offset` must be `None` and the reader is used
-/// at its current position; `len` is still used for bounds checking if provided.
+/// Returns:
+///     A [`jix.Array`][jix.Array] loaded from the file.
 ///
-/// `mmap` maps the file into virtual address space instead of copying its bytes onto the heap.
-/// The OS pages blocks in on demand, so startup is fast and only the blocks you actually read
-/// are loaded into physical memory. Defaults to `False`. **Caution:** if the underlying file
-/// is modified while the returned array (or any view derived from it) is live, the behavior is
-/// undefined. `mmap=True` is not supported when `path_or_reader` is a file-like object.
+/// Examples:
+///     ```python
+///     import jix
+///     import io
 ///
-/// `params` controls how the array is read and decoded. Accepts a :class:`jix.ArrayParams`
-/// instance or a plain `dict`. See :class:`jix.ArrayParams` for details.
+///     # Read the whole file
+///     a = jix.read_array("data.jix")
+///     assert a.shape == (4, 4)
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import io
+///     # Read two arrays packed back-to-back in one file
+///     with open("packed.jix", "wb") as f:
+///         jix.write_array(a, f)
+///         offset = f.tell()
+///         jix.write_array(b, f)
+///         total = f.tell()
+///     b2 = jix.read_array("packed.jix", offset=offset, len=total - offset)
 ///
-/// # Read the whole file
-/// a = jix.read_array("data.jix")
-/// assert a.shape == (4, 4)
+///     # Memory-mapped read (zero-copy, fast startup)
+///     c = jix.read_array("large.jix", mmap=True)
 ///
-/// # Read two arrays packed back-to-back in one file
-/// with open("packed.jix", "wb") as f:
-///     jix.write_array(a, f)
-///     offset = f.tell()
-///     jix.write_array(b, f)
-///     total = f.tell()
-/// b2 = jix.read_array("packed.jix", offset=offset, len=total - offset)
-///
-/// # Memory-mapped read (zero-copy, fast startup)
-/// c = jix.read_array("large.jix", mmap=True)
-///
-/// # Read from an in-memory buffer
-/// buf = io.BytesIO()
-/// jix.write_array(a, buf)
-/// buf.seek(0)
-/// d = jix.read_array(buf)
-/// ```
+///     # Read from an in-memory buffer
+///     buf = io.BytesIO()
+///     jix.write_array(a, buf)
+///     buf.seek(0)
+///     d = jix.read_array(buf)
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (path_or_reader, *, params=None, offset=None, len=None, mmap=false))]
@@ -113,56 +112,53 @@ pub fn read_array(
 
 /// Write a compressed array to a file or a file-like object.
 ///
-/// Works for any array type: a compact array (the result of :func:`jix.compact` or
-/// :func:`jix.read_array`) streams its already-compressed blocks directly to the destination
+/// Works for any array type: a compact array (the result of [`jix.compact()`][jix.compact] or
+/// [`jix.read_array()`][jix.read_array]) streams its already-compressed blocks directly to the destination
 /// without decompressing - `params` is ignored in this case and no re-compression takes place.
 /// A lazy view (slice, arithmetic op chain, etc.) compresses on the fly, so the full
 /// data (compressed or decompressed) is never held in memory.
 ///
-/// `path_or_writer` is either a file path or any seekable binary file-like object with
-/// `.write()`, `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle,
-/// `gzip.GzipFile`).
+/// Args:
+///     array: The array to write.
+///     path_or_writer: A file path or any seekable binary file-like object with `.write()`,
+///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle,
+///         `gzip.GzipFile`).
+///     append: When `False` (default), the file is created anew and must not already exist.
+///         When `True`, the array is appended to an existing file (or a new one is created).
+///         Ignored when `path_or_writer` is a file-like object.
+///     params: Controls the block layout and codec for encoding. Accepts a [`jix.ArrayParams`][jix.ArrayParams]
+///         instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). Unset fields are
+///         inherited from the source array. Ignored when the source is already compact.
+///         See [`jix.ArrayParams`][jix.ArrayParams] for details.
+///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse when reading the source array.
+///         When omitted, a context is created internally. See [`jix.ReadContext`][jix.ReadContext] for details.
 ///
-/// `append` controls how a file path is opened. When `False` (default), the file is created
-/// anew and must not already exist. When `True`, the array is written to the end of an existing
-/// file (or a new file is created if it does not yet exist). Passing `append=True` alongside a
-/// file-like object is ignored - the writer is used as-is at its current position.
-/// This argument is only relevant when `path_or_writer` is a file path.
+/// Examples:
+///     ```python
+///     import jix
+///     import io
 ///
-/// `params` controls the block layout and codec used to encode the output. Accepts a
-/// :class:`jix.ArrayParams` instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). Any
-/// field not set is inherited from the source array's storage. Ignored when the source array is
-/// already compact. See :class:`jix.ArrayParams` for details.
+///     a = jix.compact([[1.0, 2.0], [3.0, 4.0]])
 ///
-/// `context` is an optional :class:`jix.ReadContext` to reuse when reading the source array.
-/// When omitted, a context is created internally. See :class:`jix.ReadContext` for details.
+///     # Write to a new file (file must not exist)
+///     jix.write_array(a, "output.jix")
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import io
+///     # Pack two arrays back-to-back into the same file
+///     b = jix.compact([10, 20, 30])
+///     jix.write_array(a, "packed.jix")
+///     jix.write_array(b, "packed.jix", append=True)
 ///
-/// a = jix.compact([[1.0, 2.0], [3.0, 4.0]])
+///     # Write to an in-memory buffer
+///     buf = io.BytesIO()
+///     jix.write_array(a, buf)
 ///
-/// # Write to a new file (file must not exist)
-/// jix.write_array(a, "output.jix")
-///
-/// # Pack two arrays back-to-back into the same file
-/// b = jix.compact([10, 20, 30])
-/// jix.write_array(a, "packed.jix")
-/// jix.write_array(b, "packed.jix", append=True)
-///
-/// # Write to an in-memory buffer
-/// buf = io.BytesIO()
-/// jix.write_array(a, buf)
-///
-/// # Streaming pipeline: read via mmap, apply a lazy op, write without materializing
-/// src = jix.read_array("large.jix", mmap=True)
-/// ctx = jix.ReadContext()
-/// view = src.exp() + 1.0
-/// with open("modified.jix", "wb") as f:
-///     jix.write_array(view, f, context=ctx)
-/// ```
+///     # Streaming pipeline: read via mmap, apply a lazy op, write without materializing
+///     src = jix.read_array("large.jix", mmap=True)
+///     ctx = jix.ReadContext()
+///     view = src.exp() + 1.0
+///     with open("modified.jix", "wb") as f:
+///         jix.write_array(view, f, context=ctx)
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, path_or_writer, *, append=false, params=None, context=None))]

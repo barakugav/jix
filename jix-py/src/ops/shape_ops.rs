@@ -19,28 +19,34 @@ use crate::Array;
 /// it may decompress many blocks if the original storage is block-based and the new shape
 /// crosses block boundaries.
 ///
-/// The `array` argument must already be a `jix.Array` (no implicit `asarray()` conversion).
-///
 /// This function deviates from `numpy.broadcast_to`:
 /// - `shape` must have the same number of dimensions as the input (numpy pads leading
 ///   dimensions automatically)
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     array: Must already be a [`jix.Array`][jix.Array] (no implicit `asarray()` conversion).
+///     shape: Target shape. Must have the same number of dimensions as the input. Use `-1`
+///         to keep a dimension unchanged.
 ///
-/// # Row vector [1, 3] -> matrix [2, 3]: every row becomes identical
-/// a = jix.compact([[1, 2, 3]], dtype=np.int32)
-/// result = jix.broadcast(a, [2, 3])
-/// assert result.numpy().shape == (2, 3)
-/// assert np.array_equal(result.numpy()[0], result.numpy()[1])
+/// Returns:
+///     A [`jix.Array`][jix.Array] with the requested broadcast shape.
 ///
-/// # Column vector [3, 1] -> matrix [3, 2]: every column becomes identical
-/// b = jix.compact([[10], [20], [30]], dtype=np.int32)
-/// result = jix.broadcast(b, [3, 2])
-/// assert result.numpy()[0, 0] == result.numpy()[0, 1] == 10
-/// ```
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # Row vector [1, 3] -> matrix [2, 3]: every row becomes identical
+///     a = jix.compact([[1, 2, 3]], dtype=np.int32)
+///     result = jix.broadcast(a, [2, 3])
+///     assert result.numpy().shape == (2, 3)
+///     assert np.array_equal(result.numpy()[0], result.numpy()[1])
+///
+///     # Column vector [3, 1] -> matrix [3, 2]: every column becomes identical
+///     b = jix.compact([[10], [20], [30]], dtype=np.int32)
+///     result = jix.broadcast(b, [3, 2])
+///     assert result.numpy()[0, 0] == result.numpy()[0, 1] == 10
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
@@ -106,22 +112,30 @@ pub fn broadcast<'py>(
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     array: Input array.
+///     axis: Gap index or sequence of gap indices at which to insert new length-1 dimensions.
+///         Negative values are resolved against `ndim + 1`.
 ///
-/// a = jix.compact([1, 2, 3], dtype=np.int32)   # shape [3]
-/// assert jix.insert_axis(a, 0).numpy().shape == (1, 3)  # -> [1, 3]
-/// assert jix.insert_axis(a, 1).numpy().shape == (3, 1)  # -> [3, 1]
-/// assert jix.insert_axis(a, -1).numpy().shape == (3, 1) # negative: same as [1]
+/// Returns:
+///     A [`jix.Array`][jix.Array] with new length-1 axes inserted at the specified positions.
 ///
-/// b = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
-/// assert jix.insert_axis(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
 ///
-/// # duplicate axes: multiple length-1 dimensions at the same position
-/// assert jix.insert_axis(b, [0, 0, 0, 2]).shape() == (1, 1, 1, 2, 1, 3)
-/// ```
+///     a = jix.compact([1, 2, 3], dtype=np.int32)   # shape [3]
+///     assert jix.insert_axis(a, 0).numpy().shape == (1, 3)  # -> [1, 3]
+///     assert jix.insert_axis(a, 1).numpy().shape == (3, 1)  # -> [3, 1]
+///     assert jix.insert_axis(a, -1).numpy().shape == (3, 1) # negative: same as [1]
+///
+///     b = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
+///     assert jix.insert_axis(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
+///
+///     # duplicate axes: multiple length-1 dimensions at the same position
+///     assert jix.insert_axis(b, [0, 0, 0, 2]).shape() == (1, 1, 1, 2, 1, 3)
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn insert_axis<'py>(
@@ -139,7 +153,15 @@ pub fn insert_axis<'py>(
     let ret = jix_core::ops::InsertAxis::new_array(array, &axes).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
-/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for :func:`jix.insert_axis()`.
+/// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for [`jix.insert_axis()`][jix.insert_axis].
+///
+/// Args:
+///     array: Input array.
+///     axis: Gap index or sequence of gap indices at which to insert new length-1 dimensions.
+///         Negative values are resolved against `ndim + 1`.
+///
+/// Returns:
+///     A [`jix.Array`][jix.Array] with new length-1 axes inserted at the specified positions.
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn unsqueeze<'py>(
@@ -159,18 +181,26 @@ pub fn unsqueeze<'py>(
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     array: Input array.
+///     axis: Axis index or sequence of axis indices to remove. Each must have size 1.
+///         Negative values are supported.
 ///
-/// a = jix.compact([[1, 2, 3]], dtype=np.int32)  # shape [1, 3]
-/// assert jix.remove_axis(a, 0).numpy().shape == (3,)     # -> [3]
+/// Returns:
+///     A [`jix.Array`][jix.Array] with the specified length-1 axes removed.
 ///
-/// b = jix.compact([[[10], [20]]], dtype=np.int32)  # shape [1, 2, 1]
-/// assert jix.remove_axis(b, [0, 2]).numpy().shape == (2,)    # -> [2]
-/// assert jix.remove_axis(b, [0, -1]).numpy().shape == (2,)   # negative axis
-/// ```
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([[1, 2, 3]], dtype=np.int32)  # shape [1, 3]
+///     assert jix.remove_axis(a, 0).numpy().shape == (3,)     # -> [3]
+///
+///     b = jix.compact([[[10], [20]]], dtype=np.int32)  # shape [1, 2, 1]
+///     assert jix.remove_axis(b, [0, 2]).numpy().shape == (2,)    # -> [2]
+///     assert jix.remove_axis(b, [0, -1]).numpy().shape == (2,)   # negative axis
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn remove_axis<'py>(
@@ -196,16 +226,24 @@ pub fn remove_axis<'py>(
 /// Output dtype and total number of elements equal the input. The result is a lazy view; no
 /// computation occurs until the array is read.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     array: Input array.
+///     axis: Axis or axes to remove. When `None` (default), all size-1 dimensions are
+///         removed. Each named dimension must have size exactly 1.
 ///
-/// a = jix.compact([[[1, 2, 3]]], dtype=np.int32)  # shape [1, 1, 3]
-/// assert jix.squeeze(a).numpy().shape == (3,)              # remove all size-1 dims
-/// assert jix.squeeze(a, axis=0).numpy().shape == (1, 3)    # remove only axis 0
-/// assert jix.squeeze(a, axis=[0, 1]).numpy().shape == (3,) # remove axes 0 and 1
-/// ```
+/// Returns:
+///     A [`jix.Array`][jix.Array] with length-1 axes removed.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([[[1, 2, 3]]], dtype=np.int32)  # shape [1, 1, 3]
+///     assert jix.squeeze(a).numpy().shape == (3,)              # remove all size-1 dims
+///     assert jix.squeeze(a, axis=0).numpy().shape == (1, 3)    # remove only axis 0
+///     assert jix.squeeze(a, axis=[0, 1]).numpy().shape == (3,) # remove axes 0 and 1
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, axis=None))]
@@ -242,20 +280,28 @@ pub fn squeeze<'py>(
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     array: Input array.
+///     axes: Permutation of axis indices. When `None` (default), reverses all axes.
+///         Integer values must be unsigned (negative axes are not supported).
 ///
-/// # 2-D transpose: [2, 3] -> [3, 2]
-/// a = jix.asarray(np.arange(6, dtype=np.int32).reshape(2, 3))
-/// t = jix.permute_axes(a, [1, 0])
-/// assert t.numpy().shape == (3, 2)
-/// assert np.array_equal(t.numpy(), a.numpy().T)
+/// Returns:
+///     A [`jix.Array`][jix.Array] with axes reordered as specified.
 ///
-/// # axes=None reverses all axes (same as numpy.transpose with no argument)
-/// assert jix.permute_axes(a).numpy().shape == (3, 2)
-/// ```
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # 2-D transpose: [2, 3] -> [3, 2]
+///     a = jix.asarray(np.arange(6, dtype=np.int32).reshape(2, 3))
+///     t = jix.permute_axes(a, [1, 0])
+///     assert t.numpy().shape == (3, 2)
+///     assert np.array_equal(t.numpy(), a.numpy().T)
+///
+///     # axes=None reverses all axes (same as numpy.transpose with no argument)
+///     assert jix.permute_axes(a).numpy().shape == (3, 2)
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
@@ -289,23 +335,31 @@ pub fn permute_axes<'py>(
 /// it may decompress many blocks if the new shape is not aligned with the original block
 /// boundaries - use with care.
 ///
-/// The `array` argument must already be a `jix.Array` (no implicit `asarray()` conversion).
+/// Args:
+///     array: Must already be a [`jix.Array`][jix.Array] (no implicit `asarray()` conversion).
+///     shape: New shape. Exactly one dimension may be `-1` (inferred). Product must equal
+///         the total element count.
+///     copy: If `True` (default), returns an eagerly materialized compact array. If `False`,
+///         returns a lazy view.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Returns:
+///     A [`jix.Array`][jix.Array] with the new shape.
 ///
-/// a = jix.asarray(np.arange(6, dtype=np.int32).reshape(2, 3))  # shape [2, 3]
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
 ///
-/// # Flatten
-/// flat = jix.reshape(a, [6])
-/// assert np.array_equal(flat.numpy(), [0, 1, 2, 3, 4, 5])
+///     a = jix.asarray(np.arange(6, dtype=np.int32).reshape(2, 3))  # shape [2, 3]
 ///
-/// # Infer one dimension with -1
-/// r = jix.reshape(a, [-1, 2])
-/// assert r.numpy().shape == (3, 2)
-/// ```
+///     # Flatten
+///     flat = jix.reshape(a, [6])
+///     assert np.array_equal(flat.numpy(), [0, 1, 2, 3, 4, 5])
+///
+///     # Infer one dimension with -1
+///     r = jix.reshape(a, [-1, 2])
+///     assert r.numpy().shape == (3, 2)
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
@@ -375,23 +429,31 @@ pub fn reshape<'py>(
 
 /// Collapses an array into a single dimension.
 ///
-/// Equivalent to `jix.reshape(array, [n], copy=copy)` where `n` is the total number of
+/// Equivalent to [`jix.reshape(array, [n], copy=copy)`][jix.reshape] where `n` is the total number of
 /// elements. Output dtype equals the input dtype. Output shape is `[n]`.
 ///
 /// When `copy=True` (the default) the result is an eagerly materialized compact array.
 /// When `copy=False` the result is a lazy view; reading it may decompress many blocks if the
 /// original storage is block-based and the shape is not aligned with block boundaries.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     array: Input array.
+///     copy: If `True` (default), returns an eagerly materialized compact array. If `False`,
+///         returns a lazy view.
 ///
-/// a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
-/// f = jix.flatten(a)
-/// assert f.numpy().shape == (6,)
-/// assert np.array_equal(f.numpy(), [1, 2, 3, 4, 5, 6])
-/// ```
+/// Returns:
+///     A 1-D [`jix.Array`][jix.Array] containing all elements.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
+///     f = jix.flatten(a)
+///     assert f.numpy().shape == (6,)
+///     assert np.array_equal(f.numpy(), [1, 2, 3, 4, 5, 6])
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, *, copy=true))]
@@ -406,32 +468,37 @@ pub fn flatten<'py>(array: &Bound<'py, Array>, copy: bool) -> PyResult<Bound<'py
 /// sizes on every axis *except* the concatenation axis, along which their sizes may differ.
 /// The output has the same number of dimensions as the inputs.
 ///
-/// `axis` supports negative values (e.g. `-1` for the last axis). Each element of `arrays`
-/// may be anything that `jix.asarray()` accepts.
-///
 /// This function deviates from numpy in a few ways:
 /// - all arrays must have the same dtype (numpy will upcast if they differ)
 /// - all arrays must have the same number of dimensions (numpy will expand dims if they differ)
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     arrays: Sequence of arrays to concatenate. Each element may be anything that
+///         [`jix.asarray()`][jix.asarray] accepts. All must have the same dtype and number of dimensions.
+///     axis: Axis along which to concatenate. Supports negative values.
 ///
-/// # 1-D: join end-to-end
-/// a = jix.compact([1, 2, 3], dtype=np.int32)
-/// b = jix.compact([4, 5], dtype=np.int32)
-/// c = jix.concatenate([a, b])
-/// assert np.array_equal(c.numpy(), [1, 2, 3, 4, 5])
+/// Returns:
+///     A [`jix.Array`][jix.Array] formed by concatenating all inputs along the specified axis.
 ///
-/// # 2-D: append rows (axis 0) or columns (axis 1 / axis -1)
-/// a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
-/// b = jix.compact([[5, 6]], dtype=np.int32)
-/// assert jix.concatenate([a, b], axis=0).numpy().shape == (3, 2)
-/// assert jix.concatenate([a, b.T], axis=1).numpy().shape == (2, 3)
-/// ```
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # 1-D: join end-to-end
+///     a = jix.compact([1, 2, 3], dtype=np.int32)
+///     b = jix.compact([4, 5], dtype=np.int32)
+///     c = jix.concatenate([a, b])
+///     assert np.array_equal(c.numpy(), [1, 2, 3, 4, 5])
+///
+///     # 2-D: append rows (axis 0) or columns (axis 1 / axis -1)
+///     a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
+///     b = jix.compact([[5, 6]], dtype=np.int32)
+///     assert jix.concatenate([a, b], axis=0).numpy().shape == (3, 2)
+///     assert jix.concatenate([a, b.T], axis=1).numpy().shape == (2, 3)
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (
@@ -497,36 +564,40 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
 ///
 /// All input arrays must have identical shapes and the same dtype. A new axis of size equal
 /// to the number of arrays is inserted at position `axis` in the output. The output has one
-/// more dimension than the inputs - unlike `jix.concatenate`, which joins along an existing
+/// more dimension than the inputs - unlike [`jix.concatenate()`][jix.concatenate], which joins along an existing
 /// axis.
-///
-/// `axis` supports negative values and is resolved against `ndim + 1` (the number of valid
-/// insertion points for the new axis). Each element of `arrays` may be anything that
-/// `jix.asarray()` accepts.
 ///
 /// This function deviates from numpy in a few ways:
 /// - all arrays must have the same dtype (numpy will upcast if they differ)
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
-/// # Examples
-/// ```python,ignore
-/// import jix
-/// import numpy as np
+/// Args:
+///     arrays: Sequence of arrays to stack. Each element may be anything that
+///         [`jix.asarray()`][jix.asarray] accepts. All must have identical shapes and the same dtype.
+///     axis: Position of the new axis in the output. Supports negative values.
 ///
-/// a = jix.compact([1, 2, 3], dtype=np.int32)
-/// b = jix.compact([4, 5, 6], dtype=np.int32)
+/// Returns:
+///     A [`jix.Array`][jix.Array] with a new axis inserted and the inputs stacked along it.
 ///
-/// # Stack along a new leading axis -> shape [2, 3]
-/// c = jix.stack([a, b], axis=0)
-/// assert c.numpy().shape == (2, 3)
-/// assert np.array_equal(c.numpy()[0], [1, 2, 3])
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
 ///
-/// # Stack along a new trailing axis -> shape [3, 2]
-/// d = jix.stack([a, b], axis=1)
-/// assert d.numpy().shape == (3, 2)
-/// assert np.array_equal(d.numpy()[:, 0], [1, 2, 3])
-/// ```
+///     a = jix.compact([1, 2, 3], dtype=np.int32)
+///     b = jix.compact([4, 5, 6], dtype=np.int32)
+///
+///     # Stack along a new leading axis -> shape [2, 3]
+///     c = jix.stack([a, b], axis=0)
+///     assert c.numpy().shape == (2, 3)
+///     assert np.array_equal(c.numpy()[0], [1, 2, 3])
+///
+///     # Stack along a new trailing axis -> shape [3, 2]
+///     d = jix.stack([a, b], axis=1)
+///     assert d.numpy().shape == (3, 2)
+///     assert np.array_equal(d.numpy()[:, 0], [1, 2, 3])
+///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (

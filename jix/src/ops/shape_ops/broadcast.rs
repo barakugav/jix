@@ -23,7 +23,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// # Examples
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// // Row vector [1, 3] -> matrix [2, 3]: every row is identical

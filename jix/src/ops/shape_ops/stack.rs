@@ -37,7 +37,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// // Stack two 1-D arrays along a new leading axis -> shape [2, N]

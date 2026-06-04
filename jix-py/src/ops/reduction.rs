@@ -1,6 +1,6 @@
-use pyo3::prelude::*;
 use jix_core::scalar::{f16, Complex};
 use jix_core::ArrayAny;
+use pyo3::prelude::*;
 
 fn keepdims_after_reduction(
     array: ArrayAny,
@@ -132,31 +132,34 @@ define_reduction_op!(
     /// Reduces one or more axes by taking the maximum element.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the input dtype.
+    /// `f16`, `f32`, `f64`, `bool`.
     ///
     /// For **float** types, `NaN` values are ignored: the result is the maximum of all
     /// non-`NaN` values. If all elements are `NaN`, the result is `NaN`.
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
+    ///         When `None`, reduces over all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    /// # Reduce all axes -> scalar
-    /// assert jix.max(a).numpy()[()] == 6
-    /// # Reduce axis 0 -> shape [3]
-    /// assert np.array_equal(jix.max(a, axis=0).numpy(), [4, 5, 6])
-    /// # Reduce axis 0, keepdims=True -> shape [1, 3]
-    /// assert jix.max(a, axis=0, keepdims=True).numpy().shape == (1, 3)
-    /// ```
+    ///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    ///     # Reduce all axes -> scalar
+    ///     assert jix.max(a).numpy()[()] == 6
+    ///     # Reduce axis 0 -> shape [3]
+    ///     assert np.array_equal(jix.max(a, axis=0).numpy(), [4, 5, 6])
+    ///     # Reduce axis 0, keepdims=True -> shape [1, 3]
+    ///     assert jix.max(a, axis=0, keepdims=True).numpy().shape == (1, 3)
+    ///     ```
     max,
     Max,
     dispatch = {
@@ -168,29 +171,32 @@ define_reduction_op!(
     /// Reduces one or more axes by taking the minimum element.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype equals the input dtype.
+    /// `f16`, `f32`, `f64`, `bool`.
     ///
     /// For **float** types, `NaN` values are ignored: the result is the minimum of all
     /// non-`NaN` values. If all elements are `NaN`, the result is `NaN`.
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
+    ///         When `None`, reduces over all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    /// # Reduce all axes -> scalar
-    /// assert jix.min(a).numpy()[()] == 1
-    /// # Reduce axis 0 -> shape [3]
-    /// assert np.array_equal(jix.min(a, axis=0).numpy(), [1, 2, 3])
-    /// ```
+    ///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    ///     # Reduce all axes -> scalar
+    ///     assert jix.min(a).numpy()[()] == 1
+    ///     # Reduce axis 0 -> shape [3]
+    ///     assert np.array_equal(jix.min(a, axis=0).numpy(), [1, 2, 3])
+    ///     ```
     min,
     Min,
     dispatch = {
@@ -202,35 +208,38 @@ define_reduction_op!(
     /// Returns the index of the maximum element along a single axis.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype is `u64`.
+    /// `f16`, `f32`, `f64`, `bool`.
     ///
     /// If multiple elements share the maximum value, the index of the first occurrence is
     /// returned. For **float** types, `NaN` values are treated as less than any non-`NaN`
     /// value, so they are never selected unless all elements are `NaN`.
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). For 1-D arrays,
-    /// `axis=None` is equivalent to `axis=0`.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Single axis to reduce along. Accepts negative values. For 1-D arrays,
+    ///         `None` is equivalent to `axis=0`.
+    ///     keepdims: If `True`, the reduced axis is kept as a length-1 dimension. Default `False`.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `axis` is
+    ///     `None`, returns a scalar. When `keepdims=True`, the reduced axis is kept with size 1.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([[1, 5, 3], [4, 2, 6]], dtype=np.int32)
-    /// # Index of max along axis 1 (per row)
-    /// assert np.array_equal(jix.argmax(a, axis=1).numpy(), [1, 2])
-    /// # Index of max along axis 0 (per column)
-    /// assert np.array_equal(jix.argmax(a, axis=0).numpy(), [1, 0, 1])
-    /// ```
+    ///     a = jix.compact([[1, 5, 3], [4, 2, 6]], dtype=np.int32)
+    ///     # Index of max along axis 1 (per row)
+    ///     assert np.array_equal(jix.argmax(a, axis=1).numpy(), [1, 2])
+    ///     # Index of max along axis 0 (per column)
+    ///     assert np.array_equal(jix.argmax(a, axis=0).numpy(), [1, 0, 1])
+    ///     ```
     argmax,
     ArgMax,
     single_axis = true,
     dispatch = {
-        [bool, u8, i8, u16, i16, u16, i32, u32, i64, u64, f16, f32, f64],
+        [bool, u8, i8, u16, i16, i32, u32, i64, u64, f16, f32, f64],
         None
     }
 );
@@ -238,33 +247,36 @@ define_reduction_op!(
     /// Returns the index of the minimum element along a single axis.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `bool`. Output dtype is `u64`.
+    /// `f16`, `f32`, `f64`, `bool`.
     ///
     /// If multiple elements share the minimum value, the index of the first occurrence is
     /// returned. For **float** types, `NaN` values are treated as greater than any non-`NaN`
     /// value, so they are never selected unless all elements are `NaN`.
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). For 1-D arrays,
-    /// `axis=None` is equivalent to `axis=0`.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Single axis to reduce along. Accepts negative values. For 1-D arrays,
+    ///         `None` is equivalent to `axis=0`.
+    ///     keepdims: If `True`, the reduced axis is kept as a length-1 dimension. Default `False`.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `axis` is
+    ///     `None`, returns a scalar. When `keepdims=True`, the reduced axis is kept with size 1.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([[1, 5, 3], [4, 2, 6]], dtype=np.int32)
-    /// # Index of min along axis 1 (per row)
-    /// assert np.array_equal(jix.argmin(a, axis=1).numpy(), [0, 1])
-    /// ```
+    ///     a = jix.compact([[1, 5, 3], [4, 2, 6]], dtype=np.int32)
+    ///     # Index of min along axis 1 (per row)
+    ///     assert np.array_equal(jix.argmin(a, axis=1).numpy(), [0, 1])
+    ///     ```
     argmin,
     ArgMin,
     single_axis = true,
     dispatch = {
-        [bool, u8, i8, u16, i16, u16, i32, u32, i64, u64, f16, f32, f64],
+        [bool, u8, i8, u16, i16, i32, u32, i64, u64, f16, f32, f64],
         None
     }
 );
@@ -272,28 +284,30 @@ define_reduction_op!(
     /// Reduces one or more axes by summing all elements.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Output dtype equals the input
-    /// dtype.
+    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
     /// For **integer** types, the result wraps on overflow (two's complement). For
     /// large sums, consider casting to a wider type first.
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
+    ///         When `None`, reduces over all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    /// assert jix.sum(a).numpy()[()] == 21
-    /// assert np.array_equal(jix.sum(a, axis=0).numpy(), [5, 7, 9])
-    /// ```
+    ///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    ///     assert jix.sum(a).numpy()[()] == 21
+    ///     assert np.array_equal(jix.sum(a, axis=0).numpy(), [5, 7, 9])
+    ///     ```
     sum,
     Sum,
     dispatch = {
@@ -305,28 +319,30 @@ define_reduction_op!(
     /// Reduces one or more axes by multiplying all elements.
     ///
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`. Output dtype equals the input
-    /// dtype.
+    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
     /// For **integer** types, the result wraps on overflow. For large products, consider
     /// casting to a wider type first.
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
+    ///         When `None`, reduces over all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
-    /// assert jix.product(a).numpy()[()] == 720
-    /// assert np.array_equal(jix.product(a, axis=0).numpy(), [4, 10, 18])
-    /// ```
+    ///     a = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    ///     assert jix.product(a).numpy()[()] == 720
+    ///     assert np.array_equal(jix.product(a, axis=0).numpy(), [4, 10, 18])
+    ///     ```
     product,
     Product,
     dispatch = {
@@ -338,27 +354,29 @@ define_reduction_op!(
     /// Computes the arithmetic mean along one or more axes.
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
-    /// Output dtype equals the input dtype.
-    ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
     ///
     /// This function deviates from numpy in that only float and complex types are supported.
-    /// For integer inputs, cast to `f64` first with `jix.astype(array, 'float64')`.
+    /// For integer inputs, cast to `f64` first with [`jix.astype(array, 'float64')`][jix.astype].
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
+    ///         When `None`, reduces over all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// a = jix.compact([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
-    /// assert jix.mean(a).numpy()[()] == 3.5
-    /// assert np.allclose(jix.mean(a, axis=0).numpy(), [2.5, 3.5, 4.5])
-    /// ```
+    ///     a = jix.compact([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+    ///     assert jix.mean(a).numpy()[()] == 3.5
+    ///     assert np.allclose(jix.mean(a, axis=0).numpy(), [2.5, 3.5, 4.5])
+    ///     ```
     mean,
     Mean,
     dispatch = {
@@ -370,27 +388,28 @@ define_reduction_op!(
     /// Computes the variance along one or more axes.
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
-    /// Output dtype equals the input dtype.
     ///
-    /// `ddof` (delta degrees of freedom) defaults to `0.0` (population variance). Use
-    /// `ddof=1.0` for the sample (Bessel-corrected) variance.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values. When `None`, reduces over
+    ///         all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     ddof: Delta degrees of freedom. Default `0.0` (population). Use `1.0` for sample
+    ///         (Bessel-corrected).
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0], dtype=np.float32)
-    /// assert abs(jix.var(a).numpy()[()] - 4.0) < 1e-5   # population variance
-    /// assert abs(jix.var(a, ddof=1.0).numpy()[()] - np.var(a.numpy(), ddof=1)) < 1e-3
-    /// ```
+    ///     a = jix.compact([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0], dtype=np.float32)
+    ///     assert abs(jix.var(a).numpy()[()] - 4.0) < 1e-5   # population variance
+    ///     assert abs(jix.var(a, ddof=1.0).numpy()[()] - np.var(a.numpy(), ddof=1)) < 1e-3
+    ///     ```
     var,
     Variance,
     dispatch = {
@@ -403,26 +422,27 @@ define_reduction_op!(
     /// Computes the standard deviation along one or more axes.
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
-    /// Output dtype equals the input dtype.
     ///
-    /// `ddof` (delta degrees of freedom) defaults to `0.0` (population standard deviation).
-    /// Use `ddof=1.0` for the sample (Bessel-corrected) standard deviation.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values. When `None`, reduces over
+    ///         all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
+    ///     ddof: Delta degrees of freedom. Default `0.0` (population). Use `1.0` for sample
+    ///         (Bessel-corrected).
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
-    ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0], dtype=np.float32)
-    /// assert abs(jix.std(a).numpy()[()] - 2.0) < 1e-5   # population std dev
-    /// ```
+    ///     a = jix.compact([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0], dtype=np.float32)
+    ///     assert abs(jix.std(a).numpy()[()] - 2.0) < 1e-5   # population std dev
+    ///     ```
     std,
     StandardDeviation,
     dispatch = {
@@ -434,28 +454,31 @@ define_reduction_op!(
 define_reduction_op!(
     /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy.
     ///
-    /// Supported dtypes: `bool`. Output dtype is `bool`.
+    /// Supported dtypes: `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, non-zero -> `True`), then the
     /// AND reduction is applied. Returns `True` only if every element in the reduced
     /// dimensions is truthy; returns `True` for empty reductions.
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
+    ///         When `None`, reduces over all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([[True, True], [True, False]])
-    /// assert jix.all(a).numpy()[()] == False
-    /// assert np.array_equal(jix.all(a, axis=1).numpy(), [True, False])
-    /// ```
+    ///     a = jix.compact([[True, True], [True, False]])
+    ///     assert jix.all(a).numpy()[()] == False
+    ///     assert np.array_equal(jix.all(a, axis=1).numpy(), [True, False])
+    ///     ```
     all,
     All,
     dispatch = {
@@ -466,28 +489,31 @@ define_reduction_op!(
 define_reduction_op!(
     /// Reduces one or more axes with logical OR: returns `True` if any element is truthy.
     ///
-    /// Supported dtypes: `bool`. Output dtype is `bool`.
+    /// Supported dtypes: `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, non-zero -> `True`), then the
     /// OR reduction is applied. Returns `True` if at least one element in the reduced
     /// dimensions is truthy; returns `False` for empty reductions.
     ///
-    /// `axis` accepts negative values (e.g. `-1` for the last axis). `axis=None` reduces
-    /// over all axes, returning a scalar.
+    /// Args:
+    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
+    ///         When `None`, reduces over all axes, returning a scalar.
+    ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
     ///
-    /// The `array` argument may be anything that `jix.asarray()` accepts.
+    /// Returns:
+    ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
+    ///     are kept with size 1.
     ///
-    /// The result is a lazy view; no computation occurs until the array is read.
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
     ///
-    /// # Examples
-    /// ```python,ignore
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact([[False, False], [False, True]])
-    /// assert jix.any(a).numpy()[()] == True
-    /// assert np.array_equal(jix.any(a, axis=1).numpy(), [False, True])
-    /// ```
+    ///     a = jix.compact([[False, False], [False, True]])
+    ///     assert jix.any(a).numpy()[()] == True
+    ///     assert np.array_equal(jix.any(a, axis=1).numpy(), [False, True])
+    ///     ```
     any,
     Any,
     dispatch = {

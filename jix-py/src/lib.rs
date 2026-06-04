@@ -24,7 +24,7 @@
 //!
 //! # Quick start
 //!
-//! ```python,ignore
+//! ```python
 //! import jix
 //! import numpy as np
 //!
@@ -64,7 +64,7 @@
 //! the same indexing syntax as NumPy: integers (drop that axis), slices (keep that axis),
 //! `...` (fill remaining axes). Note: slices must have step 1; bounds are checked strictly.
 //!
-//! ```python,ignore
+//! ```python
 //! a.numpy()            # full array
 //! a.numpy(0)           # row 0 (integer drops axis 0)
 //! a.numpy(slice(1, 4)) # rows 1–3 (slice keeps axis 0)
@@ -86,7 +86,7 @@
 //!
 //! You can supply an explicit block shape through [`ArrayParams`]:
 //!
-//! ```python,ignore
+//! ```python
 //! a = jix.compact(data, params={"block_shape": [64, 64]})
 //! ```
 //!
@@ -105,7 +105,7 @@
 //! Chains compose without intermediate allocations: the full pipeline is executed in a single
 //! pass over the compressed source data, block by block.
 //!
-//! ```python,ignore
+//! ```python
 //! # Nothing is read or computed during these calls.
 //! a = jix.read_array("data.jix")
 //! result = (
@@ -126,7 +126,7 @@
 //! block layout, codec settings) in a protobuf header followed by the raw compressed block
 //! data.
 //!
-//! ```python,ignore
+//! ```python
 //! # Write to a file path.
 //! jix.write_array(a, "data.jix")
 //!
@@ -235,7 +235,7 @@ mod jix {
     #[pymodule_export]
     pub use crate::ops::dtype_sub_field;
 }
-pub use jix::*;
+pub use crate::jix::*;
 
 #[doc(hidden)]
 pub mod __private {
