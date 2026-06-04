@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package jix.v1;
+
+message ArrayHeader {
+  repeated uint64 shape = 1;
+  repeated uint64 block_shape = 2;
+}

@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Zix is a high-performance multi-dimensional array library written in Rust with Python bindings. It features lazy evaluation, block-based compressed storage (Zstd), and NumPy-compatible Python bindings via PyO3.
+Jix is a high-performance multi-dimensional array library written in Rust with Python bindings. It features lazy evaluation, block-based compressed storage (Zstd), and NumPy-compatible Python bindings via PyO3.
 
 ## Crate Structure
 
-- **`zix/`** - Core Rust library (`Array<S>`, dtype system, ops, storage, archive)
-- **`zix-macros/`** - Procedural macros used by the core library
-- **`zix-python/`** - PyO3 Python bindings (`zix-pyo3` crate, publishes as `zix` Python package)
+- **`jix/`** - Core Rust library (`Array<S>`, dtype system, ops, storage, archive)
+- **`jix-macros/`** - Procedural macros used by the core library
+- **`jix-python/`** - PyO3 Python bindings (`jix-pyo3` crate, publishes as `jix` Python package)
 
 There is no workspace-level `Cargo.toml`; each crate is built independently.
 
@@ -18,28 +18,28 @@ There is no workspace-level `Cargo.toml`; each crate is built independently.
 
 ```bash
 # Build core library
-cargo build -p zix
+cargo build -p jix
 
 # Build Python extension
-cargo build -p zix-pyo3
+cargo build -p jix-pyo3
 
 # Run Rust tests (core)
-cargo test -p zix
+cargo test -p jix
 
 # Run a single Rust test
-cargo test -p zix <test_name>
+cargo test -p jix <test_name>
 
 # Format code (100-char line width, see .rustfmt.toml)
 cargo fmt
 
 # Build and install Python package (development mode)
-cd zix-python && maturin develop
+cd jix-python && maturin develop
 
 # Run Python tests
-cd zix-python && pytest python/tests/
+cd jix-python && pytest python/tests/
 
 # Generate Python type stubs (.pyi)
-cargo run -p zix-pyo3 --bin gen_pyi
+cargo run -p jix-pyo3 --bin gen_pyi
 ```
 
 ## Architecture
@@ -64,34 +64,34 @@ Shape operations (`Reshape`, `Slice`, `Broadcast`, `PermuteAxes`, `InsertAxis`, 
 
 ### Block-Based Storage
 
-Arrays are stored in fixed-size blocks, each independently Zstd-compressed. `BlockStorage` (in `zix/src/storage/block.rs`) tracks per-block byte offsets for efficient random access. A `ReadContext` carries an optional block cache.
+Arrays are stored in fixed-size blocks, each independently Zstd-compressed. `BlockStorage` (in `jix/src/storage/block.rs`) tracks per-block byte offsets for efficient random access. A `ReadContext` carries an optional block cache.
 
 ### Codec Pipeline
 
 `Input -> [ByteShuffle filter] -> [Zstd compress] -> Block bytes`
 
-Defined in `zix/src/codec.rs`; codec/filter parameters serialized in protobuf headers.
+Defined in `jix/src/codec.rs`; codec/filter parameters serialized in protobuf headers.
 
 ### Type System
 
-**Runtime element type — `Dtype`** (in `zix/src/dtype.rs`):
+**Runtime element type — `Dtype`** (in `jix/src/dtype.rs`):
 - Scalar types: `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f16` (optional), `f32/f64`, `Complex<f32>/Complex<f64>` (optional), `bool`
 - Struct types: named fields with offsets
 - Inner shapes: dtypes can have up to 4 inner dimensions
 - Alignment and itemsize tracked for safe raw memory access
 
-**Compile-time element type — `ElementType`** (in `zix/src/storage/mod.rs`):
+**Compile-time element type — `ElementType`** (in `jix/src/storage/mod.rs`):
 - `Ty<T>` — concrete element type `T` known at compile time; enables all element-wise ops
 - `TypeDyn` — runtime-only; arrays from disk start here; call `Array::to_typed::<T>()` to recover `Ty<T>`
-- `f16` and `Complex<T>` live in `zix::scalar` (previously they were in `zix::dtype`)
+- `f16` and `Complex<T>` live in `jix::scalar` (previously they were in `jix::dtype`)
 
 ### Serialization
 
-Protocol Buffers (via `prost`) define the archive format under `zix/proto/zix/v1/`. `build.rs` compiles these to Rust at build time. Archive structs live in `zix/src/archive/`.
+Protocol Buffers (via `prost`) define the archive format under `jix/proto/jix/v1/`. `build.rs` compiles these to Rust at build time. Archive structs live in `jix/src/archive/`.
 
-### Python Bindings (`zix-python`)
+### Python Bindings (`jix-python`)
 
-PyO3 + `numpy` crate. The Python `Array` class wraps a type-erased `AnyArray` enum. Operations return new `Array` objects. `pyo3-stub-gen` generates `.pyi` stubs via the `gen_pyi` binary. The Python source lives in `zix-python/python/`.
+PyO3 + `numpy` crate. The Python `Array` class wraps a type-erased `AnyArray` enum. Operations return new `Array` objects. `pyo3-stub-gen` generates `.pyi` stubs via the `gen_pyi` binary. The Python source lives in `jix-python/python/`.
 
 ## Developer Guides
 

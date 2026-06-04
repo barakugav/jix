@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package jix.v1;
+
+import "google/protobuf/empty.proto";
+
+message Codec {
+  oneof kind {
+    google.protobuf.Empty zstd = 1;
+  }
+}
+
+message Filter {
+  oneof kind {
+    google.protobuf.Empty byte_shuffle = 1;
+    google.protobuf.Empty bit_shuffle = 2;
+  }
+}

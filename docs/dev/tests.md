@@ -14,7 +14,7 @@ element-wise op tests is `ops/op1.rs`; match its style when adding tests to othe
 | `ndarray` | Already a regular dependency. Used in tests to construct reference arrays and compare results. |
 | `tempfile` | Used by archive I/O tests that write/read actual files. |
 
-## Shared test utilities (`zix/src/util/test_util.rs`)
+## Shared test utilities (`jix/src/util/test_util.rs`)
 
 All helpers are `pub(crate)` and re-exported from `util/mod.rs` under `#[cfg(test)]`.
 

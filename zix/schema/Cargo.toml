@@ -1,8 +1,0 @@
-[package]
-name = "zix-schema-gen"
-version = "0.0.0"
-edition = "2024"
-publish = false
-
-[dependencies]
-prost-build = "0.14"

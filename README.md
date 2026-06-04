@@ -1,14 +1,16 @@
-# zix
+# jix
 
 A multi-dimensional array library with block-compressed, lazy-evaluated storage — written in Rust, with Python bindings.
 
-Arrays are divided into a grid of fixed-size nd-blocks, each compressed independently.
-Every operation — arithmetic, shape change, reduction, type cast — builds a lazy view that chains
-onto the previous one without copying data.
+**Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each compressed independently.
+Only the blocks that overlap a read request are decompressed, so random access into large arrays is cheap.
+
+**Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast - returns a new view that wraps the
+input(s) and records the transformation, nothing is computed until data is explicitly requested.
 The full pipeline runs in a single decompression pass the moment you ask for output.
 
 ```rust
-use zix::{Array, ArrayParams};
+use jix::{Array, ArrayParams};
 use ndarray::array;
 
 // Compress a 2-D f32 ndarray into block-compressed storage.
@@ -20,26 +22,26 @@ let result = a.exp().sum(0) - 1.0;
 
 // Materialize and persist. Blocks are decompressed, transformed,
 // and re-compressed one at a time — no full copy in memory.
-result.copy()?.write_to_file("result.zix")?;
+result.copy()?.write_to_file("result.jix")?;
 ```
 
 Python bindings are also available:
 
 ```python
-import zix
+import jix
 import numpy as np
 
 # Compress a NumPy array into block-compressed storage.
-a = zix.compact(np.random.rand(1024, 1024).astype(np.float32))
+a = jix.compact(np.random.rand(1024, 1024).astype(np.float32))
 
 # Build a lazy pipeline — nothing is read yet.
 result = (a - a.mean(axis=0)) / a.std(axis=0)
 
 # Materialize: decompress, transform, and write to disk in one pass.
-result.write_to("normalized.zix")
+result.write_to("normalized.jix")
 
 # Load and read a sub-region; only the touched blocks are decompressed.
-b = zix.read_array("normalized.zix")
+b = jix.read_array("normalized.jix")
 row = b[42]   # only the blocks covering row 42 are decompressed
 ```
 

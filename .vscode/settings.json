@@ -1,13 +1,13 @@
 {
     "rust-analyzer.linkedProjects": [
-        "zix/Cargo.toml",
-        "zix/schema/Cargo.toml",
-        "zix-macros/Cargo.toml",
-        "zix-python/Cargo.toml"
+        "jix/Cargo.toml",
+        "jix/schema/Cargo.toml",
+        "jix-macros/Cargo.toml",
+        "jix-python/Cargo.toml"
     ],
     "rust-analyzer.cargo.features": "all",
     "python.analysis.extraPaths": [
-        "zix-python/python/tests/"
+        "jix-python/python/tests/"
     ],
     "cSpell.words": [
         "arange",
@@ -35,6 +35,7 @@
         "rtol",
         "seekable",
         "strided",
-        "unsqueeze"
+        "unsqueeze",
+        "jix"
     ]
 }

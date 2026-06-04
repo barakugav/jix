@@ -1,0 +1,507 @@
+"""
+Property tests for element-wise binary ops. Mirrors the test block in jix/src/ops/op2.rs.
+
+One test per dtype, parametrized via @pytest.mark.parametrize, analogous to the
+test_op2! macro which expands to one proptest per (op, dtype) pair.
+
+Mixed-dtype section verifies the automatic casting / dispatch rules:
+- Safe cast: the first impl in the dispatch table that can accept both operands wins.
+- Scalars without explicit precision (Python int, float) are untyped and match any
+  same-rank impl; scalars with precision (np.int32, np.float32) match precisely.
+"""
+
+import numpy as np
+import pytest
+import jix
+from hypothesis import given
+from hypothesis import strategies as st
+from hypothesis.strategies import DataObject
+from tests_util import (
+    assert_array_matches,
+    carrays2_mixed_strategy,
+    carrays2_strategy,
+    complexes,
+    floats,
+    ints,
+    op_safe_element_strategy,
+    op_safe_non_zero_element_strategy,
+    uints,
+)
+
+
+@pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
+@given(st.data())
+def test_add(dtype: np.dtype, data: DataObject):
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype), label="arrays")
+    result = za + zb
+    assert_array_matches(result, np_a + np_b, data=data)
+
+
+def test_add_custom_inputs():
+    def check(result, expected):
+        np.testing.assert_array_equal(result.numpy(), expected)
+
+    # int64: Python ints coerce to int64 naturally
+    d = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int64)
+    za = jix.compact(d)
+    check(za + np.int64(10), d + 10)  # typed scalar, broadcast
+    check(np.int64(10) + za, 10 + d)  # __radd__ (int64 natural)
+    check(
+        za + np.array([[10, 20, 30], [40, 50, 60]]), d + [[10, 20, 30], [40, 50, 60]]
+    )  # numpy array
+    check(za + [[10, 20, 30], [40, 50, 60]], d + [[10, 20, 30], [40, 50, 60]])  # list
+    check(za + ((10, 20, 30), (40, 50, 60)), d + ((10, 20, 30), (40, 50, 60)))  # tuple
+    check(jix.add(za, np.int64(10)), d + 10)  # free-function form
+    check(jix.add(np.int64(10), za), 10 + d)  # free-function, scalar first
+
+    # float64: Python floats coerce to float64 naturally
+    df = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    zaf = jix.compact(df)
+    check(zaf + 10.0, df + 10.0)  # Python float scalar
+    check(10.0 + zaf, 10.0 + df)  # __radd__ (float64 natural)
+    check(
+        zaf + [[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]],
+        df + [[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]],
+    )
+    check(
+        zaf + ((10.0, 20.0, 30.0), (40.0, 50.0, 60.0)),
+        df + ((10.0, 20.0, 30.0), (40.0, 50.0, 60.0)),
+    )
+
+    # float32: Python float infers float64, so use typed numpy scalars / arrays.
+    # numpy scalar's __add__ promotes its type before calling __radd__, so test
+    # "scalar first" via jix.add() to bypass Python's operator dispatch.
+    df32 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    zaf32 = jix.compact(df32)
+    check(zaf32 + np.float32(10.0), df32 + np.float32(10.0))  # typed scalar, broadcast
+    check(
+        jix.add(np.float32(10.0), zaf32), np.float32(10.0) + df32
+    )  # scalar first via free-function
+    check(
+        zaf32 + np.array([10.0, 20.0, 30.0], dtype=np.float32),
+        df32 + np.array([10.0, 20.0, 30.0], dtype=np.float32),
+    )
+
+    # complex128: Python complex coerces to complex128 naturally
+    dc = np.array([1 + 2j, 3 + 4j], dtype=np.complex128)
+    zac = jix.compact(dc)
+    check(zac + complex(1, 1), dc + complex(1, 1))  # Python complex scalar
+    check(zac + [1 + 1j, 2 + 2j], dc + np.array([1 + 1j, 2 + 2j]))  # list of complex
+
+
+@pytest.mark.parametrize("dtype", ints + floats + complexes)
+@given(st.data())
+def test_subtract(dtype: np.dtype, data: DataObject):
+    # Unsigned types are excluded: the jix extension is a debug build that panics on
+    # unsigned underflow, matching Rust's test_op2!(sub, ..., [i8, i16, i32, i64, ...]).
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype), label="arrays")
+    result = za - zb
+    assert_array_matches(result, np_a - np_b, data=data)
+
+
+def test_subtract_custom_inputs():
+    def check(result, expected):
+        np.testing.assert_array_equal(result.numpy(), expected)
+
+    # int64
+    d = np.array([[10, 20, 30], [40, 50, 60]], dtype=np.int64)
+    za = jix.compact(d)
+    check(za - np.int64(5), d - 5)
+    check(np.int64(100) - za, 100 - d)  # __rsub__ (int64 natural)
+    check(za - [[1, 2, 3], [4, 5, 6]], d - [[1, 2, 3], [4, 5, 6]])
+    check(za - ((1, 2, 3), (4, 5, 6)), d - ((1, 2, 3), (4, 5, 6)))
+    check(jix.subtract(za, np.int64(5)), d - 5)
+    check(jix.subtract(np.int64(100), za), 100 - d)  # scalar first via free-function
+
+    # float64
+    df = np.array([10.0, 20.0, 30.0])
+    zaf = jix.compact(df)
+    check(zaf - 5.0, df - 5.0)
+    check(100.0 - zaf, 100.0 - df)  # __rsub__ (float64 natural)
+    check(zaf - [1.0, 2.0, 3.0], df - [1.0, 2.0, 3.0])
+    check(zaf - (1.0, 2.0, 3.0), df - (1.0, 2.0, 3.0))
+
+    # float32: use jix.subtract() for scalar-first to bypass numpy promotion
+    df32 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+    zaf32 = jix.compact(df32)
+    check(zaf32 - np.float32(5.0), df32 - np.float32(5.0))
+    check(
+        jix.subtract(np.float32(100.0), zaf32), np.float32(100.0) - df32
+    )  # scalar first via free-function
+    check(
+        zaf32 - np.array([1.0, 2.0, 3.0], dtype=np.float32),
+        df32 - np.array([1.0, 2.0, 3.0], dtype=np.float32),
+    )
+
+
+@pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
+@given(st.data())
+def test_multiply(dtype: np.dtype, data: DataObject):
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype), label="arrays")
+    result = za * zb
+    # Complex multiplication of large values can differ by a few ULP across implementations.
+    rtol = 1e-5 if np.issubdtype(dtype, np.complexfloating) else 0.0
+    assert_array_matches(result, np_a * np_b, data=data, rtol=rtol)
+
+
+def test_multiply_custom_inputs():
+    def check(result, expected):
+        np.testing.assert_array_equal(result.numpy(), expected)
+
+    # int64
+    d = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int64)
+    za = jix.compact(d)
+    check(za * np.int64(3), d * 3)
+    check(np.int64(3) * za, 3 * d)  # __rmul__ (int64 natural)
+    check(za * [[2, 3, 4], [5, 6, 7]], d * [[2, 3, 4], [5, 6, 7]])
+    check(za * ((2, 3, 4), (5, 6, 7)), d * ((2, 3, 4), (5, 6, 7)))
+    check(jix.multiply(za, np.int64(3)), d * 3)
+
+    # float64
+    df = np.array([1.0, 2.0, 3.0])
+    zaf = jix.compact(df)
+    check(zaf * 2.0, df * 2.0)
+    check(2.0 * zaf, 2.0 * df)  # __rmul__ (float64 natural)
+    check(zaf * [2.0, 3.0, 4.0], df * [2.0, 3.0, 4.0])
+    check(zaf * (2.0, 3.0, 4.0), df * (2.0, 3.0, 4.0))
+
+    # float32: use jix.multiply() for scalar-first to bypass numpy promotion
+    df32 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    zaf32 = jix.compact(df32)
+    check(zaf32 * np.float32(2.0), df32 * np.float32(2.0))
+    check(
+        jix.multiply(np.float32(2.0), zaf32), np.float32(2.0) * df32
+    )  # scalar first via free-function
+
+    # complex128: Python complex scalar
+    dc = np.array([1 + 2j, 3 + 4j], dtype=np.complex128)
+    zac = jix.compact(dc)
+    check(zac * complex(2, 0), dc * complex(2, 0))
+    check(zac * [1 + 1j, 2 + 0j], dc * np.array([1 + 1j, 2 + 0j]))
+
+
+@pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
+@given(st.data())
+def test_divide(dtype: np.dtype, data: DataObject):
+    # Use non-zero strategy for both operands to avoid integer division-by-zero panics.
+    # Mirrors Rust's test_op2!(div, ..., op_safe_non_zero_strategy).
+    nz = op_safe_non_zero_element_strategy(dtype)
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_strategy(dtype, element_st=nz), label="arrays"
+    )
+    result = za / zb
+    # jix integer division truncates toward zero (Rust semantics); numpy // is floor division.
+    # Cast through float64 and back to get truncation-toward-zero for all signed/unsigned combos.
+    if np.issubdtype(dtype, np.integer):
+        expected = (np_a.astype(np.float64) / np_b.astype(np.float64)).astype(dtype)
+    else:
+        expected = np_a / np_b
+    # Complex division algorithms differ slightly between jix (Rust) and numpy;
+    # allow a few ULP of tolerance. Float32 eps ~1.2e-7, float64 eps ~2.2e-16.
+    rtol = 1e-5 if np.issubdtype(dtype, np.complexfloating) else 0.0
+    assert_array_matches(result, expected, data=data, rtol=rtol)
+
+
+def test_divide_custom_inputs():
+    def check_int(result, expected_int):
+        # jix integer division truncates (same as //); numpy / would give float
+        np.testing.assert_array_equal(result.numpy(), expected_int)
+
+    def check_float(result, expected):
+        np.testing.assert_array_equal(result.numpy(), expected)
+
+    # int64 (use // for reference: floor div == truncating for positive values)
+    d = np.array([[10, 20, 30], [40, 50, 60]], dtype=np.int64)
+    za = jix.compact(d)
+    check_int(za / np.int64(10), d // 10)
+    check_int(np.int64(60) / za, 60 // d)  # __rtruediv__ (int64 natural)
+    check_int(za / [[5, 4, 3], [2, 5, 6]], d // [[5, 4, 3], [2, 5, 6]])
+    check_int(za / ((5, 4, 3), (2, 5, 6)), d // ((5, 4, 3), (2, 5, 6)))
+    check_int(jix.divide(za, np.int64(10)), d // 10)
+
+    # float64
+    df = np.array([10.0, 20.0, 30.0])
+    zaf = jix.compact(df)
+    check_float(zaf / 2.0, df / 2.0)
+    check_float(60.0 / zaf, 60.0 / df)  # __rtruediv__ (float64 natural)
+    check_float(zaf / [2.0, 4.0, 5.0], df / [2.0, 4.0, 5.0])
+    check_float(zaf / (2.0, 4.0, 5.0), df / (2.0, 4.0, 5.0))
+
+    # float32: use jix.divide() for scalar-first to bypass numpy promotion
+    df32 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+    zaf32 = jix.compact(df32)
+    check_float(zaf32 / np.float32(2.0), df32 / np.float32(2.0))
+    check_float(
+        jix.divide(np.float32(60.0), zaf32), np.float32(60.0) / df32
+    )  # scalar first via free-function
+    check_float(
+        zaf32 / np.array([2.0, 4.0, 5.0], dtype=np.float32),
+        df32 / np.array([2.0, 4.0, 5.0], dtype=np.float32),
+    )
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@given(st.data())
+def test_power(dtype: np.dtype, data: DataObject):
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_strategy(dtype, element_st=st.integers(1, 5).map(float)),
+        label="arrays",
+    )
+    result = jix.power(za, zb)
+    assert_array_matches(result, np_a**np_b, data=data)
+
+
+def test_power_custom_inputs():
+    def check(result, expected):
+        np.testing.assert_array_equal(result.numpy(), expected)
+
+    # float32: typed numpy scalars/arrays required
+    df32 = np.array([2.0, 3.0, 4.0], dtype=np.float32)
+    zaf32 = jix.compact(df32)
+    check(
+        jix.power(zaf32, np.float32(2.0)), df32 ** np.float32(2.0)
+    )  # scalar, broadcast
+    check(jix.power(np.float32(2.0), zaf32), np.float32(2.0) ** df32)  # scalar first
+    check(
+        jix.power(zaf32, np.array([3.0, 2.0, 0.5], dtype=np.float32)),
+        df32 ** np.array([3.0, 2.0, 0.5], dtype=np.float32),
+    )
+
+    # float64: Python floats coerce to float64 naturally
+    df64 = np.array([2.0, 3.0, 4.0])
+    zaf64 = jix.compact(df64)
+    check(jix.power(zaf64, 2.0), df64**2.0)  # Python float scalar
+    check(jix.power(2.0, zaf64), 2.0**df64)  # scalar first
+    check(jix.power(zaf64, [3.0, 2.0, 0.5]), df64 ** [3.0, 2.0, 0.5])  # list
+    check(jix.power(zaf64, (3.0, 2.0, 0.5)), df64 ** (3.0, 2.0, 0.5))  # tuple
+
+
+# ---------------------------------------------------------------------------
+# Mixed-dtype op2 tests
+#
+# The dispatch table is consulted left-to-right; the first impl where *both*
+# operands pass the CastKind::Safe rules is selected.  Expected result dtypes:
+#   u8  + u16  -> u16   (UInt P1 -> UInt P2, safe same-rank)
+#   u8  + i32  -> i32   (UInt P1 -> Int P4, needs higher prec: P2 <= P4, ok)
+#   u8  + f32  -> f32   (UInt P1 -> Float P4, needs higher prec: P2 <= P4, ok)
+#   i8  + i32  -> i32   (Int P1 -> Int P4, P1 <= P4)
+#   i32 + f32  -> f64   (Int P4 -> Float P4, needs higher prec: P8 <= P4? no -> f64)
+#   i32 + f64  -> f64   (Int P4 -> Float P8, P8 <= P8, ok)
+#   f32 + f64  -> f64   (Float P4 -> Float P8, P4 <= P8)
+#   bool + i32 -> i32   (Bool -> anything is always safe)
+#   f32 + c64  -> c64   (Float P4 -> Complex P4, P4 <= P4)
+# ---------------------------------------------------------------------------
+
+_MIXED_ARITH_CASES = [
+    # (dtype_a, dtype_b, expected_result_dtype)
+    (np.uint8, np.uint16, np.uint16),
+    (np.uint8, np.int32, np.int32),
+    (np.uint8, np.float32, np.float32),
+    (np.int8, np.int32, np.int32),
+    (np.int16, np.int64, np.int64),
+    (np.int32, np.float64, np.float64),
+    (np.float32, np.float64, np.float64),
+    (np.bool_, np.int32, np.int32),
+    (np.bool_, np.float64, np.float64),
+    (np.float32, np.complex64, np.complex64),
+]
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
+@given(st.data())
+def test_add_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+    """add(a, b) with different dtypes casts both to expected_dtype, values match."""
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(
+            dtype_a,
+            dtype_b,
+            element_st_a=op_safe_element_strategy(dtype_a),
+            element_st_b=op_safe_element_strategy(dtype_b),
+        ),
+        label="arrays",
+    )
+    result = jix.add(za, zb)
+    assert result.dtype == np.dtype(expected_dtype), (
+        f"dtype: {result.dtype} != {expected_dtype}"
+    )
+    expected = np_a.astype(expected_dtype) + np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
+@given(st.data())
+def test_multiply_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+    """multiply(a, b) with different dtypes casts both to expected_dtype, values match."""
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(
+            dtype_a,
+            dtype_b,
+            element_st_a=op_safe_element_strategy(dtype_a),
+            element_st_b=op_safe_element_strategy(dtype_b),
+        ),
+        label="arrays",
+    )
+    result = jix.multiply(za, zb)
+    assert result.dtype == np.dtype(expected_dtype), (
+        f"dtype: {result.dtype} != {expected_dtype}"
+    )
+    expected = np_a.astype(expected_dtype) * np_b.astype(expected_dtype)
+    rtol = 1e-5 if np.issubdtype(expected_dtype, np.complexfloating) else 0.0
+    np.testing.assert_allclose(result.numpy(), expected, rtol=rtol)
+
+
+@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
+@given(st.data())
+def test_subtract_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+    """subtract(a, b) with different dtypes casts both to expected_dtype, values match."""
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(
+            dtype_a,
+            dtype_b,
+            element_st_a=op_safe_element_strategy(dtype_a),
+            element_st_b=op_safe_element_strategy(dtype_b),
+        ),
+        label="arrays",
+    )
+    # Unsigned subtypes that would underflow: restrict to uint cases
+    if np.issubdtype(expected_dtype, np.unsignedinteger):
+        # skip: unsigned underflow panics in debug mode
+        return
+    result = jix.subtract(za, zb)
+    assert result.dtype == np.dtype(expected_dtype)
+    expected = np_a.astype(expected_dtype) - np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+@pytest.mark.parametrize(
+    "dtype_a,dtype_b,expected_dtype",
+    [
+        (np.uint8, np.uint16, np.uint16),
+        (np.uint8, np.int32, np.int32),
+        (np.uint8, np.float32, np.float32),
+        (np.int8, np.int32, np.int32),
+        (np.int32, np.float64, np.float64),
+        (np.float32, np.float64, np.float64),
+        (np.bool_, np.int32, np.int32),
+    ],
+)
+@given(st.data())
+def test_equal_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+    """equal(a, b) with different dtypes casts both to expected_dtype, output is bool."""
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(
+            dtype_a,
+            dtype_b,
+            element_st_a=op_safe_element_strategy(dtype_a),
+            element_st_b=op_safe_element_strategy(dtype_b),
+        ),
+        label="arrays",
+    )
+    result = jix.equal(za, zb)
+    assert result.dtype == np.bool_
+    expected = np_a.astype(expected_dtype) == np_b.astype(expected_dtype)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+def test_mixed_dtype_result_dtype_determinism():
+    """The result dtype for common mixed-type pairs is stable and matches documented rules."""
+
+    def check(da, db, expected):
+        a = jix.compact(np.array([1, 2, 3], dtype=da))
+        b = jix.compact(np.array([4, 5, 6], dtype=db))
+        result = jix.add(a, b)
+        assert result.dtype == np.dtype(expected), (
+            f"add({da.__name__}, {db.__name__}): got {result.dtype}, expected {np.dtype(expected)}"
+        )
+
+    check(np.uint8, np.uint16, np.uint16)
+    check(np.uint8, np.int32, np.int32)
+    check(np.uint8, np.float32, np.float32)
+    check(np.int8, np.int32, np.int32)
+    check(np.int32, np.float64, np.float64)
+    check(np.float32, np.float64, np.float64)
+    check(np.bool_, np.int32, np.int32)
+
+
+def test_mixed_dtype_op2_does_not_error_on_safe_combos():
+    """All 'safe' up-cast pairs must succeed, not raise UnsupportedDtype."""
+    combos = [
+        (np.uint8, np.uint16),
+        (np.uint8, np.uint32),
+        (np.uint8, np.int16),
+        (np.uint8, np.int32),
+        (np.uint8, np.float32),
+        (np.uint8, np.float64),
+        (np.int8, np.int16),
+        (np.int8, np.int32),
+        (np.int8, np.int64),
+        (np.int16, np.int32),
+        (np.int32, np.int64),
+        (np.int32, np.float64),
+        (np.float32, np.float64),
+        (np.bool_, np.uint8),
+        (np.bool_, np.int32),
+        (np.bool_, np.float32),
+    ]
+    for da, db in combos:
+        a = jix.compact(np.array([1, 2], dtype=da))
+        b = jix.compact(np.array([3, 4], dtype=db))
+        try:
+            r = jix.add(a, b)
+            _ = r.numpy()
+        except Exception as e:
+            pytest.fail(f"add({da.__name__}, {db.__name__}) raised: {e}")
+
+
+def test_mixed_dtype_op2_errors_on_complex_arithmetic():
+    """Complex + int64/uint64 should fail: no impl can hold Int/P8 cast to Complex."""
+    for int_dtype in [np.int64, np.uint64]:
+        a = jix.compact(np.array([1 + 2j, 3 + 4j], dtype=np.complex64))
+        b = jix.compact(np.array([1, 2], dtype=int_dtype))
+        with pytest.raises(Exception):
+            _ = jix.add(a, b).numpy()
+
+
+def test_complex_plus_small_int_upcasts_to_complex128():
+    """complex64 + int32 upcast to complex128 (the only fitting impl)."""
+    a = jix.compact(np.array([1 + 2j, 3 + 0j], dtype=np.complex64))
+    b = jix.compact(np.array([10, 20], dtype=np.int32))
+    result = jix.add(a, b)
+    assert result.dtype == np.complex128
+    np.testing.assert_array_equal(result.numpy(), np.array([11 + 2j, 23 + 0j]))
+
+
+# ---------------------------------------------------------------------------
+# Mixed dtype + broadcasting combined
+# ---------------------------------------------------------------------------
+
+
+def test_mixed_dtype_broadcasting():
+    """Mixed-dtype inputs also get properly broadcast before the op."""
+    # (3, 1) i8 + (1, 4) i32  -> (3, 4) i32
+    np_a = np.arange(3, dtype=np.int8).reshape(3, 1)
+    np_b = np.arange(4, dtype=np.int32).reshape(1, 4)
+    za = jix.compact(np_a)
+    zb = jix.compact(np_b)
+
+    result = jix.add(za, zb)
+    expected = np_a.astype(np.int32) + np_b
+
+    assert result.dtype == np.int32
+    assert result.shape == (3, 4)
+    np.testing.assert_array_equal(result.numpy(), expected)
+
+
+def test_mixed_dtype_broadcasting_float():
+    """Mixed dtype broadcast: (3,) u8 + (2, 3) f32 -> (2, 3) f32."""
+    np_a = np.array([1, 2, 3], dtype=np.uint8)
+    np_b = np.array([[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]], dtype=np.float32)
+    za = jix.compact(np_a)
+    zb = jix.compact(np_b)
+
+    result = jix.add(za, zb)
+    expected = np_a.astype(np.float32) + np_b
+
+    assert result.dtype == np.float32
+    assert result.shape == (2, 3)
+    np.testing.assert_array_equal(result.numpy(), expected)

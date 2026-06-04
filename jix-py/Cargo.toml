@@ -1,0 +1,33 @@
+[package]
+name = "jix-pyo3"
+version = "0.0.0"
+authors = ["Barak Ugav <barakugav@gmail.com>"]
+edition = "2024"
+rust-version = "1.89.0"
+description = "Multi-dimensional array library with block-compressed, lazy-evaluated storage"
+readme = "README.md"
+repository = "https://github.com/barakugav/jix"
+license = "Apache-2.0"
+keywords = ["ndarray", "compression", "zstd"]
+categories = ["data-structures", "compression", "science"]
+
+[lib]
+name = "jix"
+crate-type = [
+    "cdylib",
+    "rlib",   # Required by gen_pyi
+]
+
+[dependencies]
+pyo3 = "0.28"
+jix_core = { package = "jix", path = "../jix", features = [
+    "half",
+    "num-complex",
+] }
+numpy = "0.28"
+pyo3-stub-gen = "0.22.3"
+arrayvec = "0.7"
+ndarray = "0.17.0"
+
+[dev-dependencies]
+ctor = "1"

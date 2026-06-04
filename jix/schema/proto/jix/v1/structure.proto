@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package jix.v1;
+
+message FileMetadata {
+  ArchiveType archive_type = 1;
+
+  // Library version encoded as a 64-bit unsigned integer.
+  //
+  // The u64 is encoded with the following bit field layout:
+  //   major          :  8 [ 0.. 8]
+  //   minor          :  8 [ 8..16]
+  //   patch          : 10 [16..26]
+  //   pre-release    :  6 [26..32]
+  //   build-metadata : 32 [32..64]
+  // Note that the major is the least significant byte, so comparing versions can NOT be done with
+  // a simple integer comparison.
+  uint64 lib_version_semver = 2;
+}
+
+enum ArchiveType {
+  ARCHIVE_TYPE_UNSPECIFIED = 0;
+  ARCHIVE_TYPE_BLOCK_TABLE = 1;
+  ARCHIVE_TYPE_ARRAY_V1 = 2;
+}
