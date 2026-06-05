@@ -97,25 +97,25 @@ jobs:
 
       ############ Linters ############
       - name: Clippy jix-schema
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix/schema
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix-macros
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix-macros
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix-py
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix-py
           check-args: --all-features
@@ -180,7 +180,7 @@ jobs:
         run: cargo check --all-features
         working-directory: jix
       - name: cargo clippy jix
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix
           check-args: --all-features
@@ -190,7 +190,7 @@ jobs:
         run: cargo check --all-features
         working-directory: jix-py
       - name: cargo clippy jix-py
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix-py
           check-args: --all-features
