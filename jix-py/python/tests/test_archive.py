@@ -18,7 +18,7 @@ def make_array(values, dtype=np.float32):
 
 
 # ---------------------------------------------------------------------------
-# write_array — file path
+# write_array - file path
 # ---------------------------------------------------------------------------
 
 
@@ -64,7 +64,7 @@ def test_write_array_path_append():
 
 
 # ---------------------------------------------------------------------------
-# write_array — file-like object
+# write_array - file-like object
 # ---------------------------------------------------------------------------
 
 
@@ -99,7 +99,7 @@ def test_write_array_bad_object():
 
 
 # ---------------------------------------------------------------------------
-# read_array — file path
+# read_array - file path
 # ---------------------------------------------------------------------------
 
 
@@ -151,7 +151,7 @@ def test_read_array_path_bad_offset(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# read_array — file-like object
+# read_array - file-like object
 # ---------------------------------------------------------------------------
 
 
@@ -255,7 +255,7 @@ def test_roundtrip_bytesio_dtype(dtype):
 
 
 # ---------------------------------------------------------------------------
-# write_array + read_array interop: path ↔ reader, writer ↔ path
+# write_array + read_array interop: path <-> reader, writer <-> path
 # ---------------------------------------------------------------------------
 
 

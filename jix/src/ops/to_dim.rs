@@ -19,7 +19,7 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 /// [`Array::to_dim_dyn`](crate::Array::to_dim_dyn).
 ///
 /// For concrete block-compressed or plain storages that implement [`DimensionChange`], prefer
-/// [`Array::into_dim`](crate::Array::into_dim) instead — it re-tags the dimension in-place
+/// [`Array::into_dim`](crate::Array::into_dim) instead - it re-tags the dimension in-place
 /// without adding this wrapper layer.
 ///
 /// # Examples

@@ -17,3 +17,5 @@
 - rename Maximum scalar trait to PartialMax
 - remove ArrayParams from python APIm just accept dict of kwargs and convert to ArrayParams in rust
 - optimize reduce_max with state of (current max, nan_seen)
+- use cargo workspace
+- consider AlignedBytes with compile time alignment

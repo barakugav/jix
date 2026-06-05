@@ -162,7 +162,7 @@ pub(crate) fn bulk_size<T: Dtyped>() -> usize {
 
 /// An argument that specifies a set of axis indices, encoding the dimension change in the type.
 ///
-/// Operations that add or remove axes — `insert_axis`, `remove_axis`, `sum`, `max`, etc. — are
+/// Operations that add or remove axes - `insert_axis`, `remove_axis`, `sum`, `max`, etc. - are
 /// generic over `Ax: AxesArg`. The associated types `ReducedDimension` and `ExpandedDimension`
 /// compute the output dimension purely from the input dimension `D` and the concrete type of the
 /// axis argument. This means the compiler knows the output ndim without any runtime information.
@@ -173,7 +173,7 @@ pub(crate) fn bulk_size<T: Dtyped>() -> usize {
 /// |---|---|---|
 /// | `usize` | `D::Smaller` | `D::Larger` |
 /// | `[usize; 0]` / `()` | `D` | `D` |
-/// | `[usize; N]` / `(usize, ...)` (N ≥ 1) | `D::Smaller` repeated N times | `D::Larger` repeated N times |
+/// | `[usize; N]` / `(usize, ...)` (N >= 1) | `D::Smaller` repeated N times | `D::Larger` repeated N times |
 /// | `&[usize]` / `&Vec<usize>` | `DimDyn` | `DimDyn` |
 ///
 /// When the argument is a slice reference (`&[usize]`), the ndim of the result is only known at
@@ -188,15 +188,15 @@ pub(crate) fn bulk_size<T: Dtyped>() -> usize {
 ///
 /// let a = Array::compact_array(&array![[1i32, 2], [3, 4]])?;
 ///
-/// // usize: one axis removed/added — statically one smaller/larger
-/// let b = a.as_ref().sum(0);               // D::Smaller when a: Dim<N> → Dim<N-1>
-/// let c = a.as_ref().insert_axis(0);       // D::Larger  when a: Dim<N> → Dim<N+1>
+/// // usize: one axis removed/added - statically one smaller/larger
+/// let b = a.as_ref().sum(0);               // D::Smaller when a: Dim<N> -> Dim<N-1>
+/// let c = a.as_ref().insert_axis(0);       // D::Larger  when a: Dim<N> -> Dim<N+1>
 ///
-/// // [usize; 2]: two axes removed — statically two smaller
+/// // [usize; 2]: two axes removed - statically two smaller
 /// let b = a.as_ref().sum([0, 1]);          // Dim<N-2>
 /// let c = a.as_ref().insert_axis([0, 1]);  // Dim<N+2>
 ///
-/// // &[usize]: dynamic count → DimDyn regardless of input dimension
+/// // &[usize]: dynamic count -> DimDyn regardless of input dimension
 /// let axes = vec![0, 1];
 /// let b = a.as_ref().sum(axes.as_slice()); // DimDyn
 /// # Ok::<(), jix::Error>(())

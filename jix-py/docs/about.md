@@ -3,7 +3,7 @@
 ## Links
 
 - Source code: [github.com/barakugav/jix](https://github.com/barakugav/jix)
-- Rust crate documentation: [docs.rs/jix](https://docs.rs/jix) — the lower-level typed
+- Rust crate documentation: [docs.rs/jix](https://docs.rs/jix) - the lower-level typed
   Rust API used by these Python bindings.
 
 
@@ -30,5 +30,5 @@ Apache-2.0. See [`LICENSE`](https://github.com/barakugav/jix/blob/main/LICENSE).
 
 ## Author
 
-Barak Ugav — [barakugav@gmail.com](mailto:barakugav@gmail.com),
+Barak Ugav - [barakugav@gmail.com](mailto:barakugav@gmail.com),
 [github.com/barakugav](https://github.com/barakugav).

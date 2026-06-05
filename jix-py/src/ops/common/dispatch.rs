@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 
-use pyo3::prelude::*;
 use jix_core::dtype::{Dtype, DtypeScalarKind, Dtyped};
 use jix_core::ops::ToType;
 use jix_core::storage::ArrayStorageAny;
 use jix_core::{Array as CoreArray, ArrayAny, Ty};
+use pyo3::prelude::*;
 
 use crate::ops::astype_impl;
 use crate::ops::common::{CastKind, Operand, Precision, Scalar};

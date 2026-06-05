@@ -453,7 +453,7 @@ pub(crate) mod _traits {
 
     /// Scalar kernel trait for `argmax`: finds the index of the maximum element.
     pub trait ArgMax {
-        /// The output type for the flat index — always `u64` for concrete impls.
+        /// The output type for the flat index - always `u64` for concrete impls.
         type Output;
         /// Return the flat index of the maximum element in `items`, or `None` if empty.
         ///
@@ -485,7 +485,7 @@ pub(crate) mod _traits {
 
     /// Scalar kernel trait for `argmin`: finds the index of the minimum element.
     pub trait ArgMin {
-        /// The output type for the flat index — always `u64` for concrete impls.
+        /// The output type for the flat index - always `u64` for concrete impls.
         type Output;
         /// Return the flat index of the minimum element in `items`, or `None` if empty.
         ///
@@ -604,7 +604,7 @@ pub(crate) mod _traits {
     /// The mean is computed as the sum divided by the count; the output is always `f64`
     /// (or `Complex<f64>` for complex inputs) to preserve precision.
     pub trait ReduceMean {
-        /// The output element type — always `f64` or `Complex<f64>`.
+        /// The output element type - always `f64` or `Complex<f64>`.
         type Output;
         /// Compute the arithmetic mean of `items`. Returns `None` if the iterator is empty.
         fn reduce_mean(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
@@ -650,7 +650,7 @@ pub(crate) mod _traits {
     /// The degree-of-freedom correction is controlled by `ddof`: use `0.0` for population
     /// variance (`N` denominator) and `1.0` for sample variance (`N-1` denominator).
     pub trait ReduceVariance {
-        /// The output element type — always a `Float` (i.e. `f64` for most inputs).
+        /// The output element type - always a `Float` (i.e. `f64` for most inputs).
         type Output: num_traits::Float;
         /// Compute the variance of `items` with `ddof` degrees-of-freedom correction.
         fn reduce_variance(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output;
@@ -1337,19 +1337,19 @@ pub(crate) mod tests {
             })
     }
 
-    pub(crate) fn carray_strategy_for_reduction_single_axis<T: crate::util::ScalarStrategy>(
-        elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>, DimDyn>>>, usize)>
-    {
-        let shape = reduction_shape_strategy();
-        let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
-        array
-            .prop_map(|(nd, za)| (nd, Rc::new(za)))
-            .prop_flat_map(|(nd, za)| {
-                let axis = axis_strategy(nd.ndim());
-                (Just(nd), Just(za), axis)
-            })
-    }
+    // pub(crate) fn carray_strategy_for_reduction_single_axis<T: crate::util::ScalarStrategy>(
+    //     elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
+    // ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>, DimDyn>>>, usize)>
+    // {
+    //     let shape = reduction_shape_strategy();
+    //     let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
+    //     array
+    //         .prop_map(|(nd, za)| (nd, Rc::new(za)))
+    //         .prop_flat_map(|(nd, za)| {
+    //             let axis = axis_strategy(nd.ndim());
+    //             (Just(nd), Just(za), axis)
+    //         })
+    // }
 
     pub(crate) fn carray_strategy_for_reduction_small<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,

@@ -56,7 +56,7 @@ use crate::{Dimension, ElementType};
 pub trait ArrayStorage {
     /// The compile-time element type of arrays backed by this storage.
     ///
-    /// Either [`Ty<T>`](crate::Ty) — element type `T` is known at compile time — or [`TypeDyn`](crate::TypeDyn) — element
+    /// Either [`Ty<T>`](crate::Ty) - element type `T` is known at compile time - or [`TypeDyn`](crate::TypeDyn) - element
     /// type is only available at runtime via [`dtype()`](ArrayStorage::dtype).
     ///
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,

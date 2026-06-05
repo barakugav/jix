@@ -2,20 +2,22 @@
 Hypothesis strategies and assertion helpers for jix property tests.
 
 Mirrors the test utilities in jix/src/util/test_util.rs:
-  shape_strategy          ←→  shape_strategy()
-  op_safe_element_strategy ←→ ScalarStrategy::op_safe_strategy()
-  carrays2_strategy       ←→  carrays2_strategy_generic()
-  sub_range_strategy      ←→  sub_range_strategy()
-  assert_array_matches    ←→  assert_array_matches()
+  shape_strategy           <-->  shape_strategy()
+  op_safe_element_strategy <-->  ScalarStrategy::op_safe_strategy()
+  carrays2_strategy        <-->  carrays2_strategy_generic()
+  sub_range_strategy       <-->  sub_range_strategy()
+  assert_array_matches     <-->  assert_array_matches()
 """
 
 from typing import Optional
 
 import numpy as np
-import jix
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays as np_arrays
 from hypothesis.strategies import DataObject
+
+
+import jix
 
 ints = [np.int8, np.int16, np.int32, np.int64]
 uints = [np.uint8, np.uint16, np.uint32, np.uint64]
@@ -135,7 +137,7 @@ def shift_safe_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
 
 
 def _float_op_safe_st() -> st.SearchStrategy:
-    """float op_safe: (0..=20000).map(|x| (x - 10000) / 100.0) → [-100.0, 100.0]."""
+    """float op_safe: (0..=20000).map(|x| (x - 10000) / 100.0) -> [-100.0, 100.0]."""
     return st.integers(0, 2 * 100 * 100).map(lambda x: float((x - 100 * 100) / 100.0))
 
 
@@ -172,9 +174,7 @@ def carray_strategy(draw, dtype: np.dtype, element_st=None):
     ndim = len(shape)
 
     np_a = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st), label="np_a")
-    block_shape = draw(
-        st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape"
-    )
+    block_shape = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape")
     za = jix.compact(np_a, params={"block_shape": block_shape})
     return np_a, za
 
@@ -202,7 +202,7 @@ def op_safe_non_zero_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
 def op_safe_non_negative_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     """Non-negative float elements mirroring ScalarStrategy::op_safe_non_negative_strategy().
 
-    (0..=10000).map(|x| x / 100.0) → [0.0, 100.0]
+    (0..=10000).map(|x| x / 100.0) -> [0.0, 100.0]
     """
     _st = st.integers(0, 100 * 100).map(lambda x: float(x) / 100.0)
     return {
@@ -215,7 +215,7 @@ def op_safe_non_negative_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
 def unit_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     """Float elements in [-1, 1] mirroring ScalarStrategy::unit_strategy().
 
-    (-100..=100).map(|x| x / 100.0) → [-1.0, 1.0]
+    (-100..=100).map(|x| x / 100.0) -> [-1.0, 1.0]
     """
     _st = st.integers(-100, 100).map(lambda x: float(x) / 100.0)
     return {
@@ -230,17 +230,11 @@ def carrays2_strategy(draw, dtype: np.dtype, element_st=None):
     Generate two (numpy_arr, jix_arr) pairs sharing a shape but with independent
     data and block shapes. Mirrors Rust's carrays2_strategy_generic().
     """
-    return draw(
-        carrays2_mixed_strategy(
-            dtype, dtype, element_st_a=element_st, element_st_b=element_st
-        )
-    )
+    return draw(carrays2_mixed_strategy(dtype, dtype, element_st_a=element_st, element_st_b=element_st))
 
 
 @st.composite
-def carrays2_mixed_strategy(
-    draw, dtype_a: np.dtype, dtype_b: np.dtype, element_st_a=None, element_st_b=None
-):
+def carrays2_mixed_strategy(draw, dtype_a: np.dtype, dtype_b: np.dtype, element_st_a=None, element_st_b=None):
     """
     Generate two (numpy_arr, jix_arr) pairs sharing a shape but with different dtypes.
     Useful for ops where LHS and RHS have distinct types (e.g. rotate: value=T, amount=u32).
@@ -253,19 +247,11 @@ def carrays2_mixed_strategy(
     shape = tuple(draw(shape_strategy(), label="shape"))
     ndim = len(shape)
 
-    np_a = draw(
-        np_arrays(dtype=dtype_a, shape=shape, elements=element_st_a), label="np_a"
-    )
-    np_b = draw(
-        np_arrays(dtype=dtype_b, shape=shape, elements=element_st_b), label="np_b"
-    )
+    np_a = draw(np_arrays(dtype=dtype_a, shape=shape, elements=element_st_a), label="np_a")
+    np_b = draw(np_arrays(dtype=dtype_b, shape=shape, elements=element_st_b), label="np_b")
 
-    block_shape_a = draw(
-        st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape_a"
-    )
-    block_shape_b = draw(
-        st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape_b"
-    )
+    block_shape_a = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape_a")
+    block_shape_b = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape_b")
 
     za = jix.compact(np_a, params={"block_shape": block_shape_a})
     zb = jix.compact(np_b, params={"block_shape": block_shape_b})

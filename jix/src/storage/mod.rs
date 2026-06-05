@@ -24,16 +24,16 @@
 //!
 //! Every storage carries two pieces of compile-time information as associated types:
 //!
-//! - **[`ElementType`]** — the compile-time element type, accessible via
+//! - **[`ElementType`]** - the compile-time element type, accessible via
 //!   `S::ElementType`. This is either [`Ty<T>`] (the concrete scalar type `T` is known at
 //!   compile time) or [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk).
 //!
-//! - **[`Dimension`](crate::Dimension)** — the compile-time dimension, accessible via
+//! - **[`Dimension`](crate::Dimension)** - the compile-time dimension, accessible via
 //!   `S::Dimension`. Either [`Dim<N>`](crate::Dim) (known statically) or
 //!   [`DimDyn`](crate::DimDyn) (runtime only).
 //!
 //! The [`ArrayStorageTyped`] supertrait is a shorthand for
-//! `ArrayStorage<ElementType = Ty<T>>`. All element-wise operations require it —
+//! `ArrayStorage<ElementType = Ty<T>>`. All element-wise operations require it -
 //! the element type must be known at compile time so the compiler can dispatch to the
 //! correct scalar implementation.
 //!
@@ -44,11 +44,11 @@
 //!
 //! # Notable items in this module
 //!
-//! - [`ArrayStorage`] — the trait all storage backends implement.
-//! - [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`] — compile-time element type tracking.
-//! - [`Compact`] — the main block-compressed storage backend.
-//! - [`Plain`] and [`Scalar`] — adapters for non-compressed data.
-//! - [`BlocksLayout`] — block geometry hints attached to every storage.
+//! - [`ArrayStorage`] - the trait all storage backends implement.
+//! - [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`] - compile-time element type tracking.
+//! - [`Compact`] - the main block-compressed storage backend.
+//! - [`Plain`] and [`Scalar`] - adapters for non-compressed data.
+//! - [`BlocksLayout`] - block geometry hints attached to every storage.
 
 use crate::codec::{DecoderParams, EncoderParams};
 use crate::dtype::Dtyped;
@@ -79,8 +79,8 @@ pub(crate) mod block;
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
 ///
 /// `ArrayStorageTyped` is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. It exposes the
-/// concrete item type as the associated type `Item`. All element-wise operations — arithmetic,
-/// comparisons, reductions, type casts — are bounded on this trait so the compiler can dispatch
+/// concrete item type as the associated type `Item`. All element-wise operations - arithmetic,
+/// comparisons, reductions, type casts - are bounded on this trait so the compiler can dispatch
 /// to the correct scalar implementation without runtime checks.
 ///
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use

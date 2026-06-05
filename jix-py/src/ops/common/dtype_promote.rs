@@ -59,7 +59,7 @@ impl CastKind {
 
         match self {
             CastKind::None => {
-                src_rank == dst_rank && src_precision.map_or(true, |p| p == dst_precision)
+                src_rank == dst_rank && src_precision.is_none_or(|p| p == dst_precision)
             }
             CastKind::Safe => {
                 if src_rank > dst_rank {
@@ -78,11 +78,7 @@ impl CastKind {
                     // float to complex
                     (Rank::Float, Rank::Complex) => {
                         // Same precision is OK
-                        if src_precision.is_none() {
-                            true
-                        } else {
-                            src_precision.unwrap() <= dst_precision
-                        }
+                        src_precision.is_none_or(|p| p <= dst_precision)
                     }
 
                     // uint to int
@@ -91,6 +87,7 @@ impl CastKind {
                     | (Rank::UInt | Rank::Int, Rank::Float)
                     | (Rank::UInt | Rank::Int, Rank::Complex) => {
                         // Higher precision is required
+                        #[allow(clippy::unnecessary_unwrap)]
                         if src_precision.is_none() {
                             true
                         } else if let Some(src_precision) = src_precision.unwrap().higher() {

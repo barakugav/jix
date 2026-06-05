@@ -7,10 +7,11 @@ prepends missing leading dimensions, exactly as NumPy does.
 
 import numpy as np
 import pytest
-import jix
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
+
+import jix
 
 # ---------------------------------------------------------------------------
 # Strategy: pairs of shapes that are numpy-broadcastable
@@ -22,9 +23,9 @@ def broadcastable_shapes_pair(draw, max_ndim: int = 6, max_dim: int = 8):
     """
     Generate two shapes that are broadcastable per numpy rules.
 
-    Approach: build per-dimension choices aligned from the right.  For each
+    Approach: build per-dimension choices aligned from the right. For each
     position the two dims are either equal, or one of them is 1 (which numpy
-    broadcasts).  One array may have fewer dimensions (the missing leading
+    broadcasts). One array may have fewer dimensions (the missing leading
     dims are implicitly 1).
     """
     ndim_a = draw(st.integers(1, max_ndim))

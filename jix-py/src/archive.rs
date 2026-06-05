@@ -365,12 +365,12 @@ impl Write for PyWriter<'_> {
         let py = self.write_fn.py();
 
         // SAFETY: We create a read-only memoryview pointing directly into
-        // `buf`.  This is sound as long as the memoryview does not outlive
+        // `buf`. This is sound as long as the memoryview does not outlive
         // this call - i.e. Python's .write() must not stash a reference to
         // the memoryview (or a slice of it) beyond returning.
         //
         // All standard library IO implementations (FileIO, BufferedWriter,
-        // BytesIO, GzipFile, etc.) consume the buffer immediately.  This is
+        // BytesIO, GzipFile, etc.) consume the buffer immediately. This is
         // the same contract CPython's own C-level IO code relies on.
         let py_buf: Bound<'_, PyAny> = unsafe {
             Bound::from_owned_ptr_or_err(
@@ -1205,7 +1205,7 @@ class BadReturn:
     }
 
     // =======================================================================
-    // PyReader — Construction
+    // PyReader - Construction
     // =======================================================================
 
     /// Write bytes into a BytesIO and return it seeked to the start.
@@ -1276,7 +1276,7 @@ class ReadSeekOnly:
     }
 
     // =======================================================================
-    // PyReader — Read
+    // PyReader - Read
     // =======================================================================
 
     #[test]
@@ -1364,7 +1364,7 @@ class BrokenReader:
     }
 
     // =======================================================================
-    // PyReader — Seek / tell
+    // PyReader - Seek / tell
     // =======================================================================
 
     #[test]
@@ -1494,7 +1494,7 @@ class BrokenTell:
     }
 
     // =======================================================================
-    // PyReader — Integration: BufReader<PyReader>
+    // PyReader - Integration: BufReader<PyReader>
     // =======================================================================
 
     #[test]
@@ -1564,7 +1564,7 @@ class CountingReader:
             }
 
             let read_count: i32 = obj.getattr("read_count").unwrap().extract().unwrap();
-            // BufReader should batch Python calls — far fewer than 100.
+            // BufReader should batch Python calls - far fewer than 100.
             assert!(
                 read_count < 10,
                 "expected batching, got {read_count} Python read calls for 100 reads"

@@ -250,7 +250,7 @@ where
     table_of_contents = [
         Section {
             offset: block_offsets_offset as i64 - writer.base_offset as i64,
-            size: (block_offsets_num * size_of::<u64>() as u64) as u64,
+            size: block_offsets_num * size_of::<u64>() as u64,
         },
         Section {
             offset: block_data_offset as i64 - writer.base_offset as i64,

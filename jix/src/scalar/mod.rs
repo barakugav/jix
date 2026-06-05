@@ -13,14 +13,14 @@
 //! implemented for each supported element type, for example [`crate::ops::Add`] require [`core::ops::Add`].
 //! Scalar traits come from three sources:
 //!
-//! - **[`core::ops`]** — standard Rust operator traits (`Neg`, `Add`, `Sub`, `Mul`, `Div`,
+//! - **[`core::ops`]** - standard Rust operator traits (`Neg`, `Add`, `Sub`, `Mul`, `Div`,
 //!   `BitAnd`, `BitOr`, `BitXor`, `Not`, `Shl`, `Shr`) plus [`PartialEq`] and [`PartialOrd`]
 //!   for comparisons.
-//! - **[`num_traits`]** — extended numeric traits: [`num_traits::Float`] for transcendental and
+//! - **[`num_traits`]** - extended numeric traits: [`num_traits::Float`] for transcendental and
 //!   classification ops (`floor`, `exp`, `sin`, `is_nan`, ...), [`num_traits::Pow`] for
 //!   exponentiation, and [`num_traits::PrimInt`] for integer bit-manipulation ops (`rotate_left`,
 //!   `count_ones`, `swap_bytes`, ...).
-//! - **This module** — jix-specific traits for cases not covered
+//! - **This module** - jix-specific traits for cases not covered
 //!   by the above: [`Abs`] (handles `Complex<T>`), [`Maximum`]/[`Minimum`] (NaN-propagating, unlike
 //!   `f32::max`/`f32::min`), [`Cast<D>`] for type conversion, and the `Reduce*` family
 //!   ([`ReduceSum`], [`ReduceMax`], [`ReduceMean`], [`ArgMax`], ...) for reductions.

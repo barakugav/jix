@@ -20,9 +20,9 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// There are exactly two types that implement `Dimension`:
 ///
-/// - **[`Dim<N>`]** — static dimension. The compiler knows `ndim == N` at compile time. The
+/// - **[`Dim<N>`]** - static dimension. The compiler knows `ndim == N` at compile time. The
 ///   const generic `N` is the number of axes. Implemented for `N = 0..=8`.
-/// - **[`DimDyn`]** — dynamic dimension. The ndim is only known at runtime, and stored in a
+/// - **[`DimDyn`]** - dynamic dimension. The ndim is only known at runtime, and stored in a
 ///   dynamic allocated array.
 ///
 /// # How operations propagate dimension
@@ -40,8 +40,8 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// # Boundary cases
 ///
-/// - `Dim<0>::Smaller = DimDyn` — reducing below zero dimensions has no static representation.
-/// - `Dim<8>::Larger = DimDyn` — exceeding [`NDIM_MAX`] is caught at construction time and
+/// - `Dim<0>::Smaller = DimDyn` - reducing below zero dimensions has no static representation.
+/// - `Dim<8>::Larger = DimDyn` - exceeding [`NDIM_MAX`] is caught at construction time and
 ///   returns an error; the type maps to `DimDyn` to keep the trait implementable.
 ///
 /// # Example: static vs dynamic dimension tracking
@@ -58,13 +58,13 @@ pub const NDIM_MAX: usize = 8;
 /// // Returns Err if a.ndim() != 2.
 /// let a2d = a.to_dim::<Dim<2>>()?;
 ///
-/// // insert_axis(0): usize arg → D::Larger = Dim<3>
+/// // insert_axis(0): usize arg -> D::Larger = Dim<3>
 /// let a3d = a2d.insert_axis(0);
 ///
-/// // reshape_view([6u64]): [u64; 1] arg → Dim<1> output
+/// // reshape_view([6u64]): [u64; 1] arg -> Dim<1> output
 /// let flat = a3d.reshape_view([6u64]);
 ///
-/// // reshape_view(&shape[..]): &[u64] arg → DimDyn output
+/// // reshape_view(&shape[..]): &[u64] arg -> DimDyn output
 /// let flat_dyn = flat.reshape_view(&[6u64][..]);
 /// assert_eq!(flat_dyn.shape(), &[6]);
 /// # Ok::<(), jix::Error>(())
@@ -189,11 +189,11 @@ impl ndarray::IntoDimension for DimDyn {
 ///
 /// # Neighbors
 ///
-/// `Dim<N>::Smaller = Dim<N-1>` (for N ≥ 1; `Dim<0>::Smaller = DimDyn`).
-/// `Dim<N>::Larger  = Dim<N+1>` (for N ≤ 7; `Dim<8>::Larger  = DimDyn`).
+/// `Dim<N>::Smaller = Dim<N-1>` (for N >= 1; `Dim<0>::Smaller = DimDyn`).
+/// `Dim<N>::Larger  = Dim<N+1>` (for N <= 7; `Dim<8>::Larger  = DimDyn`).
 ///
 /// This means that N consecutive `insert_axis(0)` calls on a `Dim<M>` array produce a
-/// `Dim<M+N>` result, as long as `M + N ≤ 8`.
+/// `Dim<M+N>` result, as long as `M + N <= 8`.
 #[derive(Clone)]
 pub struct Dim<const NDIM: usize>([u64; NDIM]);
 impl<const NDIM: usize> Dim<NDIM> {
@@ -266,12 +266,12 @@ impl_dim!(8, nd_dim = ndarray::IxDyn, smaller = Dim<7>, larger = DimDyn);
 ///
 /// | Type | `Dimension` | Notes |
 /// |---|---|---|
-/// | Any `D: Dimension` | `D` | Identity — a dimension is already a dimension. |
+/// | Any `D: Dimension` | `D` | Identity - a dimension is already a dimension. |
 /// | `u64` | `Dim<1>` | Treated as a 1-D shape `[n]`. |
 /// | `[u64; N]` / `&[u64; N]` | `Dim<N>` | Fixed-size array, `N = 0..=8`. |
 /// | `(u64,)` .. `(u64, u64, u64, u64, u64, u64, u64, u64)` | `Dim<1>` .. `Dim<8>` | Tuples up to 8 elements. |
 /// | `()` | `Dim<0>` | Zero-dimensional (scalar) shape. |
-/// | `&[u64]` / `&Vec<u64>` | `DimDyn` | Slice/vec — ndim only known at runtime. |
+/// | `&[u64]` / `&Vec<u64>` | `DimDyn` | Slice/vec - ndim only known at runtime. |
 /// | `ndarray::Dim<[usize; N]>` (N=0..=6) | `Dim<N>` | ndarray static dimension. |
 /// | `ndarray::IxDyn` | `DimDyn` | ndarray dynamic dimension. |
 ///

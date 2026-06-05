@@ -19,13 +19,13 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 ///        |  d0  |  d1  |  d2  |
 /// ```
 ///
-/// * Gap `0` — before the first input dimension.
-/// * Gap `k` — between input dimensions `k-1` and `k`.
-/// * Gap `orig_ndim` — after the last input dimension.
+/// * Gap `0` - before the first input dimension.
+/// * Gap `k` - between input dimensions `k-1` and `k`.
+/// * Gap `orig_ndim` - after the last input dimension.
 ///
 /// Each occurrence of a gap index inserts one new length-1 dimension at that position. Duplicate
 /// gap indices are allowed and each adds another dimension at the same gap. The order of values in
-/// `axis` does not matter — only the multiset of gap indices matters. Valid gap indices are
+/// `axis` does not matter - only the multiset of gap indices matters. Valid gap indices are
 /// `0..=orig_ndim`.
 ///
 /// Output dtype equals the input dtype.
@@ -61,14 +61,14 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 ///
 /// let a = Array::compact_array(&array![1i32, 2, 3])?; // shape [3], Dim<1>
 ///
-/// // usize → output D = Dim<2> (one more than input Dim<1>)
+/// // usize -> output D = Dim<2> (one more than input Dim<1>)
 /// assert_eq!(a.as_ref().insert_axis(0).shape(), &[1, 3]);
 /// assert_eq!(a.as_ref().insert_axis(1).shape(), &[3, 1]);
 ///
-/// // [usize; 2] → output D = Dim<3> (two more than input Dim<1>)
+/// // [usize; 2] -> output D = Dim<3> (two more than input Dim<1>)
 /// assert_eq!(a.as_ref().insert_axis([0, 1]).shape(), &[1, 3, 1]);
 ///
-/// // &[usize] → output D = DimDyn
+/// // &[usize] -> output D = DimDyn
 /// let gaps = vec![0, 1];
 /// assert_eq!(a.insert_axis(gaps.as_slice()).shape(), &[1, 3, 1]);
 /// # Ok::<(), jix::Error>(())
@@ -100,8 +100,8 @@ where
 
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
-        // the last input dim".  Duplicates are allowed - each occurrence inserts one additional
-        // dim at that gap.  Valid range: 0..=orig_ndim.
+        // the last input dim". Duplicates are allowed - each occurrence inserts one additional
+        // dim at that gap. Valid range: 0..=orig_ndim.
         for &ax in &axes {
             ensure!(
                 ax <= orig_ndim,
@@ -188,7 +188,7 @@ where
         // order as without it.
         //
         // Therefore we simply strip all inserted dims from `index` and forward the
-        // remaining ranges to the inner storage unchanged.  No temporary buffer or
+        // remaining ranges to the inner storage unchanged. No temporary buffer or
         // element rearrangement is needed.
         let mut inner_index = DimArray::new();
         for (dim, index) in index.iter().enumerate() {

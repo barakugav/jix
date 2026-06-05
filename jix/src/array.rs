@@ -160,15 +160,15 @@ use crate::{
 /// # Element type tracking
 ///
 /// `S::ElementType` records the scalar element type at the type level. When the element type is
-/// statically known, `S::ElementType = Ty<T>`, and all element-wise operations — arithmetic,
-/// comparisons, reductions, type casts — become available. When the element type is only known
+/// statically known, `S::ElementType = Ty<T>`, and all element-wise operations - arithmetic,
+/// comparisons, reductions, type casts - become available. When the element type is only known
 /// at runtime (e.g. for arrays loaded from files), `S::ElementType = TypeDyn`, and those
 /// operations are not available until the type is asserted.
 ///
 /// Arrays constructed from typed sources automatically carry `Ty<T>`: `compact_array(&array![1.0f32])`
 /// returns `Array<Compact<Ty<f32>, Dim<1>>>`. Arrays loaded from disk carry `TypeDyn`. Use
-/// [`to_typed::<T>()`](Array::to_typed) to assert the expected element type — validated
-/// against the stored dtype at runtime — and recover `Ty<T>`. Use
+/// [`to_typed::<T>()`](Array::to_typed) to assert the expected element type - validated
+/// against the stored dtype at runtime - and recover `Ty<T>`. Use
 /// [`to_type_dyn()`](Array::to_type_dyn) to erase the static element type.
 ///
 /// # Dimension type tracking
@@ -1166,7 +1166,7 @@ where
     ///
     /// This method wraps the storage in a [`ToDim<S, D>`](crate::ops::ToDim) adaptor and works
     /// for any `S: ArrayStorage`. For storages that implement [`DimensionChange`], prefer
-    /// [`into_dim`](crate::Array::into_dim) instead — it replaces the `D` parameter in-place
+    /// [`into_dim`](crate::Array::into_dim) instead - it replaces the `D` parameter in-place
     /// without adding a wrapper layer.
     ///
     /// See [`to_dim_dyn`](Self::to_dim_dyn).
@@ -1208,7 +1208,7 @@ where
     ///
     /// Like `to_dim`, this wraps the storage in a [`ToDim`](crate::ops::ToDim) adaptor. For
     /// storages that implement [`DimensionChange`], prefer
-    /// [`into_dim_dyn`](crate::Array::into_dim_dyn) instead — it replaces the `D` parameter
+    /// [`into_dim_dyn`](crate::Array::into_dim_dyn) instead - it replaces the `D` parameter
     /// in-place without adding a wrapper layer.
     ///
     /// After calling `to_dim_dyn`, subsequent shape-changing operations will produce

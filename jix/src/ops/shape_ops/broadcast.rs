@@ -15,7 +15,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// the single element is repeated `shape[d]` times). Any other combination is an error.
 ///
 /// Output dtype equals the input dtype. Output shape equals `shape`. `Broadcast<S>` carries
-/// `type Dimension = S::Dimension` — broadcasting does not change the number of axes so the
+/// `type Dimension = S::Dimension` - broadcasting does not change the number of axes so the
 /// dimension type is preserved unchanged.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.

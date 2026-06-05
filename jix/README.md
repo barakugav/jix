@@ -16,13 +16,13 @@ use ndarray::array;
 // Compress a 2-D f32 ndarray into block-compressed storage.
 let a = Array::compact_array(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 
-// Build a lazy pipeline — no data is read yet.
+// Build a lazy pipeline - no data is read yet.
 // The full chain is a single static type:
 //     Array<Sub<Sum<Exp<Compact>>, Scalar<f32>>>
 let result = a.exp().sum(0) - 1.0;
 
 // Materialize and persist. Blocks are decompressed, transformed,
-// and re-compressed one at a time — no full copy in memory,
+// and re-compressed one at a time - no full copy in memory,
 // not even the compressed form of the full result.
 result.write_to_file("result.jix")?;
 ```
@@ -35,9 +35,9 @@ The storage type `S` carries the full operation chain at the type level:
 
 ```text
 Array<Compact>
-  .neg()                 → Array<Neg<Compact>>
-  .reshape_view(...)     → Array<Reshape<Neg<Compact>>>
-  .permute_axes(&[1, 0]) → Array<PermuteAxes<Reshape<...>>>
-  .sum(0)                → Array<Sum<PermuteAxes<...>>>
-  .copy()?               → Array<Compact>   ← materialize
+  .neg()                 -> Array<Neg<Compact>>
+  .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
+  .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
+  .sum(0)                -> Array<Sum<PermuteAxes<...>>>
+  .copy()?               -> Array<Compact>   <- materialize
 ```

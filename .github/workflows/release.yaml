@@ -1,0 +1,286 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "dry run"
+        type: boolean
+        required: false
+        default: true
+      publish-rs-macros:
+        description: "publish jix-macros crate"
+        type: boolean
+        required: false
+        default: true
+      publish-rs-core:
+        description: "publish jix crate"
+        type: boolean
+        required: false
+        default: true
+      publish-py:
+        description: "publish jix Python package"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  rs-macros:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.publish-rs-macros }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.89.0
+      - name: Publish
+        # we would prefer to use `cargo publish --dry-run`, but when the package has path dependencies, it doesn't work.
+        run: |
+          if [[ "${{ inputs.dry-run }}" == "false" ]]; then
+            cargo publish
+          else
+            cargo build
+          fi
+        working-directory: jix-macros
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  rs-core:
+    runs-on: ubuntu-latest
+    needs: rs-macros
+    if: >-
+      ${{ inputs.publish-rs-core
+          && (needs.rs-macros.result == 'success' || needs.rs-macros.result == 'skipped') }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.89.0
+      - name: Publish
+        # we would prefer to use `cargo publish --dry-run`, but when the package has path dependencies, it doesn't work.
+        run: |
+          if [[ "${{ inputs.dry-run }}" == "false" ]]; then
+            cargo publish
+          else
+            cargo build
+          fi
+        working-directory: jix
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  py-wheels-linux:
+    runs-on: ${{ matrix.platform.runner }}
+    if: ${{ inputs.publish-py }}
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-22.04
+            target: x86_64
+          - runner: ubuntu-22.04
+            target: x86
+          - runner: ubuntu-22.04
+            target: aarch64
+          - runner: ubuntu-22.04
+            target: armv7
+          - runner: ubuntu-22.04
+            target: s390x
+          - runner: ubuntu-22.04
+            target: ppc64le
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+          manylinux: auto
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-linux-${{ matrix.platform.target }}
+          path: dist
+
+  py-wheels-musllinux:
+    runs-on: ${{ matrix.platform.runner }}
+    if: ${{ inputs.publish-py }}
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-22.04
+            target: x86_64
+          - runner: ubuntu-22.04
+            target: x86
+          - runner: ubuntu-22.04
+            target: aarch64
+          - runner: ubuntu-22.04
+            target: armv7
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+          manylinux: musllinux_1_2
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-musllinux-${{ matrix.platform.target }}
+          path: dist
+
+  py-wheels-windows:
+    runs-on: ${{ matrix.platform.runner }}
+    if: ${{ inputs.publish-py }}
+    strategy:
+      matrix:
+        platform:
+          - runner: windows-latest
+            target: x64
+            python_arch: x64
+          - runner: windows-latest
+            target: x86
+            python_arch: x86
+          - runner: windows-11-arm
+            target: aarch64
+            python_arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.platform.python_arch }}
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-windows-${{ matrix.platform.target }}
+          path: dist
+
+  py-wheels-macos:
+    runs-on: ${{ matrix.platform.runner }}
+    if: ${{ inputs.publish-py }}
+    strategy:
+      matrix:
+        platform:
+          - runner: macos-15-intel
+            target: x86_64
+          - runner: macos-latest
+            target: aarch64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-macos-${{ matrix.platform.target }}
+          path: dist
+
+  py-sdist:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.publish-py }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: Upload sdist
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-sdist
+          path: dist
+
+  py-docs:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.publish-py }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Install docs dependencies
+        run: pip install -r scripts/dev_requirements.txt
+      - name: Build and install jix-py
+        run: maturin develop
+        working-directory: jix-py
+      - name: Generate .pyi stubs
+        run: cargo run --bin gen_pyi
+        working-directory: jix-py
+      - name: Build site
+        run: mkdocs build --strict
+        working-directory: jix-py
+      - name: Package site
+        run: |
+          cd jix-py/site
+          zip -r ../../site.zip .
+      - name: Upload site
+        uses: actions/upload-artifact@v6
+        with:
+          name: docs-site
+          path: site.zip
+
+  py-publish:
+    runs-on: ubuntu-latest
+    needs:
+      - rs-core
+      - py-wheels-linux
+      - py-wheels-musllinux
+      - py-wheels-windows
+      - py-wheels-macos
+      - py-sdist
+      - py-docs
+    if: >-
+      ${{ inputs.publish-py
+          && (needs.rs-core.result == 'success' || needs.rs-core.result == 'skipped')
+          && needs.py-wheels-linux.result == 'success'
+          && needs.py-wheels-musllinux.result == 'success'
+          && needs.py-wheels-windows.result == 'success'
+          && needs.py-wheels-macos.result == 'success'
+          && needs.py-sdist.result == 'success'
+          && needs.py-docs.result == 'success' }}
+    permissions:
+      # Use to sign the release artifacts
+      id-token: write
+      # Used to upload release artifacts
+      contents: write
+      # Used to generate artifact attestation
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v7
+      - name: Generate artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: "wheels-*/*"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Publish to PyPI
+        if: ${{ inputs.dry-run == false }}
+        run: uv publish 'wheels-*/*'
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}

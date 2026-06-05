@@ -1,5 +1,5 @@
 [package]
-name = "jix-pyo3"
+name = "jix-python"
 version = "0.0.0"
 authors = ["Barak Ugav <barakugav@gmail.com>"]
 edition = "2024"

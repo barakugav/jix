@@ -10,7 +10,7 @@ use crate::{Array, ArrayParams, ArrayStorage};
 /// Returned by [`Array::maybe_compact`] and [`Array::maybe_compact_with`]. The
 /// adaptor handles two cases transparently:
 ///
-/// - **Already compact**: the original storage is kept as is — no copy or re-compression.
+/// - **Already compact**: the original storage is kept as is - no copy or re-compression.
 /// - **Not compact** (lazy views, op chains, etc.): the array is materialized
 ///   via `copy_with` into a new [`Compact`] block-table.
 ///

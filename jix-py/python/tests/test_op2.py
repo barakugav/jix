@@ -12,7 +12,6 @@ Mixed-dtype section verifies the automatic casting / dispatch rules:
 
 import numpy as np
 import pytest
-import jix
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
@@ -27,6 +26,8 @@ from tests_util import (
     op_safe_non_zero_element_strategy,
     uints,
 )
+
+import jix
 
 
 @pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
@@ -46,9 +47,7 @@ def test_add_custom_inputs():
     za = jix.compact(d)
     check(za + np.int64(10), d + 10)  # typed scalar, broadcast
     check(np.int64(10) + za, 10 + d)  # __radd__ (int64 natural)
-    check(
-        za + np.array([[10, 20, 30], [40, 50, 60]]), d + [[10, 20, 30], [40, 50, 60]]
-    )  # numpy array
+    check(za + np.array([[10, 20, 30], [40, 50, 60]]), d + [[10, 20, 30], [40, 50, 60]])  # numpy array
     check(za + [[10, 20, 30], [40, 50, 60]], d + [[10, 20, 30], [40, 50, 60]])  # list
     check(za + ((10, 20, 30), (40, 50, 60)), d + ((10, 20, 30), (40, 50, 60)))  # tuple
     check(jix.add(za, np.int64(10)), d + 10)  # free-function form
@@ -74,9 +73,7 @@ def test_add_custom_inputs():
     df32 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
     check(zaf32 + np.float32(10.0), df32 + np.float32(10.0))  # typed scalar, broadcast
-    check(
-        jix.add(np.float32(10.0), zaf32), np.float32(10.0) + df32
-    )  # scalar first via free-function
+    check(jix.add(np.float32(10.0), zaf32), np.float32(10.0) + df32)  # scalar first via free-function
     check(
         zaf32 + np.array([10.0, 20.0, 30.0], dtype=np.float32),
         df32 + np.array([10.0, 20.0, 30.0], dtype=np.float32),
@@ -125,9 +122,7 @@ def test_subtract_custom_inputs():
     df32 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
     check(zaf32 - np.float32(5.0), df32 - np.float32(5.0))
-    check(
-        jix.subtract(np.float32(100.0), zaf32), np.float32(100.0) - df32
-    )  # scalar first via free-function
+    check(jix.subtract(np.float32(100.0), zaf32), np.float32(100.0) - df32)  # scalar first via free-function
     check(
         zaf32 - np.array([1.0, 2.0, 3.0], dtype=np.float32),
         df32 - np.array([1.0, 2.0, 3.0], dtype=np.float32),
@@ -169,9 +164,7 @@ def test_multiply_custom_inputs():
     df32 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
     check(zaf32 * np.float32(2.0), df32 * np.float32(2.0))
-    check(
-        jix.multiply(np.float32(2.0), zaf32), np.float32(2.0) * df32
-    )  # scalar first via free-function
+    check(jix.multiply(np.float32(2.0), zaf32), np.float32(2.0) * df32)  # scalar first via free-function
 
     # complex128: Python complex scalar
     dc = np.array([1 + 2j, 3 + 4j], dtype=np.complex128)
@@ -186,9 +179,7 @@ def test_divide(dtype: np.dtype, data: DataObject):
     # Use non-zero strategy for both operands to avoid integer division-by-zero panics.
     # Mirrors Rust's test_op2!(div, ..., op_safe_non_zero_strategy).
     nz = op_safe_non_zero_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=nz), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
     result = za / zb
     # jix integer division truncates toward zero (Rust semantics); numpy // is floor division.
     # Cast through float64 and back to get truncation-toward-zero for all signed/unsigned combos.
@@ -231,9 +222,7 @@ def test_divide_custom_inputs():
     df32 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
     check_float(zaf32 / np.float32(2.0), df32 / np.float32(2.0))
-    check_float(
-        jix.divide(np.float32(60.0), zaf32), np.float32(60.0) / df32
-    )  # scalar first via free-function
+    check_float(jix.divide(np.float32(60.0), zaf32), np.float32(60.0) / df32)  # scalar first via free-function
     check_float(
         zaf32 / np.array([2.0, 4.0, 5.0], dtype=np.float32),
         df32 / np.array([2.0, 4.0, 5.0], dtype=np.float32),
@@ -258,9 +247,7 @@ def test_power_custom_inputs():
     # float32: typed numpy scalars/arrays required
     df32 = np.array([2.0, 3.0, 4.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
-    check(
-        jix.power(zaf32, np.float32(2.0)), df32 ** np.float32(2.0)
-    )  # scalar, broadcast
+    check(jix.power(zaf32, np.float32(2.0)), df32 ** np.float32(2.0))  # scalar, broadcast
     check(jix.power(np.float32(2.0), zaf32), np.float32(2.0) ** df32)  # scalar first
     check(
         jix.power(zaf32, np.array([3.0, 2.0, 0.5], dtype=np.float32)),
@@ -280,7 +267,7 @@ def test_power_custom_inputs():
 # Mixed-dtype op2 tests
 #
 # The dispatch table is consulted left-to-right; the first impl where *both*
-# operands pass the CastKind::Safe rules is selected.  Expected result dtypes:
+# operands pass the CastKind::Safe rules is selected. Expected result dtypes:
 #   u8  + u16  -> u16   (UInt P1 -> UInt P2, safe same-rank)
 #   u8  + i32  -> i32   (UInt P1 -> Int P4, needs higher prec: P2 <= P4, ok)
 #   u8  + f32  -> f32   (UInt P1 -> Float P4, needs higher prec: P2 <= P4, ok)
@@ -321,9 +308,7 @@ def test_add_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
         label="arrays",
     )
     result = jix.add(za, zb)
-    assert result.dtype == np.dtype(expected_dtype), (
-        f"dtype: {result.dtype} != {expected_dtype}"
-    )
+    assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
     expected = np_a.astype(expected_dtype) + np_b.astype(expected_dtype)
     np.testing.assert_array_equal(result.numpy(), expected)
 
@@ -342,9 +327,7 @@ def test_multiply_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObjec
         label="arrays",
     )
     result = jix.multiply(za, zb)
-    assert result.dtype == np.dtype(expected_dtype), (
-        f"dtype: {result.dtype} != {expected_dtype}"
-    )
+    assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
     expected = np_a.astype(expected_dtype) * np_b.astype(expected_dtype)
     rtol = 1e-5 if np.issubdtype(expected_dtype, np.complexfloating) else 0.0
     np.testing.assert_allclose(result.numpy(), expected, rtol=rtol)

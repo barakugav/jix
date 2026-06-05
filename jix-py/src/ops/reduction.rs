@@ -8,7 +8,7 @@ fn keepdims_after_reduction(
 ) -> PyResult<ArrayAny> {
     // keepdims=true: re-insert singleton axes via insert_axis.
     // insert_axis uses gap indices in the space of the array it receives, so we must
-    // re-map: original sorted axis a_i → result-space gap (a_i - i).
+    // re-map: original sorted axis a_i -> result-space gap (a_i - i).
     let mut axes = original_reduced_axes.to_vec();
     axes.sort_unstable();
     let mapped_axes = axes

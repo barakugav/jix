@@ -1,0 +1,197 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+  workflow_dispatch: {}
+
+concurrency:
+  # on main, group = workflow-run_id
+  # on PR, group = workflow-PR_number
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      ############ Setup ############
+      - name: Repo checkout
+        uses: actions/checkout@v6
+      - name: Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.89.0
+          components: rustfmt, clippy
+          cache-workspaces: |
+            jix
+            jix-macros
+            jix/schema
+            jix-py
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.13
+          activate-environment: true
+      - name: Install Python dependencies
+        run: |
+          python -m ensurepip
+          uv pip install -r scripts/dev_requirements.txt
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+
+      ############ Format ############
+      - name: Format jix-schema
+        run: cargo fmt --all -- --check
+        working-directory: jix/schema
+      - name: Format jix-macros
+        run: cargo fmt --all -- --check
+        working-directory: jix-macros
+      - name: Format jix
+        run: cargo fmt --all -- --check
+        working-directory: jix
+      - name: Format jix-py (cargo)
+        run: cargo fmt --all -- --check
+        working-directory: jix-py
+      - name: Format jix-py (ruff)
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: --config .ruff.toml format --check --diff
+      - name: Check only ASCII
+        run: python scripts/check_only_ascii.py
+
+      ############ Build ############
+      - name: Build jix-schema
+        run: cargo build
+        working-directory: jix/schema
+      - name: Build jix-macros
+        run: cargo build
+        working-directory: jix-macros
+      - name: Build jix
+        run: cargo build
+        working-directory: jix
+      - name: Build jix-py
+        run: cargo build
+        working-directory: jix-py
+      # cargo check with feature powerset
+      - name: cargo check jix with feature powerset
+        run: cargo hack check --feature-powerset  --depth 2
+        working-directory: jix
+      # install jix-py into venv
+      - name: install jix-py
+        uses: PyO3/maturin-action@v1
+        with:
+          command: develop
+          args: --uv
+          sccache: "true"
+          working-directory: jix-py
+
+      ############ Linters ############
+      - name: Clippy jix-schema
+        uses: auguwu/clippy-action@1.4.0
+        with:
+          working-directory: jix/schema
+          check-args: --all-features
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clippy jix-macros
+        uses: auguwu/clippy-action@1.4.0
+        with:
+          working-directory: jix-macros
+          check-args: --all-features
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clippy jix
+        uses: auguwu/clippy-action@1.4.0
+        with:
+          working-directory: jix
+          check-args: --all-features
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clippy jix-py
+        uses: auguwu/clippy-action@1.4.0
+        with:
+          working-directory: jix-py
+          check-args: --all-features
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Ruff jix-py
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: --config .ruff.toml check
+      - name: Check schema is up to date
+        run: |
+          pushd schema; cargo run; popd
+          git diff --exit-code
+        working-directory: jix
+
+      ############ Tests ############
+      - name: Test jix
+        run: cargo test --all-features
+        working-directory: jix
+      - name: Test jix-py (Rust tests)
+        run: cargo test --all-features
+        working-directory: jix-py
+      - name: Test jix-py (Python tests)
+        run: pytest python/tests
+        working-directory: jix-py
+
+  rust-version-check-clippy:
+    # check that we can build using different rust versions:
+    # - the minimal rust version that is specified by this crate
+    # - the latest stable version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust-version: ["msrv", "stable"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install toml-cli using cargo
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: toml-cli
+          version: "^0.2"
+      - name: Determine Rust version
+        id: rust-version
+        run: |
+          if [ "${{ matrix.rust-version }}" = "stable" ]; then
+            rust_version="stable"
+          else
+            rust_version=$(toml get Cargo.toml package.rust-version --raw)
+          fi
+          echo "Rust version: '$rust_version'"
+          echo "rust_version=$rust_version" >> "$GITHUB_OUTPUT"
+        working-directory: jix
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ steps.rust-version.outputs.rust_version }}
+          components: clippy
+          cache-workspaces: |
+            jix
+            jix-py
+
+      - name: cargo check jix
+        run: cargo check --all-features
+        working-directory: jix
+      - name: cargo clippy jix
+        uses: auguwu/clippy-action@1.4.0
+        with:
+          working-directory: jix
+          check-args: --all-features
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: cargo check jix-py
+        run: cargo check --all-features
+        working-directory: jix-py
+      - name: cargo clippy jix-py
+        uses: auguwu/clippy-action@1.4.0
+        with:
+          working-directory: jix-py
+          check-args: --all-features
+          token: ${{ secrets.GITHUB_TOKEN }}
