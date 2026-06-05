@@ -53,14 +53,20 @@ where
 /// assert_eq!(c.shape(), &[3, 2]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Stack<ArraysT: ArraySequence> {
+pub struct Stack<ArraysT>
+where
+    ArraysT: ArraySequence,
+{
     arrays: ArraysT,
     stack_axis: usize,
 
-    shape: <ArraysT::FirstArrayDimension as crate::Dimension>::Larger,
+    shape: <ArraysT::Dimension as crate::Dimension>::Larger,
     blocks_layout: BlocksLayout,
 }
-impl<ArraysT: ArraySequence> Stack<ArraysT> {
+impl<ArraysT> Stack<ArraysT>
+where
+    ArraysT: ArraySequence,
+{
     /// Constructs a [`Stack`] storage. See the struct docs for semantics and examples.
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
         let narrays = arrays.narrays();
@@ -96,8 +102,7 @@ impl<ArraysT: ArraySequence> Stack<ArraysT> {
         let mut new_shape = DimArray::from_slice(shape0).unwrap();
         new_shape.insert(axis, narrays as u64);
         let new_shape =
-            <ArraysT::FirstArrayDimension as crate::Dimension>::Larger::from_slice(&new_shape)
-                .unwrap();
+            <ArraysT::Dimension as crate::Dimension>::Larger::from_slice(&new_shape).unwrap();
 
         let mut b_layout = arrays.spec(0).blocks_layout.clone();
         b_layout.block_shape_hint.insert(axis, 1);
@@ -121,8 +126,8 @@ impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
     ArraysT: ArraySequence,
 {
-    type ElementType = ArraysT::FirstArrayElementType;
-    type Dimension = <ArraysT::FirstArrayDimension as crate::Dimension>::Larger;
+    type ElementType = ArraysT::ElementType;
+    type Dimension = <ArraysT::Dimension as crate::Dimension>::Larger;
 
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         let shape = self.shape();
@@ -335,8 +340,12 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_dtype_mismatch_panics() {
-        let a = Array::compact_array(&array![1i32, 2]).unwrap();
-        let b = Array::compact_array(&array![1.0f32, 2.0]).unwrap();
+        let a = Array::compact_array(&array![1i32, 2])
+            .unwrap()
+            .into_type_dyn();
+        let b = Array::compact_array(&array![1.0f32, 2.0])
+            .unwrap()
+            .into_type_dyn();
         let _ = stack((a, b), 0);
     }
 

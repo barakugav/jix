@@ -10,8 +10,7 @@ macro_rules! define_array_op1_method {
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-            <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self).unwrap()
         }
@@ -38,8 +37,7 @@ macro_rules! define_array_op2_method {
         where
             S: crate::storage::ArrayStorageTyped,
             S2: crate::storage::ArrayStorageTyped<Dimension = S::Dimension>,
-            S::Item: $($trait)::+<S2::Item>,
-            <S::Item as $($trait)::+<S2::Item>>::Output: crate::dtype::Dtyped,
+            S::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
         }

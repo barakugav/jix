@@ -1,14 +1,14 @@
 #![cfg_attr(deny_warnings, deny(missing_docs))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! Procedural macros for the [`jix`] crate.
+//! Procedural macros for the [`jix`](https://docs.rs/jix) crate.
 //!
 //! ## `#[derive(Dtyped)]`
 //!
-//! Implements the [`jix::dtype::Dtyped`] trait for a `#[repr(C)]` or `#[repr(C, packed)]`
-//! struct, making it usable as an element type in a [`jix::Array`].
+//! Implements the `jix::dtype::Dtyped` trait for a `#[repr(C)]` or `#[repr(C, packed)]`
+//! struct, making it usable as an element type in a `jix::Array`.
 //!
-//! `Dtyped` maps the struct's layout to a [`jix::dtype::Dtype`] at compile time: it walks the
+//! `Dtyped` maps the struct's layout to a `jix::dtype::Dtype` at compile time: it walks the
 //! fields, computes byte offsets respecting C alignment rules (or packed layout when
 //! `#[repr(packed)]` is used), and records field names so that individual fields can be accessed
 //! as array views at runtime.

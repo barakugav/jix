@@ -1,6 +1,6 @@
 # jix (Python)
 
-Python bindings for the [`jix`](../jix/) Rust library. Built with [PyO3](https://pyo3.rs).
+Python bindings for the [`jix`](https://github.com/barakugav/jix) Rust library. Built with [PyO3](https://pyo3.rs).
 
 **Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each compressed independently.
 Only the blocks that overlap a read request are decompressed, so random access into large arrays is cheap.

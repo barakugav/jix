@@ -1211,8 +1211,7 @@ macro_rules! define_array_reduction_method {
         pub fn $method(self, axis: usize $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-            <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
         }
@@ -1223,8 +1222,7 @@ macro_rules! define_array_reduction_method {
         pub fn $method<Ax>(self, axis: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-            <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
             Ax: AxesArg,
         {
             $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
