@@ -35,7 +35,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// Standard Rust ranges convert to [`SliceItem`] automatically; negative-integer range
 /// literals work for Python-style end-relative indexing.
 ///
-/// `Slice<S>` carries `type Dimension = S::Dimension` — slicing does not change the number of
+/// `Slice<S>` carries `type Dimension = S::Dimension` - slicing does not change the number of
 /// axes so the dimension type is preserved unchanged.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
@@ -65,7 +65,7 @@ pub struct Slice<S: ArrayStorage> {
     array: S,
     /// Resolved slice for each dimension.
     slice: DimArray<DimSlice>,
-    /// `true` when every dimension has `step == 1`.  Enables a cheaper read path.
+    /// `true` when every dimension has `step == 1`. Enables a cheaper read path.
     no_steps: bool,
 
     shape: S::Dimension,
@@ -134,7 +134,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // storage - no temporary buffer is needed.
         //
         // When any dimension has `step > 1`, [`NdIter`] iterates over every combination of strided-dim
-        // output indices.  For each step:
+        // output indices. For each step:
         // * Strided dims use a single-element inner range for that step's position.
         // * Non-strided dims use the full translated range.
         // The inner read goes into a temporary buffer which is then scattered into `buf` via [`nd_copy`].
@@ -145,7 +145,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // Fast path: all dims have step == 1.
         //
         // Each requested output range [a, b) for dim d maps to inner range
-        // [start + a, start + b).  A single forwarded call suffices.
+        // [start + a, start + b). A single forwarded call suffices.
         // -----------------------------------------------------------------------
         if self.no_steps {
             let ndim = self.slice.len();
@@ -160,7 +160,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // General path: one or more dims have step > 1.
         //
         // We iterate over all combinations of strided-dim output indices with
-        // NdIter.  On each step we read from the inner storage (strided dims
+        // NdIter. On each step we read from the inner storage (strided dims
         // collapsed to a single-element range; non-strided dims as full ranges)
         // and scatter the result into `buf` using nd_copy.
         //
@@ -190,7 +190,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         //           dst_strides = C-order over out_shape)
         //
         // nd_copy iterates over inner_read_shape (1 for strided dims, full for non-
-        // strided).  The single step on strided dims is handled by dst_byte_offset
+        // strided). The single step on strided dims is handled by dst_byte_offset
         // already placing us at the right row/column; nd_copy takes care of the rest.
         // -----------------------------------------------------------------------
         let dtype = self.dtype();

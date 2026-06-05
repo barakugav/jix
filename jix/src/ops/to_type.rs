@@ -20,7 +20,7 @@ use crate::{Array, ArrayStorage, ElementType};
 /// [`Array::to_type_dyn`](crate::Array::to_type_dyn).
 ///
 /// For concrete block-compressed or plain storages that implement [`ElementTypeChange`], prefer
-/// [`Array::into_type`](crate::Array::into_type) instead — it re-tags the element type in-place
+/// [`Array::into_type`](crate::Array::into_type) instead - it re-tags the element type in-place
 /// without adding this wrapper layer.
 ///
 /// # Examples
@@ -36,13 +36,13 @@ use crate::{Array, ArrayStorage, ElementType};
 /// let a = Array::compact_array(&array![1.0f32, 2.0, 3.0])?;
 /// // a: Array<Compact<Ty<f32>, Dim<1>>>
 ///
-/// // Erase the static element type — always succeeds.
+/// // Erase the static element type - always succeeds.
 /// let dyn_a = a.to_type_dyn();
 /// // dyn_a: Array<ToType<Compact<Ty<f32>, Dim<1>>, TypeDyn>>
 /// // dyn_a: Array<Storage::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
 ///
-/// // Recover the concrete type — validated at runtime.
+/// // Recover the concrete type - validated at runtime.
 /// let typed_a = dyn_a.to_typed::<f32>()?;
 /// // typed_a: Array<ToType<ToType<..., TypeDyn>, Ty<f32>>>
 /// // typed_a: Array<Storage::ElementType = Ty<f32>>

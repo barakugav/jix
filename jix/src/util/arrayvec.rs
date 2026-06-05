@@ -94,7 +94,7 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
     /// Shortens the vector, keeping the first `len` elements and dropping
     /// the rest.
     ///
-    /// If `len` is greater than the vector’s current length this has no
+    /// If `len` is greater than the vector's current length this has no
     /// effect.
     pub fn truncate(&mut self, new_len: usize) {
         let len = self.len();
@@ -164,7 +164,7 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
         self.data = new_data;
     }
 
-    /// Set the vector’s length without dropping or moving out elements
+    /// Set the vector's length without dropping or moving out elements
     pub unsafe fn set_len(&mut self, length: usize) {
         debug_assert!(length <= self.capacity());
         self.len = length as LenUint;

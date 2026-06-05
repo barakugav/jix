@@ -51,13 +51,13 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 ///
 /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
 ///
-/// // [u64; 1] → output D = Dim<1>: compiler knows the result is 1-D
+/// // [u64; 1] -> output D = Dim<1>: compiler knows the result is 1-D
 /// assert_eq!(a.as_ref().reshape_view([6u64]).shape(), &[6]);
 ///
-/// // (u64, u64) → output D = Dim<2>: compiler knows the result is 2-D
+/// // (u64, u64) -> output D = Dim<2>: compiler knows the result is 2-D
 /// assert_eq!(a.as_ref().reshape_view((3u64, 2u64)).shape(), &[3, 2]);
 ///
-/// // &[u64] → output D = DimDyn: ndim only known at runtime
+/// // &[u64] -> output D = DimDyn: ndim only known at runtime
 /// let new_shape = vec![6u64];
 /// assert_eq!(a.as_ref().reshape_view(new_shape.as_slice()).shape(), &[6]);
 ///
@@ -171,7 +171,7 @@ where
         // Core concept
         // -----------------------------------------------------------------------
         // A reshape does not move any data - it only reinterprets the flat,
-        // C-order (row-major) element sequence under a new shape.  Element `k`
+        // C-order (row-major) element sequence under a new shape. Element `k`
         // in the flattened array is the same physical byte regardless of whether
         // the array is shaped [A, B] or [C, D] (as long as A*B == C*D).
         //
@@ -184,7 +184,7 @@ where
         // Dimension matching: "same logical stride"
         // -----------------------------------------------------------------------
         // Two shapes share a "dimension boundary" when a particular stride value
-        // appears in both stride arrays.  "Logical stride" here means the number
+        // appears in both stride arrays. "Logical stride" here means the number
         // of *elements* between successive steps along a dimension (i.e. strides
         // computed with itemsize = 1).
         //
@@ -198,13 +198,13 @@ where
         //
         // When a new dim is matched to an orig dim it means that consecutive
         // steps along the new dim correspond to exactly the same memory layout as
-        // consecutive steps along the orig dim.  The requested index range for
+        // consecutive steps along the orig dim. The requested index range for
         // that new dim can therefore be forwarded verbatim as the read range for
         // the corresponding orig dim.
         //
         // The matching scan (`same_logical_stride`) advances through orig dims
         // monotonically: for each new dim (left to right) it looks for the next
-        // orig dim with the same stride.  This preserves the ordering invariant
+        // orig dim with the same stride. This preserves the ordering invariant
         // that matched pairs always respect the nesting of C-order dimensions.
         //
         // -----------------------------------------------------------------------
@@ -213,13 +213,13 @@ where
         // We split all new dims into two groups:
         //
         //   MATCHED dims   - new dim j is paired with orig dim i.
-        //                    Their index ranges are forwarded directly.  A single
+        //                    Their index ranges are forwarded directly. A single
         //                    call to the underlying storage can cover the full
         //                    requested range along all matched dims at once.
         //
         //   UNMATCHED dims - new dim j crosses an original dimension boundary
         //                    (e.g. in [6]->[2,3] neither new dim aligns with the
-        //                    single orig dim).  We cannot express an arbitrary
+        //                    single orig dim). We cannot express an arbitrary
         //                    sub-region of an unmatched dim as a contiguous range
         //                    in the original shape, so we handle them by iterating
         //                    over every index along those dims one step at a time.
@@ -251,8 +251,8 @@ where
         //      unmatched orig dim, full range for matched dims).
         //
         //   3. COPY from `tmp_buf` into the correct position in `buf` using
-        //      `nd_copy`.  The source shape is `new_read_shape` (the matched dims'
-        //      requested sizes, 1 elsewhere).  The destination pointer is offset
+        //      `nd_copy`. The source shape is `new_read_shape` (the matched dims'
+        //      requested sizes, 1 elsewhere). The destination pointer is offset
         //      by the byte contribution of the unmatched dims' current position:
         //
         //          dst_byte_offset = sum_{unmatched new dim d} idx[d] * dst_strides[d]

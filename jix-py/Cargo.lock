@@ -305,7 +305,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "jix-pyo3"
+name = "jix-python"
 version = "0.0.0"
 dependencies = [
  "arrayvec",

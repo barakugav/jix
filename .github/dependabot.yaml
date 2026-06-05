@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Cargo
+  - package-ecosystem: cargo
+    directories:
+      - jix/
+      - jix-macros/
+      - jix/schema/
+      - jix-py/
+    schedule:
+      interval: monthly
+    groups:
+      rust-patch-updates:
+        update-types:
+          - patch
+
+  # Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

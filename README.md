@@ -1,6 +1,6 @@
 # jix
 
-A multi-dimensional array library with block-compressed, lazy-evaluated storage — written in Rust, with Python bindings.
+A multi-dimensional array library with block-compressed, lazy-evaluated storage - written in Rust, with Python bindings.
 
 **Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each compressed independently.
 Only the blocks that overlap a read request are decompressed, so random access into large arrays is cheap.
@@ -16,13 +16,13 @@ use ndarray::array;
 // Compress a 2-D f32 ndarray into block-compressed storage.
 let a = Array::compact_array(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 
-// Build a lazy pipeline — no data is read yet.
+// Build a lazy pipeline - no data is read yet.
 // The full chain is a single static type:
 //     Array<Sub<Sum<Exp<Compact>>, Scalar<f32>>>
 let result = a.exp().sum(0) - 1.0;
 
 // Materialize and persist. Blocks are decompressed, transformed,
-// and re-compressed one at a time — no full copy in memory.
+// and re-compressed one at a time - no full copy in memory.
 result.copy()?.write_to_file("result.jix")?;
 ```
 
@@ -35,7 +35,7 @@ import numpy as np
 # Compress a NumPy array into block-compressed storage.
 a = jix.compact(np.random.rand(1024, 1024).astype(np.float32))
 
-# Build a lazy pipeline — nothing is read yet.
+# Build a lazy pipeline - nothing is read yet.
 result = (a - a.mean(axis=0)) / a.std(axis=0)
 
 # Materialize: decompress, transform, and write to disk in one pass.

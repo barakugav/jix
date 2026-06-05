@@ -1,10 +1,10 @@
 #![allow(clippy::assertions_on_constants)]
 
+use jix_core::dtype::{Alignment, Dtype as jixDtype, DtypeScalarKind, Itemsize, DTYPE_MAX_NDIM};
 use numpy::{PyArrayDescr, PyArrayDescrMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
-use jix_core::dtype::{Alignment, Dtype as jixDtype, DtypeScalarKind, Itemsize, DTYPE_MAX_NDIM};
 
 use crate::util::DimArray;
 
@@ -190,9 +190,9 @@ pub(crate) fn dtype_from_any(dtype: &Bound<PyAny>) -> PyResult<jixDtype> {
 
 #[cfg(test)]
 mod tests {
+    use jix_core::dtype::{Dtype as jixDtype, DtypeScalarKind};
     use numpy::PyArrayDescrMethods;
     use pyo3::Python;
-    use jix_core::dtype::{Dtype as jixDtype, DtypeScalarKind};
 
     use super::*;
 

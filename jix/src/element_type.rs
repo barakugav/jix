@@ -9,9 +9,9 @@ use crate::util::assert_unchecked_eq;
 /// Every [`ArrayStorage`](crate::ArrayStorage) has an associated `type ElementType: ElementType`. There are two
 /// implementors:
 ///
-/// - [`Ty<T>`] — the concrete element type `T` is known at compile time. All element-wise
+/// - [`Ty<T>`] - the concrete element type `T` is known at compile time. All element-wise
 ///   operations (arithmetic, comparisons, reductions, cast) are available.
-/// - [`TypeDyn`] — the element type is only available at runtime. Arrays loaded from disk
+/// - [`TypeDyn`] - the element type is only available at runtime. Arrays loaded from disk
 ///   start with this. Call [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert
 ///   the expected element type and recover compile-time tracking.
 pub trait ElementType: Clone + Send + Sync {

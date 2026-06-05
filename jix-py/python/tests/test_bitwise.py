@@ -47,9 +47,7 @@ def _as_uint(x: int, bits: int) -> int:
 
 def _ref_count_ones(a: np.ndarray) -> np.ndarray:
     bits = a.itemsize * 8
-    return np.vectorize(
-        lambda x: bin(_as_uint(int(x), bits)).count("1"), otypes=[np.uint32]
-    )(a)
+    return np.vectorize(lambda x: bin(_as_uint(int(x), bits)).count("1"), otypes=[np.uint32])(a)
 
 
 def _ref_count_zeros(a: np.ndarray) -> np.ndarray:
@@ -141,9 +139,7 @@ def test_logical_not(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", _int_bool_dtypes)
 @given(st.data())
 def test_bitwise_not(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array"
-    )
+    np_a, za = data.draw(carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array")
     assert_array_matches(jix.bitwise_not(za), ~np_a, data=data)
 
 
@@ -151,36 +147,28 @@ def test_bitwise_not(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
 def test_count_ones(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array"
-    )
+    np_a, za = data.draw(carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array")
     assert_array_matches(jix.count_ones(za), _ref_count_ones(np_a), data=data)
 
 
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
 def test_count_zeros(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array"
-    )
+    np_a, za = data.draw(carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array")
     assert_array_matches(jix.count_zeros(za), _ref_count_zeros(np_a), data=data)
 
 
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
 def test_leading_zeros(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array"
-    )
+    np_a, za = data.draw(carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array")
     assert_array_matches(jix.leading_zeros(za), _ref_leading_zeros(np_a), data=data)
 
 
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
 def test_trailing_zeros(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array"
-    )
+    np_a, za = data.draw(carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array")
     assert_array_matches(jix.trailing_zeros(za), _ref_trailing_zeros(np_a), data=data)
 
 
@@ -188,18 +176,14 @@ def test_trailing_zeros(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", _multibyte_int_dtypes)
 @given(st.data())
 def test_swap_bytes(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array"
-    )
+    np_a, za = data.draw(carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array")
     assert_array_matches(jix.swap_bytes(za), np_a.byteswap(), data=data)
 
 
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
 def test_reverse_bits(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array"
-    )
+    np_a, za = data.draw(carray_strategy(dtype, element_st=any_element_strategy(dtype)), label="array")
     assert_array_matches(jix.reverse_bits(za), _ref_reverse_bits(np_a), data=data)
 
 
@@ -211,27 +195,21 @@ def test_reverse_bits(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", _int_bool_dtypes)
 @given(st.data())
 def test_bitwise_and(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=any_element_strategy(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=any_element_strategy(dtype)), label="arrays")
     assert_array_matches(jix.bitwise_and(za, zb), np_a & np_b, data=data)
 
 
 @pytest.mark.parametrize("dtype", _int_bool_dtypes)
 @given(st.data())
 def test_bitwise_or(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=any_element_strategy(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=any_element_strategy(dtype)), label="arrays")
     assert_array_matches(jix.bitwise_or(za, zb), np_a | np_b, data=data)
 
 
 @pytest.mark.parametrize("dtype", _int_bool_dtypes)
 @given(st.data())
 def test_bitwise_xor(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=any_element_strategy(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=any_element_strategy(dtype)), label="arrays")
     assert_array_matches(jix.bitwise_xor(za, zb), np_a ^ np_b, data=data)
 
 
@@ -240,9 +218,7 @@ def test_bitwise_xor(dtype: np.dtype, data: DataObject):
 @given(st.data())
 def test_bitwise_left_shift(dtype: np.dtype, data: DataObject):
     shift_st = shift_safe_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=shift_st), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=shift_st), label="arrays")
     assert_array_matches(jix.bitwise_left_shift(za, zb), np_a << np_b, data=data)
 
 
@@ -250,9 +226,7 @@ def test_bitwise_left_shift(dtype: np.dtype, data: DataObject):
 @given(st.data())
 def test_bitwise_right_shift(dtype: np.dtype, data: DataObject):
     shift_st = shift_safe_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=shift_st), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=shift_st), label="arrays")
     assert_array_matches(jix.bitwise_right_shift(za, zb), np_a >> np_b, data=data)
 
 
@@ -269,9 +243,7 @@ def test_bitwise_rotate_left(dtype: np.dtype, data: DataObject):
         ),
         label="arrays",
     )
-    assert_array_matches(
-        jix.bitwise_rotate_left(za, zb), _ref_rotate_left(np_a, np_b), data=data
-    )
+    assert_array_matches(jix.bitwise_rotate_left(za, zb), _ref_rotate_left(np_a, np_b), data=data)
 
 
 @pytest.mark.parametrize("dtype", _int_dtypes)
@@ -286,9 +258,7 @@ def test_bitwise_rotate_right(dtype: np.dtype, data: DataObject):
         ),
         label="arrays",
     )
-    assert_array_matches(
-        jix.bitwise_rotate_right(za, zb), _ref_rotate_right(np_a, np_b), data=data
-    )
+    assert_array_matches(jix.bitwise_rotate_right(za, zb), _ref_rotate_right(np_a, np_b), data=data)
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +321,7 @@ def test_bitwise_and_mixed_dtypes(dtype_a, dtype_b, expected_dtype):
     zb = jix.compact(np_b)
     result = jix.bitwise_and(za, zb)
     assert result.dtype == np.dtype(expected_dtype), (
-        f"bitwise_and({dtype_a.__name__}, {dtype_b.__name__}): "
-        f"got {result.dtype}, expected {expected_dtype.__name__}"
+        f"bitwise_and({dtype_a.__name__}, {dtype_b.__name__}): got {result.dtype}, expected {expected_dtype.__name__}"
     )
     expected = np_a.astype(expected_dtype) & np_b.astype(expected_dtype)
     np.testing.assert_array_equal(result.numpy(), expected)

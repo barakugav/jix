@@ -10,7 +10,7 @@ Jix is a high-performance multi-dimensional array library written in Rust with P
 
 - **`jix/`** - Core Rust library (`Array<S>`, dtype system, ops, storage, archive)
 - **`jix-macros/`** - Procedural macros used by the core library
-- **`jix-py/`** - PyO3 Python bindings (`jix-pyo3` crate, publishes as `jix` Python package)
+- **`jix-py/`** - PyO3 Python bindings (`jix-python` crate, publishes as `jix` Python package)
 
 There is no workspace-level `Cargo.toml`; each crate is built independently.
 
@@ -21,7 +21,7 @@ There is no workspace-level `Cargo.toml`; each crate is built independently.
 cargo build -p jix
 
 # Build Python extension
-cargo build -p jix-pyo3
+cargo build -p jix-python
 
 # Run Rust tests (core)
 cargo test -p jix
@@ -39,7 +39,7 @@ cd jix-py && maturin develop
 cd jix-py && pytest python/tests/
 
 # Generate Python type stubs (.pyi)
-cargo run -p jix-pyo3 --bin gen_pyi
+cargo run -p jix-python --bin gen_pyi
 ```
 
 ## Architecture
@@ -51,8 +51,8 @@ The central type is `Array<S>` where `S` implements `ArrayStorage`:
 - `shape() -> &[u64]`, `dtype() -> &Dtype`
 
 `ArrayStorage` has two associated types:
-- `type ElementType: ElementType` — compile-time element type, either `Ty<T>` (concrete scalar known at compile time) or `TypeDyn` (runtime only, for arrays loaded from disk).
-- `type Dimension: Dimension` — compile-time dimension, either `Dim<N>` (known statically) or `DimDyn`.
+- `type ElementType: ElementType` - compile-time element type, either `Ty<T>` (concrete scalar known at compile time) or `TypeDyn` (runtime only, for arrays loaded from disk).
+- `type Dimension: Dimension` - compile-time dimension, either `Dim<N>` (known statically) or `DimDyn`.
 
 `ArrayStorageTyped` is a supertrait shorthand for `ArrayStorage<ElementType = Ty<T>>`. All element-wise operations (arithmetic, comparisons, cast, reductions) require it.
 
@@ -74,15 +74,15 @@ Defined in `jix/src/codec.rs`; codec/filter parameters serialized in protobuf he
 
 ### Type System
 
-**Runtime element type — `Dtype`** (in `jix/src/dtype.rs`):
+**Runtime element type - `Dtype`** (in `jix/src/dtype.rs`):
 - Scalar types: `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f16` (optional), `f32/f64`, `Complex<f32>/Complex<f64>` (optional), `bool`
 - Struct types: named fields with offsets
 - Inner shapes: dtypes can have up to 4 inner dimensions
 - Alignment and itemsize tracked for safe raw memory access
 
-**Compile-time element type — `ElementType`** (in `jix/src/storage/mod.rs`):
-- `Ty<T>` — concrete element type `T` known at compile time; enables all element-wise ops
-- `TypeDyn` — runtime-only; arrays from disk start here; call `Array::to_typed::<T>()` to recover `Ty<T>`
+**Compile-time element type - `ElementType`** (in `jix/src/storage/mod.rs`):
+- `Ty<T>` - concrete element type `T` known at compile time; enables all element-wise ops
+- `TypeDyn` - runtime-only; arrays from disk start here; call `Array::to_typed::<T>()` to recover `Ty<T>`
 - `f16` and `Complex<T>` live in `jix::scalar` (previously they were in `jix::dtype`)
 
 ### Serialization
@@ -111,5 +111,5 @@ This project has a knowledge graph at graphify-out/ with god nodes, community st
 Rules:
 - ALWAYS read graphify-out/GRAPH_REPORT.md before reading any source files, running grep/glob searches, or answering codebase questions. The graph is your primary map of the codebase.
 - IF graphify-out/wiki/index.md EXISTS, navigate it instead of reading raw files
-- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
+- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep - these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

@@ -625,7 +625,7 @@ mod tests {
     // Non-zero offsets and trailing padding between packed arrays
     //
     // Three arrays of different dtypes and shapes are written back-to-back into
-    // a single buffer with 177-byte gaps between them.  Each is read back
+    // a single buffer with 177-byte gaps between them. Each is read back
     // independently by passing the correct (offset, len) pair to
     // read_from_reader.
     // -----------------------------------------------------------------------

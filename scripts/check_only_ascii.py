@@ -1,10 +1,4 @@
-"""Check all files for non-ASCII characters.
-
-Output style (like a compiler diagnostic):
-
-  path/to/file.py:42: café and naïve
-                       ^       ^
-"""
+"""Check all files for non-ASCII characters."""
 
 from __future__ import annotations
 

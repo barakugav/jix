@@ -105,7 +105,7 @@ impl<T, D> Array<Scalar<T, D>> {
     /// Create an array with the given `shape` where every element equals `value`.
     ///
     /// This is a zero-copy broadcast: the scalar is stored once and repeated on
-    /// every read.  The resulting array behaves like `np.full(shape, value)`.
+    /// every read. The resulting array behaves like `np.full(shape, value)`.
     ///
     /// The storage does not compress anything. This function is useful when a scalar need to participate
     /// in an operation with another array.

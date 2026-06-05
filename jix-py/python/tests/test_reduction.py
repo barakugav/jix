@@ -28,7 +28,7 @@ from tests_util import (
 )
 
 # ---------------------------------------------------------------------------
-# Shape strategies for reductions (no zero-length dims — Rust mirrors this)
+# Shape strategies for reductions (no zero-length dims - Rust mirrors this)
 # ---------------------------------------------------------------------------
 
 
@@ -53,7 +53,7 @@ def _reduction_shape_strategy_small():
 
 
 # ---------------------------------------------------------------------------
-# Axis strategies — Python-specific: int/list/tuple, positive and negative
+# Axis strategies - Python-specific: int/list/tuple, positive and negative
 # ---------------------------------------------------------------------------
 
 
@@ -70,9 +70,7 @@ def _axes_strategy(draw, ndim):
         return None
     # Pick n unique positive axes then optionally negate each
     n = draw(st.integers(1, ndim))
-    pos_axes = sorted(
-        draw(st.lists(st.integers(0, ndim - 1), min_size=n, max_size=n, unique=True))
-    )
+    pos_axes = sorted(draw(st.lists(st.integers(0, ndim - 1), min_size=n, max_size=n, unique=True)))
     axes = [ax - ndim if draw(st.booleans()) else ax for ax in pos_axes]
     # Vary the container type
     if len(axes) == 1:
@@ -129,7 +127,7 @@ def _carray_single_axis_reduction(draw, dtype, element_st):
 
 
 def _np_axis(axis):
-    """numpy requires axis as int, tuple, or None — not list."""
+    """numpy requires axis as int, tuple, or None - not list."""
     return tuple(axis) if isinstance(axis, list) else axis
 
 
@@ -145,15 +143,11 @@ def _out_dtype(dtype):
 
 
 def _sum_ref(np_a, axis, keepdims, dtype):
-    return np.sum(
-        np_a.astype(_out_dtype(dtype)), axis=_np_axis(axis), keepdims=keepdims
-    )
+    return np.sum(np_a.astype(_out_dtype(dtype)), axis=_np_axis(axis), keepdims=keepdims)
 
 
 def _prod_ref(np_a, axis, keepdims, dtype):
-    return np.prod(
-        np_a.astype(_out_dtype(dtype)), axis=_np_axis(axis), keepdims=keepdims
-    )
+    return np.prod(np_a.astype(_out_dtype(dtype)), axis=_np_axis(axis), keepdims=keepdims)
 
 
 def _element_st(dtype):
@@ -169,16 +163,14 @@ def _element_st(dtype):
 
 
 # ---------------------------------------------------------------------------
-# max / min — any strategy; op_safe for floats to avoid NaN-ignoring semantics
+# max / min - any strategy; op_safe for floats to avoid NaN-ignoring semantics
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
 @given(st.data())
 def test_max(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(dtype, _element_st(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, _element_st(dtype)), label="array")
     assert_array_matches(
         jix.max(za, axis=axis, keepdims=keepdims),
         np.max(np_a, axis=_np_axis(axis), keepdims=keepdims),
@@ -189,9 +181,7 @@ def test_max(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
 @given(st.data())
 def test_min(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(dtype, _element_st(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, _element_st(dtype)), label="array")
     assert_array_matches(
         jix.min(za, axis=axis, keepdims=keepdims),
         np.min(np_a, axis=_np_axis(axis), keepdims=keepdims),
@@ -200,16 +190,14 @@ def test_min(dtype: np.dtype, data: DataObject):
 
 
 # ---------------------------------------------------------------------------
-# argmax / argmin — single axis only; output dtype is u64
+# argmax / argmin - single axis only; output dtype is u64
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
 @given(st.data())
 def test_argmax(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_single_axis_reduction(dtype, _element_st(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_single_axis_reduction(dtype, _element_st(dtype)), label="array")
     result = jix.argmax(za, axis=axis, keepdims=keepdims)
     expected = np.argmax(np_a, axis=_np_axis(axis), keepdims=keepdims).astype(np.uint64)
     assert_array_matches(result, expected, data=data)
@@ -218,34 +206,28 @@ def test_argmax(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
 @given(st.data())
 def test_argmin(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_single_axis_reduction(dtype, _element_st(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_single_axis_reduction(dtype, _element_st(dtype)), label="array")
     result = jix.argmin(za, axis=axis, keepdims=keepdims)
     expected = np.argmin(np_a, axis=_np_axis(axis), keepdims=keepdims).astype(np.uint64)
     assert_array_matches(result, expected, data=data)
 
 
 # ---------------------------------------------------------------------------
-# sum — op_safe to avoid large accumulations; wrapping for integers
+# sum - op_safe to avoid large accumulations; wrapping for integers
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dtype", ints + uints + floats + complexes + [np.bool_])
 @given(st.data())
 def test_sum(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
     result = jix.sum(za, axis=axis, keepdims=keepdims)
     rtol = 0.0 if np.issubdtype(dtype, np.integer) else 1e-3
-    assert_array_matches(
-        result, _sum_ref(np_a, axis, keepdims, dtype), data=data, rtol=rtol
-    )
+    assert_array_matches(result, _sum_ref(np_a, axis, keepdims, dtype), data=data, rtol=rtol)
 
 
 # ---------------------------------------------------------------------------
-# product — small shapes to limit accumulation depth
+# product - small shapes to limit accumulation depth
 # ---------------------------------------------------------------------------
 
 
@@ -262,22 +244,18 @@ def test_product(dtype: np.dtype, data: DataObject):
     )
     result = jix.product(za, axis=axis, keepdims=keepdims)
     rtol = 0.0 if np.issubdtype(dtype, np.integer) else 1e-3
-    assert_array_matches(
-        result, _prod_ref(np_a, axis, keepdims, dtype), data=data, rtol=rtol
-    )
+    assert_array_matches(result, _prod_ref(np_a, axis, keepdims, dtype), data=data, rtol=rtol)
 
 
 # ---------------------------------------------------------------------------
-# mean — floats and complex only (Python binding does not accept integers)
+# mean - floats and complex only (Python binding does not accept integers)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dtype", ints + uints + floats + complexes + [np.bool_])
 @given(st.data())
 def test_mean(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
     assert_array_matches(
         jix.mean(za, axis=axis, keepdims=keepdims),
         np.mean(np_a.astype(_out_dtype(dtype)), axis=_np_axis(axis), keepdims=keepdims),
@@ -287,7 +265,7 @@ def test_mean(dtype: np.dtype, data: DataObject):
 
 
 # ---------------------------------------------------------------------------
-# var / std — f32, f64 only; ddof=0 (population) for property tests
+# var / std - f32, f64 only; ddof=0 (population) for property tests
 #   (ddof=1 can produce NaN for size-1 reductions, tested separately below)
 # ---------------------------------------------------------------------------
 
@@ -295,9 +273,7 @@ def test_mean(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
 @given(st.data())
 def test_var(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
     assert_array_matches(
         jix.var(za, axis=axis, keepdims=keepdims, ddof=0.0),
         np.var(np_a.astype(np.float64), axis=_np_axis(axis), keepdims=keepdims, ddof=0),
@@ -312,9 +288,7 @@ def test_var(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
 @given(st.data())
 def test_std(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
     assert_array_matches(
         jix.std(za, axis=axis, keepdims=keepdims, ddof=0.0),
         np.std(np_a.astype(np.float64), axis=_np_axis(axis), keepdims=keepdims, ddof=0),
@@ -325,7 +299,7 @@ def test_std(dtype: np.dtype, data: DataObject):
 
 
 # ---------------------------------------------------------------------------
-# all / any — logical_op_strategy (includes zeros for true-branch coverage)
+# all / any - logical_op_strategy (includes zeros for true-branch coverage)
 # ---------------------------------------------------------------------------
 
 
@@ -340,9 +314,7 @@ def test_std(dtype: np.dtype, data: DataObject):
 )
 @given(st.data())
 def test_all(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(dtype, logical_op_element_strategy(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, logical_op_element_strategy(dtype)), label="array")
     assert_array_matches(
         jix.all(za, axis=axis, keepdims=keepdims),
         np.all(np_a, axis=_np_axis(axis), keepdims=keepdims),
@@ -361,9 +333,7 @@ def test_all(dtype: np.dtype, data: DataObject):
 )
 @given(st.data())
 def test_any(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(dtype, logical_op_element_strategy(dtype)), label="array"
-    )
+    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, logical_op_element_strategy(dtype)), label="array")
     assert_array_matches(
         jix.any(za, axis=axis, keepdims=keepdims),
         np.any(np_a, axis=_np_axis(axis), keepdims=keepdims),

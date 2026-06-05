@@ -28,7 +28,7 @@ where
 /// [`Concatenate`](crate::ops::Concatenate), which joins along an existing axis.
 ///
 /// The output dimension type `Stack<ArraysT>::Dimension` is
-/// `ArraysT::FirstArrayDimension::Larger` — one dimension wider than the inputs. This means a
+/// `ArraysT::FirstArrayDimension::Larger` - one dimension wider than the inputs. This means a
 /// static dimension is propagated when all input arrays share a known `Dim<N>`, producing
 /// `Dim<N+1>` for the output.
 ///

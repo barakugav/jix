@@ -18,13 +18,13 @@ import numpy as np
 # Compress a NumPy array into block-compressed storage.
 a = jix.compact(np.arange(1_000_000, dtype=np.float32).reshape(1000, 1000))
 
-# Build a lazy pipeline — no decompression happens yet.
+# Build a lazy pipeline - no decompression happens yet.
 result = (a - a.mean(axis=0)) / a.std(axis=0)
 
 # Materialize the pipeline into a NumPy array.
 out = result.numpy()
 
-# Or write straight to disk — blocks are decompressed, transformed,
+# Or write straight to disk - blocks are decompressed, transformed,
 # and re-compressed one at a time without materializing the full result.
 result.write_to("normalized.jix")
 

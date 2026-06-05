@@ -530,33 +530,13 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
     let axis = normalize_axis(axis, ndim)?;
 
     let py = py_arrays.first().unwrap().py();
-    match arrays.len() {
-        1 if axis < ndim => {
-            // no-op if only one array
-            let [array] = py_arrays.try_into().unwrap();
-            Ok(array)
-        }
-        2 => {
-            let [arr1, arr2] = arrays.try_into().unwrap();
-            let ret = jix_core::ops::Concatenate::new_array([arr1, arr2], axis).into_py_result()?;
-            Bound::new(py, Array::from_core(ret.into_any()))
-        }
-        3 => {
-            let [arr1, arr2, arr3] = arrays.try_into().unwrap();
-            let ret =
-                jix_core::ops::Concatenate::new_array([arr1, arr2, arr3], axis).into_py_result()?;
-            Bound::new(py, Array::from_core(ret.into_any()))
-        }
-        4 => {
-            let [arr1, arr2, arr3, arr4] = arrays.try_into().unwrap();
-            let ret = jix_core::ops::Concatenate::new_array([arr1, arr2, arr3, arr4], axis)
-                .into_py_result()?;
-            Bound::new(py, Array::from_core(ret.into_any()))
-        }
-        _ => {
-            let ret = jix_core::ops::Concatenate::new_array(arrays, axis).into_py_result()?;
-            Bound::new(py, Array::from_core(ret.into_any()))
-        }
+    if arrays.len() == 1 && axis < ndim {
+        // no-op if only one array
+        let [array] = py_arrays.try_into().unwrap();
+        Ok(array)
+    } else {
+        let ret = jix_core::ops::Concatenate::new_array(arrays, axis).into_py_result()?;
+        Bound::new(py, Array::from_core(ret.into_any()))
     }
 }
 
@@ -623,26 +603,14 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
         }
     }
     let axis = normalize_axis(axis, ndim + 1)?;
-    match arrays.len() {
-        2 => {
-            let [arr1, arr2] = arrays.try_into().unwrap();
-            let ret = jix_core::ops::Stack::new_array([arr1, arr2], axis).into_py_result()?;
-            Ok(Array::from_core(ret.into_any()))
-        }
-        3 => {
-            let [arr1, arr2, arr3] = arrays.try_into().unwrap();
-            let ret = jix_core::ops::Stack::new_array([arr1, arr2, arr3], axis).into_py_result()?;
-            Ok(Array::from_core(ret.into_any()))
-        }
-        4 => {
-            let [arr1, arr2, arr3, arr4] = arrays.try_into().unwrap();
-            let ret =
-                jix_core::ops::Stack::new_array([arr1, arr2, arr3, arr4], axis).into_py_result()?;
-            Ok(Array::from_core(ret.into_any()))
-        }
-        _ => {
-            let ret = jix_core::ops::Stack::new_array(arrays, axis).into_py_result()?;
-            Ok(Array::from_core(ret.into_any()))
-        }
-    }
+    let res = if arrays.len() == 1 && axis < ndim {
+        // if only one array, equivalent to insert_axis along that axis
+        let [array] = arrays.try_into().unwrap();
+        let ret = jix_core::ops::InsertAxis::new_array(array, axis).into_py_result()?;
+        ret.into_any()
+    } else {
+        let ret = jix_core::ops::Stack::new_array(arrays, axis).into_py_result()?;
+        ret.into_any()
+    };
+    Ok(Array::from_core(res))
 }

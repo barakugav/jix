@@ -107,7 +107,7 @@
 //!
 //! Jix tracks element types at two levels:
 //!
-//! **Runtime — [`Dtype`](dtype::Dtype)**
+//! **Runtime - [`Dtype`](dtype::Dtype)**
 //!
 //! Every array carries a runtime [`Dtype`](dtype::Dtype) that records the kind, size, and
 //! alignment of each element. Dtypes come in two flavors:
@@ -136,17 +136,17 @@
 //! assert_eq!(fields[0].0, "r");
 //! ```
 //!
-//! **Compile-time — [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`]**
+//! **Compile-time - [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`]**
 //!
 //! In addition to the runtime [`Dtype`](dtype::Dtype), the storage type parameter `S` carries the
 //! element type at the *type level* via `S::ElementType`:
 //!
-//! - [`Ty<T>`](Ty) — the scalar element type `T` is known at compile time.
+//! - [`Ty<T>`](Ty) - the scalar element type `T` is known at compile time.
 //!   Arrays constructed from typed sources carry this automatically (e.g.
 //!   `Array::compact_array(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
 //!   Most of the element-wise operations require `Ty<T>`, as they are bounded by scalar trait of `T`.
 //!
-//! - [`TypeDyn`] — the element type is only known at runtime. Arrays loaded
+//! - [`TypeDyn`] - the element type is only known at runtime. Arrays loaded
 //!   from disk start with this (`Array<Compact<TypeDyn, DimDyn>>`). Call
 //!   [`Array::to_typed::<T>()`](Array::to_typed) to assert the expected element type (checked
 //!   against the file header at runtime) and unlock element-wise operations:
@@ -353,7 +353,7 @@ pub use error::{Error, ErrorKind};
 /// A fully type-erased array whose storage backend is hidden behind an `Arc<dyn ArrayStorage>`.
 ///
 /// Use `ArrayAny` when you need to hold arrays of different concrete storage types in the same
-/// place — for example a `Vec<ArrayAny>` mixing on-disk, in-memory, and lazy views.  All runtime
+/// place - for example a `Vec<ArrayAny>` mixing on-disk, in-memory, and lazy views. All runtime
 /// metadata (shape, dtype) is available; element-wise operations that require a known scalar type
 /// at compile time are not.
 ///

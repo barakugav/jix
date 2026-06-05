@@ -5,7 +5,6 @@ Mirrors the test block in jix/src/ops/cmp.rs.
 
 import numpy as np
 import pytest
-import jix
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
@@ -21,6 +20,8 @@ from tests_util import (
     op_safe_element_strategy,
     uints,
 )
+
+import jix
 
 _int_bool_dtypes = ints + uints + [np.bool_]
 _all_cmp_dtypes = ints + uints + floats + complexes + [np.bool_]
@@ -49,9 +50,7 @@ def _max_min_st(dtype):
 @given(st.data())
 def test_equal(dtype: np.dtype, data: DataObject):
     cmp_st = comparable_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=cmp_st), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=cmp_st), label="arrays")
     assert_array_matches(jix.equal(za, zb), np_a == np_b, data=data)
 
 
@@ -59,9 +58,7 @@ def test_equal(dtype: np.dtype, data: DataObject):
 @given(st.data())
 def test_not_equal(dtype: np.dtype, data: DataObject):
     cmp_st = comparable_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=cmp_st), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=cmp_st), label="arrays")
     assert_array_matches(jix.not_equal(za, zb), np_a != np_b, data=data)
 
 
@@ -71,36 +68,28 @@ def test_not_equal(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", _ordered_dtypes)
 @given(st.data())
 def test_greater(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=_ordering_st(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=_ordering_st(dtype)), label="arrays")
     assert_array_matches(jix.greater(za, zb), np_a > np_b, data=data)
 
 
 @pytest.mark.parametrize("dtype", _ordered_dtypes)
 @given(st.data())
 def test_greater_equal(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=_ordering_st(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=_ordering_st(dtype)), label="arrays")
     assert_array_matches(jix.greater_equal(za, zb), np_a >= np_b, data=data)
 
 
 @pytest.mark.parametrize("dtype", _ordered_dtypes)
 @given(st.data())
 def test_less(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=_ordering_st(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=_ordering_st(dtype)), label="arrays")
     assert_array_matches(jix.less(za, zb), np_a < np_b, data=data)
 
 
 @pytest.mark.parametrize("dtype", _ordered_dtypes)
 @given(st.data())
 def test_less_equal(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=_ordering_st(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=_ordering_st(dtype)), label="arrays")
     assert_array_matches(jix.less_equal(za, zb), np_a <= np_b, data=data)
 
 
@@ -111,16 +100,12 @@ def test_less_equal(dtype: np.dtype, data: DataObject):
 @pytest.mark.parametrize("dtype", _ordered_dtypes)
 @given(st.data())
 def test_maximum(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=_max_min_st(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=_max_min_st(dtype)), label="arrays")
     assert_array_matches(jix.maximum(za, zb), np.maximum(np_a, np_b), data=data)
 
 
 @pytest.mark.parametrize("dtype", _ordered_dtypes)
 @given(st.data())
 def test_minimum(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=_max_min_st(dtype)), label="arrays"
-    )
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=_max_min_st(dtype)), label="arrays")
     assert_array_matches(jix.minimum(za, zb), np.minimum(np_a, np_b), data=data)

@@ -29,7 +29,7 @@ where
 /// [`Stack`](crate::ops::Stack), which introduces a new axis.
 ///
 /// The output dimension type `Concatenate<ArraysT>::Dimension` equals
-/// `ArraysT::FirstArrayDimension` — it is taken from the first array in the sequence. This
+/// `ArraysT::FirstArrayDimension` - it is taken from the first array in the sequence. This
 /// means the static dimension is propagated when all input arrays share a known `Dim<N>`.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.

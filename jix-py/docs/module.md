@@ -5,12 +5,12 @@ The crate provide Python bindings for the core `jix` library, which is implement
 `jix` is a multi-dimensional array library that stores data in **block-compressed format**
 and evaluates operations **lazily**. It is designed around two ideas:
 
-- **Block-based compression** — the array is split into an n-dimensional grid of fixed-size
+- **Block-based compression** - the array is split into an n-dimensional grid of fixed-size
   blocks, each compressed independently with Zstd. Only the blocks that overlap a read
   request are decompressed, so random access into large arrays avoids loading the whole
   dataset into memory.
 
-- **Lazy operation chains** — every operation (arithmetic, shape manipulation, type cast,
+- **Lazy operation chains** - every operation (arithmetic, shape manipulation, type cast,
   reduction, ...) builds a new `Array` that records the transformation without executing
   it. The full pipeline runs in a single decompression pass the moment you ask for output.
   While the pass runs the GIL is released, so Python threads can make progress
@@ -29,7 +29,7 @@ import numpy as np
 # Compress a NumPy array into a jix array.
 a = jix.compact(np.arange(100, dtype=np.float32).reshape(10, 10))
 
-# Build a lazy pipeline — no data is read yet.
+# Build a lazy pipeline - no data is read yet.
 result = (a - a.mean(axis=0)).abs()
 
 # Materialize the pipeline into a NumPy array.
@@ -65,8 +65,8 @@ the same indexing syntax as NumPy: integers (drop that axis), slices (keep that 
 ```python
 a.numpy()            # full array
 a.numpy(0)           # row 0 (integer drops axis 0)
-a.numpy(slice(1, 4)) # rows 1–3 (slice keeps axis 0)
-a[0, 1:3]            # row 0, columns 1–2 (shorthand)
+a.numpy(slice(1, 4)) # rows 1-3 (slice keeps axis 0)
+a[0, 1:3]            # row 0, columns 1-2 (shorthand)
 a[..., -1]           # last column of any-rank array
 ```
 
@@ -79,7 +79,7 @@ matches your access pattern avoids wasteful work. For example, a `[1, ncols]` bl
 means reading a single row decompresses exactly one block; a `[nrows, 1]` shape is
 similarly efficient for column reads.
 
-When no block shape is specified, jix picks one automatically — it greedily expands each
+When no block shape is specified, jix picks one automatically - it greedily expands each
 dimension (innermost first) until the block byte-size reaches the L1 data cache.
 
 You can supply an explicit block shape through [`ArrayParams`][jix.ArrayParams]:
@@ -95,7 +95,7 @@ re-encode with a layout suited to the new shape.
 
 # Operations
 
-Every operation — arithmetic, comparisons, reductions, shape changes, type casts — returns
+Every operation - arithmetic, comparisons, reductions, shape changes, type casts - returns
 a new `Array` **view** that wraps the input(s) and records the transformation. No data is read or
 computed at call time. The deferred work only runs when you ask for output (`.numpy()`, `[...]`,
 `.write_to()`, `jix.copy()`, etc.).

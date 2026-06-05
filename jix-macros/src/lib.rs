@@ -147,8 +147,8 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                 .chain(
                     var_field_end_offset
                         .iter()
-                        .cloned()
-                        .take(var_field_end_offset.len().saturating_sub(1)),
+                        .take(var_field_end_offset.len().saturating_sub(1))
+                        .cloned(),
                 )
                 .collect::<Vec<_>>();
             let last_field_end_offset = var_field_end_offset

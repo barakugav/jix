@@ -80,7 +80,7 @@ impl<A, D> Plain<A, TypeDyn, D> {
     ///   `[0, 0, ..., 0]` of the logical view).
     /// * `shape` - number of elements along each dimension.
     /// * `strides` - byte distance between adjacent elements along each
-    ///   dimension.  Must have the same length as `shape`.
+    ///   dimension. Must have the same length as `shape`.
     /// * `dtype` - element type descriptor; used for itemsize and alignment
     ///   checks.
     ///
@@ -156,7 +156,7 @@ impl<T, D> Array<Plain<Vec<T>, Ty<T>, D>> {
     /// Create a [`Plain`] array that takes ownership of an `ndarray` array.
     ///
     /// The ndarray's allocation is moved into the returned `Array`; no element
-    /// data is copied.  The resulting array respects the ndarray's existing
+    /// data is copied. The resulting array respects the ndarray's existing
     /// memory layout (C-order, Fortran-order, transposed, etc.) and can handle
     /// non-contiguous strides.
     ///
@@ -226,8 +226,8 @@ impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
 
     /// Create a [`Plain`] array that borrows from an ndarray.
     ///
-    /// No element data is copied.  The resulting array shares memory with
-    /// `arr` and is valid for its lifetime `'a`.  Any layout supported by
+    /// No element data is copied. The resulting array shares memory with
+    /// `arr` and is valid for its lifetime `'a`. Any layout supported by
     /// ndarray (C-order, Fortran-order, non-contiguous slices, transposed
     /// views, etc.) is handled correctly.
     ///
@@ -267,7 +267,7 @@ impl<ET, D> Array<Plain<&(), ET, D>> {
     /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an external
     /// allocation.
     ///
-    /// No element data is copied.  The resulting array shares memory with the external allocation and is valid for its
+    /// No element data is copied. The resulting array shares memory with the external allocation and is valid for its
     /// lifetime `'a`. The buffer may be laid out in any order (C-contiguous, Fortran-contiguous, transposed, sliced
     /// with gaps, etc.) as long as elements are aligned.
     ///

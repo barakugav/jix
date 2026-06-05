@@ -43,7 +43,7 @@
 //!
 //! # Typed element requirements
 //!
-//! Element-wise operations — arithmetic, comparisons, reductions, bitwise ops, type casting — all
+//! Element-wise operations - arithmetic, comparisons, reductions, bitwise ops, type casting - all
 //! require the input storage to be *typed*: the element type must be known at compile time, not
 //! just at runtime. Concretely, the input must satisfy
 //! [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), which is a shorthand for

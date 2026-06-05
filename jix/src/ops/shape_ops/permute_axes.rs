@@ -17,7 +17,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// duplicates.
 ///
 /// Output dtype equals the input dtype. `PermuteAxes<S>` carries `type Dimension = S::Dimension`
-/// — permutation does not change the number of axes so the dimension type is preserved unchanged.
+/// - permutation does not change the number of axes so the dimension type is preserved unchanged.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///

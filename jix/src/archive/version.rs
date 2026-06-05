@@ -100,10 +100,10 @@ const fn const_atoi(s: &[u8]) -> u32 {
 
 /// Parse pre-release tag into a 6-bit number.
 ///
-/// - `""` → 0 (stable)
-/// - `"3"` → 3
-/// - `"alpha.1"` → 1 (trailing numeric segment)
-/// - `"rc"` → 1 (non-numeric, just marks pre-release)
+/// - `""` -> 0 (stable)
+/// - `"3"` -> 3
+/// - `"alpha.1"` -> 1 (trailing numeric segment)
+/// - `"rc"` -> 1 (non-numeric, just marks pre-release)
 const fn parse_pre_release(s: &[u8]) -> u32 {
     if s.is_empty() {
         return 0;

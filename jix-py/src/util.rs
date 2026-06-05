@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::mem::MaybeUninit;
 
+use jix_core::NDIM_MAX;
 use numpy::npyffi::npy_intp;
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::impl_stub_type;
-use jix_core::NDIM_MAX;
 
 use crate::ArrayParams;
 

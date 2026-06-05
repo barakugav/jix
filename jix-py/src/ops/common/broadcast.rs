@@ -1,6 +1,6 @@
-use pyo3::prelude::*;
 use jix_core::ErrorKind;
 use jix_core::{ops::Broadcast, NDIM_MAX};
+use pyo3::prelude::*;
 
 use crate::ops::common::Operand;
 use crate::util::{DimArray, IntoPyResult};
@@ -130,7 +130,7 @@ mod tests {
         );
     }
 
-    // ── Identical shapes ──────────────────────────────────────────────
+    // -- Identical shapes ----------------------------------------------
 
     #[test]
     fn identical_scalar() {
@@ -152,7 +152,7 @@ mod tests {
         ok(&[2, 3, 4], &[2, 3, 4], &[2, 3, 4]);
     }
 
-    // ── Scalar (0-d) broadcasting ─────────────────────────────────────
+    // -- Scalar (0-d) broadcasting -------------------------------------
 
     #[test]
     fn scalar_with_1d() {
@@ -171,7 +171,7 @@ mod tests {
         ok(&[], &[2, 3, 4], &[2, 3, 4]);
     }
 
-    // ── Ones expand ───────────────────────────────────────────────────
+    // -- Ones expand ---------------------------------------------------
 
     #[test]
     fn one_expands_trailing() {
@@ -207,7 +207,7 @@ mod tests {
         ok(&[7], &[1], &[7]);
     }
 
-    // ── Prepending dimensions (different ndim) ────────────────────────
+    // -- Prepending dimensions (different ndim) ------------------------
 
     #[test]
     fn prepend_1d_to_2d() {
@@ -233,15 +233,15 @@ mod tests {
 
     #[test]
     fn prepend_with_ones() {
-        // (1,) vs (2,3) → implicit (1,1) vs (2,3) → (2,3)
+        // (1,) vs (2,3) -> implicit (1,1) vs (2,3) -> (2,3)
         ok(&[1], &[2, 3], &[2, 3]);
     }
 
-    // ── Combined prepend + expand ─────────────────────────────────────
+    // -- Combined prepend + expand -------------------------------------
 
     #[test]
     fn prepend_and_expand() {
-        // (1, 4) vs (2, 3, 1) → (1, 1, 4) vs (2, 3, 1) → (2, 3, 4)
+        // (1, 4) vs (2, 3, 1) -> (1, 1, 4) vs (2, 3, 1) -> (2, 3, 4)
         ok(&[1, 4], &[2, 3, 1], &[2, 3, 4]);
     }
 
@@ -252,18 +252,18 @@ mod tests {
 
     #[test]
     fn complex_broadcast_3d() {
-        // (1, 5, 1) vs (3, 1, 4) → (3, 5, 4)
+        // (1, 5, 1) vs (3, 1, 4) -> (3, 5, 4)
         ok(&[1, 5, 1], &[3, 1, 4], &[3, 5, 4]);
     }
 
     #[test]
     fn complex_broadcast_4d() {
-        // (8, 1, 6, 1) vs (7, 1, 5) → (8, 7, 6, 5)
+        // (8, 1, 6, 1) vs (7, 1, 5) -> (8, 7, 6, 5)
         // This is the classic NumPy docs example
         ok(&[8, 1, 6, 1], &[7, 1, 5], &[8, 7, 6, 5]);
     }
 
-    // ── All-ones shapes ───────────────────────────────────────────────
+    // -- All-ones shapes -----------------------------------------------
 
     #[test]
     fn all_ones_same_ndim() {
@@ -280,7 +280,7 @@ mod tests {
         ok(&[1, 1, 1], &[2, 3, 4], &[2, 3, 4]);
     }
 
-    // ── Large dimensions ──────────────────────────────────────────────
+    // -- Large dimensions ----------------------------------------------
 
     #[test]
     fn large_dims() {
@@ -295,7 +295,7 @@ mod tests {
         ok(&[big], &[big], &[big]);
     }
 
-    // ── High-rank tensors ─────────────────────────────────────────────
+    // -- High-rank tensors ---------------------------------------------
 
     #[test]
     fn broadcast_6d() {
@@ -311,7 +311,7 @@ mod tests {
         ok(&[3], &[5, 4, 3, 2, 1, 3], &[5, 4, 3, 2, 1, 3]);
     }
 
-    // ── Zero-size dimensions ──────────────────────────────────────────
+    // -- Zero-size dimensions ------------------------------------------
     // NumPy allows 0 in shapes: (0,) broadcasts like any other dim
 
     #[test]
@@ -321,14 +321,14 @@ mod tests {
 
     #[test]
     fn zero_with_one() {
-        // np.broadcast_shapes((0,), (1,)) → (0,)
+        // np.broadcast_shapes((0,), (1,)) -> (0,)
         ok(&[0], &[1], &[0]);
         ok(&[1], &[0], &[0]);
     }
 
     #[test]
     fn zero_with_nonzero_fails() {
-        // np.broadcast_shapes((0,), (3,)) → error
+        // np.broadcast_shapes((0,), (3,)) -> error
         err(&[0], &[3]);
         err(&[3], &[0]);
     }
@@ -344,7 +344,7 @@ mod tests {
         ok(&[0], &[3, 0], &[3, 0]);
     }
 
-    // ── Commutativity ─────────────────────────────────────────────────
+    // -- Commutativity -------------------------------------------------
 
     #[test]
     fn commutative_success() {
@@ -372,7 +372,7 @@ mod tests {
         }
     }
 
-    // ── Incompatible shapes (errors) ──────────────────────────────────
+    // -- Incompatible shapes (errors) ----------------------------------
 
     #[test]
     fn err_simple_mismatch() {
@@ -415,48 +415,48 @@ mod tests {
         err(&[2, 3, 4], &[5, 6, 7]);
     }
 
-    // ── NumPy docs examples ───────────────────────────────────────────
+    // -- NumPy docs examples -------------------------------------------
     // Taken straight from numpy.broadcast_shapes / broadcasting docs
 
     #[test]
     fn numpy_docs_example_1() {
-        // np.broadcast_shapes((5,4), (1,)) → (5,4)
+        // np.broadcast_shapes((5,4), (1,)) -> (5,4)
         ok(&[5, 4], &[1], &[5, 4]);
     }
 
     #[test]
     fn numpy_docs_example_2() {
-        // np.broadcast_shapes((5,4), (4,)) → (5,4)
+        // np.broadcast_shapes((5,4), (4,)) -> (5,4)
         ok(&[5, 4], &[4], &[5, 4]);
     }
 
     #[test]
     fn numpy_docs_example_3() {
-        // np.broadcast_shapes((15,3,5), (15,1,5)) → (15,3,5)
+        // np.broadcast_shapes((15,3,5), (15,1,5)) -> (15,3,5)
         ok(&[15, 3, 5], &[15, 1, 5], &[15, 3, 5]);
     }
 
     #[test]
     fn numpy_docs_example_4() {
-        // np.broadcast_shapes((15,3,5), (3,5)) → (15,3,5)
+        // np.broadcast_shapes((15,3,5), (3,5)) -> (15,3,5)
         ok(&[15, 3, 5], &[3, 5], &[15, 3, 5]);
     }
 
     #[test]
     fn numpy_docs_example_5() {
-        // np.broadcast_shapes((15,3,5), (3,1)) → (15,3,5)
+        // np.broadcast_shapes((15,3,5), (3,1)) -> (15,3,5)
         ok(&[15, 3, 5], &[3, 1], &[15, 3, 5]);
     }
 
     #[test]
     fn numpy_docs_example_arange() {
-        // The classic (4,1) + (1,3) → (4,3)
+        // The classic (4,1) + (1,3) -> (4,3)
         ok(&[4, 1], &[1, 3], &[4, 3]);
     }
 
     #[test]
     fn numpy_docs_image_example() {
-        // (256,256,3) + (3,) → (256,256,3)
+        // (256,256,3) + (3,) -> (256,256,3)
         ok(&[256, 256, 3], &[3], &[256, 256, 3]);
     }
 }

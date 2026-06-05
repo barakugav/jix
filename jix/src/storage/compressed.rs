@@ -31,12 +31,12 @@ use crate::Dimension;
 ///
 /// `Compact<ET, D>` has two type parameters:
 ///
-/// - **`ET: ElementType`** — compile-time element type, either [`Ty<Scalar>`](crate::Ty)
+/// - **`ET: ElementType`** - compile-time element type, either [`Ty<Scalar>`](crate::Ty)
 ///   (element type known at compile time) or [`TypeDyn`](crate::TypeDyn) (runtime only).
 ///   Arrays constructed from typed sources carry `Ty<_>` automatically; arrays loaded from disk
 ///   carry `TypeDyn`.
 ///
-/// - **`D: Dimension`** — compile-time dimension, either [`Dim<N>`](crate::Dim) (statically known
+/// - **`D: Dimension`** - compile-time dimension, either [`Dim<N>`](crate::Dim) (statically known
 ///   ndim) or [`DimDyn`](crate::DimDyn) (runtime only).
 ///
 /// Use [`Array::into_dim`](crate::Array::into_dim) to convert between `D` variants in-place, or
