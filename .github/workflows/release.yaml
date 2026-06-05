@@ -87,8 +87,9 @@ jobs:
             target: aarch64
           - runner: ubuntu-22.04
             target: armv7
-          - runner: ubuntu-22.04
-            target: s390x
+          # Big endian not supported
+          # - runner: ubuntu-22.04
+          #   target: s390x
           - runner: ubuntu-22.04
             target: ppc64le
     steps:
@@ -100,13 +101,14 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
           manylinux: auto
+          working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
           name: wheels-linux-${{ matrix.platform.target }}
-          path: dist
+          path: jix-py/dist
 
   py-wheels-musllinux:
     runs-on: ${{ matrix.platform.runner }}
@@ -131,13 +133,14 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
           manylinux: musllinux_1_2
+          working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
           name: wheels-musllinux-${{ matrix.platform.target }}
-          path: dist
+          path: jix-py/dist
 
   py-wheels-windows:
     runs-on: ${{ matrix.platform.runner }}
@@ -165,11 +168,12 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
+          working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
           name: wheels-windows-${{ matrix.platform.target }}
-          path: dist
+          path: jix-py/dist
 
   py-wheels-macos:
     runs-on: ${{ matrix.platform.runner }}
@@ -191,11 +195,12 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
+          working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
           name: wheels-macos-${{ matrix.platform.target }}
-          path: dist
+          path: jix-py/dist
 
   py-sdist:
     runs-on: ubuntu-latest
@@ -207,11 +212,12 @@ jobs:
         with:
           command: sdist
           args: --out dist
+          working-directory: jix-py
       - name: Upload sdist
         uses: actions/upload-artifact@v6
         with:
           name: wheels-sdist
-          path: dist
+          path: jix-py/dist
 
   py-docs:
     runs-on: ubuntu-latest
@@ -219,15 +225,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
+        # Do not change this to uv, as the build of the bindings require CPython libraries to be available
         with:
-          python-version: "3.12"
+          python-version: 3.13
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.91.0
       - name: Install docs dependencies
-        run: pip install -r scripts/dev_requirements.txt
+        run: pip install -r scripts/dev_requirements.txt uv
       - name: Build and install jix-py
-        run: maturin develop
+        run: uv pip install -e . --system
         working-directory: jix-py
       - name: Generate .pyi stubs
         run: cargo run --bin gen_pyi
@@ -236,14 +243,13 @@ jobs:
         run: mkdocs build --strict
         working-directory: jix-py
       - name: Package site
-        run: |
-          cd jix-py/site
-          zip -r ../../site.zip .
+        run: zip -r site.zip site
+        working-directory: jix-py
       - name: Upload site
         uses: actions/upload-artifact@v6
         with:
-          name: docs-site
-          path: site.zip
+          name: py-docs-site
+          path: jix-py/site.zip
 
   py-publish:
     runs-on: ubuntu-latest
@@ -273,14 +279,20 @@ jobs:
       attestations: write
     steps:
       - uses: actions/download-artifact@v7
+        with:
+          path: jix-py
       - name: Generate artifact attestation
         uses: actions/attest@v4
         with:
-          subject-path: "wheels-*/*"
+          subject-path: "jix-py/wheels-*/*"
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.13
+          activate-environment: true
       - name: Publish to PyPI
         if: ${{ inputs.dry-run == false }}
         run: uv publish 'wheels-*/*'
+        working-directory: jix-py
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
