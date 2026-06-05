@@ -1,0 +1,18 @@
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.12"
+    rust: "1.91"
+  jobs:
+    post_install:
+      - cd jix-py && maturin develop
+      - cd jix-py && cargo run --bin gen_pyi
+
+mkdocs:
+  configuration: jix-py/mkdocs.yml
+
+python:
+  install:
+    - requirements: scripts/dev_requirements.txt

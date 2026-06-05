@@ -1,160 +1,7 @@
 #![cfg_attr(deny_warnings, deny(missing_docs))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
-//! Multi-dimensional array library with block-compressed, lazy-evaluated storage.
-//!
-//! The crate provide Python bindings for the core `jix` library, which is implemented in Rust.
-//! `jix` is a multi-dimensional array library that stores data in **block-compressed format**
-//! and evaluates operations **lazily**. It is designed around two ideas:
-//!
-//! - **Block-based compression** — the array is split into an n-dimensional grid of fixed-size
-//!   blocks, each compressed independently with Zstd. Only the blocks that overlap a read
-//!   request are decompressed, so random access into large arrays avoids loading the whole
-//!   dataset into memory.
-//!
-//! - **Lazy operation chains** — every operation (arithmetic, shape manipulation, type cast,
-//!   reduction, ...) builds a new `Array` that records the transformation without executing
-//!   it. The full pipeline runs in a single decompression pass the moment you ask for output.
-//!   While the pass runs the GIL is released, so Python threads can make progress
-//!   concurrently.
-//!
-//! The library is NumPy-compatible: arrays expose a NumPy `dtype`, accept NumPy index syntax,
-//! and materialize to NumPy arrays on demand.
-//!
-//!
-//! # Quick start
-//!
-//! ```python
-//! import jix
-//! import numpy as np
-//!
-//! # Compress a NumPy array into a jix array.
-//! a = jix.compact(np.arange(100, dtype=np.float32).reshape(10, 10))
-//!
-//! # Build a lazy pipeline — no data is read yet.
-//! result = (a - a.mean(axis=0)).abs()
-//!
-//! # Materialize the pipeline into a NumPy array.
-//! out = result.numpy()
-//!
-//! # Save and reload.
-//! a.write_to("data.jix")
-//! b = jix.read_array("data.jix")
-//! assert b.shape == (10, 10)
-//! ```
-//!
-//!
-//! # [`Array`]
-//!
-//! The central type. Wraps compressed array data together with any pending lazy operations.
-//! Every operation returns a new `Array`; no data is copied or computed until you ask for
-//! output.
-//!
-//! **Creating an `Array`:**
-//!
-//! | Function | Description |
-//! |---|---|
-//! | `jix.compact(...)` | Compress any array-like (NumPy array, list, scalar) into a new jix array. This is the primary constructor. |
-//! | `jix.asarray(...)` | Wrap any array-like as a zero-copy jix view without compressing. Useful for mixing plain NumPy data with jix arrays in operations. |
-//! | `jix.read_array(...)` | Load a `.jix` file from disk. |
-//!
-//! **Reading data from an `Array`:**
-//!
-//! The primary output method is `Array.numpy()`, or equivalently `array[...]`. Both accept
-//! the same indexing syntax as NumPy: integers (drop that axis), slices (keep that axis),
-//! `...` (fill remaining axes). Note: slices must have step 1; bounds are checked strictly.
-//!
-//! ```python
-//! a.numpy()            # full array
-//! a.numpy(0)           # row 0 (integer drops axis 0)
-//! a.numpy(slice(1, 4)) # rows 1–3 (slice keeps axis 0)
-//! a[0, 1:3]            # row 0, columns 1–2 (shorthand)
-//! a[..., -1]           # last column of any-rank array
-//! ```
-//!
-//! ## Block shape
-//!
-//! Every jix array stores its data in a grid of fixed-size nd-blocks, each compressed
-//! independently. The block shape has a large impact on both read performance and compression
-//! ratio: only the blocks that overlap a read request are decompressed, so a block shape that
-//! matches your access pattern avoids wasteful work. For example, a `[1, ncols]` block shape
-//! means reading a single row decompresses exactly one block; a `[nrows, 1]` shape is
-//! similarly efficient for column reads.
-//!
-//! When no block shape is specified, jix picks one automatically — it greedily expands each
-//! dimension (innermost first) until the block byte-size reaches the L1 data cache.
-//!
-//! You can supply an explicit block shape through [`ArrayParams`]:
-//!
-//! ```python
-//! a = jix.compact(data, params={"block_shape": [64, 64]})
-//! ```
-//!
-//! After shape-changing operations (`reshape`, `permute_axes`, etc.) the original block
-//! layout may no longer match the new access pattern. Call `jix.copy(arr, params=...)` to
-//! re-encode with a layout suited to the new shape.
-//!
-//!
-//! # Operations
-//!
-//! Every operation — arithmetic, comparisons, reductions, shape changes, type casts — returns
-//! a new `Array` **view** that wraps the input(s) and records the transformation. No data is read or
-//! computed at call time. The deferred work only runs when you ask for output (`.numpy()`, `[...]`,
-//! `.write_to()`, `jix.copy()`, etc.).
-//!
-//! Chains compose without intermediate allocations: the full pipeline is executed in a single
-//! pass over the compressed source data, block by block.
-//!
-//! ```python
-//! # Nothing is read or computed during these calls.
-//! a = jix.read_array("data.jix")
-//! result = (
-//!     a
-//!      .astype("float64")
-//!      .exp()
-//!      .sum(axis=0)
-//! )
-//!
-//! # This single call decompresses, transforms, and materializes the pipeline.
-//! out = result.numpy()
-//! ```
-//!
-//!
-//! # Persistence
-//!
-//! Arrays are saved to and loaded from `.jix` files. The format stores metadata (shape, dtype,
-//! block layout, codec settings) in a protobuf header followed by the raw compressed block
-//! data.
-//!
-//! ```python
-//! # Write to a file path.
-//! jix.write_array(a, "data.jix")
-//!
-//! # Load back.
-//! b = jix.read_array("data.jix")
-//!
-//! # Memory-mapped read: blocks are paged in from disk on demand.
-//! # Fast startup, zero copy, but the file must not be modified while the array is live.
-//! c = jix.read_array("data.jix", mmap=True)
-//! ```
-//!
-//! `write_array` accept a file path or any writable binary
-//! file-like object. `read_array` accepts a file path or any seekable binary file-like
-//! object.
-//!
-//! A key property: **a lazy array can be written directly without fully materializing it in
-//! memory**. The write path compresses block by block, pulling data from the lazy chain on
-//! demand. For example, the result of a large matrix operation can be streamed straight to
-//! disk.
-//!
-//!
-//! # Limits
-//!
-//! - Maximum array dimensions: 8.
-//! - Maximum inner-shape dimensions for struct dtypes: 4.
-//! - Little-endian platforms only.
-//!
-//!
+//
+#![doc = include_str!("../docs/module.md")]
 //! # Disclaimer
 //!
 //! This project would not exist without the work of several upstream authors and communities.
@@ -173,6 +20,7 @@ mod ops;
 mod params;
 mod util;
 
+#[doc = include_str!("../docs/module.md")]
 #[pymodule]
 mod jix {
     /// The version of the jix library.
@@ -236,6 +84,21 @@ mod jix {
     pub use crate::ops::dtype_sub_field;
 }
 pub use crate::jix::*;
+
+pyo3_stub_gen::inventory::submit! {
+    pyo3_stub_gen::type_info::ModuleDocInfo {
+        module: "jix",
+        doc: {
+            fn _fmt() -> String {
+                include_str!("../docs/module.md").to_string()
+            }
+            _fmt
+        }
+    }
+}
+
+// TODO: pyo3 stub doesnt generate a docstring for constants.
+pyo3_stub_gen::module_variable!("jix", "__version__", String);
 
 #[doc(hidden)]
 pub mod __private {
