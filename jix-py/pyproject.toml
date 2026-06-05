@@ -1,12 +1,22 @@
 [project]
 name = "jix"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dynamic = ["version"]
+dependencies = ["numpy~=2.0"]
+dynamic = [
+    "version",
+    "readme",
+    "description",
+    "authors",
+    "license",
+    "keywords",
+    "classifiers",
+    "urls",
+]
 
 [project.optional-dependencies]
 tests = ["pytest"]
