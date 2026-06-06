@@ -19,3 +19,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    groups:
+      github-actions-patch-updates:
+        update-types:
+          - major
+          - minor
+          - patch
