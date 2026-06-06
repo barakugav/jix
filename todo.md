@@ -15,7 +15,8 @@
 - move pyi gen to a separate crate
 - squeeze()
 - rename Maximum scalar trait to PartialMax
-- remove ArrayParams from python APIm just accept dict of kwargs and convert to ArrayParams in rust
 - optimize reduce_max with state of (current max, nan_seen)
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
+- python `jix.add(1,2)` should create i64, not u8
+- build wheels for free threaded python (blocked by https://github.com/Jij-Inc/pyo3-stub-gen/issues/305)

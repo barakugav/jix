@@ -1,14 +1,10 @@
-use std::collections::BTreeMap;
 use std::mem::MaybeUninit;
 
 use jix_core::NDIM_MAX;
 use numpy::npyffi::npy_intp;
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use pyo3_stub_gen::impl_stub_type;
-
-use crate::ArrayParams;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
@@ -139,14 +135,6 @@ impl<T> UnsafeSend<T> {
         self.0
     }
 }
-
-#[derive(FromPyObject)]
-pub enum OrKwargs<T> {
-    Value(T),
-    Kwargs(BTreeMap<String, Py<PyAny>>),
-}
-impl_stub_type!(OrKwargs< ArrayParams> = ArrayParams | PyDict);
-impl_stub_type!(OrKwargs< Bound<'_, ArrayParams>> = Bound<'_, ArrayParams> | PyDict);
 
 pub(crate) trait IterExt: Iterator {
     fn try_collect_array<T, E, const N: usize>(self) -> Result<Option<[T; N]>, E>

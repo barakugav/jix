@@ -17,7 +17,6 @@ mod array;
 mod codec;
 mod dtype;
 mod ops;
-mod params;
 mod util;
 
 #[doc = include_str!("../docs/module.md")]
@@ -29,7 +28,7 @@ mod jix {
     pub const __version__: &str = env!("CARGO_PKG_VERSION");
 
     #[pymodule_export]
-    pub use crate::{array::Array, codec::ReadContext, params::ArrayParams};
+    pub use crate::{array::Array, codec::ReadContext};
 
     #[pymodule_export]
     pub use crate::array::compact;
@@ -97,7 +96,7 @@ pyo3_stub_gen::inventory::submit! {
     }
 }
 
-// TODO: pyo3 stub doesnt generate a docstring for constants.
+// TODO: pyo3 stub doesn't generate a docstring for constants.
 pyo3_stub_gen::module_variable!("jix", "__version__", String);
 
 #[doc(hidden)]

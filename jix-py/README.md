@@ -16,6 +16,11 @@ import numpy as np
 # Compress a NumPy array into block-compressed storage.
 a = jix.compact(np.arange(1_000_000, dtype=np.float32).reshape(1000, 1000))
 
+# Accessing the data triggers decompression of the relevant blocks
+assert a[0, 0] == 0
+assert a[999, 999] == 999_999
+assert a[0, 0:10].tolist() == list(range(10))
+
 # Build a lazy pipeline - no decompression happens yet.
 result = (a - a.mean(axis=0)) / a.std(axis=0)
 
@@ -23,7 +28,8 @@ result = (a - a.mean(axis=0)) / a.std(axis=0)
 out = result.numpy()
 
 # Or write straight to disk - blocks are decompressed, transformed,
-# and re-compressed one at a time without materializing the full result.
+# and re-compressed one at a time without materializing the full result,
+# not even in its compressed form.
 result.write_to("normalized.jix")
 
 # Load back; use mmap=True for zero-copy access to large files.
