@@ -37,6 +37,9 @@ jobs:
             jix/schema
             jix-py
       - uses: taiki-e/install-action@cargo-hack
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -135,10 +138,10 @@ jobs:
         run: cargo test --all-features
         working-directory: jix
       - name: Test jix-py (Rust tests)
-        run: cargo test --all-features
+        run: cargo test --all-features --all-targets
         working-directory: jix-py
       - name: Test jix-py (Python tests)
-        run: pytest python/tests
+        run: pytest python/tests --numprocesses auto
         working-directory: jix-py
 
   rust-version-check-clippy:

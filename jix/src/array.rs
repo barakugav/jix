@@ -349,7 +349,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     ///
     /// # Examples
     ///
-    /// 1D — the index is a `u64`:
+    /// 1D - the index is a `u64`:
     ///
     /// ```
     /// use jix::Array;
@@ -360,7 +360,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// # Ok::<(), jix::Error>(())
     /// ```
     ///
-    /// 2D — the index is a `(u64, u64)` tuple:
+    /// 2D - the index is a `(u64, u64)` tuple:
     ///
     /// ```
     /// use jix::Array;
@@ -371,7 +371,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// # Ok::<(), jix::Error>(())
     /// ```
     ///
-    /// Dynamic rank — passing a slice produces a dynamic-dimensional array whose
+    /// Dynamic rank - passing a slice produces a dynamic-dimensional array whose
     /// callback receives `&[u64]`:
     ///
     /// ```
