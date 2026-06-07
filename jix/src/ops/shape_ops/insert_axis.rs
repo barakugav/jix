@@ -177,7 +177,7 @@ where
         Self::new(array.into_storage(), axis).map(Array::from_storage)
     }
 
-    #[inline]
+    #[inline(always)]
     fn transform_index(&self, index: &[Range<u64>]) -> Result<Option<DimArray<Range<u64>>>> {
         check_get_range(self.shape(), index)?;
 

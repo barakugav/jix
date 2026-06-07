@@ -37,8 +37,8 @@ pub mod filter {
 /// Description of a type layout and inner fields
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Dtype {
-    #[prost(uint64, repeated, tag = "3")]
-    pub shape: ::prost::alloc::vec::Vec<u64>,
+    #[prost(uint32, repeated, tag = "3")]
+    pub shape: ::prost::alloc::vec::Vec<u32>,
     #[prost(uint32, tag = "4")]
     pub itemsize: u32,
     #[prost(uint32, tag = "5")]

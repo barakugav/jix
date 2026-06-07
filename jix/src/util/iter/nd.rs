@@ -64,6 +64,7 @@ where
     ///
     /// On each step the rightmost dimension that has not yet reached its bound is incremented,
     /// and all dimensions to its right are reset to `begin`.
+    #[inline(always)]
     pub(crate) fn next(&mut self) -> Option<(&[Ix], E::Item<'_>)> {
         match self.status {
             IterStatus::NotStarted => {

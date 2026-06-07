@@ -477,7 +477,6 @@ impl ReadContext {
         })
     }
 
-    #[inline]
     pub(crate) fn decoder<'a>(&'a self, config: &'a DecoderCodecConfig) -> Decoder<'a> {
         Decoder::new(self, config)
     }

@@ -1068,7 +1068,6 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// Only arrays that are already dynamically typed (`TypeDyn`, `DimDyn`) can be erased this
     /// way. Call [`Array::to_type_dyn`] and [`Array::to_dim_dyn`] first if needed.
-    #[inline]
     pub fn into_any(self) -> ArrayAny
     where
         S: ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync + 'static,
@@ -1096,7 +1095,6 @@ impl<S: ArrayStorage> Array<S> {
     /// assert!(!b.is_compact()); // b is a lazy view
     /// # Ok::<(), jix::Error>(())
     /// ```
-    #[inline]
     pub fn is_compact(&self) -> bool {
         self.storage().as_compact().is_some()
     }

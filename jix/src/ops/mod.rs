@@ -81,7 +81,7 @@
 //! Each op additionally requires the input element type to implement the relevant scalar trait,
 //! such as traits in [`core::ops`], [`num_traits`] or [`jix::scalar`](crate::scalar).
 //! For example, `add()` requires `core::ops::Add`, `exp()` requires `num_traits::Float`, and
-//! `sum()` requires `crate::scalar::ReduceSum`.
+//! `sum()` requires `crate::scalar::Sum`.
 //!
 //! # Multi-array operations
 //!

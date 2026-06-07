@@ -12,9 +12,14 @@
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
 - squeeze()
+- consider matching insert_axis to numpy's expand_dims instead of using gap indices
 - rename Maximum scalar trait to PartialMax
 - optimize reduce_max with state of (current max, nan_seen)
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
 - python `jix.add(1,2)` should create i64, not u8
 - build wheels for free threaded python (blocked by https://github.com/Jij-Inc/pyo3-stub-gen/issues/305)
+- add "why should i use this" to readme(s)
+- add link (pyproject metadata + readme) to readthedocs
+- build wheels for windows
+- remove .copy(), .compact() should be used instead, bot in rust and python

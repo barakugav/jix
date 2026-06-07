@@ -96,7 +96,7 @@ where
     where
         Self: 'a;
 
-    #[inline]
+    #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: Ix, after: Ix, _diff: Ix) {
         let (low, high) = &self.borders[dim];
         let (offset, size) = if after != high.index {
@@ -109,7 +109,7 @@ where
         self.current_block_size[dim] = size;
     }
 
-    #[inline]
+    #[inline(always)]
     fn on_decrease(&mut self, dim: usize, _before: Ix, after: Ix, _diff: Ix) {
         let (low, high) = &self.borders[dim];
         let (offset, size) = if after != low.index {

@@ -182,7 +182,7 @@ impl crate::dtype::Dtype {
         };
 
         schema::Dtype {
-            shape: self.shape().iter().map(|&d| d as u64).collect(),
+            shape: self.shape().iter().map(|&d| d as u32).collect(),
             itemsize: self.itemsize() as u32,
             alignment: self.alignment().as_usize() as u32,
             kind: Some(kind),
@@ -199,7 +199,7 @@ mod tests {
         kind: schema::DtypeScalarKind,
         itemsize: u32,
         alignment: u32,
-        shape: Vec<u64>,
+        shape: Vec<u32>,
     ) -> schema::Dtype {
         schema::Dtype {
             shape,

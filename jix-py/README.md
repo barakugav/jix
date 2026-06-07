@@ -1,4 +1,4 @@
-# jix (Python)
+# jix
 
 Python bindings for the [`jix`](https://github.com/barakugav/jix) Rust library. Built with [PyO3](https://pyo3.rs).
 

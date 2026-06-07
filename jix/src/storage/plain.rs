@@ -69,7 +69,7 @@ pub struct Plain<A, ET, D> {
 impl<A, D> Plain<A, TypeDyn, D> {
     /// Construct a `Plain` storage from a raw pointer, shape, and byte strides.
     ///
-    /// `storage` is any value that owns (or keeps alive) the memory pointed to
+    /// `allocation` is any value that owns (or keeps alive) the memory pointed to
     /// by `data`; it is stored alongside the pointer so the borrow checker can
     /// enforce lifetime constraints through `A`'s type parameter.
     ///
