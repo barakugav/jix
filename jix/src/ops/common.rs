@@ -70,28 +70,6 @@ macro_rules! define_array_op2_method {
     };
 }
 
-// macro_rules! or_else {
-//     ($( { $($optional:tt)+ } )? or { $($else:tt)+ }) => {
-//         crate::ops::common::or_else!(@impl_ $( { $($optional)+ } )? or { $($else)* });
-//     };
-//     (@impl_ { $($optional:tt)+ } or { $($else:tt)* }) => {
-//         $($optional)*
-//     };
-//     (@impl_ or { $($else:tt)* }) => {
-//         $($else)*
-//     };
-// }
-// macro_rules! if_none {
-//     ($( { $($optional:tt)+ } )? than { $($else:tt)+ }) => {
-//         crate::ops::common::if_none!(@impl_ $( { $($optional)+ } )? than { $($else)* });
-//     };
-//     (@impl_ { $($optional:tt)+ } than { $($else:tt)* }) => {
-//     };
-//     (@impl_ than { $($else:tt)* }) => {
-//         $($else)*
-//     };
-// }
-
 pub(crate) use {define_array_op1_method, define_array_op2_method};
 
 // TODO: remove

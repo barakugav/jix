@@ -8,8 +8,6 @@
     - allclose, isclose
     - flip, roll, split
     - log variants, log10, log2, log1p
-- full/zeros/ones/
-- array::from_fn
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate

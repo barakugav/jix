@@ -1,7 +1,7 @@
 use crate::dtype::Itemsize;
 use crate::error::{check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
+use crate::util::{dim_arr, DimArray, Idx, IterExt};
 
 /// Block geometry hints for an nd-array storage.
 ///

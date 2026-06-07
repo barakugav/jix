@@ -11,7 +11,7 @@ use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Compact, CompactMmap};
-use crate::util::{dim_arr, DimArray, Idx, IxIterExt};
+use crate::util::{dim_arr, DimArray, Idx, IterExt};
 use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ErrorKind, TypeDyn};
 
 impl Array<Compact<TypeDyn, DimDyn>> {

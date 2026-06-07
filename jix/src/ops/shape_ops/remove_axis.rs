@@ -150,7 +150,7 @@ where
         // Removed dimensions have size 1 and do not affect the element sequence.
         // Re-insert them as `0..1` ranges and forward the full index to the inner storage.
         let mut output_dim = 0usize;
-        let inner_index: DimArray<_> = self
+        let inner_index = self
             .is_removed
             .iter()
             .map(|&removed| {
@@ -162,7 +162,7 @@ where
                     range
                 }
             })
-            .collect();
+            .collect::<DimArray<_>>();
         Ok(inner_index)
     }
 }

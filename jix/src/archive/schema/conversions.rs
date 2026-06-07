@@ -3,7 +3,7 @@
 use crate::archive::schema;
 use crate::dtype::{Alignment, Itemsize};
 use crate::error::{bail, check_ndim, ensure, Error, ErrorKind, Result};
-use crate::util::{DimArray, IxIterExt};
+use crate::util::{DimArray, IterExt};
 
 impl crate::dtype::Dtype {
     pub(crate) fn from_proto(dtype: &schema::Dtype) -> Result<Self> {

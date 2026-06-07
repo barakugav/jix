@@ -7,7 +7,7 @@ use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::DimensionChange;
 use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IxIterExt};
+use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
 use crate::{ArrayStorage, Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape_view`].

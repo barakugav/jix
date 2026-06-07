@@ -31,7 +31,7 @@ use std::hint::assert_unchecked;
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::scalar::{f16, Complex};
 use crate::util::arrayvec::ArrayVec;
-use crate::util::{Idx, IxIterExt};
+use crate::util::{Idx, IterExt};
 
 /// A type alignment in bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
