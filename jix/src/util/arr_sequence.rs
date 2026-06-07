@@ -25,6 +25,9 @@ pub(crate) trait ArraySequenceImpl {
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).
 ///
+/// All arrays in the sequence must have the same element type and dimension, but may have
+/// different storage types.
+///
 /// This is a sealed trait - it cannot be implemented outside this crate. It is implemented for the
 /// following collection types, covering both homogeneous and heterogeneous cases:
 ///
@@ -67,17 +70,17 @@ pub(crate) trait ArraySequenceImpl {
 /// ```
 #[allow(private_bounds)]
 pub trait ArraySequence: ArraySequenceImpl {
-    /// The compile-time dimension of the first array in the sequence.
+    /// The element type of all arrays in the sequence.
     ///
-    /// This is used by operations like `stack` and `concatenate` to determine the output dimension
-    /// of the result, which is always derived from the first array's dimension.
-    type FirstArrayDimension: Dimension;
+    /// Used in operations like `stack` and `concatenate` to ensure all arrays have the same
+    /// element type, and to determine the output element type of the result.
+    type ElementType: ElementType;
 
-    /// The compile-time element type of the first array in the sequence.
+    /// The dimension of all arrays in the sequence.
     ///
-    /// This is used by operations like `stack` and `concatenate` to determine the output element type
-    /// of the result, which is always derived from the first array's element type.
-    type FirstArrayElementType: ElementType;
+    /// Used in operations like `stack` and `concatenate` to ensure all arrays have the same number
+    /// of axes, and to determine the output dimension of the result.
+    type Dimension: Dimension;
 }
 
 impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
@@ -114,12 +117,9 @@ where
         self[arr].storage.spec()
     }
 }
-impl<S, const N: usize> ArraySequence for [Array<S>; N]
-where
-    S: ArrayStorage,
-{
-    type FirstArrayDimension = S::Dimension;
-    type FirstArrayElementType = S::ElementType;
+impl<S: ArrayStorage, const N: usize> ArraySequence for [Array<S>; N] {
+    type Dimension = S::Dimension;
+    type ElementType = S::ElementType;
 }
 
 impl<S> ArraySequenceImpl for Vec<Array<S>>
@@ -157,8 +157,8 @@ where
     }
 }
 impl<S: ArrayStorage> ArraySequence for Vec<Array<S>> {
-    type FirstArrayDimension = S::Dimension;
-    type FirstArrayElementType = S::ElementType;
+    type Dimension = S::Dimension;
+    type ElementType = S::ElementType;
 }
 
 impl<S> ArraySequenceImpl for &[Array<S>]
@@ -196,18 +196,20 @@ where
     }
 }
 impl<S: ArrayStorage> ArraySequence for &[Array<S>] {
-    type FirstArrayDimension = S::Dimension;
-    type FirstArrayElementType = S::ElementType;
+    type Dimension = S::Dimension;
+    type ElementType = S::ElementType;
 }
 
 macro_rules! impl_array_sequence_for_tuple {
     ($($idx:tt : $S:ident),+ $(,)?) => {
-        impl<$($S),+> ArraySequence for ($(Array<$S>,)+)
+        impl<$($S),+, ET, D> ArraySequence for ($(Array<$S>,)+)
         where
-            $($S: ArrayStorage,)+
+            $($S: ArrayStorage<ElementType = ET, Dimension = D>,)+
+            ET: ElementType,
+            D: Dimension,
         {
-            type FirstArrayDimension = S0::Dimension;
-            type FirstArrayElementType = S0::ElementType;
+            type ElementType = ET;
+            type Dimension = D;
         }
         impl<$($S),+> ArraySequenceImpl for ($(Array<$S>,)+)
         where

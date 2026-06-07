@@ -26,19 +26,28 @@ and materialize to NumPy arrays on demand.
 import jix
 import numpy as np
 
-# Compress a NumPy array into a jix array.
-a = jix.compact(np.arange(100, dtype=np.float32).reshape(10, 10))
+# Compress a NumPy array into block-compressed storage.
+a = jix.compact(np.arange(1_000_000, dtype=np.float32).reshape(1000, 1000))
 
-# Build a lazy pipeline - no data is read yet.
-result = (a - a.mean(axis=0)).abs()
+# Accessing the data triggers decompression of the relevant blocks
+assert a[0, 0] == 0
+assert a[999, 999] == 999_999
+assert a[0, 0:10].tolist() == list(range(10))
+
+# Build a lazy pipeline - no decompression happens yet.
+result = (a - a.mean(axis=0)) / a.std(axis=0)
 
 # Materialize the pipeline into a NumPy array.
 out = result.numpy()
 
-# Save and reload.
-a.write_to("data.jix")
-b = jix.read_array("data.jix")
-assert b.shape == (10, 10)
+# Or write straight to disk - blocks are decompressed, transformed,
+# and re-compressed one at a time without materializing the full result,
+# not even in its compressed form.
+result.write_to("normalized.jix")
+
+# Load back; use mmap=True for zero-copy access to large files.
+b = jix.read_array("normalized.jix", mmap=True)
+print(b.shape, b.dtype)   # (1000, 1000) float32
 ```
 
 
@@ -82,7 +91,7 @@ similarly efficient for column reads.
 When no block shape is specified, jix picks one automatically - it greedily expands each
 dimension (innermost first) until the block byte-size reaches the L1 data cache.
 
-You can supply an explicit block shape through [`ArrayParams`][jix.ArrayParams]:
+You can supply an explicit block shape through `params` when constructing an array:
 
 ```python
 a = jix.compact(data, params={"block_shape": [64, 64]})

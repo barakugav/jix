@@ -8,14 +8,13 @@
     - allclose, isclose
     - flip, roll, split
     - log variants, log10, log2, log1p
-- full/zeros/ones/
-- array::from_fn
 - consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
 - squeeze()
 - rename Maximum scalar trait to PartialMax
-- remove ArrayParams from python APIm just accept dict of kwargs and convert to ArrayParams in rust
 - optimize reduce_max with state of (current max, nan_seen)
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
+- python `jix.add(1,2)` should create i64, not u8
+- build wheels for free threaded python (blocked by https://github.com/Jij-Inc/pyo3-stub-gen/issues/305)

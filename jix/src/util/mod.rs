@@ -1,6 +1,4 @@
 mod aligned_vec;
-use std::mem::MaybeUninit;
-
 pub(crate) use aligned_vec::AlignedBytes;
 
 mod arr_sequence;
@@ -8,12 +6,14 @@ pub use arr_sequence::ArraySequence;
 
 pub(crate) mod arrayvec;
 pub(crate) mod cpu_cache;
-pub(crate) mod iter;
 
+pub(crate) mod iter;
 use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use iter::NdIter;
 
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray};
+
+use std::mem::MaybeUninit;
 
 pub(crate) trait Idx:
     Clone
@@ -112,18 +112,16 @@ where
     unsafe { std::slice::from_raw_parts_mut(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
 
-pub(crate) trait IxIterExt: Iterator {
-    fn try_product(self) -> Option<Self::Item>;
-}
-impl<Ix, Iter> IxIterExt for Iter
-where
-    Ix: Idx,
-    Iter: Iterator<Item = Ix>,
-{
-    fn try_product(mut self) -> Option<Self::Item> {
-        self.try_fold(Ix::ONE, |acc, x| acc.checked_mul(x))
+pub(crate) trait IterExt: Iterator {
+    fn try_product(mut self) -> Option<Self::Item>
+    where
+        Self: Sized,
+        Self::Item: Idx,
+    {
+        self.try_fold(Self::Item::ONE, |acc, x| acc.checked_mul(x))
     }
 }
+impl<Iter: Iterator> IterExt for Iter {}
 
 // pub(crate) enum MaybeOwned<'a, T> {
 //     Owned(T),
@@ -379,6 +377,29 @@ where
     }
     Ok(unsafe { val.assume_init() })
 }
+
+macro_rules! or_else {
+    ($( { $($optional:tt)+ } )? or { $($else:tt)+ }) => {
+        crate::util::or_else!(@impl_ $( { $($optional)+ } )? or { $($else)* })
+    };
+    (@impl_ { $($optional:tt)+ } or { $($else:tt)* }) => {
+        $($optional)*
+    };
+    (@impl_ or { $($else:tt)* }) => {
+        $($else)*
+    };
+}
+// macro_rules! if_none {
+//     ($( { $($optional:tt)+ } )? than { $($else:tt)+ }) => {
+//         crate::util::if_none!(@impl_ $( { $($optional)+ } )? than { $($else)* });
+//     };
+//     (@impl_ { $($optional:tt)+ } than { $($else:tt)* }) => {
+//     };
+//     (@impl_ than { $($else:tt)* }) => {
+//         $($else)*
+//     };
+// }
+pub(crate) use or_else;
 
 #[cfg(test)]
 mod tests {

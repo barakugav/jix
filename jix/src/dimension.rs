@@ -1,4 +1,5 @@
 use std::hint::assert_unchecked;
+use std::ops::{Index, IndexMut};
 
 use crate::error::{bail, Result};
 use crate::{Error, ErrorKind};
@@ -73,7 +74,13 @@ pub const NDIM_MAX: usize = 8;
 /// Every `Dimension` value also implements [`IntoDimension`] (with `Dimension = Self`), so a
 /// `Dim<N>` or `DimDyn` can be passed directly to any function that accepts `IntoDimension`.
 pub trait Dimension:
-    IntoDimension<Dimension = Self> + ndarray::IntoDimension<Dim: IntoDimension> + Clone + Send + Sync
+    Index<usize, Output = u64>
+    + IndexMut<usize, Output = u64>
+    + IntoDimension<Dimension = Self>
+    + ndarray::IntoDimension<Dim: IntoDimension>
+    + Clone
+    + Send
+    + Sync
 {
     /// The number of axes, if known at compile time.
     ///
@@ -98,6 +105,17 @@ pub trait Dimension:
     /// For `DimDyn`: `DimDyn` (adding an axis keeps the dimension dynamic).
     type Larger: Dimension;
 
+    /// The type of the index pattern for this dimension.
+    ///
+    /// - For `Dim<1>`: `u64`
+    /// - For `Dim<2>`: `(u64, u64)`
+    /// - For `Dim<3>`: `(u64, u64, u64)`
+    /// - ...
+    /// - For `DimDyn`: `&[u64]`
+    type Index<'a>: IntoDimension<Dimension = Self> + Clone
+    where
+        Self: 'a;
+
     /// Construct a `Dimension` value from a shape slice.
     ///
     /// Returns an error if the slice length does not match the statically expected ndim (for
@@ -108,6 +126,9 @@ pub trait Dimension:
 
     /// Return the shape as a slice, with one element per dimension.
     fn as_slice(&self) -> &[u64];
+
+    /// Return the shape as a mutable slice, with one element per dimension.
+    fn as_mut_slice(&mut self) -> &mut [u64];
 
     /// Return the number of dimensions.
     ///
@@ -125,6 +146,9 @@ pub trait Dimension:
     fn size(&self, dim: usize) -> u64 {
         self.as_slice()[dim]
     }
+
+    /// Convert the dimension into its index pattern type.
+    fn to_index(&self) -> Self::Index<'_>;
 }
 
 /// A dynamically-dimensioned shape whose ndim is only known at runtime.
@@ -144,6 +168,7 @@ impl Dimension for DimDyn {
     const NDIM: Option<usize> = None;
     type Smaller = Self;
     type Larger = Self;
+    type Index<'a> = &'a [u64];
 
     #[inline(always)]
     fn from_slice(slice: &[u64]) -> Result<Self> {
@@ -164,6 +189,31 @@ impl Dimension for DimDyn {
         let s = self.0.as_slice();
         unsafe { assert_unchecked(s.len() <= NDIM_MAX) };
         s
+    }
+    #[inline(always)]
+    fn as_mut_slice(&mut self) -> &mut [u64] {
+        let s = self.0.as_mut_slice();
+        unsafe { assert_unchecked(s.len() <= NDIM_MAX) };
+        s
+    }
+
+    #[inline(always)]
+    fn to_index(&self) -> Self::Index<'_> {
+        self.as_slice()
+    }
+}
+impl Index<usize> for DimDyn {
+    type Output = u64;
+
+    #[inline(always)]
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.as_slice()[index]
+    }
+}
+impl IndexMut<usize> for DimDyn {
+    #[inline(always)]
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.as_mut_slice()[index]
     }
 }
 impl ndarray::IntoDimension for DimDyn {
@@ -204,14 +254,18 @@ impl<const NDIM: usize> Dim<NDIM> {
     }
 }
 macro_rules! impl_dim {
-    ($dim:literal, smaller = $smaller:ty, larger = $larger:ty) => {
-        impl_dim!($dim, nd_dim = ndarray::Dim<[usize; $dim]>, smaller = $smaller, larger = $larger);
-    };
-    ($dim:literal, nd_dim=$nd_dim:ty, smaller = $smaller:ty, larger = $larger:ty) => {
+    (
+        $dim:literal,
+        $(nd_dim = $nd_dim:ty,)?
+        $(smaller = $smaller:ty,)?
+        $(larger = $larger:ty,)?
+        index = { $index:ty, |$to_index_in:ident| $to_index:expr }
+    ) => {
         impl Dimension for Dim<$dim> {
             const NDIM: Option<usize> = Some($dim);
-            type Smaller = $smaller;
-            type Larger = $larger;
+            type Smaller = crate::util::or_else!($({ $smaller })? or { Dim<{ $dim - 1 }> });
+            type Larger = crate::util::or_else!($({ $larger })? or { Dim<{ $dim + 1 }> });
+            type Index<'a> = $index;
 
             #[inline(always)]
             fn from_slice(slice: &[u64]) -> Result<Self> {
@@ -227,9 +281,34 @@ macro_rules! impl_dim {
             fn as_slice(&self) -> &[u64] {
                 self.0.as_slice()
             }
+            #[inline(always)]
+            fn as_mut_slice(&mut self) -> &mut [u64] {
+                self.0.as_mut_slice()
+            }
+
+            #[inline(always)]
+            fn to_index(&self) -> Self::Index<'_> {
+                #[allow(unused_variables)]
+                let $to_index_in = self.as_slice();
+                $to_index
+            }
+        }
+        impl Index<usize> for Dim<$dim> {
+            type Output = u64;
+
+            #[inline(always)]
+            fn index(&self, index: usize) -> &Self::Output {
+                &self.as_slice()[index]
+            }
+        }
+        impl IndexMut<usize> for Dim<$dim> {
+            #[inline(always)]
+            fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+                &mut self.as_mut_slice()[index]
+            }
         }
         impl ndarray::IntoDimension for Dim<$dim> {
-            type Dim = $nd_dim;
+            type Dim = crate::util::or_else!($({ $nd_dim })? or { ndarray::Dim<[usize; $dim]> });
 
             #[inline(always)]
             fn into_dimension(self) -> Self::Dim {
@@ -242,19 +321,16 @@ macro_rules! impl_dim {
             }
         }
     };
-    ($dim:literal $(, nd_dim=$nd_dim:ty)?) => {
-        impl_dim!($dim $(, nd_dim = $nd_dim)?, smaller = Dim<{ $dim - 1 }>, larger = Dim<{ $dim + 1 }>);
-    };
 }
-impl_dim!(0, smaller = DimDyn, larger = Dim<1>);
-impl_dim!(1);
-impl_dim!(2);
-impl_dim!(3);
-impl_dim!(4);
-impl_dim!(5);
-impl_dim!(6);
-impl_dim!(7, nd_dim = ndarray::IxDyn);
-impl_dim!(8, nd_dim = ndarray::IxDyn, smaller = Dim<7>, larger = DimDyn);
+impl_dim!(0, smaller = DimDyn, larger = Dim<1>, index = { (), |i| () });
+impl_dim!(1, index = { u64, |i| i[0] });
+impl_dim!(2, index = { (u64, u64), |i| (i[0], i[1]) });
+impl_dim!(3, index = { (u64, u64, u64), |i| (i[0], i[1], i[2]) });
+impl_dim!(4, index = { (u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3]) });
+impl_dim!(5, index = { (u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4]) });
+impl_dim!(6, index = { (u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5]) });
+impl_dim!(7, nd_dim = ndarray::IxDyn, index = { (u64, u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5], i[6]) });
+impl_dim!(8, nd_dim = ndarray::IxDyn, smaller = Dim<7>, larger = DimDyn, index = { (u64, u64, u64, u64, u64, u64, u64, u64), |i| (i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7]) });
 
 /// Conversion into a [`Dimension`] value, encoding the ndim in the type.
 ///

@@ -10,8 +10,7 @@ macro_rules! define_array_op1_method {
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
             S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+,
-            <S::Item as $($trait)::+>::Output: crate::dtype::Dtyped,
+            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self).unwrap()
         }
@@ -38,8 +37,7 @@ macro_rules! define_array_op2_method {
         where
             S: crate::storage::ArrayStorageTyped,
             S2: crate::storage::ArrayStorageTyped<Dimension = S::Dimension>,
-            S::Item: $($trait)::+<S2::Item>,
-            <S::Item as $($trait)::+<S2::Item>>::Output: crate::dtype::Dtyped,
+            S::Item: $($trait)::+<S2::Item, Output: crate::dtype::Dtyped>,
         {
             $Op::new_array(self, other).unwrap()
         }
@@ -71,28 +69,6 @@ macro_rules! define_array_op2_method {
         }
     };
 }
-
-// macro_rules! or_else {
-//     ($( { $($optional:tt)+ } )? or { $($else:tt)+ }) => {
-//         crate::ops::common::or_else!(@impl_ $( { $($optional)+ } )? or { $($else)* });
-//     };
-//     (@impl_ { $($optional:tt)+ } or { $($else:tt)* }) => {
-//         $($optional)*
-//     };
-//     (@impl_ or { $($else:tt)* }) => {
-//         $($else)*
-//     };
-// }
-// macro_rules! if_none {
-//     ($( { $($optional:tt)+ } )? than { $($else:tt)+ }) => {
-//         crate::ops::common::if_none!(@impl_ $( { $($optional)+ } )? than { $($else)* });
-//     };
-//     (@impl_ { $($optional:tt)+ } than { $($else:tt)* }) => {
-//     };
-//     (@impl_ than { $($else:tt)* }) => {
-//         $($else)*
-//     };
-// }
 
 pub(crate) use {define_array_op1_method, define_array_op2_method};
 

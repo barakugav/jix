@@ -3,9 +3,11 @@ use std::path::PathBuf;
 
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
-use crate::util::{IntoPyResult, OrKwargs};
-use crate::{Array, ArrayParams, ReadContext};
+use crate::array::resolve_array_params;
+use crate::util::IntoPyResult;
+use crate::{Array, ReadContext};
 
 /// Load a compressed array from a `.jix` file or a file-like object.
 ///
@@ -20,8 +22,7 @@ use crate::{Array, ArrayParams, ReadContext};
 ///         the heap; blocks are paged in on demand. Defaults to `False`. **Caution:** modifying
 ///         the file while the returned array is live has undefined behavior. Not supported for
 ///         file-like objects.
-///     params: Controls how the array is read and decoded. Accepts a [`jix.ArrayParams`][jix.ArrayParams] instance
-///         or a plain `dict`. See [`jix.ArrayParams`][jix.ArrayParams] for details.
+///     params: Controls how the array is read and decoded. See [`jix.compact()`][jix.compact] for details.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] loaded from the file.
@@ -58,12 +59,12 @@ use crate::{Array, ArrayParams, ReadContext};
 pub fn read_array(
     py: Python,
     path_or_reader: &Bound<'_, PyAny>,
-    params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+    params: Option<Bound<'_, PyDict>>,
     offset: Option<u64>,
     len: Option<u64>,
     mmap: bool,
 ) -> PyResult<Array> {
-    let params = ArrayParams::resolve(py, params)?;
+    let params = resolve_array_params(py, params)?;
     let path_or_reader = PathOrReader::from_pyany(path_or_reader)?;
 
     match path_or_reader {
@@ -126,10 +127,9 @@ pub fn read_array(
 ///     append: When `False` (default), the file is created anew and must not already exist.
 ///         When `True`, the array is appended to an existing file (or a new one is created).
 ///         Ignored when `path_or_writer` is a file-like object.
-///     params: Controls the block layout and codec for encoding. Accepts a [`jix.ArrayParams`][jix.ArrayParams]
-///         instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). Unset fields are
+///     params: Controls the block layout and codec for encoding. Unset fields are
 ///         inherited from the source array. Ignored when the source is already compact.
-///         See [`jix.ArrayParams`][jix.ArrayParams] for details.
+///         See [`jix.compact()`][jix.compact] for details.
 ///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse when reading the source array.
 ///         When omitted, a context is created internally. See [`jix.ReadContext`][jix.ReadContext] for details.
 ///
@@ -166,13 +166,13 @@ pub fn write_array(
     array: &Bound<'_, Array>,
     path_or_writer: &Bound<'_, PyAny>,
     append: bool,
-    params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+    params: Option<Bound<'_, PyDict>>,
     context: Option<&Bound<'_, ReadContext>>,
 ) -> PyResult<()> {
     let py = array.py();
     let path_or_writer = PathOrWriter::from_pyany(path_or_writer)?;
     let array = &array.get().arr;
-    let params = ArrayParams::resolve(py, params)?;
+    let params = resolve_array_params(py, params)?;
     let context = context.map(|ctx| ctx.get());
 
     match path_or_writer {

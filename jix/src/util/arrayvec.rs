@@ -1,13 +1,6 @@
-use std::cmp;
-use std::iter;
-use std::mem;
-use std::ops::{Deref, DerefMut};
-use std::ptr;
-use std::slice;
-
-use std::fmt;
-
 use std::mem::MaybeUninit;
+use std::ops::{Deref, DerefMut};
+use std::{cmp, fmt, iter, mem, ptr, slice};
 
 type LenUint = u8;
 

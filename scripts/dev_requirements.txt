@@ -5,4 +5,5 @@ mkdocstrings[python]~=1.0
 griffelib~=2.0
 ruff~=0.15
 pytest~=9.0
+pytest-xdist~=3.0
 hypothesis~=6.0

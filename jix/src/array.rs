@@ -11,10 +11,11 @@ use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlocksLayout, Compact, Ref,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
+use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray,
-    Idx, IxIterExt,
+    Idx, IterExt,
 };
 use crate::{
     ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
@@ -287,8 +288,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     {
         let array = Array::plain_ndarray_ref(array)?;
         params.tune(array.shape(), array.dtype())?;
-        let context = ReadContext::new(&params.decoder_params.clone().unwrap_or_default())?;
-        array.copy_with(params, &context)
+        array.copy_with(params, &array.try_read_ctx()?)
     }
 }
 
@@ -329,8 +329,178 @@ impl<D> Array<Compact<TypeDyn, D>> {
     {
         let array = unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype)? };
         params.tune(array.shape(), array.dtype())?;
-        let context = ReadContext::new(&params.decoder_params.clone().unwrap_or_default())?;
-        array.copy_with(params, &context)
+        array.copy_with(params, &array.try_read_ctx()?)
+    }
+}
+
+impl<T, D> Array<Compact<Ty<T>, D>> {
+    /// Create a block-compressed array by evaluating a function `f` at each index.
+    ///
+    /// The function `f` is called with the index of each element in the output array, and should
+    /// return the value for that element.
+    /// Elements are visited in an arbitrary order - this is not some theoretical use case, most of
+    /// the times elements will NOT be visited in row-major order, and the function should not rely
+    /// on any specific order for correctness or performance.
+    ///
+    /// # Arguments
+    ///
+    /// - `shape`: shape of the output array.
+    /// - `f`: function that produces the value of each element given its index.
+    ///
+    /// # Examples
+    ///
+    /// 1D - the index is a `u64`:
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_fn(5, |i: u64| i * 2)?;
+    /// assert_eq!(a.to_ndarray()?, array![0, 2, 4, 6, 8]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    ///
+    /// 2D - the index is a `(u64, u64)` tuple:
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_fn((3, 3), |(x, y)| x * 10 + y)?;
+    /// assert_eq!(a.to_ndarray()?, array![[0, 1, 2], [10, 11, 12], [20, 21, 22]]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    ///
+    /// Dynamic rank - passing a slice produces a dynamic-dimensional array whose
+    /// callback receives `&[u64]`:
+    ///
+    /// ```
+    /// use jix::Array;
+    ///
+    /// let a = Array::compact_fn([2, 3].as_slice(), |i: &[u64]| i[0] + i[1])?;
+    /// assert_eq!(a.shape(), &[2, 3]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    pub fn compact_fn<Sh, F>(shape: Sh, f: F) -> Result<Self>
+    where
+        Sh: IntoDimension<Dimension = D>,
+        D: Dimension,
+        F: Fn(D::Index<'_>) -> T,
+        T: Dtyped,
+    {
+        Self::compact_fn_with(shape, ArrayParams::default(), f)
+    }
+
+    /// Create a block-compressed array by evaluating a function `f` at each index, with explicit `ArrayParams`.
+    ///
+    /// The function `f` is called with the index of each element in the output array, and should
+    /// return the value for that element.
+    /// Elements are visited in an arbitrary order - this is not some theoretical use case, most of
+    /// the times elements will NOT be visited in row-major order, and the function should not rely
+    /// on any specific order for correctness or performance.
+    ///
+    /// # Arguments
+    ///
+    /// - `shape`: shape of the output array.
+    /// - `params`: block layout and codec parameters. See [`ArrayParams`] for details.
+    /// - `f`: function that produces the value of each element given its index.
+    ///
+    /// # Examples
+    ///
+    /// Materialize a large 2D array with an explicit block shape tuned to the
+    /// access pattern (here, square 64x64 tiles):
+    ///
+    /// ```
+    /// # use jix::{Array, ArrayParams};
+    /// let mut params = ArrayParams::new();
+    /// params.block_shape(&[64, 64]);
+    ///
+    /// let a = Array::compact_fn_with((256, 256), params, |(x, y)| (x as f32) * 0.5 + (y as f32))?;
+    /// assert_eq!(a.shape(), &[256, 256]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    pub fn compact_fn_with<Sh, F>(shape: Sh, mut params: ArrayParams, f: F) -> Result<Self>
+    where
+        Sh: IntoDimension<Dimension = D>,
+        D: Dimension,
+        F: Fn(D::Index<'_>) -> T,
+        T: Dtyped,
+    {
+        struct FnStorage<T, D, F> {
+            dtype: Ty<T>,
+            shape: D,
+            f: F,
+            layout: BlocksLayout,
+        }
+        impl<T, D, F> ArrayStorage for FnStorage<T, D, F>
+        where
+            T: Dtyped,
+            D: Dimension,
+            F: Fn(D::Index<'_>) -> T,
+        {
+            type ElementType = Ty<T>;
+            type Dimension = D;
+
+            fn read_data(
+                &self,
+                index: &[Range<u64>],
+                buf: &mut [u8],
+                _context: &ReadContext,
+            ) -> Result<()> {
+                let ndim = self.shape().len();
+                let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+                let mut iter = NdIter::new(
+                    &read_shape,
+                    NdIterExtStridesPtrMut::new(
+                        &default_strides(&read_shape, size_of::<T>() as u64),
+                        buf.as_mut_ptr(),
+                    ),
+                );
+                while let Some((idx, out)) = iter.next() {
+                    let idx = D::from_slice(idx).unwrap();
+                    let value = (self.f)(idx.to_index());
+                    unsafe { out.cast::<T>().write(value) };
+                }
+                Ok(())
+            }
+
+            fn shape(&self) -> &[u64] {
+                self.shape.as_slice()
+            }
+
+            fn dtype(&self) -> &Dtype {
+                self.dtype.dtype()
+            }
+
+            fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
+                crate::storage::ArrayStorageSpec {
+                    blocks_layout: &self.layout,
+                    encoder_params: None,
+                    decoder_params: None,
+                }
+            }
+        }
+
+        let shape = shape.into_dimension()?;
+        let dtype = Ty::<T>::new();
+
+        params.tune(shape.as_slice(), dtype.dtype())?;
+        let layout = BlocksLayout::new(
+            params.block_shape.clone().unwrap(),
+            params.block_shape_tag.clone().unwrap(),
+            params.block_size_hint.unwrap(),
+            params.preferred_read_shape.clone().unwrap(),
+            params.preferred_read_size_hint.unwrap(),
+        );
+
+        let array = Array::from_storage(FnStorage {
+            dtype,
+            shape,
+            f,
+            layout,
+        });
+
+        array.copy_with(params, &ReadContext::new(&DecoderParams::default())?)
     }
 }
 
@@ -391,14 +561,61 @@ impl<S: ArrayStorage> Array<S> {
         dtype
     }
 
-    /// Decode the full array into a heap-allocated [`ndarray::Array`].
+    /// Decode the entire array into a fresh heap-allocated [`ndarray::Array`].
     ///
-    /// Decompresses all blocks and returns the elements in a contiguous row-major ndarray.
-    /// `T` must match [`self.dtype()`](Array::dtype).
+    /// This is the simplest way to materialize a jix array into a standard in-memory ndarray.
+    /// All blocks of the underlying compact storage are decompressed and the elements are
+    /// returned in a contiguous row-major (C-order) ndarray with the same shape and element
+    /// type as the source.
+    ///
+    /// For a lazy view (e.g. `Array<Add<Mul<Compact, _>, _>>`), `to_ndarray` walks the entire
+    /// operation pipeline: each composed op is evaluated on the fly as data flows out of the
+    /// innermost storage. Materializing the same chain repeatedly will redo the work; if you
+    /// plan to read the result more than once, call [`copy`](Array::copy) first to re-compress
+    /// the result into a fresh `Array<Compact>` (or [`copy_with`](Array::copy_with) to control
+    /// the block shape).
+    ///
+    /// `to_ndarray` allocates a fresh [`ReadContext`] internally, so callers don't need to
+    /// manage one. For repeated reads (e.g. iterating tiles over a large array) prefer
+    /// [`to_ndarray_sub`](Array::to_ndarray_sub) with an explicit context obtained from
+    /// [`read_ctx`](Array::read_ctx) - that way the codec scratch buffers and decompressor
+    /// instance are shared across calls.
     ///
     /// # Errors
     ///
     /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
+    /// let nd = a.to_ndarray()?;
+    /// assert_eq!(nd, array![[1.0f32, 2.0], [3.0, 4.0]]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    ///
+    /// Materialize a lazy pipeline. None of the arithmetic runs at construction time - it
+    /// only executes when `to_ndarray` walks the chain:
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_array(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
+    /// let b = Array::compact_array(&ndarray::Array2::<f32>::ones((2, 3)))?;
+    ///
+    /// // Build a lazy view: (a + b) * 2 - 1
+    /// let lazy = (a + b) * 2.0f32 - 1.0f32;
+    /// assert_eq!(lazy.shape(), &[2, 3]);
+    ///
+    /// let nd = lazy.to_ndarray()?;            // executes the pipeline
+    /// assert_eq!(nd[[0, 0]], (1.0 + 1.0) * 2.0 - 1.0);
+    /// assert_eq!(nd[[1, 2]], (6.0 + 1.0) * 2.0 - 1.0);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
     pub fn to_ndarray(
         &self,
     ) -> Result<ndarray::Array<S::Item, <S::Dimension as ndarray::IntoDimension>::Dim>>
@@ -410,15 +627,49 @@ impl<S: ArrayStorage> Array<S> {
         self.to_ndarray_sub(&full_range, &self.read_ctx())
     }
 
-    /// Decode a rectangular sub-region into a heap-allocated [`ndarray::Array`].
+    /// Decode a rectangular sub-region of the array into a fresh heap-allocated [`ndarray::Array`].
     ///
-    /// Only the compressed blocks overlapping `index` are decompressed. When `index` aligns to
-    /// block boundaries no extra data is read; for unaligned ranges, the overlapping boundary
-    /// blocks are fully decompressed and only the requested slice is returned.
+    /// `index` contains one half-open `start..end` range per dimension within
+    /// `0..self.shape()[dim]`. The result has shape `[index[0].len(), index[1].len(), ...]`
+    /// and contains the corresponding elements from the source in row-major order.
     ///
-    /// `index` must contain one half-open `start..end` per dimension within
-    /// `0..self.shape()[dim]`. `T` must match [`self.dtype()`](Array::dtype). Obtain a
-    /// [`ReadContext`] via [`read_ctx`](Array::read_ctx).
+    /// # When to use this over [`to_ndarray`](Array::to_ndarray)
+    ///
+    /// Use `to_ndarray_sub` when you only need a window of a large array, or when you want
+    /// to stream over an array tile-by-tile without ever materializing the whole thing in
+    /// memory. Use `to_ndarray` when you need the entire array at once and don't plan to
+    /// issue further reads.
+    ///
+    /// # What gets decompressed
+    ///
+    /// For [`Array<Compact>`](crate::storage::Compact) (and views layered on top of it),
+    /// `to_ndarray_sub` only touches the blocks that overlap `index`:
+    ///
+    /// - **Block-aligned ranges**: if `index` aligns to block boundaries on every axis,
+    ///   exactly the covered blocks are decompressed - no wasted work.
+    /// - **Unaligned ranges**: the overlapping boundary blocks are decompressed in full and
+    ///   the requested slice is copied out. Elements outside `index` within those boundary
+    ///   blocks are decoded but then discarded.
+    ///
+    /// To keep sub-region reads cheap, choose a `block_shape` (via
+    /// [`ArrayParams::block_shape`](crate::ArrayParams::block_shape) when creating the array)
+    /// that matches your access pattern.
+    ///
+    /// For lazy views (e.g. after `reshape`, `permute_axes`, `broadcast`, or element-wise
+    /// ops), the index range is propagated inward through the chain and only the
+    /// corresponding region of the innermost storage is read. A shape-changing op can
+    /// scramble the mapping such that a small output range still touches many input blocks -
+    /// if this matters for performance, materialize with [`copy`](Array::copy) before
+    /// iterating sub-regions.
+    ///
+    /// # `ReadContext` reuse
+    ///
+    /// `context` carries the decoder instance and scratch buffers used during decompression.
+    /// Allocating these on every read is expensive, especially for small windows. Obtain a
+    /// single context via [`read_ctx`](Array::read_ctx) once and pass it to every call.
+    /// [`read_ctx`](Array::read_ctx) inherits the array's stored decoder configuration;
+    /// `ReadContext::default()` works too but uses default decoder parameters regardless of
+    /// the array.
     ///
     /// # Errors
     ///
@@ -428,20 +679,51 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Examples
     ///
+    /// Stream a large array tile-by-tile, reusing a single `ReadContext`. The block shape
+    /// is chosen to divide the tile shape, so every tile read decompresses exactly its
+    /// covering blocks with no boundary waste:
+    ///
+    /// ```
+    /// use jix::{Array, ArrayParams};
+    ///
+    /// // 256x256 f32 array stored as 32x32 blocks.
+    /// let data = ndarray::Array2::<f32>::from_shape_fn((256, 256), |(i, j)| (i + j) as f32);
+    /// let mut params = ArrayParams::new();
+    /// params.block_shape(&[32, 32]);
+    /// let a = Array::compact_array_with(&data, params)?;
+    ///
+    /// // Walk the array as 64x64 tiles. 32 divides 64, so each call decompresses exactly
+    /// // 2*2 = 4 blocks - no boundary waste. The same ReadContext is reused across all
+    /// // 16 reads, sharing decompressor and scratch buffers.
+    /// let ctx = a.read_ctx();
+    /// let mut total = 0.0f32;
+    /// for tr in 0..4 {
+    ///     for tc in 0..4 {
+    ///         let tile = a.to_ndarray_sub(
+    ///             &[(tr * 64)..((tr + 1) * 64), (tc * 64)..((tc + 1) * 64)],
+    ///             &ctx,
+    ///         )?;
+    ///         total += tile.sum();
+    ///     }
+    /// }
+    /// assert!(total > 0.0);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    ///
+    /// Sub-region reads also work on lazy views - the requested range is propagated through
+    /// the pipeline so the inner storage only sees the corresponding window:
+    ///
     /// ```
     /// use jix::Array;
     /// use ndarray::array;
     ///
     /// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
+    /// let scaled = a * 10i32;                         // Array<Mul<Compact, Scalar<i32>>>
     ///
-    /// let context = a.read_ctx();
+    /// let ctx = scaled.read_ctx();
     /// assert_eq!(
-    ///     a.to_ndarray_sub(&[1..3, 1..3], &context)?,
-    ///     array![[5, 6], [8, 9]]
-    /// );
-    /// assert_eq!(
-    ///    a.to_ndarray_sub(&[0..2, 0..2], &context)?,
-    ///    array![[1, 2], [4, 5]]
+    ///     scaled.to_ndarray_sub(&[1..3, 1..3], &ctx)?,
+    ///     array![[50, 60], [80, 90]],
     /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
@@ -743,12 +1025,14 @@ impl<S: ArrayStorage> Array<S> {
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub fn read_ctx(&self) -> ReadContext {
+        self.try_read_ctx().expect("failed to create read context")
+    }
+    fn try_read_ctx(&self) -> Result<ReadContext> {
         let params = self.storage.spec().decoder_params;
-        let context = match params {
+        match params {
             Some(params) => ReadContext::new(params),
             None => ReadContext::new(&DecoderParams::default()),
-        };
-        context.expect("failed to create read context")
+        }
     }
 
     /// Create an array with a storage reference to this array, without cloning the underlying data.
@@ -1603,6 +1887,44 @@ mod tests {
         let a = Array::compact_array_with(&src, arr_params(&[2, 3])).unwrap();
         let got = a.to_ndarray_sub(&[1..3, 2..5], &a.read_ctx()).unwrap();
         assert_eq!(got, array![[8u8, 9, 10], [14, 15, 16]]);
+    }
+
+    // -----------------------------------------------------------------------
+    // compact_fn
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn compact_fn_1d() {
+        let a = Array::compact_fn(47, |i| i * 4 + 6).unwrap();
+        assert_eq!(a.shape(), &[47]);
+        assert_eq!(
+            a.to_ndarray().unwrap().as_slice().unwrap()[..4],
+            [6, 10, 14, 18]
+        );
+    }
+
+    #[test]
+    fn compact_fn_2d() {
+        let a = Array::compact_fn((3, 3), |(x, y)| x * 10 + y).unwrap();
+        assert_eq!(a.shape(), &[3, 3]);
+        assert_eq!(
+            a.to_ndarray().unwrap(),
+            array![[0, 1, 2], [10, 11, 12], [20, 21, 22]]
+        );
+
+        let a = Array::compact_fn([3, 3].as_slice(), |i| i[0] * 7 + i[1]).unwrap();
+        assert_eq!(a.shape(), &[3, 3]);
+        assert_eq!(
+            a.to_ndarray().unwrap(),
+            array![[0, 1, 2], [7, 8, 9], [14, 15, 16]].into_dyn()
+        );
+    }
+
+    #[test]
+    fn compact_fn_0d() {
+        let a = Array::compact_fn((), |()| 42).unwrap();
+        assert_eq!(a.shape(), &[]);
+        assert_eq!(a.to_ndarray().unwrap().as_slice().unwrap(), &[42]);
     }
 
     // -----------------------------------------------------------------------

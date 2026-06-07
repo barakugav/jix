@@ -37,6 +37,9 @@ jobs:
             jix/schema
             jix-py
       - uses: taiki-e/install-action@cargo-hack
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -97,25 +100,25 @@ jobs:
 
       ############ Linters ############
       - name: Clippy jix-schema
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix/schema
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix-macros
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix-macros
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix-py
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix-py
           check-args: --all-features
@@ -135,10 +138,10 @@ jobs:
         run: cargo test --all-features
         working-directory: jix
       - name: Test jix-py (Rust tests)
-        run: cargo test --all-features
+        run: cargo test --all-features --all-targets
         working-directory: jix-py
       - name: Test jix-py (Python tests)
-        run: pytest python/tests
+        run: pytest python/tests --numprocesses auto
         working-directory: jix-py
 
   rust-version-check-clippy:
@@ -180,7 +183,7 @@ jobs:
         run: cargo check --all-features
         working-directory: jix
       - name: cargo clippy jix
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix
           check-args: --all-features
@@ -190,7 +193,7 @@ jobs:
         run: cargo check --all-features
         working-directory: jix-py
       - name: cargo clippy jix-py
-        uses: auguwu/clippy-action@1.4.0
+        uses: auguwu/clippy-action@1.5.0
         with:
           working-directory: jix-py
           check-args: --all-features

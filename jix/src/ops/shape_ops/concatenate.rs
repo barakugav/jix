@@ -59,15 +59,21 @@ where
 /// assert_eq!(c.shape(), &[2, 5]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Concatenate<ArraysT: ArraySequence> {
+pub struct Concatenate<ArraysT>
+where
+    ArraysT: ArraySequence,
+{
     arrays: ArraysT,
     concat_axis: usize,
     borders: Vec<u64>,
 
-    shape: ArraysT::FirstArrayDimension,
+    shape: ArraysT::Dimension,
     blocks_layout: BlocksLayout,
 }
-impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
+impl<ArraysT> Concatenate<ArraysT>
+where
+    ArraysT: ArraySequence,
+{
     /// Constructs a [`Concatenate`] storage. See the struct docs for semantics and examples.
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
         let narrays = arrays.narrays();
@@ -114,7 +120,7 @@ impl<ArraysT: ArraySequence> Concatenate<ArraysT> {
             borders.push(shape[axis]);
         }
 
-        let shape = ArraysT::FirstArrayDimension::from_slice(&shape).unwrap();
+        let shape = ArraysT::Dimension::from_slice(&shape).unwrap();
         Ok(Self {
             shape,
             blocks_layout: arrays.spec(0).blocks_layout.clone(),
@@ -133,8 +139,8 @@ impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where
     ArraysT: ArraySequence,
 {
-    type ElementType = ArraysT::FirstArrayElementType;
-    type Dimension = ArraysT::FirstArrayDimension;
+    type ElementType = ArraysT::ElementType;
+    type Dimension = ArraysT::Dimension;
 
     /// Fills `buf` with a C-order slice of the concatenated array described by `index`.
     ///
@@ -160,8 +166,6 @@ where
             return Ok(());
         }
 
-        const BINARY_SEARCH_THRESHOLD: usize = 32;
-
         let itemsize = dtype.itemsize() as usize;
 
         let output_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
@@ -177,6 +181,7 @@ where
         let req_end = index[self.concat_axis].end;
 
         // Find the first sub-array whose end exceeds req_start (i.e. the first that may overlap).
+        const BINARY_SEARCH_THRESHOLD: usize = 32;
         let first_arr = if self.borders.len() < BINARY_SEARCH_THRESHOLD {
             self.borders
                 .iter()
@@ -385,16 +390,24 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_shape_mismatch_panics() {
-        let a = Array::compact_array(&array![1i32, 2]).unwrap();
-        let b = Array::compact_array(&array![[1i32, 2]]).unwrap();
+        let a = Array::compact_array(&array![1i32, 2])
+            .unwrap()
+            .into_dim_dyn();
+        let b = Array::compact_array(&array![[1i32, 2]])
+            .unwrap()
+            .into_dim_dyn();
         let _ = concatenate((a, b), 0);
     }
 
     #[test]
     #[should_panic]
     fn test_dtype_mismatch_panics() {
-        let a = Array::compact_array(&array![1i32, 2]).unwrap();
-        let b = Array::compact_array(&array![1.0f32, 2.0]).unwrap();
+        let a = Array::compact_array(&array![1i32, 2])
+            .unwrap()
+            .into_type_dyn();
+        let b = Array::compact_array(&array![1.0f32, 2.0])
+            .unwrap()
+            .into_type_dyn();
         let _ = concatenate((a, b), 0);
     }
 

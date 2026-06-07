@@ -1,10 +1,12 @@
 use jix_core::Array as CoreArray;
 use jix_core::ArrayStorage;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
+use crate::array::resolve_array_params;
 use crate::codec::ReadContext;
-use crate::util::{IntoPyResult, OrKwargs};
-use crate::{Array, ArrayParams};
+use crate::util::IntoPyResult;
+use crate::Array;
 
 /// Copies the data of an array into a new compact array by compressing it into new blocks.
 ///
@@ -24,18 +26,10 @@ use crate::{Array, ArrayParams};
 ///
 /// Codec settings (compression level, filters, etc.) are inherited from the source storage.
 ///
-/// `params` controls the block layout and codec of the output. Accepts a [`jix.ArrayParams`][jix.ArrayParams]
-/// instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). Any field not set is
-/// inherited from the source array's storage. See [`jix.ArrayParams`][jix.ArrayParams] for details.
-///
-/// `context` is an optional [`jix.ReadContext`][jix.ReadContext] to reuse when decoding the source array.
-/// When omitted, a context is created internally. See [`jix.ReadContext`][jix.ReadContext] for details.
-///
 /// Args:
 ///     array: The array to copy. May be any [`jix.Array`][jix.Array], including lazy views.
-///     params: Controls the block layout and codec of the output. Accepts a [`jix.ArrayParams`][jix.ArrayParams]
-///         instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`). Unset fields are
-///         inherited from the source array. See [`jix.ArrayParams`][jix.ArrayParams] for details.
+///     params: Controls the block layout and codec of the output. Unset fields are
+///         inherited from the source array. See [`jix.compact()`][jix.compact] for details.
 ///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse when decoding the source array.
 ///         When omitted, a context is created internally.
 ///
@@ -66,7 +60,7 @@ use crate::{Array, ArrayParams};
 ))]
 pub fn copy<'py>(
     array: &Bound<'py, Array>,
-    params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+    params: Option<Bound<'_, PyDict>>,
     context: Option<&Bound<'_, ReadContext>>,
 ) -> PyResult<Bound<'py, Array>> {
     copy_impl_with(array.py(), &array.get().arr, params, context)
@@ -86,7 +80,7 @@ where
 pub(crate) fn copy_impl_with<'py, S>(
     py: Python<'py>,
     array: &CoreArray<S>,
-    params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+    params: Option<Bound<'_, PyDict>>,
     context: Option<&Bound<'_, ReadContext>>,
 ) -> PyResult<Bound<'py, Array>>
 where
@@ -94,7 +88,7 @@ where
     S::ElementType: 'static,
     S::Dimension: 'static,
 {
-    let params = ArrayParams::resolve(py, params)?;
+    let params = resolve_array_params(py, params)?;
     let context = context.map(|ctx| ctx.get());
 
     let array = py.detach::<PyResult<_>, _>(|| {

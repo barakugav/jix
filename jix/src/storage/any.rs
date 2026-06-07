@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::storage::ArrayStorageSpec;
-use crate::{ArrayStorage, DimArray, DimDyn, TypeDyn, NDIM_MAX};
+use crate::{ArrayStorage, DimDyn, Dimension, TypeDyn, NDIM_MAX};
 
 /// A type-erased array storage backend that wraps any dynamically-typed storage via `Arc<dyn ArrayStorage>`.
 ///
@@ -19,7 +19,7 @@ use crate::{ArrayStorage, DimArray, DimDyn, TypeDyn, NDIM_MAX};
 #[derive(Clone)]
 pub struct ArrayStorageAny {
     inner: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
-    shape: DimArray<u64>,
+    shape: DimDyn,
     dtype: Dtype,
 }
 impl ArrayStorageAny {
@@ -28,7 +28,7 @@ impl ArrayStorageAny {
         storage: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
     ) -> Self {
         Self {
-            shape: DimArray::from_slice(storage.shape()).unwrap(),
+            shape: DimDyn::from_slice(storage.shape()).unwrap(),
             dtype: storage.dtype().clone(),
             inner: storage,
         }

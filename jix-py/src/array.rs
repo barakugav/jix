@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
+use jix_core::codec::{Codec, EncoderParams};
 use jix_core::ops::SliceItem;
 use jix_core::{Array as CoreArray, ArrayAny};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
-use pyo3::types::{PyEllipsis, PyTuple};
+use pyo3::types::{PyDict, PyEllipsis, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
@@ -13,8 +15,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
-use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence, OrKwargs};
-use crate::ArrayParams;
+use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
 
 /// A multi-dimensional compressed array.
 ///
@@ -569,7 +570,7 @@ impl Array {
     #[pyo3(signature = (*, params=None, context=None))]
     pub fn copy<'py>(
         slf: &Bound<'py, Self>,
-        params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+        params: Option<Bound<'_, PyDict>>,
         context: Option<&Bound<'_, ReadContext>>,
     ) -> PyResult<Bound<'py, Array>> {
         crate::ops::copy(slf, params, context)
@@ -606,7 +607,7 @@ impl Array {
         slf: &Bound<'_, Array>,
         path_or_writer: &Bound<'_, PyAny>,
         append: bool,
-        params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+        params: Option<Bound<'_, PyDict>>,
         context: Option<&Bound<'_, ReadContext>>,
     ) -> PyResult<()> {
         crate::archive::write_array(slf, path_or_writer, append, params, context)
@@ -1015,14 +1016,61 @@ impl Array {
 /// A new jix compact array is created, with all the input data compressed into blocks. The data
 /// is compressed even if the input is already a jix array.
 ///
+/// Note:
+///     **On copy** (e.g. [`jix.copy()`][jix.copy]): a new compressed array is created, inheriting any
+///     unset fields from the source array's storage. After shape-changing operations
+///     (`reshape`, `permute_axes`, etc.) the inherited block layout may not suit the new
+///     shape - consider passing explicit params to [`jix.copy()`][jix.copy] after such ops.
+///
 /// Args:
 ///     array: The input data to compress. May be a Python scalar, list, tuple, NumPy array,
 ///         or any other object accepted by `numpy.asarray`.
 ///     dtype: Optional dtype to cast the array to before compressing. Accepts anything
 ///         `numpy.dtype()` accepts. When omitted the input dtype is preserved.
-///     params: Controls the block layout and codec configuration. Accepts either a
-///         [`jix.ArrayParams`][jix.ArrayParams] instance or a plain `dict` (e.g. `{"block_shape": [64, 64]}`).
-///         When omitted, defaults are chosen automatically. See [`jix.ArrayParams`][jix.ArrayParams] for details.
+///     params: Controls the block layout and codec configuration:
+///
+///         - **Block layout** - the nd-block shape used to divide the array into independently
+///           compressed blocks. A good block layout is critical for performance and should match the
+///           access pattern of your workload.
+///         - **Codec** - compression settings used when writing and reading blocks. The defaults
+///           (Zstd level 3 with byte shuffling, block sized to fit in the L1 data cache) are
+///           suitable for most workloads.
+///
+///         When omitted, defaults are chosen automatically.
+///         A dictionary with the following optional keys:
+///
+///         - `block_shape`: Explicit storage block shape, as a list of integers (one per
+///             dimension). When set, array data is divided into nd-blocks of exactly this shape
+///             (each dimension is clamped to the array boundary). Choosing a block shape that
+///             matches your access pattern is the most important tuning knob: if you always read
+///             row slices, a block shape of `[1, <row_length>]` avoids decompressing neighboring
+///             rows. When not set, the shape is auto-computed to fit approximately
+///             `block_size_hint` bytes.
+///         - `block_shape_tag`: Per-dimension constraint on how `block_shape` is scaled when a
+///             downstream operation auto-computes a new block shape. One string per dimension:
+///             `"fixed"` pins the block size exactly (the default when `block_shape` is set by
+///             the user); `"multiple-of"` allows scaling up while keeping it a multiple of the
+///             given value; `"any"` allows free choice (used when an op makes the original size
+///             irrelevant, e.g. a broadcast dimension). Requires `block_shape` to also be set.
+///             Length must equal the number of dimensions.
+///         - `block_size_hint`: Target block size in bytes, used when auto-computing or scaling the
+///             block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
+///             are `"fixed"`. Defaults to the L1 data cache size.
+///         - `preferred_read_shape`: Recommended region size to request in a single read, as a list
+///             of integers (one per dimension). Reads that cover a region of approximately this
+///             shape avoid decompressing unnecessary blocks. Typically larger than `block_shape`
+///             and targets the L2 cache. When not set, auto-computed from
+///             `preferred_read_size_hint`.
+///         - `preferred_read_size_hint`: Target size in bytes for the preferred read region, used
+///             when auto-computing `preferred_read_shape`. Defaults to the L2 cache size.
+///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
+///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
+///         - `compression_level`: Compression level passed to the codec. For Zstd the valid range
+///             is 1-22; higher values compress more but are slower to encode. Defaults to 3.
+///         - `filters`: List of filters applied to the raw block bytes *before* compression.
+///             Filters improve the compression ratio for typed numeric data: `"byte-shuffle"`
+///             groups bytes by significance (e.g. all high bytes together, then all low bytes);
+///             `"bit-shuffle"` groups bits across elements. Defaults to `["byte-shuffle"]`.
 ///
 /// Returns:
 ///     A new compact [`jix.Array`][jix.Array] with all data compressed into blocks.
@@ -1037,11 +1085,11 @@ impl Array {
 pub fn compact(
     array: &Bound<'_, PyAny>,
     dtype: Option<&Bound<'_, PyAny>>,
-    params: Option<OrKwargs<Bound<'_, ArrayParams>>>,
+    params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Array> {
     let py = array.py();
     let mut array = crate::asarray(array)?;
-    let params = ArrayParams::resolve(py, params)?;
+    let params = resolve_array_params(py, params)?;
 
     if let Some(dtype) = dtype {
         array = crate::ops::astype(&array, dtype)?;
@@ -1050,6 +1098,110 @@ pub fn compact(
     let array = py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?;
 
     Ok(Array::from_core(array.into_any()))
+}
+pub(crate) fn resolve_array_params(
+    py: Python<'_>,
+    params: Option<Bound<'_, PyDict>>,
+) -> PyResult<jix_core::ArrayParams> {
+    match params {
+        None => Ok(jix_core::ArrayParams::default()),
+        Some(kwargs) => {
+            let mut kwargs = kwargs.extract::<BTreeMap<String, Py<PyAny>>>()?;
+            macro_rules! extract_arg {
+                ($key:expr, $ty:ty) => {
+                    kwargs
+                        .remove($key)
+                        .map(|v| {
+                            v.bind(py).extract::<$ty>().map_err(|e| {
+                                PyTypeError::new_err(format!(
+                                    "{} must be of type {}: {e}",
+                                    $key,
+                                    stringify!($ty)
+                                ))
+                            })
+                        })
+                        .transpose()
+                };
+            }
+            let block_shape = extract_arg!("block_shape", Vec<u32>)?;
+            let block_shape_tag = extract_arg!("block_shape_tag", Vec<String>)?;
+            let block_size_hint = extract_arg!("block_size_hint", u64)?;
+            let preferred_read_shape = extract_arg!("preferred_read_shape", Vec<u32>)?;
+            let preferred_read_size_hint = extract_arg!("preferred_read_size_hint", u64)?;
+            let codec = extract_arg!("codec", String)?;
+            let compression_level = extract_arg!("compression_level", u32)?;
+            let filters = extract_arg!("filters", Vec<String>)?;
+            if !kwargs.is_empty() {
+                return Err(PyTypeError::new_err(format!(
+                    "Unexpected array params kwargs: {}",
+                    kwargs.into_keys().collect::<Vec<_>>().join(", ")
+                )));
+            }
+
+            let mut params = jix_core::ArrayParams::default();
+            if let Some(block_shape) = block_shape {
+                params.block_shape(&block_shape);
+            }
+            if let Some(block_shape_tag) = block_shape_tag {
+                let block_shape_tag = block_shape_tag
+                    .iter()
+                    .map(|s| match s.as_str() {
+                        "fixed" => Ok(jix_core::storage::BlockShapeTag::Fixed),
+                        "multiple-of" => Ok(jix_core::storage::BlockShapeTag::MultipleOf),
+                        "any" => Ok(jix_core::storage::BlockShapeTag::Any),
+                        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Invalid block_shape_tag: {s}"
+                        ))),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                params.block_shape_tag(&block_shape_tag);
+            }
+            if let Some(block_size_hint) = block_size_hint {
+                params.block_size_hint(block_size_hint);
+            }
+            if let Some(preferred_read_shape) = preferred_read_shape {
+                params.preferred_read_shape(&preferred_read_shape);
+            }
+            if let Some(preferred_read_size_hint) = preferred_read_size_hint {
+                params.preferred_read_size_hint(preferred_read_size_hint);
+            }
+
+            if codec.is_some() || compression_level.is_some() || filters.is_some() {
+                let mut encoder_params = EncoderParams::default();
+                if let Some(codec) = codec {
+                    match codec.as_str() {
+                        "zstd" => {
+                            encoder_params.codec(Codec::Zstd);
+                        }
+                        _ => {
+                            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                                "Unsupported codec: {codec}"
+                            )));
+                        }
+                    }
+                }
+                if let Some(compression_level) = compression_level {
+                    encoder_params.level(compression_level).into_py_result()?;
+                }
+                if let Some(filters) = filters {
+                    let filters = filters
+                        .into_iter()
+                        .map(|filter| match filter.as_str() {
+                            "byte-shuffle" => Ok(jix_core::codec::Filter::ByteShuffle),
+                            "bit-shuffle" => Ok(jix_core::codec::Filter::BitShuffle),
+                            _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                                "Unsupported filter: {filter}"
+                            ))),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    encoder_params.filters(&filters).into_py_result()?;
+                }
+                params.encoder_params(encoder_params);
+            }
+
+            Ok(params)
+        }
+    }
 }
 
 #[cfg(test)]
