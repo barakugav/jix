@@ -17,6 +17,12 @@ pub(crate) struct Op1<S, K> {
 pub(crate) trait Op1Kernel<T> {
     type Output;
     fn apply(&self, x: T) -> Self::Output;
+
+    // TODO: implement ops using explicit SIMD
+    // #[inline(always)]
+    // fn apply_bulk<const N: usize>(&self, x: [T; N]) -> [Self::Output; N] {
+    //     x.map(|x| self.apply(x))
+    // }
 }
 impl<S, K> Op1<S, K> {
     pub(crate) fn new(array: S, kernel: K) -> Result<Self>
@@ -56,14 +62,10 @@ where
         T: Dtyped,
     {
         check_dtype(&T::DTYPE, &K::Output::DTYPE)?;
-
-        let data = self
-            .array
+        self.array
             .read_data_typed(index, context)?
-            .map_items(|x| self.kernel.apply(x));
-
-        // SAFETY: We checked that `T` has the same dtype as `K::Output`
-        Ok(unsafe { data.transmute_items::<T>() })
+            .map_items(|x| self.kernel.apply(x))
+            .transmute_items::<T>()
     }
 
     #[inline(always)]

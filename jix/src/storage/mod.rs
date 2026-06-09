@@ -52,7 +52,7 @@
 
 use crate::codec::{DecoderParams, EncoderParams};
 use crate::dtype::Dtyped;
-use crate::error::{ensure, Result};
+use crate::error::{check_dtype, ensure, Result};
 use crate::ops::bulk_size;
 use crate::util::cast_slice_mut;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
@@ -239,6 +239,7 @@ pub trait ReadData<T> {
     /// Read all items into the given buffer.
     ///
     /// The given buffer must have the exact size of `self.len() * size_of::<T>()` and be properly aligned for `T`.
+    #[inline]
     fn to_buf(&mut self, buf: &mut [u8]) -> Result<()>
     where
         T: Dtyped,
@@ -262,6 +263,7 @@ pub trait ReadData<T> {
         let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
         assert_eq!(buf.len(), nitems);
 
+        #[inline(always)]
         unsafe fn read_to_buf_impl<T, const BULK: usize>(
             data: &mut impl ReadData<T>,
             buf: &mut [T],
@@ -375,7 +377,18 @@ where
         }
     }
 
-    unsafe fn transmute_items<U>(self) -> impl ReadData<U>
+    fn transmute_items<U>(self) -> Result<impl ReadData<U>>
+    where
+        Self: Sized,
+        T: Dtyped,
+        U: Dtyped,
+    {
+        check_dtype(&T::DTYPE, &U::DTYPE)?;
+        // SAFETY: We checked that `T` has the same dtype as `K::Output`
+        Ok(unsafe { self.transmute_items_unsafe() })
+    }
+
+    unsafe fn transmute_items_unsafe<U>(self) -> impl ReadData<U>
     where
         Self: Sized,
         U: Copy + Send + Sync + Sized + 'static,

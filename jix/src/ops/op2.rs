@@ -17,6 +17,16 @@ pub(crate) struct Op2<S1, S2, K> {
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
     fn apply(&self, a: T1, b: T2) -> Self::Output;
+
+    // TODO: implement ops using explicit SIMD
+    // #[inline(always)]
+    // fn apply_bulk<const N: usize>(&self, a: [T1; N], b: [T2; N]) -> [Self::Output; N] {
+    //     let mut iter = a.into_iter().zip(b);
+    //     std::array::from_fn(|_| {
+    //         let (a, b) = iter.next().unwrap();
+    //         self.apply(a, b)
+    //     })
+    // }
 }
 impl<S1, S2, K> Op2<S1, S2, K> {
     pub(crate) fn new(a: S1, b: S2, kernel: K) -> Result<Self>
@@ -66,15 +76,11 @@ where
         T: Dtyped,
     {
         check_dtype(&T::DTYPE, &K::Output::DTYPE)?;
-
         let a_data = self.a.read_data_typed(index, context)?;
         let b_data = self.b.read_data_typed(index, context)?;
-        let data = a_data
-            .zip_items(b_data)
-            .map_items(|(a, b)| self.kernel.apply(a, b));
-
-        // SAFETY: We checked that `T` has the same dtype as `K::Output`
-        Ok(unsafe { data.transmute_items::<T>() })
+        let data = a_data.zip_items(b_data);
+        data.map_items(|(a, b)| self.kernel.apply(a, b))
+            .transmute_items::<T>()
     }
 
     #[inline(always)]

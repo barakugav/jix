@@ -1,3 +1,5 @@
+use std::hint::unreachable_unchecked;
+
 use crate::util::{dim_arr, DimArray, Idx};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
@@ -14,15 +16,42 @@ pub(crate) struct NdIter<Ix, E> {
     pub(crate) extensions: E,
 }
 
-/// Tracks whether iteration has begun or is finished.
+/// The iteration status is encoded in a single `i64` field:
+/// - zero: exhausted or no items to begin with
+/// - negative: not started yet, with `-status` items remaining
+/// - positive: in progress, with `status` items remaining
 #[derive(Clone)]
-enum IterStatus {
-    /// `next` has never been called; `current_idx` sits at `begin`.
-    NotStarted,
-    /// Iteration is underway.
-    InProgress,
-    /// All indices have been visited; further `next` calls return `None`.
-    Exhausted,
+struct IterStatus(i64);
+impl IterStatus {
+    fn new(nitems: u64) -> Self {
+        Self(-(nitems as i64))
+    }
+
+    fn is_not_started(&self) -> bool {
+        self.0 < 0
+    }
+    fn is_in_progress(&self) -> bool {
+        self.0 > 0
+    }
+    fn is_exhausted(&self) -> bool {
+        self.0 == 0
+    }
+    fn len(&self) -> u64 {
+        if self.is_not_started() {
+            (-self.0) as u64
+        } else {
+            self.0 as u64
+        }
+    }
+
+    fn start(&mut self) {
+        assert!(self.is_not_started());
+        self.0 = -self.0;
+    }
+    fn advance(&mut self) {
+        assert!(self.is_in_progress());
+        self.0 -= 1;
+    }
 }
 
 impl<Ix, E> NdIter<Ix, E>
@@ -46,11 +75,17 @@ where
         extensions.assert_ndim(ndim);
         assert!(begin.iter().zip(end.iter()).all(|(&b, &e)| b <= e));
         let current_idx = begin.clone();
-        let status = if begin.iter().zip(&end).any(|(&b, &e)| (e - b) == Ix::ZERO) {
-            IterStatus::Exhausted
-        } else {
-            IterStatus::NotStarted
-        };
+
+        let nitems = begin
+            .iter()
+            .zip(&end)
+            .map(|(&b, &e)| {
+                let n: usize = (e - b).try_into().unwrap();
+                n as u64
+            })
+            .product::<u64>();
+        let status = IterStatus::new(nitems);
+
         Self {
             end,
             begin,
@@ -66,42 +101,48 @@ where
     /// and all dimensions to its right are reset to `begin`.
     #[inline(always)]
     pub(crate) fn next(&mut self) -> Option<(&[Ix], E::Item<'_>)> {
-        match self.status {
-            IterStatus::NotStarted => {
-                self.status = IterStatus::InProgress;
-                Some((&self.current_idx, self.extensions.next()))
-            }
-            IterStatus::InProgress => {
-                let shape = self.end.as_ref();
-                let ndim = shape.len();
-                for dim in (0..ndim).rev() {
-                    let advanced_idx = self.current_idx[dim] + Ix::ONE;
-                    if advanced_idx < shape[dim] {
-                        self.extensions.on_increase(
-                            dim,
-                            self.current_idx[dim],
-                            advanced_idx,
-                            Ix::ONE,
-                        );
-                        self.current_idx[dim] = advanced_idx;
-                        for smaller_dim in dim + 1..ndim {
-                            let begin = self.begin[smaller_dim];
-                            self.extensions.on_decrease(
-                                smaller_dim,
-                                self.current_idx[smaller_dim],
-                                begin,
-                                self.current_idx[smaller_dim] - begin,
-                            );
-                            self.current_idx[smaller_dim] = begin;
-                        }
-                        return Some((&self.current_idx, self.extensions.next()));
-                    }
-                }
-                self.status = IterStatus::Exhausted;
-                None
-            }
-            IterStatus::Exhausted => None,
+        if self.status.is_exhausted() {
+            return None;
         }
+
+        if self.status.is_not_started() {
+            self.status.start();
+            return Some(self.get_current_and_advance_status());
+        }
+
+        debug_assert!(self.status.is_in_progress());
+        let shape = self.end.as_ref();
+        let ndim = shape.len();
+        for dim in (0..ndim).rev() {
+            let advanced_idx = self.current_idx[dim] + Ix::ONE;
+            if advanced_idx < shape[dim] {
+                self.extensions
+                    .on_increase(dim, self.current_idx[dim], advanced_idx, Ix::ONE);
+                self.current_idx[dim] = advanced_idx;
+                for smaller_dim in dim + 1..ndim {
+                    let begin = self.begin[smaller_dim];
+                    self.extensions.on_decrease(
+                        smaller_dim,
+                        self.current_idx[smaller_dim],
+                        begin,
+                        self.current_idx[smaller_dim] - begin,
+                    );
+                    self.current_idx[smaller_dim] = begin;
+                }
+                return Some(self.get_current_and_advance_status());
+            }
+        }
+        unsafe { unreachable_unchecked() }
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_current_and_advance_status(&mut self) -> (&[Ix], E::Item<'_>) {
+        self.status.advance();
+        (&self.current_idx, self.extensions.next())
+    }
+
+    pub(crate) fn len(&self) -> u64 {
+        self.status.len()
     }
 
     pub(crate) fn map<T>(
@@ -113,7 +154,10 @@ where
         E: Clone,
     {
         #[derive(Clone)]
-        struct Iter<Ix, E, F>(NdIter<Ix, E>, F);
+        struct Iter<Ix, E, F> {
+            iter: NdIter<Ix, E>,
+            f: F,
+        }
         impl<Ix, E, F, T> Iterator for Iter<Ix, E, F>
         where
             Ix: Idx,
@@ -122,22 +166,15 @@ where
         {
             type Item = T;
             fn next(&mut self) -> Option<Self::Item> {
-                self.0.next().map(|step| (self.1)(step))
+                self.iter.next().map(|step| (self.f)(step))
             }
 
             fn size_hint(&self) -> (usize, Option<usize>) {
-                let len = self.0.begin.as_ref().iter().zip(self.0.end.as_ref()).fold(
-                    1,
-                    |acc, (&b, &e)| {
-                        let e: usize = e.try_into().unwrap();
-                        let b: usize = b.try_into().unwrap();
-                        acc * (e - b)
-                    },
-                );
+                let len = self.iter.status.len() as usize;
                 (len, Some(len))
             }
         }
-        Iter(self, f)
+        Iter { iter: self, f }
     }
 }
 
