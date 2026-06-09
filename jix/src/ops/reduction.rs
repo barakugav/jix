@@ -201,16 +201,48 @@ where
                 &reduction_shape,
                 NdIterExtStridesPtr::new(&inner_strides, base_ptr),
             );
+            let nitems = reduction_iter.len();
             let mut reduction_iter =
                 reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
 
-            let first = reduction_iter.next();
-            let mut nitems = first.is_some() as u64;
-            let mut state = self.kernel.init_state(first);
-            for item in reduction_iter {
-                self.kernel.update_state(&mut state, item, nitems);
-                nitems += 1;
+            let bulk_size: u64 = 256;
+            let mut state;
+            let mut item_idx = 0;
+
+            // first item
+            {
+                let first = reduction_iter.next();
+                state = self.kernel.init_state(first);
+                if first.is_some() {
+                    item_idx += 1;
+                }
+            };
+            // first bulk
+            let first_bulk_limit = bulk_size.min(nitems);
+            while item_idx < first_bulk_limit {
+                let item = reduction_iter.next();
+                let item = unsafe { item.unwrap_unchecked() };
+                self.kernel.update_state(&mut state, item, item_idx);
+                item_idx += 1;
             }
+            // all bulks
+            for _ in 1..(nitems / bulk_size) {
+                for _ in 0..bulk_size {
+                    let item = reduction_iter.next();
+                    let item = unsafe { item.unwrap_unchecked() };
+                    self.kernel.update_state(&mut state, item, item_idx);
+                    item_idx += 1;
+                }
+            }
+            // remainder
+            while item_idx < nitems {
+                let item = reduction_iter.next();
+                let item = unsafe { item.unwrap_unchecked() };
+                self.kernel.update_state(&mut state, item, item_idx);
+                item_idx += 1;
+            }
+            debug_assert!(reduction_iter.next().is_none());
+
             let res = self.kernel.finalize_state(state, nitems);
 
             unsafe { out_ptr.cast::<K::Output>().write(res) };
@@ -385,7 +417,7 @@ pub(crate) mod _traits {
                 }
                 #[inline(always)]
                 fn update(state: &mut Self::Output, item: Self) {
-                    *state = *state + <_ as crate::scalar::Cast<Self::Output>>::cast(item);
+                    *state += <_ as crate::scalar::Cast<Self::Output>>::cast(item);
                 }
             }
         };
@@ -431,7 +463,7 @@ pub(crate) mod _traits {
                 }
                 #[inline(always)]
                 fn update(state: &mut Self::Output, item: Self) {
-                    *state = *state * <_ as crate::scalar::Cast<Self::Output>>::cast(item);
+                    *state *= <_ as crate::scalar::Cast<Self::Output>>::cast(item);
                 }
             }
         };
@@ -567,7 +599,7 @@ pub(crate) mod _traits {
                 fn update(state: &mut Self::State, item: Self, idx: u64) {
                     let x = <_ as crate::scalar::Cast<$mean_ty>>::cast(item);
                     let $delta = x - state.mean;
-                    state.mean = state.mean + $delta / (idx + 1) as f64;
+                    state.mean += $delta / (idx + 1) as f64;
                     let $delta2 = x - state.mean;
                     state.m2 += $m2_expr;
                 }
