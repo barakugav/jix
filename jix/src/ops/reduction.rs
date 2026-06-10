@@ -135,83 +135,93 @@ where
     type ElementType = Ty<K::Output>;
     type Dimension = D;
 
-    // Streams the reduction over **bulk-blocks** of the inner array so peak scratch memory
-    // stays bounded — only one bulk's items plus one `K::State` per output position are
-    // resident at a time, regardless of the source array size.
-    //
-    // # What it computes
-    //
-    // For every output position `O` covered by `index`, evaluates
-    //
-    //   stream(O) = iterate inner elements with non-reduced coords matching O,
-    //               in row-major order over the reduced axes
-    //   buf[O]    = K::finalize_state(fold(stream(O), K::init_state, K::update_state),
-    //                                 nitems = stream length)
-    //
-    // # Bulk-block geometry
-    //
-    // The inner index range `inner_index_full` (reduced dims spanning the full source
-    // extent, non-reduced dims forwarded from `index`) is partitioned into bulk-blocks of
-    // shape `inner_shape_bulk[d]`:
-    //   - reduced dims:     a small chunk (currently `min(inner_shape[d], 64)`) so the
-    //                       reduction stream is consumed in pieces;
-    //   - non-reduced dims: the full source extent `inner_shape[d]`, guaranteeing
-    //                       `inner_index_full[d]` fits inside a single bulk-block along
-    //                       that dim. Splitting a non-reduced dim across multiple bulks
-    //                       would cause `out_iter` to re-walk the same outputs once per
-    //                       strip and double-count contributions into their states.
-    //
-    // `block_iter` then walks the bulk-block grid in row-major order, yielding
-    // `(blk_idx, (inner_offset, blk_size))` for each block. The absolute element start in
-    // dim `d` is `blk_idx[d] * inner_shape_bulk[d] + inner_offset[d]` and the active
-    // length is `blk_size[d]`. Interior blocks always carry `inner_offset = 0,
-    // blk_size = inner_shape_bulk`; border blocks carry the partial values produced by
-    // `NdIterExtBlockOffsetSize`.
-    //
-    // # Per-bulk processing
-    //
-    // For each bulk:
-    //   1. Read the bulk's raw elements into `items_buf` (one `src_dtype` slab).
-    //   2. For each output position O (`out_iter` over `out_shape`), walk the bulk's
-    //      `reduction_size` reduction items at the right offset into `items_buf` and
-    //      fold them into `state_buf[O]`:
-    //        - First bulk (`!state_initialized`): `state_buf[O]` is `MaybeUninit`.
-    //          Initialize it via `K::init_state(first)`, then fold this bulk's remaining
-    //          items into it (`item_idx` runs `0 .. reduction_size`).
-    //        - Later bulks: `assume_init_mut` the running state and fold this bulk's
-    //          items, continuing the global stream position
-    //          `item_idx ∈ [base_item_idx, base_item_idx + reduction_size)`.
-    //   3. Advance `base_item_idx += reduction_size` (the stream items each output now
-    //      has folded into it).
-    //
-    // `reduction_size = ∏ blk_size[d] for d in reduced dims` is the number of stream
-    // items each output receives from the current bulk.
-    //
-    // # Finalization
-    //
-    // After all bulks:
-    //   - If any bulk was visited (`state_initialized`): finalize every state into `buf`
-    //     via `K::finalize_state(state, reduction_size_overall)`.
-    //   - Otherwise (empty reduction — only reachable when a reduced dim is empty and the
-    //     kernel supports empty): write `K::finalize_state(K::init_state(None), 0)` to
-    //     every output.
-    //
-    // # Scratch buffers
-    //
-    // - `items_buf`: raw input elements for the current bulk. Resized each iteration.
-    // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Initialized lazily on
-    //   the first bulk; finalized in the post-loop pass.
-    //
-    // # Invariants (also enforced by `debug_assert!`s)
-    //
-    // - Non-reduced dims produce at most one bulk-block per call.
-    // - Each bulk's `inner_index` is contained in `inner_index_full`.
-    // - On the first state init pass, `base_item_idx == 0`.
-    // - After all bulks, each output's reduction stream consumes exactly
-    //   `∏ (inner_index_full[d].end - .start) for d in reduced dims` items (when
-    //   `out_nitems > 0`).
     #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        // Streams the reduction over **bulk-blocks** of the inner array so peak scratch memory
+        // stays bounded — only one bulk's items plus one `K::State` per output position are
+        // resident at a time, regardless of the source array size.
+        //
+        // # What it computes
+        //
+        // For every output position `O` covered by `index`, evaluates
+        //
+        //   stream(O) = iterate inner elements with non-reduced coords matching O,
+        //               in row-major order over the reduced axes
+        //   buf[O]    = K::finalize_state(fold(stream(O), K::init_state, K::update_state),
+        //                                 nitems = stream length)
+        //
+        // # Bulk-block geometry
+        //
+        // The inner index range `inner_index_full` (reduced dims spanning the full source
+        // extent, non-reduced dims forwarded from `index`) is partitioned into bulk-blocks of
+        // shape `inner_shape_bulk[d]`:
+        //   - reduced dims:     a small chunk (currently `min(inner_shape[d], 64)`) so the
+        //                       reduction stream is consumed in pieces;
+        //   - non-reduced dims: the full source extent `inner_shape[d]`, guaranteeing
+        //                       `inner_index_full[d]` fits inside a single bulk-block along
+        //                       that dim. Splitting a non-reduced dim across multiple bulks
+        //                       would cause `out_iter` to re-walk the same outputs once per
+        //                       strip and double-count contributions into their states.
+        //
+        // `block_iter` then walks the bulk-block grid in row-major order, yielding
+        // `(blk_idx, (inner_offset, blk_size))` for each block. The absolute element start in
+        // dim `d` is `blk_idx[d] * inner_shape_bulk[d] + inner_offset[d]` and the active
+        // length is `blk_size[d]`. Interior blocks always carry `inner_offset = 0,
+        // blk_size = inner_shape_bulk`; border blocks carry the partial values produced by
+        // `NdIterExtBlockOffsetSize`.
+        //
+        // # Per-bulk processing
+        //
+        // For each bulk:
+        //   1. Read the bulk's raw elements into `items_buf` (one `src_dtype` slab).
+        //   2. For each output position O (`out_iter` over `out_shape`), walk the bulk's
+        //      `reduction_size` reduction items at the right offset into `items_buf` and
+        //      fold them into `state_buf[O]`:
+        //        - First bulk (`!state_initialized`): `state_buf[O]` is `MaybeUninit`.
+        //          Initialize it via `K::init_state(first)`, then fold this bulk's remaining
+        //          items into it (`item_idx` runs `0 .. reduction_size`).
+        //        - Later bulks: `assume_init_mut` the running state and fold this bulk's
+        //          items, continuing the global stream position
+        //          `item_idx ∈ [base_item_idx, base_item_idx + reduction_size)`.
+        //   3. Advance `base_item_idx += reduction_size` (the stream items each output now
+        //      has folded into it).
+        //
+        // `reduction_size = ∏ blk_size[d] for d in reduced dims` is the number of stream
+        // items each output receives from the current bulk.
+        //
+        // # Finalization
+        //
+        // After all bulks:
+        //   - If any bulk was visited (`state_initialized`): finalize every state into `buf`
+        //     via `K::finalize_state(state, reduction_size_overall)`. When
+        //     `state_in_out_buf`, the state and output pointers for each slot alias the same
+        //     bytes, so each iteration `assume_init_read`s the state *before* writing the
+        //     result.
+        //   - Otherwise (empty reduction — only reachable when a reduced dim is empty and the
+        //     kernel supports empty): write `K::finalize_state(K::init_state(None), 0)` to
+        //     every output.
+        //
+        // # Scratch buffers
+        //
+        // - `items_buf`: raw input elements for the current bulk. Resized each iteration.
+        // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Initialized lazily on
+        //   the first bulk; finalized in the post-loop pass. When `K::State` matches
+        //   `K::Output` in size and is no more strictly aligned (`state_in_out_buf`), we skip
+        //   the scratch allocation entirely and reuse the caller's `buf` as the state buffer
+        //   — `finalize_state` then reads each slot and writes the output into the same byte
+        //   range it just consumed. The finalization loop reads the state out of each slot
+        //   *before* writing the result back into it, since the state and output pointers
+        //   alias in that mode (see the `CAREFUL` comments).
+        //
+        // # Invariants (also enforced by `debug_assert!`s)
+        //
+        // - Non-reduced dims produce at most one bulk-block per call.
+        // - Each bulk's `inner_index` is contained in `inner_index_full`.
+        // - On the first state init pass, `base_item_idx == 0`.
+        // - After all bulks, each output's reduction stream consumes exactly
+        //   `∏ (inner_index_full[d].end - .start) for d in reduced dims` items (when
+        //   `out_nitems > 0`).
+
         let src_dtype = self.array.dtype();
         let dst_dtype = self.dtype();
         check_get_range(self.shape(), index)?;
@@ -269,10 +279,19 @@ where
             ),
         );
 
-        // TODO: if size_of::<K::State>()==size_of::<K::Outout>(), use the output buffer as the state buffer
-        let mut state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
-        let state_buf =
-            unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(state_buf.as_mut_slice()) };
+        let state_in_out_buf = size_of::<K::State>() == size_of::<K::Output>()
+            && align_of::<K::State>() <= align_of::<K::Output>();
+        let mut state_buf;
+        // CAREFUL: state_buf and out_ptr may alias
+        let (state_buf, out_ptr) = if state_in_out_buf {
+            // use the output buffer as the state buffer
+            let out_ptr = buf.as_mut_ptr();
+            (buf, out_ptr)
+        } else {
+            state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
+            (state_buf.as_mut_slice(), buf.as_mut_ptr())
+        };
+        let state_buf = unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(state_buf) };
         let state_strides = default_strides(&out_shape, size_of::<MaybeUninit<K::State>>() as u64);
         let mut state_initialized = false;
 
@@ -393,24 +412,35 @@ where
         );
         let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as u64);
         if state_initialized {
+            // CAREFUL: state_buf and out_ptr may alias
+            let state_ptr = state_buf.as_mut_ptr();
+            // doesn't do anything, but indicate we don't hold a mut ref to the state buf, as
+            // out_ptr may be an alias to it
+            #[allow(dropping_references)]
+            drop(state_buf);
+
             let mut out_iter = NdIter::new(
                 &out_shape,
                 (
-                    NdIterExtStridesPtrMut::new(&state_strides, state_buf.as_mut_ptr().cast()),
-                    NdIterExtStridesPtrMut::new(&out_strides, buf.as_mut_ptr()),
+                    // CAREFUL: state_ptr and out_ptr may alias
+                    NdIterExtStridesPtrMut::new(&state_strides, state_ptr.cast()),
+                    NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
                 ),
             );
             while let Some((_idx, (state, out_ptr))) = out_iter.next() {
-                let state = unsafe { &*state.cast::<MaybeUninit<K::State>>() };
-                let state = unsafe { state.assume_init_read() };
-                let res = self.kernel.finalize_state(state, reduction_size_overall);
+                // CAREFUL: state and out_ptr may alias
+                let res = {
+                    let state = unsafe { &*state.cast::<MaybeUninit<K::State>>() };
+                    let state = unsafe { state.assume_init_read() };
+                    self.kernel.finalize_state(state, reduction_size_overall)
+                };
                 unsafe { out_ptr.cast::<K::Output>().write(res) };
             }
         } else {
             // Empty reduction: write the empty-stream result to every output.
             let mut out_iter = NdIter::new(
                 &out_shape,
-                NdIterExtStridesPtrMut::new(&out_strides, buf.as_mut_ptr()),
+                NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);
             while let Some((_idx, out_ptr)) = out_iter.next() {
