@@ -1,3 +1,4 @@
+use std::hint::assert_unchecked;
 use std::mem::MaybeUninit;
 use std::ops::{Not, Range};
 
@@ -174,17 +175,18 @@ where
         //
         // For each bulk:
         //   1. Read the bulk's raw elements into `items_buf` (one `src_dtype` slab).
-        //   2. For each output position O (`out_iter` over `out_shape`), walk the bulk's
-        //      `reduction_size` reduction items at the right offset into `items_buf` and
-        //      fold them into `state_buf[O]`:
-        //        - First bulk (`!state_initialized`): `state_buf[O]` is `MaybeUninit`.
-        //          Initialize it via `K::init_state(first)`, then fold this bulk's remaining
-        //          items into it (`item_idx` runs `0 .. reduction_size`).
-        //        - Later bulks: `assume_init_mut` the running state and fold this bulk's
-        //          items, continuing the global stream position
-        //          `item_idx ∈ [base_item_idx, base_item_idx + reduction_size)`.
-        //   3. Advance `base_item_idx += reduction_size` (the stream items each output now
-        //      has folded into it).
+        //   2. One pass over the output positions (`out_iter` over `out_shape`) folds this
+        //      bulk's `reduction_size` reduction items into each `state_buf[O]`. The same
+        //      loop handles both first-init and continue: when `!state_initialized`, the
+        //      first reduction item per output is consumed by `K::init_state(first)` to
+        //      write the slot, then control falls into the shared `K::update_state` loop;
+        //      otherwise the slot is `assume_init_mut`-ed and the loop just keeps folding.
+        //      `item_idx` is the global stream position and runs
+        //      `[base_item_idx, base_item_idx + reduction_size)` regardless of branch.
+        //   3. Advance `base_item_idx += reduction_size`. Promote `state_initialized` to
+        //      `true` only if `reduction_size > 0` — a bulk that contributes zero items
+        //      cannot have written any slots, and a later bulk doing `assume_init_mut`
+        //      on an unwritten slot would be UB.
         //
         // `reduction_size = ∏ blk_size[d] for d in reduced dims` is the number of stream
         // items each output receives from the current bulk.
@@ -338,65 +340,45 @@ where
             });
             let reduction_size = reduction_shape.iter().product::<u64>();
 
-            if !state_initialized {
-                while let Some((_idx, (src_base, state))) = out_iter.next() {
-                    let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+            while let Some((_idx, (src_base, state))) = out_iter.next() {
+                let reduction_iter = NdIter::new(
+                    &reduction_shape,
+                    NdIterExtStridesPtr::new(&items_buf_strides, src_base),
+                );
+                debug_assert_eq!(reduction_size, reduction_iter.len());
+                let mut reduction_iter =
+                    reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+                let mut item_idx = base_item_idx;
 
-                    let reduction_iter = NdIter::new(
-                        &reduction_shape,
-                        NdIterExtStridesPtr::new(&items_buf_strides, src_base),
-                    );
-                    debug_assert_eq!(reduction_size, reduction_iter.len());
-                    let mut reduction_iter = reduction_iter
-                        .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
-                    debug_assert_eq!(base_item_idx, 0);
-                    let mut item_idx = 0;
-
+                let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                let state = if !state_initialized {
                     // init state with the first item
-                    let state = {
-                        let first = reduction_iter.next();
-                        let state = state.write(self.kernel.init_state(first));
-                        if first.is_some() {
-                            item_idx += 1;
-                        }
-                        state
-                    };
-                    // fold the rest of the items into the state
-                    while item_idx < reduction_size {
-                        let item = reduction_iter.next();
-                        let item = unsafe { item.unwrap_unchecked() };
-                        self.kernel.update_state(state, item, item_idx);
+                    debug_assert_eq!(item_idx, 0);
+                    unsafe { assert_unchecked(reduction_size > 0) };
+                    let first = reduction_iter.next();
+                    let state = state.write(self.kernel.init_state(first));
+                    if first.is_some() {
                         item_idx += 1;
                     }
-                    debug_assert!(reduction_iter.next().is_none());
-                }
-                state_initialized = true;
-            } else {
-                while let Some((_idx, (src_base, state))) = out_iter.next() {
-                    let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                    state
+                } else {
                     // SAFETY: every state was written by the !state_initialized branch above.
-                    let state = unsafe { state.assume_init_mut() };
+                    unsafe { state.assume_init_mut() }
+                };
 
-                    let reduction_iter = NdIter::new(
-                        &reduction_shape,
-                        NdIterExtStridesPtr::new(&items_buf_strides, src_base),
-                    );
-                    debug_assert_eq!(reduction_size, reduction_iter.len());
-                    let mut reduction_iter = reduction_iter
-                        .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
-                    let mut item_idx = base_item_idx;
-
-                    // Fold this block's `reduction_size` items into the running state
-                    while item_idx < base_item_idx + reduction_size {
-                        let item = reduction_iter.next();
-                        let item = unsafe { item.unwrap_unchecked() };
-                        self.kernel.update_state(state, item, item_idx);
-                        item_idx += 1;
-                    }
-                    debug_assert!(reduction_iter.next().is_none());
+                // Fold this block's `reduction_size` items into the running state
+                while item_idx < base_item_idx + reduction_size {
+                    let item = reduction_iter.next();
+                    let item = unsafe { item.unwrap_unchecked() };
+                    self.kernel.update_state(state, item, item_idx);
+                    item_idx += 1;
                 }
+                debug_assert!(reduction_iter.next().is_none());
             }
             base_item_idx += reduction_size;
+            if reduction_size > 0 {
+                state_initialized = true;
+            }
         }
 
         // finalize_state
