@@ -802,7 +802,8 @@ impl<S: ArrayStorage> Array<S> {
         debug_assert!(read_shape.iter().all(|l| *l > 0));
 
         // Fast path for small reads
-        let small_read = (0..ndim).all(|d| (index[d].end - index[d].start) <= read_shape[d] as u64);
+        let small_read =
+            (0..ndim).all(|dim| (index[dim].end - index[dim].start) <= read_shape[dim] as u64);
         if small_read {
             return self.storage.read_data(index, buf, context);
         }
@@ -830,9 +831,9 @@ impl<S: ArrayStorage> Array<S> {
 
         let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
         while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
-            let inner_index = dim_arr(ndim, |d| {
-                let start = block_idx[d] * read_shape[d] as u64 + block_inner_offset[d];
-                let end = start + block_size[d];
+            let inner_index = dim_arr(ndim, |dim| {
+                let start = block_idx[dim] * read_shape[dim] as u64 + block_inner_offset[dim];
+                let end = start + block_size[dim];
                 start..end
             });
             let tmp_buf = {
@@ -843,7 +844,7 @@ impl<S: ArrayStorage> Array<S> {
             self.storage.read_data(&inner_index, tmp_buf, context)?;
 
             let out_offset = (0..ndim)
-                .map(|d| (inner_index[d].start - index[d].start) as usize * out_strides[d])
+                .map(|dim| (inner_index[dim].start - index[dim].start) as usize * out_strides[dim])
                 .sum::<usize>();
             let dst_ptr = unsafe { buf.as_mut_ptr().add(out_offset) };
 

@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
@@ -7,9 +8,10 @@ use crate::ops::common::AxesArg;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
+use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
-use crate::util::{assert_unchecked_eq, default_strides, dim_arr, DimArray};
+use crate::util::{assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
@@ -92,16 +94,24 @@ impl<S, K, D> ReductionOp<S, K, D> {
 
         let mut b_layout = array.spec().blocks_layout.clone();
         b_layout.block_shape_hint = (0..input_ndim)
-            .filter_map(|d| is_reduced[d].not().then_some(b_layout.block_shape_hint[d]))
+            .filter_map(|dim| {
+                is_reduced[dim]
+                    .not()
+                    .then_some(b_layout.block_shape_hint[dim])
+            })
             .collect();
         b_layout.block_shape_tag = (0..input_ndim)
-            .filter_map(|d| is_reduced[d].not().then_some(b_layout.block_shape_tag[d]))
+            .filter_map(|dim| {
+                is_reduced[dim]
+                    .not()
+                    .then_some(b_layout.block_shape_tag[dim])
+            })
             .collect();
         b_layout.preferred_read_shape = (0..input_ndim)
-            .filter_map(|d| {
-                is_reduced[d]
+            .filter_map(|dim| {
+                is_reduced[dim]
                     .not()
-                    .then_some(b_layout.preferred_read_shape[d])
+                    .then_some(b_layout.preferred_read_shape[dim])
             })
             .collect();
 
@@ -125,23 +135,96 @@ where
     type ElementType = Ty<K::Output>;
     type Dimension = D;
 
+    // Streams the reduction over **bulk-blocks** of the inner array so peak scratch memory
+    // stays bounded — only one bulk's items plus one `K::State` per output position are
+    // resident at a time, regardless of the source array size.
+    //
+    // # What it computes
+    //
+    // For every output position `O` covered by `index`, evaluates
+    //
+    //   stream(O) = iterate inner elements with non-reduced coords matching O,
+    //               in row-major order over the reduced axes
+    //   buf[O]    = K::finalize_state(fold(stream(O), K::init_state, K::update_state),
+    //                                 nitems = stream length)
+    //
+    // # Bulk-block geometry
+    //
+    // The inner index range `inner_index_full` (reduced dims spanning the full source
+    // extent, non-reduced dims forwarded from `index`) is partitioned into bulk-blocks of
+    // shape `inner_shape_bulk[d]`:
+    //   - reduced dims:     a small chunk (currently `min(inner_shape[d], 64)`) so the
+    //                       reduction stream is consumed in pieces;
+    //   - non-reduced dims: the full source extent `inner_shape[d]`, guaranteeing
+    //                       `inner_index_full[d]` fits inside a single bulk-block along
+    //                       that dim. Splitting a non-reduced dim across multiple bulks
+    //                       would cause `out_iter` to re-walk the same outputs once per
+    //                       strip and double-count contributions into their states.
+    //
+    // `block_iter` then walks the bulk-block grid in row-major order, yielding
+    // `(blk_idx, (inner_offset, blk_size))` for each block. The absolute element start in
+    // dim `d` is `blk_idx[d] * inner_shape_bulk[d] + inner_offset[d]` and the active
+    // length is `blk_size[d]`. Interior blocks always carry `inner_offset = 0,
+    // blk_size = inner_shape_bulk`; border blocks carry the partial values produced by
+    // `NdIterExtBlockOffsetSize`.
+    //
+    // # Per-bulk processing
+    //
+    // For each bulk:
+    //   1. Read the bulk's raw elements into `items_buf` (one `src_dtype` slab).
+    //   2. For each output position O (`out_iter` over `out_shape`), walk the bulk's
+    //      `reduction_size` reduction items at the right offset into `items_buf` and
+    //      fold them into `state_buf[O]`:
+    //        - First bulk (`!state_initialized`): `state_buf[O]` is `MaybeUninit`.
+    //          Initialize it via `K::init_state(first)`, then fold this bulk's remaining
+    //          items into it (`item_idx` runs `0 .. reduction_size`).
+    //        - Later bulks: `assume_init_mut` the running state and fold this bulk's
+    //          items, continuing the global stream position
+    //          `item_idx ∈ [base_item_idx, base_item_idx + reduction_size)`.
+    //   3. Advance `base_item_idx += reduction_size` (the stream items each output now
+    //      has folded into it).
+    //
+    // `reduction_size = ∏ blk_size[d] for d in reduced dims` is the number of stream
+    // items each output receives from the current bulk.
+    //
+    // # Finalization
+    //
+    // After all bulks:
+    //   - If any bulk was visited (`state_initialized`): finalize every state into `buf`
+    //     via `K::finalize_state(state, reduction_size_overall)`.
+    //   - Otherwise (empty reduction — only reachable when a reduced dim is empty and the
+    //     kernel supports empty): write `K::finalize_state(K::init_state(None), 0)` to
+    //     every output.
+    //
+    // # Scratch buffers
+    //
+    // - `items_buf`: raw input elements for the current bulk. Resized each iteration.
+    // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Initialized lazily on
+    //   the first bulk; finalized in the post-loop pass.
+    //
+    // # Invariants (also enforced by `debug_assert!`s)
+    //
+    // - Non-reduced dims produce at most one bulk-block per call.
+    // - Each bulk's `inner_index` is contained in `inner_index_full`.
+    // - On the first state init pass, `base_item_idx == 0`.
+    // - After all bulks, each output's reduction stream consumes exactly
+    //   `∏ (inner_index_full[d].end - .start) for d in reduced dims` items (when
+    //   `out_nitems > 0`).
     #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
         let src_dtype = self.array.dtype();
         let dst_dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, dst_dtype, buf)?;
+        let out_nitems = check_get_buffer_size(index, dst_dtype, buf)?;
 
-        let orig_shape = self.array.shape();
-        let orig_ndim = orig_shape.len();
+        let inner_shape = self.array.shape();
+        let inner_ndim = inner_shape.len();
 
-        // Build inner_index: reduced dims span the full original range,
-        // non-reduced dims forward the requested output range.
-        let inner_index = {
+        let inner_index_full = {
             let mut out_dim = 0;
-            dim_arr(orig_ndim, |d| {
-                if self.is_reduced[d] {
-                    0..orig_shape[d]
+            dim_arr(inner_ndim, |dim| {
+                if self.is_reduced[dim] {
+                    0..inner_shape[dim]
                 } else {
                     let r = index[out_dim].clone();
                     out_dim += 1;
@@ -150,93 +233,191 @@ where
             })
         };
 
-        let inner_read_shape = dim_arr(orig_ndim, |d| inner_index[d].end - inner_index[d].start);
-        let n_inner = inner_read_shape.iter().product::<u64>();
+        let out_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
 
-        let out_shape = dim_arr(index.len(), |d| index[d].end - index[d].start);
-
-        // Read the full inner block into a temp buffer.
-        let tmp_buf_size = n_inner * src_dtype.itemsize() as u64;
-        let mut tmp_buf = context.tmp_buf(tmp_buf_size as usize, src_dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.read_data(&inner_index, tmp_buf, context)?;
-
-        // C-contiguous byte strides for inner and output layouts.
-        let inner_strides = default_strides(&inner_read_shape, src_dtype.itemsize() as u64);
-        let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as u64);
-
-        // Strides into tmp_buf for the output iterator: reduced dims are absent.
-        let tmp_buf_strides = inner_strides
-            .iter()
-            .zip(&self.is_reduced)
-            .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
-            .collect::<DimArray<_>>();
-
-        let mut out_iter = NdIter::new(
-            &out_shape,
-            (
-                NdIterExtStridesPtr::new(&tmp_buf_strides, tmp_buf.as_ptr()),
-                NdIterExtStridesPtrMut::new(&out_strides, buf.as_mut_ptr()),
-            ),
-        );
-        let reduction_shape = dim_arr(orig_ndim, |d| {
-            if self.is_reduced[d] {
-                orig_shape[d]
+        // `inner_shape_bulk` is the bulk-block shape used to chunk the inner read. We only
+        // chunk along *reduced* dims (so the kernel can stream the reduction stream in
+        // pieces). For *non-reduced* dims we use the full source extent so the requested
+        // output range fits inside a single bulk-block — any other choice can split a
+        // non-reduced dim across multiple bulk-blocks, which would cause `out_iter` to
+        // re-walk the same outputs once per strip and double-count contributions.
+        let inner_shape_bulk = dim_arr(inner_ndim, |dim| {
+            if self.is_reduced[dim] {
+                let target_block_size = 64; // TODO: tune this heuristic
+                inner_shape[dim].max(1).min(target_block_size)
             } else {
-                1
+                inner_shape[dim].max(1) // arbitrarily large
             }
         });
+        let block_begin = dim_arr(inner_ndim, |dim| {
+            inner_index_full[dim].start / inner_shape_bulk[dim]
+        });
+        let block_end = dim_arr(inner_ndim, |dim| {
+            inner_index_full[dim].end.div_ceil(inner_shape_bulk[dim])
+        });
+        debug_assert!(
+            (0..inner_ndim).all(|d| self.is_reduced[d] || block_end[d] - block_begin[d] <= 1),
+            "non-reduced dim must produce at most one bulk-block",
+        );
+        let mut block_iter = NdIter::new_with_begin(
+            &block_begin,
+            &block_end,
+            NdIterExtBlockOffsetSize::new(
+                &dim_arr(inner_ndim, |dim| inner_index_full[dim].start),
+                &dim_arr(inner_ndim, |dim| inner_index_full[dim].end),
+                &inner_shape_bulk,
+            ),
+        );
 
-        while let Some((_out_idx, (base_ptr, out_ptr))) = out_iter.next() {
-            let reduction_iter = NdIter::new(
-                &reduction_shape,
-                NdIterExtStridesPtr::new(&inner_strides, base_ptr),
+        // TODO: if size_of::<K::State>()==size_of::<K::Outout>(), use the output buffer as the state buffer
+        let mut state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
+        let state_buf =
+            unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(state_buf.as_mut_slice()) };
+        let state_strides = default_strides(&out_shape, size_of::<MaybeUninit<K::State>>() as u64);
+        let mut state_initialized = false;
+
+        let mut items_buf = context.tmp_buf(0, src_dtype.alignment());
+        let mut base_item_idx = 0;
+        while let Some((blk_idx, (inner_offset, blk_size))) = block_iter.next() {
+            // Read the inner block into a temp buffer.
+            items_buf
+                .set_len((blk_size.iter().product::<u64>() * src_dtype.itemsize() as u64) as usize);
+            let items_buf = items_buf.as_mut_slice();
+            // Absolute inner-element range for this bulk: `blk_idx * bulk + inner_offset`,
+            // since `inner_offset` from `NdIterExtBlockOffsetSize` is intra-block, not absolute.
+            let inner_index = dim_arr(inner_ndim, |dim| {
+                let start = blk_idx[dim] * inner_shape_bulk[dim] + inner_offset[dim];
+                start..start + blk_size[dim]
+            });
+            debug_assert!(
+                (0..inner_ndim).all(|d| {
+                    inner_index_full[d].start <= inner_index[d].start
+                        && inner_index[d].end <= inner_index_full[d].end
+                }),
+                "block inner_index not contained in inner_index_full"
             );
-            let nitems = reduction_iter.len();
-            let mut reduction_iter =
-                reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+            self.array.read_data(&inner_index, items_buf, context)?;
 
-            let bulk_size: u64 = 256;
-            let mut state;
-            let mut item_idx = 0;
+            // Strides into items_buf for the output iterator: reduced dims are absent.
+            let items_buf_strides = default_strides(&blk_size, src_dtype.itemsize() as u64);
+            let items_buf_strides_for_out_iter = items_buf_strides
+                .iter()
+                .zip(&self.is_reduced)
+                .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
+                .collect::<DimArray<_>>();
 
-            // first item
-            {
-                let first = reduction_iter.next();
-                state = self.kernel.init_state(first);
-                if first.is_some() {
-                    item_idx += 1;
+            let mut out_iter = NdIter::new(
+                &out_shape,
+                (
+                    NdIterExtStridesPtr::new(&items_buf_strides_for_out_iter, items_buf.as_ptr()),
+                    NdIterExtStridesPtrMut::new(&state_strides, state_buf.as_mut_ptr().cast()),
+                ),
+            );
+
+            let reduction_shape = dim_arr(inner_ndim, |dim| {
+                self.is_reduced[dim].then_some(blk_size[dim]).unwrap_or(1)
+            });
+            let reduction_size = reduction_shape.iter().product::<u64>();
+
+            if !state_initialized {
+                while let Some((_idx, (src_base, state))) = out_iter.next() {
+                    let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+
+                    let reduction_iter = NdIter::new(
+                        &reduction_shape,
+                        NdIterExtStridesPtr::new(&items_buf_strides, src_base),
+                    );
+                    debug_assert_eq!(reduction_size, reduction_iter.len());
+                    let mut reduction_iter = reduction_iter
+                        .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+                    debug_assert_eq!(base_item_idx, 0);
+                    let mut item_idx = 0;
+
+                    // init state with the first item
+                    let state = {
+                        let first = reduction_iter.next();
+                        let state = state.write(self.kernel.init_state(first));
+                        if first.is_some() {
+                            item_idx += 1;
+                        }
+                        state
+                    };
+                    // fold the rest of the items into the state
+                    while item_idx < reduction_size {
+                        let item = reduction_iter.next();
+                        let item = unsafe { item.unwrap_unchecked() };
+                        self.kernel.update_state(state, item, item_idx);
+                        item_idx += 1;
+                    }
+                    debug_assert!(reduction_iter.next().is_none());
                 }
-            };
-            // first bulk
-            let first_bulk_limit = bulk_size.min(nitems);
-            while item_idx < first_bulk_limit {
-                let item = reduction_iter.next();
-                let item = unsafe { item.unwrap_unchecked() };
-                self.kernel.update_state(&mut state, item, item_idx);
-                item_idx += 1;
-            }
-            // all bulks
-            for _ in 1..(nitems / bulk_size) {
-                for _ in 0..bulk_size {
-                    let item = reduction_iter.next();
-                    let item = unsafe { item.unwrap_unchecked() };
-                    self.kernel.update_state(&mut state, item, item_idx);
-                    item_idx += 1;
+                state_initialized = true;
+            } else {
+                while let Some((_idx, (src_base, state))) = out_iter.next() {
+                    let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                    // SAFETY: every state was written by the !state_initialized branch above.
+                    let state = unsafe { state.assume_init_mut() };
+
+                    let reduction_iter = NdIter::new(
+                        &reduction_shape,
+                        NdIterExtStridesPtr::new(&items_buf_strides, src_base),
+                    );
+                    debug_assert_eq!(reduction_size, reduction_iter.len());
+                    let mut reduction_iter = reduction_iter
+                        .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+                    let mut item_idx = base_item_idx;
+
+                    // Fold this block's `reduction_size` items into the running state
+                    while item_idx < base_item_idx + reduction_size {
+                        let item = reduction_iter.next();
+                        let item = unsafe { item.unwrap_unchecked() };
+                        self.kernel.update_state(state, item, item_idx);
+                        item_idx += 1;
+                    }
+                    debug_assert!(reduction_iter.next().is_none());
                 }
             }
-            // remainder
-            while item_idx < nitems {
-                let item = reduction_iter.next();
-                let item = unsafe { item.unwrap_unchecked() };
-                self.kernel.update_state(&mut state, item, item_idx);
-                item_idx += 1;
+            base_item_idx += reduction_size;
+        }
+
+        // finalize_state
+        let reduction_size_overall = base_item_idx;
+        debug_assert!(
+            out_nitems == 0
+                || reduction_size_overall
+                    == (0..inner_ndim)
+                        .filter(|&d| self.is_reduced[d])
+                        .map(|d| inner_index_full[d].end - inner_index_full[d].start)
+                        .product::<u64>(),
+            "total items folded per output does not match product of reduced-dim sizes",
+        );
+        let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as u64);
+        if state_initialized {
+            let mut out_iter = NdIter::new(
+                &out_shape,
+                (
+                    NdIterExtStridesPtrMut::new(&state_strides, state_buf.as_mut_ptr().cast()),
+                    NdIterExtStridesPtrMut::new(&out_strides, buf.as_mut_ptr()),
+                ),
+            );
+            while let Some((_idx, (state, out_ptr))) = out_iter.next() {
+                let state = unsafe { &*state.cast::<MaybeUninit<K::State>>() };
+                let state = unsafe { state.assume_init_read() };
+                let res = self.kernel.finalize_state(state, reduction_size_overall);
+                unsafe { out_ptr.cast::<K::Output>().write(res) };
             }
-            debug_assert!(reduction_iter.next().is_none());
-
-            let res = self.kernel.finalize_state(state, nitems);
-
-            unsafe { out_ptr.cast::<K::Output>().write(res) };
+        } else {
+            // Empty reduction: write the empty-stream result to every output.
+            let mut out_iter = NdIter::new(
+                &out_shape,
+                NdIterExtStridesPtrMut::new(&out_strides, buf.as_mut_ptr()),
+            );
+            debug_assert_eq!(reduction_size_overall, 0);
+            while let Some((_idx, out_ptr)) = out_iter.next() {
+                let state = self.kernel.init_state(None);
+                let res = self.kernel.finalize_state(state, 0);
+                unsafe { out_ptr.cast::<K::Output>().write(res) };
+            }
         }
 
         Ok(())

@@ -8,7 +8,6 @@
     - allclose, isclose
     - flip, roll, split
     - log variants, log10, log2, log1p
-- consider breaking reduction impl into multiple calls to inner.read_data if the blocks are big.
 - add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
 - squeeze()
@@ -26,3 +25,6 @@
 - general generic reduction, .fold
 - make NdIter generic of D
 - add Validation enum when reading array from disk, validating offsets array is in bound
+- add NdIter.foreach() and NdIter.try_foreach()
+- have some SIMD friendly api in NdIter.foreach(), like when detecting the last dim is continuous
+- tmp_buf_typed should return a typed version of TmpBuf

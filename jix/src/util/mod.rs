@@ -102,8 +102,8 @@ where
 #[inline(always)]
 pub(crate) unsafe fn cast_slice_mut<T, U>(slice: &mut [T]) -> &mut [U]
 where
-    T: Copy + Sized,
-    U: Copy + Sized,
+    T: Sized,
+    U: Sized,
 {
     let (ptr, len) = (slice.as_mut_ptr().cast::<U>(), slice.len());
     let len_bytes = len * size_of::<T>();
