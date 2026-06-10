@@ -23,19 +23,24 @@ pub(crate) struct NdIter<Ix, E> {
 #[derive(Clone)]
 struct IterStatus(i64);
 impl IterStatus {
+    #[inline(always)]
     fn new(nitems: u64) -> Self {
         Self(-(nitems as i64))
     }
 
+    #[inline(always)]
     fn is_not_started(&self) -> bool {
         self.0 < 0
     }
+    #[inline(always)]
     fn is_in_progress(&self) -> bool {
         self.0 > 0
     }
+    #[inline(always)]
     fn is_exhausted(&self) -> bool {
         self.0 == 0
     }
+    #[inline(always)]
     fn len(&self) -> u64 {
         if self.is_not_started() {
             (-self.0) as u64
@@ -44,10 +49,12 @@ impl IterStatus {
         }
     }
 
+    #[inline(always)]
     fn start(&mut self) {
         assert!(self.is_not_started());
         self.0 = -self.0;
     }
+    #[inline(always)]
     fn advance(&mut self) {
         assert!(self.is_in_progress());
         self.0 -= 1;
@@ -60,12 +67,14 @@ where
     E: NdIterExtension<Ix>,
 {
     /// Creates an iterator over `[0, shape)` in every dimension.
+    #[inline(always)]
     pub(crate) fn new(shape: &[Ix], extensions: E) -> Self {
         let begin = dim_arr(shape.len(), |_| Ix::ZERO);
         Self::new_with_begin(&begin, shape, extensions)
     }
 
     /// Creates an iterator over `[begin, end)` in every dimension.
+    #[inline(always)]
     pub(crate) fn new_with_begin(begin: &[Ix], end: &[Ix], extensions: E) -> Self {
         let begin = DimArray::from_slice(begin).unwrap();
         let end = DimArray::from_slice(end).unwrap();
@@ -141,10 +150,12 @@ where
         (&self.current_idx, self.extensions.next())
     }
 
+    #[inline(always)]
     pub(crate) fn len(&self) -> u64 {
         self.status.len()
     }
 
+    #[inline(always)]
     pub(crate) fn map<T>(
         self,
         f: impl FnMut((&[Ix], E::Item<'_>)) -> T + Clone,
@@ -165,10 +176,12 @@ where
             F: FnMut((&[Ix], E::Item<'_>)) -> T + Clone,
         {
             type Item = T;
+            #[inline(always)]
             fn next(&mut self) -> Option<Self::Item> {
                 self.iter.next().map(|step| (self.f)(step))
             }
 
+            #[inline(always)]
             fn size_hint(&self) -> (usize, Option<usize>) {
                 let len = self.iter.status.len() as usize;
                 (len, Some(len))
@@ -212,6 +225,7 @@ impl<Ix> IdxIter<Ix>
 where
     Ix: Idx,
 {
+    #[inline(always)]
     pub(crate) fn new(shape: &[Ix]) -> Self {
         Self(NdIter::new(shape, ()))
     }

@@ -23,3 +23,6 @@
 - add link (pyproject metadata + readme) to readthedocs
 - build wheels for windows
 - remove .copy(), .compact() should be used instead, bot in rust and python
+- general generic reduction, .fold
+- make NdIter generic of D
+- add Validation enum when reading array from disk, validating offsets array is in bound

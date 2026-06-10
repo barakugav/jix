@@ -41,6 +41,7 @@ impl<Ix> NdIterExtBlockOffsetSize<Ix>
 where
     Ix: Idx,
 {
+    #[inline(always)]
     pub(crate) fn new(begin: &[Ix], end: &[Ix], block_shape: &[Ix]) -> Self {
         let ndim = begin.len();
         assert_eq!(ndim, end.len());
@@ -125,6 +126,7 @@ where
         (&self.inner_offset, &self.current_block_size)
     }
 
+    #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
         assert_eq!(self.block_shape.len(), ndim);
         assert_eq!(self.borders.len(), ndim);

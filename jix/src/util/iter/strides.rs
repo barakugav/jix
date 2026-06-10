@@ -10,6 +10,7 @@ pub(crate) struct NdIterExtStridesPtr<S>(NdIterExtStridesPtrMut<S>);
 
 impl<S> NdIterExtStridesPtr<S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
+    #[inline(always)]
     pub fn new(strides: &[S], initial_ptr: *const u8) -> Self
     where
         S: Copy,
@@ -56,6 +57,7 @@ pub(crate) struct NdIterExtStridesPtrMut<S> {
 
 impl<S> NdIterExtStridesPtrMut<S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
+    #[inline(always)]
     pub fn new(strides: &[S], initial_ptr: *mut u8) -> Self
     where
         S: Copy,
@@ -91,6 +93,7 @@ where
         self.current_ptr
     }
 
+    #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
         assert_eq!(self.strides.len(), ndim);
     }
@@ -108,6 +111,7 @@ impl<Ix> NdIterExtStridesOffset<Ix>
 where
     Ix: Idx,
 {
+    #[inline(always)]
     pub fn new(strides: &[Ix], initial_offset: Ix) -> Self {
         Self {
             strides: DimArray::from_slice(strides).unwrap(),
@@ -138,11 +142,13 @@ where
         self.offset
     }
 
+    #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
         assert_eq!(self.strides.len(), ndim);
     }
 }
 
+#[inline(always)]
 pub(crate) fn nd_iter_ext_logical_global_index<Ix: Idx>(
     shape: &[Ix],
     begin: &[Ix],
