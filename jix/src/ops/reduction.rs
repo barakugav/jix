@@ -139,40 +139,31 @@ where
         // non-reduced dims forward the requested output range.
         let inner_index = {
             let mut out_dim = 0;
-            (0..orig_ndim)
-                .map(|in_d| {
-                    if self.is_reduced[in_d] {
-                        // TODO: we could read it in chunks
-                        0..orig_shape[in_d]
-                    } else {
-                        let r = index[out_dim].clone();
-                        out_dim += 1;
-                        r
-                    }
-                })
-                .collect::<DimArray<_>>()
+            dim_arr(orig_ndim, |d| {
+                if self.is_reduced[d] {
+                    0..orig_shape[d]
+                } else {
+                    let r = index[out_dim].clone();
+                    out_dim += 1;
+                    r
+                }
+            })
         };
 
-        let inner_read_shape = inner_index
-            .iter()
-            .map(|r| (r.end - r.start) as usize)
-            .collect::<DimArray<_>>();
-        let n_inner = inner_read_shape.iter().product::<usize>();
+        let inner_read_shape = dim_arr(orig_ndim, |d| inner_index[d].end - inner_index[d].start);
+        let n_inner = inner_read_shape.iter().product::<u64>();
 
-        let out_shape = index
-            .iter()
-            .map(|r| (r.end - r.start) as usize)
-            .collect::<DimArray<_>>();
+        let out_shape = dim_arr(index.len(), |d| index[d].end - index[d].start);
 
         // Read the full inner block into a temp buffer.
-        let tmp_buf_size = n_inner * src_dtype.itemsize() as usize;
-        let mut tmp_buf = context.tmp_buf(tmp_buf_size, src_dtype.alignment());
+        let tmp_buf_size = n_inner * src_dtype.itemsize() as u64;
+        let mut tmp_buf = context.tmp_buf(tmp_buf_size as usize, src_dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
         self.array.read_data(&inner_index, tmp_buf, context)?;
 
         // C-contiguous byte strides for inner and output layouts.
-        let inner_strides = default_strides(&inner_read_shape, src_dtype.itemsize() as usize);
-        let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as usize);
+        let inner_strides = default_strides(&inner_read_shape, src_dtype.itemsize() as u64);
+        let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as u64);
 
         // Strides into tmp_buf for the output iterator: reduced dims are absent.
         let tmp_buf_strides = inner_strides

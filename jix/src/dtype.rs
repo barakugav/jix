@@ -1433,10 +1433,7 @@ mod tests {
     #[test]
     fn derive_simple_struct() {
         let dtype = SimpleStruct::DTYPE;
-        assert_eq!(
-            dtype.itemsize() as usize,
-            std::mem::size_of::<SimpleStruct>()
-        );
+        assert_eq!(dtype.itemsize() as usize, size_of::<SimpleStruct>());
         assert_eq!(
             dtype.alignment().as_usize(),
             std::mem::align_of::<SimpleStruct>()
@@ -1462,10 +1459,7 @@ mod tests {
     #[test]
     fn derive_packed_struct() {
         let dtype = PackedStruct::DTYPE;
-        assert_eq!(
-            dtype.itemsize() as usize,
-            std::mem::size_of::<PackedStruct>()
-        );
+        assert_eq!(dtype.itemsize() as usize, size_of::<PackedStruct>());
         assert_eq!(
             dtype.alignment().as_usize(),
             std::mem::align_of::<PackedStruct>()
@@ -1489,7 +1483,7 @@ mod tests {
         assert_eq!(NewtypeWrapper::DTYPE, SimpleStruct::DTYPE);
         assert_eq!(
             NewtypeWrapper::DTYPE.itemsize() as usize,
-            std::mem::size_of::<NewtypeWrapper>()
+            size_of::<NewtypeWrapper>()
         );
     }
 
@@ -1503,10 +1497,7 @@ mod tests {
     #[test]
     fn derive_nested_struct() {
         let dtype = NestedStruct::DTYPE;
-        assert_eq!(
-            dtype.itemsize() as usize,
-            std::mem::size_of::<NestedStruct>()
-        );
+        assert_eq!(dtype.itemsize() as usize, size_of::<NestedStruct>());
         assert_eq!(
             dtype.alignment().as_usize(),
             std::mem::align_of::<NestedStruct>()
@@ -1529,10 +1520,7 @@ mod tests {
     #[test]
     fn derive_struct_with_array_field() {
         let dtype = ArrayFieldStruct::DTYPE;
-        assert_eq!(
-            dtype.itemsize() as usize,
-            std::mem::size_of::<ArrayFieldStruct>()
-        );
+        assert_eq!(dtype.itemsize() as usize, size_of::<ArrayFieldStruct>());
         assert_eq!(
             dtype.alignment().as_usize(),
             std::mem::align_of::<ArrayFieldStruct>()
@@ -1559,7 +1547,7 @@ mod tests {
     #[test]
     fn derive_deeply_nested_struct() {
         let dtype = DeepNested::DTYPE;
-        assert_eq!(dtype.itemsize() as usize, std::mem::size_of::<DeepNested>());
+        assert_eq!(dtype.itemsize() as usize, size_of::<DeepNested>());
         assert_eq!(
             dtype.alignment().as_usize(),
             std::mem::align_of::<DeepNested>()

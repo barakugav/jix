@@ -408,7 +408,7 @@ impl BlockTableStorageRead for Owned {
             InvalidArchive,
             "section size is not a multiple of item size"
         );
-        let len = section.size as usize / std::mem::size_of::<T>();
+        let len = section.size as usize / size_of::<T>();
 
         let mut data = Vec::<MaybeUninit<T>>::with_capacity(len);
         unsafe { data.set_len(len) };
@@ -443,7 +443,7 @@ impl BlockTableStorageRead for Mmap {
             InvalidArchive,
             "section size is not a multiple of item size"
         );
-        let len = section.size as usize / std::mem::size_of::<T>();
+        let len = section.size as usize / size_of::<T>();
 
         let offset = self.base_offset as i64 + section.offset;
         let offset = offset as usize;

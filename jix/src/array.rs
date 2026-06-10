@@ -818,7 +818,6 @@ impl<S: ArrayStorage> Array<S> {
             &block_begin,
             &block_end,
             NdIterExtBlockOffsetSize::new(
-                shape,
                 &elem_begin,
                 &elem_end,
                 &dim_arr(ndim, |dim| read_shape[dim] as u64),
@@ -1219,7 +1218,6 @@ impl<S: ArrayStorage> Array<S> {
         let mut block_iter = NdIter::new(
             &grid_shape,
             NdIterExtBlockOffsetSize::new(
-                shape,
                 &dim_arr(ndim, |_| 0),
                 shape,
                 &dim_arr(ndim, |dim| block_shape[dim] as u64),
