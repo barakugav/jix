@@ -1,4 +1,3 @@
-use std::hint::assert_unchecked;
 use std::mem::MaybeUninit;
 use std::ops::{Not, Range};
 
@@ -9,6 +8,7 @@ use crate::ops::common::AxesArg;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
+use crate::util::cpu_cache::cache_sizes;
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
@@ -127,6 +127,27 @@ impl<S, K, D> ReductionOp<S, K, D> {
     }
 }
 
+/// Greedy scale-up: returns a per-dim shape that starts at all-1s and grows each
+/// dim, visited in `scale_order`, up to `inner_shape[d]`, while keeping the running
+/// product below `target_nitems`. Once the product saturates, all remaining dims
+/// stay at 1. Mirrors `BlocksLayout::scale_block_shape` but works on the raw `u64`
+/// shape used by reduction.
+fn scale_up_to_target(
+    inner_shape: &[u64],
+    scale_order: impl IntoIterator<Item = usize>,
+    target_nitems: u64,
+) -> DimArray<u64> {
+    let mut shape = dim_arr(inner_shape.len(), |_| 1u64);
+    let mut current_volume = 1u64;
+    for dim in scale_order {
+        let cap = inner_shape[dim].max(1);
+        let max_size = (target_nitems / current_volume).max(1).min(cap);
+        shape[dim] = max_size;
+        current_volume = current_volume.saturating_mul(max_size);
+    }
+    shape
+}
+
 impl<S, K, D> ArrayStorage for ReductionOp<S, K, D>
 where
     S: ArrayStorageTyped,
@@ -138,9 +159,9 @@ where
 
     #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        // Streams the reduction over **bulk-blocks** of the inner array so peak scratch memory
-        // stays bounded — only one bulk's items plus one `K::State` per output position are
-        // resident at a time, regardless of the source array size.
+        // Streams the reduction over a two-level chunking of the inner array so peak scratch
+        // memory stays bounded *and* each downstream `self.array.read_data` call is sized to
+        // roughly fit the caller's request in cache.
         //
         // # What it computes
         //
@@ -151,45 +172,64 @@ where
         //   buf[O]    = K::finalize_state(fold(stream(O), K::init_state, K::update_state),
         //                                 nitems = stream length)
         //
-        // # Bulk-block geometry
+        // # Two-level chunking: bulks and tiles
         //
-        // The inner index range `inner_index_full` (reduced dims spanning the full source
-        // extent, non-reduced dims forwarded from `index`) is partitioned into bulk-blocks of
-        // shape `inner_shape_bulk[d]`:
-        //   - reduced dims:     a small chunk (currently `min(inner_shape[d], 64)`) so the
-        //                       reduction stream is consumed in pieces;
-        //   - non-reduced dims: the full source extent `inner_shape[d]`, guaranteeing
-        //                       `inner_index_full[d]` fits inside a single bulk-block along
-        //                       that dim. Splitting a non-reduced dim across multiple bulks
-        //                       would cause `out_iter` to re-walk the same outputs once per
-        //                       strip and double-count contributions into their states.
+        // The inner index range `inner_range_full` (reduced dims spanning the full source
+        // extent, non-reduced dims forwarded from `index`) is partitioned at two granularities:
         //
-        // `block_iter` then walks the bulk-block grid in row-major order, yielding
-        // `(blk_idx, (inner_offset, blk_size))` for each block. The absolute element start in
-        // dim `d` is `blk_idx[d] * inner_shape_bulk[d] + inner_offset[d]` and the active
-        // length is `blk_size[d]`. Interior blocks always carry `inner_offset = 0,
-        // blk_size = inner_shape_bulk`; border blocks carry the partial values produced by
-        // `NdIterExtBlockOffsetSize`.
+        //   * **bulk** — the outer chunk. Splits *reduced* dims only. Walking bulks in
+        //     row-major order is what advances `base_item_idx`: each bulk delivers
+        //     `reduction_size = ∏ bulk_size[d] for d reduced` items per output position.
+        //     `bulk_shape[d] = tile_shape[d]` for reduced dims and `inner_shape[d]`
+        //     for non-reduced — i.e. the full non-reduced extent always sits in one bulk
+        //     along that dim, so consecutive bulks never re-walk the same outputs.
+        //   * **tile** — the inner chunk. Splits *both* dim groups, but is shaped so the
+        //     reduced part exactly matches one bulk's reduced range (one tile-along-reduced
+        //     per bulk). Within a bulk the tile iterator sweeps the non-reduced output
+        //     region. Each `(bulk, tile)` pair produces *one* `self.array.read_data` call
+        //     whose volume is approximately `tile_nitems_target` items.
         //
-        // # Per-bulk processing
+        // `tile_shape` is chosen once per call via a greedy scale-up
+        // (`scale_up_to_target`): start at all-1s, then grow each dim — reduced dims first
+        // (rightmost first), then non-reduced (rightmost first) — taking the largest size
+        // that keeps the running product under `tile_nitems_target`. Setting
+        // `bulk_shape[reduced] = tile_shape[reduced]` then makes the inner read shape
+        // come out to `tile_shape` for every tile.
         //
-        // For each bulk:
-        //   1. Read the bulk's raw elements into `items_buf` (one `src_dtype` slab).
-        //   2. One pass over the output positions (`out_iter` over `out_shape`) folds this
-        //      bulk's `reduction_size` reduction items into each `state_buf[O]`. The same
-        //      loop handles both first-init and continue: when `!state_initialized`, the
-        //      first reduction item per output is consumed by `K::init_state(first)` to
-        //      write the slot, then control falls into the shared `K::update_state` loop;
-        //      otherwise the slot is `assume_init_mut`-ed and the loop just keeps folding.
-        //      `item_idx` is the global stream position and runs
-        //      `[base_item_idx, base_item_idx + reduction_size)` regardless of branch.
-        //   3. Advance `base_item_idx += reduction_size`. Promote `state_initialized` to
-        //      `true` only if `reduction_size > 0` — a bulk that contributes zero items
-        //      cannot have written any slots, and a later bulk doing `assume_init_mut`
-        //      on an unwritten slot would be UB.
+        // `tile_nitems_target` is `out_nitems` (i.e. `∏ index[d].len()`, the caller's request
+        // size) raised to a cache floor of `max(L1_data, 8 KiB) / src_dtype.itemsize()`.
+        // The floor prevents pathologically tiny reads when the caller asks for a handful
+        // of outputs over a giant reduction axis.
         //
-        // `reduction_size = ∏ blk_size[d] for d in reduced dims` is the number of stream
-        // items each output receives from the current bulk.
+        // Both iterators are driven by `NdIterExtBlockOffsetSize`. Each yields
+        // `(blk_idx, (inner_offset, blk_size))`: the absolute element start in dim `d` is
+        // `blk_idx[d] * block_shape[d] + inner_offset[d]`, length `blk_size[d]`. Interior
+        // blocks carry `inner_offset = 0, blk_size = block_shape`; border blocks carry the
+        // partial values produced by the iterator.
+        //
+        // # Per-tile processing
+        //
+        // ```text
+        // for each bulk:
+        //   reduction_size = ∏ bulk_size[d] for d in reduced dims
+        //   item_idx_end   = base_item_idx + reduction_size
+        //   for each tile in this bulk:
+        //     items_buf <- self.array.read_data(tile = bulk-reduced × tile-non-reduced)
+        //     for each output position O in this tile's non-reduced sub-region:
+        //       walk the tile's `reduction_size` items at the right offset into items_buf,
+        //       folding them into state_buf[O] via K::init_state / K::update_state. item_idx
+        //       runs `[base_item_idx, item_idx_end)` regardless of init-vs-continue branch.
+        //   base_item_idx = item_idx_end
+        //   if reduction_size > 0 { state_initialized = true }
+        // ```
+        //
+        // The first-init vs. continue split is per-slot inside the inner output loop: when
+        // `!state_initialized`, the first reduction item per output is consumed by
+        // `K::init_state(first)` to write the slot; control then falls into the same
+        // `K::update_state` loop as later bulks. Within the first bulk, *all* tiles take
+        // the init branch — each tile only initializes the slots it covers, and together
+        // the first bulk's tiles cover every output exactly once. The flag flips only at
+        // the *end* of a bulk that contributed items, never inside a bulk.
         //
         // # Finalization
         //
@@ -205,23 +245,25 @@ where
         //
         // # Scratch buffers
         //
-        // - `items_buf`: raw input elements for the current bulk. Resized each iteration.
-        // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Initialized lazily on
-        //   the first bulk; finalized in the post-loop pass. When `K::State` matches
-        //   `K::Output` in size and is no more strictly aligned (`state_in_out_buf`), we skip
-        //   the scratch allocation entirely and reuse the caller's `buf` as the state buffer
-        //   — `finalize_state` then reads each slot and writes the output into the same byte
-        //   range it just consumed. The finalization loop reads the state out of each slot
-        //   *before* writing the result back into it, since the state and output pointers
-        //   alias in that mode (see the `CAREFUL` comments).
+        // - `items_buf`: raw input elements for the current *tile*. Resized each tile.
+        // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Initialized lazily
+        //   one tile at a time during the first bulk; finalized in the post-loop pass.
+        //   When `K::State` matches `K::Output` in size and is no more strictly aligned
+        //   (`state_in_out_buf`), we skip the scratch allocation entirely and reuse the
+        //   caller's `buf` as the state buffer — `finalize_state` then reads each slot and
+        //   writes the output into the same byte range it just consumed. The finalization
+        //   loop reads the state out of each slot *before* writing the result back, since
+        //   state and output pointers alias in that mode (see the `CAREFUL` comments).
         //
         // # Invariants (also enforced by `debug_assert!`s)
         //
         // - Non-reduced dims produce at most one bulk-block per call.
-        // - Each bulk's `inner_index` is contained in `inner_index_full`.
+        // - Each bulk has exactly one tile-along-reduced
+        //   (`tile_shape[reduced] == bulk_shape[reduced]`).
+        // - Every tile's `tile` is contained in `inner_range_full`.
         // - On the first state init pass, `base_item_idx == 0`.
         // - After all bulks, each output's reduction stream consumes exactly
-        //   `∏ (inner_index_full[d].end - .start) for d in reduced dims` items (when
+        //   `∏ (inner_range_full[d].end - .start) for d in reduced dims` items (when
         //   `out_nitems > 0`).
 
         let src_dtype = self.array.dtype();
@@ -232,7 +274,7 @@ where
         let inner_shape = self.array.shape();
         let inner_ndim = inner_shape.len();
 
-        let inner_index_full = {
+        let inner_range_full = {
             let mut out_dim = 0;
             dim_arr(inner_ndim, |dim| {
                 if self.is_reduced[dim] {
@@ -247,37 +289,59 @@ where
 
         let out_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
 
-        // `inner_shape_bulk` is the bulk-block shape used to chunk the inner read. We only
-        // chunk along *reduced* dims (so the kernel can stream the reduction stream in
-        // pieces). For *non-reduced* dims we use the full source extent so the requested
-        // output range fits inside a single bulk-block — any other choice can split a
-        // non-reduced dim across multiple bulk-blocks, which would cause `out_iter` to
-        // re-walk the same outputs once per strip and double-count contributions.
-        let inner_shape_bulk = dim_arr(inner_ndim, |dim| {
+        let tile_shape = {
+            // Number of items read per tile.
+            // Aim roughly for the same number of items as the caller requested.
+            let tile_nitems_target = (out_nitems as u64).max({
+                let cache_floor_bytes = cache_sizes().l1_data.max(8192) as u64;
+                cache_floor_bytes.div_ceil(src_dtype.itemsize() as u64)
+            });
+
+            // TODO: take into account the inner array block layout
+
+            // Tile shape: greedy scale-up starting at all-1s. Reduced dims first (rightmost
+            // first), then non-reduced (rightmost first). The reduction kernel consumes the
+            // reduced axes in one go, so feeding them first gives them the entire `tile_nitems_target`
+            // budget before the non-reduced dims start asking for room.
+            scale_up_to_target(
+                inner_shape,
+                (0..inner_ndim)
+                    .rev()
+                    .filter(|&dim| self.is_reduced[dim])
+                    .chain((0..inner_ndim).rev().filter(|&dim| !self.is_reduced[dim])),
+                tile_nitems_target,
+            )
+        };
+
+        // Bulk shape: tile shape on reduced dims (so each bulk has exactly one
+        // tile-along-reduced), full source extent on non-reduced dims (so the requested
+        // output range sits in one bulk along that dim — otherwise consecutive bulks would
+        // re-walk the same outputs and double-count).
+        let bulk_shape = dim_arr(inner_ndim, |dim| {
             if self.is_reduced[dim] {
-                let target_block_size = 64; // TODO: tune this heuristic
-                inner_shape[dim].max(1).min(target_block_size)
+                tile_shape[dim]
             } else {
-                inner_shape[dim].max(1) // arbitrarily large
+                inner_shape[dim].max(1)
             }
         });
-        let block_begin = dim_arr(inner_ndim, |dim| {
-            inner_index_full[dim].start / inner_shape_bulk[dim]
+        let bulk_grid_begin = dim_arr(inner_ndim, |dim| {
+            inner_range_full[dim].start / bulk_shape[dim]
         });
-        let block_end = dim_arr(inner_ndim, |dim| {
-            inner_index_full[dim].end.div_ceil(inner_shape_bulk[dim])
+        let bulk_grid_end = dim_arr(inner_ndim, |dim| {
+            inner_range_full[dim].end.div_ceil(bulk_shape[dim])
         });
         debug_assert!(
-            (0..inner_ndim).all(|d| self.is_reduced[d] || block_end[d] - block_begin[d] <= 1),
+            (0..inner_ndim)
+                .all(|d| self.is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
             "non-reduced dim must produce at most one bulk-block",
         );
-        let mut block_iter = NdIter::new_with_begin(
-            &block_begin,
-            &block_end,
+        let mut bulk_iter = NdIter::new_with_begin(
+            &bulk_grid_begin,
+            &bulk_grid_end,
             NdIterExtBlockOffsetSize::new(
-                &dim_arr(inner_ndim, |dim| inner_index_full[dim].start),
-                &dim_arr(inner_ndim, |dim| inner_index_full[dim].end),
-                &inner_shape_bulk,
+                &dim_arr(inner_ndim, |dim| inner_range_full[dim].start),
+                &dim_arr(inner_ndim, |dim| inner_range_full[dim].end),
+                &bulk_shape,
             ),
         );
 
@@ -299,83 +363,139 @@ where
 
         let mut items_buf = context.tmp_buf(0, src_dtype.alignment());
         let mut base_item_idx = 0;
-        while let Some((blk_idx, (inner_offset, blk_size))) = block_iter.next() {
-            // Read the inner block into a temp buffer.
-            items_buf
-                .set_len((blk_size.iter().product::<u64>() * src_dtype.itemsize() as u64) as usize);
-            let items_buf = items_buf.as_mut_slice();
-            // Absolute inner-element range for this bulk: `blk_idx * bulk + inner_offset`,
-            // since `inner_offset` from `NdIterExtBlockOffsetSize` is intra-block, not absolute.
-            let inner_index = dim_arr(inner_ndim, |dim| {
-                let start = blk_idx[dim] * inner_shape_bulk[dim] + inner_offset[dim];
-                start..start + blk_size[dim]
+        while let Some((bulk_idx, (bulk_inner_offset, bulk_size))) = bulk_iter.next() {
+            // The bulk's absolute element range, used as the tile iterator's universe.
+            let bulk_begin = dim_arr(inner_ndim, |dim| {
+                bulk_idx[dim] * bulk_shape[dim] + bulk_inner_offset[dim]
             });
+            let bulk_end = dim_arr(inner_ndim, |dim| bulk_begin[dim] + bulk_size[dim]);
+
+            // Each bulk contributes `reduction_size` items to every output it covers
+            // (which is every output, since non-reduced dims sit in one bulk). That count
+            // is determined by the bulk along reduced dims and is independent of tiling.
+            let reduction_size = (0..inner_ndim)
+                .filter(|&d| self.is_reduced[d])
+                .map(|d| bulk_size[d])
+                .product::<u64>();
+            let item_idx_end = base_item_idx + reduction_size;
+
+            // Tile iterator: walks the bulk's range partitioned by `tile_shape`. Reduced
+            // dims have exactly one tile per bulk (tile_shape[reduced] == bulk reduced
+            // width), non-reduced dims are subdivided.
+            let tile_grid_begin = dim_arr(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
+            let tile_grid_end = dim_arr(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
+            let mut tile_iter = NdIter::new_with_begin(
+                &tile_grid_begin,
+                &tile_grid_end,
+                NdIterExtBlockOffsetSize::new(&bulk_begin, &bulk_end, &tile_shape),
+            );
             debug_assert!(
-                (0..inner_ndim).all(|d| {
-                    inner_index_full[d].start <= inner_index[d].start
-                        && inner_index[d].end <= inner_index_full[d].end
-                }),
-                "block inner_index not contained in inner_index_full"
-            );
-            self.array.read_data(&inner_index, items_buf, context)?;
-
-            // Strides into items_buf for the output iterator: reduced dims are absent.
-            let items_buf_strides = default_strides(&blk_size, src_dtype.itemsize() as u64);
-            let items_buf_strides_for_out_iter = items_buf_strides
-                .iter()
-                .zip(&self.is_reduced)
-                .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
-                .collect::<DimArray<_>>();
-
-            let mut out_iter = NdIter::new(
-                &out_shape,
-                (
-                    NdIterExtStridesPtr::new(&items_buf_strides_for_out_iter, items_buf.as_ptr()),
-                    NdIterExtStridesPtrMut::new(&state_strides, state_buf.as_mut_ptr().cast()),
-                ),
+                (0..inner_ndim)
+                    .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
+                "reduced dim must produce at most one tile per bulk",
             );
 
-            let reduction_shape = dim_arr(inner_ndim, |dim| {
-                self.is_reduced[dim].then_some(blk_size[dim]).unwrap_or(1)
-            });
-            let reduction_size = reduction_shape.iter().product::<u64>();
-
-            while let Some((_idx, (src_base, state))) = out_iter.next() {
-                let reduction_iter = NdIter::new(
-                    &reduction_shape,
-                    NdIterExtStridesPtr::new(&items_buf_strides, src_base),
+            while let Some((tile_idx, (tile_inner_offset, tile_size))) = tile_iter.next() {
+                let tile = dim_arr(inner_ndim, |dim| {
+                    let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
+                    start..start + tile_size[dim]
+                });
+                debug_assert!(
+                    (0..inner_ndim).all(|d| {
+                        inner_range_full[d].start <= tile[d].start
+                            && tile[d].end <= inner_range_full[d].end
+                    }),
+                    "tile not contained in inner_range_full",
                 );
-                debug_assert_eq!(reduction_size, reduction_iter.len());
-                let mut reduction_iter =
-                    reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
-                let mut item_idx = base_item_idx;
 
-                let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
-                let state = if !state_initialized {
-                    // init state with the first item
-                    debug_assert_eq!(item_idx, 0);
-                    unsafe { assert_unchecked(reduction_size > 0) };
-                    let first = reduction_iter.next();
-                    let state = state.write(self.kernel.init_state(first));
-                    if first.is_some() {
-                        item_idx += 1;
-                    }
-                    state
-                } else {
-                    // SAFETY: every state was written by the !state_initialized branch above.
-                    unsafe { state.assume_init_mut() }
+                // Read this tile's items
+                items_buf.set_len(
+                    (tile_size.iter().product::<u64>() * src_dtype.itemsize() as u64) as usize,
+                );
+                let items_buf = items_buf.as_mut_slice();
+                self.array.read_data(&tile, items_buf, context)?;
+
+                // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
+                // `tile_state_base` shifts `state_buf` to its first slot.
+                let items_buf_strides = default_strides(&tile_size, src_dtype.itemsize() as u64);
+                let items_buf_strides_for_out_iter = items_buf_strides
+                    .iter()
+                    .zip(&self.is_reduced)
+                    .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
+                    .collect::<DimArray<_>>();
+                let tile_out_shape = (0..inner_ndim)
+                    .filter(|&d| !self.is_reduced[d])
+                    .map(|d| tile_size[d])
+                    .collect::<DimArray<_>>();
+                let state_offset_bytes = (0..inner_ndim)
+                    .filter(|&d| !self.is_reduced[d])
+                    .enumerate()
+                    .map(|(out_d, d)| {
+                        (tile[d].start - inner_range_full[d].start) * state_strides[out_d]
+                    })
+                    .sum::<u64>();
+                let tile_state_base = unsafe {
+                    state_buf
+                        .as_mut_ptr()
+                        .cast::<u8>()
+                        .offset(state_offset_bytes as isize)
                 };
 
-                // Fold this block's `reduction_size` items into the running state
-                while item_idx < base_item_idx + reduction_size {
-                    let item = reduction_iter.next();
-                    let item = unsafe { item.unwrap_unchecked() };
-                    self.kernel.update_state(state, item, item_idx);
-                    item_idx += 1;
+                let mut out_iter = NdIter::new(
+                    &tile_out_shape,
+                    (
+                        NdIterExtStridesPtr::new(
+                            &items_buf_strides_for_out_iter,
+                            items_buf.as_ptr(),
+                        ),
+                        NdIterExtStridesPtrMut::new(&state_strides, tile_state_base),
+                    ),
+                );
+
+                // Reduction-axis walk inside `items_buf`. `tile_size[reduced] == bulk_size[reduced]`
+                // so this equals `reduction_size`.
+                let reduction_shape = dim_arr(inner_ndim, |dim| {
+                    self.is_reduced[dim].then_some(tile_size[dim]).unwrap_or(1)
+                });
+                debug_assert_eq!(reduction_shape.iter().product::<u64>(), reduction_size);
+
+                while let Some((_idx, (src_base, state))) = out_iter.next() {
+                    let reduction_iter = NdIter::new(
+                        &reduction_shape,
+                        NdIterExtStridesPtr::new(&items_buf_strides, src_base),
+                    );
+                    debug_assert_eq!(reduction_size, reduction_iter.len());
+                    let mut reduction_iter = reduction_iter
+                        .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+                    let mut item_idx = base_item_idx;
+
+                    let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                    let state = if !state_initialized {
+                        // init state with the first item
+                        debug_assert_eq!(item_idx, 0);
+                        let first = reduction_iter.next();
+                        let state = state.write(self.kernel.init_state(first));
+                        if first.is_some() {
+                            item_idx += 1;
+                        }
+                        state
+                    } else {
+                        // SAFETY: every state was written during the first bulk.
+                        unsafe { state.assume_init_mut() }
+                    };
+
+                    // Fold this tile's `reduction_size` items into the running state.
+                    while item_idx < item_idx_end {
+                        let item = reduction_iter.next();
+                        let item = unsafe { item.unwrap_unchecked() };
+                        self.kernel.update_state(state, item, item_idx);
+                        item_idx += 1;
+                    }
+                    debug_assert!(reduction_iter.next().is_none());
                 }
-                debug_assert!(reduction_iter.next().is_none());
             }
-            base_item_idx += reduction_size;
+
+            base_item_idx = item_idx_end;
             if reduction_size > 0 {
                 state_initialized = true;
             }
@@ -388,19 +508,18 @@ where
                 || reduction_size_overall
                     == (0..inner_ndim)
                         .filter(|&d| self.is_reduced[d])
-                        .map(|d| inner_index_full[d].end - inner_index_full[d].start)
+                        .map(|d| inner_range_full[d].end - inner_range_full[d].start)
                         .product::<u64>(),
             "total items folded per output does not match product of reduced-dim sizes",
         );
+        // CAREFUL: state_buf and out_ptr may alias
+        let state_ptr = state_buf.as_mut_ptr();
+        // drop doesn't do anything, but indicate we don't hold a mut ref to the state buf, as
+        // out_ptr may be an alias to it
+        #[allow(dropping_references)]
+        drop(state_buf);
         let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as u64);
         if state_initialized {
-            // CAREFUL: state_buf and out_ptr may alias
-            let state_ptr = state_buf.as_mut_ptr();
-            // doesn't do anything, but indicate we don't hold a mut ref to the state buf, as
-            // out_ptr may be an alias to it
-            #[allow(dropping_references)]
-            drop(state_buf);
-
             let mut out_iter = NdIter::new(
                 &out_shape,
                 (

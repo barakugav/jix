@@ -28,3 +28,4 @@
 - add NdIter.foreach() and NdIter.try_foreach()
 - have some SIMD friendly api in NdIter.foreach(), like when detecting the last dim is continuous
 - tmp_buf_typed should return a typed version of TmpBuf
+- add Dimension::Vec<T> associated type
