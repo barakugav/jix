@@ -109,6 +109,7 @@ where
         });
         b_layout.preferred_read_shape = dim_arr(ndim, |dim| {
             if is_broadcast[dim] {
+                // TODO: start with 1, and scale up to preferred_read_size_hint
                 new_shape_slice[dim] as u32
             } else {
                 b_layout.preferred_read_shape[dim]

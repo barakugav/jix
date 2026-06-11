@@ -3,7 +3,7 @@ use std::ops::{Not, Range};
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorageSpec, BlocksLayout};
+use crate::storage::ArrayStorageSpec;
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -68,7 +68,6 @@ where
     borders: Vec<u64>,
 
     shape: ArraysT::Dimension,
-    blocks_layout: BlocksLayout,
 }
 impl<ArraysT> Concatenate<ArraysT>
 where
@@ -123,7 +122,6 @@ where
         let shape = ArraysT::Dimension::from_slice(&shape).unwrap();
         Ok(Self {
             shape,
-            blocks_layout: arrays.spec(0).blocks_layout.clone(),
             arrays,
             concat_axis: axis,
             borders,
@@ -270,10 +268,7 @@ where
         self.arrays.dtype(0)
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.arrays.spec(0)
-        }
+        self.arrays.spec(0)
     }
 }
 
