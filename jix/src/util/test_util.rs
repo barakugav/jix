@@ -486,8 +486,15 @@ where
         })
 }
 
-pub(crate) fn block_shape_strategy(ndim: usize) -> impl Strategy<Value = Vec<BlockSize>> {
-    prop::collection::vec(1u32..=4, ndim)
+pub(crate) fn block_shape_strategy(
+    shape: &[usize],
+) -> impl Strategy<Value = Vec<BlockSize>> + use<> {
+    // Per-dim block size is clamped to [1, max(1, s)] to satisfy the invariant
+    // enforced by `BlocksLayout::tune`: `1 <= b <= s.max(1)`.
+    shape
+        .iter()
+        .map(|&s| 1u32..=4u32.min(s.max(1) as u32))
+        .collect::<Vec<_>>()
 }
 
 pub(crate) fn carray_strategy_any<T>(
@@ -515,7 +522,7 @@ where
     T: ScalarStrategy + Debug,
 {
     data.prop_flat_map(|arr| {
-        let block_shape = block_shape_strategy(arr.ndim());
+        let block_shape = block_shape_strategy(arr.shape());
         (Just(arr), block_shape)
     })
     .prop_map(|(arr, block_shape)| {

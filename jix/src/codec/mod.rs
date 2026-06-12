@@ -59,6 +59,7 @@ use crate::util::{AlignedBytes, AlternatingBuffers};
 
 /// The compression algorithm applied to each block.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Codec {
     /// [Zstandard](https://facebook.github.io/zstd/) - a fast general-purpose compressor.
     /// Compression level is controlled by [`EncoderParams::level`].
@@ -83,8 +84,8 @@ pub enum Codec {
 /// Use the defaults (most common case):
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
 /// use jix::codec::EncoderParams;
+/// use jix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
 /// let data = array![1.0f32, 2.0, 3.0, 4.0];
@@ -98,13 +99,13 @@ pub enum Codec {
 /// Increase compression level for archival data:
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
 /// use jix::codec::{EncoderParams, Filter};
+/// use jix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
 /// let data = array![1.0f64, 2.0, 3.0, 4.0];
 /// let mut enc = EncoderParams::new();
-/// enc.level(15)?;  // slower encode, better ratio
+/// enc.level(15)?; // slower encode, better ratio
 /// enc.filters(&[Filter::ByteShuffle])?;
 /// let mut params = ArrayParams::new();
 /// params.encoder_params(enc);
@@ -439,8 +440,8 @@ impl<'a> Decoder<'a> {
 /// more control over the decoder parameters or want to create a context independently of a specific
 /// array.
 /// ```
-/// use jix::Array;
 /// use jix::codec::ReadContext;
+/// use jix::Array;
 ///
 /// let za = Array::plain_scalar(42i32, &[5])?;
 /// let out = za.to_ndarray_sub(&[0..3], &ReadContext::default())?;

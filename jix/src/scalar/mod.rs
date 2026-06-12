@@ -24,7 +24,6 @@
 //!   by the above: [`Abs`] (handles `Complex<T>`), [`Maximum`]/[`Minimum`] (NaN-propagating, unlike
 //!   `f32::max`/`f32::min`), [`Cast<D>`] for type conversion, and the `Reduce*` family
 //!   ([`Sum`], [`ReduceMax`], [`Mean`], [`ArgMax`], ...) for reductions.
-//!
 
 #[cfg(feature = "half")]
 pub use half::f16;

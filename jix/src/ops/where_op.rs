@@ -44,8 +44,8 @@ where
 ///
 /// # Examples
 /// ```
-/// use jix::Array;
 /// use jix::ops::where_condition;
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let cond = Array::compact_ndarray(&array![true, false, true, false])?;
@@ -211,12 +211,11 @@ mod tests {
 
     use super::{where_condition, Where};
     use crate::array::Array;
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
     use crate::storage::Compact;
     use crate::util::ScalarStrategy;
     use crate::{DimDyn, Ty};
-
-    #[cfg(feature = "half")]
-    use crate::scalar::f16;
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;

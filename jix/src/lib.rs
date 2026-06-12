@@ -21,8 +21,8 @@
 //! # Quick start
 //!
 //! ```
-//! use jix::Array;
 //! use jix::dtype::Dtyped;
+//! use jix::Array;
 //! use ndarray::array;
 //!
 //! // Compress a 2-D f32 ndarray into a block-compressed Array<Compact>.
@@ -159,13 +159,14 @@
 //!
 //! ```no_run
 //! use std::path::Path;
+//!
 //! use jix::{Array, ArrayParams};
 //!
 //! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
 //! // src: Array<Compact<TypeDyn, DimDyn>> - element type unknown at compile time
 //! // src: Array<S::ElementType = TypeDyn>
 //!
-//! let typed = src.to_typed::<f32>()?;  // runtime check: dtype must be f32
+//! let typed = src.to_typed::<f32>()?; // runtime check: dtype must be f32
 //! // typed: Array<S::ElementType = Ty<f32>>
 //! let result = typed.exp().sum(0).compact()?;
 //! # Ok::<(), jix::Error>(())
@@ -230,12 +231,12 @@
 //!
 //! let context = array.read_ctx();
 //! for tile_row in 0..7 {
-//!   for tile_col in 0..7 {
-//!     let row_range = (tile_row * 64)..((tile_row + 2) * 64);
-//!     let col_range = (tile_col * 64)..((tile_col + 2) * 64);
-//!     let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
-//!     println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
-//!   }
+//!     for tile_col in 0..7 {
+//!         let row_range = (tile_row * 64)..((tile_row + 2) * 64);
+//!         let col_range = (tile_col * 64)..((tile_col + 2) * 64);
+//!         let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
+//!         println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
+//!     }
 //! }
 //! # Ok::<(), jix::Error>(())
 //! ```
@@ -286,9 +287,10 @@
 //! from the source lazily:
 //!
 //! ```
-//! use std::io::BufWriter;
 //! use std::fs::File;
-//! use jix::{Array, ArrayParams};
+//! use std::io::BufWriter;
+//!
+//! use jix::{ArchiveValidation, Array, ArrayParams};
 //! use ndarray::array;
 //!
 //! let tmp_dir = tempfile::tempdir()?;
@@ -298,15 +300,23 @@
 //!
 //! // Memory-map the source - blocks are paged in on demand.
 //! // Safety: the file is not modified while `src` is live.
-//! let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
+//! let src = unsafe {
+//!     Array::read_from_file_mmap(
+//!         &path,
+//!         0,
+//!         len,
+//!         ArrayParams::default(),
+//!         ArchiveValidation::default(),
+//!     )?
+//! };
 //!
 //! // Build a lazy pipeline over the mmap'd data.
 //! let processed = src.to_typed::<f32>()?.exp() + 1.0f32;
 //!
 //! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
-//! processed.write_to(
-//!     BufWriter::new(File::create(tmp_dir.path().join("modified.jix"))?),
-//! )?;
+//! processed.write_to(BufWriter::new(File::create(
+//!     tmp_dir.path().join("modified.jix"),
+//! )?))?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -342,6 +352,7 @@ pub mod storage;
 pub use storage::core::ArrayStorage;
 
 mod archive;
+pub use archive::ArchiveValidation;
 
 pub mod ops;
 

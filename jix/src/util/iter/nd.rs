@@ -494,9 +494,7 @@ mod tests {
     // NdIter with new_with_begin
     // ---------------------------------------------------------------------------
 
-    fn collect_indices<D: Dimension, E: NdIterExtension>(
-        mut iter: NdIter<D, E>,
-    ) -> Vec<Vec<u64>> {
+    fn collect_indices<D: Dimension, E: NdIterExtension>(mut iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
         while let Some((idx, _)) = iter.next() {
             out.push(idx.to_vec());

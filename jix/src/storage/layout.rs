@@ -43,6 +43,7 @@ pub struct BlocksLayout {
 ///
 /// See [`BlocksLayout::block_shape_tag`](BlocksLayout).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[non_exhaustive]
 pub enum BlockShapeTag {
     /// The block size for this dimension is exactly the value in `block_shape_hint` and
     /// must not be changed. Used for most user-specified block shapes to preserve the
@@ -139,7 +140,9 @@ impl BlocksLayout {
         ensure!(
             ndim == block_shape_tag.len(),
             InvalidArgument,
-            "ndim does not match block_shape_tag length"
+            "ndim does not match block_shape_tag length: expected {}, got {}",
+            ndim,
+            block_shape_tag.len()
         );
         let fixed_block_shape = block_shape_tag
             .iter()
@@ -157,6 +160,13 @@ impl BlocksLayout {
                 shape,
             )
         });
+        ensure!(
+            ndim == block_shape.len(),
+            InvalidArgument,
+            "ndim does not match block_shape length: expected {}, got {}",
+            ndim,
+            block_shape.len()
+        );
         // Scale block_shape up to block_size_hint
         if !fixed_block_shape {
             block_shape = Self::scale_block_shape(
@@ -169,10 +179,22 @@ impl BlocksLayout {
                 shape,
             );
         }
+        ensure!(
+            block_shape
+                .iter()
+                .zip(shape)
+                .all(|(&b, &s)| b > 0 && b as u64 <= s.max(1)),
+            InvalidArgument,
+            "block_shape {:?} is invalid for array shape {:?}",
+            block_shape,
+            shape
+        );
         // Update block_size_hint to block_shape.product() if it is not specified
-        let block_size_hint = block_size_hint.unwrap_or_else(|| {
-            block_shape.iter().map(|&b| b as u64).try_product().unwrap() * itemsize
-        });
+        let block_size_hint = block_size_hint
+            .unwrap_or_else(|| {
+                block_shape.iter().map(|&b| b as u64).try_product().unwrap() * itemsize
+            })
+            .max(1);
         // Compute preferred_read_size_hint if not specified, and if it cant be computed from preferred_read_shape
         if preferred_read_size_hint.is_none() && preferred_read_shape.is_none() {
             preferred_read_size_hint = Some(cache_sizes.l2 as u64);
@@ -199,15 +221,32 @@ impl BlocksLayout {
                 shape,
             ),
         };
-        // Update preferred_read_size_hint to preferred_read_shape.product() if it is not specified
-        let preferred_read_size_hint = preferred_read_size_hint.unwrap_or_else(|| {
+        ensure!(
+            ndim == preferred_read_shape.len(),
+            InvalidArgument,
+            "ndim does not match preferred_read_shape length"
+        );
+        ensure!(
             preferred_read_shape
                 .iter()
-                .map(|&b| b as u64)
-                .try_product()
-                .unwrap()
-                * itemsize
-        });
+                .zip(shape)
+                .all(|(&b, &s)| b > 0 && b as u64 <= s.max(1)),
+            InvalidArgument,
+            "preferred_read_shape {:?} is invalid for array shape {:?}",
+            preferred_read_shape,
+            shape
+        );
+        // Update preferred_read_size_hint to preferred_read_shape.product() if it is not specified
+        let preferred_read_size_hint = preferred_read_size_hint
+            .unwrap_or_else(|| {
+                preferred_read_shape
+                    .iter()
+                    .map(|&b| b as u64)
+                    .try_product()
+                    .unwrap()
+                    * itemsize
+            })
+            .max(1);
 
         Ok(BlocksLayout::new(
             block_shape,

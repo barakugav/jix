@@ -117,27 +117,19 @@ where
         self.element_type.dtype()
     }
 
-    /// Get the total number of items in this storage.
+    /// Get the number of blocks in this storage.
     #[inline(always)]
-    pub(crate) fn nitems(&self) -> u64 {
-        self.nitems
-    }
-
-    /// Get the length of a block in this storage.
-    ///
-    /// Note that the units are in items, not bytes.
-    #[inline(always)]
-    pub(crate) fn block_len(&self) -> BlockSize {
-        self.block_size
+    pub(crate) fn nblocks(&self) -> u64 {
+        self.block_offsets.as_ref().len().saturating_sub(1) as u64
     }
 
     /// Decompress one block into `buf`.
     ///
     /// # Arguments
     ///
-    /// - `block_idx` - zero-based block index in `0..(nitems / block_len)`.
+    /// - `block_idx` - zero-based block index in `0..(nitems / block_size)`.
     ///   **Panics** if out of range.
-    /// - `buf` - destination buffer. Must be exactly `block_len * dtype.itemsize()` bytes.
+    /// - `buf` - destination buffer. Must be exactly `block_size * dtype.itemsize()` bytes.
     /// - `context` - read context used for decoding.
     ///
     /// # Errors
@@ -153,7 +145,7 @@ where
     where
         ET: ElementType,
     {
-        let b_size_bytes = self.block_len() as usize * self.dtype().itemsize() as usize;
+        let b_size_bytes = self.block_size as usize * self.dtype().itemsize() as usize;
         ensure!(
             buf.len() == b_size_bytes,
             InvalidBufferSize,
@@ -162,8 +154,8 @@ where
         );
 
         let block_offsets = self.block_offsets.as_ref();
-        let begin = block_offsets[block_idx as usize] as usize;
         let end = block_offsets[block_idx as usize + 1] as usize;
+        let begin = block_offsets[block_idx as usize] as usize;
         let block_data = &self.block_data.as_ref()[begin..end];
 
         let decoder = context.decoder(&self.decoder_config);
@@ -568,7 +560,7 @@ mod tests {
         S: BlockTableStorage,
         ET: ElementType,
     {
-        let block_bytes = table.block_len() as usize * table.dtype().itemsize() as usize;
+        let block_bytes = table.block_size as usize * table.dtype().itemsize() as usize;
         let mut buf = vec![0u8; block_bytes];
         table.read_block(idx as u64, &mut buf, context).unwrap();
         buf
@@ -720,13 +712,13 @@ mod tests {
 
     fn make_storage<T: Dtyped>(
         items: &[T],
-        block_len: BlockSize,
+        block_size: BlockSize,
         encoder_params: &EncoderParams,
     ) -> BlockTable<Owned, Ty<T>> {
         BlockTable::build_from_data(
             unsafe { cast_slice::<T, u8>(items) },
             T::DTYPE,
-            block_len,
+            block_size,
             &encoder_params,
         )
         .unwrap()
@@ -738,7 +730,7 @@ mod tests {
         S: BlockTableStorage,
     {
         let mut context = ReadContext::default();
-        let block_bytes = storage.block_len() as usize * storage.dtype().itemsize() as usize;
+        let block_bytes = storage.block_size as usize * storage.dtype().itemsize() as usize;
         let mut buf =
             AlignedBytes::with_capacity_exact(T::DTYPE.alignment().as_usize(), block_bytes);
         unsafe { buf.set_len(block_bytes) };
@@ -752,8 +744,8 @@ mod tests {
     fn single_block_u8_round_trips() {
         let items: Vec<u8> = (0..8).collect();
         let s = make_storage(&items, 8, &EncoderParams::default());
-        assert_eq!(s.nitems(), 8);
-        assert_eq!(s.block_len(), 8);
+        assert_eq!(s.nitems, 8);
+        assert_eq!(s.block_size, 8);
         assert_eq!(s.dtype(), &u8::DTYPE);
         assert_eq!(read_block_items::<u8, _>(&s, 0), items);
     }
@@ -762,8 +754,8 @@ mod tests {
     fn two_blocks_i32_round_trips() {
         let items: Vec<i32> = (0..8).collect();
         let s = make_storage(&items, 4, &EncoderParams::default());
-        assert_eq!(s.nitems(), 8);
-        assert_eq!(s.block_len(), 4);
+        assert_eq!(s.nitems, 8);
+        assert_eq!(s.block_size, 4);
         assert_eq!(read_block_items::<i32, _>(&s, 0), items[..4]);
         assert_eq!(read_block_items::<i32, _>(&s, 1), items[4..]);
     }
@@ -772,8 +764,8 @@ mod tests {
     fn multiple_blocks_f32_round_trips() {
         let items: Vec<f32> = (0..12).map(|x| x as f32 * 0.5).collect();
         let s = make_storage(&items, 4, &EncoderParams::default());
-        assert_eq!(s.nitems(), 12);
-        assert_eq!(s.block_len(), 4);
+        assert_eq!(s.nitems, 12);
+        assert_eq!(s.block_size, 4);
         for b in 0..3 {
             assert_eq!(read_block_items::<f32, _>(&s, b), items[b * 4..(b + 1) * 4]);
         }

@@ -155,7 +155,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// the [`Dtyped::DTYPE`] implementation of a Rust primitive:
 ///
 /// ```rust
-/// use jix::dtype::{Dtype, Dtyped, DtypeScalarKind};
+/// use jix::dtype::{Dtype, DtypeScalarKind, Dtyped};
 ///
 /// let d = Dtype::of_scalar(DtypeScalarKind::F64);
 /// assert_eq!(d, f64::DTYPE);
@@ -350,7 +350,7 @@ impl Dtype {
     /// The created dtype will use the native endianness.
     ///
     /// ```rust
-    /// use jix::dtype::{Dtype, Dtyped, DtypeScalarKind};
+    /// use jix::dtype::{Dtype, DtypeScalarKind, Dtyped};
     ///
     /// let i32_dtype = Dtype::of_scalar(DtypeScalarKind::I32);
     /// assert_eq!(i32_dtype.scalar_kind(), Some(DtypeScalarKind::I32));
@@ -367,7 +367,10 @@ impl Dtype {
     /// assert_eq!(f64_dtype.shape(), &[]);
     ///
     /// let complex_f32_dtype = Dtype::of_scalar(DtypeScalarKind::ComplexF32);
-    /// assert_eq!(complex_f32_dtype.scalar_kind(), Some(DtypeScalarKind::ComplexF32));
+    /// assert_eq!(
+    ///     complex_f32_dtype.scalar_kind(),
+    ///     Some(DtypeScalarKind::ComplexF32)
+    /// );
     /// assert_eq!(complex_f32_dtype.itemsize(), 8);
     /// assert_eq!(complex_f32_dtype.alignment().as_usize(), 4);
     ///

@@ -28,8 +28,8 @@ use crate::{Array, ArrayStorage, ElementType};
 /// Erase and recover the static element type:
 ///
 /// ```
-/// use jix::Array;
 /// use jix::dtype::Dtyped;
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// // compact_ndarray infers Ty<f32> from the ndarray input type.

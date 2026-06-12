@@ -68,12 +68,13 @@
 //!
 //! ```no_run
 //! use std::path::Path;
+//!
 //! use jix::{Array, ArrayParams};
 //!
 //! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
 //! // src is Array<Compact<TypeDyn, DimDyn>> - ops not yet available
 //!
-//! let typed = src.to_typed::<f32>()?;  // validates dtype at runtime
+//! let typed = src.to_typed::<f32>()?; // validates dtype at runtime
 //! let result = typed.exp().cast::<f64>().compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```

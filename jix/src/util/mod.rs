@@ -8,13 +8,13 @@ pub(crate) mod arrayvec;
 pub(crate) mod cpu_cache;
 
 pub(crate) mod iter;
+use std::mem::MaybeUninit;
+
 use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use iter::NdIter;
 
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray};
 use crate::{Dimension, IntoDimension};
-
-use std::mem::MaybeUninit;
 
 pub(crate) trait Idx:
     Clone

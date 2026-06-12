@@ -165,8 +165,8 @@ pub(crate) mod _traits {
 ///
 /// # Examples
 /// ```
-/// use jix::Array;
 /// use jix::dtype::Dtyped;
+/// use jix::Array;
 /// use ndarray::array;
 ///
 /// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
@@ -434,9 +434,10 @@ mod tests {
     fn cast_f16_to_f16() {
         // must work even without the "half" feature, since it's a no-op cast
 
+        use ndarray::array;
+
         use crate::util::arr_params;
         use crate::Array;
-        use ndarray::array;
 
         let a = Array::compact_ndarray_with(&array![f16::from_bits(17)], arr_params(&[1])).unwrap();
         let _ = a.cast::<f16>();

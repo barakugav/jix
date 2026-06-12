@@ -1870,12 +1870,11 @@ pub(crate) mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
 
+    use proptest::prelude::*;
+
     use crate::array::Array;
     use crate::storage::Compact;
-    use crate::DimDyn;
-    use crate::Ty;
-
-    use proptest::prelude::*;
+    use crate::{DimDyn, Ty};
 
     pub(crate) fn axis_strategy(ndim: usize) -> impl proptest::strategy::Strategy<Value = usize> {
         0..ndim
@@ -2411,8 +2410,9 @@ pub(crate) mod tests {
 
         #[cfg(test)]
         mod tests {
-            use super::*;
             use ndarray::{array, Array};
+
+            use super::*;
 
             #[test]
             fn single_axis_0() {

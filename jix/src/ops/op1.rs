@@ -256,10 +256,9 @@ macro_rules! define_op1 {
 pub(crate) use define_op1;
 
 pub(crate) mod _traits {
+    use crate::scalar::traits_util::define_op1_trait;
     #[allow(unused_imports)]
     use crate::scalar::{f16, Complex};
-
-    use crate::scalar::traits_util::define_op1_trait;
 
     define_op1_trait!(
         Abs,

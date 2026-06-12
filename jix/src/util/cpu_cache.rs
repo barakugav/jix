@@ -86,9 +86,10 @@ fn detect() -> CacheSizes {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use super::CacheSizes;
     use std::fs;
     use std::path::Path;
+
+    use super::CacheSizes;
 
     /// Fill in whatever levels we find from sysfs; leave others at their
     /// default. The canonical layout is:
@@ -176,11 +177,10 @@ mod linux {
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use std::ffi::{c_void, CStr};
+    use std::{mem, ptr};
+
     use super::CacheSizes;
-    use std::ffi::c_void;
-    use std::ffi::CStr;
-    use std::mem;
-    use std::ptr;
 
     pub(super) fn fill(out: &mut CacheSizes) {
         // Prefer the performance cluster on Apple Silicon; fall back to the

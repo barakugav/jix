@@ -208,8 +208,8 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// # Examples
     ///
     /// ```
-    /// use jix::Array;
     /// use jix::dtype::Dtyped;
+    /// use jix::Array;
     /// use ndarray::array;
     ///
     /// // Compress a 2-D f32 ndarray.
@@ -267,12 +267,12 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// // Read tiles of 128*128 by decompressing 2*2 blocks at a time.
     /// let context = array.read_ctx();
     /// for tile_row in 0..7 {
-    ///   for tile_col in 0..7 {
-    ///     let row_range = (tile_row * 64)..((tile_row + 2) * 64);
-    ///     let col_range = (tile_col * 64)..((tile_col + 2) * 64);
-    ///     let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
-    ///     println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
-    ///   }
+    ///     for tile_col in 0..7 {
+    ///         let row_range = (tile_row * 64)..((tile_row + 2) * 64);
+    ///         let col_range = (tile_col * 64)..((tile_col + 2) * 64);
+    ///         let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
+    ///         println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
+    ///     }
     /// }
     /// # Ok::<(), jix::Error>(())
     /// ```
@@ -367,7 +367,10 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_fn((3, 3), |(x, y)| x * 10 + y)?;
-    /// assert_eq!(a.to_ndarray()?, array![[0, 1, 2], [10, 11, 12], [20, 21, 22]]);
+    /// assert_eq!(
+    ///     a.to_ndarray()?,
+    ///     array![[0, 1, 2], [10, 11, 12], [20, 21, 22]]
+    /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
     ///
@@ -611,7 +614,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let lazy = (a + b) * 2.0f32 - 1.0f32;
     /// assert_eq!(lazy.shape(), &[2, 3]);
     ///
-    /// let nd = lazy.to_ndarray()?;            // executes the pipeline
+    /// let nd = lazy.to_ndarray()?; // executes the pipeline
     /// assert_eq!(nd[[0, 0]], (1.0 + 1.0) * 2.0 - 1.0);
     /// assert_eq!(nd[[1, 2]], (6.0 + 1.0) * 2.0 - 1.0);
     /// # Ok::<(), jix::Error>(())
@@ -718,7 +721,7 @@ impl<S: ArrayStorage> Array<S> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
-    /// let scaled = a * 10i32;                         // Array<Mul<Compact, Scalar<i32>>>
+    /// let scaled = a * 10i32; // Array<Mul<Compact, Scalar<i32>>>
     ///
     /// let ctx = scaled.read_ctx();
     /// assert_eq!(
@@ -780,7 +783,8 @@ impl<S: ArrayStorage> Array<S> {
     /// let context = a.read_ctx();
     /// let mut buf = vec![0u32; 4];
     /// {
-    ///     let buf = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 4) };
+    ///     let buf =
+    ///         unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 4) };
     ///     a.to_ndarray_buf(&[1..3, 1..3], buf, &context)?;
     /// }
     /// assert_eq!(buf, vec![5, 6, 8, 9]);
@@ -935,8 +939,8 @@ impl<S: ArrayStorage> Array<S> {
     /// let b = a.compact_with(b_params, &a.read_ctx())?;
     ///
     /// assert_eq!(
-    ///     b.to_ndarray_sub(&[0..2, 0..1],
-    ///     &b.read_ctx())?, array![[1.5], [3.14]]
+    ///     b.to_ndarray_sub(&[0..2, 0..1], &b.read_ctx())?,
+    ///     array![[1.5], [3.14]]
     /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
@@ -1467,7 +1471,7 @@ where
     /// let a = Array::compact_ndarray(&ndarray::ArrayD::<i32>::zeros(vec![2, 3, 4]))?;
     ///
     /// // Assert the array is 3-D; fail gracefully if not.
-    /// let a3d = a.to_dim::<Dim<3>>()?;  // Array<ToDim<Compact<DimDyn>, Dim<3>>>
+    /// let a3d = a.to_dim::<Dim<3>>()?; // Array<ToDim<Compact<DimDyn>, Dim<3>>>
     ///
     /// // Now insert_axis knows the result is 4-D at compile time.
     /// let a4d = a3d.insert_axis(0); // Array<InsertAxis<..., Dim<4>>>
@@ -1551,7 +1555,7 @@ mod tests {
     use crate::storage::block::{BlockSize, BlockTable};
     use crate::storage::{BlockShapeTag, BlocksLayout};
     use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
-    use crate::{Dimension, IntoDimension, Ty};
+    use crate::{Dimension, ErrorKind, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper
@@ -1789,12 +1793,12 @@ mod tests {
     }
 
     #[test]
-    fn compact_ndarray_block_larger_than_shape_is_clamped() {
-        // block_shape [10] > array size [4]; should clamp to [4]
+    fn compact_ndarray_block_larger_than_shape_is_rejected() {
+        // block_shape [10] > array shape [4]; must be rejected per the
+        // `b <= s.max(1)` invariant enforced by `BlocksLayout::tune`.
         let src = array![0u8, 1, 2, 3];
-        let a = Array::compact_ndarray_with(&src, arr_params(&[10])).unwrap();
-        assert_eq!(a.shape(), &[4]);
-        assert_eq!(a.to_ndarray().unwrap(), src);
+        let err = Array::compact_ndarray_with(&src, arr_params(&[10])).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidArgument);
     }
 
     #[test]
