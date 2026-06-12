@@ -52,7 +52,7 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// // Passing a dynamically-dimensioned ndarray produces Array<Compact<DimDyn>>.
 /// // Arrays loaded from files via Array::read_from_file also carry DimDyn.
-/// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(vec![2, 3]))?;
+/// let a = Array::compact_ndarray(&ndarray::ArrayD::<i32>::zeros(vec![2, 3]))?;
 /// // a: Array<Compact<DimDyn>>
 ///
 /// // Asserting "I know this is 2-D" converts to static Dim<2>.

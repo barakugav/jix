@@ -22,7 +22,7 @@ use crate::{Array, ArrayStorage};
 ///
 /// # When are params applied?
 ///
-/// - When a new array is constructed, such as via [`Array::compact_array`]: the data is split into
+/// - When a new array is constructed, such as via [`Array::compact_ndarray`]: the data is split into
 ///   blocks according to the block layout params, and each block is compressed using the encoder
 ///   params before being written to storage.
 /// - When an array is accessed for read, such as via [`Array::to_ndarray`]: each compressed block
@@ -53,7 +53,7 @@ use crate::{Array, ArrayStorage};
 /// let data = ndarray::Array2::<f32>::zeros((1024, 1024));
 /// let mut params = ArrayParams::new();
 /// params.block_shape(&[64, 64]);
-/// let za = Array::compact_array_with(&data, params)?;
+/// let za = Array::compact_ndarray_with(&data, params)?;
 ///
 /// // After a shape-changing op, pin the block shape explicitly.
 /// let mut out_params = ArrayParams::new();
@@ -198,7 +198,7 @@ impl ArrayParams {
     /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
-    /// let source = Array::compact_array(&array![1i32, 2, 3, 4, 5, 6, 7, 8])?;
+    /// let source = Array::compact_ndarray(&array![1i32, 2, 3, 4, 5, 6, 7, 8])?;
     ///
     /// // Override just the block shape; inherit codec params from `source`.
     /// let mut params = ArrayParams::new();
@@ -264,7 +264,7 @@ mod tests {
         let data = ndarray::Array2::<f32>::zeros((1024, 1024));
         let mut params = ArrayParams::new();
         params.block_shape(&[64, 64]);
-        let za = Array::compact_array_with(&data, params).unwrap();
+        let za = Array::compact_ndarray_with(&data, params).unwrap();
 
         // After a shape-changing op, pin the block shape explicitly.
         let mut out_params = ArrayParams::new();

@@ -21,14 +21,14 @@ define_op2!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b1111])?;
-    /// let b = Array::compact_array(&array![0b1010u8, 0b0101, 0b0000])?;
+    /// let a = Array::compact_ndarray(&array![0b1100u8, 0b1010, 0b1111])?;
+    /// let b = Array::compact_ndarray(&array![0b1010u8, 0b0101, 0b0000])?;
     /// let result = (a & b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b1000, 0b0000, 0b0000]);
     ///
     /// // Mask out the lower nibble.
-    /// let c = Array::compact_array(&array![0xABu8, 0xCDu8])?;
-    /// let d = Array::compact_array(&array![0xF0u8, 0xF0u8])?;
+    /// let c = Array::compact_ndarray(&array![0xABu8, 0xCDu8])?;
+    /// let d = Array::compact_ndarray(&array![0xF0u8, 0xF0u8])?;
     /// let result = (c & d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xA0, 0xC0]);
     /// # Ok::<(), jix::Error>(())
@@ -54,14 +54,14 @@ define_op2!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b0000])?;
-    /// let b = Array::compact_array(&array![0b1010u8, 0b0101, 0b1111])?;
+    /// let a = Array::compact_ndarray(&array![0b1100u8, 0b1010, 0b0000])?;
+    /// let b = Array::compact_ndarray(&array![0b1010u8, 0b0101, 0b1111])?;
     /// let result = (a | b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b1110, 0b1111, 0b1111]);
     ///
     /// // Set a specific bit pattern.
-    /// let c = Array::compact_array(&array![0x0Fu8, 0x00u8])?;
-    /// let d = Array::compact_array(&array![0xF0u8, 0xF0u8])?;
+    /// let c = Array::compact_ndarray(&array![0x0Fu8, 0x00u8])?;
+    /// let d = Array::compact_ndarray(&array![0xF0u8, 0xF0u8])?;
     /// let result = (c | d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xFF, 0xF0]);
     /// # Ok::<(), jix::Error>(())
@@ -87,14 +87,14 @@ define_op2!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b1100u8, 0b1010, 0b1111])?;
-    /// let b = Array::compact_array(&array![0b1010u8, 0b1010, 0b1111])?;
+    /// let a = Array::compact_ndarray(&array![0b1100u8, 0b1010, 0b1111])?;
+    /// let b = Array::compact_ndarray(&array![0b1010u8, 0b1010, 0b1111])?;
     /// let result = (a ^ b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b0110, 0b0000, 0b0000]);
     ///
     /// // Toggle bits using a mask.
-    /// let c = Array::compact_array(&array![0xFFu8, 0x0Fu8])?;
-    /// let d = Array::compact_array(&array![0x0Fu8, 0x0Fu8])?;
+    /// let c = Array::compact_ndarray(&array![0xFFu8, 0x0Fu8])?;
+    /// let d = Array::compact_ndarray(&array![0x0Fu8, 0x0Fu8])?;
     /// let result = (c ^ d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0xF0, 0x00]);
     /// # Ok::<(), jix::Error>(())
@@ -120,12 +120,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b00001111u8, 0b11110000u8, 0u8])?;
+    /// let a = Array::compact_ndarray(&array![0b00001111u8, 0b11110000u8, 0u8])?;
     /// let result = (!a).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b11110000, 0b00001111, 0xFF]);
     ///
     /// // For bool arrays, bitwise NOT is equivalent to logical NOT.
-    /// let b = Array::compact_array(&array![true, false])?;
+    /// let b = Array::compact_ndarray(&array![true, false])?;
     /// let result = (!b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[false, true]);
     /// # Ok::<(), jix::Error>(())
@@ -153,14 +153,14 @@ define_op2!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b00000001u8, 0b00000010u8, 0b00000100u8])?;
-    /// let b = Array::compact_array(&array![1u8, 2, 3])?;
+    /// let a = Array::compact_ndarray(&array![0b00000001u8, 0b00000010u8, 0b00000100u8])?;
+    /// let b = Array::compact_ndarray(&array![1u8, 2, 3])?;
     /// let result = a.bitwise_shift_left(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b00000010, 0b00001000, 0b00100000]);
     ///
     /// // Signed arithmetic left shift: sign bit is lost if shifted out.
-    /// let c = Array::compact_array(&array![1i8, -1i8])?;
-    /// let d = Array::compact_array(&array![3i8, 1i8])?;
+    /// let c = Array::compact_ndarray(&array![1i8, -1i8])?;
+    /// let d = Array::compact_ndarray(&array![3i8, 1i8])?;
     /// let result = c.bitwise_shift_left(d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[8, -2]);
     /// # Ok::<(), jix::Error>(())
@@ -189,14 +189,14 @@ define_op2!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b10000000u8, 0b00100000u8, 0b00001000u8])?;
-    /// let b = Array::compact_array(&array![1u8, 2, 3])?;
+    /// let a = Array::compact_ndarray(&array![0b10000000u8, 0b00100000u8, 0b00001000u8])?;
+    /// let b = Array::compact_ndarray(&array![1u8, 2, 3])?;
     /// let result = a.bitwise_shift_right(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b01000000, 0b00001000, 0b00000001]);
     ///
     /// // Signed arithmetic right shift: vacated bits are filled with the sign bit.
-    /// let c = Array::compact_array(&array![-8i8, -1i8])?;
-    /// let d = Array::compact_array(&array![2i8, 1i8])?;
+    /// let c = Array::compact_ndarray(&array![-8i8, -1i8])?;
+    /// let d = Array::compact_ndarray(&array![2i8, 1i8])?;
     /// let result = c.bitwise_shift_right(d).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-2, -1]);
     /// # Ok::<(), jix::Error>(())
@@ -223,14 +223,14 @@ define_op2_rhs_fixed!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b10000001u8, 0b00000001u8, 0b11110000u8])?;
-    /// let b = Array::compact_array(&array![1u32, 3, 4])?;
+    /// let a = Array::compact_ndarray(&array![0b10000001u8, 0b00000001u8, 0b11110000u8])?;
+    /// let b = Array::compact_ndarray(&array![1u32, 3, 4])?;
     /// let result = a.bitwise_rotate_left(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b00000011, 0b00001000, 0b00001111]);
     ///
     /// // Rotating by 0 is a no-op.
-    /// let c = Array::compact_array(&array![0xABu8])?;
-    /// let d = Array::compact_array(&array![0u32])?;
+    /// let c = Array::compact_ndarray(&array![0xABu8])?;
+    /// let d = Array::compact_ndarray(&array![0u32])?;
     /// let result = c.bitwise_rotate_left(d).to_ndarray()?;
     /// assert_eq!(result[[0]], 0xABu8);
     /// # Ok::<(), jix::Error>(())
@@ -261,14 +261,14 @@ define_op2_rhs_fixed!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b10000001u8, 0b00001000u8, 0b00001111u8])?;
-    /// let b = Array::compact_array(&array![1u32, 3, 4])?;
+    /// let a = Array::compact_ndarray(&array![0b10000001u8, 0b00001000u8, 0b00001111u8])?;
+    /// let b = Array::compact_ndarray(&array![1u32, 3, 4])?;
     /// let result = a.bitwise_rotate_right(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b11000000, 0b00000001, 0b11110000]);
     ///
     /// // Rotating by 0 is a no-op.
-    /// let c = Array::compact_array(&array![0xABu8])?;
-    /// let d = Array::compact_array(&array![0u32])?;
+    /// let c = Array::compact_ndarray(&array![0xABu8])?;
+    /// let d = Array::compact_ndarray(&array![0u32])?;
     /// let result = c.bitwise_rotate_right(d).to_ndarray()?;
     /// assert_eq!(result[[0]], 0xABu8);
     /// # Ok::<(), jix::Error>(())
@@ -298,12 +298,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b00001111u8, 0b11001100u8, 0b11111111u8])?;
+    /// let a = Array::compact_ndarray(&array![0b00001111u8, 0b11001100u8, 0b11111111u8])?;
     /// let result = a.count_ones().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 4, 8]);
     ///
     /// // Zero has no set bits.
-    /// let b = Array::compact_array(&array![0u8, 0u8])?;
+    /// let b = Array::compact_ndarray(&array![0u8, 0u8])?;
     /// let result = b.count_ones().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0, 0]);
     /// # Ok::<(), jix::Error>(())
@@ -331,12 +331,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b11110000u8, 0b00001111u8, 0b11111111u8])?;
+    /// let a = Array::compact_ndarray(&array![0b11110000u8, 0b00001111u8, 0b11111111u8])?;
     /// let result = a.count_zeros().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 4, 0]);
     ///
     /// // Zero has all bits unset: count_zeros == bit width.
-    /// let b = Array::compact_array(&array![0u8])?;
+    /// let b = Array::compact_ndarray(&array![0u8])?;
     /// let result = b.count_zeros().to_ndarray()?;
     /// assert_eq!(result[[0]], 8); // u8 has 8 bits
     /// # Ok::<(), jix::Error>(())
@@ -365,12 +365,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0x00010000u32, 0x80000000u32, 0x00000001u32])?;
+    /// let a = Array::compact_ndarray(&array![0x00010000u32, 0x80000000u32, 0x00000001u32])?;
     /// let result = a.leading_zeros().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[15, 0, 31]);
     ///
     /// // Zero returns the bit width of the type (32 for u32).
-    /// let b = Array::compact_array(&array![0u32])?;
+    /// let b = Array::compact_ndarray(&array![0u32])?;
     /// let result = b.leading_zeros().to_ndarray()?;
     /// assert_eq!(result[[0]], 32);
     /// # Ok::<(), jix::Error>(())
@@ -399,12 +399,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0x00010000u32, 0x80000000u32, 0x00000001u32])?;
+    /// let a = Array::compact_ndarray(&array![0x00010000u32, 0x80000000u32, 0x00000001u32])?;
     /// let result = a.trailing_zeros().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[16, 31, 0]);
     ///
     /// // Zero returns the bit width of the type (32 for u32).
-    /// let b = Array::compact_array(&array![0u32])?;
+    /// let b = Array::compact_ndarray(&array![0u32])?;
     /// let result = b.trailing_zeros().to_ndarray()?;
     /// assert_eq!(result[[0]], 32);
     /// # Ok::<(), jix::Error>(())
@@ -431,12 +431,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0x00FF0000u32, 0x0000FF00u32])?;
+    /// let a = Array::compact_ndarray(&array![0x00FF0000u32, 0x0000FF00u32])?;
     /// let result = a.swap_bytes().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0x0000FF00, 0x00FF0000]);
     ///
     /// // Classic endian-swap example.
-    /// let b = Array::compact_array(&array![0x12345678u32])?;
+    /// let b = Array::compact_ndarray(&array![0x12345678u32])?;
     /// let result = b.swap_bytes().to_ndarray()?;
     /// assert_eq!(result[[0]], 0x78563412u32);
     /// # Ok::<(), jix::Error>(())
@@ -461,12 +461,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0b00000001u8, 0b10000000u8, 0b10101010u8])?;
+    /// let a = Array::compact_ndarray(&array![0b00000001u8, 0b10000000u8, 0b10101010u8])?;
     /// let result = a.reverse_bits().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0b10000000, 0b00000001, 0b01010101]);
     ///
     /// // Reversing bits of 0 gives 0.
-    /// let b = Array::compact_array(&array![0u8])?;
+    /// let b = Array::compact_ndarray(&array![0u8])?;
     /// let result = b.reverse_bits().to_ndarray()?;
     /// assert_eq!(result[[0]], 0u8);
     /// # Ok::<(), jix::Error>(())

@@ -522,7 +522,7 @@ where
         let block_shape = block_shape;
         let mut params = ArrayParams::default();
         params.block_shape(&block_shape);
-        let compact = crate::Array::compact_array_with(&arr, params).unwrap();
+        let compact = crate::Array::compact_ndarray_with(&arr, params).unwrap();
         (arr, compact)
     })
 }

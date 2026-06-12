@@ -91,7 +91,7 @@ pub enum Codec {
 /// let mut params = ArrayParams::new();
 /// // EncoderParams::default() is equivalent to EncoderParams::new()
 /// params.encoder_params(EncoderParams::new());
-/// let za = Array::compact_array_with(&data, params)?;
+/// let za = Array::compact_ndarray_with(&data, params)?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
@@ -108,7 +108,7 @@ pub enum Codec {
 /// enc.filters(&[Filter::ByteShuffle])?;
 /// let mut params = ArrayParams::new();
 /// params.encoder_params(enc);
-/// let za = Array::compact_array_with(&data, params)?;
+/// let za = Array::compact_ndarray_with(&data, params)?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[derive(Clone, Debug)]
@@ -426,7 +426,7 @@ impl<'a> Decoder<'a> {
 /// use jix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
-/// let za = Array::compact_array(&array![1i32, 2, 3, 4])?;
+/// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 ///
 /// // read_ctx() inherits the decoder config from the array.
 /// let ctx = za.read_ctx();

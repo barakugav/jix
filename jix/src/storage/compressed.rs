@@ -43,7 +43,7 @@ use crate::Dimension;
 /// [`Array::to_typed`](crate::Array::to_typed) to assert a concrete element type and go from
 /// `TypeDyn` to `Ty<T>`.
 ///
-/// Created by [`Array::compact_array`](crate::Array::compact_array), [`Array::copy`](crate::Array::copy)
+/// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray), [`Array::copy`](crate::Array::copy)
 /// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
 pub struct Compact<ET, D>(
     pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, ET, D>,

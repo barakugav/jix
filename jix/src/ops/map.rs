@@ -40,12 +40,12 @@ where
 /// use jix::Array;
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![1i32, 2, 3, 4])?;
+/// let a = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let result = a.map(|x: i32| x * x).to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1, 4, 9, 16]);
 ///
 /// // Change element type in the mapping function
-/// let b = Array::compact_array(&array![0.0f32, 1.5, -2.0])?;
+/// let b = Array::compact_ndarray(&array![0.0f32, 1.5, -2.0])?;
 /// let result = b.map(|x: f32| x > 0.0).to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, false]);
 /// # Ok::<(), jix::Error>(())
@@ -97,8 +97,8 @@ where
 /// use jix::Array;
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![1i32, 2, 3, 4])?;
-/// let b = Array::compact_array(&array![10i32, 20, 30, 40])?;
+/// let a = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
+/// let b = Array::compact_ndarray(&array![10i32, 20, 30, 40])?;
 ///
 /// let result = jix::ops::map2(a, b, |x, y| x + y).to_ndarray()?;
 /// assert_eq!(result, array![11, 22, 33, 44]);
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn map_same_type_1d() {
         let a = array![1i32, 2, 3, 4];
-        let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: i32| x * 2).to_ndarray().unwrap();
         assert_eq!(actual, a.mapv(|x| x * 2));
     }
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn map_same_type_multi_block() {
         let a = array![1i32, 2, 3, 4, 5, 6];
-        let za = Array::compact_array_with(&a, arr_params(&[2])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[2])).unwrap();
         let actual = za.map(|x: i32| x + 10).to_ndarray().unwrap();
         assert_eq!(actual, a.mapv(|x| x + 10));
     }
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn map_type_change_i32_to_f64() {
         let a = array![1i32, 2, 3, 4];
-        let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: i32| x as f64 * 0.5).to_ndarray().unwrap();
         let expected = a.mapv(|x| x as f64 * 0.5);
         assert_eq!(actual, expected);
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn map_type_change_f32_to_bool() {
         let a = array![0.0f32, 1.0, -1.0, 0.0];
-        let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[4])).unwrap();
         let actual = za.map(|x: f32| x != 0.0).to_ndarray().unwrap();
         let expected = a.mapv(|x| x != 0.0);
         assert_eq!(actual, expected);
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn map_2d_multi_block() {
         let a = ndarray::Array::from_shape_fn((3, 4), |idx| (idx.0 * 4 + idx.1) as i32);
-        let za = Array::compact_array_with(&a, arr_params(&[2, 2])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[2, 2])).unwrap();
         let actual = za.map(|x: i32| x * x).to_ndarray().unwrap();
         let expected = a.mapv(|x| x * x);
         assert_eq!(actual, expected);
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn map_output_dtype_is_r() {
         let a = array![1i32, 2, 3];
-        let za = Array::compact_array_with(&a, arr_params(&[3])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[3])).unwrap();
         let mapped = za.map(|x: i32| x as f64);
         use crate::dtype::Dtyped;
         assert_eq!(mapped.dtype(), &f64::DTYPE);
@@ -221,7 +221,7 @@ mod tests {
         }
 
         let a = array![1i32, 2, 3, 4];
-        let za = Array::compact_array_with(&a, arr_params(&[4])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[4])).unwrap();
         let actual = za
             .map(|v: i32| Point { x: v, y: v * 10 })
             .to_ndarray()
@@ -253,7 +253,7 @@ mod tests {
         }
 
         let a = array![1i32, 2, 3, 4];
-        let za = Array::compact_array_with(&a, arr_params(&[2])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[2])).unwrap();
         let actual = za
             .map(|v: i32| Small { x: v, y: v + 1 })
             .map(|s: Small| Big {

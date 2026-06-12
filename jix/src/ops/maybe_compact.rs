@@ -124,7 +124,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<Compact<Ty<T>, DimDyn>> {
         let src = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
-        Array::compact_array_with(&src, arr_params(block_shape)).unwrap()
+        Array::compact_ndarray_with(&src, arr_params(block_shape)).unwrap()
     }
 
     fn to_bytes<ET: ElementType, D: Dimension>(a: &Array<Compact<ET, D>>) -> Vec<u8> {

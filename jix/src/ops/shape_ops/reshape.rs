@@ -49,7 +49,7 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 /// use jix::{Array, Dim};
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
+/// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
 ///
 /// // [u64; 1] -> output D = Dim<1>: compiler knows the result is 1-D
 /// assert_eq!(a.as_ref().reshape_view([6u64]).shape(), &[6]);
@@ -437,7 +437,7 @@ mod tests {
         block_size: usize,
     ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ndarray::Array::from_shape_vec(vec![vals.len()], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
     /// Create a 2-D Array<Compact>.
@@ -448,7 +448,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ndarray::Array::from_shape_vec(vec![rows, cols], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(block_shape)).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(block_shape)).unwrap()
     }
 
     /// Create a 3-D Array<Compact>.
@@ -460,7 +460,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ndarray::Array::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(block_shape)).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(block_shape)).unwrap()
     }
 
     fn u8s(n: usize) -> Vec<u8> {

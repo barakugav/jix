@@ -46,7 +46,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// use ndarray::array;
 ///
 /// let nd_compact = array![[1.0f32, 2.0], [3.0, 4.0]];
-/// let compact = Array::compact_array(&nd_compact)?;
+/// let compact = Array::compact_ndarray(&nd_compact)?;
 ///
 /// let nd_plain = array![[10.0f32, 20.0], [30.0, 40.0]];
 /// let plain = Array::plain_ndarray(nd_plain)?;

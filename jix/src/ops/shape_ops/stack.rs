@@ -41,14 +41,14 @@ where
 /// use ndarray::array;
 ///
 /// // Stack two 1-D arrays along a new leading axis -> shape [2, N]
-/// let a = Array::compact_array(&array![1i32, 2, 3])?;
-/// let b = Array::compact_array(&array![4i32, 5, 6])?;
+/// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
+/// let b = Array::compact_ndarray(&array![4i32, 5, 6])?;
 /// let c = jix::ops::stack((a, b), 0);
 /// assert_eq!(c.shape(), &[2, 3]);
 ///
 /// // Stack along axis 1 -> shape [N, 2]
-/// let a = Array::compact_array(&array![1i32, 2, 3])?;
-/// let b = Array::compact_array(&array![4i32, 5, 6])?;
+/// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
+/// let b = Array::compact_ndarray(&array![4i32, 5, 6])?;
 /// let c = jix::ops::stack((a, b), 1);
 /// assert_eq!(c.shape(), &[3, 2]);
 /// # Ok::<(), jix::Error>(())
@@ -232,8 +232,8 @@ mod tests {
     fn test_i32_1d_axis0() {
         let a = array![1i32, 2, 3, 4];
         let b = array![5i32, 6, 7, 8];
-        let za = Array::compact_array(&a).unwrap();
-        let zb = Array::compact_array(&b).unwrap();
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
         let actual = stack(vec![za, zb], 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
@@ -244,8 +244,8 @@ mod tests {
     fn test_i32_1d_axis1() {
         let a = array![1i32, 2, 3];
         let b = array![4i32, 5, 6];
-        let za = Array::compact_array(&a).unwrap();
-        let zb = Array::compact_array(&b).unwrap();
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
         let actual = stack([za, zb], 1).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
@@ -256,8 +256,8 @@ mod tests {
     fn test_i32_2d_axis0() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
         let b = array![[7i32, 8, 9], [10, 11, 12]];
-        let za = Array::compact_array(&a).unwrap();
-        let zb = Array::compact_array(&b).unwrap();
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
         let actual = stack((za, zb.as_ref()), 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
@@ -268,8 +268,8 @@ mod tests {
     fn test_i32_2d_axis1() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
         let b = array![[7i32, 8, 9], [10, 11, 12]];
-        let za = Array::compact_array(&a).unwrap();
-        let zb = Array::compact_array(&b).unwrap();
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
         let actual = stack(vec![za.as_ref(), zb.as_ref()], 1)
             .to_ndarray()
             .unwrap();
@@ -283,9 +283,9 @@ mod tests {
         let a = array![1i32, 2, 3];
         let b = array![4i32, 5, 6];
         let c = array![7i32, 8, 9];
-        let za = Array::compact_array(&a).unwrap();
-        let zb = Array::compact_array(&b).unwrap();
-        let zc = Array::compact_array(&c).unwrap();
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
+        let zc = Array::compact_ndarray(&c).unwrap();
         let actual = stack([za, zb, zc], 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected);
@@ -296,8 +296,8 @@ mod tests {
     fn test_f32_1d_axis0() {
         let a = array![1.0f32, 2.0, 3.0, 4.0];
         let b = array![5.0f32, 6.0, 7.0, 8.0];
-        let za = Array::compact_array(&a).unwrap();
-        let zb = Array::compact_array(&b).unwrap();
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
         let actual = stack([za, zb], 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
@@ -308,8 +308,8 @@ mod tests {
     fn test_f32_2d_axis1() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
         let b = array![[7.0f32, 8.0], [9.0, 10.0], [11.0, 12.0]];
-        let za = Array::compact_array(&a).unwrap();
-        let zb = Array::compact_array(&b).unwrap();
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
         let actual = stack([za.as_ref(), zb.as_ref()], 1).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
@@ -321,9 +321,9 @@ mod tests {
         let a = array![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let b = array![7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0];
         let c = array![13.0f32, 14.0, 15.0, 16.0, 17.0, 18.0];
-        let za = Array::compact_array_with(&a, arr_params(&[2])).unwrap();
-        let zb = Array::compact_array_with(&b, arr_params(&[2])).unwrap();
-        let zc = Array::compact_array_with(&c, arr_params(&[2])).unwrap();
+        let za = Array::compact_ndarray_with(&a, arr_params(&[2])).unwrap();
+        let zb = Array::compact_ndarray_with(&b, arr_params(&[2])).unwrap();
+        let zc = Array::compact_ndarray_with(&c, arr_params(&[2])).unwrap();
         let actual = stack((za, zb, zc.as_ref()), 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected);
@@ -332,18 +332,18 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_shape_mismatch_panics() {
-        let a = Array::compact_array(&array![1i32, 2]).unwrap();
-        let b = Array::compact_array(&array![1i32, 2, 3]).unwrap();
+        let a = Array::compact_ndarray(&array![1i32, 2]).unwrap();
+        let b = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
         let _ = stack(vec![a, b], 0);
     }
 
     #[test]
     #[should_panic]
     fn test_dtype_mismatch_panics() {
-        let a = Array::compact_array(&array![1i32, 2])
+        let a = Array::compact_ndarray(&array![1i32, 2])
             .unwrap()
             .into_type_dyn();
-        let b = Array::compact_array(&array![1.0f32, 2.0])
+        let b = Array::compact_ndarray(&array![1.0f32, 2.0])
             .unwrap()
             .into_type_dyn();
         let _ = stack((a, b), 0);

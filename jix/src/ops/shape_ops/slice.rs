@@ -46,7 +46,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// use jix::Array;
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
+/// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
 ///
 /// // First two rows, last two columns
 /// let result = a.slice((0..2, 1..)).to_ndarray()?;
@@ -55,7 +55,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// assert_eq!(result[[1, 1]], 6);
 ///
 /// // Negative index: last row only
-/// let b = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
+/// let b = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
 /// let result = b.slice(((-1i64..), ..)).to_ndarray()?;
 /// assert_eq!(result.shape(), &[1, 3]);
 /// assert_eq!(result[[0, 1]], 8);
@@ -443,12 +443,12 @@ mod tests {
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
     fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, Dim<3>>> {
         let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
     fn arange(n: usize) -> Vec<i32> {

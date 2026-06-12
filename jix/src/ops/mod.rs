@@ -55,8 +55,8 @@
 //! use jix::Array;
 //! use ndarray::array;
 //!
-//! // compact_array returns Array<Compact<Ty<f32>, ...>>: automatically typed.
-//! let a = Array::compact_array(&array![1.0f32, 2.0, 3.0])?;
+//! // compact_ndarray returns Array<Compact<Ty<f32>, ...>>: automatically typed.
+//! let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
 //! let b = a.exp();        // fine: f32: Exp
 //! let c = b.cast::<i32>(); // fine: f32: Cast<i32>
 //! # Ok::<(), jix::Error>(())

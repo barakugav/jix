@@ -58,7 +58,7 @@ impl ElementType for TypeDyn {
 ///
 /// `Ty<T>` enables all element-wise operations: arithmetic, comparisons, reductions, and
 /// type casts. Arrays constructed from typed sources (e.g.
-/// [`Array::compact_array`](crate::Array::compact_array)) automatically carry `Ty<T>`.
+/// [`Array::compact_ndarray`](crate::Array::compact_ndarray)) automatically carry `Ty<T>`.
 #[derive(Clone)]
 pub struct Ty<T>(Dtype, PhantomData<T>);
 impl<T> Ty<T> {

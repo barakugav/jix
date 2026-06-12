@@ -39,7 +39,7 @@ impl Array<Compact<TypeDyn, DimDyn>> {
     /// let tmp_dir = tempfile::tempdir()?;
     /// let path = tmp_dir.path().join("data.jix");
     ///
-    /// Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?.write_to_file(&path)?;
+    /// Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?.write_to_file(&path)?;
     /// let array = Array::read_from_file(&path, ArrayParams::default())?;
     /// assert_eq!(array.shape(), &[2, 2]);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -73,8 +73,8 @@ impl Array<Compact<TypeDyn, DimDyn>> {
     /// let path = tmp_dir.path().join("packed.jix");
     ///
     /// // Write two arrays back-to-back into a single file and record their positions.
-    /// let a = Array::compact_array(&array![0u8, 1, 2, 3])?;
-    /// let b = Array::compact_array(&array![10u8, 20, 30, 40, 50, 60])?;
+    /// let a = Array::compact_ndarray(&array![0u8, 1, 2, 3])?;
+    /// let b = Array::compact_ndarray(&array![10u8, 20, 30, 40, 50, 60])?;
     /// let mut f = std::fs::File::create(&path)?;
     /// a.write_to(&mut f)?;
     /// let offset = f.metadata()?.len();
@@ -119,7 +119,7 @@ impl Array<Compact<TypeDyn, DimDyn>> {
     /// use ndarray::array;
     ///
     /// // Serialize to an in-memory buffer and read it back.
-    /// let original = Array::compact_array(&array![1i32, 2, 3, 4])?;
+    /// let original = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
     /// let mut buf = Cursor::new(Vec::new());
     /// original.write_to(&mut buf)?;
     ///
@@ -183,7 +183,7 @@ impl Array<CompactMmap<TypeDyn, DimDyn>> {
     ///
     /// let tmp_dir = tempfile::tempdir()?;
     /// let path = tmp_dir.path().join("data.jix");
-    /// Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?.write_to_file(&path)?;
+    /// Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?.write_to_file(&path)?;
     ///
     /// let len = std::fs::metadata(&path)?.len();
     /// // Safety: the file is not modified after this point.
@@ -239,7 +239,7 @@ where
     /// use jix::{Array, ArrayParams};
     /// use ndarray::array;
     ///
-    /// let array = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
+    /// let array = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
     ///
     /// let tmp_dir = tempfile::tempdir()?;
     /// let path = tmp_dir.path().join("output.jix");
@@ -276,8 +276,8 @@ where
     /// use ndarray::array;
     ///
     /// // Write two arrays into a single buffer and record their byte positions.
-    /// let a = Array::compact_array(&array![1u8, 2, 3, 4])?;
-    /// let b = Array::compact_array(&array![10u8, 20, 30])?;
+    /// let a = Array::compact_ndarray(&array![1u8, 2, 3, 4])?;
+    /// let b = Array::compact_ndarray(&array![10u8, 20, 30])?;
     ///
     /// let mut buf = Cursor::new(Vec::new());
     /// a.write_to(&mut buf)?;
@@ -326,7 +326,7 @@ where
     ///
     /// let tmp_dir = tempfile::tempdir()?;
     /// let path = tmp_dir.path().join("large.jix");
-    /// Array::compact_array(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
+    /// Array::compact_ndarray(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
     /// let len = std::fs::metadata(&path)?.len();
     ///
     /// // Map the file - compressed blocks are paged in on demand, no heap copy.
@@ -522,7 +522,7 @@ mod tests {
             .unwrap()
             .into_dimensionality::<<Sh::Dimension as ndarray::IntoDimension>::Dim>()
             .unwrap();
-        let array = Array::compact_array_with(&src, arr_params(block_shape)).unwrap();
+        let array = Array::compact_ndarray_with(&src, arr_params(block_shape)).unwrap();
         array.into_dim().unwrap()
     }
 

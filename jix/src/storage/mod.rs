@@ -37,7 +37,7 @@
 //! the element type must be known at compile time so the compiler can dispatch to the
 //! correct scalar implementation.
 //!
-//! Arrays constructed from typed sources (e.g. [`Array::compact_array`](crate::Array::compact_array))
+//! Arrays constructed from typed sources (e.g. [`Array::compact_ndarray`](crate::Array::compact_ndarray))
 //! are automatically typed. Arrays loaded from disk carry [`TypeDyn`]; call
 //! [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert the expected element
 //! type and regain compile-time tracking.

@@ -63,7 +63,7 @@ where
 ///     Point { x: 2, y: 20 },
 ///     Point { x: 3, y: 30 },
 /// ];
-/// let za = Array::compact_array(&pts)?;
+/// let za = Array::compact_ndarray(&pts)?;
 /// let xs = za.dtype_sub_field::<i32>("x").to_ndarray()?;
 /// assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
 /// # Ok::<(), jix::Error>(())
@@ -175,7 +175,7 @@ mod tests {
             Pair { x: 2, y: 20 },
             Pair { x: 3, y: 30 },
         ];
-        let za = Array::compact_array(&pts).unwrap();
+        let za = Array::compact_ndarray(&pts).unwrap();
         let xs = za
             .as_ref()
             .dtype_sub_field::<i32>("x")
@@ -192,14 +192,14 @@ mod tests {
 
     #[test]
     fn error_not_struct_dtype() {
-        let a = Array::compact_array(&ndarray::array![1i32, 2, 3]).unwrap();
+        let a = Array::compact_ndarray(&ndarray::array![1i32, 2, 3]).unwrap();
         assert!(super::SubDtype::<_, TypeDyn>::new_array(a, "x").is_err());
     }
 
     #[test]
     fn error_field_not_found() {
         let pts = ndarray::array![Pair { x: 1, y: 10 }];
-        let za = Array::compact_array(&pts).unwrap();
+        let za = Array::compact_ndarray(&pts).unwrap();
         assert!(super::SubDtype::<_, TypeDyn>::new_array(za, "z").is_err());
     }
 
@@ -214,7 +214,7 @@ mod tests {
             let pair_structs: Vec<Pair> = pairs.iter().map(|&(x, y)| Pair { x, y }).collect();
             let n = pair_structs.len();
             let nd = ndarray::Array::from_shape_vec([n], pair_structs).unwrap();
-            let za = Array::compact_array(&nd).unwrap();
+            let za = Array::compact_ndarray(&nd).unwrap();
             let expected_x = ndarray::Array::from_shape_vec([n],
                 pairs.iter().map(|&(x, _)| x).collect::<Vec<_>>(),
             ).unwrap();

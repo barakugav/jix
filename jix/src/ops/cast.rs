@@ -169,12 +169,12 @@ pub(crate) mod _traits {
 /// use jix::dtype::Dtyped;
 /// use ndarray::array;
 ///
-/// let za = Array::compact_array(&array![1i32, 2, 3, 4])?;
+/// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 /// let result = za.cast::<f64>().to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[1.0f64, 2.0, 3.0, 4.0]);
 ///
 /// // Zero -> false, non-zero -> true
-/// let zb = Array::compact_array(&array![0i32, 1, -2, 0])?;
+/// let zb = Array::compact_ndarray(&array![0i32, 1, -2, 0])?;
 /// let result = zb.cast::<bool>().to_ndarray()?;
 /// assert_eq!(result.as_slice().unwrap(), &[false, true, true, false]);
 /// # Ok::<(), jix::Error>(())
@@ -438,7 +438,7 @@ mod tests {
         use crate::Array;
         use ndarray::array;
 
-        let a = Array::compact_array_with(&array![f16::from_bits(17)], arr_params(&[1])).unwrap();
+        let a = Array::compact_ndarray_with(&array![f16::from_bits(17)], arr_params(&[1])).unwrap();
         let _ = a.cast::<f16>();
     }
 }

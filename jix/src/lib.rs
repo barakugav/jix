@@ -26,7 +26,7 @@
 //! use ndarray::array;
 //!
 //! // Compress a 2-D f32 ndarray into a block-compressed Array<Compact>.
-//! let a = Array::compact_array(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
+//! let a = Array::compact_ndarray(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
 //! assert_eq!(a.shape(), &[2, 3]);
 //! assert_eq!(a.dtype(), &f32::DTYPE);
 //!
@@ -35,7 +35,7 @@
 //! assert_eq!(decompressed[[0, 0]], 1.5);
 //!
 //! // Build a lazy operation pipeline - no data is read yet.
-//! let ones = Array::compact_array(&ndarray::Array2::<f32>::ones((2, 3)))?;
+//! let ones = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
 //! let result = a             // Array<Compact>
 //!     .exp()                 // Array<Exp<Compact>>
 //!     .floor()               // Array<Floor<Exp<Compact>>>
@@ -143,7 +143,7 @@
 //!
 //! - [`Ty<T>`](Ty) - the scalar element type `T` is known at compile time.
 //!   Arrays constructed from typed sources carry this automatically (e.g.
-//!   `Array::compact_array(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
+//!   `Array::compact_ndarray(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
 //!   Most of the element-wise operations require `Ty<T>`, as they are bounded by scalar trait of `T`.
 //!
 //! - [`TypeDyn`] - the element type is only known at runtime. Arrays loaded
@@ -220,7 +220,7 @@
 //! // Store with 64*64 blocks - one decompression per tile.
 //! let mut params = ArrayParams::new();
 //! params.block_shape(&[64, 64]);
-//! let array = Array::compact_array_with(&data, params)?;
+//! let array = Array::compact_ndarray_with(&data, params)?;
 //!
 //! let context = array.read_ctx();
 //! for tile_row in 0..7 {
@@ -248,7 +248,7 @@
 //! // Compress with column-friendly blocks.
 //! let mut params = ArrayParams::new();
 //! params.block_shape(&[64, 64]);
-//! let a = Array::compact_array_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
+//! let a = Array::compact_ndarray_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
 //!
 //! // Transpose and re-encode with row-friendly blocks.
 //! let mut out_params = ArrayParams::new();
@@ -287,7 +287,7 @@
 //!
 //! let tmp_dir = tempfile::tempdir()?;
 //! let path = tmp_dir.path().join("large.jix");
-//! Array::compact_array(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
+//! Array::compact_ndarray(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
 //! let len = std::fs::metadata(&path)?.len();
 //!
 //! // Memory-map the source - blocks are paged in on demand.
