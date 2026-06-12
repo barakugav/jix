@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::storage::ArrayStorageSpec;
-use crate::{ArrayStorage, DimDyn, Dimension, TypeDyn, NDIM_MAX};
+use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
 /// A type-erased array storage backend that wraps any dynamically-typed storage via `Arc<dyn ArrayStorage>`.
 ///
@@ -20,7 +20,7 @@ use crate::{ArrayStorage, DimDyn, Dimension, TypeDyn, NDIM_MAX};
 pub struct ArrayStorageAny {
     inner: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
     shape: DimDyn,
-    dtype: Dtype,
+    element_type: TypeDyn,
 }
 impl ArrayStorageAny {
     /// Wrap an existing `Arc`-boxed storage as an `ArrayStorageAny`.
@@ -29,7 +29,7 @@ impl ArrayStorageAny {
     ) -> Self {
         Self {
             shape: DimDyn::from_slice(storage.shape()).unwrap(),
-            dtype: storage.dtype().clone(),
+            element_type: TypeDyn::from_dtype(storage.dtype().clone()).unwrap(),
             inner: storage,
         }
     }
@@ -58,7 +58,7 @@ impl ArrayStorage for ArrayStorageAny {
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.element_type.dtype()
     }
 
     fn spec(&self) -> ArrayStorageSpec<'_> {

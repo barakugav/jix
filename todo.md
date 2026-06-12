@@ -28,8 +28,8 @@
 - have some SIMD friendly api in NdIter.foreach(), like when detecting the last dim is continuous
 - tmp_buf_typed should return a typed version of TmpBuf
 - add Dimension::Vec<T> associated type
-- prefer Self::Item::DTYPE and K::Output::DTYPE over self.array.dtype() and self.dtype()
 - preferred_read_size should be L1 cache. In the future we can add preferred_read_size_multithread with in L2
 - compress offsets array
 - change offsets array to have length of num_blocks-1 instead of num_blocks+1
 - py div, true_div, floor_div
+- slice op in python api
