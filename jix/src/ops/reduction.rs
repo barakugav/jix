@@ -1,15 +1,17 @@
+use std::mem::MaybeUninit;
 use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped};
+use crate::dtype::{Alignment, Dtype, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::common::AxesArg;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
+use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
-use crate::util::{assert_unchecked_eq, default_strides, dim_arr, DimArray};
+use crate::util::{assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
@@ -24,9 +26,29 @@ pub(crate) struct ReductionOp<S, K, D> {
 }
 pub(crate) trait ReductionOpKernel<T> {
     type Output;
-    fn reduce(&self, items: impl Iterator<Item = T>) -> Self::Output;
+
+    type State;
+    /// Build the initial accumulator. `first` is the first element of the reduction stream
+    /// when the stream is non-empty, or `None` when the kernel was invoked on an empty
+    /// reduction. Kernels with [`supports_empty`](Self::supports_empty) returning `false`
+    /// may unwrap `first` - the caller guarantees it is `Some` for those kernels.
+    ///
+    /// The first element is at position `0`; subsequent calls to [`update_state`] receive
+    /// the 0-based stream `idx` of each item.
+    ///
+    /// [`update_state`]: Self::update_state
+    fn init_state(&self, first: Option<T>) -> Self::State;
+    /// Fold `item` (at 0-based stream position `idx`) into `state`. `idx` is always `>= 1`
+    /// since position `0` is consumed by [`init_state`](Self::init_state).
+    fn update_state(&self, state: &mut Self::State, item: T, idx: u64);
+    /// Produce the final result. `nitems` is the total number of stream elements that
+    /// were folded into `state` (one for `init_state` + one per `update_state` call),
+    /// so `nitems == 0` exactly when `first` was `None`.
+    fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output;
+
     fn supports_empty(&self) -> bool;
 }
+
 impl<S, K, D> ReductionOp<S, K, D> {
     pub(crate) fn new<Ax>(array: S, kernel: K, axes: Ax) -> Result<Self>
     where
@@ -72,16 +94,24 @@ impl<S, K, D> ReductionOp<S, K, D> {
 
         let mut b_layout = array.spec().blocks_layout.clone();
         b_layout.block_shape_hint = (0..input_ndim)
-            .filter_map(|d| is_reduced[d].not().then_some(b_layout.block_shape_hint[d]))
+            .filter_map(|dim| {
+                is_reduced[dim]
+                    .not()
+                    .then_some(b_layout.block_shape_hint[dim])
+            })
             .collect();
         b_layout.block_shape_tag = (0..input_ndim)
-            .filter_map(|d| is_reduced[d].not().then_some(b_layout.block_shape_tag[d]))
+            .filter_map(|dim| {
+                is_reduced[dim]
+                    .not()
+                    .then_some(b_layout.block_shape_tag[dim])
+            })
             .collect();
         b_layout.preferred_read_shape = (0..input_ndim)
-            .filter_map(|d| {
-                is_reduced[d]
+            .filter_map(|dim| {
+                is_reduced[dim]
                     .not()
-                    .then_some(b_layout.preferred_read_shape[d])
+                    .then_some(b_layout.preferred_read_shape[dim])
             })
             .collect();
 
@@ -107,82 +137,380 @@ where
 
     #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        let src_dtype = self.array.dtype();
-        let dst_dtype = self.dtype();
+        // Streams the reduction over a two-level chunking of the inner array so peak scratch
+        // memory stays bounded *and* each downstream `self.array.read_data` call is sized to
+        // roughly fit the caller's request in cache.
+        //
+        // # What it computes
+        //
+        // For every output position `O` covered by `index`, evaluates
+        //
+        //   stream(O) = iterate inner elements with non-reduced coords matching O,
+        //               in row-major order over the reduced axes
+        //   buf[O]    = K::finalize_state(fold(stream(O), K::init_state, K::update_state),
+        //                                 nitems = stream length)
+        //
+        // # Two-level chunking: bulks and tiles
+        //
+        // The inner index range `inner_range_full` (reduced dims spanning the full source
+        // extent, non-reduced dims forwarded from `index`) is partitioned at two granularities:
+        //
+        //   * **bulk** - the outer chunk. Splits *reduced* dims only. Walking bulks in
+        //     row-major order is what advances `base_item_idx`: each bulk delivers
+        //     `reduction_size = product(bulk_size[d] for d reduced)` items per output position.
+        //     `bulk_shape[d] = tile_shape[d]` for reduced dims and `inner_shape[d]`
+        //     for non-reduced - i.e. the full non-reduced extent always sits in one bulk
+        //     along that dim, so consecutive bulks never re-walk the same outputs.
+        //   * **tile** - the inner chunk. Splits *both* dim groups, but is shaped so the
+        //     reduced part exactly matches one bulk's reduced range (one tile-along-reduced
+        //     per bulk). Within a bulk the tile iterator sweeps the non-reduced output
+        //     region. Each `(bulk, tile)` pair produces *one* `self.array.read_data` call,
+        //     sized to roughly fit the source's `preferred_read_size_hint`.
+        //
+        // `tile_shape` is chosen once per call by [`choose_tile_shape`]: seed every dim
+        // from the source storage block hint (clamped to `inner_range_full[d].len()`), then
+        // greedily scale each dim up by an integer multiplier of its seed - reduced dims
+        // first (rightmost first), then non-reduced (rightmost first) - until the running
+        // product would exceed `target_nitems = preferred_read_size_hint /
+        // size_of::<S::Item>()`. The per-dim multiplier is also capped so the tile can't
+        // overshoot the requested range. A final fixup snaps any dim whose tile already
+        // covers the full requested range to `inner_shape[d]`: tiles are aligned to
+        // absolute multiples of `tile_shape[d]`, so a tile sized exactly to the range can
+        // still get split when `inner_range_full[d].start` is not a multiple of the tile
+        // shape - using the full source extent guarantees one tile along that dim. Setting
+        // `bulk_shape[reduced] = tile_shape[reduced]` then makes the inner read shape come
+        // out to `tile_shape` for every tile.
+        //
+        // [`choose_tile_shape`]: Self::choose_tile_shape
+        //
+        // Both iterators are driven by `NdIterExtBlockOffsetSize`. Each yields
+        // `(blk_idx, (inner_offset, blk_size))`: the absolute element start in dim `d` is
+        // `blk_idx[d] * block_shape[d] + inner_offset[d]`, length `blk_size[d]`. Interior
+        // blocks carry `inner_offset = 0, blk_size = block_shape`; border blocks carry the
+        // partial values produced by the iterator.
+        //
+        // # Per-tile processing
+        //
+        // ```text
+        // for each bulk:
+        //   reduction_size = product(bulk_size[d] for d in reduced dims)
+        //   item_idx_end   = base_item_idx + reduction_size
+        //   for each tile in this bulk:
+        //     items_buf <- self.array.read_data(tile = bulk-reduced * tile-non-reduced)
+        //     for each output position O in this tile's non-reduced sub-region:
+        //       walk the tile's `reduction_size` items at the right offset into items_buf,
+        //       folding them into state_buf[O] via K::init_state / K::update_state. item_idx
+        //       runs `[base_item_idx, item_idx_end)` regardless of init-vs-continue branch.
+        //   base_item_idx = item_idx_end
+        //   if reduction_size > 0 { state_initialized = true }
+        // ```
+        //
+        // The first-init vs. continue split is per-slot inside the inner output loop: when
+        // `!state_initialized`, the first reduction item per output is consumed by
+        // `K::init_state(first)` to write the slot; control then falls into the same
+        // `K::update_state` loop as later bulks. Within the first bulk, *all* tiles take
+        // the init branch - each tile only initializes the slots it covers, and together
+        // the first bulk's tiles cover every output exactly once. The flag flips only at
+        // the *end* of a bulk that contributed items, never inside a bulk.
+        //
+        // # Finalization
+        //
+        // After all bulks:
+        //   - If any bulk was visited (`state_initialized`): finalize every state into `buf`
+        //     via `K::finalize_state(state, reduction_size_overall)`. When
+        //     `state_in_out_buf`, the state and output pointers for each slot alias the same
+        //     bytes, so each iteration `assume_init_read`s the state *before* writing the
+        //     result.
+        //   - Otherwise (empty reduction - only reachable when a reduced dim is empty and the
+        //     kernel supports empty): write `K::finalize_state(K::init_state(None), 0)` to
+        //     every output.
+        //
+        // # Scratch buffers
+        //
+        // - `items_buf`: raw input elements for the current *tile*. Resized each tile.
+        // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Initialized lazily
+        //   one tile at a time during the first bulk; finalized in the post-loop pass.
+        //   When `K::State` matches `K::Output` in size and is no more strictly aligned
+        //   (`state_in_out_buf`), we skip the scratch allocation entirely and reuse the
+        //   caller's `buf` as the state buffer - `finalize_state` then reads each slot and
+        //   writes the output into the same byte range it just consumed. The finalization
+        //   loop reads the state out of each slot *before* writing the result back, since
+        //   state and output pointers alias in that mode (see the `CAREFUL` comments).
+        //
+        // # Invariants (also enforced by `debug_assert!`s)
+        //
+        // - Non-reduced dims produce at most one bulk-block per call.
+        // - Each bulk has exactly one tile-along-reduced
+        //   (`tile_shape[reduced] == bulk_shape[reduced]`).
+        // - Every tile's absolute element range is contained in `inner_range_full`.
+        // - On the first state init pass, `base_item_idx == 0`.
+        // - After all bulks, each output's reduction stream consumes exactly
+        //   `product(inner_range_full[d].end - .start for d in reduced dims)` items (when
+        //   `out_nitems > 0`).
+
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, dst_dtype, buf)?;
+        let out_nitems = check_get_buffer_size(index, &K::Output::DTYPE, buf)?;
 
-        let orig_shape = self.array.shape();
-        let orig_ndim = orig_shape.len();
+        let inner_shape = self.array.shape();
+        let inner_ndim = inner_shape.len();
 
-        // Build inner_index: reduced dims span the full original range,
-        // non-reduced dims forward the requested output range.
-        let mut out_dim = 0usize;
-        let inner_index = (0..orig_ndim)
-            .map(|in_d| {
-                if self.is_reduced[in_d] {
-                    // TODO: we could read it in chunks
-                    0..orig_shape[in_d]
+        let inner_range_full = {
+            let mut out_dim = 0;
+            dim_arr(inner_ndim, |dim| {
+                if self.is_reduced[dim] {
+                    0..inner_shape[dim]
                 } else {
                     let r = index[out_dim].clone();
                     out_dim += 1;
                     r
                 }
             })
-            .collect::<DimArray<_>>();
+        };
 
-        let inner_read_shape = inner_index
-            .iter()
-            .map(|r| (r.end - r.start) as usize)
-            .collect::<DimArray<_>>();
-        let n_inner: usize = inner_read_shape.iter().product();
+        let out_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
 
-        let out_shape = index
-            .iter()
-            .map(|r| (r.end - r.start) as usize)
-            .collect::<DimArray<_>>();
+        let tile_shape = self.choose_tile_shape(&inner_range_full);
 
-        // Read the full inner block into a temp buffer.
-        let tmp_buf_size = n_inner * src_dtype.itemsize() as usize;
-        let mut tmp_buf = context.tmp_buf(tmp_buf_size, src_dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.read_data(&inner_index, tmp_buf, context)?;
-
-        // C-contiguous byte strides for inner and output layouts.
-        let inner_strides = default_strides(&inner_read_shape, src_dtype.itemsize() as usize);
-        let out_strides = default_strides(&out_shape, dst_dtype.itemsize() as usize);
-
-        // Strides into tmp_buf for the output iterator: reduced dims are absent.
-        let tmp_buf_strides = inner_strides
-            .iter()
-            .zip(&self.is_reduced)
-            .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
-            .collect::<DimArray<_>>();
-
-        let mut out_iter = NdIter::new(
-            &out_shape,
-            (
-                NdIterExtStridesPtr::new(&tmp_buf_strides, tmp_buf.as_ptr()),
-                NdIterExtStridesPtrMut::new(&out_strides, buf.as_mut_ptr()),
-            ),
-        );
-        let reduction_shape = dim_arr(orig_ndim, |d| {
-            if self.is_reduced[d] {
-                orig_shape[d]
+        // Bulk shape: tile shape on reduced dims (so each bulk has exactly one
+        // tile-along-reduced), full source extent on non-reduced dims (so the requested
+        // output range sits in one bulk along that dim - otherwise consecutive bulks would
+        // re-walk the same outputs and double-count).
+        let bulk_shape = dim_arr(inner_ndim, |dim| {
+            if self.is_reduced[dim] {
+                tile_shape[dim]
             } else {
-                1
+                inner_shape[dim].max(1)
             }
         });
+        let bulk_grid_begin = dim_arr(inner_ndim, |dim| {
+            inner_range_full[dim].start / bulk_shape[dim]
+        });
+        let bulk_grid_end = dim_arr(inner_ndim, |dim| {
+            inner_range_full[dim].end.div_ceil(bulk_shape[dim])
+        });
+        debug_assert!(
+            (0..inner_ndim)
+                .all(|d| self.is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
+            "non-reduced dim must produce at most one bulk-block",
+        );
+        let mut bulk_iter = NdIter::new_with_begin(
+            &bulk_grid_begin,
+            &bulk_grid_end,
+            NdIterExtBlockOffsetSize::new(
+                &dim_arr(inner_ndim, |dim| inner_range_full[dim].start),
+                &dim_arr(inner_ndim, |dim| inner_range_full[dim].end),
+                &bulk_shape,
+            ),
+        );
 
-        while let Some((_out_idx, (base_ptr, out_ptr))) = out_iter.next() {
-            let reduction_iter = NdIter::new(
-                &reduction_shape,
-                NdIterExtStridesPtr::new(&inner_strides, base_ptr),
+        let state_in_out_buf = size_of::<K::State>() == size_of::<K::Output>()
+            && align_of::<K::State>() <= align_of::<K::Output>();
+        let mut state_buf;
+        // CAREFUL: state_buf and out_ptr may alias
+        let (state_buf, out_ptr) = if state_in_out_buf {
+            // use the output buffer as the state buffer
+            let out_ptr = buf.as_mut_ptr();
+            (buf, out_ptr)
+        } else {
+            state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
+            (state_buf.as_mut_slice(), buf.as_mut_ptr())
+        };
+        let state_buf = unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(state_buf) };
+        let state_strides = default_strides(&out_shape, size_of::<MaybeUninit<K::State>>() as u64);
+        let mut state_initialized = false;
+
+        let mut items_buf = context.tmp_buf(0, Alignment::of::<S::Item>());
+        let mut base_item_idx = 0;
+        while let Some((bulk_idx, (bulk_inner_offset, bulk_size))) = bulk_iter.next() {
+            // The bulk's absolute element range, used as the tile iterator's universe.
+            let bulk_begin = dim_arr(inner_ndim, |dim| {
+                bulk_idx[dim] * bulk_shape[dim] + bulk_inner_offset[dim]
+            });
+            let bulk_end = dim_arr(inner_ndim, |dim| bulk_begin[dim] + bulk_size[dim]);
+
+            // Each bulk contributes `reduction_size` items to every output it covers
+            // (which is every output, since non-reduced dims sit in one bulk). That count
+            // is determined by the bulk along reduced dims and is independent of tiling.
+            let reduction_size = (0..inner_ndim)
+                .filter(|&d| self.is_reduced[d])
+                .map(|d| bulk_size[d])
+                .product::<u64>();
+            let item_idx_end = base_item_idx + reduction_size;
+
+            // Tile iterator: walks the bulk's range partitioned by `tile_shape`. Reduced
+            // dims have exactly one tile per bulk (tile_shape[reduced] == bulk reduced
+            // width), non-reduced dims are subdivided.
+            let tile_grid_begin = dim_arr(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
+            let tile_grid_end = dim_arr(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
+            let mut tile_iter = NdIter::new_with_begin(
+                &tile_grid_begin,
+                &tile_grid_end,
+                NdIterExtBlockOffsetSize::new(&bulk_begin, &bulk_end, &tile_shape),
             );
-            let reduction_iter =
-                reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
-            let res = self.kernel.reduce(reduction_iter);
-            unsafe { out_ptr.cast::<K::Output>().write(res) };
+            debug_assert!(
+                (0..inner_ndim)
+                    .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
+                "reduced dim must produce at most one tile per bulk",
+            );
+
+            while let Some((tile_idx, (tile_inner_offset, tile_size))) = tile_iter.next() {
+                let tile = dim_arr(inner_ndim, |dim| {
+                    let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
+                    start..start + tile_size[dim]
+                });
+                debug_assert!(
+                    (0..inner_ndim).all(|d| {
+                        inner_range_full[d].start <= tile[d].start
+                            && tile[d].end <= inner_range_full[d].end
+                    }),
+                    "tile not contained in inner_range_full",
+                );
+
+                // Read this tile's items
+                items_buf.set_len(
+                    (tile_size.iter().product::<u64>() * size_of::<S::Item>() as u64) as usize,
+                );
+                let items_buf = items_buf.as_mut_slice();
+                self.array.read_data(&tile, items_buf, context)?;
+
+                // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
+                // `tile_state_base` shifts `state_buf` to its first slot.
+                let items_buf_strides = default_strides(tile_size, size_of::<S::Item>() as u64);
+                let items_buf_strides_for_out_iter = items_buf_strides
+                    .iter()
+                    .zip(&self.is_reduced)
+                    .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
+                    .collect::<DimArray<_>>();
+                let tile_out_shape = (0..inner_ndim)
+                    .filter(|&d| !self.is_reduced[d])
+                    .map(|d| tile_size[d])
+                    .collect::<DimArray<_>>();
+                let state_offset_bytes = (0..inner_ndim)
+                    .filter(|&d| !self.is_reduced[d])
+                    .enumerate()
+                    .map(|(out_d, d)| {
+                        (tile[d].start - inner_range_full[d].start) * state_strides[out_d]
+                    })
+                    .sum::<u64>();
+                let tile_state_base = unsafe {
+                    state_buf
+                        .as_mut_ptr()
+                        .cast::<u8>()
+                        .offset(state_offset_bytes as isize)
+                };
+
+                let mut out_iter = NdIter::new(
+                    &tile_out_shape,
+                    (
+                        NdIterExtStridesPtr::new(
+                            &items_buf_strides_for_out_iter,
+                            items_buf.as_ptr(),
+                        ),
+                        NdIterExtStridesPtrMut::new(&state_strides, tile_state_base),
+                    ),
+                );
+
+                // Reduction-axis walk inside `items_buf`. `tile_size[reduced] == bulk_size[reduced]`
+                // so this equals `reduction_size`.
+                let reduction_shape = dim_arr(inner_ndim, |dim| {
+                    if self.is_reduced[dim] {
+                        tile_size[dim]
+                    } else {
+                        1
+                    }
+                });
+                debug_assert_eq!(reduction_shape.iter().product::<u64>(), reduction_size);
+
+                while let Some((_idx, (src_base, state))) = out_iter.next() {
+                    let reduction_iter = NdIter::new(
+                        &reduction_shape,
+                        NdIterExtStridesPtr::new(&items_buf_strides, src_base),
+                    );
+                    debug_assert_eq!(reduction_size, reduction_iter.len());
+                    let mut reduction_iter = reduction_iter
+                        .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+                    let mut item_idx = base_item_idx;
+
+                    let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                    let state = if !state_initialized {
+                        // init state with the first item
+                        debug_assert_eq!(item_idx, 0);
+                        let first = reduction_iter.next();
+                        let state = state.write(self.kernel.init_state(first));
+                        if first.is_some() {
+                            item_idx += 1;
+                        }
+                        state
+                    } else {
+                        // SAFETY: every state was written during the first bulk.
+                        unsafe { state.assume_init_mut() }
+                    };
+
+                    // Fold this tile's `reduction_size` items into the running state.
+                    while item_idx < item_idx_end {
+                        let item = reduction_iter.next();
+                        let item = unsafe { item.unwrap_unchecked() };
+                        self.kernel.update_state(state, item, item_idx);
+                        item_idx += 1;
+                    }
+                    debug_assert!(reduction_iter.next().is_none());
+                }
+            }
+
+            base_item_idx = item_idx_end;
+            if reduction_size > 0 {
+                state_initialized = true;
+            }
+        }
+
+        // finalize_state
+        let reduction_size_overall = base_item_idx;
+        debug_assert!(
+            out_nitems == 0
+                || reduction_size_overall
+                    == (0..inner_ndim)
+                        .filter(|&d| self.is_reduced[d])
+                        .map(|d| inner_range_full[d].end - inner_range_full[d].start)
+                        .product::<u64>(),
+            "total items folded per output does not match product of reduced-dim sizes",
+        );
+        // CAREFUL: state_buf and out_ptr may alias
+        let state_ptr = state_buf.as_mut_ptr();
+        // drop doesn't do anything, but indicate we don't hold a mut ref to the state buf, as
+        // out_ptr may be an alias to it
+        #[allow(dropping_references)]
+        drop(state_buf);
+        let out_strides = default_strides(&out_shape, size_of::<K::Output>() as u64);
+        if state_initialized {
+            let mut out_iter = NdIter::new(
+                &out_shape,
+                (
+                    // CAREFUL: state_ptr and out_ptr may alias
+                    NdIterExtStridesPtrMut::new(&state_strides, state_ptr.cast()),
+                    NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
+                ),
+            );
+            while let Some((_idx, (state, out_ptr))) = out_iter.next() {
+                // CAREFUL: state and out_ptr may alias
+                let res = {
+                    let state = unsafe { &*state.cast::<MaybeUninit<K::State>>() };
+                    let state = unsafe { state.assume_init_read() };
+                    self.kernel.finalize_state(state, reduction_size_overall)
+                };
+                unsafe { out_ptr.cast::<K::Output>().write(res) };
+            }
+        } else {
+            // Empty reduction: write the empty-stream result to every output.
+            let mut out_iter = NdIter::new(
+                &out_shape,
+                NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
+            );
+            debug_assert_eq!(reduction_size_overall, 0);
+            while let Some((_idx, out_ptr)) = out_iter.next() {
+                let state = self.kernel.init_state(None);
+                let res = self.kernel.finalize_state(state, 0);
+                unsafe { out_ptr.cast::<K::Output>().write(res) };
+            }
         }
 
         Ok(())
@@ -205,337 +533,223 @@ where
         }
     }
 }
+impl<S, K, D> ReductionOp<S, K, D>
+where
+    S: ArrayStorageTyped,
+    K: ReductionOpKernel<S::Item, Output: Dtyped>,
+    D: Dimension,
+{
+    /// Choose the per-tile inner read shape.
+    ///
+    /// Tiles seed from the source array's storage-block hint (the natural unit of work
+    /// for the inner reader) and scale up greedily - reduced dims first, rightmost first
+    /// within each group - until the byte volume reaches the source's preferred read size
+    /// hint (with a cache floor for pathologically small hints). Every per-dim choice is
+    /// clamped to `full_read_shape[d].len()` so the budget isn't spent on dims that the
+    /// requested range can't actually consume.
+    ///
+    /// Final fixup: any dim whose tile already covers the full requested range is snapped
+    /// to `inner_shape[d]`. Tiles are aligned to absolute multiples of `tile_shape[d]`, so
+    /// a tile sized exactly to the range can still get split when `full_read_shape[d].start`
+    /// is not a multiple of the tile shape; using the full source extent guarantees the
+    /// range fits in one tile along that dim.
+    fn choose_tile_shape(&self, full_read_shape: &[Range<u64>]) -> DimArray<u64> {
+        let ndim = full_read_shape.len();
+        let blocks_layout = &self.array.spec().blocks_layout;
 
+        // Target byte volume per inner read; floor to keep tiny hints from collapsing tiles.
+        let target_nitems =
+            (blocks_layout.preferred_read_size_hint / size_of::<S::Item>() as u64).max(1);
+
+        // Seed from the source storage block hint, clamped to the requested range.
+        let mut tile_shape = dim_arr(ndim, |dim| {
+            (blocks_layout.block_shape_hint[dim] as u64)
+                .min(full_read_shape[dim].end - full_read_shape[dim].start)
+                .max(1)
+        });
+
+        // Greedy scale-up: reduced dims first (rightmost first), then non-reduced
+        // (rightmost first). The reduction kernel walks the reduced axes inside one tile,
+        // so giving them first claim on the budget produces fewer outer iterations. Each
+        // dim grows by an integer multiplier of its seed (the storage block hint), so the
+        // tile stays a multiple of the source's natural block size along that dim.
+        let scale_order = (0..ndim)
+            .rev()
+            .filter(|&dim| self.is_reduced[dim])
+            .chain((0..ndim).rev().filter(|&dim| !self.is_reduced[dim]));
+        let mut current_volume = tile_shape.iter().product::<u64>();
+        for dim in scale_order {
+            let dim_len = full_read_shape[dim].end - full_read_shape[dim].start;
+            let mult_by_budget = target_nitems / current_volume.max(1);
+            let mult_by_range = dim_len.div_ceil(tile_shape[dim]);
+            let multiplier = mult_by_budget.min(mult_by_range).max(1);
+            let new_tile_size = (tile_shape[dim] * multiplier).min(dim_len);
+            current_volume = current_volume / tile_shape[dim] * new_tile_size;
+            tile_shape[dim] = new_tile_size;
+        }
+
+        // Snap any dim already covering its full requested range to `inner_shape[d]` so
+        // the tile boundary doesn't accidentally split the range along an unaligned start.
+        let inner_shape = self.array.shape();
+        for dim in 0..ndim {
+            if tile_shape[dim] == (full_read_shape[dim].end - full_read_shape[dim].start) {
+                tile_shape[dim] = inner_shape[dim].max(1);
+            }
+        }
+
+        tile_shape
+    }
+}
+
+/// Emits the wrapper storage struct (`$Op<S, D>` or `$Op<S>`), its `ArrayStorage` impl,
+/// and the kernel struct declaration (`pub(crate) struct $Kernel;` - with fields if
+/// `extra_args` were declared). The `ReductionOpKernel` impl for the kernel is still
+/// written by hand next to the macro invocation.
+///
+/// Invocation shape:
+/// ```ignore
+/// define_reduction_op!(
+///     /// docs...
+///     Op, Kernel { extra_arg: Type, ... },           // `{ ... }` is optional
+///     where { S: ArrayStorageTyped, S::Item: ... },  // full where-clause, must end with `,`
+///     output = <S::Item as Trait>::Output,
+///     single_axis,                                 // optional; omit for multi-axis
+/// );
+/// ```
 macro_rules! define_reduction_op {
+    // single-axis variant
     (
         $(#[$meta:meta])*
         $Op:ident,
-        $Kernel:ident,
-        $($trait:ident)::+,
-        support_empty = $support_empty:expr,
-        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
-        single_axis = true
+        $Kernel:ident $( { $($extra_arg:ident: $extra_ty:ty),+ $(,)? } )?,
+        where { $($where_:tt)+ }
+        output = $output_ty:ty,
+        single_axis $(,)?
     ) => {
+        struct $Kernel { $($($extra_arg: $extra_ty),+)? }
+
         $(#[$meta])*
-        pub struct $Op<S>(crate::ops::reduction::ReductionOp<S, $Kernel, <S::Dimension as crate::Dimension>::Smaller>)
+        pub struct $Op<S>(
+            crate::ops::reduction::ReductionOp<S, $Kernel, <S::Dimension as crate::Dimension>::Smaller>,
+        )
         where
             S: crate::ArrayStorage;
+
         impl<S> $Op<S>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            $($where_)+
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new(array: S, axis: usize $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self> {
-                let kernel = $Kernel { $($extra_arg),* };
+            pub fn new(array: S, axis: usize $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self> {
+                let kernel = $Kernel { $($($extra_arg,)+)? };
                 Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, &[axis])?))
             }
 
             #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array(array: crate::Array<S>, axis: usize $(, $extra_arg: $extra_ty)*) -> crate::error::Result<crate::Array<Self>> {
-                Self::new(array.into_storage(), axis $(, $extra_arg)*).map(crate::Array::from_storage)
+            pub fn new_array(array: crate::Array<S>, axis: usize $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>> {
+                Self::new(array.into_storage(), axis $($(, $extra_arg)+)?).map(crate::Array::from_storage)
             }
         }
 
         impl<S> crate::ArrayStorage for $Op<S>
         where
-            S: crate::storage::ArrayStorageTyped,
-             S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            $($where_)+
         {
-            type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
+            type ElementType = crate::Ty<$output_ty>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
 
             crate::storage::impl_array_storage_forward!(<S>);
         }
-
-        define_reduction_op!(
-            @define_kernel
-            $Kernel,
-            $($trait)::+,
-            support_empty = $support_empty,
-            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
-        );
     };
 
+    // multi-axis variant
     (
         $(#[$meta:meta])*
         $Op:ident,
-        $Kernel:ident,
-        $($trait:ident)::+,
-        support_empty = $support_empty:expr,
-        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
+        $Kernel:ident $( { $($extra_arg:ident: $extra_ty:ty),+ $(,)? } )?,
+        where { $($where_:tt)+ }
+        output = $output_ty:ty $(,)?
     ) => {
+        struct $Kernel { $($($extra_arg: $extra_ty),+)? }
+
         $(#[$meta])*
         pub struct $Op<S, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
+
         impl<S, D> $Op<S, D>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            $($where_)+
             D: crate::Dimension,
         {
             #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new<Ax>(array: S, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
+            pub fn new<Ax>(array: S, axes: Ax $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<Self>
             where
                 Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
             {
-                let kernel = $Kernel { $($extra_arg),* };
+                let kernel = $Kernel { $($($extra_arg,)+)? };
                 Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, axes)?))
             }
 
             #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<crate::Array<Self>>
+            pub fn new_array<Ax>(array: crate::Array<S>, axes: Ax $($(, $extra_arg: $extra_ty)+)?) -> crate::error::Result<crate::Array<Self>>
             where
                 Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
             {
-                Self::new(array.into_storage(), axes $(, $extra_arg)*).map(crate::Array::from_storage)
+                Self::new(array.into_storage(), axes $($(, $extra_arg)+)?).map(crate::Array::from_storage)
             }
         }
 
         impl<S, D> crate::ArrayStorage for $Op<S, D>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+            $($where_)+
             D: crate::Dimension,
         {
-            type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
+            type ElementType = crate::Ty<$output_ty>;
             type Dimension = D;
 
             crate::storage::impl_array_storage_forward!(<S, D>);
         }
-
-        define_reduction_op!(
-            @define_kernel
-            $Kernel,
-            $($trait)::+,
-            support_empty = $support_empty,
-            |$arg_items $(, $extra_arg : $extra_ty)*| { $body },
-        );
     };
-
-    (
-        @define_kernel
-        $Kernel:ident,
-        $($trait:ident)::+,
-        support_empty = $support_empty:expr,
-        |$arg_items:ident $(, $extra_arg:ident : $extra_ty:ty)*| { $body:expr },
-    ) => {
-        struct $Kernel { $($extra_arg: $extra_ty,)* }
-        impl<T> crate::ops::reduction::ReductionOpKernel<T> for $Kernel
-        where
-            T: $($trait)::+,
-        {
-            type Output = <T as $($trait)::+>::Output;
-
-            #[inline]
-            fn reduce(&self, items: impl Iterator<Item = T>) -> Self::Output {
-                #[allow(unused)]
-                $(let $extra_arg = self.$extra_arg;)*
-                let $arg_items = items;
-                { $body }.unwrap()
-            }
-
-            #[inline(always)]
-            fn supports_empty(&self) -> bool {
-                $support_empty
-            }
-        }
-    };
-
-    (
-        $(#[$meta:meta])*
-        $Op:ident,
-        $Kernel:ident,
-        support_empty = $support_empty:expr,
-        |$arg_items:ident: Iterator<Item = $in_type:ty> $(, $extra_arg:ident : $extra_ty:ty)*| -> $out_type:ty { $body:expr },
-    ) => {
-        $(#[$meta])*
-        pub struct $Op<S, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
-        impl<S, D> $Op<S, D>
-        where
-            S: crate::storage::ArrayStorageTyped<Item = $in_type>,
-            D: crate::Dimension,
-        {
-            #[doc = concat!("Constructs a [`", stringify!($Op), "`] storage. See the struct docs for semantics and examples.")]
-            pub fn new<Ax>(array: S, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<Self>
-            where
-                Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
-            {
-                let kernel = $Kernel { $($extra_arg),* };
-                Ok(Self(crate::ops::reduction::ReductionOp::new(array, kernel, axes)?))
-            }
-
-            #[doc = concat!("Constructs an array with [`", stringify!($Op), "`] storage. See the storage struct docs for semantics and examples.")]
-            pub fn new_array<Ax>(array: crate::Array<S>, axes: Ax $(, $extra_arg: $extra_ty)*) -> crate::error::Result<crate::Array<Self>>
-            where
-                Ax: crate::ops::AxesArg<ReducedDimension<S::Dimension> = D>,
-            {
-                Self::new(array.into_storage(), axes $(, $extra_arg)*).map(crate::Array::from_storage)
-            }
-        }
-
-        impl<S, D> crate::ArrayStorage for $Op<S, D>
-        where
-            S: crate::storage::ArrayStorageTyped<Item = $in_type>,
-            D: crate::Dimension,
-        {
-            type ElementType = crate::Ty<$out_type>;
-            type Dimension = D;
-
-            crate::storage::impl_array_storage_forward!(<S, D>);
-        }
-
-
-        struct $Kernel { $($extra_arg: $extra_ty,)* }
-        impl crate::ops::reduction::ReductionOpKernel<$in_type> for $Kernel
-        {
-            type Output = $out_type;
-
-            #[inline]
-            fn reduce(&self, items: impl Iterator<Item = $in_type>) -> Self::Output {
-                #[allow(unused)]
-                $(let $extra_arg = self.$extra_arg;)*
-                let $arg_items = items;
-                { $body }.unwrap()
-            }
-
-            #[inline(always)]
-            fn supports_empty(&self) -> bool {
-                $support_empty
-            }
-        }
-    };
-
 }
-// pub(crate) use {define_reduction_op};
 
-/// Internal scalar-level reduction kernels used by the reduction op storage wrappers.
+/// Public scalar-level traits implemented by primitive element types and consumed by the
+/// reduction op storage wrappers ([`Sum`], [`Product`], [`Mean`], [`Variance`], ...).
+///
+/// Each trait describes how to fold a stream of `Self` values into a result. Some are simple
+/// (e.g. `Sum` only needs an `Output` accumulator); others (`Mean`, `Variance`)
+/// expose a richer state machine (`type State`, `init`, `update`, `finalize`) because the
+/// final result is not just the accumulator.
+///
+/// Max/Min/argmax/argmin do **not** appear here - those ops are bounded directly by
+/// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`] / [`PartialOrd`].
 pub(crate) mod _traits {
     #[allow(unused_imports)]
     use crate::scalar::{f16, Complex};
-
-    /// Scalar kernel trait for the element-wise `max` reduction.
-    pub trait ReduceMax {
-        /// The output element type of this reduction (same as the input for scalar max).
-        type Output;
-        /// Reduce `items` to their maximum value. Returns `None` if the iterator is empty.
-        fn reduce_max(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
-    }
-    impl<T> ReduceMax for T
-    where
-        T: crate::scalar::Maximum<Output = T>,
-    {
-        type Output = Self;
-
-        #[inline]
-        fn reduce_max(items: impl Iterator<Item = T>) -> Option<Self::Output> {
-            items.reduce(|m, x| m.maximum(x))
-        }
-    }
-
-    /// Scalar kernel trait for the element-wise `min` reduction.
-    pub trait ReduceMin {
-        /// The output element type of this reduction (same as the input for scalar min).
-        type Output;
-        /// Reduce `items` to their minimum value. Returns `None` if the iterator is empty.
-        fn reduce_min(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
-    }
-    impl<T> ReduceMin for T
-    where
-        T: crate::scalar::Minimum<Output = T>,
-    {
-        type Output = Self;
-
-        #[inline]
-        fn reduce_min(items: impl Iterator<Item = Self>) -> Option<Self::Output> {
-            items.reduce(|m, x| m.minimum(x))
-        }
-    }
-
-    /// Scalar kernel trait for `argmax`: finds the index of the maximum element.
-    pub trait ArgMax {
-        /// The output type for the flat index - always `u64` for concrete impls.
-        type Output;
-        /// Return the flat index of the maximum element in `items`, or `None` if empty.
-        ///
-        /// For floating-point types, comparison uses [`PartialOrd`]: `NaN` values behave
-        /// as unordered and the result is unspecified when `NaN` is present.
-        fn argmax(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
-    }
-    impl<T> ArgMax for T
-    where
-        T: PartialOrd,
-    {
-        type Output = u64;
-
-        #[inline]
-        fn argmax(items: impl Iterator<Item = Self>) -> Option<Self::Output> {
-            let mut idx = 0u64;
-            items
-                .map({
-                    |x| {
-                        let i = idx;
-                        idx += 1;
-                        (i, x)
-                    }
-                })
-                .reduce(|(m_idx, m), (idx, x)| if x > m { (idx, x) } else { (m_idx, m) })
-                .map(|(idx, _)| idx)
-        }
-    }
-
-    /// Scalar kernel trait for `argmin`: finds the index of the minimum element.
-    pub trait ArgMin {
-        /// The output type for the flat index - always `u64` for concrete impls.
-        type Output;
-        /// Return the flat index of the minimum element in `items`, or `None` if empty.
-        ///
-        /// For floating-point types, comparison uses [`PartialOrd`]: `NaN` values behave
-        /// as unordered and the result is unspecified when `NaN` is present.
-        fn argmin(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
-    }
-    impl<T> ArgMin for T
-    where
-        T: PartialOrd,
-    {
-        type Output = u64;
-
-        #[inline]
-        fn argmin(items: impl Iterator<Item = Self>) -> Option<Self::Output> {
-            let mut idx = 0u64;
-            items
-                .map({
-                    |x| {
-                        let i = idx;
-                        idx += 1;
-                        (i, x)
-                    }
-                })
-                .reduce(|(m_idx, m), (idx, x)| if x < m { (idx, x) } else { (m_idx, m) })
-                .map(|(idx, _)| idx)
-        }
-    }
 
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
     /// Accumulates into a wider output type to reduce overflow risk: integer types accumulate
     /// into `i64`/`u64`, floating-point types accumulate into `f64`.
-    pub trait ReduceSum {
-        /// The output element type (wider than the input for most types).
+    pub trait Sum {
+        /// The sum element type (wider than the input for most types).
         type Output;
-        /// Sum all elements in `items`, starting from zero. Returns zero for an empty iterator.
-        fn reduce_sum(items: impl Iterator<Item = Self>) -> Self::Output;
+        /// Return the initial accumulator (zero).
+        fn init() -> Self::Output;
+        /// Fold `item` into the running sum.
+        fn update(state: &mut Self::Output, item: Self);
     }
 
     macro_rules! impl_sum {
         ($item_ty:ty, $output_ty:ty) => {
-            impl ReduceSum for $item_ty {
+            impl Sum for $item_ty {
                 type Output = $output_ty;
 
-                #[inline]
-                fn reduce_sum(items: impl Iterator<Item = Self>) -> Self::Output {
-                    items.fold(<_ as crate::scalar::Cast<Self::Output>>::cast(0), |m, x| {
-                        m + <_ as crate::scalar::Cast<Self::Output>>::cast(x)
-                    })
+                #[inline(always)]
+                fn init() -> Self::Output {
+                    <i32 as crate::scalar::Cast<Self::Output>>::cast(0)
+                }
+                #[inline(always)]
+                fn update(state: &mut Self::Output, item: Self) {
+                    *state += <_ as crate::scalar::Cast<Self::Output>>::cast(item);
                 }
             }
         };
@@ -562,22 +776,26 @@ pub(crate) mod _traits {
     ///
     /// Accumulates into a wider output type to reduce overflow risk: integer types accumulate
     /// into `i64`/`u64`, floating-point types accumulate into `f64`.
-    pub trait ReduceProduct {
-        /// The output element type (wider than the input for most types).
+    pub trait Product {
+        /// The product element type (wider than the input for most types).
         type Output;
-        /// Multiply all elements in `items`, starting from one. Returns one for an empty iterator.
-        fn reduce_product(items: impl Iterator<Item = Self>) -> Self::Output;
+        /// Return the initial accumulator (one).
+        fn init() -> Self::Output;
+        /// Fold `item` into the running product.
+        fn update(state: &mut Self::Output, item: Self);
     }
     macro_rules! impl_product {
         ($item_ty:ty, $output_ty:ty) => {
-            impl ReduceProduct for $item_ty {
+            impl Product for $item_ty {
                 type Output = $output_ty;
 
-                #[inline]
-                fn reduce_product(items: impl Iterator<Item = Self>) -> Self::Output {
-                    items.fold(<_ as crate::scalar::Cast<Self::Output>>::cast(1), |m, x| {
-                        m * <_ as crate::scalar::Cast<Self::Output>>::cast(x)
-                    })
+                #[inline(always)]
+                fn init() -> Self::Output {
+                    <i32 as crate::scalar::Cast<Self::Output>>::cast(1)
+                }
+                #[inline(always)]
+                fn update(state: &mut Self::Output, item: Self) {
+                    *state *= <_ as crate::scalar::Cast<Self::Output>>::cast(item);
                 }
             }
         };
@@ -603,26 +821,42 @@ pub(crate) mod _traits {
     ///
     /// The mean is computed as the sum divided by the count; the output is always `f64`
     /// (or `Complex<f64>` for complex inputs) to preserve precision.
-    pub trait ReduceMean {
+    ///
+    /// The count is tracked **outside** the accumulator: callers thread the number of
+    /// folded items into [`finalize`](Self::finalize) themselves.
+    pub trait Mean {
         /// The output element type - always `f64` or `Complex<f64>`.
         type Output;
-        /// Compute the arithmetic mean of `items`. Returns `None` if the iterator is empty.
-        fn reduce_mean(items: impl Iterator<Item = Self>) -> Option<Self::Output>;
+        /// Accumulator state - the running sum.
+        type State;
+        /// Return the initial (empty) accumulator.
+        fn init() -> Self::State;
+        /// Fold `item` into the running sum.
+        fn update(state: &mut Self::State, item: Self);
+        /// Finalize `state` into the mean. Returns `None` if `nitems == 0`; otherwise
+        /// returns `state / nitems` (cast to the output domain).
+        fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output>;
     }
     macro_rules! impl_mean {
         ($item_ty:ty, $output_ty:ty) => {
-            impl ReduceMean for $item_ty {
+            impl Mean for $item_ty {
                 type Output = $output_ty;
+                type State = <Self as Sum>::Output;
 
-                #[inline]
-                fn reduce_mean(items: impl Iterator<Item = Self>) -> Option<Self::Output> {
-                    let (size, size_high) = items.size_hint();
-                    assert_eq!(Some(size), size_high);
-                    if size == 0 {
+                #[inline(always)]
+                fn init() -> Self::State {
+                    <Self as Sum>::init()
+                }
+                #[inline(always)]
+                fn update(state: &mut Self::State, item: Self) {
+                    <Self as Sum>::update(state, item);
+                }
+                #[inline(always)]
+                fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output> {
+                    if nitems == 0 {
                         return None;
                     }
-                    let sum = <Self as ReduceSum>::reduce_sum(items);
-                    Some(<_ as crate::scalar::Cast<Self::Output>>::cast(sum) / size as f64)
+                    Some(<_ as crate::scalar::Cast<Self::Output>>::cast(state) / nitems as f64)
                 }
             }
         };
@@ -645,122 +879,95 @@ pub(crate) mod _traits {
     impl_mean!(Complex<f64>, Complex<f64>);
     impl_mean!(bool, f64);
 
+    /// Welford accumulator used by [`Variance`]. The count of folded items is tracked
+    /// **outside** this struct - callers thread it into [`Variance::update`] (as `n`)
+    /// and [`Variance::finalize`] (as `nitems`).
+    pub struct VarianceState<M> {
+        /// Running mean in the type-specific accumulator domain.
+        mean: M,
+        /// Running sum of squared deviations from the mean (`f64`).
+        m2: f64,
+    }
+
     /// Scalar kernel trait for the `var` (variance) and `std` (standard deviation) reductions.
     ///
-    /// The degree-of-freedom correction is controlled by `ddof`: use `0.0` for population
-    /// variance (`N` denominator) and `1.0` for sample variance (`N-1` denominator).
-    pub trait ReduceVariance {
+    /// The degree-of-freedom correction is controlled by `ddof` passed to [`finalize`]:
+    /// use `0.0` for population variance (`N` denominator) and `1.0` for sample variance
+    /// (`N-1` denominator).
+    ///
+    /// Uses Welford's online algorithm for numerical stability.
+    ///
+    /// [`finalize`]: Variance::finalize
+    pub trait Variance {
         /// The output element type - always a `Float` (i.e. `f64` for most inputs).
-        type Output: num_traits::Float;
-        /// Compute the variance of `items` with `ddof` degrees-of-freedom correction.
-        fn reduce_variance(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output;
-        /// Compute the standard deviation of `items` with `ddof` degrees-of-freedom correction.
+        type Output;
+        /// Welford accumulator state.
+        type State;
+        /// Return the initial (empty) accumulator.
+        fn init() -> Self::State;
+        /// Fold `item` into the running Welford accumulator. `idx` is the 0-based stream position
+        /// of `item.
+        fn update(state: &mut Self::State, item: Self, idx: u64);
+        /// Finalize `state` into the variance using `ddof` degrees-of-freedom correction.
+        /// `nitems` is the total number of elements folded in.
         ///
-        /// This is `sqrt(variance)` using the same `ddof`.
-        #[inline(always)]
-        fn reduce_std(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output {
-            let var = Self::reduce_variance(items, ddof);
-            <_ as num_traits::Float>::sqrt(var)
-        }
+        /// Returns `NaN` if the effective denominator (`nitems - ddof`) is non-positive.
+        fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output;
     }
     macro_rules! impl_variance {
-        ($item_ty:ty) => {
-            impl ReduceVariance for $item_ty {
+        ($item_ty:ty, $mean_ty:ty, |$delta:ident, $delta2:ident| $m2_expr:expr) => {
+            impl Variance for $item_ty {
                 type Output = f64;
+                type State = VarianceState<$mean_ty>;
 
                 #[inline(always)]
-                fn reduce_variance(items: impl Iterator<Item = Self>, ddof: f64) -> Self::Output {
-                    variance_impl(items, ddof)
+                fn init() -> Self::State {
+                    VarianceState {
+                        mean: <i32 as crate::scalar::Cast<$mean_ty>>::cast(0),
+                        m2: 0.0,
+                    }
+                }
+                #[inline(always)]
+                fn update(state: &mut Self::State, item: Self, idx: u64) {
+                    let x = <_ as crate::scalar::Cast<$mean_ty>>::cast(item);
+                    let $delta = x - state.mean;
+                    state.mean += $delta / (idx + 1) as f64;
+                    let $delta2 = x - state.mean;
+                    state.m2 += $m2_expr;
+                }
+                #[inline(always)]
+                fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output {
+                    let denom = nitems as f64 - ddof;
+                    if denom <= 0.0 {
+                        f64::NAN
+                    } else {
+                        state.m2 / denom
+                    }
                 }
             }
         };
     }
-    impl_variance!(i8);
-    impl_variance!(i16);
-    impl_variance!(i32);
-    impl_variance!(i64);
-    impl_variance!(u8);
-    impl_variance!(u16);
-    impl_variance!(u32);
-    impl_variance!(u64);
+    impl_variance!(i8, f64, |delta, delta2| delta * delta2);
+    impl_variance!(i16, f64, |delta, delta2| delta * delta2);
+    impl_variance!(i32, f64, |delta, delta2| delta * delta2);
+    impl_variance!(i64, f64, |delta, delta2| delta * delta2);
+    impl_variance!(u8, f64, |delta, delta2| delta * delta2);
+    impl_variance!(u16, f64, |delta, delta2| delta * delta2);
+    impl_variance!(u32, f64, |delta, delta2| delta * delta2);
+    impl_variance!(u64, f64, |delta, delta2| delta * delta2);
     #[cfg(feature = "half")]
-    impl_variance!(f16);
-    impl_variance!(f32);
-    impl_variance!(f64);
+    impl_variance!(f16, f64, |delta, delta2| delta * delta2);
+    impl_variance!(f32, f64, |delta, delta2| delta * delta2);
+    impl_variance!(f64, f64, |delta, delta2| delta * delta2);
     #[cfg(feature = "num-complex")]
-    impl_variance!(Complex<f32>);
+    impl_variance!(Complex<f32>, Complex<f64>, |delta, delta2| delta.re
+        * delta2.re
+        + delta.im * delta2.im);
     #[cfg(feature = "num-complex")]
-    impl_variance!(Complex<f64>);
-    impl_variance!(bool);
-    fn variance_impl<T>(items: impl Iterator<Item = T>, ddof: f64) -> f64
-    where
-        T: VarianceImpl,
-        i32: crate::scalar::Cast<T::MeanType>,
-        T: crate::scalar::Cast<T::MeanType>,
-        T::MeanType: core::ops::Sub<T::MeanType, Output = T::MeanType>
-            + core::ops::Div<f64, Output = T::MeanType>
-            + core::ops::AddAssign<T::MeanType>
-            + Copy,
-    {
-        let mut mean = <_ as crate::scalar::Cast<T::MeanType>>::cast(0);
-        let mut m2 = 0.0_f64;
-        let mut n = 0_u64;
-
-        for x in items {
-            let x = <_ as crate::scalar::Cast<T::MeanType>>::cast(x);
-            n += 1;
-            let delta = x - mean;
-            mean += delta / n as f64;
-            let delta2 = x - mean;
-            m2 += T::update_m2(delta, delta2);
-        }
-
-        let denom = n as f64 - ddof;
-        if denom <= 0.0 {
-            f64::NAN
-        } else {
-            m2 / denom
-        }
-    }
-    trait VarianceImpl {
-        type MeanType;
-        fn update_m2(delta: Self::MeanType, delta2: Self::MeanType) -> f64;
-    }
-    macro_rules! impl_num_variance_impl {
-        ($ty:ty) => {
-            impl VarianceImpl for $ty {
-                type MeanType = f64;
-                fn update_m2(delta: f64, delta2: f64) -> f64 {
-                    delta * delta2
-                }
-            }
-        };
-    }
-    macro_rules! impl_complex_variance_impl {
-        ($f_ty:ty) => {
-            impl VarianceImpl for Complex<$f_ty> {
-                type MeanType = Complex<f64>;
-                fn update_m2(delta: Complex<f64>, delta2: Complex<f64>) -> f64 {
-                    delta.re * delta2.re + delta.im * delta2.im
-                }
-            }
-        };
-    }
-    impl_num_variance_impl!(i8);
-    impl_num_variance_impl!(i16);
-    impl_num_variance_impl!(i32);
-    impl_num_variance_impl!(i64);
-    impl_num_variance_impl!(u8);
-    impl_num_variance_impl!(u16);
-    impl_num_variance_impl!(u32);
-    impl_num_variance_impl!(u64);
-    #[cfg(feature = "half")]
-    impl_num_variance_impl!(f16);
-    impl_num_variance_impl!(f32);
-    impl_num_variance_impl!(f64);
-    impl_complex_variance_impl!(f32);
-    impl_complex_variance_impl!(f64);
-    impl_num_variance_impl!(bool);
+    impl_variance!(Complex<f64>, Complex<f64>, |delta, delta2| delta.re
+        * delta2.re
+        + delta.im * delta2.im);
+    impl_variance!(bool, f64, |delta, delta2| delta * delta2);
 }
 
 define_reduction_op!(
@@ -796,10 +1003,37 @@ define_reduction_op!(
     /// ```
     Max,
     MaxKernel,
-    crate::scalar::ReduceMax,
-    support_empty = false,
-    |items| { <T as crate::scalar::ReduceMax>::reduce_max(items) },
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: crate::scalar::Maximum<Output = S::Item> + crate::dtype::Dtyped,
+    }
+    output = S::Item,
 );
+impl<T> ReductionOpKernel<T> for MaxKernel
+where
+    T: crate::scalar::Maximum<Output = T> + Copy,
+{
+    type Output = T;
+    type State = T;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        first.unwrap()
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
+        *state = (*state).maximum(item);
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        state
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        false
+    }
+}
+
 define_reduction_op!(
     /// Reduces one or more axes by taking the minimum element.
     ///
@@ -833,10 +1067,37 @@ define_reduction_op!(
     /// ```
     Min,
     MinKernel,
-    crate::scalar::ReduceMin,
-    support_empty = false,
-    |items| { <T as crate::scalar::ReduceMin>::reduce_min(items) },
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: crate::scalar::Minimum<Output = S::Item> + crate::dtype::Dtyped,
+    }
+    output = S::Item,
 );
+impl<T> ReductionOpKernel<T> for MinKernel
+where
+    T: crate::scalar::Minimum<Output = T> + Copy,
+{
+    type Output = T;
+    type State = T;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        first.unwrap()
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
+        *state = (*state).minimum(item);
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        state
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        false
+    }
+}
+
 define_reduction_op!(
     /// Reduces a single axis by returning the index of the maximum element.
     ///
@@ -872,13 +1133,44 @@ define_reduction_op!(
     /// ```
     ArgMax,
     ArgMaxKernel,
-    crate::scalar::ArgMax,
-    support_empty = false,
-    |items| {
-        <T as crate::scalar::ArgMax>::argmax(items)
-    },
-    single_axis = true
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: PartialOrd,
+    }
+    output = u64,
+    single_axis,
 );
+impl<T> ReductionOpKernel<T> for ArgMaxKernel
+where
+    T: PartialOrd,
+{
+    type Output = u64;
+    /// `(best_idx, best_val)`.
+    type State = (u64, T);
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        (0, first.unwrap())
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
+        let (best_idx, best_val) = (&mut state.0, &mut state.1);
+        if item > *best_val {
+            *best_idx = idx;
+            *best_val = item;
+        }
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        let (best_idx, _best_val) = (state.0, state.1);
+        best_idx
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        false
+    }
+}
+
 define_reduction_op!(
     /// Reduces a single axis by returning the index of the minimum element.
     ///
@@ -914,13 +1206,44 @@ define_reduction_op!(
     /// ```
     ArgMin,
     ArgMinKernel,
-    crate::scalar::ArgMin,
-    support_empty = false,
-    |items| {
-        <T as crate::scalar::ArgMin>::argmin(items)
-    },
-    single_axis = true
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: PartialOrd,
+    }
+    output = u64,
+    single_axis,
 );
+impl<T> ReductionOpKernel<T> for ArgMinKernel
+where
+    T: PartialOrd,
+{
+    type Output = u64;
+    /// `(best_idx, best_val)`.
+    type State = (u64, T);
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        (0, first.unwrap())
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
+        let (best_idx, best_val) = (&mut state.0, &mut state.1);
+        if item < *best_val {
+            *best_idx = idx;
+            *best_val = item;
+        }
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        let (best_idx, _best_val) = (state.0, state.1);
+        best_idx
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        false
+    }
+}
+
 define_reduction_op!(
     /// Reduces one or more axes by summing all elements along those axes.
     ///
@@ -961,10 +1284,41 @@ define_reduction_op!(
     /// ```
     Sum,
     SumKernel,
-    crate::scalar::ReduceSum,
-    support_empty = true,
-    |items| { Some(<T as crate::scalar::ReduceSum>::reduce_sum(items)) },
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: crate::scalar::Sum<Output: crate::dtype::Dtyped>,
+    }
+    output = <S::Item as crate::scalar::Sum>::Output,
 );
+impl<T> ReductionOpKernel<T> for SumKernel
+where
+    T: crate::scalar::Sum,
+{
+    type Output = <T as crate::scalar::Sum>::Output;
+    type State = <T as crate::scalar::Sum>::Output;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        let mut state = <T as crate::scalar::Sum>::init();
+        if let Some(item) = first {
+            self.update_state(&mut state, item, 0);
+        }
+        state
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
+        <T as crate::scalar::Sum>::update(state, item);
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        state
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        true
+    }
+}
+
 define_reduction_op!(
     /// Reduces one or more axes by multiplying all elements along those axes.
     ///
@@ -1005,10 +1359,41 @@ define_reduction_op!(
     /// ```
     Product,
     ProductKernel,
-    crate::scalar::ReduceProduct,
-    support_empty = true,
-    |items| { Some(<T as crate::scalar::ReduceProduct>::reduce_product(items)) },
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: crate::scalar::Product<Output: crate::dtype::Dtyped>,
+    }
+    output = <S::Item as crate::scalar::Product>::Output,
 );
+impl<T> ReductionOpKernel<T> for ProductKernel
+where
+    T: crate::scalar::Product,
+{
+    type Output = <T as crate::scalar::Product>::Output;
+    type State = <T as crate::scalar::Product>::Output;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        let mut state = <T as crate::scalar::Product>::init();
+        if let Some(item) = first {
+            self.update_state(&mut state, item, 0);
+        }
+        state
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
+        <T as crate::scalar::Product>::update(state, item);
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        state
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        true
+    }
+}
+
 define_reduction_op!(
     /// Reduces one or more axes by computing the arithmetic mean.
     ///
@@ -1042,10 +1427,41 @@ define_reduction_op!(
     /// ```
     Mean,
     MeanKernel,
-    crate::scalar::ReduceMean,
-    support_empty = false,
-    |items| { <T as crate::scalar::ReduceMean>::reduce_mean(items) },
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: crate::scalar::Mean<Output: crate::dtype::Dtyped>,
+    }
+    output = <S::Item as crate::scalar::Mean>::Output,
 );
+impl<T> ReductionOpKernel<T> for MeanKernel
+where
+    T: crate::scalar::Mean,
+{
+    type Output = <T as crate::scalar::Mean>::Output;
+    type State = <T as crate::scalar::Mean>::State;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        let mut state = <T as crate::scalar::Mean>::init();
+        if let Some(item) = first {
+            self.update_state(&mut state, item, 0);
+        }
+        state
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
+        <T as crate::scalar::Mean>::update(state, item);
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
+        <T as crate::scalar::Mean>::finalize(state, nitems).unwrap()
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        false
+    }
+}
+
 define_reduction_op!(
     /// Reduces one or more axes by computing the variance.
     ///
@@ -1083,11 +1499,42 @@ define_reduction_op!(
     /// # Ok::<(), jix::Error>(())
     /// ```
     Variance,
-    VarianceKernel,
-    crate::scalar::ReduceVariance,
-    support_empty = false,
-    |items, ddof: f64| { Some(<T as crate::scalar::ReduceVariance>::reduce_variance(items, ddof)) },
+    VarianceKernel { ddof: f64 },
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: crate::scalar::Variance<Output: crate::dtype::Dtyped>,
+    }
+    output = <S::Item as crate::scalar::Variance>::Output,
 );
+impl<T> ReductionOpKernel<T> for VarianceKernel
+where
+    T: crate::scalar::Variance,
+{
+    type Output = <T as crate::scalar::Variance>::Output;
+    type State = <T as crate::scalar::Variance>::State;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        let mut state = <T as crate::scalar::Variance>::init();
+        if let Some(item) = first {
+            self.update_state(&mut state, item, 0);
+        }
+        state
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
+        <T as crate::scalar::Variance>::update(state, item, idx);
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
+        <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems)
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        false
+    }
+}
+
 define_reduction_op!(
     /// Reduces one or more axes by computing the standard deviation.
     ///
@@ -1121,13 +1568,42 @@ define_reduction_op!(
     /// # Ok::<(), jix::Error>(())
     /// ```
     StandardDeviation,
-    StandardDeviationKernel,
-    crate::scalar::ReduceVariance,
-    support_empty = false,
-    |items, ddof: f64| {{
-        Some(<T as crate::scalar::ReduceVariance>::reduce_std(items, ddof))
-    }},
+    StandardDeviationKernel { ddof: f64 },
+    where {
+        S: crate::storage::ArrayStorageTyped,
+        S::Item: crate::scalar::Variance<Output: num_traits::Float + crate::dtype::Dtyped>,
+    }
+    output = <S::Item as crate::scalar::Variance>::Output,
 );
+impl<T> ReductionOpKernel<T> for StandardDeviationKernel
+where
+    T: crate::scalar::Variance<Output: num_traits::Float>,
+{
+    type Output = <T as crate::scalar::Variance>::Output;
+    type State = <T as crate::scalar::Variance>::State;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        let mut state = <T as crate::scalar::Variance>::init();
+        if let Some(item) = first {
+            self.update_state(&mut state, item, 0);
+        }
+        state
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
+        <T as crate::scalar::Variance>::update(state, item, idx);
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
+        let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
+        <_ as num_traits::Float>::sqrt(var)
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        false
+    }
+}
 
 define_reduction_op!(
     /// Reduces one or more axes by testing whether all elements are `true`.
@@ -1160,12 +1636,37 @@ define_reduction_op!(
     /// ```
     All,
     AllKernel,
-    support_empty = true,
-    |items: Iterator<Item = bool>| -> bool {
-        #[allow(clippy::unnecessary_fold)]
-        Some(items.fold(true, |m, x| m && x))
-    },
+    where {
+        S: crate::storage::ArrayStorageTyped<Item = bool>,
+    }
+    output = bool,
 );
+impl ReductionOpKernel<bool> for AllKernel {
+    type Output = bool;
+    type State = bool;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<bool>) -> Self::State {
+        let mut state = true;
+        if let Some(item) = first {
+            self.update_state(&mut state, item, 0);
+        }
+        state
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: bool, _idx: u64) {
+        *state = *state && item;
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        state
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        true
+    }
+}
+
 define_reduction_op!(
     /// Reduces one or more axes by testing whether any element is `true`.
     ///
@@ -1197,43 +1698,69 @@ define_reduction_op!(
     /// ```
     Any,
     AnyKernel,
-    support_empty = true,
-    |items: Iterator<Item = bool>| -> bool {
-        #[allow(clippy::unnecessary_fold)]
-        Some(items.fold(false, |m, x| m || x))
-    },
+    where {
+        S: crate::storage::ArrayStorageTyped<Item = bool>,
+    }
+    output = bool,
 );
+impl ReductionOpKernel<bool> for AnyKernel {
+    type Output = bool;
+    type State = bool;
 
+    #[inline(always)]
+    fn init_state(&self, first: Option<bool>) -> Self::State {
+        let mut state = false;
+        if let Some(item) = first {
+            self.update_state(&mut state, item, 0);
+        }
+        state
+    }
+    #[inline(always)]
+    fn update_state(&self, state: &mut Self::State, item: bool, _idx: u64) {
+        *state = *state || item;
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        state
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        true
+    }
+}
+
+/// Emits an `Array::$method(...)` helper that forwards to `$Op::new_array(...)`. The full
+/// where-clause on `S` (and its `Item`) is supplied verbatim by the caller so each op can
+/// pick its own bound (`PartialOrd`, `Maximum`, `Sum`, `Item = bool`, ...).
 macro_rules! define_array_reduction_method {
-    ($method:ident : $Op:ident, $($trait:ident)::+, single_axis = true $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
+    // single-axis variant
+    (
+        $method:ident: $Op:ident,
+        where { $($where_:tt)+ }
+        $(, extra_args = ($($extra_arg:ident: $extra_ty:ty),*))?,
+        single_axis $(,)?
+    ) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
         pub fn $method(self, axis: usize $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S>>
-        where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
+        where $($where_)+
         {
             $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
         }
     };
-    ($method:ident : $Op:ident, $($trait:ident)::+ $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
+
+    // multi-axis variant
+    (
+        $method:ident: $Op:ident,
+        where { $($where_:tt)+ }
+        $(, extra_args = ($($extra_arg:ident: $extra_ty:ty),*))?
+        $(,)?
+    ) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
         #[track_caller]
         pub fn $method<Ax>(self, axis: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
         where
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: $($trait)::+<Output: crate::dtype::Dtyped>,
-            Ax: AxesArg,
-        {
-            $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
-        }
-    };
-    ($method:ident : $Op:ident, $in_type:ty => $out_type:ty $(, extra_args = ($($extra_arg:ident : $extra_ty:ty),*))?) => {
-        #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-        #[track_caller]
-        pub fn $method<Ax>(self, axis: Ax $($(, $extra_arg: $extra_ty)*)?) -> crate::Array<$Op<S, Ax::ReducedDimension<S::Dimension>>>
-        where
-            S: crate::storage::ArrayStorageTyped<Item = $in_type>,
+            $($where_)+
             Ax: AxesArg,
         {
             $Op::new_array(self, axis $($(, $extra_arg)*)?).unwrap()
@@ -1245,17 +1772,85 @@ impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    define_array_reduction_method!(max: Max, crate::scalar::ReduceMax);
-    define_array_reduction_method!(min: Min, crate::scalar::ReduceMin);
-    define_array_reduction_method!(argmax: ArgMax, crate::scalar::ArgMax, single_axis = true);
-    define_array_reduction_method!(argmin: ArgMin, crate::scalar::ArgMin, single_axis = true);
-    define_array_reduction_method!(sum: Sum, crate::scalar::ReduceSum);
-    define_array_reduction_method!(product: Product, crate::scalar::ReduceProduct);
-    define_array_reduction_method!(mean: Mean, crate::scalar::ReduceMean);
-    define_array_reduction_method!(var: Variance, crate::scalar::ReduceVariance, extra_args = (ddof: f64));
-    define_array_reduction_method!(std: StandardDeviation, crate::scalar::ReduceVariance, extra_args = (ddof: f64));
-    define_array_reduction_method!(all: All, bool => bool);
-    define_array_reduction_method!(any: Any, bool => bool);
+    define_array_reduction_method!(
+        max: Max,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: crate::scalar::Maximum<Output = S::Item> + crate::dtype::Dtyped,
+        }
+    );
+    define_array_reduction_method!(
+        min: Min,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: crate::scalar::Minimum<Output = S::Item> + crate::dtype::Dtyped,
+        }
+    );
+    define_array_reduction_method!(
+        argmax: ArgMax,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: PartialOrd,
+        },
+        single_axis
+    );
+    define_array_reduction_method!(
+        argmin: ArgMin,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: PartialOrd,
+        },
+        single_axis
+    );
+    define_array_reduction_method!(
+        sum: Sum,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: crate::scalar::Sum<Output: crate::dtype::Dtyped>,
+        }
+    );
+    define_array_reduction_method!(
+        product: Product,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: crate::scalar::Product<Output: crate::dtype::Dtyped>,
+        }
+    );
+    define_array_reduction_method!(
+        mean: Mean,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: crate::scalar::Mean<Output: crate::dtype::Dtyped>,
+        }
+    );
+    define_array_reduction_method!(
+        var: Variance,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: crate::scalar::Variance<Output: crate::dtype::Dtyped>,
+        },
+        extra_args = (ddof: f64)
+    );
+    define_array_reduction_method!(
+        std: StandardDeviation,
+        where {
+            S: crate::storage::ArrayStorageTyped,
+            S::Item: crate::scalar::Variance<Output: num_traits::Float + crate::dtype::Dtyped>,
+        },
+        extra_args = (ddof: f64)
+    );
+    define_array_reduction_method!(
+        all: All,
+        where {
+            S: crate::storage::ArrayStorageTyped<Item = bool>,
+        }
+    );
+    define_array_reduction_method!(
+        any: Any,
+        where {
+            S: crate::storage::ArrayStorageTyped<Item = bool>,
+        }
+    );
 }
 
 #[cfg(test)]

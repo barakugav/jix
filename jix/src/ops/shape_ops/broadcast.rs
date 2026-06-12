@@ -71,17 +71,17 @@ where
         );
 
         let mut is_broadcast = DimArray::new();
-        for d in 0..ndim {
-            if new_shape[d] == input_shape[d] {
+        for dim in 0..ndim {
+            if new_shape[dim] == input_shape[dim] {
                 is_broadcast.push(false);
-            } else if input_shape[d] == 1 {
+            } else if input_shape[dim] == 1 {
                 is_broadcast.push(true);
             } else {
                 bail!(
                     InvalidShapeOperation,
-                    "cannot broadcast dim {d} from length {} to length {}",
-                    input_shape[d],
-                    new_shape[d]
+                    "cannot broadcast dim {dim} from length {} to length {}",
+                    input_shape[dim],
+                    new_shape[dim]
                 );
             }
         }
@@ -93,25 +93,26 @@ where
         // For broadcast dims: Any tag, hint=1, preferred=new size (full extent reads are free).
         // For unchanged dims: inherit from inner.
         let mut b_layout = array.spec().blocks_layout.clone();
-        b_layout.block_shape_hint = dim_arr(ndim, |d| {
-            if is_broadcast[d] {
+        b_layout.block_shape_hint = dim_arr(ndim, |dim| {
+            if is_broadcast[dim] {
                 1
             } else {
-                b_layout.block_shape_hint[d]
+                b_layout.block_shape_hint[dim]
             }
         });
-        b_layout.block_shape_tag = dim_arr(ndim, |d| {
-            if is_broadcast[d] {
+        b_layout.block_shape_tag = dim_arr(ndim, |dim| {
+            if is_broadcast[dim] {
                 BlockShapeTag::Any
             } else {
-                b_layout.block_shape_tag[d]
+                b_layout.block_shape_tag[dim]
             }
         });
-        b_layout.preferred_read_shape = dim_arr(ndim, |d| {
-            if is_broadcast[d] {
-                new_shape_slice[d] as u32
+        b_layout.preferred_read_shape = dim_arr(ndim, |dim| {
+            if is_broadcast[dim] {
+                // TODO: start with 1, and scale up to preferred_read_size_hint
+                new_shape_slice[dim] as u32
             } else {
-                b_layout.preferred_read_shape[d]
+                b_layout.preferred_read_shape[dim]
             }
         });
 
@@ -150,15 +151,15 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 
         // Read from inner with broadcast dims collapsed to 0..1.
         // tmp_buf is C-contiguous over inner_read_shape.
-        let inner_index = dim_arr(ndim, |d| {
-            if self.is_broadcast[d] {
+        let inner_index = dim_arr(ndim, |dim| {
+            if self.is_broadcast[dim] {
                 0..1
             } else {
-                index[d].clone()
+                index[dim].clone()
             }
         });
-        let inner_read_shape = dim_arr(ndim, |d| {
-            (inner_index[d].end - inner_index[d].start) as usize
+        let inner_read_shape = dim_arr(ndim, |dim| {
+            (inner_index[dim].end - inner_index[dim].start) as usize
         });
         let n_bytes = inner_read_shape.iter().product::<usize>() * itemsize;
         let mut tmp_buf = context.tmp_buf(n_bytes, dtype.alignment());
@@ -169,14 +170,14 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         // A zero stride means advancing along that output axis always reads the same src byte,
         // which is exactly the repeat-element semantics of broadcasting.
         let mut src_strides = default_strides(&inner_read_shape, itemsize);
-        for d in 0..ndim {
-            if self.is_broadcast[d] {
-                src_strides[d] = 0;
+        for dim in 0..ndim {
+            if self.is_broadcast[dim] {
+                src_strides[dim] = 0;
             }
         }
 
         // Destination strides: C-contiguous over the requested output sub-shape.
-        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let dst_strides = default_strides(&out_shape, itemsize);
 
         unsafe {

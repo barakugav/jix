@@ -41,16 +41,15 @@ impl<Ix> NdIterExtBlockOffsetSize<Ix>
 where
     Ix: Idx,
 {
-    pub(crate) fn new(shape: &[Ix], begin: &[Ix], end: &[Ix], block_shape: &[Ix]) -> Self {
-        let ndim = shape.len();
-        assert_eq!(ndim, begin.len());
+    #[inline(always)]
+    pub(crate) fn new(begin: &[Ix], end: &[Ix], block_shape: &[Ix]) -> Self {
+        let ndim = begin.len();
         assert_eq!(ndim, end.len());
         assert_eq!(ndim, block_shape.len());
 
         let mut borders = DimArray::new();
         for dim in 0..ndim {
             assert!(begin[dim] <= end[dim]);
-            assert!(end[dim] <= shape[dim]);
             let block_len = block_shape[dim];
 
             let low_block_inner_offset = begin[dim] % block_len;
@@ -96,7 +95,7 @@ where
     where
         Self: 'a;
 
-    #[inline]
+    #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: Ix, after: Ix, _diff: Ix) {
         let (low, high) = &self.borders[dim];
         let (offset, size) = if after != high.index {
@@ -109,7 +108,7 @@ where
         self.current_block_size[dim] = size;
     }
 
-    #[inline]
+    #[inline(always)]
     fn on_decrease(&mut self, dim: usize, _before: Ix, after: Ix, _diff: Ix) {
         let (low, high) = &self.borders[dim];
         let (offset, size) = if after != low.index {
@@ -127,6 +126,7 @@ where
         (&self.inner_offset, &self.current_block_size)
     }
 
+    #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
         assert_eq!(self.block_shape.len(), ndim);
         assert_eq!(self.borders.len(), ndim);
@@ -142,12 +142,11 @@ mod tests {
     use crate::util::Idx;
 
     fn make_iter<Ix: Idx>(
-        shape: &[Ix],
         begin: &[Ix],
         end: &[Ix],
         block: &[Ix],
     ) -> NdIter<Ix, NdIterExtBlockOffsetSize<Ix>> {
-        let ext = NdIterExtBlockOffsetSize::new(shape, begin, end, block);
+        let ext = NdIterExtBlockOffsetSize::new(begin, end, block);
         let block_begin: Vec<Ix> = begin.iter().zip(block).map(|(&b, &c)| b / c).collect();
         let block_end: Vec<Ix> = end
             .iter()
@@ -196,7 +195,7 @@ mod tests {
     #[test]
     fn full_1d_one_block() {
         assert_eq!(
-            collect(make_iter(&[4usize], &[0], &[4], &[4])),
+            collect(make_iter(&[0usize], &[4], &[4])),
             vec![item(&[0], &[0], &[4])],
         );
     }
@@ -204,7 +203,7 @@ mod tests {
     #[test]
     fn full_1d_two_blocks() {
         assert_eq!(
-            collect(make_iter(&[6usize], &[0], &[6], &[3])),
+            collect(make_iter(&[0usize], &[6], &[3])),
             vec![item(&[0], &[0], &[3]), item(&[1], &[0], &[3])],
         );
     }
@@ -212,7 +211,7 @@ mod tests {
     #[test]
     fn full_1d_three_blocks() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[0], &[9], &[3])),
+            collect(make_iter(&[0usize], &[9], &[3])),
             vec![
                 item(&[0], &[0], &[3]),
                 item(&[1], &[0], &[3]),
@@ -224,7 +223,7 @@ mod tests {
     #[test]
     fn single_block_full() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[0], &[3], &[3])),
+            collect(make_iter(&[0usize], &[3], &[3])),
             vec![item(&[0], &[0], &[3])],
         );
     }
@@ -232,7 +231,7 @@ mod tests {
     #[test]
     fn single_block_offset_start() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[1], &[3], &[3])),
+            collect(make_iter(&[1usize], &[3], &[3])),
             vec![item(&[0], &[1], &[2])],
         );
     }
@@ -240,7 +239,7 @@ mod tests {
     #[test]
     fn single_block_interior_slice() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[1], &[2], &[3])),
+            collect(make_iter(&[1usize], &[2], &[3])),
             vec![item(&[0], &[1], &[1])],
         );
     }
@@ -248,7 +247,7 @@ mod tests {
     #[test]
     fn single_block_in_middle_of_array() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[3], &[5], &[3])),
+            collect(make_iter(&[3usize], &[5], &[3])),
             vec![item(&[1], &[0], &[2])],
         );
     }
@@ -256,7 +255,7 @@ mod tests {
     #[test]
     fn single_block_mid_offset_in_middle_of_array() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[4], &[5], &[3])),
+            collect(make_iter(&[4usize], &[5], &[3])),
             vec![item(&[1], &[1], &[1])],
         );
     }
@@ -264,7 +263,7 @@ mod tests {
     #[test]
     fn non_aligned_start_two_blocks() {
         assert_eq!(
-            collect(make_iter(&[6usize], &[1], &[6], &[3])),
+            collect(make_iter(&[1usize], &[6], &[3])),
             vec![item(&[0], &[1], &[2]), item(&[1], &[0], &[3])],
         );
     }
@@ -272,7 +271,7 @@ mod tests {
     #[test]
     fn non_aligned_start_three_blocks() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[2], &[9], &[3])),
+            collect(make_iter(&[2usize], &[9], &[3])),
             vec![
                 item(&[0], &[2], &[1]),
                 item(&[1], &[0], &[3]),
@@ -284,7 +283,7 @@ mod tests {
     #[test]
     fn start_at_block_boundary() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[3], &[9], &[3])),
+            collect(make_iter(&[3usize], &[9], &[3])),
             vec![item(&[1], &[0], &[3]), item(&[2], &[0], &[3])],
         );
     }
@@ -292,7 +291,7 @@ mod tests {
     #[test]
     fn non_aligned_end_two_blocks() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[0], &[5], &[3])),
+            collect(make_iter(&[0usize], &[5], &[3])),
             vec![item(&[0], &[0], &[3]), item(&[1], &[0], &[2])],
         );
     }
@@ -300,7 +299,7 @@ mod tests {
     #[test]
     fn non_aligned_end_three_blocks() {
         assert_eq!(
-            collect(make_iter(&[12usize], &[0], &[10], &[4])),
+            collect(make_iter(&[0usize], &[10], &[4])),
             vec![
                 item(&[0], &[0], &[4]),
                 item(&[1], &[0], &[4]),
@@ -312,7 +311,7 @@ mod tests {
     #[test]
     fn end_aligned_to_block_boundary_within_array() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[0], &[6], &[3])),
+            collect(make_iter(&[0usize], &[6], &[3])),
             vec![item(&[0], &[0], &[3]), item(&[1], &[0], &[3])],
         );
     }
@@ -320,7 +319,7 @@ mod tests {
     #[test]
     fn non_aligned_both_two_blocks() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[1], &[5], &[3])),
+            collect(make_iter(&[1usize], &[5], &[3])),
             vec![item(&[0], &[1], &[2]), item(&[1], &[0], &[2])],
         );
     }
@@ -328,7 +327,7 @@ mod tests {
     #[test]
     fn non_aligned_both_three_blocks() {
         assert_eq!(
-            collect(make_iter(&[9usize], &[1], &[7], &[3])),
+            collect(make_iter(&[1usize], &[7], &[3])),
             vec![
                 item(&[0], &[1], &[2]),
                 item(&[1], &[0], &[3]),
@@ -340,7 +339,7 @@ mod tests {
     #[test]
     fn non_aligned_both_four_blocks() {
         assert_eq!(
-            collect(make_iter(&[12usize], &[1], &[11], &[4])),
+            collect(make_iter(&[1usize], &[11], &[4])),
             vec![
                 item(&[0], &[1], &[3]),
                 item(&[1], &[0], &[4]),
@@ -352,7 +351,7 @@ mod tests {
     #[test]
     fn block_larger_than_range() {
         assert_eq!(
-            collect(make_iter(&[10usize], &[2], &[6], &[8])),
+            collect(make_iter(&[2usize], &[6], &[8])),
             vec![item(&[0], &[2], &[4])],
         );
     }
@@ -360,7 +359,7 @@ mod tests {
     #[test]
     fn index_type_u32_full_array() {
         assert_eq!(
-            collect(make_iter(&[6u32], &[0], &[6], &[3])),
+            collect(make_iter(&[0u32], &[6], &[3])),
             vec![item(&[0], &[0], &[3]), item(&[1], &[0], &[3])],
         );
     }
@@ -368,7 +367,7 @@ mod tests {
     #[test]
     fn index_type_u32_non_aligned_both() {
         assert_eq!(
-            collect(make_iter(&[9u32], &[1], &[7], &[3])),
+            collect(make_iter(&[1u32], &[7], &[3])),
             vec![
                 item(&[0], &[1], &[2]),
                 item(&[1], &[0], &[3]),
@@ -380,7 +379,7 @@ mod tests {
     #[test]
     fn index_type_u64_full_array() {
         assert_eq!(
-            collect(make_iter(&[9u64], &[0], &[9], &[3])),
+            collect(make_iter(&[0u64], &[9], &[3])),
             vec![
                 item(&[0], &[0], &[3]),
                 item(&[1], &[0], &[3]),
@@ -392,7 +391,7 @@ mod tests {
     #[test]
     fn full_2d_aligned() {
         assert_eq!(
-            collect(make_iter(&[6usize, 4], &[0, 0], &[6, 4], &[3, 2])),
+            collect(make_iter(&[0usize, 0], &[6, 4], &[3, 2])),
             vec![
                 item(&[0, 0], &[0, 0], &[3, 2]),
                 item(&[0, 1], &[0, 0], &[3, 2]),
@@ -405,7 +404,7 @@ mod tests {
     #[test]
     fn full_2d_asymmetric_blocks() {
         assert_eq!(
-            collect(make_iter(&[4usize, 9], &[0, 0], &[4, 9], &[2, 3])),
+            collect(make_iter(&[0usize, 0], &[4, 9], &[2, 3])),
             vec![
                 item(&[0, 0], &[0, 0], &[2, 3]),
                 item(&[0, 1], &[0, 0], &[2, 3]),
@@ -420,7 +419,7 @@ mod tests {
     #[test]
     fn non_aligned_start_2d() {
         assert_eq!(
-            collect(make_iter(&[6usize, 4], &[1, 1], &[6, 4], &[3, 2])),
+            collect(make_iter(&[1usize, 1], &[6, 4], &[3, 2])),
             vec![
                 item(&[0, 0], &[1, 1], &[2, 1]),
                 item(&[0, 1], &[1, 0], &[2, 2]),
@@ -433,7 +432,7 @@ mod tests {
     #[test]
     fn non_aligned_start_2d_asymmetric() {
         assert_eq!(
-            collect(make_iter(&[9usize, 9], &[1, 2], &[9, 9], &[3, 3])),
+            collect(make_iter(&[1usize, 2], &[9, 9], &[3, 3])),
             vec![
                 item(&[0, 0], &[1, 2], &[2, 1]),
                 item(&[0, 1], &[1, 0], &[2, 3]),
@@ -451,7 +450,7 @@ mod tests {
     #[test]
     fn non_aligned_both_2d() {
         assert_eq!(
-            collect(make_iter(&[9usize, 9], &[1, 1], &[7, 7], &[3, 3])),
+            collect(make_iter(&[1usize, 1], &[7, 7], &[3, 3])),
             vec![
                 item(&[0, 0], &[1, 1], &[2, 2]),
                 item(&[0, 1], &[1, 0], &[2, 3]),
@@ -468,12 +467,7 @@ mod tests {
 
     #[test]
     fn full_3d_aligned() {
-        let got = collect(make_iter(
-            &[4usize, 6, 8],
-            &[0, 0, 0],
-            &[4, 6, 8],
-            &[2, 3, 4],
-        ));
+        let got = collect(make_iter(&[0usize, 0, 0], &[4, 6, 8], &[2, 3, 4]));
         let expected: Vec<BlocksIterItemOwned<usize>> = (0..2)
             .flat_map(|i| {
                 (0..2).flat_map(move |j| {

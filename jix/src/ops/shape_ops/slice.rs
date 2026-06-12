@@ -90,7 +90,7 @@ impl<S: ArrayStorage> Slice<S> {
         })?;
         let no_steps = slice.iter().all(|ds| ds.is_contiguous());
 
-        let shape = dim_arr(ndim, |d| slice[d].len());
+        let shape = dim_arr(ndim, |dim| slice[dim].len());
 
         let mut b_layout = array.spec().blocks_layout.clone();
         for dim in 0..ndim {
@@ -144,14 +144,14 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // -----------------------------------------------------------------------
         // Fast path: all dims have step == 1.
         //
-        // Each requested output range [a, b) for dim d maps to inner range
+        // Each requested output range [a, b) for dim maps to inner range
         // [start + a, start + b). A single forwarded call suffices.
         // -----------------------------------------------------------------------
         if self.no_steps {
             let ndim = self.slice.len();
-            let inner_index = dim_arr(ndim, |d| {
-                let off = self.slice[d].start;
-                (index[d].start + off)..(index[d].end + off)
+            let inner_index = dim_arr(ndim, |dim| {
+                let off = self.slice[dim].start;
+                (index[dim].start + off)..(index[dim].end + off)
             });
             return self.array.read_data(&inner_index, buf, context);
         }
@@ -197,13 +197,13 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         check_get_buffer_size(index, dtype, buf)?;
         let ndim = self.slice.len();
         let itemsize = dtype.itemsize() as usize;
-        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let dst_strides = default_strides(&out_shape, itemsize);
 
         // inner_read_shape: 1 for strided dims, full range for non-strided dims.
-        let inner_read_shape = dim_arr(ndim, |d| {
-            if self.slice[d].is_contiguous() {
-                out_shape[d]
+        let inner_read_shape = dim_arr(ndim, |dim| {
+            if self.slice[dim].is_contiguous() {
+                out_shape[dim]
             } else {
                 1
             }
@@ -213,21 +213,21 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, dtype.alignment());
 
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
-        let iter_shape = dim_arr(ndim, |d| {
-            if self.slice[d].is_contiguous() {
+        let iter_shape = dim_arr(ndim, |dim| {
+            if self.slice[dim].is_contiguous() {
                 1
             } else {
-                out_shape[d] as u64
+                out_shape[dim] as u64
             }
         });
         let mut iter = NdIter::new(&iter_shape, ());
         while let Some((idx, ())) = iter.next() {
-            let inner_index = dim_arr(ndim, |d| {
-                let ds = &self.slice[d];
+            let inner_index = dim_arr(ndim, |dim| {
+                let ds = &self.slice[dim];
                 if ds.is_contiguous() {
-                    (ds.start + index[d].start)..(ds.start + index[d].end)
+                    (ds.start + index[dim].start)..(ds.start + index[dim].end)
                 } else {
-                    let pos = ds.start + (index[d].start + idx[d]) * ds.step;
+                    let pos = ds.start + (index[dim].start + idx[dim]) * ds.step;
                     pos..(pos + 1)
                 }
             });
@@ -235,8 +235,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             self.array.read_data(&inner_index, tmp, context)?;
 
             let dst_byte_offset = (0..ndim)
-                .filter(|&d| !self.slice[d].is_contiguous())
-                .map(|d| idx[d] as usize * dst_strides[d])
+                .filter(|&dim| !self.slice[dim].is_contiguous())
+                .map(|dim| idx[dim] as usize * dst_strides[dim])
                 .sum::<usize>();
             let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
             unsafe {

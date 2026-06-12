@@ -69,7 +69,7 @@ pub struct Plain<A, ET, D> {
 impl<A, D> Plain<A, TypeDyn, D> {
     /// Construct a `Plain` storage from a raw pointer, shape, and byte strides.
     ///
-    /// `storage` is any value that owns (or keeps alive) the memory pointed to
+    /// `allocation` is any value that owns (or keeps alive) the memory pointed to
     /// by `data`; it is stored alongside the pointer so the borrow checker can
     /// enforce lifetime constraints through `A`'s type parameter.
     ///
@@ -178,7 +178,7 @@ impl<T, D> Array<Plain<Vec<T>, Ty<T>, D>> {
         let strides = arr
             .strides()
             .iter()
-            .map(|&s| usize::try_from(s).unwrap() * std::mem::size_of::<T>())
+            .map(|&s| usize::try_from(s).unwrap() * size_of::<T>())
             .collect::<DimArray<_>>();
 
         let (allocation, allocation_offset) = arr.into_raw_vec_and_offset();
@@ -216,7 +216,7 @@ impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
         let strides = arr
             .strides()
             .iter()
-            .map(|&s| s as usize * std::mem::size_of::<T>())
+            .map(|&s| s as usize * size_of::<T>())
             .collect::<DimArray<_>>();
 
         let data_ptr = arr.as_ptr().cast::<u8>();

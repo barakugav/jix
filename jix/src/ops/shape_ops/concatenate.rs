@@ -3,7 +3,7 @@ use std::ops::{Not, Range};
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorageSpec, BlocksLayout};
+use crate::storage::ArrayStorageSpec;
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -68,7 +68,6 @@ where
     borders: Vec<u64>,
 
     shape: ArraysT::Dimension,
-    blocks_layout: BlocksLayout,
 }
 impl<ArraysT> Concatenate<ArraysT>
 where
@@ -123,7 +122,6 @@ where
         let shape = ArraysT::Dimension::from_slice(&shape).unwrap();
         Ok(Self {
             shape,
-            blocks_layout: arrays.spec(0).blocks_layout.clone(),
             arrays,
             concat_axis: axis,
             borders,
@@ -168,7 +166,9 @@ where
 
         let itemsize = dtype.itemsize() as usize;
 
-        let output_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let output_shape = dim_arr(index.len(), |dim| {
+            (index[dim].end - index[dim].start) as usize
+        });
         let output_strides = default_strides(&output_shape, itemsize);
         let concat_stride = output_strides[self.concat_axis];
         // When all dims before concat_axis have size <=1 each array's data is contiguous in buf.
@@ -205,15 +205,15 @@ where
             let buf_concat_offset = (overlap_start - req_start) as usize;
 
             // Sub-index into array `arr`: same as `index` but concat axis uses local coords.
-            let sub_index = dim_arr(index.len(), |d| {
-                if d == self.concat_axis {
+            let sub_index = dim_arr(index.len(), |dim| {
+                if dim == self.concat_axis {
                     local_start..local_end
                 } else {
-                    index[d].clone()
+                    index[dim].clone()
                 }
             });
-            let sub_shape = dim_arr(index.len(), |d| {
-                (sub_index[d].end - sub_index[d].start) as usize
+            let sub_shape = dim_arr(index.len(), |dim| {
+                (sub_index[dim].end - sub_index[dim].start) as usize
             });
             let sub_size_bytes = sub_shape.iter().product::<usize>() * itemsize;
             let buf_offset = buf_concat_offset * concat_stride;
@@ -235,11 +235,11 @@ where
                 // dst: output_strides for dims before concat_axis (wider due to full output width),
                 //      sub_strides for dims at/after (sizes match the output there).
                 let sub_strides = default_strides(&sub_shape, itemsize);
-                let dst_strides = dim_arr(index.len(), |d| {
-                    if d < self.concat_axis {
-                        output_strides[d]
+                let dst_strides = dim_arr(index.len(), |dim| {
+                    if dim < self.concat_axis {
+                        output_strides[dim]
                     } else {
-                        sub_strides[d]
+                        sub_strides[dim]
                     }
                 });
 
@@ -268,10 +268,7 @@ where
         self.arrays.dtype(0)
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.arrays.spec(0)
-        }
+        self.arrays.spec(0)
     }
 }
 

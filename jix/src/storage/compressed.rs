@@ -315,7 +315,6 @@ where
             (
                 nd_iter_ext_logical_global_index(&self.block_grid_shape, &block_begin),
                 NdIterExtBlockOffsetSize::new(
-                    shape,
                     &elem_begin,
                     &elem_end,
                     &dim_arr(ndim, |dim| block_shape[dim] as u64),

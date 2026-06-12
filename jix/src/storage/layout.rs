@@ -282,7 +282,7 @@ impl BlocksLayout {
                 .unwrap_or(multiple_of)
         };
         debug_assert!(1 <= block_len && block_len <= dim_len);
-        block_len as BlockSize
+        block_len.try_into().unwrap()
     }
 
     /// Recommended storage block shape, in items per dimension.

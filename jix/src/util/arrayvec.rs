@@ -26,7 +26,7 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
     #[inline]
     #[track_caller]
     pub const fn new() -> ArrayVec<T, CAP> {
-        if std::mem::size_of::<usize>() > std::mem::size_of::<LenUint>() {
+        if size_of::<usize>() > size_of::<LenUint>() {
             assert!(
                 CAP <= LenUint::MAX as usize,
                 "ArrayVec: capacity exceeds maximum supported capacity ",

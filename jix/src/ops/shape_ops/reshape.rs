@@ -303,10 +303,13 @@ where
             inv
         };
         debug_assert_eq!(
-            same_logical_stride.iter().filter(|d| d.is_some()).count(),
+            same_logical_stride
+                .iter()
+                .filter(|dim| dim.is_some())
+                .count(),
             same_logical_stride_inv
                 .iter()
-                .filter(|d| d.is_some())
+                .filter(|dim| dim.is_some())
                 .count()
         );
 
@@ -351,8 +354,8 @@ where
                     index[new_dim as usize].clone()
                 } else {
                     let flat: u64 = (0..ndim)
-                        .filter(|&d| same_logical_stride[d].is_none())
-                        .map(|d| (index[d].start + idx[d]) * new_logical_strides[d])
+                        .filter(|&dim| same_logical_stride[dim].is_none())
+                        .map(|dim| (index[dim].start + idx[dim]) * new_logical_strides[dim])
                         .sum();
                     let orig_coord = (flat / orig_logical_strides[dim]) % orig_shape[dim];
                     orig_coord..(orig_coord + 1)
@@ -363,8 +366,8 @@ where
             self.array.read_data(&read_range, tmp_buf, context)?;
 
             let dst_byte_offset: usize = (0..ndim)
-                .filter(|&d| same_logical_stride[d].is_none())
-                .map(|d| idx[d] as usize * dst_strides[d] as usize)
+                .filter(|&dim| same_logical_stride[dim].is_none())
+                .map(|dim| idx[dim] as usize * dst_strides[dim] as usize)
                 .sum();
             let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
             unsafe {

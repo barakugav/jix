@@ -23,7 +23,7 @@
 //! - **This module** - jix-specific traits for cases not covered
 //!   by the above: [`Abs`] (handles `Complex<T>`), [`Maximum`]/[`Minimum`] (NaN-propagating, unlike
 //!   `f32::max`/`f32::min`), [`Cast<D>`] for type conversion, and the `Reduce*` family
-//!   ([`ReduceSum`], [`ReduceMax`], [`ReduceMean`], [`ArgMax`], ...) for reductions.
+//!   ([`Sum`], [`ReduceMax`], [`Mean`], [`ArgMax`], ...) for reductions.
 //!
 
 #[cfg(feature = "half")]

@@ -42,7 +42,7 @@ pub(crate) mod _traits {
                 }
             })*
         };
-}
+    }
     macro_rules! impl_float_maximum {
         ($($t:ty),* $(,)?) => {
             $(impl Maximum for $t {
@@ -82,23 +82,25 @@ pub(crate) mod _traits {
     /// equivalent. The trait therefore provides a single uniform interface usable across all
     /// supported numeric dtypes.
     pub trait Minimum<Rhs = Self> {
+        // TODO: rename this to MinimumPartial
+
         /// The output element type of this minimum operation.
         type Output;
         /// Return the element-wise minimum of `self` and `other`, propagating `NaN` for floats.
         fn minimum(self, other: Rhs) -> Self::Output;
     }
     macro_rules! impl_integer_minimum {
-    ($($t:ty),* $(,)?) => {
-        $(impl Minimum for $t { // TODO: rename
-            type Output = Self;
+        ($($t:ty),* $(,)?) => {
+            $(impl Minimum for $t {
+                type Output = Self;
 
-            #[inline(always)]
-            fn minimum(self, other: Self) -> Self {
-                std::cmp::min(self, other)
-            }
-        })*
-    };
-}
+                #[inline(always)]
+                fn minimum(self, other: Self) -> Self {
+                    std::cmp::min(self, other)
+                }
+            })*
+        };
+    }
     macro_rules! impl_float_minimum {
     ($($t:ty),* $(,)?) => {
         $(impl Minimum for $t {
