@@ -132,9 +132,14 @@ impl NdIterExtension for NdIterExtBlockOffsetSize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dimension::DimDyn;
     use crate::util::iter::NdIter;
 
-    fn make_iter(begin: &[u64], end: &[u64], block: &[u64]) -> NdIter<NdIterExtBlockOffsetSize> {
+    fn make_iter(
+        begin: &[u64],
+        end: &[u64],
+        block: &[u64],
+    ) -> NdIter<DimDyn, NdIterExtBlockOffsetSize> {
         let ext = NdIterExtBlockOffsetSize::new(begin, end, block);
         let block_begin = begin
             .iter()
@@ -156,7 +161,7 @@ mod tests {
         block_size: Vec<u64>,
     }
 
-    fn collect(mut iter: NdIter<NdIterExtBlockOffsetSize>) -> Vec<BlocksIterItemOwned> {
+    fn collect(mut iter: NdIter<DimDyn, NdIterExtBlockOffsetSize>) -> Vec<BlocksIterItemOwned> {
         let mut out = Vec::new();
         while let Some((block_idx, (inner_offset, block_size))) = iter.next() {
             out.push(BlocksIterItemOwned {

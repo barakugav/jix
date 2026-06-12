@@ -21,7 +21,6 @@
 - add link (pyproject metadata + readme) to readthedocs
 - build wheels for windows
 - general generic reduction, .fold
-- make NdIter generic of D
 - add Validation enum when reading array from disk, validating offsets array is in bound
 - add NdIter.foreach() and NdIter.try_foreach()
 - have some SIMD friendly api in NdIter.foreach(), like when detecting the last dim is continuous
@@ -32,3 +31,4 @@
 - change offsets array to have length of num_blocks-1 instead of num_blocks+1
 - py div, true_div, floor_div
 - slice op in python api
+- bump pyo3 to 0.29

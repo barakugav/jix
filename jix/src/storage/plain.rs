@@ -342,7 +342,7 @@ where
             nd_copy(
                 src_ptr,
                 dst_ptr,
-                &out_shape,
+                D::from_slice(&out_shape).unwrap(),
                 &self.strides,
                 &out_strides,
                 itemsize,

@@ -151,7 +151,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                &sub_shape_out,
+                S::Dimension::from_slice(&sub_shape_out).unwrap(),
                 &src_strides_out,
                 &dst_strides,
                 itemsize,

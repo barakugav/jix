@@ -294,8 +294,8 @@ where
             "non-reduced dim must produce at most one bulk-block",
         );
         let mut bulk_iter = NdIter::new_with_begin(
-            &bulk_grid_begin,
-            &bulk_grid_end,
+            S::Dimension::from_slice(&bulk_grid_begin).unwrap(),
+            S::Dimension::from_slice(&bulk_grid_end).unwrap(),
             NdIterExtBlockOffsetSize::new(
                 &dim_arr(inner_ndim, |dim| inner_range_full[dim].start),
                 &dim_arr(inner_ndim, |dim| inner_range_full[dim].end),
@@ -343,8 +343,8 @@ where
             let tile_grid_begin = dim_arr(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
             let tile_grid_end = dim_arr(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
             let mut tile_iter = NdIter::new_with_begin(
-                &tile_grid_begin,
-                &tile_grid_end,
+                S::Dimension::from_slice(&tile_grid_begin).unwrap(),
+                S::Dimension::from_slice(&tile_grid_end).unwrap(),
                 NdIterExtBlockOffsetSize::new(&bulk_begin, &bulk_end, &tile_shape),
             );
             debug_assert!(
@@ -400,7 +400,7 @@ where
                 };
 
                 let mut out_iter = NdIter::new(
-                    &tile_out_shape,
+                    D::from_slice(&tile_out_shape).unwrap(),
                     (
                         NdIterExtStridesPtr::new(
                             &items_buf_strides_for_out_iter,
@@ -423,7 +423,7 @@ where
 
                 while let Some((_idx, (src_base, state))) = out_iter.next() {
                     let reduction_iter = NdIter::new(
-                        &reduction_shape,
+                        S::Dimension::from_slice(&reduction_shape).unwrap(),
                         NdIterExtStridesPtr::new(&items_buf_strides, src_base),
                     );
                     debug_assert_eq!(reduction_size, reduction_iter.len());
@@ -483,7 +483,7 @@ where
         let out_strides = default_strides(&out_shape, size_of::<K::Output>() as u64);
         if state_initialized {
             let mut out_iter = NdIter::new(
-                &out_shape,
+                D::from_slice(&out_shape).unwrap(),
                 (
                     // CAREFUL: state_ptr and out_ptr may alias
                     NdIterExtStridesPtrMut::new(&state_strides, state_ptr.cast()),
@@ -502,7 +502,7 @@ where
         } else {
             // Empty reduction: write the empty-stream result to every output.
             let mut out_iter = NdIter::new(
-                &out_shape,
+                D::from_slice(&out_shape).unwrap(),
                 NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);

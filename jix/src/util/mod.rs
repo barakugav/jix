@@ -12,6 +12,7 @@ use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use iter::NdIter;
 
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray};
+use crate::{Dimension, IntoDimension};
 
 use std::mem::MaybeUninit;
 
@@ -270,17 +271,20 @@ impl<'a> AlternatingBuffers<'a> {
     }
 }
 
-pub(crate) unsafe fn nd_copy<S2, S3>(
+pub(crate) unsafe fn nd_copy<D, S2, S3>(
     src: *const u8,
     dst: *mut u8,
-    shape: &[u64],
+    shape: impl IntoDimension<Dimension = D>,
     src_strides: &[S2],
     dst_strides: &[S3],
     itemsize: usize,
 ) where
+    D: Dimension,
     S2: Idx + 'static,
     S3: Idx + 'static,
 {
+    let shape = shape.into_dimension().unwrap();
+    let shape = shape.as_slice();
     let ndim = shape.len();
     assert_eq!(ndim, src_strides.len());
     assert_eq!(ndim, dst_strides.len());

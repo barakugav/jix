@@ -184,7 +184,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                &out_shape,
+                S::Dimension::from_slice(&out_shape).unwrap(),
                 &src_strides,
                 &dst_strides,
                 itemsize,

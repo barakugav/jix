@@ -220,7 +220,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 out_shape[dim]
             }
         });
-        let mut iter = NdIter::new(&iter_shape, ());
+        let mut iter = NdIter::new(S::Dimension::from_slice(&iter_shape).unwrap(), ());
         while let Some((idx, ())) = iter.next() {
             let inner_index = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
@@ -243,7 +243,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 nd_copy(
                     tmp.as_ptr(),
                     dst_ptr,
-                    &inner_read_shape,
+                    Self::Dimension::from_slice(&inner_read_shape).unwrap(),
                     &src_strides,
                     &dst_strides,
                     itemsize as usize,

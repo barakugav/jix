@@ -144,8 +144,9 @@ where
             .chain(index[self.stack_axis + 1..].iter())
             .cloned()
             .collect::<DimArray<_>>();
-        let arr_range_shape =
-            dim_arr(arr_range.len(), |dim| arr_range[dim].end - arr_range[dim].start);
+        let arr_range_shape = dim_arr(arr_range.len(), |dim| {
+            arr_range[dim].end - arr_range[dim].start
+        });
         let itemsize = dtype.itemsize() as usize;
         let arr_size_bytes = arr_range_shape.iter().product::<u64>() as usize * itemsize;
         let mut tmp_buf = in_place
@@ -187,7 +188,7 @@ where
                     nd_copy(
                         arr_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
-                        &arr_range_shape,
+                        ArraysT::Dimension::from_slice(&arr_range_shape).unwrap(),
                         arr_strides,
                         out_strides,
                         itemsize,

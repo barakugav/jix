@@ -346,7 +346,7 @@ where
                 index[dim].end - index[dim].start
             }
         });
-        let mut iter = NdIter::new(&iteration_shape, ());
+        let mut iter = NdIter::new(D::from_slice(&iteration_shape).unwrap(), ());
         while let Some((idx, ())) = iter.next() {
             let read_range = dim_arr(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {
@@ -374,7 +374,7 @@ where
                 nd_copy(
                     tmp_buf.as_ptr(),
                     dst_ptr,
-                    &new_read_shape,
+                    D::from_slice(&new_read_shape).unwrap(),
                     &tmp_buf_strides,
                     &dst_strides,
                     dtype.itemsize() as _,

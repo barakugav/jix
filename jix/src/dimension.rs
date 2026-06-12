@@ -116,6 +116,9 @@ pub trait Dimension:
     where
         Self: 'a;
 
+    /// Construct a `Dimension` with all axes of size zero.
+    fn zeros(ndim: usize) -> Result<Self>;
+
     /// Construct a `Dimension` value from a shape slice.
     ///
     /// Returns an error if the slice length does not match the statically expected ndim (for
@@ -169,6 +172,17 @@ impl Dimension for DimDyn {
     type Smaller = Self;
     type Larger = Self;
     type Index<'a> = &'a [u64];
+
+    #[inline(always)]
+    fn zeros(ndim: usize) -> Result<Self> {
+        if ndim > NDIM_MAX {
+            bail!(
+                TooManyDimensions,
+                "cannot create DimDyn with ndim {ndim}: exceeds NDIM_MAX ({NDIM_MAX})"
+            );
+        }
+        Ok(Self(dim_arr(ndim, |_| 0)))
+    }
 
     #[inline(always)]
     fn from_slice(slice: &[u64]) -> Result<Self> {
@@ -266,6 +280,18 @@ macro_rules! impl_dim {
             type Smaller = crate::util::or_else!($({ $smaller })? or { Dim<{ $dim - 1 }> });
             type Larger = crate::util::or_else!($({ $larger })? or { Dim<{ $dim + 1 }> });
             type Index<'a> = $index;
+
+            #[inline(always)]
+            fn zeros(ndim: usize) -> Result<Self> {
+                if ndim != $dim {
+                    bail!(
+                        TooManyDimensions,
+                        "cannot create Dim<{}> with ndim {ndim}",
+                        $dim
+                    );
+                }
+                Ok(Self([0; $dim]))
+            }
 
             #[inline(always)]
             fn from_slice(slice: &[u64]) -> Result<Self> {

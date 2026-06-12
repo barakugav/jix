@@ -450,7 +450,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 let ndim = self.shape().len();
                 let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
                 let mut iter = NdIter::new(
-                    &read_shape,
+                    D::from_slice(&read_shape).unwrap(),
                     NdIterExtStridesPtrMut::new(
                         &default_strides(&read_shape, size_of::<T>() as u64),
                         buf.as_mut_ptr(),
@@ -816,8 +816,8 @@ impl<S: ArrayStorage> Array<S> {
         let elem_end = dim_arr(ndim, |dim| index[dim].end);
         // NdIter that yields blocks of size <= read_shape
         let mut block_iter = NdIter::new_with_begin(
-            &block_begin,
-            &block_end,
+            S::Dimension::from_slice(&block_begin).unwrap(),
+            S::Dimension::from_slice(&block_end).unwrap(),
             NdIterExtBlockOffsetSize::new(
                 &elem_begin,
                 &elem_end,
@@ -852,7 +852,7 @@ impl<S: ArrayStorage> Array<S> {
                 nd_copy(
                     tmp_buf.as_ptr(),
                     dst_ptr,
-                    block_size,
+                    S::Dimension::from_slice(&block_size).unwrap(),
                     &default_strides(block_size, itemsize as _),
                     &out_strides,
                     itemsize,
@@ -1217,7 +1217,7 @@ impl<S: ArrayStorage> Array<S> {
         let mut encoder = Encoder::new(encoder_cfg, dtype.clone())?;
 
         let mut block_iter = NdIter::new(
-            &grid_shape,
+            S::Dimension::from_slice(&grid_shape).unwrap(),
             NdIterExtBlockOffsetSize::new(
                 &dim_arr(ndim, |_| 0),
                 shape,
@@ -1302,7 +1302,7 @@ impl<S: ArrayStorage> Array<S> {
                             nd_copy(
                                 read_data_buf.as_ptr(),
                                 tmp_block_plain_ptr,
-                                block_size,
+                                S::Dimension::from_slice(&block_size).unwrap(),
                                 &src_strides,
                                 &block_strides,
                                 itemsize,

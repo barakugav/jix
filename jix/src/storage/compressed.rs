@@ -310,8 +310,8 @@ where
         let block_end = dim_arr(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64));
 
         let mut block_iter = NdIter::new_with_begin(
-            &block_begin,
-            &block_end,
+            D::from_slice(&block_begin).unwrap(),
+            D::from_slice(&block_end).unwrap(),
             (
                 nd_iter_ext_logical_global_index(&self.block_grid_shape, &block_begin),
                 NdIterExtBlockOffsetSize::new(
@@ -353,7 +353,7 @@ where
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    block_size,
+                    D::from_slice(&block_size).unwrap(),
                     &block_strides,
                     &out_strides,
                     itemsize,

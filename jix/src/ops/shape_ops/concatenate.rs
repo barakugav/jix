@@ -247,7 +247,7 @@ where
                     nd_copy(
                         read_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
-                        &sub_shape,
+                        Self::Dimension::from_slice(&sub_shape).unwrap(),
                         &sub_strides,
                         &dst_strides,
                         itemsize,
