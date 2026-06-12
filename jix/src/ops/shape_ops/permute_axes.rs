@@ -141,8 +141,8 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let src_strides_in = default_strides(&sub_shape_in, itemsize);
 
         // The output buffer is C-contiguous over sub_shape_out (output dim order).
-        let sub_shape_out = dim_arr(ndim, |i| (index[i].end - index[i].start) as usize);
-        let dst_strides = default_strides(&sub_shape_out, itemsize);
+        let sub_shape_out = dim_arr(ndim, |i| index[i].end - index[i].start);
+        let dst_strides = default_strides(&sub_shape_out, itemsize as u64);
 
         // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
         let src_strides_out = dim_arr(ndim, |i| src_strides_in[self.axes[i]]);

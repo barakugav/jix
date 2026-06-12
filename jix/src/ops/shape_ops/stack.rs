@@ -144,25 +144,24 @@ where
             .chain(index[self.stack_axis + 1..].iter())
             .cloned()
             .collect::<DimArray<_>>();
-        let arr_range_shape = dim_arr(arr_range.len(), |dim| {
-            (arr_range[dim].end - arr_range[dim].start) as usize
-        });
+        let arr_range_shape =
+            dim_arr(arr_range.len(), |dim| arr_range[dim].end - arr_range[dim].start);
         let itemsize = dtype.itemsize() as usize;
-        let arr_size_bytes = arr_range_shape.iter().product::<usize>() * itemsize;
+        let arr_size_bytes = arr_range_shape.iter().product::<u64>() as usize * itemsize;
         let mut tmp_buf = in_place
             .not()
             .then(|| context.tmp_buf(arr_size_bytes, dtype.alignment()));
         // Stride of the stack axis in the output buffer (= size of one sub-array slice).
         let stack_axis_stride =
-            arr_range_shape[self.stack_axis..].iter().product::<usize>() * itemsize;
+            arr_range_shape[self.stack_axis..].iter().product::<u64>() as usize * itemsize;
         let n_stack = (index[self.stack_axis].end - index[self.stack_axis].start) as usize;
         let out_of_place_strides = in_place.not().then(|| {
-            let arr_strides = default_strides(&arr_range_shape, itemsize);
+            let arr_strides = default_strides(&arr_range_shape, itemsize as u64);
             // For dims before the stack axis the output stride is n_stack times wider;
             // for dims at or after it the stride is unchanged.
             let mut out_strides = arr_strides.clone();
             for dim in 0..self.stack_axis {
-                out_strides[dim] *= n_stack;
+                out_strides[dim] *= n_stack as u64;
             }
             (arr_strides, out_strides)
         });

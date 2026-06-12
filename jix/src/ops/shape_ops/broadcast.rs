@@ -177,8 +177,8 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         }
 
         // Destination strides: C-contiguous over the requested output sub-shape.
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let dst_strides = default_strides(&out_shape, itemsize);
+        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let dst_strides = default_strides(&out_shape, itemsize as u64);
 
         unsafe {
             nd_copy(

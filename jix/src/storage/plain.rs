@@ -329,8 +329,8 @@ where
         check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.shape.ndim();
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_strides = default_strides(&out_shape, itemsize);
+        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as u64);
+        let out_strides = default_strides(&out_shape, itemsize as u64);
 
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])

@@ -270,15 +270,14 @@ impl<'a> AlternatingBuffers<'a> {
     }
 }
 
-pub(crate) unsafe fn nd_copy<S1, S2, S3>(
+pub(crate) unsafe fn nd_copy<S2, S3>(
     src: *const u8,
     dst: *mut u8,
-    shape: &[S1],
+    shape: &[u64],
     src_strides: &[S2],
     dst_strides: &[S3],
     itemsize: usize,
 ) where
-    S1: Idx + 'static,
     S2: Idx + 'static,
     S3: Idx + 'static,
 {
@@ -293,7 +292,7 @@ pub(crate) unsafe fn nd_copy<S1, S2, S3>(
             let src_stride: usize = src_strides[dim].try_into().unwrap();
             let dst_stride: usize = dst_strides[dim].try_into().unwrap();
             let is_contiguous = src_stride == *expected_stride && dst_stride == *expected_stride;
-            *expected_stride *= shape[dim].try_into().unwrap();
+            *expected_stride *= shape[dim] as usize;
             Some(is_contiguous)
         })
         .take_while(|&is_contiguous| is_contiguous)

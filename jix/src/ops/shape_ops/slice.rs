@@ -196,8 +196,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         let dtype = self.dtype();
         check_get_buffer_size(index, dtype, buf)?;
         let ndim = self.slice.len();
-        let itemsize = dtype.itemsize() as usize;
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let itemsize = dtype.itemsize() as u64;
+        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let dst_strides = default_strides(&out_shape, itemsize);
 
         // inner_read_shape: 1 for strided dims, full range for non-strided dims.
@@ -209,7 +209,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             }
         });
         let src_strides = default_strides(&inner_read_shape, itemsize);
-        let tmp_buf_bytes = inner_read_shape.iter().product::<usize>() * itemsize;
+        let tmp_buf_bytes = (inner_read_shape.iter().product::<u64>() * itemsize) as usize;
         let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, dtype.alignment());
 
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
@@ -217,7 +217,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             if self.slice[dim].is_contiguous() {
                 1
             } else {
-                out_shape[dim] as u64
+                out_shape[dim]
             }
         });
         let mut iter = NdIter::new(&iter_shape, ());
@@ -236,8 +236,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
 
             let dst_byte_offset = (0..ndim)
                 .filter(|&dim| !self.slice[dim].is_contiguous())
-                .map(|dim| idx[dim] as usize * dst_strides[dim])
-                .sum::<usize>();
+                .map(|dim| idx[dim] * dst_strides[dim])
+                .sum::<u64>() as usize;
             let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
             unsafe {
                 nd_copy(
@@ -246,7 +246,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                     &inner_read_shape,
                     &src_strides,
                     &dst_strides,
-                    itemsize,
+                    itemsize as usize,
                 )
             };
         }

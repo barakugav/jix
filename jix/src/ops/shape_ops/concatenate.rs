@@ -213,9 +213,9 @@ where
                 }
             });
             let sub_shape = dim_arr(index.len(), |dim| {
-                (sub_index[dim].end - sub_index[dim].start) as usize
+                (sub_index[dim].end - sub_index[dim].start) as u64
             });
-            let sub_size_bytes = sub_shape.iter().product::<usize>() * itemsize;
+            let sub_size_bytes = sub_shape.iter().product::<u64>() as usize * itemsize;
             let buf_offset = buf_concat_offset * concat_stride;
 
             let read_buf = if in_place {
@@ -234,10 +234,10 @@ where
                 // src: C-strides of sub_shape.
                 // dst: output_strides for dims before concat_axis (wider due to full output width),
                 //      sub_strides for dims at/after (sizes match the output there).
-                let sub_strides = default_strides(&sub_shape, itemsize);
+                let sub_strides = default_strides(&sub_shape, itemsize as u64);
                 let dst_strides = dim_arr(index.len(), |dim| {
                     if dim < self.concat_axis {
-                        output_strides[dim]
+                        output_strides[dim] as u64
                     } else {
                         sub_strides[dim]
                     }
