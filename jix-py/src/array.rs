@@ -1095,7 +1095,11 @@ pub fn compact(
         array = crate::ops::astype(&array, dtype)?;
     }
     let array = &array.get().arr;
-    let array = py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?;
+    let array = py.detach(|| {
+        array
+            .compact_with(params, &array.read_ctx())
+            .into_py_result()
+    })?;
 
     Ok(Array::from_core(array.into_any()))
 }
@@ -1223,7 +1227,7 @@ mod tests {
     where
         D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
     {
-        let core = CoreArray::compact_array(ndarray).unwrap();
+        let core = CoreArray::compact_ndarray(ndarray).unwrap();
         let core = core.to_type_dyn().to_dim_dyn();
         Bound::new(py, Array::from_core(core.into_any())).unwrap()
     }

@@ -29,14 +29,14 @@ use crate::{Array, ArrayStorage};
 ///   is decompressed using the decoder params. Sometimes readers of an array might want to read
 ///   smaller chunks of data, that is aligned to the block shape (or preferred read shape) to avoid
 ///   decompressing more data than necessary.
-/// - When an array is copied, such as via [`Array::copy`] or [`Array::copy_with`]: a new compressed
+/// - When an array is copied, such as via [`Array::compact`] or [`Array::compact_with`]: a new compressed
 ///   array is constructed, inheriting any unset params from the source array's storage spec. When
 ///   the copied array is a compressed array (i.e. not a lazy view), the block shape and codec
 ///   params are preserved identically by default. Arrays with lazy view storage
 ///   (e.g. from `Add`, `Reshape`, etc.) may modify the params as best as it can, trying to preserve
 ///   user-specified params where possible, but it is an approximate heuristic.
 ///   Shape modifying operations (e.g. `Reshape`, `PermuteAxes`, etc.) are especially likely to
-///   change the block layout params - consider passing explicit params to `copy_with` after these
+///   change the block layout params - consider passing explicit params to `compact_with` after these
 ///   ops, or verifying the resulting block layout is reasonable for your access pattern.
 ///
 /// # Recommended usage
@@ -44,7 +44,7 @@ use crate::{Array, ArrayStorage};
 /// Use `ArrayParams::new()` (equivalent to `ArrayParams::default()`) for most cases - the
 /// defaults select a block shape that fits in the L1 data cache using Zstd level 3 with byte
 /// shuffling. For latency-sensitive workloads where you know the access pattern, set `block_shape`
-/// explicitly and call `copy_with` instead of `copy` after shape-changing ops.
+/// explicitly and call `compact_with` instead of `compact` after shape-changing ops.
 ///
 /// ```
 /// use jix::{Array, ArrayParams};
@@ -59,7 +59,7 @@ use crate::{Array, ArrayStorage};
 /// let mut out_params = ArrayParams::new();
 /// out_params.block_shape(&[128, 128]);
 /// let ctx = za.read_ctx();
-/// let transposed = za.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
+/// let transposed = za.permute_axes(&[1, 0]).compact_with(out_params, &ctx)?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[derive(Clone, Default, Debug)]
@@ -189,7 +189,7 @@ impl ArrayParams {
     /// Fills in any unset fields in `self` from `array`'s storage params.
     ///
     /// Fields that are already set in `self` are not overwritten. This mirrors what
-    /// [`Array::copy_with`] does internally, and is useful when building params that should
+    /// [`Array::compact_with`] does internally, and is useful when building params that should
     /// inherit most settings from an existing array while overriding specific ones.
     ///
     /// # Example
@@ -205,7 +205,7 @@ impl ArrayParams {
     /// params.block_shape(&[4]);
     /// params.override_from_array(&source);
     ///
-    /// let copy = source.copy_with(params, &source.read_ctx())?;
+    /// let copy = source.compact_with(params, &source.read_ctx())?;
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub fn override_from_array<S>(&mut self, array: &Array<S>)
@@ -272,7 +272,7 @@ mod tests {
         let ctx = za.read_ctx();
         let transposed = za
             .permute_axes(&[1, 0])
-            .copy_with(out_params, &ctx)
+            .compact_with(out_params, &ctx)
             .unwrap();
         assert_eq!(transposed.shape(), &[1024, 1024]);
     }

@@ -14,7 +14,7 @@
 //! - **Lazy operation chains** - every operation (arithmetic, shape manipulation, type cast,
 //!   reduction, ...) returns a new [`Array<OpStorage<...>>`](Array), rather than a materialized result.
 //!   Computation only runs when data is explicitly requested (e.g. via
-//!   [`.to_ndarray()`](Array::to_ndarray) or [`.copy()`](Array::copy)). Because the full
+//!   [`.to_ndarray()`](Array::to_ndarray) or [`.compact()`](Array::compact)). Because the full
 //!   operation chain is encoded in the static type, the compiler can inline the entire pipeline
 //!   into a single read loop with no virtual dispatch very efficiently.
 //!
@@ -42,9 +42,15 @@
 //!     * 2.0f32               // Array<Mul<Floor<...>, Scalar<f32>>>
 //!     + ones;                // Array<Add<Mul<...>, Compact>>
 //!
-//! // Materialize the pipeline with a copy and persist to disk.
+//! // materialize the pipeline into a new compressed Array<Compact>
+//! let result_compressed = result.compact()?;
+//! // or alternatively, materialize into an uncompressed ndarray::Array
+//! let result_decompressed = result.to_ndarray()?;
+//! // or alternatively, materialize directly to disk without ever holding the
+//! // full result in memory - blocks are decompressed, transformed, re-compressed
+//! // and written one at a time.
 //! let tmp_dir = tempfile::tempdir()?;
-//! result.copy()?.write_to_file(&tmp_dir.path().join("result.jix"))?;
+//! result.write_to_file(&tmp_dir.path().join("result.jix"))?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -63,7 +69,7 @@
 //!   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
 //!   .add(other)            -> Array<Add<PermuteAxes<...>, Compact>>
 //!   .sum(0).               -> Array<Sum<Add<...>>>
-//!   .copy()?               -> Array<Compact>  - materialize
+//!   .compact()?            -> Array<Compact>  - materialize
 //! ```
 //!
 //! There is no runtime evaluation graph or scheduler. The type system *is* the execution plan.
@@ -161,7 +167,7 @@
 //!
 //! let typed = src.to_typed::<f32>()?;  // runtime check: dtype must be f32
 //! // typed: Array<S::ElementType = Ty<f32>>
-//! let result = typed.exp().sum(0).copy()?;
+//! let result = typed.exp().sum(0).compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
@@ -239,7 +245,7 @@
 //! that the original layout respected, a single read may decompress many more blocks than
 //! needed.
 //!
-//! To avoid this, call [`.copy()`](Array::copy) (or the eager variant `reshape`)
+//! To avoid this, call [`.compact()`](Array::compact) (or the eager variant `reshape`)
 //! after a shape change to re-encode with a freshly derived block shape:
 //!
 //! ```
@@ -254,7 +260,7 @@
 //! let mut out_params = ArrayParams::new();
 //! out_params.block_shape(&[128, 128]);
 //! let ctx = a.read_ctx();
-//! let transposed = a.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
+//! let transposed = a.permute_axes(&[1, 0]).compact_with(out_params, &ctx)?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!

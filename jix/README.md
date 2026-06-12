@@ -39,5 +39,5 @@ Array<Compact>
   .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
   .sum(0)                -> Array<Sum<PermuteAxes<...>>>
-  .copy()?               -> Array<Compact>   <- materialize
+  .compact()?            -> Array<Compact>   <- materialize
 ```

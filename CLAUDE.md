@@ -60,7 +60,7 @@ Storage backends: `Compact<T, D>` (heap-allocated block-compressed), `CompactMma
 
 ### Lazy Evaluation
 
-Shape operations (`Reshape`, `Slice`, `Broadcast`, `PermuteAxes`, `InsertAxis`, `RemoveAxis`) implement `ArrayStorage` as thin wrappers that transform index ranges without copying data. Data is only read when explicitly requested (e.g., `.copy()`). This means operation chains compose generically at the type level.
+Shape operations (`Reshape`, `Slice`, `Broadcast`, `PermuteAxes`, `InsertAxis`, `RemoveAxis`) implement `ArrayStorage` as thin wrappers that transform index ranges without copying data. Data is only read when explicitly requested (e.g., `.to_ndarray()`). This means operation chains compose generically at the type level.
 
 ### Block-Based Storage
 

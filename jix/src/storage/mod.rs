@@ -100,7 +100,7 @@ where
 /// Internal metadata of ArrayStorage.
 ///
 /// Carries the information [`Array`](crate::Array) needs when creating a new storage
-/// from an existing one - such as during `copy`, `copy_with`, and lazy view operations.
+/// from an existing one - such as during `compact`, `compact_with`, and lazy view operations.
 /// Not intended to be used directly.
 pub struct ArrayStorageSpec<'a> {
     pub(crate) blocks_layout: &'a BlocksLayout,

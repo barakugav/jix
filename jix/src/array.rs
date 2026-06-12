@@ -32,7 +32,7 @@ use crate::{
 /// methods. The main concrete storage backend is the block-compressed [`Compact`] type, which
 /// divides the array into n-dimensional blocks and compresses each block independently, and its
 /// the return type of the common creation methods for arrays
-/// (e.g.[`compact_ndarray()`](Array::compact_ndarray) and [`copy()`](Array::copy)).
+/// (e.g.[`compact_ndarray()`](Array::compact_ndarray) and [`compact()`](Array::compact)).
 ///
 /// # Storage variants
 ///
@@ -57,11 +57,11 @@ use crate::{
 ///   .permute_axes(axes)    -> Array<PermuteAxes<Reshape<...>>>
 ///   .add(other_array)      -> Array<Add<PermuteAxes<...>, Compact>>
 ///   .sum(axis)             -> Array<Sum<Add<...>>>
-///   .copy();               -> Array<Compact> - materialize the pipeline
+///   .compact();            -> Array<Compact> - materialize the pipeline
 /// ```
 ///
 /// Data is never copied or computed at construction time. An operation only runs when the result
-/// is materialized via [`to_ndarray()`](Array::to_ndarray), [`copy()`](Array::copy), and their variants.
+/// is materialized via [`to_ndarray()`](Array::to_ndarray), [`compact()`](Array::compact), and their variants.
 /// At that point the read request propagates inward through the storage
 /// chain, and only the minimum required data is read from the innermost backend.
 ///
@@ -127,8 +127,8 @@ use crate::{
 /// let result = scaled
 ///     .argmax(/* axis */ 1)                        // Array<ArgMax<Add<Mul<...>, Compact>>>
 ///     .cast::<i16>()                               // Array<Cast<ArgMax<Add<...>>>>
-///     // materialize the pipeline with a copy
-///     .copy()?;                                    // Array<Compact>
+///     // materialize the pipeline bt recompressing
+///     .compact()?;                                 // Array<Compact>
 /// assert_eq!(result.shape(), &[2]);
 /// assert_eq!(result.dtype(), &i16::DTYPE);
 /// let tmp_dir = tempfile::tempdir()?;
@@ -144,7 +144,7 @@ use crate::{
 /// block shape is chosen automatically to fit within the L1 data cache, by starting with a block
 /// shape of all ones and iteratively increasing each dimension greedily, in order from last to first
 /// dim, as long the block size in bytes does not exceed the target size.
-/// Additional arrays that are created from existing arrays (`.copy()`, `.reshape()`, result
+/// Additional arrays that are created from existing arrays (`.compact()`, `.reshape()`, result
 /// of operations, etc.) choose their block shape with a heuristic, trying to preserve the original
 /// user block shape as much as possible while respecting the new shape and layout.
 ///
@@ -152,9 +152,9 @@ use crate::{
 /// [`broadcast`](Array::broadcast), [`permute_axes`](Array::permute_axes) - remap how
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
-/// than necessary. To avoid this, materialize with [`copy`](Array::copy) (automatic block shape)
-/// or [`copy_with`](Array::copy_with) (explicit [`ArrayParams`]) after a shape change.
-/// Some operations, like "reshape", have an eager variant [`reshape`](Array::reshape) call `copy`
+/// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block shape)
+/// or [`compact_with`](Array::compact_with) (explicit [`ArrayParams`]) after a shape change.
+/// Some operations, like "reshape", have an eager variant [`reshape`](Array::reshape) call `compact`
 /// internally. To ensure a well-aligned block layout, pass explicit `ArrayParams` with a block
 /// shape that matches the expected access pattern.
 ///
@@ -288,7 +288,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     {
         let array = Array::plain_ndarray_ref(array)?;
         params.tune(array.shape(), array.dtype())?;
-        array.copy_with(params, &array.try_read_ctx()?)
+        array.compact_with(params, &array.try_read_ctx()?)
     }
 }
 
@@ -329,7 +329,7 @@ impl<D> Array<Compact<TypeDyn, D>> {
     {
         let array = unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype)? };
         params.tune(array.shape(), array.dtype())?;
-        array.copy_with(params, &array.try_read_ctx()?)
+        array.compact_with(params, &array.try_read_ctx()?)
     }
 }
 
@@ -500,7 +500,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             layout,
         });
 
-        array.copy_with(params, &ReadContext::new(&DecoderParams::default())?)
+        array.compact_with(params, &ReadContext::new(&DecoderParams::default())?)
     }
 }
 
@@ -571,8 +571,8 @@ impl<S: ArrayStorage> Array<S> {
     /// For a lazy view (e.g. `Array<Add<Mul<Compact, _>, _>>`), `to_ndarray` walks the entire
     /// operation pipeline: each composed op is evaluated on the fly as data flows out of the
     /// innermost storage. Materializing the same chain repeatedly will redo the work; if you
-    /// plan to read the result more than once, call [`copy`](Array::copy) first to re-compress
-    /// the result into a fresh `Array<Compact>` (or [`copy_with`](Array::copy_with) to control
+    /// plan to read the result more than once, call [`compact`](Array::compact) first to re-compress
+    /// the result into a fresh `Array<Compact>` (or [`compact_with`](Array::compact_with) to control
     /// the block shape).
     ///
     /// `to_ndarray` allocates a fresh [`ReadContext`] internally, so callers don't need to
@@ -659,7 +659,7 @@ impl<S: ArrayStorage> Array<S> {
     /// ops), the index range is propagated inward through the chain and only the
     /// corresponding region of the innermost storage is read. A shape-changing op can
     /// scramble the mapping such that a small output range still touches many input blocks -
-    /// if this matters for performance, materialize with [`copy`](Array::copy) before
+    /// if this matters for performance, materialize with [`compact`](Array::compact) before
     /// iterating sub-regions.
     ///
     /// # `ReadContext` reuse
@@ -862,25 +862,25 @@ impl<S: ArrayStorage> Array<S> {
         Ok(())
     }
 
-    /// Copy the data of this array into a new `Array<Compact>` by compressing it into new blocks.
+    /// Compress the data of this array into a new `Array<Compact>` with new blocks.
     ///
-    /// The primary use of `copy` is to materialize a lazy operation chain:
+    /// The primary use of `compact` is to materialize a lazy operation chain:
     /// An `Array<S>` can have an arbitrary storage implementation, often a lazy view of some one or
     /// more computation, for example `Array<Floor<Mul<Compact, Scalar<f32>>>>` (see the examples).
     /// Reads to such lazy view arrays always perform the whole computation pipeline on the fly,
     /// which is very flexible but can be inefficient for repeated access. Coping the data and
-    /// re-compressing it into a new array with `copy` breaks the lazy storage chain and materializes
+    /// re-compressing it into a new array with `compact` breaks the lazy storage chain and materializes
     /// the result as a standalone `Array<Compact>`.
     ///
     /// In contrast to "simple" views such as unary element-wise operations, lazy ops that change the
     /// shape of the array (e.g. `reshape`, `broadcast`, `permute_axes`) can cause block boundaries
     /// to no longer align with the logical layout of the array, causing reads to decompress excess
-    /// data. Calling `copy` on the result of such an operation re-encodes the data with a freshly
+    /// data. Calling `compact` on the result of such an operation re-encodes the data with a freshly
     /// derived block shape that matches the new layout. The block shape of copied arrays is
     /// automatically derived and tuned from the underlying storage(s), using a heuristic that aims
     /// to preserve user choices (that may depend on the user knowledge of the access pattern), but
     /// its not perfect - you may want to explicitly pass some parameters via
-    /// [`copy_with`](Array::copy_with).
+    /// [`compact_with`](Array::compact_with).
     ///
     /// Its also possible to materialize a lazy operation chain directly into a file without holding
     /// the whole result (compressed or decompressed) in memory.
@@ -899,20 +899,20 @@ impl<S: ArrayStorage> Array<S> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
-    /// let result =
+    /// let result =         // Array<Compact>
     ///     (a * 7.399_f32)  // Array<Mul<Compact, Scalar<f32>>>
-    ///    .floor()       // Array<Floor<Mul<Compact, Scalar<f32>>>>
-    ///    .copy()?;      // Array<Compact> - materialize the pipeline
+    ///    .floor()          // Array<Floor<Mul<Compact, Scalar<f32>>>>
+    ///    .compact()?;      // Array<Compact> - materialize the pipeline
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn copy(&self) -> Result<Array<Compact<S::ElementType, S::Dimension>>> {
+    pub fn compact(&self) -> Result<Array<Compact<S::ElementType, S::Dimension>>> {
         let context = self.read_ctx();
-        self.copy_with(ArrayParams::default(), &context)
+        self.compact_with(ArrayParams::default(), &context)
     }
 
-    /// Copy the data of this array into a new `Array<Compact>` with explicit control over parameters.
+    /// Compress the data of this array into a new `Array<Compact>` with explicit control over parameters.
     ///
-    /// Like [`copy`](Array::copy) (see its documentation), but with explicit [`ArrayParams`].
+    /// Like [`compact`](Array::compact) (see its documentation), but with explicit [`ArrayParams`].
     /// Any optional field in `params` that is not set will be inherited from the source storage
     /// if possible.
     ///
@@ -929,10 +929,10 @@ impl<S: ArrayStorage> Array<S> {
     /// let a = Array::compact_ndarray_with(&array![[1.5f32, 2.0], [3.14, 6.17]], a_params)?;
     ///
     /// // Let's say a is given to us, and we prepare to access it many times with a specific access
-    /// // pattern. We copy it and re-compress it with a matching block shape.
+    /// // pattern. We re-compress it with a matching block shape.
     /// let mut b_params = ArrayParams::default();
     /// b_params.block_shape(&[2, 1]);
-    /// let b = a.copy_with(b_params, &a.read_ctx())?;
+    /// let b = a.compact_with(b_params, &a.read_ctx())?;
     ///
     /// assert_eq!(
     ///     b.to_ndarray_sub(&[0..2, 0..1],
@@ -940,7 +940,7 @@ impl<S: ArrayStorage> Array<S> {
     /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
-    pub fn copy_with(
+    pub fn compact_with(
         &self,
         mut params: ArrayParams,
         context: &ReadContext,
@@ -1078,7 +1078,7 @@ impl<S: ArrayStorage> Array<S> {
     /// Check if this array storage is compact block-compressed storage.
     ///
     /// This functions returns `true` for arrays that are stored in compact block-compressed form,
-    /// i.e. those created by [`compact_ndarray`](Array::compact_ndarray), [`copy`](Array::copy),
+    /// i.e. those created by [`compact_ndarray`](Array::compact_ndarray), [`compact`](Array::compact),
     /// [`read_from_file`](Array::read_from_file), etc., and `false` for arrays with storage
     /// implementations with uncompressed data, such as lazy operation views, plain ndarray views,
     /// etc.
@@ -1925,13 +1925,13 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // copy
+    // compact
     // -----------------------------------------------------------------------
 
     #[test]
-    fn copy_1d_single_block() {
+    fn compact_1d_single_block() {
         let a = array(&[&[0u8, 1, 2, 3]], &[4], &[4]);
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[4]);
         assert_eq!(b.ndim(), 1);
         assert_eq!(b.dtype(), &u8::DTYPE);
@@ -1940,29 +1940,29 @@ mod tests {
     }
 
     #[test]
-    fn copy_1d_multi_block() {
+    fn compact_1d_multi_block() {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[6]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
         assert_eq!(b.to_ndarray().unwrap(), array![0, 1, 2, 3, 4, 5]);
     }
 
     #[test]
-    fn copy_1d_with_padding() {
+    fn compact_1d_with_padding() {
         // shape [5], block [3] -> stored as 6 elements (padded)
         let src = array![0u8, 1, 2, 3, 4];
         let a = Array::compact_ndarray_with(&src, arr_params(&[3])).unwrap();
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[5]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
         assert_eq!(b.to_ndarray().unwrap(), src);
     }
 
     #[test]
-    fn copy_1d_i32() {
+    fn compact_1d_i32() {
         let a = array(&[&[10i32, 20, 30, 40], &[50, 60, 70, 80]], &[8], &[4]);
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[8]);
         assert_eq!(b.dtype(), &i32::DTYPE);
         assert_eq!(
@@ -1972,18 +1972,18 @@ mod tests {
     }
 
     #[test]
-    fn copy_2d_single_block() {
+    fn compact_2d_single_block() {
         // shape=[2,3], block=[2,3] - one block, no partial-block path
         let a = array(&[&[0u8, 1, 2, 3, 4, 5]], &[2, 3], &[2, 3]);
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[2, 3]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(b.to_ndarray().unwrap(), array![[0, 1, 2], [3, 4, 5]]);
     }
 
     #[test]
-    fn copy_2d_multi_block() {
-        // shape=[4,6], block=[2,3] - 4 blocks, exercises the full-block copy path
+    fn compact_2d_multi_block() {
+        // shape=[4,6], block=[2,3] - 4 blocks, exercises the full-block compact path
         // Block layout (row-major grid):
         //   block0=[0,0]: rows 0-1, cols 0-2 -> 0,1,2,6,7,8
         //   block1=[0,1]: rows 0-1, cols 3-5 -> 3,4,5,9,10,11
@@ -2000,7 +2000,7 @@ mod tests {
             &[4, 6],
             &[2, 3],
         );
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[4, 6]);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
         assert_eq!(
@@ -2010,7 +2010,7 @@ mod tests {
     }
 
     #[test]
-    fn copy_2d_with_padding() {
+    fn compact_2d_with_padding() {
         // shape=[3,5], block=[2,3] -> padded to [4,6]; shape preserved as [3,5].
         // Block grid 2*2:
         //   [0,0]: size [2,3] - full block
@@ -2024,21 +2024,21 @@ mod tests {
             [10,   11, 12, 13, 14],
         ];
         let a = Array::compact_ndarray_with(&src, arr_params(&[2, 3])).unwrap();
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[3, 5]);
         assert_eq!(b.dtype(), &i32::DTYPE);
         assert_eq!(b.to_ndarray().unwrap(), src);
     }
 
     #[test]
-    fn copy_3d_with_padding_in_all_dims() {
+    fn compact_3d_with_padding_in_all_dims() {
         // shape=[3,3,5], block=[2,2,3] -> padded to [4,4,6].
         // Block grid 2*2*2 = 8 blocks; every boundary block is partial in at least
         // one dimension, and the single corner block [1,1,1] is partial in all three:
         //   size [1,1,2] vs block_shape [2,2,3].
         let src = ndarray::Array3::<u8>::from_shape_vec([3, 3, 5], (0u8..45).collect()).unwrap();
         let a = Array::compact_ndarray_with(&src, arr_params(&[2, 2, 3])).unwrap();
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[3, 3, 5]);
         assert_eq!(b.dtype(), &u8::DTYPE);
         assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 2, 3]);
@@ -2046,11 +2046,11 @@ mod tests {
     }
 
     #[test]
-    fn copy_preserves_block_shape() {
+    fn compact_preserves_block_shape() {
         // Verify the copied array has the same block layout as the source.
         let src = array![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         let a = Array::compact_ndarray_with(&src, arr_params(&[4])).unwrap();
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         assert_eq!(
             a.blocks_layout().block_shape_hint[..],
             b.blocks_layout().block_shape_hint[..]
@@ -2058,13 +2058,13 @@ mod tests {
     }
 
     #[test]
-    fn copy_result_is_independent() {
-        // Mutating the source array should not affect the copy (they are independent).
+    fn compact_result_is_independent() {
+        // Mutating the source array should not affect the compact (they are independent).
         // Since Array<Compact> doesn't expose mutation, we verify by round-tripping
         // both through write/read and checking values remain consistent.
         let src = array![10u8, 20, 30, 40];
         let a = Array::compact_ndarray_with(&src, arr_params(&[4])).unwrap();
-        let b = a.copy().unwrap();
+        let b = a.compact().unwrap();
         // Both should read back the same data independently.
         assert_eq!(a.to_ndarray().unwrap(), b.to_ndarray().unwrap());
     }

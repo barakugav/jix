@@ -4,7 +4,7 @@
 //! [`ArrayStorage`](crate::ArrayStorage). The storage wraps the input array(s) and
 //! transforms read requests on demand - no data is copied at construction time. An operation only
 //! executes when its result is materialized, e.g. via [`.to_ndarray()`](crate::Array::to_ndarray)
-//! or [`.copy()`](crate::Array::copy).
+//! or [`.compact()`](crate::Array::compact).
 //!
 //! # Operation chains
 //!
@@ -15,7 +15,7 @@
 //!     .cast::<f32>()           // Array<Cast<Compact>>
 //!     .floor()                 // Array<Floor<Cast<Compact>>>
 //!     .exp()                   // Array<Exp<Floor<Cast<Compact>>>>
-//!     .copy();                 // Array<Compact> - materialize the pipeline
+//!     .compact();              // Array<Compact> - materialize the pipeline
 //! ```
 //!
 //! The compiler sees through all the wrappers and can inline the entire pipeline into a single
@@ -32,13 +32,13 @@
 //!
 //! To avoid this, materialize the array after a shape change:
 //!
-//! * [`.copy()`](crate::Array::copy) - re-encodes with a block shape derived automatically from
+//! * [`.compact()`](crate::Array::compact) - re-encodes with a block shape derived automatically from
 //!   the new shape and the original block shape.
-//! * [`.copy_with(params, ...)`](crate::Array::copy_with) - re-encodes with an explicit
+//! * [`.compact_with(params, ...)`](crate::Array::compact_with) - re-encodes with an explicit
 //!   [`ArrayParams`](crate::ArrayParams), giving full control over the new block shape. Use this
 //!   to guarantee your access pattern is well-aligned.
 //!
-//! The eager variant ([`Array::reshape`](crate::Array::reshape)) calls `.copy()` internally.
+//! The eager variant ([`Array::reshape`](crate::Array::reshape)) calls `.compact()` internally.
 //! Use the `_view` variants with care.
 //!
 //! # Typed element requirements
@@ -74,7 +74,7 @@
 //! // src is Array<Compact<TypeDyn, DimDyn>> - ops not yet available
 //!
 //! let typed = src.to_typed::<f32>()?;  // validates dtype at runtime
-//! let result = typed.exp().cast::<f64>().copy()?;
+//! let result = typed.exp().cast::<f64>().compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!

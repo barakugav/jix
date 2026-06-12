@@ -12,7 +12,7 @@ use crate::{Array, ArrayParams, ArrayStorage};
 ///
 /// - **Already compact**: the original storage is kept as is - no copy or re-compression.
 /// - **Not compact** (lazy views, op chains, etc.): the array is materialized
-///   via `copy_with` into a new [`Compact`] block-table.
+///   and compressed into a new [`Compact`] block-table.
 ///
 /// In both cases all [`ArrayStorage`] methods delegate to the inner variant,
 /// and the storage is guaranteed to be a materialized compact storage, not a view.
@@ -38,7 +38,7 @@ where
         } else {
             ToCompactInner::Compact(
                 Array::from_storage(array)
-                    .copy_with(params, context)?
+                    .compact_with(params, context)?
                     .into_storage(),
             )
         }))

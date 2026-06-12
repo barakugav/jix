@@ -168,7 +168,7 @@ pub trait ArrayStorage {
     /// Returns metadata about this storage backend.
     ///
     /// Used internally by [`Array`](crate::Array) to propagate block geometry and codec
-    /// parameters through lazy view operations and when re-encoding via `copy` / `copy_with`.
+    /// parameters through lazy view operations and when re-encoding via `compact` / `compact_with`.
     /// Not intended to be called directly.
     #[doc(hidden)]
     fn spec(&self) -> ArrayStorageSpec<'_>;

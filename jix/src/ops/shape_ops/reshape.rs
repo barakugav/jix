@@ -37,7 +37,7 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 /// read-amplification. In the worst case every element access decompresses a different block.
 ///
 /// Prefer [`Array::reshape`] over `reshape_view` unless you intend to chain further lazy
-/// operations before materializing. If you do use `reshape_view`, call [`.copy()`](Array::copy)
+/// operations before materializing. If you do use `reshape_view`, call [`.compact()`](Array::compact)
 /// as soon as possible to produce a compactly-stored array with a block layout matched to the
 /// new shape.
 ///
