@@ -353,7 +353,7 @@ where
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    D::from_slice(&block_size).unwrap(),
+                    D::from_slice(block_size).unwrap(),
                     &block_strides,
                     &out_strides,
                     itemsize,

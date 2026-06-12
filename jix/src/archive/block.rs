@@ -326,7 +326,6 @@ where
     /// Returns `InvalidArchive` if the header is malformed (missing codec, unknown filter, wrong
     /// TOC section count, missing required sections, or bad dtype). Propagates I/O errors from
     /// `reader` and errors from [`BlockTable::new`].
-
     pub(crate) fn read_content<R>(
         reader: &mut ArchiveReader<R>,
         storage: S,

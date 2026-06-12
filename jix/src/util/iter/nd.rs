@@ -157,7 +157,7 @@ where
     #[inline(always)]
     pub(crate) fn get_current_and_advance_status(&mut self) -> (&[u64], E::Item<'_>) {
         self.status.advance();
-        (&self.current_idx.as_slice(), self.extensions.next())
+        (self.current_idx.as_slice(), self.extensions.next())
     }
 
     #[inline(always)]

@@ -856,7 +856,7 @@ impl<S: ArrayStorage> Array<S> {
                 nd_copy(
                     tmp_buf.as_ptr(),
                     dst_ptr,
-                    S::Dimension::from_slice(&block_size).unwrap(),
+                    S::Dimension::from_slice(block_size).unwrap(),
                     &default_strides(block_size, itemsize as _),
                     &out_strides,
                     itemsize,
@@ -1306,7 +1306,7 @@ impl<S: ArrayStorage> Array<S> {
                             nd_copy(
                                 read_data_buf.as_ptr(),
                                 tmp_block_plain_ptr,
-                                S::Dimension::from_slice(&block_size).unwrap(),
+                                S::Dimension::from_slice(block_size).unwrap(),
                                 &src_strides,
                                 &block_strides,
                                 itemsize,
