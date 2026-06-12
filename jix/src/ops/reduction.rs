@@ -31,7 +31,7 @@ pub(crate) trait ReductionOpKernel<T> {
     /// Build the initial accumulator. `first` is the first element of the reduction stream
     /// when the stream is non-empty, or `None` when the kernel was invoked on an empty
     /// reduction. Kernels with [`supports_empty`](Self::supports_empty) returning `false`
-    /// may unwrap `first` — the caller guarantees it is `Some` for those kernels.
+    /// may unwrap `first` - the caller guarantees it is `Some` for those kernels.
     ///
     /// The first element is at position `0`; subsequent calls to [`update_state`] receive
     /// the 0-based stream `idx` of each item.
@@ -155,13 +155,13 @@ where
         // The inner index range `inner_range_full` (reduced dims spanning the full source
         // extent, non-reduced dims forwarded from `index`) is partitioned at two granularities:
         //
-        //   * **bulk** — the outer chunk. Splits *reduced* dims only. Walking bulks in
+        //   * **bulk** - the outer chunk. Splits *reduced* dims only. Walking bulks in
         //     row-major order is what advances `base_item_idx`: each bulk delivers
-        //     `reduction_size = ∏ bulk_size[d] for d reduced` items per output position.
+        //     `reduction_size = product(bulk_size[d] for d reduced)` items per output position.
         //     `bulk_shape[d] = tile_shape[d]` for reduced dims and `inner_shape[d]`
-        //     for non-reduced — i.e. the full non-reduced extent always sits in one bulk
+        //     for non-reduced - i.e. the full non-reduced extent always sits in one bulk
         //     along that dim, so consecutive bulks never re-walk the same outputs.
-        //   * **tile** — the inner chunk. Splits *both* dim groups, but is shaped so the
+        //   * **tile** - the inner chunk. Splits *both* dim groups, but is shaped so the
         //     reduced part exactly matches one bulk's reduced range (one tile-along-reduced
         //     per bulk). Within a bulk the tile iterator sweeps the non-reduced output
         //     region. Each `(bulk, tile)` pair produces *one* `self.array.read_data` call,
@@ -169,15 +169,15 @@ where
         //
         // `tile_shape` is chosen once per call by [`choose_tile_shape`]: seed every dim
         // from the source storage block hint (clamped to `inner_range_full[d].len()`), then
-        // greedily scale each dim up by an integer multiplier of its seed — reduced dims
-        // first (rightmost first), then non-reduced (rightmost first) — until the running
+        // greedily scale each dim up by an integer multiplier of its seed - reduced dims
+        // first (rightmost first), then non-reduced (rightmost first) - until the running
         // product would exceed `target_nitems = preferred_read_size_hint /
         // size_of::<S::Item>()`. The per-dim multiplier is also capped so the tile can't
         // overshoot the requested range. A final fixup snaps any dim whose tile already
         // covers the full requested range to `inner_shape[d]`: tiles are aligned to
         // absolute multiples of `tile_shape[d]`, so a tile sized exactly to the range can
         // still get split when `inner_range_full[d].start` is not a multiple of the tile
-        // shape — using the full source extent guarantees one tile along that dim. Setting
+        // shape - using the full source extent guarantees one tile along that dim. Setting
         // `bulk_shape[reduced] = tile_shape[reduced]` then makes the inner read shape come
         // out to `tile_shape` for every tile.
         //
@@ -193,10 +193,10 @@ where
         //
         // ```text
         // for each bulk:
-        //   reduction_size = ∏ bulk_size[d] for d in reduced dims
+        //   reduction_size = product(bulk_size[d] for d in reduced dims)
         //   item_idx_end   = base_item_idx + reduction_size
         //   for each tile in this bulk:
-        //     items_buf <- self.array.read_data(tile = bulk-reduced × tile-non-reduced)
+        //     items_buf <- self.array.read_data(tile = bulk-reduced * tile-non-reduced)
         //     for each output position O in this tile's non-reduced sub-region:
         //       walk the tile's `reduction_size` items at the right offset into items_buf,
         //       folding them into state_buf[O] via K::init_state / K::update_state. item_idx
@@ -209,7 +209,7 @@ where
         // `!state_initialized`, the first reduction item per output is consumed by
         // `K::init_state(first)` to write the slot; control then falls into the same
         // `K::update_state` loop as later bulks. Within the first bulk, *all* tiles take
-        // the init branch — each tile only initializes the slots it covers, and together
+        // the init branch - each tile only initializes the slots it covers, and together
         // the first bulk's tiles cover every output exactly once. The flag flips only at
         // the *end* of a bulk that contributed items, never inside a bulk.
         //
@@ -221,7 +221,7 @@ where
         //     `state_in_out_buf`, the state and output pointers for each slot alias the same
         //     bytes, so each iteration `assume_init_read`s the state *before* writing the
         //     result.
-        //   - Otherwise (empty reduction — only reachable when a reduced dim is empty and the
+        //   - Otherwise (empty reduction - only reachable when a reduced dim is empty and the
         //     kernel supports empty): write `K::finalize_state(K::init_state(None), 0)` to
         //     every output.
         //
@@ -232,7 +232,7 @@ where
         //   one tile at a time during the first bulk; finalized in the post-loop pass.
         //   When `K::State` matches `K::Output` in size and is no more strictly aligned
         //   (`state_in_out_buf`), we skip the scratch allocation entirely and reuse the
-        //   caller's `buf` as the state buffer — `finalize_state` then reads each slot and
+        //   caller's `buf` as the state buffer - `finalize_state` then reads each slot and
         //   writes the output into the same byte range it just consumed. The finalization
         //   loop reads the state out of each slot *before* writing the result back, since
         //   state and output pointers alias in that mode (see the `CAREFUL` comments).
@@ -245,7 +245,7 @@ where
         // - Every tile's absolute element range is contained in `inner_range_full`.
         // - On the first state init pass, `base_item_idx == 0`.
         // - After all bulks, each output's reduction stream consumes exactly
-        //   `∏ (inner_range_full[d].end - .start) for d in reduced dims` items (when
+        //   `product(inner_range_full[d].end - .start for d in reduced dims)` items (when
         //   `out_nitems > 0`).
 
         check_get_range(self.shape(), index)?;
@@ -273,7 +273,7 @@ where
 
         // Bulk shape: tile shape on reduced dims (so each bulk has exactly one
         // tile-along-reduced), full source extent on non-reduced dims (so the requested
-        // output range sits in one bulk along that dim — otherwise consecutive bulks would
+        // output range sits in one bulk along that dim - otherwise consecutive bulks would
         // re-walk the same outputs and double-count).
         let bulk_shape = dim_arr(inner_ndim, |dim| {
             if self.is_reduced[dim] {
@@ -375,7 +375,7 @@ where
 
                 // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
                 // `tile_state_base` shifts `state_buf` to its first slot.
-                let items_buf_strides = default_strides(&tile_size, size_of::<S::Item>() as u64);
+                let items_buf_strides = default_strides(tile_size, size_of::<S::Item>() as u64);
                 let items_buf_strides_for_out_iter = items_buf_strides
                     .iter()
                     .zip(&self.is_reduced)
@@ -413,7 +413,11 @@ where
                 // Reduction-axis walk inside `items_buf`. `tile_size[reduced] == bulk_size[reduced]`
                 // so this equals `reduction_size`.
                 let reduction_shape = dim_arr(inner_ndim, |dim| {
-                    self.is_reduced[dim].then_some(tile_size[dim]).unwrap_or(1)
+                    if self.is_reduced[dim] {
+                        tile_size[dim]
+                    } else {
+                        1
+                    }
                 });
                 debug_assert_eq!(reduction_shape.iter().product::<u64>(), reduction_size);
 
@@ -538,8 +542,8 @@ where
     /// Choose the per-tile inner read shape.
     ///
     /// Tiles seed from the source array's storage-block hint (the natural unit of work
-    /// for the inner reader) and scale up greedily — reduced dims first, rightmost first
-    /// within each group — until the byte volume reaches the source's preferred read size
+    /// for the inner reader) and scale up greedily - reduced dims first, rightmost first
+    /// within each group - until the byte volume reaches the source's preferred read size
     /// hint (with a cache floor for pathologically small hints). Every per-dim choice is
     /// clamped to `full_read_shape[d].len()` so the budget isn't spent on dims that the
     /// requested range can't actually consume.
@@ -598,16 +602,16 @@ where
 }
 
 /// Emits the wrapper storage struct (`$Op<S, D>` or `$Op<S>`), its `ArrayStorage` impl,
-/// and the kernel struct declaration (`pub(crate) struct $Kernel;` — with fields if
+/// and the kernel struct declaration (`pub(crate) struct $Kernel;` - with fields if
 /// `extra_args` were declared). The `ReductionOpKernel` impl for the kernel is still
 /// written by hand next to the macro invocation.
 ///
 /// Invocation shape:
 /// ```ignore
 /// define_reduction_op!(
-///     /// docs…
-///     Op, Kernel { extra_arg: Type, … },           // `{ … }` is optional
-///     where { S: ArrayStorageTyped, S::Item: … },  // full where-clause, must end with `,`
+///     /// docs...
+///     Op, Kernel { extra_arg: Type, ... },           // `{ ... }` is optional
+///     where { S: ArrayStorageTyped, S::Item: ... },  // full where-clause, must end with `,`
 ///     output = <S::Item as Trait>::Output,
 ///     single_axis,                                 // optional; omit for multi-axis
 /// );
@@ -708,14 +712,14 @@ macro_rules! define_reduction_op {
 }
 
 /// Public scalar-level traits implemented by primitive element types and consumed by the
-/// reduction op storage wrappers ([`Sum`], [`Product`], [`Mean`], [`Variance`], …).
+/// reduction op storage wrappers ([`Sum`], [`Product`], [`Mean`], [`Variance`], ...).
 ///
 /// Each trait describes how to fold a stream of `Self` values into a result. Some are simple
 /// (e.g. `Sum` only needs an `Output` accumulator); others (`Mean`, `Variance`)
 /// expose a richer state machine (`type State`, `init`, `update`, `finalize`) because the
 /// final result is not just the accumulator.
 ///
-/// Max/Min/argmax/argmin do **not** appear here — those ops are bounded directly by
+/// Max/Min/argmax/argmin do **not** appear here - those ops are bounded directly by
 /// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`] / [`PartialOrd`].
 pub(crate) mod _traits {
     #[allow(unused_imports)]
@@ -823,7 +827,7 @@ pub(crate) mod _traits {
     pub trait Mean {
         /// The output element type - always `f64` or `Complex<f64>`.
         type Output;
-        /// Accumulator state — the running sum.
+        /// Accumulator state - the running sum.
         type State;
         /// Return the initial (empty) accumulator.
         fn init() -> Self::State;
@@ -876,7 +880,7 @@ pub(crate) mod _traits {
     impl_mean!(bool, f64);
 
     /// Welford accumulator used by [`Variance`]. The count of folded items is tracked
-    /// **outside** this struct — callers thread it into [`Variance::update`] (as `n`)
+    /// **outside** this struct - callers thread it into [`Variance::update`] (as `n`)
     /// and [`Variance::finalize`] (as `nitems`).
     pub struct VarianceState<M> {
         /// Running mean in the type-specific accumulator domain.
@@ -1727,7 +1731,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
 
 /// Emits an `Array::$method(...)` helper that forwards to `$Op::new_array(...)`. The full
 /// where-clause on `S` (and its `Item`) is supplied verbatim by the caller so each op can
-/// pick its own bound (`PartialOrd`, `Maximum`, `Sum`, `Item = bool`, …).
+/// pick its own bound (`PartialOrd`, `Maximum`, `Sum`, `Item = bool`, ...).
 macro_rules! define_array_reduction_method {
     // single-axis variant
     (
