@@ -8,7 +8,6 @@
     - allclose, isclose
     - flip, roll, split
     - log variants, log10, log2, log1p
-- add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
 - squeeze()
 - consider matching insert_axis to numpy's expand_dims instead of using gap indices
@@ -33,3 +32,4 @@
 - preferred_read_size should be L1 cache. In the future we can add preferred_read_size_multithread with in L2
 - compress offsets array
 - change offsets array to have length of num_blocks-1 instead of num_blocks+1
+- py div, true_div, floor_div
