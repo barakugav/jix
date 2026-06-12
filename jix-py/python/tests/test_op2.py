@@ -390,8 +390,8 @@ def test_mixed_dtype_result_dtype_determinism():
     """The result dtype for common mixed-type pairs is stable and matches documented rules."""
 
     def check(da, db, expected):
-        a = jix.compact(np.array([1, 2, 3], dtype=da))
-        b = jix.compact(np.array([4, 5, 6], dtype=db))
+        a = jix.compact([1, 2, 3], dtype=da)
+        b = jix.compact([4, 5, 6], dtype=db)
         result = jix.add(a, b)
         assert result.dtype == np.dtype(expected), (
             f"add({da.__name__}, {db.__name__}): got {result.dtype}, expected {np.dtype(expected)}"
@@ -427,8 +427,8 @@ def test_mixed_dtype_op2_does_not_error_on_safe_combos():
         (np.bool_, np.float32),
     ]
     for da, db in combos:
-        a = jix.compact(np.array([1, 2], dtype=da))
-        b = jix.compact(np.array([3, 4], dtype=db))
+        a = jix.compact([1, 2], dtype=da)
+        b = jix.compact([3, 4], dtype=db)
         try:
             r = jix.add(a, b)
             _ = r.numpy()
@@ -439,16 +439,16 @@ def test_mixed_dtype_op2_does_not_error_on_safe_combos():
 def test_mixed_dtype_op2_errors_on_complex_arithmetic():
     """Complex + int64/uint64 should fail: no impl can hold Int/P8 cast to Complex."""
     for int_dtype in [np.int64, np.uint64]:
-        a = jix.compact(np.array([1 + 2j, 3 + 4j], dtype=np.complex64))
-        b = jix.compact(np.array([1, 2], dtype=int_dtype))
+        a = jix.compact([1 + 2j, 3 + 4j], dtype=np.complex64)
+        b = jix.compact([1, 2], dtype=int_dtype)
         with pytest.raises(Exception):
             _ = jix.add(a, b).numpy()
 
 
 def test_complex_plus_small_int_upcasts_to_complex128():
     """complex64 + int32 upcast to complex128 (the only fitting impl)."""
-    a = jix.compact(np.array([1 + 2j, 3 + 0j], dtype=np.complex64))
-    b = jix.compact(np.array([10, 20], dtype=np.int32))
+    a = jix.compact([1 + 2j, 3 + 0j], dtype=np.complex64)
+    b = jix.compact([10, 20], dtype=np.int32)
     result = jix.add(a, b)
     assert result.dtype == np.complex128
     np.testing.assert_array_equal(result.numpy(), np.array([11 + 2j, 23 + 0j]))

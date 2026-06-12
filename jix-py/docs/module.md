@@ -98,7 +98,7 @@ a = jix.compact(data, params={"block_shape": [64, 64]})
 ```
 
 After shape-changing operations (`reshape`, `permute_axes`, etc.) the original block
-layout may no longer match the new access pattern. Call `jix.copy(arr, params=...)` to
+layout may no longer match the new access pattern. Call `jix.compact(arr, params=...)` to
 re-encode with a layout suited to the new shape.
 
 
@@ -107,7 +107,7 @@ re-encode with a layout suited to the new shape.
 Every operation - arithmetic, comparisons, reductions, shape changes, type casts - returns
 a new `Array` **view** that wraps the input(s) and records the transformation. No data is read or
 computed at call time. The deferred work only runs when you ask for output (`.numpy()`, `[...]`,
-`.write_to()`, `jix.copy()`, etc.).
+`.write_to()`, `jix.compact()`, etc.).
 
 Chains compose without intermediate allocations: the full pipeline is executed in a single
 pass over the compressed source data, block by block.

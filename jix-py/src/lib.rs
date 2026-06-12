@@ -40,9 +40,6 @@ mod jix {
     pub use crate::ops::{asarray, astype};
 
     #[pymodule_export]
-    pub use crate::ops::copy;
-
-    #[pymodule_export]
     pub use crate::ops::{add, divide, multiply, power, subtract};
 
     #[pymodule_export]

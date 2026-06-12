@@ -1,8 +1,8 @@
 use pyo3::prelude::*;
 
-use crate::ops::{any_to_core_array, asarray, copy_impl};
+use crate::ops::{any_to_core_array, asarray};
 use crate::util::{normalize_axes, normalize_axis, IntoPyResult, ItemOrSequence};
-use crate::Array;
+use crate::{compact, Array};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
 ///
@@ -410,21 +410,20 @@ pub fn reshape<'py>(
         new_shape.iter().map(|&dim| dim as u64).collect::<Vec<_>>()
     };
 
-    if new_shape == array.shape() {
-        // no-op if already the right shape
-        return if !copy {
-            Ok(py_arr.clone())
-        } else {
-            copy_impl(py_arr.py(), array)
-        };
-    }
-
-    let ret = jix_core::ops::Reshape::new_array(array.clone(), &new_shape).into_py_result()?;
-    if !copy {
-        Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let array = if new_shape != array.shape() {
+        jix_core::ops::Reshape::new_array(array.clone(), &new_shape)
+            .into_py_result()?
+            .into_any()
     } else {
-        copy_impl(py_arr.py(), &ret)
+        // no-op if already the right shape
+        array.clone()
+    };
+    let mut array = Bound::new(py_arr.py(), Array::from_core(array))?;
+
+    if copy {
+        array = compact(&array, None, None, None)?;
     }
+    Ok(array)
 }
 
 /// Collapses an array into a single dimension.

@@ -27,9 +27,6 @@ pub use logical1::*;
 mod reduction;
 pub use reduction::*;
 
-mod copy_op;
-pub use copy_op::*;
-
 mod sub_dtype;
 pub use sub_dtype::*;
 

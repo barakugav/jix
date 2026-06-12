@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 import jix
 
 # ---------------------------------------------------------------------------
@@ -14,7 +15,7 @@ import jix
 
 
 def make_array(values, dtype=np.float32):
-    return jix.compact(np.array(values, dtype=dtype))
+    return jix.compact(values, dtype=dtype)
 
 
 # ---------------------------------------------------------------------------
