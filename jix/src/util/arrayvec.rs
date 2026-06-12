@@ -1,5 +1,5 @@
 use std::mem::MaybeUninit;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::{cmp, fmt, iter, mem, ptr, slice};
 
 type LenUint = u8;
@@ -430,6 +430,27 @@ impl<T, const CAP: usize> iter::FromIterator<T> for ArrayVec<T, CAP> {
         let mut array = ArrayVec::new();
         array.extend(iter);
         array
+    }
+}
+
+impl<T, const CAP: usize, I> Index<I> for ArrayVec<T, CAP>
+where
+    [T]: Index<I>,
+{
+    type Output = <[T] as Index<I>>::Output;
+
+    #[inline(always)]
+    fn index(&self, index: I) -> &Self::Output {
+        self.as_slice().index(index)
+    }
+}
+impl<T, const CAP: usize, I> IndexMut<I> for ArrayVec<T, CAP>
+where
+    [T]: IndexMut<I>,
+{
+    #[inline(always)]
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        self.as_mut_slice().index_mut(index)
     }
 }
 
