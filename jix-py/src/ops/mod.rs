@@ -100,9 +100,9 @@ pub(crate) fn astype_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> 
 
         macro_rules! cast_impl {
             ($src_type:ty, $dst_type:ty) => {{
-                let array = array.to_typed::<$src_type>().unwrap();
+                let array = array.into_typed::<$src_type>().unwrap();
                 let array = array.cast::<$dst_type>();
-                return Ok(array.to_type_dyn().into_any());
+                return Ok(array.into_type_dyn().into_any());
             }};
         }
         macro_rules! cast_num {

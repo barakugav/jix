@@ -103,12 +103,24 @@ where
     }
 
     type DimensionChange<NewD: crate::Dimension> = MaybeCompact<S::DimensionChange<NewD>>;
+    #[inline]
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
         Ok(MaybeCompact(match self.0 {
             ToCompactInner::Original(s) => ToCompactInner::Original(s.dimension_change()?),
             ToCompactInner::Compact(c) => ToCompactInner::Compact(c.dimension_change()?),
+        }))
+    }
+
+    type ElementTypeChange<NewET: crate::ElementType> = MaybeCompact<S::ElementTypeChange<NewET>>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(MaybeCompact(match self.0 {
+            ToCompactInner::Original(s) => ToCompactInner::Original(s.element_type_change()?),
+            ToCompactInner::Compact(c) => ToCompactInner::Compact(c.element_type_change()?),
         }))
     }
 }

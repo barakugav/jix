@@ -410,6 +410,18 @@ where
             blocks_layout: self.blocks_layout,
         })
     }
+
+    type ElementTypeChange<NewET: crate::ElementType> = Reshape<S::ElementTypeChange<NewET>, D>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(Reshape {
+            array: self.array.element_type_change()?,
+            new_shape: self.new_shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 #[cfg(test)]

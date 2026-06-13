@@ -194,4 +194,22 @@ pub trait ArrayStorage {
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>>
     where
         Self: Sized;
+
+    /// The concrete storage type after swapping the element type to `NewET`.
+    type ElementTypeChange<NewET: ElementType>: ArrayStorage<
+        ElementType = NewET,
+        Dimension = Self::Dimension,
+    >
+    where
+        Self: Sized;
+
+    /// Consume `self`, validate the new element type against the runtime dtype, and return the
+    /// re-tagged storage.
+    ///
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// `NewET = Ty<T>` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
+    /// `NewET = TypeDyn`.
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>>
+    where
+        Self: Sized;
 }

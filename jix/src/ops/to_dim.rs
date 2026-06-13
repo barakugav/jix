@@ -128,6 +128,17 @@ where
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
         ToDim::new(self.inner)
     }
+
+    type ElementTypeChange<NewET: crate::ElementType> = ToDim<S::ElementTypeChange<NewET>, D>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> Result<Self::ElementTypeChange<NewET>> {
+        Ok(ToDim {
+            inner: self.inner.element_type_change()?,
+            dim: PhantomData,
+        })
+    }
 }
 
 macro_rules! impl_dimension_change_default {

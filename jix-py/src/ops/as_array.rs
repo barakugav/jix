@@ -64,7 +64,7 @@ mod tests {
             .get()
             .arr
             .as_ref()
-            .to_typed::<T>()
+            .into_typed::<T>()
             .unwrap()
             .to_ndarray()
             .unwrap()

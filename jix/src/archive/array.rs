@@ -140,7 +140,7 @@ impl Array<Compact<TypeDyn, DimDyn>> {
     ///     ArrayParams::default(),
     ///     ArchiveValidation::default(),
     /// )?;
-    /// let loaded = loaded.to_typed::<i32>()?;
+    /// let loaded = loaded.into_typed::<i32>()?;
     /// assert_eq!(loaded.to_ndarray()?, array![1i32, 2, 3, 4].into_dyn());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -273,7 +273,7 @@ where
     /// array.write_to_file(&path)?;
     ///
     /// let loaded = Array::read_from_file(&path, ArrayParams::default())?;
-    /// let loaded = loaded.to_typed::<f32>()?;
+    /// let loaded = loaded.into_typed::<f32>()?;
     /// assert_eq!(
     ///     loaded.to_ndarray()?,
     ///     array![[1.0f32, 2.0], [3.0, 4.0]].into_dyn()
@@ -323,7 +323,7 @@ where
     ///     ArrayParams::default(),
     ///     ArchiveValidation::default(),
     /// )?;
-    /// let b2 = b2.to_typed::<u8>()?;
+    /// let b2 = b2.into_typed::<u8>()?;
     /// assert_eq!(b2.to_ndarray()?, array![10u8, 20, 30].into_dyn());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -376,7 +376,7 @@ where
     /// let context = src.read_ctx();
     ///
     /// // Build a lazy view - no data is read yet.
-    /// let view = src.to_typed::<f32>()?.exp().map(|x| x + 1.0f32);
+    /// let view = src.into_typed::<f32>()?.exp().map(|x| x + 1.0f32);
     ///
     /// // Write to a new file: blocks are decompressed, modified by ops, and re-compressed one at
     /// // a time. The full array is never held in memory, not even in its compressed form.
@@ -760,7 +760,7 @@ mod tests {
         .unwrap();
         assert_eq!(r0.shape(), &[6]);
         assert_eq!(
-            r0.to_typed::<u8>().unwrap().to_ndarray().unwrap(),
+            r0.into_typed::<u8>().unwrap().to_ndarray().unwrap(),
             src0.into_dyn()
         );
 
@@ -773,7 +773,7 @@ mod tests {
         .unwrap();
         assert_eq!(r1.shape(), &[3, 4]);
         assert_eq!(
-            r1.to_typed::<i32>().unwrap().to_ndarray().unwrap(),
+            r1.into_typed::<i32>().unwrap().to_ndarray().unwrap(),
             src1.into_dyn()
         );
 
@@ -786,7 +786,7 @@ mod tests {
         .unwrap();
         assert_eq!(r2.shape(), &[2, 3, 5]);
         assert_eq!(
-            r2.to_typed::<f64>().unwrap().to_ndarray().unwrap(),
+            r2.into_typed::<f64>().unwrap().to_ndarray().unwrap(),
             src2.into_dyn()
         );
     }

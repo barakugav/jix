@@ -225,6 +225,8 @@ where
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
         Ok(Cast(self.0.dimension_change()?))
     }
+
+    crate::ops::impl_element_type_change_default!();
 }
 
 impl<S> Array<S>

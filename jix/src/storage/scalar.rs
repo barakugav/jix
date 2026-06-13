@@ -173,6 +173,8 @@ where
             blocks_layout: self.blocks_layout,
         })
     }
+
+    crate::ops::impl_element_type_change_default!();
 }
 
 #[cfg(test)]

@@ -3,7 +3,6 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::ops::ElementTypeChange;
 use crate::storage::{
     ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ElementType, Ty, TypeDyn,
 };
@@ -381,16 +380,10 @@ where
             blocks_layout: self.blocks_layout,
         })
     }
-}
 
-impl<A, ET, D> ElementTypeChange for Plain<A, ET, D>
-where
-    ET: ElementType,
-    D: Dimension,
-{
     type ElementTypeChange<NewET: ElementType> = Plain<A, NewET, D>;
-
-    fn change_type<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+    #[inline]
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
         Ok(Plain {
             allocation: self.allocation,
             data: self.data,

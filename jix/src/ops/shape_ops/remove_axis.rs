@@ -222,6 +222,20 @@ where
             blocks_layout: self.blocks_layout,
         })
     }
+
+    type ElementTypeChange<NewET: crate::ElementType> =
+        RemoveAxis<S::ElementTypeChange<NewET>, D>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(RemoveAxis {
+            array: self.array.element_type_change()?,
+            is_removed: self.is_removed,
+            shape: self.shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 #[cfg(test)]

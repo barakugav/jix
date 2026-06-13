@@ -280,6 +280,20 @@ where
             blocks_layout: self.blocks_layout,
         })
     }
+
+    type ElementTypeChange<NewET: crate::ElementType> =
+        InsertAxis<S::ElementTypeChange<NewET>, D>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(InsertAxis {
+            array: self.array.element_type_change()?,
+            is_inserted: self.is_inserted,
+            shape: self.shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 #[cfg(test)]

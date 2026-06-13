@@ -65,7 +65,7 @@ impl<ExtraArgs> OpFnDescriptor<1, ExtraArgs> {
 
         Self::new_args(input_desc, move |inputs, extra_args| {
             let [input] = inputs;
-            let input = input.to_typed::<T>().unwrap();
+            let input = input.into_typed::<T>().unwrap();
             f(input, extra_args)
         })
     }
@@ -92,8 +92,8 @@ impl OpFnDescriptor<2, ()> {
     {
         let f = move |inputs: [ArrayAny; 2]| {
             let [input1, input2] = inputs;
-            let input1 = input1.to_typed::<T1>().unwrap();
-            let input2 = input2.to_typed::<T2>().unwrap();
+            let input1 = input1.into_typed::<T1>().unwrap();
+            let input2 = input2.into_typed::<T2>().unwrap();
             f(input1, input2)
         };
 

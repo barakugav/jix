@@ -282,6 +282,20 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             blocks_layout: self.blocks_layout,
         })
     }
+
+    type ElementTypeChange<NewET: crate::ElementType> = Slice<S::ElementTypeChange<NewET>>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(Slice {
+            array: self.array.element_type_change()?,
+            slice: self.slice,
+            no_steps: self.no_steps,
+            shape: self.shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 /// A complete slice specification: one [`SliceItem`] per dimension.

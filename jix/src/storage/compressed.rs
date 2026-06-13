@@ -126,17 +126,11 @@ macro_rules! impl_array_storage {
             fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
                 Ok($ty(self.0.dimension_change()?))
             }
-        }
 
-        impl<$($lt,)? ET, D> crate::ops::ElementTypeChange for $ty<$($lt,)? ET, D>
-        where
-            ET: crate::ElementType,
-            D: crate::Dimension,
-        {
             type ElementTypeChange<NewET: ElementType> = $ty<$($lt,)? NewET, D>;
-
-            fn change_type<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
-                Ok($ty(self.0.into_type()?))
+            #[inline]
+            fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+                Ok($ty(self.0.element_type_change()?))
             }
         }
     };
@@ -358,14 +352,15 @@ where
         Ok(())
     }
 
-    pub(crate) fn into_type<NewET: ElementType>(
+    #[inline]
+    pub(crate) fn element_type_change<NewET: ElementType>(
         self,
     ) -> Result<ArrayBlockTableStorageBase<S, NewET, D>>
     where
         ET: ElementType,
     {
         Ok(ArrayBlockTableStorageBase {
-            blocks: self.blocks.into_type()?,
+            blocks: self.blocks.element_type_change()?,
             shape: self.shape,
             blocks_layout: self.blocks_layout,
             block_grid_shape: self.block_grid_shape,

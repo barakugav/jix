@@ -186,6 +186,8 @@ where
             blocks_layout: self.blocks_layout,
         })
     }
+
+    crate::ops::impl_element_type_change_default!();
 }
 impl<S, K, D> ReductionOp<S, K, D>
 where
@@ -716,6 +718,7 @@ macro_rules! define_reduction_op {
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
             crate::storage::impl_array_storage_forward!(<S>);
             crate::ops::impl_dimension_change_default!();
+            crate::ops::impl_element_type_change_default!();
         }
     };
 
@@ -771,6 +774,8 @@ macro_rules! define_reduction_op {
             ) -> crate::error::Result<Self::DimensionChange<NewD>> {
                 Ok($Op(self.0.dimension_change()?))
             }
+
+            crate::ops::impl_element_type_change_default!();
         }
     };
 }
@@ -1933,6 +1938,8 @@ where
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
         Ok(Reduce(self.0.dimension_change::<NewD>()?))
     }
+
+    crate::ops::impl_element_type_change_default!();
 }
 
 /// Reduces one or more axes by folding the elements along those axes through a
@@ -2099,6 +2106,8 @@ where
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
         Ok(Fold(self.0.dimension_change::<NewD>()?))
     }
+
+    crate::ops::impl_element_type_change_default!();
 }
 
 /// Emits an `Array::$method(...)` helper that forwards to `$Op::new_array(...)`. The full

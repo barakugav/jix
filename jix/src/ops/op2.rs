@@ -114,6 +114,8 @@ where
             kernel: self.kernel,
         })
     }
+
+    crate::ops::impl_element_type_change_default!();
 }
 
 impl<F, T1, T2, O> Op2Kernel<T1, T2> for F
@@ -177,6 +179,8 @@ macro_rules! define_op2 {
             ) -> crate::error::Result<Self::DimensionChange<NewD>> {
                 Ok($Op(self.0.dimension_change()?))
             }
+
+            crate::ops::impl_element_type_change_default!();
         }
         define_op2!(@define_core
             impl $Op
@@ -233,6 +237,8 @@ macro_rules! define_op2 {
             ) -> crate::error::Result<Self::DimensionChange<NewD>> {
                 Ok($Op(self.0.dimension_change()?))
             }
+
+            crate::ops::impl_element_type_change_default!();
         }
     };
 
@@ -371,6 +377,8 @@ macro_rules! define_op2_rhs_fixed {
             ) -> crate::error::Result<Self::DimensionChange<NewD>> {
                 Ok($Op(self.0.dimension_change()?))
             }
+
+            crate::ops::impl_element_type_change_default!();
         }
     };
 }

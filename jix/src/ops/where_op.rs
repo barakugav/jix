@@ -213,6 +213,22 @@ where
             y: self.y.dimension_change()?,
         })
     }
+
+    type ElementTypeChange<NewET: crate::ElementType> =
+        Where<SC, SX::ElementTypeChange<NewET>, SY::ElementTypeChange<NewET>>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> Result<Self::ElementTypeChange<NewET>>
+    where
+        Self: Sized,
+    {
+        Ok(Where {
+            condition: self.condition,
+            x: self.x.element_type_change()?,
+            y: self.y.element_type_change()?,
+        })
+    }
 }
 
 #[cfg(test)]

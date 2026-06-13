@@ -47,7 +47,7 @@ pub fn r#where<'py>(
     y: &pyo3::Bound<'py, pyo3::PyAny>,
 ) -> pyo3::PyResult<Array> {
     let condition = any_to_core_array(condition)?
-        .to_typed::<bool>()
+        .into_typed::<bool>()
         .into_py_result()?;
     let x = any_to_core_array(x)?;
     let y = any_to_core_array(y)?;

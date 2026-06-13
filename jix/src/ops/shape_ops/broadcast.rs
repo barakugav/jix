@@ -221,6 +221,20 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             blocks_layout: self.blocks_layout,
         })
     }
+
+    type ElementTypeChange<NewET: crate::ElementType> = Broadcast<S::ElementTypeChange<NewET>>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(Broadcast {
+            array: self.array.element_type_change()?,
+            is_broadcast: self.is_broadcast,
+            is_identity: self.is_identity,
+            new_shape: self.new_shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 #[cfg(test)]

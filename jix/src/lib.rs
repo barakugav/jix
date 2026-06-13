@@ -168,7 +168,7 @@
 //! // src: Array<Compact<TypeDyn, DimDyn>> - element type unknown at compile time
 //! // src: Array<S::ElementType = TypeDyn>
 //!
-//! let typed = src.to_typed::<f32>()?; // runtime check: dtype must be f32
+//! let typed = src.into_typed::<f32>()?; // runtime check: dtype must be f32
 //! // typed: Array<S::ElementType = Ty<f32>>
 //! let result = typed.exp().sum(0).compact()?;
 //! # Ok::<(), jix::Error>(())
@@ -313,7 +313,7 @@
 //! };
 //!
 //! // Build a lazy pipeline over the mmap'd data.
-//! let processed = src.to_typed::<f32>()?.exp().map(|x| x + 1.0f32);
+//! let processed = src.into_typed::<f32>()?.exp().map(|x| x + 1.0f32);
 //!
 //! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
 //! processed.write_to(BufWriter::new(File::create(
