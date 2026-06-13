@@ -191,8 +191,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         })
     }
 
-    type ElementTypeChange<NewET: crate::ElementType> =
-        PermuteAxes<S::ElementTypeChange<NewET>>;
+    type ElementTypeChange<NewET: crate::ElementType> = PermuteAxes<S::ElementTypeChange<NewET>>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,

@@ -2066,7 +2066,7 @@ where
 
     #[inline(always)]
     fn init_state(&self, first: Option<T>) -> Self::State {
-        let mut state = self.init.clone();
+        let mut state = self.init;
         if let Some(item) = first {
             state = self.update_state(state, item, 0);
         }
@@ -2250,6 +2250,7 @@ where
 
     /// Applies the [`Fold`] operation, see the op struct docs for details.
     #[track_caller]
+    #[allow(clippy::type_complexity)]
     pub fn fold<F, B, Ax>(
         self,
         axes: Ax,

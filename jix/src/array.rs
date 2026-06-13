@@ -1375,7 +1375,9 @@ where
     where
         NewET: ElementType,
     {
-        Ok(Array::from_storage(self.into_storage().element_type_change()?))
+        Ok(Array::from_storage(
+            self.into_storage().element_type_change()?,
+        ))
     }
 
     /// Re-tag this array's element type as [`Ty<T>`](crate::Ty), asserting a concrete scalar type.

@@ -223,8 +223,7 @@ where
         })
     }
 
-    type ElementTypeChange<NewET: crate::ElementType> =
-        RemoveAxis<S::ElementTypeChange<NewET>, D>;
+    type ElementTypeChange<NewET: crate::ElementType> = RemoveAxis<S::ElementTypeChange<NewET>, D>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,
