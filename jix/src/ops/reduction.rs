@@ -41,7 +41,7 @@ pub(crate) trait ReductionOpKernel<T> {
     fn init_state(&self, first: Option<T>) -> Self::State;
     /// Fold `item` (at 0-based stream position `idx`) into `state`. `idx` is always `>= 1`
     /// since position `0` is consumed by [`init_state`](Self::init_state).
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64);
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State;
     /// Produce the final result. `nitems` is the total number of stream elements that
     /// were folded into `state` (one for `init_state` + one per `update_state` call),
     /// so `nitems == 0` exactly when `first` was `None`.
@@ -479,26 +479,24 @@ where
                         .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
                     let mut item_idx = base_item_idx;
 
-                    let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
-                    let state = if !state_initialized {
+                    let state_ref = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                    if !state_initialized {
                         // init state with the first item
                         debug_assert_eq!(item_idx, 0);
                         let first = reduction_iter.next();
-                        let state = state.write(self.kernel.init_state(first));
+                        state_ref.write(self.kernel.init_state(first));
                         if first.is_some() {
                             item_idx += 1;
                         }
-                        state
-                    } else {
-                        // SAFETY: every state was written during the first bulk.
-                        unsafe { state.assume_init_mut() }
-                    };
+                    }
+                    // SAFETY: every state was written during the first bulk.
+                    let mut state = unsafe { state_ref.assume_init_read() };
 
                     // Fold the first SIMD block
                     while item_idx < item_idx_end.min(SIMD as u64) {
                         let item = reduction_iter.next();
                         let item = unsafe { item.unwrap_unchecked() };
-                        self.kernel.update_state(state, item, item_idx);
+                        state = self.kernel.update_state(state, item, item_idx);
                         item_idx += 1;
                     }
                     // Fold all SIMD blocks
@@ -508,7 +506,7 @@ where
                             reduction_iter.next().unwrap_unchecked()
                         });
                         for (i, item) in items.into_iter().enumerate() {
-                            self.kernel.update_state(state, item, item_idx + i as u64);
+                            state = self.kernel.update_state(state, item, item_idx + i as u64);
                         }
                         item_idx += SIMD as u64;
                     }
@@ -516,10 +514,11 @@ where
                     while item_idx < item_idx_end {
                         let item = reduction_iter.next();
                         let item = unsafe { item.unwrap_unchecked() };
-                        self.kernel.update_state(state, item, item_idx);
+                        state = self.kernel.update_state(state, item, item_idx);
                         item_idx += 1;
                     }
                     debug_assert!(reduction_iter.next().is_none());
+                    state_ref.write(state);
                 }
             }
 
@@ -778,7 +777,7 @@ pub(crate) mod _traits {
         /// Return the initial accumulator (zero).
         fn init() -> Self::Output;
         /// Fold `item` into the running sum.
-        fn update(state: &mut Self::Output, item: Self);
+        fn update(state: Self::Output, item: Self) -> Self::Output;
     }
 
     macro_rules! impl_sum {
@@ -791,8 +790,8 @@ pub(crate) mod _traits {
                     <i32 as crate::scalar::Cast<Self::Output>>::cast(0)
                 }
                 #[inline(always)]
-                fn update(state: &mut Self::Output, item: Self) {
-                    *state += <_ as crate::scalar::Cast<Self::Output>>::cast(item);
+                fn update(state: Self::Output, item: Self) -> Self::Output {
+                    state + <_ as crate::scalar::Cast<Self::Output>>::cast(item)
                 }
             }
         };
@@ -825,7 +824,7 @@ pub(crate) mod _traits {
         /// Return the initial accumulator (one).
         fn init() -> Self::Output;
         /// Fold `item` into the running product.
-        fn update(state: &mut Self::Output, item: Self);
+        fn update(state: Self::Output, item: Self) -> Self::Output;
     }
     macro_rules! impl_product {
         ($item_ty:ty, $output_ty:ty) => {
@@ -837,8 +836,8 @@ pub(crate) mod _traits {
                     <i32 as crate::scalar::Cast<Self::Output>>::cast(1)
                 }
                 #[inline(always)]
-                fn update(state: &mut Self::Output, item: Self) {
-                    *state *= <_ as crate::scalar::Cast<Self::Output>>::cast(item);
+                fn update(state: Self::Output, item: Self) -> Self::Output {
+                    state * <_ as crate::scalar::Cast<Self::Output>>::cast(item)
                 }
             }
         };
@@ -875,7 +874,7 @@ pub(crate) mod _traits {
         /// Return the initial (empty) accumulator.
         fn init() -> Self::State;
         /// Fold `item` into the running sum.
-        fn update(state: &mut Self::State, item: Self);
+        fn update(state: Self::State, item: Self) -> Self::State;
         /// Finalize `state` into the mean. Returns `None` if `nitems == 0`; otherwise
         /// returns `state / nitems` (cast to the output domain).
         fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output>;
@@ -891,8 +890,8 @@ pub(crate) mod _traits {
                     <Self as Sum>::init()
                 }
                 #[inline(always)]
-                fn update(state: &mut Self::State, item: Self) {
-                    <Self as Sum>::update(state, item);
+                fn update(state: Self::State, item: Self) -> Self::State {
+                    <Self as Sum>::update(state, item)
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output> {
@@ -950,7 +949,7 @@ pub(crate) mod _traits {
         fn init() -> Self::State;
         /// Fold `item` into the running Welford accumulator. `idx` is the 0-based stream position
         /// of `item.
-        fn update(state: &mut Self::State, item: Self, idx: u64);
+        fn update(state: Self::State, item: Self, idx: u64) -> Self::State;
         /// Finalize `state` into the variance using `ddof` degrees-of-freedom correction.
         /// `nitems` is the total number of elements folded in.
         ///
@@ -971,12 +970,13 @@ pub(crate) mod _traits {
                     }
                 }
                 #[inline(always)]
-                fn update(state: &mut Self::State, item: Self, idx: u64) {
+                fn update(mut state: Self::State, item: Self, idx: u64) -> Self::State {
                     let x = <_ as crate::scalar::Cast<$mean_ty>>::cast(item);
                     let $delta = x - state.mean;
                     state.mean += $delta / (idx + 1) as f64;
                     let $delta2 = x - state.mean;
                     state.m2 += $m2_expr;
+                    state
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output {
@@ -1054,7 +1054,7 @@ define_reduction_op!(
 );
 impl<T> ReductionOpKernel<T> for MaxKernel
 where
-    T: crate::scalar::Maximum<Output = T> + Copy,
+    T: crate::scalar::Maximum<Output = T>,
 {
     type Output = T;
     type State = T;
@@ -1064,8 +1064,8 @@ where
         first.unwrap()
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        *state = (*state).maximum(item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        state.maximum(item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1118,7 +1118,7 @@ define_reduction_op!(
 );
 impl<T> ReductionOpKernel<T> for MinKernel
 where
-    T: crate::scalar::Minimum<Output = T> + Copy,
+    T: crate::scalar::Minimum<Output = T>,
 {
     type Output = T;
     type State = T;
@@ -1128,8 +1128,8 @@ where
         first.unwrap()
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        *state = (*state).minimum(item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        state.minimum(item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1196,16 +1196,17 @@ where
         (0, first.unwrap())
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
-        let (best_idx, best_val) = (&mut state.0, &mut state.1);
-        if item > *best_val {
-            *best_idx = idx;
-            *best_val = item;
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
+        let (best_idx, best_val) = state;
+        if item > best_val {
+            (idx, item)
+        } else {
+            (best_idx, best_val)
         }
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
-        let (best_idx, _best_val) = (state.0, state.1);
+        let (best_idx, _best_val) = state;
         best_idx
     }
     #[inline(always)]
@@ -1269,16 +1270,17 @@ where
         (0, first.unwrap())
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
-        let (best_idx, best_val) = (&mut state.0, &mut state.1);
-        if item < *best_val {
-            *best_idx = idx;
-            *best_val = item;
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
+        let (best_idx, best_val) = state;
+        if item < best_val {
+            (idx, item)
+        } else {
+            (best_idx, best_val)
         }
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
-        let (best_idx, _best_val) = (state.0, state.1);
+        let (best_idx, _best_val) = state;
         best_idx
     }
     #[inline(always)]
@@ -1344,13 +1346,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Sum>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        <T as crate::scalar::Sum>::update(state, item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        <T as crate::scalar::Sum>::update(state, item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1419,13 +1421,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Product>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        <T as crate::scalar::Product>::update(state, item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        <T as crate::scalar::Product>::update(state, item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1487,13 +1489,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Mean>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        <T as crate::scalar::Mean>::update(state, item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        <T as crate::scalar::Mean>::update(state, item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -1560,13 +1562,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
-        <T as crate::scalar::Variance>::update(state, item, idx);
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
+        <T as crate::scalar::Variance>::update(state, item, idx)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -1629,13 +1631,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
-        <T as crate::scalar::Variance>::update(state, item, idx);
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
+        <T as crate::scalar::Variance>::update(state, item, idx)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -1692,13 +1694,13 @@ impl ReductionOpKernel<bool> for AllKernel {
     fn init_state(&self, first: Option<bool>) -> Self::State {
         let mut state = true;
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: bool, _idx: u64) {
-        *state = *state && item;
+    fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
+        state && item
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1754,13 +1756,13 @@ impl ReductionOpKernel<bool> for AnyKernel {
     fn init_state(&self, first: Option<bool>) -> Self::State {
         let mut state = false;
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: bool, _idx: u64) {
-        *state = *state || item;
+    fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
+        state || item
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
