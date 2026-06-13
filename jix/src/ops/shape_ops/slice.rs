@@ -267,6 +267,21 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             ..self.array.spec()
         }
     }
+
+    type DimensionChange<NewD: crate::Dimension> = Slice<S::DimensionChange<NewD>>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        let shape = NewD::from_slice(self.shape())?;
+        Ok(Slice {
+            array: self.array.dimension_change()?,
+            slice: self.slice,
+            no_steps: self.no_steps,
+            shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 /// A complete slice specification: one [`SliceItem`] per dimension.

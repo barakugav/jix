@@ -32,4 +32,3 @@
 - bump pyo3 to 0.29
 - rework block shape and read shape propagation through ops
 - remove DimensionChange, every storage should implement it
-- rename ReadData

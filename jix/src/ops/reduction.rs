@@ -171,6 +171,21 @@ where
             ..self.array.spec()
         }
     }
+
+    type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(ReductionOp {
+            kernel: self.kernel,
+            array: self.array,
+            is_reduced: self.is_reduced,
+            out_dtype_: self.out_dtype_,
+            shape: NewD::from_slice(self.shape.as_slice())?,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 impl<S, K, D> ReductionOp<S, K, D>
 where
@@ -699,8 +714,8 @@ macro_rules! define_reduction_op {
         {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
-
             crate::storage::impl_array_storage_forward!(<S>);
+            crate::ops::impl_dimension_change_default!();
         }
     };
 
@@ -747,8 +762,15 @@ macro_rules! define_reduction_op {
         {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = D;
-
             crate::storage::impl_array_storage_forward!(<S, D>);
+
+            type DimensionChange<NewD: crate::Dimension> = $Op<S, NewD>;
+            #[inline]
+            fn dimension_change<NewD: crate::Dimension>(
+                self,
+            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+                Ok($Op(self.0.dimension_change()?))
+            }
         }
     };
 }
@@ -1903,6 +1925,14 @@ where
     type ElementType = Ty<S::Item>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, F>);
+
+    type DimensionChange<NewD: crate::Dimension> = Reduce<S, NewD, F>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Reduce(self.0.dimension_change::<NewD>()?))
+    }
 }
 
 /// Reduces one or more axes by folding the elements along those axes through a
@@ -2061,6 +2091,14 @@ where
     type ElementType = Ty<B>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, B, F>);
+
+    type DimensionChange<NewD: crate::Dimension> = Fold<S, NewD, B, F>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Fold(self.0.dimension_change::<NewD>()?))
+    }
 }
 
 /// Emits an `Array::$method(...)` helper that forwards to `$Op::new_array(...)`. The full
@@ -2694,7 +2732,11 @@ pub(crate) mod tests {
         // required for the result to be well-defined (the traversal order across multiple
         // reduced axes is implementation-defined).
         let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let r = a.as_ref().reduce((0, 1), |a, b| a + b).to_ndarray().unwrap();
+        let r = a
+            .as_ref()
+            .reduce((0, 1), |a, b| a + b)
+            .to_ndarray()
+            .unwrap();
         assert_eq!(r[[]], 21);
     }
 
@@ -2724,7 +2766,11 @@ pub(crate) mod tests {
         // traversal makes the result deterministic:
         // ((((100 - 10) - 1) - 2) - 3) = 84.
         let a = Array::compact_ndarray(&array![10i32, 1, 2, 3]).unwrap();
-        let r = a.as_ref().fold(0, 100i32, |a, x| a - x).to_ndarray().unwrap();
+        let r = a
+            .as_ref()
+            .fold(0, 100i32, |a, x| a - x)
+            .to_ndarray()
+            .unwrap();
         assert_eq!(r[[]], 84);
     }
 

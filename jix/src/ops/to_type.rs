@@ -122,6 +122,17 @@ where
     fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
         self.inner.spec()
     }
+
+    type DimensionChange<NewD: crate::Dimension> = ToType<S::DimensionChange<NewD>, ET>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(ToType {
+            inner: self.inner.dimension_change()?,
+            element_type: PhantomData,
+        })
+    }
 }
 
 /// Opt-in trait for storage types that can swap their element-type parameter in-place.

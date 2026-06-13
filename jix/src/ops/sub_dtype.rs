@@ -155,6 +155,18 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         self.array.spec()
     }
+
+    type DimensionChange<NewD: crate::Dimension> = SubDtype<S::DimensionChange<NewD>, ET>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(SubDtype {
+            array: self.array.dimension_change()?,
+            dst_type: self.dst_type,
+            sub_field_offset: self.sub_field_offset,
+        })
+    }
 }
 
 #[cfg(test)]

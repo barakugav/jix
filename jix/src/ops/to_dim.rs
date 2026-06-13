@@ -15,12 +15,11 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 /// dimension ([`Dim<N>`](crate::Dim)), the runtime ndim is validated to equal `N`; if it is
 /// [`DimDyn`](crate::DimDyn) the conversion always succeeds.
 ///
-/// The typical entry points are [`Array::to_dim`](crate::Array::to_dim) and
-/// [`Array::to_dim_dyn`](crate::Array::to_dim_dyn).
-///
-/// For concrete block-compressed or plain storages that implement [`DimensionChange`], prefer
-/// [`Array::into_dim`](crate::Array::into_dim) instead - it re-tags the dimension in-place
-/// without adding this wrapper layer.
+/// The typical entry points are [`Array::into_dim`](crate::Array::into_dim) and
+/// [`Array::into_dim_dyn`](crate::Array::into_dim_dyn), which either wrap the array in `ToDim`
+/// or, for some storages, swap the dimension parameter in-place. For example,
+/// [`Ref`](crate::storage::Ref) can not be re-tagged in-place, but
+/// [`Compact`](crate::storage::Compact) can.
 ///
 /// # Examples
 ///
@@ -35,8 +34,8 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 /// // a: Array<Storage::Dimension = DimDyn>
 ///
 /// // Assert it is 3-D; returns an error if the ndim does not match.
-/// let a3d = a.to_dim::<Dim<3>>()?;
-/// // a3d: Array<ToDim<Compact<TypeDyn, DimDyn>, Dim<3>>>
+/// let a3d = a.as_ref().into_dim::<Dim<3>>()?;
+/// // a3d: Array<ToDim<AsRef<Compact<TypeDyn, DimDyn>>, Dim<3>>>
 /// // a3d: Array<Storage::Dimension = Dim<3>>
 ///
 /// // Subsequent operations propagate Dim<3> through the type system.
@@ -123,39 +122,24 @@ where
     fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
         self.inner.spec()
     }
+
+    type DimensionChange<NewD: Dimension> = ToDim<S, NewD>;
+    #[inline]
+    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
+        ToDim::new(self.inner)
+    }
 }
 
-/// Opt-in trait for storage types that can swap their dimension parameter in-place.
-///
-/// Storages that implement this trait can change their [`Dimension`] without wrapping
-/// themselves in a [`ToDim`] adapter. The result is a leaner type: e.g. `Compact<ET, NewD>`
-/// instead of `ToDim<Compact<ET, D>, NewD>`.
-///
-/// Implementors: [`Compact`](crate::storage::Compact),
-/// [`CompactMmap`](crate::storage::CompactMmap),
-/// [`CompactBorrowed`](crate::storage::CompactBorrowed),
-/// [`Plain`](crate::storage::Plain).
-///
-/// The typical entry points are [`Array::into_dim`](crate::Array::into_dim) and
-/// [`Array::into_dim_dyn`](crate::Array::into_dim_dyn). Use
-/// [`Array::to_dim`](crate::Array::to_dim) / [`Array::to_dim_dyn`](crate::Array::to_dim_dyn)
-/// for storage types that do not implement this trait.
-pub trait DimensionChange {
-    /// The concrete storage type after swapping the dimension to `NewD`.
-    type DimensionChange<NewD: Dimension>: ArrayStorage<
-        ElementType = Self::ElementType,
-        Dimension = NewD,
-    >
-    where
-        Self: ArrayStorage;
+macro_rules! impl_dimension_change_default {
+    () => {
+        type DimensionChange<NewD: crate::Dimension> = crate::ops::ToDim<Self, NewD>;
 
-    /// Consume `self`, validate the new dimension against the runtime ndim, and return the
-    /// re-tagged storage.
-    ///
-    /// Returns [`ErrorKind::InvalidShapeOperation`](crate::ErrorKind::InvalidShapeOperation) if
-    /// `NewD = Dim<N>` and the runtime ndim does not equal `N`. Always succeeds for
-    /// `NewD = DimDyn`.
-    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>>
-    where
-        Self: ArrayStorage;
+        #[inline]
+        fn dimension_change<NewD: crate::Dimension>(
+            self,
+        ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+            crate::ops::ToDim::new(self)
+        }
+    };
 }
+pub(crate) use impl_dimension_change_default;

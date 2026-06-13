@@ -200,6 +200,19 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         self.x.spec()
     }
+
+    type DimensionChange<NewD: crate::Dimension> =
+        Where<SC::DimensionChange<NewD>, SX::DimensionChange<NewD>, SY::DimensionChange<NewD>>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Where {
+            condition: self.condition.dimension_change()?,
+            x: self.x.dimension_change()?,
+            y: self.y.dimension_change()?,
+        })
+    }
 }
 
 #[cfg(test)]

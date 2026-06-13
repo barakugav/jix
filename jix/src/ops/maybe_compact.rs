@@ -101,6 +101,16 @@ where
             ToCompactInner::Compact(c) => c.as_compact().unwrap(),
         })
     }
+
+    type DimensionChange<NewD: crate::Dimension> = MaybeCompact<S::DimensionChange<NewD>>;
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(MaybeCompact(match self.0 {
+            ToCompactInner::Original(s) => ToCompactInner::Original(s.dimension_change()?),
+            ToCompactInner::Compact(c) => ToCompactInner::Compact(c.dimension_change()?),
+        }))
+    }
 }
 
 #[cfg(test)]

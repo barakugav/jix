@@ -208,6 +208,20 @@ where
             ..self.array.spec()
         }
     }
+
+    type DimensionChange<NewD: crate::Dimension> = RemoveAxis<S, NewD>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        let shape = NewD::from_slice(self.shape())?;
+        Ok(RemoveAxis {
+            array: self.array,
+            is_removed: self.is_removed,
+            shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 #[cfg(test)]

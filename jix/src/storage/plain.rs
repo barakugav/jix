@@ -367,6 +367,20 @@ where
             // decoder_config: None,
         }
     }
+
+    type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;
+    #[inline]
+    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
+        let shape = NewD::from_slice(self.shape())?;
+        Ok(Plain {
+            allocation: self.allocation,
+            data: self.data,
+            shape,
+            strides: self.strides,
+            element_type: self.element_type,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 impl<A, ET, D> ElementTypeChange for Plain<A, ET, D>
@@ -383,26 +397,6 @@ where
             shape: self.shape,
             strides: self.strides,
             element_type: NewET::from_dtype(self.element_type.dtype().clone())?,
-            blocks_layout: self.blocks_layout,
-        })
-    }
-}
-
-impl<A, ET, D> crate::ops::DimensionChange for Plain<A, ET, D>
-where
-    ET: ElementType,
-    D: Dimension,
-{
-    type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;
-
-    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
-        Ok(Plain {
-            allocation: self.allocation,
-            data: self.data,
-            shape,
-            strides: self.strides,
-            element_type: self.element_type,
             blocks_layout: self.blocks_layout,
         })
     }

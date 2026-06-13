@@ -159,6 +159,7 @@ where
     type Dimension = S::Dimension;
 
     impl_array_storage_forward!('b, T, <S>);
+    crate::ops::impl_dimension_change_default!();
 }
 impl<'a, S> Clone for Ref<'a, S> {
     fn clone(&self) -> Self {
@@ -215,7 +216,9 @@ macro_rules! impl_array_storage_forward {
 }
 pub(crate) use impl_array_storage_forward;
 
-/// An iterator-like trait for reading items from an `ArrayStorage` in bulk.
+/// An interface trait for reading items from an `ArrayStorage` in bulk.
+///
+/// Returned by [`ArrayStorage::read_data_typed`], used by element-wise operations.
 pub trait ReadData<T> {
     /// The total number of items available to read.
     fn len(&self) -> usize;

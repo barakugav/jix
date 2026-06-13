@@ -214,6 +214,8 @@ where
             ..self.arrays.spec(0)
         }
     }
+
+    crate::ops::impl_dimension_change_default!();
 }
 
 #[cfg(test)]

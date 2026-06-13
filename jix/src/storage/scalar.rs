@@ -161,15 +161,9 @@ where
             // decoder_config: None,
         }
     }
-}
 
-impl<T, D> crate::ops::DimensionChange for Scalar<T, D>
-where
-    T: Dtyped,
-    D: Dimension,
-{
     type DimensionChange<NewD: Dimension> = Scalar<T, NewD>;
-
+    #[inline]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
         let shape = NewD::from_slice(self.shape())?;
         Ok(Scalar {

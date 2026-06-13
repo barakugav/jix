@@ -100,6 +100,20 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         self.a.spec()
     }
+
+    type DimensionChange<NewD: crate::Dimension> =
+        Op2<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>, K>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Op2 {
+            a: self.a.dimension_change()?,
+            b: self.b.dimension_change()?,
+            out_dtype_: self.out_dtype_,
+            kernel: self.kernel,
+        })
+    }
 }
 
 impl<F, T1, T2, O> Op2Kernel<T1, T2> for F
@@ -155,6 +169,14 @@ macro_rules! define_op2 {
             type ElementType = crate::Ty<<S1::Item as $($trait)::+<S2::Item>>::Output>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
+
+            type DimensionChange<NewD: crate::Dimension> = $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
+            #[inline]
+            fn dimension_change<NewD: crate::Dimension>(
+                self,
+            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+                Ok($Op(self.0.dimension_change()?))
+            }
         }
         define_op2!(@define_core
             impl $Op
@@ -203,6 +225,14 @@ macro_rules! define_op2 {
             type ElementType = crate::Ty<$output_type>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
+
+            type DimensionChange<NewD: crate::Dimension> = $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
+            #[inline]
+            fn dimension_change<NewD: crate::Dimension>(
+                self,
+            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+                Ok($Op(self.0.dimension_change()?))
+            }
         }
     };
 
@@ -333,6 +363,14 @@ macro_rules! define_op2_rhs_fixed {
             type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
+
+            type DimensionChange<NewD: crate::Dimension> = $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
+            #[inline]
+            fn dimension_change<NewD: crate::Dimension>(
+                self,
+            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+                Ok($Op(self.0.dimension_change()?))
+            }
         }
     };
 }

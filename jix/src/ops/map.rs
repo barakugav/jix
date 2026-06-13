@@ -81,6 +81,13 @@ where
     type ElementType = Ty<O>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!(<S, O, F>);
+
+    type DimensionChange<NewD: crate::Dimension> = Map<S::DimensionChange<NewD>, F>;
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Map(self.0.dimension_change()?))
+    }
 }
 
 /// Applies a binary function element-wise to two arrays.
@@ -138,6 +145,14 @@ where
     type ElementType = Ty<O>;
     type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2, O, F>);
+
+    type DimensionChange<NewD: crate::Dimension> =
+        Map2<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>, F>;
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Map2(self.0.dimension_change()?))
+    }
 }
 
 /// Applies a binary function element-wise to two arrays. See [`Map2`] for details and examples.

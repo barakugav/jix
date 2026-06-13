@@ -207,6 +207,20 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             ..self.array.spec()
         }
     }
+
+    type DimensionChange<NewD: crate::Dimension> = Broadcast<S::DimensionChange<NewD>>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Broadcast {
+            array: self.array.dimension_change()?,
+            is_broadcast: self.is_broadcast,
+            is_identity: self.is_identity,
+            new_shape: NewD::from_slice(self.new_shape.as_slice())?,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 #[cfg(test)]
