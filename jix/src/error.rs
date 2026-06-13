@@ -49,6 +49,7 @@ impl Error {
 /// Match on this to distinguish failure modes programmatically; the human-readable
 /// description is available via [`Error::message`] or the [`Display`](fmt::Display) impl.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
 pub enum ErrorKind {
     /// Index out of bounds, slice start > end, nd-index with wrong number of dimensions, etc
     InvalidIndex,

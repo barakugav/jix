@@ -40,9 +40,6 @@ mod jix {
     pub use crate::ops::{asarray, astype};
 
     #[pymodule_export]
-    pub use crate::ops::copy;
-
-    #[pymodule_export]
     pub use crate::ops::{add, divide, multiply, power, subtract};
 
     #[pymodule_export]
@@ -81,6 +78,18 @@ mod jix {
 
     #[pymodule_export]
     pub use crate::ops::dtype_sub_field;
+
+    #[pymodule_init]
+    fn init(m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> pyo3::PyResult<()> {
+        use pyo3::prelude::*;
+
+        // aliases
+        m.add("pow", m.getattr("power")?)?;
+        m.add("abs", m.getattr("absolute")?)?;
+        m.add("concat", m.getattr("concatenate")?)?;
+
+        Ok(())
+    }
 }
 pub use crate::jix::*;
 

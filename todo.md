@@ -8,7 +8,6 @@
     - allclose, isclose
     - flip, roll, split
     - log variants, log10, log2, log1p
-- add functions alias in python (abs, pow, concat)
 - move pyi gen to a separate crate
 - squeeze()
 - consider matching insert_axis to numpy's expand_dims instead of using gap indices
@@ -21,15 +20,15 @@
 - add "why should i use this" to readme(s)
 - add link (pyproject metadata + readme) to readthedocs
 - build wheels for windows
-- remove .copy(), .compact() should be used instead, bot in rust and python
 - general generic reduction, .fold
-- make NdIter generic of D
-- add Validation enum when reading array from disk, validating offsets array is in bound
 - add NdIter.foreach() and NdIter.try_foreach()
 - have some SIMD friendly api in NdIter.foreach(), like when detecting the last dim is continuous
 - tmp_buf_typed should return a typed version of TmpBuf
 - add Dimension::Vec<T> associated type
-- prefer Self::Item::DTYPE and K::Output::DTYPE over self.array.dtype() and self.dtype()
 - preferred_read_size should be L1 cache. In the future we can add preferred_read_size_multithread with in L2
 - compress offsets array
 - change offsets array to have length of num_blocks-1 instead of num_blocks+1
+- py div, true_div, floor_div
+- slice op in python api
+- bump pyo3 to 0.29
+- remove Scalar, users should use .map instead

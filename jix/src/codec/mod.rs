@@ -59,6 +59,7 @@ use crate::util::{AlignedBytes, AlternatingBuffers};
 
 /// The compression algorithm applied to each block.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Codec {
     /// [Zstandard](https://facebook.github.io/zstd/) - a fast general-purpose compressor.
     /// Compression level is controlled by [`EncoderParams::level`].
@@ -83,32 +84,32 @@ pub enum Codec {
 /// Use the defaults (most common case):
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
 /// use jix::codec::EncoderParams;
+/// use jix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
 /// let data = array![1.0f32, 2.0, 3.0, 4.0];
 /// let mut params = ArrayParams::new();
 /// // EncoderParams::default() is equivalent to EncoderParams::new()
 /// params.encoder_params(EncoderParams::new());
-/// let za = Array::compact_array_with(&data, params)?;
+/// let za = Array::compact_ndarray_with(&data, params)?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
 /// Increase compression level for archival data:
 ///
 /// ```
-/// use jix::{Array, ArrayParams};
 /// use jix::codec::{EncoderParams, Filter};
+/// use jix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
 /// let data = array![1.0f64, 2.0, 3.0, 4.0];
 /// let mut enc = EncoderParams::new();
-/// enc.level(15)?;  // slower encode, better ratio
+/// enc.level(15)?; // slower encode, better ratio
 /// enc.filters(&[Filter::ByteShuffle])?;
 /// let mut params = ArrayParams::new();
 /// params.encoder_params(enc);
-/// let za = Array::compact_array_with(&data, params)?;
+/// let za = Array::compact_ndarray_with(&data, params)?;
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[derive(Clone, Debug)]
@@ -426,7 +427,7 @@ impl<'a> Decoder<'a> {
 /// use jix::{Array, ArrayParams};
 /// use ndarray::array;
 ///
-/// let za = Array::compact_array(&array![1i32, 2, 3, 4])?;
+/// let za = Array::compact_ndarray(&array![1i32, 2, 3, 4])?;
 ///
 /// // read_ctx() inherits the decoder config from the array.
 /// let ctx = za.read_ctx();
@@ -439,8 +440,8 @@ impl<'a> Decoder<'a> {
 /// more control over the decoder parameters or want to create a context independently of a specific
 /// array.
 /// ```
-/// use jix::Array;
 /// use jix::codec::ReadContext;
+/// use jix::Array;
 ///
 /// let za = Array::plain_scalar(42i32, &[5])?;
 /// let out = za.to_ndarray_sub(&[0..3], &ReadContext::default())?;

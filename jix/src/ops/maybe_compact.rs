@@ -12,7 +12,7 @@ use crate::{Array, ArrayParams, ArrayStorage};
 ///
 /// - **Already compact**: the original storage is kept as is - no copy or re-compression.
 /// - **Not compact** (lazy views, op chains, etc.): the array is materialized
-///   via `copy_with` into a new [`Compact`] block-table.
+///   and compressed into a new [`Compact`] block-table.
 ///
 /// In both cases all [`ArrayStorage`] methods delegate to the inner variant,
 /// and the storage is guaranteed to be a materialized compact storage, not a view.
@@ -38,7 +38,7 @@ where
         } else {
             ToCompactInner::Compact(
                 Array::from_storage(array)
-                    .copy_with(params, context)?
+                    .compact_with(params, context)?
                     .into_storage(),
             )
         }))
@@ -124,7 +124,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<Compact<Ty<T>, DimDyn>> {
         let src = ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
-        Array::compact_array_with(&src, arr_params(block_shape)).unwrap()
+        Array::compact_ndarray_with(&src, arr_params(block_shape)).unwrap()
     }
 
     fn to_bytes<ET: ElementType, D: Dimension>(a: &Array<Compact<ET, D>>) -> Vec<u8> {

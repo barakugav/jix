@@ -11,6 +11,19 @@ use crate::{Array, ReadContext};
 
 /// Load a compressed array from a `.jix` file or a file-like object.
 ///
+/// When reading an archive, jix performs sanity checks to ensure the file is well-formed before
+/// trusting its contents. These checks fall into two cost categories:
+///
+/// - **O(1) checks** are *always* performed regardless of the validation mode. They examine
+///   only a constant amount of metadata - the file magic header, the archive type tag,
+///   declared shape and block-shape consistency, and similar fixed-size fields. The cost
+///   is negligible, so there is never a reason to skip them.
+///
+/// - **O(data_size) checks** scan structures whose size grows with the array (most notably
+///   the per-block offset table, which has one entry per block). For very large arrays this
+///   can become non-trivial - on the order of memory-touch cost over the whole offset table.
+///   These checks are only performed in `strict` mode.
+///
 /// Args:
 ///     path_or_reader: A file path or any seekable binary file-like object with `.read()`,
 ///         `.seek()`, and `.tell()` methods (e.g. `io.BytesIO`, an open file handle).
@@ -23,6 +36,16 @@ use crate::{Array, ReadContext};
 ///         the file while the returned array is live has undefined behavior. Not supported for
 ///         file-like objects.
 ///     params: Controls how the array is read and decoded. See [`jix.compact()`][jix.compact] for details.
+///     validation: Controls how strictly the archive is validated. Can be one of:
+///
+///        - `None` (default): Currently the same as the `strict` mode, may change in the future.
+///        - `minimal`: Perform only the constant-time (O(1)) consistency checks.
+///             Suitable for archives produced by a trusted source where the O(data_size) scans
+///             would add measurable overhead with no expected benefit.
+///        - `strict`: Perform all checks, including those that scan structures whose size grows
+///             with the array (O(data_size)). This is the right choice unless you have a specific
+///             reason to skip the extra scans. Use it whenever the archive's origin is untrusted
+///             or unverified.
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] loaded from the file.
@@ -55,7 +78,15 @@ use crate::{Array, ReadContext};
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (path_or_reader, *, params=None, offset=None, len=None, mmap=false))]
+#[pyo3(signature = (
+    path_or_reader,
+    *,
+    params=None,
+    offset=None,
+    len=None,
+    mmap=false,
+    validation=None,
+))]
 pub fn read_array(
     py: Python,
     path_or_reader: &Bound<'_, PyAny>,
@@ -63,9 +94,22 @@ pub fn read_array(
     offset: Option<u64>,
     len: Option<u64>,
     mmap: bool,
+    #[gen_stub(override_type(type_repr="typing.Optional[typing.Sequence[typing.Literal['minimal', 'strict']]]", imports=("typing")))]
+    validation: Option<String>,
 ) -> PyResult<Array> {
     let params = resolve_array_params(py, params)?;
     let path_or_reader = PathOrReader::from_pyany(path_or_reader)?;
+    let validation = match validation.as_deref() {
+        None => jix_core::ArchiveValidation::default(),
+        Some("minimal") => jix_core::ArchiveValidation::Minimal,
+        Some("strict") => jix_core::ArchiveValidation::Strict,
+        _ => {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "invalid validation value: '{}'",
+                validation.unwrap_or_default()
+            )))
+        }
+    };
 
     match path_or_reader {
         PathOrReader::Path(path) => py.detach(|| {
@@ -81,12 +125,13 @@ pub fn read_array(
             };
 
             Ok(if !mmap {
-                let array = jix_core::Array::read_from_file_section(&path, offset, len, params)
-                    .into_py_result()?;
+                let array =
+                    jix_core::Array::read_from_file_section(&path, offset, len, params, validation)
+                        .into_py_result()?;
                 Array::from_core(array.into_any())
             } else {
                 let array = unsafe {
-                    jix_core::Array::read_from_file_mmap(&path, offset, len, params)
+                    jix_core::Array::read_from_file_mmap(&path, offset, len, params, validation)
                         .into_py_result()?
                 };
                 Array::from_core(array.into_any())
@@ -105,7 +150,8 @@ pub fn read_array(
             }
             // Can't detach the GIL since the reader is a Python object.
             let reader = BufReader::new(reader);
-            let array = jix_core::Array::read_from_reader(reader, len, params).into_py_result()?;
+            let array = jix_core::Array::read_from_reader(reader, len, params, validation)
+                .into_py_result()?;
             Ok(Array::from_core(array.into_any()))
         }
     }

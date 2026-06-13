@@ -28,12 +28,12 @@ use crate::{Array, ArrayStorage, ElementType};
 /// Erase and recover the static element type:
 ///
 /// ```
-/// use jix::Array;
 /// use jix::dtype::Dtyped;
+/// use jix::Array;
 /// use ndarray::array;
 ///
-/// // compact_array infers Ty<f32> from the ndarray input type.
-/// let a = Array::compact_array(&array![1.0f32, 2.0, 3.0])?;
+/// // compact_ndarray infers Ty<f32> from the ndarray input type.
+/// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
 /// // a: Array<Compact<Ty<f32>, Dim<1>>>
 ///
 /// // Erase the static element type - always succeeds.

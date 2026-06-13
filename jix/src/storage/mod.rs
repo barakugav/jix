@@ -37,7 +37,7 @@
 //! the element type must be known at compile time so the compiler can dispatch to the
 //! correct scalar implementation.
 //!
-//! Arrays constructed from typed sources (e.g. [`Array::compact_array`](crate::Array::compact_array))
+//! Arrays constructed from typed sources (e.g. [`Array::compact_ndarray`](crate::Array::compact_ndarray))
 //! are automatically typed. Arrays loaded from disk carry [`TypeDyn`]; call
 //! [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert the expected element
 //! type and regain compile-time tracking.
@@ -100,7 +100,7 @@ where
 /// Internal metadata of ArrayStorage.
 ///
 /// Carries the information [`Array`](crate::Array) needs when creating a new storage
-/// from an existing one - such as during `copy`, `copy_with`, and lazy view operations.
+/// from an existing one - such as during `compact`, `compact_with`, and lazy view operations.
 /// Not intended to be used directly.
 pub struct ArrayStorageSpec<'a> {
     pub(crate) blocks_layout: &'a BlocksLayout,

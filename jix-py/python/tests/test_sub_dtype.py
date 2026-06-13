@@ -4,6 +4,7 @@ Use-case tests for jix.dtype_sub_field.
 
 import numpy as np
 import pytest
+
 import jix
 
 
@@ -76,7 +77,7 @@ def test_numpy_array_input():
 
 def test_error_non_struct_dtype():
     """Raises ValueError when the array has a plain (non-struct) dtype."""
-    za = jix.compact(np.array([1, 2, 3], dtype=np.int32))
+    za = jix.compact([1, 2, 3], dtype=np.int32)
     with pytest.raises(Exception):
         jix.dtype_sub_field(za, "x")
 

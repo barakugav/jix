@@ -21,6 +21,7 @@ mod byte_shuffle;
 /// squeeze out more compression for data with low bit entropy, at the cost of higher CPU
 /// usage.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Filter {
     /// Groups bytes by their position within each element across a block.
     ///

@@ -43,7 +43,7 @@ use crate::Dimension;
 /// [`Array::to_typed`](crate::Array::to_typed) to assert a concrete element type and go from
 /// `TypeDyn` to `Ty<T>`.
 ///
-/// Created by [`Array::compact_array`](crate::Array::compact_array), [`Array::copy`](crate::Array::copy)
+/// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray), [`Array::compact`](crate::Array::compact)
 /// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
 pub struct Compact<ET, D>(
     pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, ET, D>,
@@ -164,7 +164,7 @@ impl_array_storage!(CompactMmap<ET, D>);
 /// for all `d`.
 ///
 /// `encoder_params` and `decoder_params` are kept here - not in `BlockTable` - so that
-/// `ArrayStorage::spec` can propagate them through lazy view operations and `copy_with`.
+/// `ArrayStorage::spec` can propagate them through lazy view operations and `compact_with`.
 pub(crate) struct ArrayBlockTableStorageBase<S, ET, D>
 where
     S: BlockTableStorage,
@@ -310,8 +310,8 @@ where
         let block_end = dim_arr(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64));
 
         let mut block_iter = NdIter::new_with_begin(
-            &block_begin,
-            &block_end,
+            D::from_slice(&block_begin).unwrap(),
+            D::from_slice(&block_end).unwrap(),
             (
                 nd_iter_ext_logical_global_index(&self.block_grid_shape, &block_begin),
                 NdIterExtBlockOffsetSize::new(
@@ -353,7 +353,7 @@ where
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    block_size,
+                    D::from_slice(block_size).unwrap(),
                     &block_strides,
                     &out_strides,
                     itemsize,

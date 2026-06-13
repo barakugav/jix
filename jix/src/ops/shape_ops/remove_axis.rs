@@ -46,7 +46,7 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// use jix::{Array, Dim};
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![[[1i32, 2, 3]]])?; // shape [1, 1, 3], Dim<3>
+/// let a = Array::compact_ndarray(&array![[[1i32, 2, 3]]])?; // shape [1, 1, 3], Dim<3>
 ///
 /// // usize -> output D = Dim<2> (one fewer than input Dim<3>)
 /// assert_eq!(a.as_ref().remove_axis(0).shape(), &[1, 3]);
@@ -223,17 +223,17 @@ mod tests {
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, Dim<1>>> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(&[rows, cols])).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(&[rows, cols])).unwrap()
     }
 
     fn make3d(vals: Vec<i32>, d0: usize, d1: usize, d2: usize) -> Array<Compact<Ty<i32>, Dim<3>>> {
         let nd = ndarray::Array::from_shape_vec([d0, d1, d2], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(&[d0, d1, d2])).unwrap()
     }
 
     fn arange(n: usize) -> Vec<i32> {

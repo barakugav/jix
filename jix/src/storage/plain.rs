@@ -46,7 +46,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// use ndarray::array;
 ///
 /// let nd_compact = array![[1.0f32, 2.0], [3.0, 4.0]];
-/// let compact = Array::compact_array(&nd_compact)?;
+/// let compact = Array::compact_ndarray(&nd_compact)?;
 ///
 /// let nd_plain = array![[10.0f32, 20.0], [30.0, 40.0]];
 /// let plain = Array::plain_ndarray(nd_plain)?;
@@ -329,8 +329,8 @@ where
         check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.shape.ndim();
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_strides = default_strides(&out_shape, itemsize);
+        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let out_strides = default_strides(&out_shape, itemsize as u64);
 
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])
@@ -342,7 +342,7 @@ where
             nd_copy(
                 src_ptr,
                 dst_ptr,
-                &out_shape,
+                D::from_slice(&out_shape).unwrap(),
                 &self.strides,
                 &out_strides,
                 itemsize,

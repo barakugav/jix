@@ -1,11 +1,11 @@
 use std::ops::Range;
 
 use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped};
+use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_dtype, check_get_buffer_size, check_get_range, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ReadData, Ty};
 use crate::util::{cast_slice_mut, dim_arr};
-use crate::{Array, Dimension, IntoDimension};
+use crate::{Array, Dimension, ElementType, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -30,7 +30,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// use jix::Array;
 /// use ndarray::array;
 ///
-/// let arr = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
+/// let arr = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
 /// let result = (arr * 5.0f32).to_ndarray()?; // the scalar is broadcast automatically
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]]);
@@ -43,7 +43,7 @@ use crate::{Array, Dimension, IntoDimension};
 /// use jix::Array;
 /// use ndarray::array;
 ///
-/// let arr = Array::compact_array(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
+/// let arr = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
 /// let scalar_arr = Array::plain_scalar(5.0f32, &[2, 2])?;
 /// let result = (arr * scalar_arr).to_ndarray()?;
@@ -53,7 +53,7 @@ use crate::{Array, Dimension, IntoDimension};
 pub struct Scalar<T, D> {
     data: T,
     shape: D,
-    dtype: Dtype,
+    element_type: Ty<T>,
     blocks_layout: BlocksLayout,
 }
 impl<T, D> Scalar<T, D> {
@@ -74,7 +74,6 @@ impl<T, D> Scalar<T, D> {
     {
         let shape = shape.into_dimension()?;
         let ndim = shape.ndim();
-        let dtype = T::DTYPE;
 
         let blocks_layout = BlocksLayout::tune(
             Some(dim_arr(ndim, |_| 1)),
@@ -83,13 +82,13 @@ impl<T, D> Scalar<T, D> {
             None,
             None,
             shape.as_slice(),
-            dtype.itemsize(),
+            size_of::<T>() as Itemsize,
         )?;
 
         Ok(Self {
             data,
             shape,
-            dtype,
+            element_type: Ty::new(),
             blocks_layout,
         })
     }
@@ -140,7 +139,7 @@ where
         _context: &ReadContext,
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, self.dtype(), buf)?;
+        check_get_buffer_size(index, &T::DTYPE, buf)?;
         let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
         for item in buf.iter_mut() {
             *item = self.data;
@@ -195,7 +194,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        &self.dtype
+        self.element_type.dtype()
     }
     fn spec(&self) -> ArrayStorageSpec<'_> {
         ArrayStorageSpec {
@@ -219,7 +218,7 @@ where
         Ok(Scalar {
             data: self.data,
             shape,
-            dtype: self.dtype,
+            element_type: self.element_type,
             blocks_layout: self.blocks_layout,
         })
     }

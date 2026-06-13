@@ -14,9 +14,9 @@ use crate::util::IntoPyResult;
 /// amortizes these costs.
 ///
 /// For most workloads you do not need to create one explicitly - functions that read array
-/// data (such as [`Array.numpy()`][jix.Array.numpy] and [`jix.copy()`][jix.copy]) create a context internally when none is
-/// provided. Pass an explicit `ReadContext` when you are doing many successive reads and want
-/// to avoid the repeated initialization overhead.
+/// data (such as [`Array.numpy()`][jix.Array.numpy] and [`jix.compact()`][jix.compact]) create a
+/// context internally when none is provided. Pass an explicit `ReadContext` when you are doing many
+/// successive reads and want to avoid the repeated initialization overhead.
 ///
 /// A single `ReadContext` instance may be reused across multiple calls and across multiple
 /// arrays.

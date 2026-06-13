@@ -276,7 +276,7 @@ Use plain `#[test]` functions with hardcoded `i32` arrays when:
 ```rust
 fn make(vals: Vec<i32>, shape: &[usize]) -> Array<Compact> {
     let nd = ndarray::ArrayD::from_shape_vec(shape.to_vec(), vals).unwrap();
-    Array::compact_array(&nd).unwrap()
+    Array::compact_ndarray(&nd).unwrap()
 }
 
 #[test]

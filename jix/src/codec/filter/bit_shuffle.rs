@@ -1,8 +1,7 @@
+use super::byte_shuffle::ByteShuffleFilter;
 use crate::codec::filter::FilterImpl;
 use crate::codec::TmpBufferPool;
 use crate::dtype::Dtype;
-
-use super::byte_shuffle::ByteShuffleFilter;
 
 // Bitshuffle filter, derived from Bitshuffle by Kiyoshi Masui (MIT,
 // https://github.com/kiyo-masui/bitshuffle) via its adaptation in

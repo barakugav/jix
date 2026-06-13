@@ -14,19 +14,19 @@
 //! - **Lazy operation chains** - every operation (arithmetic, shape manipulation, type cast,
 //!   reduction, ...) returns a new [`Array<OpStorage<...>>`](Array), rather than a materialized result.
 //!   Computation only runs when data is explicitly requested (e.g. via
-//!   [`.to_ndarray()`](Array::to_ndarray) or [`.copy()`](Array::copy)). Because the full
+//!   [`.to_ndarray()`](Array::to_ndarray) or [`.compact()`](Array::compact)). Because the full
 //!   operation chain is encoded in the static type, the compiler can inline the entire pipeline
 //!   into a single read loop with no virtual dispatch very efficiently.
 //!
 //! # Quick start
 //!
 //! ```
-//! use jix::Array;
 //! use jix::dtype::Dtyped;
+//! use jix::Array;
 //! use ndarray::array;
 //!
 //! // Compress a 2-D f32 ndarray into a block-compressed Array<Compact>.
-//! let a = Array::compact_array(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
+//! let a = Array::compact_ndarray(&array![[1.5f32, 2.0, -9.0], [3.14, 6.17, 0.0]])?;
 //! assert_eq!(a.shape(), &[2, 3]);
 //! assert_eq!(a.dtype(), &f32::DTYPE);
 //!
@@ -35,16 +35,22 @@
 //! assert_eq!(decompressed[[0, 0]], 1.5);
 //!
 //! // Build a lazy operation pipeline - no data is read yet.
-//! let ones = Array::compact_array(&ndarray::Array2::<f32>::ones((2, 3)))?;
+//! let ones = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
 //! let result = a             // Array<Compact>
 //!     .exp()                 // Array<Exp<Compact>>
 //!     .floor()               // Array<Floor<Exp<Compact>>>
 //!     * 2.0f32               // Array<Mul<Floor<...>, Scalar<f32>>>
 //!     + ones;                // Array<Add<Mul<...>, Compact>>
 //!
-//! // Materialize the pipeline with a copy and persist to disk.
+//! // materialize the pipeline into a new compressed Array<Compact>
+//! let result_compressed = result.compact()?;
+//! // or alternatively, materialize into an uncompressed ndarray::Array
+//! let result_decompressed = result.to_ndarray()?;
+//! // or alternatively, materialize directly to disk without ever holding the
+//! // full result in memory - blocks are decompressed, transformed, re-compressed
+//! // and written one at a time.
 //! let tmp_dir = tempfile::tempdir()?;
-//! result.copy()?.write_to_file(&tmp_dir.path().join("result.jix"))?;
+//! result.write_to_file(&tmp_dir.path().join("result.jix"))?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -63,7 +69,7 @@
 //!   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
 //!   .add(other)            -> Array<Add<PermuteAxes<...>, Compact>>
 //!   .sum(0).               -> Array<Sum<Add<...>>>
-//!   .copy()?               -> Array<Compact>  - materialize
+//!   .compact()?            -> Array<Compact>  - materialize
 //! ```
 //!
 //! There is no runtime evaluation graph or scheduler. The type system *is* the execution plan.
@@ -143,7 +149,7 @@
 //!
 //! - [`Ty<T>`](Ty) - the scalar element type `T` is known at compile time.
 //!   Arrays constructed from typed sources carry this automatically (e.g.
-//!   `Array::compact_array(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
+//!   `Array::compact_ndarray(&array![1.0f32, 2.0])` yields `Array<Compact<Ty<f32>, Dim<1>>>`).
 //!   Most of the element-wise operations require `Ty<T>`, as they are bounded by scalar trait of `T`.
 //!
 //! - [`TypeDyn`] - the element type is only known at runtime. Arrays loaded
@@ -153,15 +159,16 @@
 //!
 //! ```no_run
 //! use std::path::Path;
+//!
 //! use jix::{Array, ArrayParams};
 //!
 //! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
 //! // src: Array<Compact<TypeDyn, DimDyn>> - element type unknown at compile time
 //! // src: Array<S::ElementType = TypeDyn>
 //!
-//! let typed = src.to_typed::<f32>()?;  // runtime check: dtype must be f32
+//! let typed = src.to_typed::<f32>()?; // runtime check: dtype must be f32
 //! // typed: Array<S::ElementType = Ty<f32>>
-//! let result = typed.exp().sum(0).copy()?;
+//! let result = typed.exp().sum(0).compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
@@ -220,16 +227,16 @@
 //! // Store with 64*64 blocks - one decompression per tile.
 //! let mut params = ArrayParams::new();
 //! params.block_shape(&[64, 64]);
-//! let array = Array::compact_array_with(&data, params)?;
+//! let array = Array::compact_ndarray_with(&data, params)?;
 //!
 //! let context = array.read_ctx();
 //! for tile_row in 0..7 {
-//!   for tile_col in 0..7 {
-//!     let row_range = (tile_row * 64)..((tile_row + 2) * 64);
-//!     let col_range = (tile_col * 64)..((tile_col + 2) * 64);
-//!     let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
-//!     println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
-//!   }
+//!     for tile_col in 0..7 {
+//!         let row_range = (tile_row * 64)..((tile_row + 2) * 64);
+//!         let col_range = (tile_col * 64)..((tile_col + 2) * 64);
+//!         let tile = array.to_ndarray_sub(&[row_range, col_range], &context)?;
+//!         println!("tile ({tile_row},{tile_col}) sum: {}", tile.sum());
+//!     }
 //! }
 //! # Ok::<(), jix::Error>(())
 //! ```
@@ -239,7 +246,7 @@
 //! that the original layout respected, a single read may decompress many more blocks than
 //! needed.
 //!
-//! To avoid this, call [`.copy()`](Array::copy) (or the eager variant `reshape`)
+//! To avoid this, call [`.compact()`](Array::compact) (or the eager variant `reshape`)
 //! after a shape change to re-encode with a freshly derived block shape:
 //!
 //! ```
@@ -248,13 +255,13 @@
 //! // Compress with column-friendly blocks.
 //! let mut params = ArrayParams::new();
 //! params.block_shape(&[64, 64]);
-//! let a = Array::compact_array_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
+//! let a = Array::compact_ndarray_with(&ndarray::Array2::<f32>::zeros((1024, 1024)), params)?;
 //!
 //! // Transpose and re-encode with row-friendly blocks.
 //! let mut out_params = ArrayParams::new();
 //! out_params.block_shape(&[128, 128]);
 //! let ctx = a.read_ctx();
-//! let transposed = a.permute_axes(&[1, 0]).copy_with(out_params, &ctx)?;
+//! let transposed = a.permute_axes(&[1, 0]).compact_with(out_params, &ctx)?;
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
@@ -280,27 +287,36 @@
 //! from the source lazily:
 //!
 //! ```
-//! use std::io::BufWriter;
 //! use std::fs::File;
-//! use jix::{Array, ArrayParams};
+//! use std::io::BufWriter;
+//!
+//! use jix::{ArchiveValidation, Array, ArrayParams};
 //! use ndarray::array;
 //!
 //! let tmp_dir = tempfile::tempdir()?;
 //! let path = tmp_dir.path().join("large.jix");
-//! Array::compact_array(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
+//! Array::compact_ndarray(&array![[2.3_f32, 6.99], [-99.1, 0.0]])?.write_to_file(&path)?;
 //! let len = std::fs::metadata(&path)?.len();
 //!
 //! // Memory-map the source - blocks are paged in on demand.
 //! // Safety: the file is not modified while `src` is live.
-//! let src = unsafe { Array::read_from_file_mmap(&path, 0, len, ArrayParams::default())? };
+//! let src = unsafe {
+//!     Array::read_from_file_mmap(
+//!         &path,
+//!         0,
+//!         len,
+//!         ArrayParams::default(),
+//!         ArchiveValidation::default(),
+//!     )?
+//! };
 //!
 //! // Build a lazy pipeline over the mmap'd data.
 //! let processed = src.to_typed::<f32>()?.exp() + 1.0f32;
 //!
 //! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
-//! processed.write_to(
-//!     BufWriter::new(File::create(tmp_dir.path().join("modified.jix"))?),
-//! )?;
+//! processed.write_to(BufWriter::new(File::create(
+//!     tmp_dir.path().join("modified.jix"),
+//! )?))?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -336,6 +352,7 @@ pub mod storage;
 pub use storage::core::ArrayStorage;
 
 mod archive;
+pub use archive::ArchiveValidation;
 
 pub mod ops;
 

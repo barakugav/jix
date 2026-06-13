@@ -30,7 +30,7 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 /// use jix::{Array, Dim};
 ///
 /// // Arrays loaded from files (or built from ndarray::IxDyn) carry DimDyn.
-/// let a = Array::compact_array(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3, 4])))?;
+/// let a = Array::compact_ndarray(&ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&[2, 3, 4])))?;
 /// // a: Array<Compact<TypeDyn, DimDyn>>
 /// // a: Array<Storage::Dimension = DimDyn>
 ///

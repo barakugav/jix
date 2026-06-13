@@ -14,7 +14,7 @@ use jix::Array;
 use ndarray::array;
 
 // Compress a 2-D f32 ndarray into block-compressed storage.
-let a = Array::compact_array(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
+let a = Array::compact_ndarray(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 
 // Build a lazy pipeline - no data is read yet.
 // The full chain is a single static type:
@@ -39,5 +39,5 @@ Array<Compact>
   .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
   .sum(0)                -> Array<Sum<PermuteAxes<...>>>
-  .copy()?               -> Array<Compact>   <- materialize
+  .compact()?            -> Array<Compact>   <- materialize
 ```

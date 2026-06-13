@@ -27,13 +27,13 @@ use crate::{Array, ArrayStorage, Dimension};
 /// use ndarray::array;
 ///
 /// // Row vector [1, 3] -> matrix [2, 3]: every row is identical
-/// let a = Array::compact_array(&array![[1i32, 2, 3]])?;
+/// let a = Array::compact_ndarray(&array![[1i32, 2, 3]])?;
 /// let result = a.broadcast(&[2, 3]).to_ndarray()?;
 /// assert_eq!(result[[0, 0]], result[[1, 0]]);
 /// assert_eq!(result[[0, 2]], result[[1, 2]]);
 ///
 /// // Column vector [3, 1] -> matrix [3, 2]: every column is identical
-/// let b = Array::compact_array(&array![[10i32], [20], [30]])?;
+/// let b = Array::compact_ndarray(&array![[10i32], [20], [30]])?;
 /// let result = b.broadcast(&[3, 2]).to_ndarray()?;
 /// assert_eq!(result[[0, 0]], 10);
 /// assert_eq!(result[[0, 1]], 10);
@@ -177,14 +177,14 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         }
 
         // Destination strides: C-contiguous over the requested output sub-shape.
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let dst_strides = default_strides(&out_shape, itemsize);
+        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let dst_strides = default_strides(&out_shape, itemsize as u64);
 
         unsafe {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                &out_shape,
+                S::Dimension::from_slice(&out_shape).unwrap(),
                 &src_strides,
                 &dst_strides,
                 itemsize,
@@ -224,7 +224,7 @@ mod tests {
     {
         let shape = shape.into_dimension().unwrap();
         let nd = ndarray::Array::from_shape_vec(shape, vals).unwrap();
-        Array::compact_array(&nd).unwrap().into_dim().unwrap()
+        Array::compact_ndarray(&nd).unwrap().into_dim().unwrap()
     }
 
     fn arange(n: usize) -> Vec<i32> {

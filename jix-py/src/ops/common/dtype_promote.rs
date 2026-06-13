@@ -3,7 +3,7 @@ use jix_core::dtype::{DtypeScalarKind, Itemsize};
 use crate::ops::common::scalar_kind_to_rank_precision;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Rank {
+pub(crate) enum Rank {
     Bool = 0,
     UInt = 1,
     Int = 2,
@@ -12,7 +12,7 @@ pub enum Rank {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub enum Precision {
+pub(crate) enum Precision {
     P1 = 0,
     P2 = 1,
     P4 = 2,

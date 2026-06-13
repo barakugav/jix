@@ -12,7 +12,7 @@ use crate::storage::block::{
 };
 use crate::util::arrayvec::ArrayVec;
 use crate::util::{cast_slice, cast_slice_mut, value_as_bytes, value_from_io, Idx, SendSyncPtr};
-use crate::{ElementType, TypeDyn};
+use crate::{ArchiveValidation, ElementType, TypeDyn};
 
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
 ///
@@ -301,7 +301,11 @@ impl BlockTable<Owned, TypeDyn> {
             schema::ArchiveType::BlockTable,
             schema::ArchiveType::try_from(f_meta.archive_type)
         );
-        Self::read_content(&mut reader, Owned(PhantomData))
+        Self::read_content(
+            &mut reader,
+            Owned(PhantomData),
+            ArchiveValidation::default(),
+        )
     }
 }
 
@@ -322,7 +326,11 @@ where
     /// Returns `InvalidArchive` if the header is malformed (missing codec, unknown filter, wrong
     /// TOC section count, missing required sections, or bad dtype). Propagates I/O errors from
     /// `reader` and errors from [`BlockTable::new`].
-    pub(crate) fn read_content<R>(reader: &mut ArchiveReader<R>, storage: S) -> Result<Self>
+    pub(crate) fn read_content<R>(
+        reader: &mut ArchiveReader<R>,
+        storage: S,
+        validation: ArchiveValidation,
+    ) -> Result<Self>
     where
         R: Read + Seek,
         S: BlockTableStorageRead,
@@ -369,6 +377,23 @@ where
             }
             None => bail!(InvalidArchive, "missing body description in header"),
         };
+
+        // validation checks
+        let check_offsets = match validation {
+            ArchiveValidation::Minimal => false,
+            ArchiveValidation::Strict => true,
+        };
+        if check_offsets && !block_offsets.as_ref().is_empty() {
+            let block_offsets = block_offsets.as_ref();
+            let monotonic = block_offsets.windows(2).all(|w| w[0] <= w[1]);
+            // enough to check the last because of monotonicity
+            let in_bounds = *block_offsets.last().unwrap() <= block_data.as_ref().len() as u64;
+            ensure!(
+                monotonic && in_bounds,
+                InvalidArchive,
+                "invalid block offsets: monotonic={monotonic}, in_bounds={in_bounds}"
+            );
+        }
 
         let decoder_config = DecoderCodecConfig {
             codec,

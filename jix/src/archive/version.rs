@@ -129,8 +129,9 @@ const fn parse_pre_release(s: &[u8]) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use proptest::prelude::*;
+
+    use super::*;
 
     fn version_strategy() -> impl Strategy<Value = Version> {
         (

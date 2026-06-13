@@ -8,12 +8,13 @@ pub(crate) mod arrayvec;
 pub(crate) mod cpu_cache;
 
 pub(crate) mod iter;
+use std::mem::MaybeUninit;
+
 use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use iter::NdIter;
 
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray};
-
-use std::mem::MaybeUninit;
+use crate::{Dimension, IntoDimension};
 
 pub(crate) trait Idx:
     Clone
@@ -270,18 +271,20 @@ impl<'a> AlternatingBuffers<'a> {
     }
 }
 
-pub(crate) unsafe fn nd_copy<S1, S2, S3>(
+pub(crate) unsafe fn nd_copy<D, S2, S3>(
     src: *const u8,
     dst: *mut u8,
-    shape: &[S1],
+    shape: impl IntoDimension<Dimension = D>,
     src_strides: &[S2],
     dst_strides: &[S3],
     itemsize: usize,
 ) where
-    S1: Idx + 'static,
+    D: Dimension,
     S2: Idx + 'static,
     S3: Idx + 'static,
 {
+    let shape = shape.into_dimension().unwrap();
+    let shape = shape.as_slice();
     let ndim = shape.len();
     assert_eq!(ndim, src_strides.len());
     assert_eq!(ndim, dst_strides.len());
@@ -293,7 +296,7 @@ pub(crate) unsafe fn nd_copy<S1, S2, S3>(
             let src_stride: usize = src_strides[dim].try_into().unwrap();
             let dst_stride: usize = dst_strides[dim].try_into().unwrap();
             let is_contiguous = src_stride == *expected_stride && dst_stride == *expected_stride;
-            *expected_stride *= shape[dim].try_into().unwrap();
+            *expected_stride *= shape[dim] as usize;
             Some(is_contiguous)
         })
         .take_while(|&is_contiguous| is_contiguous)

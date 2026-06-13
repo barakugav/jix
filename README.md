@@ -14,7 +14,7 @@ use jix::Array;
 use ndarray::array;
 
 // Compress a 2-D f32 ndarray into block-compressed storage.
-let a = Array::compact_array(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
+let a = Array::compact_ndarray(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 
 // Build a lazy pipeline - no data is read yet.
 // The full chain is a single static type:
@@ -23,7 +23,7 @@ let result = a.exp().sum(0) - 1.0;
 
 // Materialize and persist. Blocks are decompressed, transformed,
 // and re-compressed one at a time - no full copy in memory.
-result.copy()?.write_to_file("result.jix")?;
+result.write_to_file("result.jix")?;
 ```
 
 Python bindings are also available:

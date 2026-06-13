@@ -24,7 +24,7 @@ use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
 /// independently with Zstd. Data is decoded on demand: constructing an array or
 /// chaining operations does no I/O. Actual decompression happens only when you
 /// materialize the result, for example by indexing with `[]`, calling `.numpy()`,
-/// `.copy()`, or `.write_to()`.
+/// `.compact()`, or `.write_to()`.
 ///
 /// # Creating arrays
 ///
@@ -101,13 +101,13 @@ use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
 ///
 /// # Copying and re-encoding
 ///
-/// [`.copy()`][jix.Array.copy] materializes the current array (including any pending lazy
+/// [`.compact()`][jix.Array.compact] materializes the current array (including any pending lazy
 /// operations) into a new compressed array. This is also the way to tune the block layout
 /// after shape-changing operations:
 ///
 /// ```python
 /// # Transpose and re-encode with a block layout suited for column access
-/// b = jix.copy(a.T, params={"block_shape": [1024, 1]})
+/// b = jix.compact(a.T, params={"block_shape": [1024, 1]})
 /// ```
 ///
 /// # Architecture overview
@@ -548,7 +548,7 @@ impl Array {
     /// ensuring that reads use the same settings the array was written with. Prefer this over
     /// constructing [`jix.ReadContext`][jix.ReadContext] directly when reading a specific array.
     ///
-    /// Pass the returned context to [`Array.numpy()`][jix.Array.numpy] or [`jix.copy()`][jix.copy] to amortize decompressor
+    /// Pass the returned context to [`Array.numpy()`][jix.Array.numpy] or [`jix.compact()`][jix.compact] to amortize decompressor
     /// initialization across many successive reads. See [`jix.ReadContext`][jix.ReadContext] for details.
     ///
     /// ```python
@@ -566,14 +566,14 @@ impl Array {
         Bound::new(py, ReadContext::from_core(self.arr.read_ctx()))
     }
 
-    /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.copy()`][jix.copy].
+    /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.compact()`][jix.compact].
     #[pyo3(signature = (*, params=None, context=None))]
-    pub fn copy<'py>(
+    pub fn compact<'py>(
         slf: &Bound<'py, Self>,
         params: Option<Bound<'_, PyDict>>,
         context: Option<&Bound<'_, ReadContext>>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::copy(slf, params, context)
+        crate::compact(slf, None, params, context)
     }
 
     /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
@@ -1008,7 +1008,7 @@ impl Array {
     }
 }
 
-/// Compact any array-like object to a new [`jix.Array`][jix.Array].
+/// Compact any array-like object to a new [`jix.Array`][jix.Array] by compressing it into new blocks.
 ///
 /// Accepts Python scalars, lists, tuples, NumPy arrays, and any other object accepted by
 /// [`numpy.asarray`](https://numpy.org/doc/stable/reference/generated/numpy.asarray.html).
@@ -1016,15 +1016,34 @@ impl Array {
 /// A new jix compact array is created, with all the input data compressed into blocks. The data
 /// is compressed even if the input is already a jix array.
 ///
+/// The primary use of `compact`, other than compacting non-jix objects, is to materialize a
+/// lazy operation chain. A [`jix.Array`][jix.Array] can wrap an arbitrary lazy computation - for
+/// example the result of `a * 2.0 + b`. Reads to such lazy arrays always perform the whole
+/// computation pipeline on the fly, which is very flexible but can be inefficient for repeated
+/// access. Calling `array_view.compact()` breaks the lazy chain and materializes the result as a
+/// standalone compressed array.
+///
+/// In contrast to "simple" views such as unary element-wise operations, lazy ops that change
+/// the shape of the array (e.g. `reshape`, `broadcast`, `permute_axes`) can cause block
+/// boundaries to no longer align with the logical layout of the array, causing reads to
+/// decompress excess data. Calling `compact` on the result of such an operation re-encodes the
+/// data with a freshly derived block shape that matches the new layout. The block shape is
+/// automatically derived using a heuristic that aims to preserve user choices, but it is not
+/// perfect - pass explicit `params` after shape-changing ops when you know the access pattern.
+///
+/// Codec settings (compression level, filters, etc.) are inherited from the source storage if the
+/// source is a jix array. Otherwise, they are either passed explicitly via `params` or chosen
+/// automatically based on the input dtype and size. See `params` for details.
+///
 /// Note:
-///     **On copy** (e.g. [`jix.copy()`][jix.copy]): a new compressed array is created, inheriting any
-///     unset fields from the source array's storage. After shape-changing operations
+///     **On copy** (e.g. [`jix.compact()`][jix.Array.compact]): a new compressed array is created,
+///     inheriting any unset fields from the source array's storage. After shape-changing operations
 ///     (`reshape`, `permute_axes`, etc.) the inherited block layout may not suit the new
-///     shape - consider passing explicit params to [`jix.copy()`][jix.copy] after such ops.
+///     shape - consider passing explicit params to `.compact()` after such ops.
 ///
 /// Args:
 ///     array: The input data to compress. May be a Python scalar, list, tuple, NumPy array,
-///         or any other object accepted by `numpy.asarray`.
+///         jix array, or any other object accepted by `jix.asarray`.
 ///     dtype: Optional dtype to cast the array to before compressing. Accepts anything
 ///         `numpy.dtype()` accepts. When omitted the input dtype is preserved.
 ///     params: Controls the block layout and codec configuration:
@@ -1037,6 +1056,7 @@ impl Array {
 ///           suitable for most workloads.
 ///
 ///         When omitted, defaults are chosen automatically.
+///         If the source array is a jix array, unset fields are inherited from the source storage.
 ///         A dictionary with the following optional keys:
 ///
 ///         - `block_shape`: Explicit storage block shape, as a list of integers (one per
@@ -1071,33 +1091,72 @@ impl Array {
 ///             Filters improve the compression ratio for typed numeric data: `"byte-shuffle"`
 ///             groups bytes by significance (e.g. all high bytes together, then all low bytes);
 ///             `"bit-shuffle"` groups bits across elements. Defaults to `["byte-shuffle"]`.
+///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse when decoding the source
+///         array. When omitted, a context is created internally. Unused if the source array is not
+///         a jix array.
 ///
 /// Returns:
 ///     A new compact [`jix.Array`][jix.Array] with all data compressed into blocks.
 ///
 /// Raises:
-///     ValueError: If the input cannot be converted by `numpy.asarray`, the array has more
+///     ValueError: If the input cannot be converted by `jix.asarray`, the array has more
 ///         dimensions than jix supports, or the array has negative strides (e.g. a reversed
 ///         slice `a[::-1]`).
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # Create new compact arrays from various inputs
+///     a = jix.compact([1, 2, 3]) # from python list
+///     assert a.numpy().tolist() == [1, 2, 3]
+///     b = jix.compact(np.array([66, 8])) # from numpy
+///     assert b.numpy().tolist() == [66, 8]
+///     c = jix.compact(a, params={"block_shape": [2]}) # from another jix array (recompress)
+///     assert c.numpy().tolist() == [1, 2, 3]
+///
+///     # Compacting a lazy computation pipeline
+///     d = jix.compact([[1.5, 2.0], [3.14, 6.17]], dtype=np.float32)
+///     e = (d * 7.399) \    # Array<Mul<Compact, Scalar<f32>>> (lazy views, rust internal types)
+///         .floor() \       # Array<Floor<Mul<Compact, Scalar<f32>>>>
+///         .compact()       # Array<Compact> - materialize the pipeline
+///
+///     # After a shape-changing op, pin the block shape explicitly
+///     f = jix.compact(d.T, params={"block_shape": [2, 1]})
+///     ```
 #[gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, *, dtype=None, params=None))]
-pub fn compact(
-    array: &Bound<'_, PyAny>,
+#[pyo3(signature = (array, *, dtype=None, params=None, context=None))]
+pub fn compact<'py>(
+    array: &Bound<'py, PyAny>,
     dtype: Option<&Bound<'_, PyAny>>,
     params: Option<Bound<'_, PyDict>>,
-) -> PyResult<Array> {
+    context: Option<&Bound<'_, ReadContext>>,
+) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let mut array = crate::asarray(array)?;
     let params = resolve_array_params(py, params)?;
+    let context = context.map(|ctx| ctx.get());
 
     if let Some(dtype) = dtype {
         array = crate::ops::astype(&array, dtype)?;
     }
     let array = &array.get().arr;
-    let array = py.detach(|| array.copy_with(params, &array.read_ctx()).into_py_result())?;
+    let array = py.detach(|| {
+        let context_guard;
+        let context = match context {
+            Some(ctx) => {
+                context_guard = ctx.lock();
+                &*context_guard
+            }
+            None => &array.read_ctx(),
+        };
 
-    Ok(Array::from_core(array.into_any()))
+        array.compact_with(params, context).into_py_result()
+    })?;
+
+    Bound::new(py, Array::from_core(array.into_any()))
 }
 pub(crate) fn resolve_array_params(
     py: Python<'_>,
@@ -1223,7 +1282,7 @@ mod tests {
     where
         D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
     {
-        let core = CoreArray::compact_array(ndarray).unwrap();
+        let core = CoreArray::compact_ndarray(ndarray).unwrap();
         let core = core.to_type_dyn().to_dim_dyn();
         Bound::new(py, Array::from_core(core.into_any())).unwrap()
     }

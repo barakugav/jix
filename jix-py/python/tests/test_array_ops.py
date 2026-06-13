@@ -1,4 +1,4 @@
-"""Tests for shape/axis manipulation, copy, astype, asarray, concatenate, stack, where,
+"""Tests for shape/axis manipulation, compact, astype, asarray, concatenate, stack, where,
 flatten, reshape, broadcast, permute_axes, squeeze/unsqueeze, insert_axis/remove_axis,
 read_array/write_array."""
 
@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 import jix
 
 # ---------------------------------------------------------------------------
@@ -81,23 +82,23 @@ def test_astype_float_to_bool():
 
 
 # ---------------------------------------------------------------------------
-# copy
+# compact
 # ---------------------------------------------------------------------------
 
 
-def test_copy_produces_equal_array():
+def test_compact_produces_equal_array():
     arr = np.arange(12, dtype=np.float32).reshape(3, 4)
     za = jix.compact(arr)
-    copied = jix.copy(za)
+    copied = jix.compact(za)
     assert copied.shape == za.shape
     assert copied.dtype == za.dtype
     np.testing.assert_array_equal(copied.numpy(), arr)
 
 
-def test_copy_is_independent():
+def test_compact_is_independent():
     arr = np.array([1, 2, 3], dtype=np.int32)
     za = jix.compact(arr)
-    copied = jix.copy(za)
+    copied = jix.compact(za)
     np.testing.assert_array_equal(copied.numpy(), za.numpy())
 
 
@@ -332,45 +333,45 @@ def test_broadcast_non_one_dim_raises():
 
 
 def test_concatenate_axis0():
-    a = jix.compact(np.array([[1, 2], [3, 4]], dtype=np.int32))
-    b = jix.compact(np.array([[5, 6]], dtype=np.int32))
+    a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
+    b = jix.compact([[5, 6]], dtype=np.int32)
     r = jix.concatenate([a, b], axis=0)
     assert r.shape == (3, 2)
     np.testing.assert_array_equal(r.numpy(), np.array([[1, 2], [3, 4], [5, 6]]))
 
 
 def test_concatenate_axis1():
-    a = jix.compact(np.array([[1, 2], [3, 4]], dtype=np.int32))
-    b = jix.compact(np.array([[5], [6]], dtype=np.int32))
+    a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
+    b = jix.compact([[5], [6]], dtype=np.int32)
     r = jix.concatenate([a, b], axis=1)
     assert r.shape == (2, 3)
     np.testing.assert_array_equal(r.numpy(), np.array([[1, 2, 5], [3, 4, 6]]))
 
 
 def test_concatenate_negative_axis():
-    a = jix.compact(np.array([1, 2, 3], dtype=np.int32))
-    b = jix.compact(np.array([4, 5], dtype=np.int32))
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    b = jix.compact([4, 5], dtype=np.int32)
     r = jix.concatenate([a, b], axis=-1)
     assert r.shape == (5,)
     np.testing.assert_array_equal(r.numpy(), [1, 2, 3, 4, 5])
 
 
 def test_concatenate_three_arrays():
-    arrays = [jix.compact(np.array([i, i + 1], dtype=np.float32)) for i in range(3)]
+    arrays = [jix.compact([i, i + 1], dtype=np.float32) for i in range(3)]
     r = jix.concatenate(arrays, axis=0)
     assert r.shape == (6,)
 
 
 def test_concatenate_default_axis():
-    a = jix.compact(np.array([1, 2], dtype=np.int32))
-    b = jix.compact(np.array([3, 4], dtype=np.int32))
+    a = jix.compact([1, 2], dtype=np.int32)
+    b = jix.compact([3, 4], dtype=np.int32)
     r = jix.concatenate([a, b])
     np.testing.assert_array_equal(r.numpy(), [1, 2, 3, 4])
 
 
 def test_concatenate_dtype_mismatch_raises():
-    a = jix.compact(np.array([1, 2], dtype=np.int32))
-    b = jix.compact(np.array([3.0, 4.0], dtype=np.float32))
+    a = jix.compact([1, 2], dtype=np.int32)
+    b = jix.compact([3.0, 4.0], dtype=np.float32)
     with pytest.raises(Exception):
         jix.concatenate([a, b])
 
@@ -381,24 +382,24 @@ def test_concatenate_dtype_mismatch_raises():
 
 
 def test_stack_axis0():
-    a = jix.compact(np.array([1, 2, 3], dtype=np.int32))
-    b = jix.compact(np.array([4, 5, 6], dtype=np.int32))
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    b = jix.compact([4, 5, 6], dtype=np.int32)
     r = jix.stack([a, b], axis=0)
     assert r.shape == (2, 3)
     np.testing.assert_array_equal(r.numpy(), np.array([[1, 2, 3], [4, 5, 6]]))
 
 
 def test_stack_axis1():
-    a = jix.compact(np.array([1, 2, 3], dtype=np.int32))
-    b = jix.compact(np.array([4, 5, 6], dtype=np.int32))
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    b = jix.compact([4, 5, 6], dtype=np.int32)
     r = jix.stack([a, b], axis=1)
     assert r.shape == (3, 2)
     np.testing.assert_array_equal(r.numpy(), np.array([[1, 4], [2, 5], [3, 6]]))
 
 
 def test_stack_default_axis():
-    a = jix.compact(np.array([1, 2], dtype=np.int32))
-    b = jix.compact(np.array([3, 4], dtype=np.int32))
+    a = jix.compact([1, 2], dtype=np.int32)
+    b = jix.compact([3, 4], dtype=np.int32)
     r = jix.stack([a, b])
     assert r.shape == (2, 2)
 
@@ -411,15 +412,15 @@ def test_stack_2d_arrays():
 
 
 def test_stack_shape_mismatch_raises():
-    a = jix.compact(np.array([1, 2], dtype=np.int32))
-    b = jix.compact(np.array([3, 4, 5], dtype=np.int32))
+    a = jix.compact([1, 2], dtype=np.int32)
+    b = jix.compact([3, 4, 5], dtype=np.int32)
     with pytest.raises(Exception):
         jix.stack([a, b])
 
 
 def test_stack_dtype_mismatch_raises():
-    a = jix.compact(np.array([1, 2], dtype=np.int32))
-    b = jix.compact(np.array([3.0, 4.0], dtype=np.float32))
+    a = jix.compact([1, 2], dtype=np.int32)
+    b = jix.compact([3.0, 4.0], dtype=np.float32)
     with pytest.raises(Exception):
         jix.stack([a, b])
 
@@ -430,17 +431,17 @@ def test_stack_dtype_mismatch_raises():
 
 
 def test_where_basic():
-    cond = jix.compact(np.array([True, False, True, False], dtype=bool))
-    x = jix.compact(np.array([1, 2, 3, 4], dtype=np.int32))
-    y = jix.compact(np.array([10, 20, 30, 40], dtype=np.int32))
+    cond = jix.compact([True, False, True, False], dtype=bool)
+    x = jix.compact([1, 2, 3, 4], dtype=np.int32)
+    y = jix.compact([10, 20, 30, 40], dtype=np.int32)
     r = jix.where(cond, x, y)
     np.testing.assert_array_equal(r.numpy(), [1, 20, 3, 40])
 
 
 def test_where_float():
-    cond = jix.compact(np.array([True, False, True], dtype=bool))
-    x = jix.compact(np.array([1.0, 2.0, 3.0], dtype=np.float32))
-    y = jix.compact(np.array([0.1, 0.2, 0.3], dtype=np.float32))
+    cond = jix.compact([True, False, True], dtype=bool)
+    x = jix.compact([1.0, 2.0, 3.0], dtype=np.float32)
+    y = jix.compact([0.1, 0.2, 0.3], dtype=np.float32)
     r = jix.where(cond, x, y)
     np.testing.assert_allclose(r.numpy(), [1.0, 0.2, 3.0])
 

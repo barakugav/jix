@@ -37,7 +37,7 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 /// read-amplification. In the worst case every element access decompresses a different block.
 ///
 /// Prefer [`Array::reshape`] over `reshape_view` unless you intend to chain further lazy
-/// operations before materializing. If you do use `reshape_view`, call [`.copy()`](Array::copy)
+/// operations before materializing. If you do use `reshape_view`, call [`.compact()`](Array::compact)
 /// as soon as possible to produce a compactly-stored array with a block layout matched to the
 /// new shape.
 ///
@@ -49,7 +49,7 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 /// use jix::{Array, Dim};
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
+/// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
 ///
 /// // [u64; 1] -> output D = Dim<1>: compiler knows the result is 1-D
 /// assert_eq!(a.as_ref().reshape_view([6u64]).shape(), &[6]);
@@ -346,7 +346,7 @@ where
                 index[dim].end - index[dim].start
             }
         });
-        let mut iter = NdIter::new(&iteration_shape, ());
+        let mut iter = NdIter::new(D::from_slice(&iteration_shape).unwrap(), ());
         while let Some((idx, ())) = iter.next() {
             let read_range = dim_arr(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {
@@ -374,7 +374,7 @@ where
                 nd_copy(
                     tmp_buf.as_ptr(),
                     dst_ptr,
-                    &new_read_shape,
+                    D::from_slice(&new_read_shape).unwrap(),
                     &tmp_buf_strides,
                     &dst_strides,
                     dtype.itemsize() as _,
@@ -437,7 +437,7 @@ mod tests {
         block_size: usize,
     ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ndarray::Array::from_shape_vec(vec![vals.len()], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(&[block_size])).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(&[block_size])).unwrap()
     }
 
     /// Create a 2-D Array<Compact>.
@@ -448,7 +448,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ndarray::Array::from_shape_vec(vec![rows, cols], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(block_shape)).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(block_shape)).unwrap()
     }
 
     /// Create a 3-D Array<Compact>.
@@ -460,7 +460,7 @@ mod tests {
         block_shape: &[usize],
     ) -> Array<Compact<Ty<T>, DimDyn>> {
         let nd = ndarray::Array::from_shape_vec(vec![d0, d1, d2], vals).unwrap();
-        Array::compact_array_with(&nd, arr_params(block_shape)).unwrap()
+        Array::compact_ndarray_with(&nd, arr_params(block_shape)).unwrap()
     }
 
     fn u8s(n: usize) -> Vec<u8> {

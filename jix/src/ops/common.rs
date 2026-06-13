@@ -162,7 +162,7 @@ pub(crate) fn bulk_size<T: Dtyped>() -> usize {
 /// use jix::{Array, Dim};
 /// use ndarray::array;
 ///
-/// let a = Array::compact_array(&array![[1i32, 2], [3, 4]])?;
+/// let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]])?;
 ///
 /// // usize: one axis removed/added - statically one smaller/larger
 /// let b = a.as_ref().sum(0);               // D::Smaller when a: Dim<N> -> Dim<N-1>

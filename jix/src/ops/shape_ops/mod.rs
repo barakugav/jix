@@ -45,14 +45,14 @@ where
     where
         Sh: IntoDimension,
     {
-        self.reshape_view(shape).copy().unwrap()
+        self.reshape_view(shape).compact().unwrap()
     }
 
     /// Returns a lazy view of the array with a new shape. See [`Reshape`] for details and
     /// examples.
     ///
     /// No data is copied at construction time, but reads may be slow when the new shape crosses
-    /// block boundaries of the original layout. Call [`.copy()`](Array::copy) to realign blocks
+    /// block boundaries of the original layout. Call [`.compact()`](Array::compact) to realign blocks
     /// before repeated reads, or prefer [`reshape`](Self::reshape) directly.
     ///
     /// # Panics

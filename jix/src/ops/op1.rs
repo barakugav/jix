@@ -256,10 +256,9 @@ macro_rules! define_op1 {
 pub(crate) use define_op1;
 
 pub(crate) mod _traits {
+    use crate::scalar::traits_util::define_op1_trait;
     #[allow(unused_imports)]
     use crate::scalar::{f16, Complex};
-
-    use crate::scalar::traits_util::define_op1_trait;
 
     define_op1_trait!(
         Abs,
@@ -317,12 +316,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![1.0f32, -2.5, 3.0])?;
+    /// let a = Array::compact_ndarray(&array![1.0f32, -2.5, 3.0])?;
     /// let result = (-a).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-1.0, 2.5, -3.0]);
     ///
     /// // Negating i8::MIN wraps in release builds (two's complement overflow).
-    /// let b = Array::compact_array(&array![0i8, 1, -1])?;
+    /// let b = Array::compact_ndarray(&array![0i8, 1, -1])?;
     /// let result = (-b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[0, -1, 1]);
     /// # Ok::<(), jix::Error>(())
@@ -347,12 +346,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![1.1f32, 2.9, 3.0])?;
+    /// let a = Array::compact_ndarray(&array![1.1f32, 2.9, 3.0])?;
     /// let result = a.floor().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, 2.0, 3.0]);
     ///
     /// // Floor rounds towards -inf, so negative values floor down.
-    /// let b = Array::compact_array(&array![-1.1f32, -2.9, -3.0])?;
+    /// let b = Array::compact_ndarray(&array![-1.1f32, -2.9, -3.0])?;
     /// let result = b.floor().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-2.0, -3.0, -3.0]);
     /// # Ok::<(), jix::Error>(())
@@ -377,12 +376,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![1.1f32, 2.0, 3.9])?;
+    /// let a = Array::compact_ndarray(&array![1.1f32, 2.0, 3.9])?;
     /// let result = a.ceil().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[2.0, 2.0, 4.0]);
     ///
     /// // Ceil rounds towards +inf, so negative values ceil up.
-    /// let b = Array::compact_array(&array![-1.7f32, -2.0, -0.1])?;
+    /// let b = Array::compact_ndarray(&array![-1.7f32, -2.0, -0.1])?;
     /// let result = b.ceil().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[-1.0, -2.0, 0.0]);
     /// # Ok::<(), jix::Error>(())
@@ -410,12 +409,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![1.4f32, 1.6, 2.0])?;
+    /// let a = Array::compact_ndarray(&array![1.4f32, 1.6, 2.0])?;
     /// let result = a.round().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, 2.0, 2.0]);
     ///
     /// // Ties are broken away from zero: 0.5 -> 1.0, -0.5 -> -1.0.
-    /// let b = Array::compact_array(&array![0.5f32, -0.5])?;
+    /// let b = Array::compact_ndarray(&array![0.5f32, -0.5])?;
     /// let result = b.round().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0]);
     /// # Ok::<(), jix::Error>(())
@@ -440,12 +439,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![4.0f32, 9.0, 16.0])?;
+    /// let a = Array::compact_ndarray(&array![4.0f32, 9.0, 16.0])?;
     /// let result = a.sqrt().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[2.0, 3.0, 4.0]);
     ///
     /// // Negative input produces NaN.
-    /// let b = Array::compact_array(&array![-1.0f32])?;
+    /// let b = Array::compact_ndarray(&array![-1.0f32])?;
     /// let result = b.sqrt().to_ndarray()?;
     /// assert!(result[[0]].is_nan());
     /// # Ok::<(), jix::Error>(())
@@ -470,12 +469,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![1.0f32, 2.0, 3.0])?;
+    /// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
     /// let result = a.exp().to_ndarray()?;
     /// assert!((result[[0]] - std::f32::consts::E).abs() < 1e-5);
     ///
     /// // exp(0.0) = 1.0 and exp(1.0) = e.
-    /// let b = Array::compact_array(&array![0.0f32, 1.0])?;
+    /// let b = Array::compact_ndarray(&array![0.0f32, 1.0])?;
     /// let result = b.exp().to_ndarray()?;
     /// assert_eq!(result[[0]], 1.0);
     /// assert!((result[[1]] - std::f32::consts::E).abs() < 1e-5);
@@ -502,13 +501,13 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E])?;
+    /// let a = Array::compact_ndarray(&array![1.0f32, std::f32::consts::E, std::f32::consts::E * std::f32::consts::E])?;
     /// let result = a.ln().to_ndarray()?;
     /// assert!((result[[0]] - 0.0).abs() < 1e-5);
     /// assert!((result[[1]] - 1.0).abs() < 1e-5);
     ///
     /// // Zero produces -inf; negative input produces NaN.
-    /// let b = Array::compact_array(&array![0.0f32, -1.0])?;
+    /// let b = Array::compact_ndarray(&array![0.0f32, -1.0])?;
     /// let result = b.ln().to_ndarray()?;
     /// assert_eq!(result[[0]], f32::NEG_INFINITY);
     /// assert!(result[[1]].is_nan());
@@ -534,12 +533,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![std::f32::consts::FRAC_PI_2, std::f32::consts::PI])?;
+    /// let a = Array::compact_ndarray(&array![std::f32::consts::FRAC_PI_2, std::f32::consts::PI])?;
     /// let result = a.sin().to_ndarray()?;
     /// assert!((result[[0]] - 1.0).abs() < 1e-5);
     ///
     /// // sin(0.0) = 0.0.
-    /// let b = Array::compact_array(&array![0.0f32])?;
+    /// let b = Array::compact_ndarray(&array![0.0f32])?;
     /// let result = b.sin().to_ndarray()?;
     /// assert_eq!(result[[0]], 0.0);
     /// # Ok::<(), jix::Error>(())
@@ -564,13 +563,13 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0.0f32, std::f32::consts::PI])?;
+    /// let a = Array::compact_ndarray(&array![0.0f32, std::f32::consts::PI])?;
     /// let result = a.cos().to_ndarray()?;
     /// assert!((result[[0]] - 1.0).abs() < 1e-5);
     /// assert!((result[[1]] - (-1.0)).abs() < 1e-5);
     ///
     /// // cos(0.0) = 1.0.
-    /// let b = Array::compact_array(&array![0.0f32])?;
+    /// let b = Array::compact_ndarray(&array![0.0f32])?;
     /// let result = b.cos().to_ndarray()?;
     /// assert_eq!(result[[0]], 1.0);
     /// # Ok::<(), jix::Error>(())
@@ -595,12 +594,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_2 * 0.5])?;
+    /// let a = Array::compact_ndarray(&array![std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_2 * 0.5])?;
     /// let result = a.tan().to_ndarray()?;
     /// assert!((result[[0]] - 1.0).abs() < 1e-5);
     ///
     /// // tan(0.0) = 0.0.
-    /// let b = Array::compact_array(&array![0.0f32])?;
+    /// let b = Array::compact_ndarray(&array![0.0f32])?;
     /// let result = b.tan().to_ndarray()?;
     /// assert_eq!(result[[0]], 0.0);
     /// # Ok::<(), jix::Error>(())
@@ -625,13 +624,13 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0.0f32, 1.0, -1.0])?;
+    /// let a = Array::compact_ndarray(&array![0.0f32, 1.0, -1.0])?;
     /// let result = a.asin().to_ndarray()?;
     /// assert_eq!(result[[0]], 0.0);
     /// assert!((result[[1]] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
     ///
     /// // Input outside [-1, 1] produces NaN.
-    /// let b = Array::compact_array(&array![2.0f32])?;
+    /// let b = Array::compact_ndarray(&array![2.0f32])?;
     /// let result = b.asin().to_ndarray()?;
     /// assert!(result[[0]].is_nan());
     /// # Ok::<(), jix::Error>(())
@@ -656,13 +655,13 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![1.0f32, 0.0, -1.0])?;
+    /// let a = Array::compact_ndarray(&array![1.0f32, 0.0, -1.0])?;
     /// let result = a.acos().to_ndarray()?;
     /// assert_eq!(result[[0]], 0.0);
     /// assert!((result[[1]] - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
     ///
     /// // Input outside [-1, 1] produces NaN.
-    /// let b = Array::compact_array(&array![2.0f32])?;
+    /// let b = Array::compact_ndarray(&array![2.0f32])?;
     /// let result = b.acos().to_ndarray()?;
     /// assert!(result[[0]].is_nan());
     /// # Ok::<(), jix::Error>(())
@@ -687,12 +686,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![0.0f32, -1.0, 1.0])?;
+    /// let a = Array::compact_ndarray(&array![0.0f32, -1.0, 1.0])?;
     /// let result = a.atan().to_ndarray()?;
     /// assert_eq!(result[[0]], 0.0);
     ///
     /// // atan(1.0) = pi/4.
-    /// let b = Array::compact_array(&array![1.0f32])?;
+    /// let b = Array::compact_ndarray(&array![1.0f32])?;
     /// let result = b.atan().to_ndarray()?;
     /// assert!((result[[0]] - std::f32::consts::FRAC_PI_4).abs() < 1e-5);
     /// # Ok::<(), jix::Error>(())
@@ -719,12 +718,12 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![3.0f32, -5.0, -0.1])?;
+    /// let a = Array::compact_ndarray(&array![3.0f32, -5.0, -0.1])?;
     /// let result = a.signum().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0, -1.0]);
     ///
     /// // Positive zero returns +1.0.
-    /// let b = Array::compact_array(&array![0.0f32])?;
+    /// let b = Array::compact_ndarray(&array![0.0f32])?;
     /// let result = b.signum().to_ndarray()?;
     /// assert_eq!(result[[0]], 1.0);
     /// # Ok::<(), jix::Error>(())
@@ -765,7 +764,7 @@ define_op1!(
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_array(&array![-3i32, 0, 5, -7])?;
+    /// let a = Array::compact_ndarray(&array![-3i32, 0, 5, -7])?;
     /// let result = a.abs().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[3, 0, 5, 7]);
     /// # Ok::<(), jix::Error>(())
@@ -779,7 +778,7 @@ define_op1!(
     ///
     /// // For complex input the result is the modulus sqrt(re^2 + im^2).
     /// use jix::scalar::Complex;
-    /// let b = Array::compact_array(&array![Complex { re: 3.0f32, im: 4.0 }])?;
+    /// let b = Array::compact_ndarray(&array![Complex { re: 3.0f32, im: 4.0 }])?;
     /// let result = b.abs().to_ndarray()?;
     /// assert!((result[[0]] - 5.0).abs() < 1e-5);
     /// # }

@@ -294,8 +294,8 @@ where
             "non-reduced dim must produce at most one bulk-block",
         );
         let mut bulk_iter = NdIter::new_with_begin(
-            &bulk_grid_begin,
-            &bulk_grid_end,
+            S::Dimension::from_slice(&bulk_grid_begin).unwrap(),
+            S::Dimension::from_slice(&bulk_grid_end).unwrap(),
             NdIterExtBlockOffsetSize::new(
                 &dim_arr(inner_ndim, |dim| inner_range_full[dim].start),
                 &dim_arr(inner_ndim, |dim| inner_range_full[dim].end),
@@ -343,8 +343,8 @@ where
             let tile_grid_begin = dim_arr(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
             let tile_grid_end = dim_arr(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
             let mut tile_iter = NdIter::new_with_begin(
-                &tile_grid_begin,
-                &tile_grid_end,
+                S::Dimension::from_slice(&tile_grid_begin).unwrap(),
+                S::Dimension::from_slice(&tile_grid_end).unwrap(),
                 NdIterExtBlockOffsetSize::new(&bulk_begin, &bulk_end, &tile_shape),
             );
             debug_assert!(
@@ -400,7 +400,7 @@ where
                 };
 
                 let mut out_iter = NdIter::new(
-                    &tile_out_shape,
+                    D::from_slice(&tile_out_shape).unwrap(),
                     (
                         NdIterExtStridesPtr::new(
                             &items_buf_strides_for_out_iter,
@@ -423,7 +423,7 @@ where
 
                 while let Some((_idx, (src_base, state))) = out_iter.next() {
                     let reduction_iter = NdIter::new(
-                        &reduction_shape,
+                        S::Dimension::from_slice(&reduction_shape).unwrap(),
                         NdIterExtStridesPtr::new(&items_buf_strides, src_base),
                     );
                     debug_assert_eq!(reduction_size, reduction_iter.len());
@@ -483,7 +483,7 @@ where
         let out_strides = default_strides(&out_shape, size_of::<K::Output>() as u64);
         if state_initialized {
             let mut out_iter = NdIter::new(
-                &out_shape,
+                D::from_slice(&out_shape).unwrap(),
                 (
                     // CAREFUL: state_ptr and out_ptr may alias
                     NdIterExtStridesPtrMut::new(&state_strides, state_ptr.cast()),
@@ -502,7 +502,7 @@ where
         } else {
             // Empty reduction: write the empty-stream result to every output.
             let mut out_iter = NdIter::new(
-                &out_shape,
+                D::from_slice(&out_shape).unwrap(),
                 NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);
@@ -991,12 +991,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Reduce all axes -> scalar
-    /// let scalar = Array::compact_array(&nd)?
+    /// let scalar = Array::compact_ndarray(&nd)?
     ///     .max((0, 1)).to_ndarray()?;
     /// assert_eq!(scalar[[]], 6);
     ///
     /// // Reduce axis 0 -> shape [3]
-    /// let col_max = Array::compact_array(&nd)?
+    /// let col_max = Array::compact_ndarray(&nd)?
     ///     .max(0).to_ndarray()?;
     /// assert_eq!(col_max.as_slice().unwrap(), &[4, 5, 6]);
     /// # Ok::<(), jix::Error>(())
@@ -1055,12 +1055,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Reduce all axes -> scalar
-    /// let scalar = Array::compact_array(&nd)?
+    /// let scalar = Array::compact_ndarray(&nd)?
     ///     .min((0, 1)).to_ndarray()?;
     /// assert_eq!(scalar[[]], 1);
     ///
     /// // Reduce axis 0 -> shape [3]
-    /// let col_min = Array::compact_array(&nd)?
+    /// let col_min = Array::compact_ndarray(&nd)?
     ///     .min(0).to_ndarray()?;
     /// assert_eq!(col_min.as_slice().unwrap(), &[1, 2, 3]);
     /// # Ok::<(), jix::Error>(())
@@ -1121,12 +1121,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
     ///
     /// // Index of max along axis 1 (per row) -> shape [2]
-    /// let idx = Array::compact_array(&nd)?
+    /// let idx = Array::compact_ndarray(&nd)?
     ///     .argmax(1).to_ndarray()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[1, 2]); // max of row 0 at col 1, row 1 at col 2
     ///
     /// // Index of max along axis 0 (per column) -> shape [3]
-    /// let col_idx = Array::compact_array(&nd)?
+    /// let col_idx = Array::compact_ndarray(&nd)?
     ///     .argmax(0).to_ndarray()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[1, 0, 1]); // max of col 0 at row 1, col 1 at row 0, col 2 at row 1
     /// # Ok::<(), jix::Error>(())
@@ -1194,12 +1194,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
     ///
     /// // Index of min along axis 1 (per row) -> shape [2]
-    /// let idx = Array::compact_array(&nd)?
+    /// let idx = Array::compact_ndarray(&nd)?
     ///     .argmin(1).to_ndarray()?;
     /// assert_eq!(idx.as_slice().unwrap(), &[0, 1]); // min of row 0 at col 0, row 1 at col 1
     ///
     /// // Index of min along axis 0 (per column) -> shape [3]
-    /// let col_idx = Array::compact_array(&nd)?
+    /// let col_idx = Array::compact_ndarray(&nd)?
     ///     .argmin(0).to_ndarray()?;
     /// assert_eq!(col_idx.as_slice().unwrap(), &[0, 1, 0]); // min of col 0 at row 0, col 1 at row 1, col 2 at row 0
     /// # Ok::<(), jix::Error>(())
@@ -1272,12 +1272,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Sum all elements -> i64
-    /// let total = Array::compact_array(&nd)?
+    /// let total = Array::compact_ndarray(&nd)?
     ///     .sum((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 21);
     ///
     /// // Sum along axis 0 -> shape [3]
-    /// let col_sums = Array::compact_array(&nd)?
+    /// let col_sums = Array::compact_ndarray(&nd)?
     ///     .sum(0).to_ndarray()?;
     /// assert_eq!(col_sums.as_slice().unwrap(), &[5, 7, 9]);
     /// # Ok::<(), jix::Error>(())
@@ -1347,12 +1347,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Product of all elements -> i64
-    /// let total = Array::compact_array(&nd)?
+    /// let total = Array::compact_ndarray(&nd)?
     ///     .product((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 720);
     ///
     /// // Product along axis 0 -> shape [3]
-    /// let col_products = Array::compact_array(&nd)?
+    /// let col_products = Array::compact_ndarray(&nd)?
     ///     .product(0).to_ndarray()?;
     /// assert_eq!(col_products.as_slice().unwrap(), &[4, 10, 18]);
     /// # Ok::<(), jix::Error>(())
@@ -1415,12 +1415,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Mean of all elements -> f64
-    /// let total = Array::compact_array(&nd)?
+    /// let total = Array::compact_ndarray(&nd)?
     ///     .mean((0, 1)).to_ndarray()?;
     /// assert_eq!(total[[]], 3.5);
     ///
     /// // Mean along axis 0 -> shape [3]
-    /// let col_means = Array::compact_array(&nd)?
+    /// let col_means = Array::compact_ndarray(&nd)?
     ///     .mean(0).to_ndarray()?;
     /// assert_eq!(col_means.as_slice().unwrap(), &[2.5, 3.5, 4.5]);
     /// # Ok::<(), jix::Error>(())
@@ -1488,12 +1488,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Population variance (ddof=0) of all elements -> f64
-    /// let var_all = Array::compact_array(&nd)?
+    /// let var_all = Array::compact_ndarray(&nd)?
     ///     .var((0, 1), 0.0).to_ndarray()?;
     /// assert!((var_all[[]] - 2.9167).abs() < 0.001);
     ///
     /// // Sample variance (ddof=1) along axis 0 -> shape [3]
-    /// let col_vars = Array::compact_array(&nd)?
+    /// let col_vars = Array::compact_ndarray(&nd)?
     ///     .var(0, 1.0).to_ndarray()?;
     /// assert_eq!(col_vars.as_slice().unwrap(), &[4.5, 4.5, 4.5]);
     /// # Ok::<(), jix::Error>(())
@@ -1557,12 +1557,12 @@ define_reduction_op!(
     /// let nd = array![[1i32, 2, 3], [4, 5, 6]];
     ///
     /// // Population std (ddof=0) of all elements -> f64
-    /// let std_all = Array::compact_array(&nd)?
+    /// let std_all = Array::compact_ndarray(&nd)?
     ///     .std((0, 1), 0.0).to_ndarray()?;
     /// assert!((std_all[[]] - 1.7078).abs() < 0.001);
     ///
     /// // Sample std (ddof=1) along axis 0 -> shape [3]
-    /// let col_stds = Array::compact_array(&nd)?
+    /// let col_stds = Array::compact_ndarray(&nd)?
     ///     .std(0, 1.0).to_ndarray()?;
     /// assert!((col_stds[[0]] - 2.1213).abs() < 0.001);
     /// # Ok::<(), jix::Error>(())
@@ -1624,12 +1624,12 @@ define_reduction_op!(
     /// let nd = array![[true, false, true], [true, true, true]];
     ///
     /// // All elements true? -> false (contains false)
-    /// let all_true = Array::compact_array(&nd)?
+    /// let all_true = Array::compact_ndarray(&nd)?
     ///     .all((0, 1)).to_ndarray()?;
     /// assert_eq!(all_true[[]], false);
     ///
     /// // All true along axis 0 (per column) -> shape [3]
-    /// let col_all = Array::compact_array(&nd)?
+    /// let col_all = Array::compact_ndarray(&nd)?
     ///     .all(0).to_ndarray()?;
     /// assert_eq!(col_all.as_slice().unwrap(), &[true, false, true]);
     /// # Ok::<(), jix::Error>(())
@@ -1686,12 +1686,12 @@ define_reduction_op!(
     /// let nd = array![[false, false, false], [true, true, true]];
     ///
     /// // Any element true? -> true
-    /// let any_true = Array::compact_array(&nd)?
+    /// let any_true = Array::compact_ndarray(&nd)?
     ///     .any((0, 1)).to_ndarray()?;
     /// assert_eq!(any_true[[]], true);
     ///
     /// // Any true along axis 0 (per column) -> shape [3]
-    /// let col_any = Array::compact_array(&nd)?
+    /// let col_any = Array::compact_ndarray(&nd)?
     ///     .any(0).to_ndarray()?;
     /// assert_eq!(col_any.as_slice().unwrap(), &[true, true, true]);
     /// # Ok::<(), jix::Error>(())
@@ -1870,12 +1870,11 @@ pub(crate) mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
 
+    use proptest::prelude::*;
+
     use crate::array::Array;
     use crate::storage::Compact;
-    use crate::DimDyn;
-    use crate::Ty;
-
-    use proptest::prelude::*;
+    use crate::{DimDyn, Ty};
 
     pub(crate) fn axis_strategy(ndim: usize) -> impl proptest::strategy::Strategy<Value = usize> {
         0..ndim
@@ -2283,7 +2282,7 @@ pub(crate) mod tests {
     );
     #[test]
     fn variance() {
-        let a = Array::compact_array(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
+        let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
         let var_all = a.as_ref().var((0, 1), 0.0).to_ndarray().unwrap();
         assert!((var_all[[]] - 2.9166).abs() < 0.001);
         let var_col = a.as_ref().var(0, 0.0).to_ndarray().unwrap();
@@ -2293,7 +2292,7 @@ pub(crate) mod tests {
     }
     #[test]
     fn std() {
-        let a = Array::compact_array(&array![[7i32, 8, 9], [4, 5, 6]]).unwrap();
+        let a = Array::compact_ndarray(&array![[7i32, 8, 9], [4, 5, 6]]).unwrap();
         let std_all = a.as_ref().std((0, 1), 0.0).to_ndarray().unwrap();
         assert!((std_all[[]] - 1.7078).abs() < 0.001);
         let std_col = a.as_ref().std(0, 0.0).to_ndarray().unwrap();
@@ -2411,8 +2410,9 @@ pub(crate) mod tests {
 
         #[cfg(test)]
         mod tests {
-            use super::*;
             use ndarray::{array, Array};
+
+            use super::*;
 
             #[test]
             fn single_axis_0() {
