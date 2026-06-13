@@ -30,4 +30,6 @@
 - py div, true_div, floor_div
 - slice op in python api
 - bump pyo3 to 0.29
-- remove Scalar, users should use .map instead
+- rework block shape and read shape propagation through ops
+- remove DimensionChange, every storage should implement it
+- rename ReadData

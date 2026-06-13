@@ -282,22 +282,6 @@ macro_rules! define_op2 {
                 $Op::new_array(self, b).unwrap()
             }
         }
-
-        impl<S1, T2> core::ops::$core_op_trait<T2> for Array<S1>
-        where
-            S1: crate::storage::ArrayStorageTyped,
-            T2: crate::dtype::Dtyped,
-            S1::Item: core::ops::$core_op_trait<T2, Output: crate::dtype::Dtyped>,
-        {
-            type Output = Array<$Op<S1, crate::storage::Scalar<T2, S1::Dimension>>>;
-            #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-            #[track_caller]
-            fn $core_op_fn(self, b: T2) -> Self::Output {
-                let shape = <S1::Dimension as crate::Dimension>::from_slice(self.shape()).unwrap();
-                let b = Array::plain_scalar(b, shape).unwrap();
-                $Op::new_array(self, b).unwrap()
-            }
-        }
     };
 }
 
@@ -362,8 +346,8 @@ define_op2!(
     /// For **complex** types each component is added independently:
     /// `(a + bi) + (c + di) = (a+c) + (b+d)i`.
     ///
-    /// Available via the `+` operator on arrays. A raw scalar can be used as one of the operands
-    /// and it will be broadcasted to the array's shape: `arr + 1i32`.
+    /// Available via the `+` operator on arrays. For adding a constant to every element, use
+    /// [`Array::map`]: `a.map(|x| x + 1i32)`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -376,10 +360,6 @@ define_op2!(
     /// let b = Array::compact_ndarray(&array![10i32, 20, 30])?;
     /// let result = (a + b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[11, 22, 33]);
-    ///
-    /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
-    /// let result = (a + 10i32).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[11, 12, 13]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Add,
@@ -394,8 +374,8 @@ define_op2!(
     /// For **complex** types each component is subtracted independently:
     /// `(a + bi) - (c + di) = (a-c) + (b-d)i`.
     ///
-    /// Available via the `-` operator on arrays. A raw scalar can be used as the right-hand
-    /// side and is broadcast to the array's shape: `arr - 1i32`.
+    /// Available via the `-` operator on arrays. For subtracting a constant from every element,
+    /// use [`Array::map`]: `a.map(|x| x - 1i32)`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -408,10 +388,6 @@ define_op2!(
     /// let b = Array::compact_ndarray(&array![1i32, 2, 3])?;
     /// let result = (a - b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[9, 18, 27]);
-    ///
-    /// let a = Array::compact_ndarray(&array![10i32, 20, 30])?;
-    /// let result = (a - 5i32).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[5, 15, 25]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Sub,
@@ -426,8 +402,8 @@ define_op2!(
     /// For **complex** types this is full complex multiplication:
     /// `(a + bi) * (c + di) = (ac - bd) + (ad + bc)i`.
     ///
-    /// Available via the `*` operator on arrays. A raw scalar can be used as the right-hand
-    /// side and is broadcast to the array's shape: `arr * 2i32`.
+    /// Available via the `*` operator on arrays. For scaling every element by a constant, use
+    /// [`Array::map`]: `a.map(|x| x * 2i32)`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -440,10 +416,6 @@ define_op2!(
     /// let b = Array::compact_ndarray(&array![4i32, 5, 6])?;
     /// let result = (a * b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4, 10, 18]);
-    ///
-    /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
-    /// let result = (a * 3i32).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[3, 6, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Mul,
@@ -460,8 +432,8 @@ define_op2!(
     /// For **float** types semantics follow `f32::div`.
     /// For **complex** types this is full complex division.
     ///
-    /// Available via the `/` operator on arrays. A raw scalar can be used as the right-hand
-    /// side and is broadcast to the array's shape: `arr / 2i32`.
+    /// Available via the `/` operator on arrays. For dividing every element by a constant, use
+    /// [`Array::map`]: `a.map(|x| x / 2i32)`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -474,10 +446,6 @@ define_op2!(
     /// let b = Array::compact_ndarray(&array![2i32, 4, 5])?;
     /// let result = (a / b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[5, 5, 6]);
-    ///
-    /// let a = Array::compact_ndarray(&array![10i32, 20, 30])?;
-    /// let result = (a / 10i32).to_ndarray()?;
-    /// assert_eq!(result.as_slice().unwrap(), &[1, 2, 3]);
     /// # Ok::<(), jix::Error>(())
     /// ```
     Div,
@@ -506,10 +474,9 @@ define_op2!(
     /// let result = a.pow(b).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[8.0, 9.0, 2.0]);
     ///
-    /// // Raise each element to a scalar exponent.
+    /// // Raise each element to a constant exponent.
     /// let a = Array::compact_ndarray(&array![2.0f32, 3.0, 4.0])?;
-    /// let exp = Array::plain_scalar(2.0f32, &[3])?;
-    /// let result = a.pow(exp).to_ndarray()?;
+    /// let result = a.map(|x| x.powf(2.0)).to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[4.0, 9.0, 16.0]);
     /// # Ok::<(), jix::Error>(())
     /// ```
@@ -653,21 +620,6 @@ pub(crate) mod tests {
             let result = (za + zb) * zc;
             let expected = (&nd_a + &nd_b) * &nd_c;
             crate::util::assert_array_matches(&result, &expected);
-        }
-    }
-
-    proptest::proptest! {
-        #[test]
-        fn add_mul_scalar(
-            vals in proptest::collection::vec(<f32 as crate::util::ScalarStrategy>::op_safe_strategy(), 100usize)
-        ) {
-            use crate::array::Array;
-            let a = ndarray::Array::from_shape_vec([10, 10], vals).unwrap();
-            let za = Array::compact_ndarray_with(&a, crate::util::arr_params(&[10, 10])).unwrap();
-            let zb = za * 2.0f32 + 1.0f32;
-            let actual = zb.to_ndarray().unwrap();
-            let expected = &a * 2.0 + 1.0;
-            proptest::prop_assert_eq!(actual, expected);
         }
     }
 }

@@ -11,9 +11,8 @@
 //! - [`Compact`] - heap-allocated
 //! - [`CompactMmap`] - memory-mapped file
 //!
-//! Two adapters let non-compressed data participate in the same `Array` world (such as math operations with compressed arrays):
+//! An adapter lets non-compressed data participate in the same `Array` world (such as math operations with compressed arrays):
 //! - [`Plain`] - a zero-copy view into a contiguous or strided in-memory buffer.
-//! - [`Scalar<T>`] - a single value broadcast to any shape.
 //!
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
 //! the transformation at read time. These are defined in [`jix::ops`](crate::ops) and include shape
@@ -47,7 +46,7 @@
 //! - [`ArrayStorage`] - the trait all storage backends implement.
 //! - [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`] - compile-time element type tracking.
 //! - [`Compact`] - the main block-compressed storage backend.
-//! - [`Plain`] and [`Scalar`] - adapters for non-compressed data.
+//! - [`Plain`] - adapter for non-compressed data.
 //! - [`BlocksLayout`] - block geometry hints attached to every storage.
 
 use crate::codec::{DecoderParams, EncoderParams};
@@ -68,13 +67,11 @@ pub use compressed::*;
 mod plain;
 pub use plain::*;
 
-mod scalar;
-pub use scalar::*;
-
 mod any;
 pub use any::*;
 
 pub(crate) mod block;
+pub(crate) mod scalar;
 
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
 ///

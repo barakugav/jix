@@ -376,7 +376,7 @@ where
     /// let context = src.read_ctx();
     ///
     /// // Build a lazy view - no data is read yet.
-    /// let view = src.to_typed::<f32>()?.exp() + 1.0f32;
+    /// let view = src.to_typed::<f32>()?.exp().map(|x| x + 1.0f32);
     ///
     /// // Write to a new file: blocks are decompressed, modified by ops, and re-compressed one at
     /// // a time. The full array is never held in memory, not even in its compressed form.

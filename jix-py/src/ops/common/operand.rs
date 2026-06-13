@@ -169,7 +169,7 @@ impl Operand {
                     T: Dtyped,
                 {
                     let array = jix_core::Array::from_storage(
-                        jix_core::storage::Scalar::new(value, shape).into_py_result()?,
+                        jix_core::__private::Scalar::new(value, shape).into_py_result()?,
                     );
                     Ok(array.to_type_dyn().into_any())
                 }

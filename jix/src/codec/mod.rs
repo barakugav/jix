@@ -442,10 +442,11 @@ impl<'a> Decoder<'a> {
 /// ```
 /// use jix::codec::ReadContext;
 /// use jix::Array;
+/// use ndarray::array;
 ///
-/// let za = Array::plain_scalar(42i32, &[5])?;
+/// let za = Array::compact_ndarray(&array![42i32, 17, 6, 99, 51])?;
 /// let out = za.to_ndarray_sub(&[0..3], &ReadContext::default())?;
-/// assert_eq!(out.as_slice().unwrap(), &[42, 42, 42]);
+/// assert_eq!(out.as_slice().unwrap(), &[42, 17, 6]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///

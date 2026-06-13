@@ -18,8 +18,8 @@ let a = Array::compact_ndarray(&array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]])?;
 
 // Build a lazy pipeline - no data is read yet.
 // The full chain is a single static type:
-//     Array<Sub<Sum<Exp<Compact>>, Scalar<f32>>>
-let result = a.exp().sum(0) - 1.0;
+//     Array<Map<Sum<Exp<Compact>>>>
+let result = a.exp().sum(0).map(|x| x - 1.0);
 
 // Materialize and persist. Blocks are decompressed, transformed,
 // and re-compressed one at a time - no full copy in memory,

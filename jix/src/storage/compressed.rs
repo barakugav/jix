@@ -31,7 +31,7 @@ use crate::Dimension;
 ///
 /// `Compact<ET, D>` has two type parameters:
 ///
-/// - **`ET: ElementType`** - compile-time element type, either [`Ty<Scalar>`](crate::Ty)
+/// - **`ET: ElementType`** - compile-time element type, either [`Ty<T>`](crate::Ty)
 ///   (element type known at compile time) or [`TypeDyn`](crate::TypeDyn) (runtime only).
 ///   Arrays constructed from typed sources carry `Ty<_>` automatically; arrays loaded from disk
 ///   carry `TypeDyn`.

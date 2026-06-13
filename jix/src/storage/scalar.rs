@@ -5,7 +5,7 @@ use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_dtype, check_get_buffer_size, check_get_range, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ReadData, Ty};
 use crate::util::{cast_slice_mut, dim_arr};
-use crate::{Array, Dimension, ElementType, IntoDimension};
+use crate::{Dimension, ElementType, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -16,36 +16,16 @@ use crate::{Array, Dimension, ElementType, IntoDimension};
 /// `D: Dimension` tracks the ndim at the type level and follows the same semantics as
 /// [`Compact<ET, D>`](crate::storage::Compact): `D` is inferred from the shape argument type.
 ///
-/// Prefer the [`Array`] constructor [`Array::plain_scalar`] over constructing this type directly.
-///
 /// # Examples
 ///
-/// Scalars can be combined with arrays either implicitly, by using a raw Rust
-/// value directly as an operand, or explicitly via [`Array::plain_scalar`].
-/// Both are equivalent; choose whichever reads more clearly.
-///
-/// **Implicit** - the operator accepts a raw scalar and broadcasts it automatically:
-///
 /// ```
 /// use jix::Array;
+/// # use jix::__private::Scalar;
 /// use ndarray::array;
 ///
 /// let arr = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
-/// let result = (arr * 5.0f32).to_ndarray()?; // the scalar is broadcast automatically
-/// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]]);
-/// # Ok::<(), jix::Error>(())
-/// ```
-///
-/// **Explicit** - construct a `Scalar` array first, then apply the operation:
-///
-/// ```
-/// use jix::Array;
-/// use ndarray::array;
-///
-/// let arr = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
-///
-/// let scalar_arr = Array::plain_scalar(5.0f32, &[2, 2])?;
+/// let scalar_arr = Array::from_storage(Scalar::new(5.0f32, &[2, 2])?);
 /// let result = (arr * scalar_arr).to_ndarray()?;
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]]);
 /// # Ok::<(), jix::Error>(())
@@ -97,29 +77,6 @@ impl<T, D> Scalar<T, D> {
     #[inline(always)]
     pub fn data(&self) -> &T {
         &self.data
-    }
-}
-
-impl<T, D> Array<Scalar<T, D>> {
-    /// Create an array with the given `shape` where every element equals `value`.
-    ///
-    /// This is a zero-copy broadcast: the scalar is stored once and repeated on
-    /// every read. The resulting array behaves like `np.full(shape, value)`.
-    ///
-    /// The storage does not compress anything. This function is useful when a scalar need to participate
-    /// in an operation with another array.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `shape.len()` exceeds the maximum supported number
-    /// of dimensions.
-    pub fn plain_scalar<Sh>(value: T, shape: Sh) -> Result<Self>
-    where
-        T: Dtyped,
-        D: Dimension,
-        Sh: IntoDimension<Dimension = D>,
-    {
-        Ok(Self::from_storage(Scalar::new(value, shape)?))
     }
 }
 
@@ -228,8 +185,19 @@ where
 mod tests {
     use ndarray::array;
 
+    use crate::__private::Scalar;
     use crate::codec::ReadContext;
-    use crate::Array;
+    use crate::dtype::Dtyped;
+    use crate::error::Result;
+    use crate::{Array, IntoDimension};
+
+    pub fn plain_scalar<T, Sh>(value: T, shape: Sh) -> Result<Array<Scalar<T, Sh::Dimension>>>
+    where
+        T: Dtyped,
+        Sh: IntoDimension,
+    {
+        Ok(Array::from_storage(Scalar::new(value, shape)?))
+    }
 
     // -----------------------------------------------------------------------
     // plain_scalar - shape [N]
@@ -237,37 +205,31 @@ mod tests {
 
     #[test]
     fn broadcast_1d_shape() {
-        let a = Array::plain_scalar(5i32, &[4]).unwrap();
+        let a = plain_scalar(5i32, &[4]).unwrap();
         assert_eq!(a.shape(), &[4u64]);
     }
 
     #[test]
     fn broadcast_1d_read_i32() {
-        let got = Array::plain_scalar(5i32, &[4])
-            .unwrap()
-            .to_ndarray()
-            .unwrap();
+        let got = plain_scalar(5i32, &[4]).unwrap().to_ndarray().unwrap();
         assert_eq!(got, array![5i32, 5, 5, 5]);
     }
 
     #[test]
     fn broadcast_2d_shape() {
-        let a = Array::plain_scalar(1u8, &[3, 4]).unwrap();
+        let a = plain_scalar(1u8, &[3, 4]).unwrap();
         assert_eq!(a.shape(), &[3u64, 4]);
     }
 
     #[test]
     fn broadcast_2d_read_u8() {
-        let got = Array::plain_scalar(9u8, &[2, 3])
-            .unwrap()
-            .to_ndarray()
-            .unwrap();
+        let got = plain_scalar(9u8, &[2, 3]).unwrap().to_ndarray().unwrap();
         assert_eq!(got, array![[9u8, 9, 9], [9, 9, 9]]);
     }
 
     #[test]
     fn broadcast_2d_subregion_read() {
-        let got = Array::plain_scalar(42i32, &[5, 5])
+        let got = plain_scalar(42i32, &[5, 5])
             .unwrap()
             .to_ndarray_sub(&[1..3, 2..4], &ReadContext::default())
             .unwrap();
@@ -276,7 +238,7 @@ mod tests {
 
     #[test]
     fn broadcast_3d_read_f32() {
-        let got = Array::plain_scalar(1.5f32, &[2, 3, 4])
+        let got = plain_scalar(1.5f32, &[2, 3, 4])
             .unwrap()
             .to_ndarray()
             .unwrap();
@@ -293,7 +255,7 @@ mod tests {
     #[test]
     fn max_of_broadcast_scalar() {
         // max of a constant array is the constant itself
-        let got = Array::plain_scalar(7.0f64, &[3, 4])
+        let got = plain_scalar(7.0f64, &[3, 4])
             .unwrap()
             .max(0)
             .to_ndarray()
@@ -304,7 +266,7 @@ mod tests {
     #[test]
     fn sum_of_broadcast_scalar_i32() {
         // sum of [2,2,2] (3 rows, broadcast) over axis 0 = [6,6,6,6] as i64
-        let got = Array::plain_scalar(2i32, &[3, 4])
+        let got = plain_scalar(2i32, &[3, 4])
             .unwrap()
             .sum(0)
             .to_ndarray()

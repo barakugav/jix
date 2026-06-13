@@ -21,13 +21,11 @@ use crate::{Dimension, ElementType};
 ///  These store the array as independently
 /// compressed nd-blocks and are the primary on-disk format.
 ///
-/// # Adapters
+/// # Adapter
 ///
-/// Two adapters let plain data participate in the same `Array<S>` world:
+/// An adapter lets plain data participate in the same `Array<S>` world:
 /// - `plain::Plain` - wraps a contiguous or strided in-memory ndarray, used when
 ///   operating on regular Rust/ndarray data alongside compressed arrays.
-/// - `scalar::Scalar<T>` - represents a single scalar value broadcast to any shape,
-///   used as the right-hand side in operations like `array + scalar`.
 ///
 /// # Lazy operation views
 ///

@@ -43,7 +43,6 @@ use crate::{
 /// | [`Array<Compact>`](crate::storage::Compact) | Heap-allocated block-compressed array. The main storage backend. |
 /// | [`Array<Add<S1, S2>> or Array<Neg<S>> ...`](crate::ops) | Lazy operations views that wrap one or more arrays and apply a transformation at read time. Created by methods in [`ops`](crate::ops). |
 /// | [`Array<Plain<...>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_ref`](Array::plain_ndarray_ref). |
-/// | [`Array<Scalar<T>>`](crate::storage::Scalar) | A single scalar broadcast to any shape, used as the operand in expressions like `array + 1.0`. |
 ///
 /// # Operations and lazy evaluation
 ///
@@ -115,8 +114,8 @@ use crate::{
 /// let scaled = array                               // Array<Compact>
 ///     .exp()                                       // Array<Exp<Compact>>
 ///     .floor()                                     // Array<Floor<Exp<Compact>>>
-///     * 2.0f32                                     // Array<Mul<Floor<...>, Scalar<f32>>>
-///     + ones;                                      // Array<Add<Mul<...>, Compact>>
+///     .map(|x| x * 2.0f32)                         // Array<Map<Floor<...>>>
+///     + ones;                                      // Array<Add<Map<...>, Compact>>
 /// // lazy view arrays are still functional arrays
 /// // access to data execute the pipeline on demand, possibly on a sub set of the original array
 /// assert_eq!(scaled.shape(), &[2, 3]);
@@ -227,8 +226,8 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// let scaled = array                               // Array<Compact>
     ///     .exp()                                       // Array<Exp<Compact>>
     ///     .floor()                                     // Array<Floor<Exp<Compact>>>
-    ///     * 2.0f32                                     // Array<Mul<Floor<...>, Scalar<f32>>>
-    ///     + ones;                                      // Array<Add<Mul<...>, Compact>>
+    ///     .map(|x| x * 2.0f32)                         // Array<Map<Floor<...>>>
+    ///     + ones;                                      // Array<Add<Map<...>, Compact>>
     /// assert_eq!(scaled.shape(), &[2, 3]);
     /// assert_eq!(scaled.dtype(), &f32::DTYPE);
     /// assert_eq!(scaled.to_ndarray()?[[1, 1]], 957.0);
@@ -611,7 +610,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let b = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
     ///
     /// // Build a lazy view: (a + b) * 2 - 1
-    /// let lazy = (a + b) * 2.0f32 - 1.0f32;
+    /// let lazy = (a + b).map(|x| x * 2.0f32 - 1.0f32);
     /// assert_eq!(lazy.shape(), &[2, 3]);
     ///
     /// let nd = lazy.to_ndarray()?; // executes the pipeline
@@ -721,7 +720,7 @@ impl<S: ArrayStorage> Array<S> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6], [7, 8, 9]])?;
-    /// let scaled = a * 10i32; // Array<Mul<Compact, Scalar<i32>>>
+    /// let scaled = a.map(|x| x * 10i32);
     ///
     /// let ctx = scaled.read_ctx();
     /// assert_eq!(
@@ -870,7 +869,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The primary use of `compact` is to materialize a lazy operation chain:
     /// An `Array<S>` can have an arbitrary storage implementation, often a lazy view of some one or
-    /// more computation, for example `Array<Floor<Mul<Compact, Scalar<f32>>>>` (see the examples).
+    /// more computation, for example `Array<Floor<Map<Compact>>>` (see the examples).
     /// Reads to such lazy view arrays always perform the whole computation pipeline on the fly,
     /// which is very flexible but can be inefficient for repeated access. Coping the data and
     /// re-compressing it into a new array with `compact` breaks the lazy storage chain and materializes
@@ -903,10 +902,10 @@ impl<S: ArrayStorage> Array<S> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
-    /// let result =         // Array<Compact>
-    ///     (a * 7.399_f32)  // Array<Mul<Compact, Scalar<f32>>>
-    ///    .floor()          // Array<Floor<Mul<Compact, Scalar<f32>>>>
-    ///    .compact()?;      // Array<Compact> - materialize the pipeline
+    /// let result =                  // Array<Compact>
+    ///     a.map(|x| x * 7.399_f32)  // Array<Map<Compact>>
+    ///    .floor()                   // Array<Floor<Map<Compact>>>
+    ///    .compact()?;               // Array<Compact> - materialize the pipeline
     /// # Ok::<(), jix::Error>(())
     /// ```
     pub fn compact(&self) -> Result<Array<Compact<S::ElementType, S::Dimension>>> {
@@ -1053,7 +1052,7 @@ impl<S: ArrayStorage> Array<S> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
-    /// let b = a.as_ref() + 1.0f32; // Array<Add<Ref<Compact>, Scalar<f32>>>
+    /// let b = a.as_ref().map(|x| x + 1.0f32); // Array<Map<Ref<Compact>>>
     /// let c = a.as_ref() * b; // we can use `a` again here because we called as_ref()
     /// assert_eq!(c.to_ndarray()?[[1, 1]], 6.17 * (6.17 + 1.0));
     /// # Ok::<(), jix::Error>(())
@@ -1095,7 +1094,7 @@ impl<S: ArrayStorage> Array<S> {
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
     /// assert!(a.is_compact());
     ///
-    /// let b = a * 2.0f32; // Array<Mul<Compact, Scalar<f32>>>
+    /// let b = a.map(|x| x * 2.0f32); // Array<Map<Compact>>
     /// assert!(!b.is_compact()); // b is a lazy view
     /// # Ok::<(), jix::Error>(())
     /// ```
@@ -1123,7 +1122,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert!(a.is_compact());
     /// let a = a.maybe_compact()?; // a is already compact, so this is a no-op
     ///
-    /// let b = a * 2.0f32; // Array<Mul<Compact, Scalar<f32>>>
+    /// let b = a.map(|x| x * 2.0f32); // Array<Map<Compact>>
     /// assert!(!b.is_compact()); // b is a lazy view
     /// let b = b.maybe_compact()?; // materialize b into compact form
     /// assert!(b.is_compact());
