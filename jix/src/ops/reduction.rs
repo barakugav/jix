@@ -5,6 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::common::AxesArg;
+use crate::ops::BulkInfo;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
@@ -137,6 +138,53 @@ where
 
     #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        // this is a compile time check, the compiler knows the value of `BULK`
+        let read_fn = match <S::Item as BulkInfo>::BULK {
+            1 => Self::read_data_impl::<1>,
+            2 => Self::read_data_impl::<2>,
+            4 => Self::read_data_impl::<4>,
+            8 => Self::read_data_impl::<8>,
+            16 => Self::read_data_impl::<16>,
+            32 => Self::read_data_impl::<32>,
+            64 => Self::read_data_impl::<64>,
+            128 => Self::read_data_impl::<128>,
+            256 => Self::read_data_impl::<256>,
+            512 => Self::read_data_impl::<512>,
+            _ => Self::read_data_impl::<1024>,
+        };
+        read_fn(self, index, buf, context)
+    }
+
+    #[inline(always)]
+    fn shape(&self) -> &[u64] {
+        self.shape.as_slice()
+    }
+    #[inline(always)]
+    fn dtype(&self) -> &Dtype {
+        let dtype = &self.out_dtype_;
+        unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
+        dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.spec()
+        }
+    }
+}
+impl<S, K, D> ReductionOp<S, K, D>
+where
+    S: ArrayStorageTyped,
+    K: ReductionOpKernel<S::Item, Output: Dtyped>,
+    D: Dimension,
+{
+    #[inline]
+    fn read_data_impl<const SIMD: usize>(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> Result<()> {
         // Streams the reduction over a two-level chunking of the inner array so peak scratch
         // memory stays bounded *and* each downstream `self.array.read_data` call is sized to
         // roughly fit the caller's request in cache.
@@ -446,7 +494,25 @@ where
                         unsafe { state.assume_init_mut() }
                     };
 
-                    // Fold this tile's `reduction_size` items into the running state.
+                    // Fold the first SIMD block
+                    while item_idx < item_idx_end.min(SIMD as u64) {
+                        let item = reduction_iter.next();
+                        let item = unsafe { item.unwrap_unchecked() };
+                        self.kernel.update_state(state, item, item_idx);
+                        item_idx += 1;
+                    }
+                    // Fold all SIMD blocks
+                    let simd_idx_end = item_idx_end.saturating_sub(SIMD as u64);
+                    while item_idx < simd_idx_end {
+                        let items: [_; SIMD] = std::array::from_fn(|_| unsafe {
+                            reduction_iter.next().unwrap_unchecked()
+                        });
+                        for (i, item) in items.into_iter().enumerate() {
+                            self.kernel.update_state(state, item, item_idx + i as u64);
+                        }
+                        item_idx += SIMD as u64;
+                    }
+                    // Fold the tail
                     while item_idx < item_idx_end {
                         let item = reduction_iter.next();
                         let item = unsafe { item.unwrap_unchecked() };
@@ -516,29 +582,6 @@ where
         Ok(())
     }
 
-    #[inline(always)]
-    fn shape(&self) -> &[u64] {
-        self.shape.as_slice()
-    }
-    #[inline(always)]
-    fn dtype(&self) -> &Dtype {
-        let dtype = &self.out_dtype_;
-        unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
-        dtype
-    }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
-    }
-}
-impl<S, K, D> ReductionOp<S, K, D>
-where
-    S: ArrayStorageTyped,
-    K: ReductionOpKernel<S::Item, Output: Dtyped>,
-    D: Dimension,
-{
     /// Choose the per-tile inner read shape.
     ///
     /// Tiles seed from the source array's storage-block hint (the natural unit of work

@@ -53,7 +53,7 @@
 use crate::codec::{DecoderParams, EncoderParams};
 use crate::dtype::Dtyped;
 use crate::error::{check_dtype, ensure, Result};
-use crate::ops::bulk_size;
+use crate::ops::BulkInfo;
 use crate::util::cast_slice_mut;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
@@ -287,10 +287,8 @@ pub trait ReadData<T> {
             Ok(())
         }
 
-        let bulk_size = bulk_size::<T>();
-        assert!(bulk_size.is_power_of_two());
-        // this is a compile time check, the compiler knows the value of `bulk_size::<T>()`
-        let read_fn = match bulk_size {
+        // this is a compile time check, the compiler knows the value of BULK
+        let read_fn = match <T as BulkInfo>::BULK {
             1 => read_to_buf_impl::<T, 1>,
             2 => read_to_buf_impl::<T, 2>,
             4 => read_to_buf_impl::<T, 4>,

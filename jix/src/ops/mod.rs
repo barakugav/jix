@@ -128,8 +128,8 @@ mod sub_dtype;
 pub use sub_dtype::*;
 
 mod common;
-pub(crate) use common::bulk_size;
 pub use common::AxesArg;
+pub(crate) use common::BulkInfo;
 
 pub(crate) mod _traits {
     pub use super::cast::_traits::*;
