@@ -20,7 +20,6 @@
 - add "why should i use this" to readme(s)
 - add link (pyproject metadata + readme) to readthedocs
 - build wheels for windows
-- general generic reduction, .fold
 - add NdIter.foreach() and NdIter.try_foreach()
 - have some SIMD friendly api in NdIter.foreach(), like when detecting the last dim is continuous
 - tmp_buf_typed should return a typed version of TmpBuf
