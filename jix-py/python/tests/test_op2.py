@@ -225,7 +225,7 @@ def test_divide_custom_inputs():
 def test_floor_divide(dtype: np.dtype, data: DataObject):
     # floor_divide dispatches only on integer/unsigned dtypes. Non-zero strategy
     # avoids divide-by-zero panics. jix's `//` truncates toward zero (Rust `/`
-    # semantics) — for signed-negative quotients this differs from numpy's `//`
+    # semantics) - for signed-negative quotients this differs from numpy's `//`
     # which floors toward -inf, so the expected is computed via float / and cast.
     nz = op_safe_non_zero_element_strategy(dtype)
     (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
@@ -249,7 +249,7 @@ def test_floor_divide_custom_inputs():
     check(jix.floor_divide(za, np.int64(3)), d // 3)
     check(jix.floor_divide(np.int64(60), za), 60 // d)  # scalar first via free-function
 
-    # int32: signed-negative quotient — jix truncates toward zero, numpy floors
+    # int32: signed-negative quotient - jix truncates toward zero, numpy floors
     # toward -inf, so they diverge. Compute expected via Python int truncation.
     neg = np.array([-7, -8, 9], dtype=np.int32)
     zn = jix.compact(neg)

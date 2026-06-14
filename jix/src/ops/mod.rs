@@ -130,6 +130,9 @@ pub use where_op::*;
 mod sub_dtype;
 pub use sub_dtype::*;
 
+mod complex;
+pub use complex::*;
+
 mod common;
 pub use common::AxesArg;
 pub(crate) use common::BulkInfo;

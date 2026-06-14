@@ -860,6 +860,20 @@ impl Array {
         crate::ops::unsqueeze(slf, axis)
     }
 
+    // == complex ops ==
+
+    /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
+    #[getter]
+    pub fn real(slf: &Bound<'_, Array>) -> PyResult<Array> {
+        crate::ops::real(slf)
+    }
+
+    /// Extracts the imaginary part of each complex element. See [`jix.imag()`][jix.imag].
+    #[getter]
+    pub fn imag(slf: &Bound<'_, Array>) -> PyResult<Array> {
+        crate::ops::imag(slf)
+    }
+
     // == trigonometric ops ==
 
     /// Computes the sine of each element (input in radians). See [`jix.sin()`][jix.sin].

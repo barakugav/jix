@@ -2,7 +2,6 @@
     - clip, clamp
     - split
     - 'cumprod', 'cumsum', diff
-    - imag, real
     - repeat, tile
     - allclose, isclose
     - flip, roll, split
