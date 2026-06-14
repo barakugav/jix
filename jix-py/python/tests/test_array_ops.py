@@ -653,3 +653,72 @@ def test_repeat_method_on_array():
 def test_repeat_accepts_python_list():
     r = jix.repeat([1, 2, 3], 2, axis=0)
     np.testing.assert_array_equal(r.numpy(), [1, 1, 2, 2, 3, 3])
+
+
+# ---------------------------------------------------------------------------
+# flip
+# ---------------------------------------------------------------------------
+
+
+def test_flip_1d():
+    a = jix.compact([1, 2, 3, 4], dtype=np.int32)
+    np.testing.assert_array_equal(jix.flip(a).numpy(), [4, 3, 2, 1])
+
+
+def test_flip_axis_int():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.flip(a, axis=0)
+    np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=0))
+
+
+def test_flip_axis_list():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.flip(a, axis=[1])
+    np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=1))
+
+
+def test_flip_negative_axis():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.flip(a, axis=-1)
+    np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=-1))
+
+
+def test_flip_axis_none_reverses_all():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.flip(a)
+    np.testing.assert_array_equal(r.numpy(), np.flip(arr))
+
+
+def test_flip_multiple_axes():
+    arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    a = jix.compact(arr)
+    r = jix.flip(a, axis=[0, 2])
+    np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=(0, 2)))
+
+
+def test_flip_duplicate_axis_raises():
+    a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
+    with pytest.raises(Exception):
+        jix.flip(a, axis=[0, 0])
+
+
+def test_flip_out_of_bounds_axis_raises():
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    with pytest.raises(Exception):
+        jix.flip(a, axis=1)
+
+
+def test_flip_method_on_array():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = a.flip(axis=0)
+    np.testing.assert_array_equal(r.numpy(), np.flip(arr, axis=0))
+
+
+def test_flip_accepts_python_list():
+    r = jix.flip([1, 2, 3], axis=0)
+    np.testing.assert_array_equal(r.numpy(), [3, 2, 1])

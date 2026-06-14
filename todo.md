@@ -1,5 +1,5 @@
 - ops
-    - tile, flip, roll
+    - tile, roll
     - clip, clamp
     - allclose, isclose
     - square

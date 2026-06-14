@@ -869,6 +869,15 @@ impl Array {
         crate::ops::repeat(slf, repeats, axis)
     }
 
+    /// Reverses the order of elements along the given axis. See [`jix.flip()`][jix.flip].
+    #[pyo3(signature = (axis=None))]
+    pub fn flip<'py>(
+        slf: &Bound<'py, Array>,
+        axis: Option<ItemOrSequence<i32>>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::flip(slf, axis)
+    }
+
     // == complex ops ==
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].

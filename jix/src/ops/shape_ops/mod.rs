@@ -25,6 +25,9 @@ pub use stack::*;
 mod repeat;
 pub use repeat::*;
 
+mod flip;
+pub use flip::*;
+
 use crate::ops::AxesArg;
 use crate::storage::Compact;
 use crate::{Array, ArrayStorage, IntoDimension};
@@ -109,6 +112,21 @@ where
     #[track_caller]
     pub fn repeat(self, repeats: u64, axis: usize) -> Array<Repeat<S>> {
         Repeat::new_array(self, repeats, axis).unwrap()
+    }
+
+    /// Returns a lazy view of the array with the order of elements reversed along the
+    /// specified axes. See [`Flip`] for details and examples.
+    ///
+    /// `axis` accepts any [`AxesArg`]: a single `usize`, an array `[usize; N]`, a tuple
+    /// `(usize, ...)`, a `Vec<usize>`, or a slice `&[usize]`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any axis is out of bounds or duplicated.
+    #[inline]
+    #[track_caller]
+    pub fn flip(self, axis: impl AxesArg) -> Array<Flip<S>> {
+        Flip::new_array(self, axis).unwrap()
     }
 
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.

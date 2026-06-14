@@ -5,7 +5,8 @@ use pyo3::types::{PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::{any_to_core_array, asarray};
 use crate::util::{
-    normalize_axes, normalize_axis, normalize_axis_optional, DimArray, IntoPyResult, ItemOrSequence,
+    normalize_axes, normalize_axes_optional, normalize_axis, normalize_axis_optional, DimArray,
+    IntoPyResult, ItemOrSequence,
 };
 use crate::{compact, Array};
 
@@ -920,5 +921,62 @@ pub fn repeat<'py>(
         return Ok(py_arr); // no-op
     }
     let ret = jix_core::ops::Repeat::new_array(array, repeats, axis).into_py_result()?;
+    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+}
+
+/// Reverses the order of elements along the given axis.
+///
+/// Each named axis is independently reversed; non-named axes are left untouched. The shape
+/// and dtype of the output equal the input. `axis` accepts an integer, a sequence of
+/// integers, or `None` (the default) which reverses every axis. Negative indices are
+/// supported. Duplicate axes are not allowed.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// Args:
+///     array: Input array.
+///     axis: Axis or axes to reverse. Negative indices are supported. When `None` (the
+///         default), all axes are reversed.
+///
+/// Returns:
+///     A [`jix.Array`][jix.Array] with the specified axes reversed.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # 1-D: reverse the array
+///     a = jix.compact([1, 2, 3, 4], dtype=np.int32)
+///     assert np.array_equal(jix.flip(a).numpy(), [4, 3, 2, 1])
+///
+///     # 2-D: flip rows (axis=0)
+///     b = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+///     assert np.array_equal(jix.flip(b, axis=0).numpy(), [[4, 5, 6], [1, 2, 3]])
+///
+///     # 2-D: flip columns (axis=1)
+///     assert np.array_equal(jix.flip(b, axis=1).numpy(), [[3, 2, 1], [6, 5, 4]])
+///
+///     # 2-D: flip both axes (default behaviour with axis=None)
+///     assert np.array_equal(jix.flip(b).numpy(), [[6, 5, 4], [3, 2, 1]])
+///
+///     # Sequence of axes (negative indices supported)
+///     assert np.array_equal(jix.flip(b, axis=[-1]).numpy(), [[3, 2, 1], [6, 5, 4]])
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+#[pyo3(signature = (array, axis=None))]
+pub fn flip<'py>(
+    array: &Bound<'py, PyAny>,
+    axis: Option<ItemOrSequence<i32>>,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray(array)?;
+    let array = py_arr.get().to_core();
+    let ndim = array.ndim();
+    let axes = normalize_axes_optional(axis.map(|a| a.into_vec()), ndim)?;
+    if axes.is_empty() {
+        return Ok(py_arr); // no-op if no axes to flip
+    }
+    let ret = jix_core::ops::Flip::new_array(array, axes.as_slice()).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
