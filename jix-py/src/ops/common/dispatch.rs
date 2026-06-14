@@ -7,7 +7,7 @@ use jix_core::{Array as CoreArray, ArrayAny, Ty};
 use pyo3::prelude::*;
 
 use crate::ops::astype_impl;
-use crate::ops::common::{CastKind, Operand, Precision, Scalar};
+use crate::ops::common::{CastKind, Operand, Precision, Rank, Scalar};
 use crate::util::{IntoPyResult, ItemOrSequence, IterExt};
 
 type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
@@ -133,7 +133,21 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
             .unwrap()
             .ok();
 
-        if let Some(in_dtypes) = in_dtypes {
+        if let Some(mut in_dtypes) = in_dtypes {
+            let all_without_precision = in_dtypes
+                .iter()
+                .all(|(_rank, precision)| precision.is_none());
+            if all_without_precision {
+                in_dtypes = in_dtypes.map(|(rank, precision)| {
+                    debug_assert!(precision.is_none());
+                    let precision = match rank {
+                        Rank::Bool => None,
+                        Rank::UInt | Rank::Int | Rank::Float | Rank::Complex => Some(Precision::P8),
+                    };
+                    (rank, precision)
+                });
+            }
+
             for op_fn in &self.fns {
                 let dtypes_supported = in_dtypes.iter().zip(op_fn.input_desc.iter()).all(
                     |(input_dtype, input_desc)| {
