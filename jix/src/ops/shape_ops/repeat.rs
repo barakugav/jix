@@ -10,6 +10,10 @@ use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
 ///
+/// This differs from [`Tile`](crate::ops::Tile): `repeat` replicates each element in place
+/// `(a, b, c, ...) -> (a, a, b, b, c, c, ...)` whereas `tile` repeats the whole sequence
+/// `(a, b, c, ...) -> (a, b, c, a, b, c, ...)`.
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples

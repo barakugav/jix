@@ -9,7 +9,8 @@ use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Removes length-1 dimensions from an array's shape,
-/// returned by [`Array::remove_axis`](crate::Array::remove_axis).
+/// returned by [`Array::remove_axis`](crate::Array::remove_axis). The inverse operation
+/// is [`InsertAxis`](crate::ops::InsertAxis).
 ///
 /// `axis` is a set of axis indices in the *input* shape (0-based). Each named dimension must have
 /// length exactly 1 and is dropped from the output shape. Duplicate axis indices are not allowed.

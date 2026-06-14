@@ -15,6 +15,9 @@ use crate::{Array, ArrayStorage, Dimension};
 /// that fall off the end re-enter at the beginning); a negative `shift` moves them toward
 /// smaller indices. `shift` is reduced modulo `L`, so any signed integer is accepted.
 ///
+/// See also [`Flip`](crate::ops::Flip), which reverses element order along an axis
+/// without wrapping.
+///
 /// Output shape and dtype equal the input. The result is a lazy view; no computation
 /// occurs until the array is read.
 ///

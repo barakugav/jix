@@ -18,6 +18,11 @@ use crate::{Array, ArrayStorage, Dimension};
 /// `type Dimension = S::Dimension` - broadcasting does not change the number of axes so the
 /// dimension type is preserved unchanged.
 ///
+/// `Broadcast` is the lazy zero-cost case of replication restricted to length-1 axes; for
+/// general element replication along an axis of any length use [`Repeat`](crate::ops::Repeat)
+/// (each element duplicated in place) or [`Tile`](crate::ops::Tile) (the whole sequence
+/// duplicated).
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples

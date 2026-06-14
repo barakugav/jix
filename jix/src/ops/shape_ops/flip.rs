@@ -17,6 +17,9 @@ use crate::{Array, ArrayStorage, Dimension};
 /// unchanged. `axes` may be empty (no-op), and axes of size 0 or 1 do not require any
 /// data motion.
 ///
+/// See also [`Roll`](crate::ops::Roll), which cyclically shifts elements along an axis
+/// without reversing them.
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// # Examples

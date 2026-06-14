@@ -16,7 +16,8 @@ use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 ///
 /// This differs from [`Repeat`](crate::ops::Repeat): `tile` repeats the whole sequence
 /// `(a, b, c, ...) -> (a, b, c, a, b, c, ...)` whereas `repeat` repeats each element in
-/// place `(a, b, c, ...) -> (a, a, b, b, c, c, ...)`.
+/// place `(a, b, c, ...) -> (a, a, b, b, c, c, ...)`. When the input axis already has
+/// length 1, [`Broadcast`](crate::ops::Broadcast) is a zero-cost alternative.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///

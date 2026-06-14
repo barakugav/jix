@@ -21,3 +21,4 @@
 - change offsets array to have length of num_blocks-1 instead of num_blocks+1
 - bump pyo3 to 0.29
 - rework block shape and read shape propagation through ops
+- cache python pointers, such as `numpy.astype` func itself

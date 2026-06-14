@@ -9,7 +9,8 @@ use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
-/// returned by [`Array::insert_axis`](crate::Array::insert_axis).
+/// returned by [`Array::insert_axis`](crate::Array::insert_axis). The inverse operation
+/// is [`RemoveAxis`](crate::ops::RemoveAxis).
 ///
 /// Each element of `axis` is a **gap index** that identifies a position *between* (or outside)
 /// the input dimensions:

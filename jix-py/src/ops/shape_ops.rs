@@ -18,6 +18,11 @@ use crate::{compact, Array};
 /// `shape[d]` may be `-1` as a shorthand for `input_shape[d]` (keeps the dimension size
 /// unchanged regardless of whether that dimension is 1 or larger).
 ///
+/// `broadcast` is the lazy zero-cost case of replication restricted to length-1 axes. For
+/// general element replication along an axis of any length use [`jix.repeat()`][jix.repeat]
+/// (each element duplicated in place) or [`jix.tile()`][jix.tile] (the whole sequence
+/// duplicated).
+///
 /// Output dtype equals the input dtype. Output shape equals `shape`.
 ///
 /// When `copy=True` (the default) the result is an eagerly materialized compact array with a
@@ -353,7 +358,9 @@ pub(crate) struct ParsedBasicIndex {
 /// position. The order of values in `axis` does not matter.
 ///
 /// This differs from `numpy.expand_dims`, where each axis index refers to the new (larger)
-/// shape rather than the original shape.
+/// shape rather than the original shape. The inverse operation is
+/// [`jix.remove_axis()`][jix.remove_axis] (which is also exposed as
+/// [`jix.squeeze()`][jix.squeeze]).
 ///
 /// Output dtype and total number of elements equal the input.
 ///
@@ -423,6 +430,10 @@ pub fn unsqueeze<'py>(
 /// `axis` is a set of axis indices in the *input* shape (0-based). Each named dimension must
 /// have size exactly 1 and is dropped from the output. Duplicate axis indices are not allowed.
 /// Negative values are supported and are resolved against `ndim`. Removed axes must have size 1.
+///
+/// The inverse operation is [`jix.insert_axis()`][jix.insert_axis] (also available as
+/// [`jix.unsqueeze()`][jix.unsqueeze]). [`jix.squeeze()`][jix.squeeze] is a related variant
+/// whose `axis` defaults to "every length-1 dimension".
 ///
 /// Output dtype and total number of elements equal the input.
 ///
@@ -869,6 +880,10 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
 /// `n * repeats`. `repeats == 0` produces an empty output (matches numpy). `repeats == 1`
 /// is the identity.
 ///
+/// This differs from [`jix.tile()`][jix.tile]: `repeat` duplicates each element in place
+/// `(a, b, c) -> (a, a, b, b, c, c)`, whereas `tile` duplicates the whole sequence
+/// `(a, b, c) -> (a, b, c, a, b, c)`.
+///
 /// Output dtype equals the input dtype. The result is a lazy view; no computation occurs
 /// until the array is read.
 ///
@@ -931,6 +946,9 @@ pub fn repeat<'py>(
 /// integers, or `None` (the default) which reverses every axis. Negative indices are
 /// supported. Duplicate axes are not allowed.
 ///
+/// See also [`jix.roll()`][jix.roll], which cyclically shifts elements along an axis
+/// without reversing them.
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
@@ -987,6 +1005,9 @@ pub fn flip<'py>(
 /// of the output equal the input. `shift` is taken modulo `shape[axis]`; positive shifts
 /// move elements toward larger indices, negative shifts toward smaller indices.
 ///
+/// See also [`jix.flip()`][jix.flip], which reverses element order along an axis without
+/// wrapping.
+///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
@@ -1039,7 +1060,8 @@ pub fn roll<'py>(
 /// The output shape matches the input except `shape[axis]` is multiplied by `reps`. Element
 /// `i` along the output axis comes from input element `i mod shape[axis]`, so the whole
 /// sequence is repeated rather than each element in place. This differs from
-/// [`jix.repeat()`][jix.repeat], which repeats each element.
+/// [`jix.repeat()`][jix.repeat], which repeats each element. When the input axis already
+/// has length 1, [`jix.broadcast()`][jix.broadcast] is a zero-cost alternative.
 ///
 /// Unlike `numpy.tile`, this function only accepts a single integer `reps` along a single
 /// `axis`, and does not extend the array with new leading axes. `axis` must satisfy
