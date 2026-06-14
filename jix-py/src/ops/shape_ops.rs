@@ -4,7 +4,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::{any_to_core_array, asarray};
-use crate::util::{normalize_axes, normalize_axis, DimArray, IntoPyResult, ItemOrSequence};
+use crate::util::{
+    normalize_axes, normalize_axis, normalize_axis_optional, DimArray, IntoPyResult, ItemOrSequence,
+};
 use crate::{compact, Array};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
@@ -857,4 +859,66 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
         ret.into_any()
     };
     Ok(Array::from_core(res))
+}
+
+/// Repeats each element along the given axis.
+///
+/// Every element along `axis` is replicated `repeats` times. The output has the
+/// same number of dimensions as the input; only `shape[axis]` changes, from `n` to
+/// `n * repeats`. `repeats == 0` produces an empty output (matches numpy). `repeats == 1`
+/// is the identity.
+///
+/// Output dtype equals the input dtype. The result is a lazy view; no computation occurs
+/// until the array is read.
+///
+/// Args:
+///     array: Input array.
+///     repeats: Number of times to repeat each element along `axis`. Must be non-negative.
+///     axis: Axis along which to repeat. Supports negative values. `None` (default) is equivalent
+///         to `axis=0` for 1-D arrays, unsupported for higher dimensions (deviates from numpy).
+///
+/// Returns:
+///     A [`jix.Array`][jix.Array] with `shape[axis]` multiplied by `repeats`.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # 1-D: each element appears `repeats` times in a row
+///     a = jix.compact([1, 2, 3], dtype=np.int32)
+///     r = jix.repeat(a, 2)
+///     assert np.array_equal(r.numpy(), [1, 1, 2, 2, 3, 3])
+///
+///     # 2-D along rows (axis=0): each row appears `repeats` times
+///     b = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
+///     assert np.array_equal(
+///         jix.repeat(b, 2, axis=0).numpy(),
+///         [[1, 2], [1, 2], [3, 4], [3, 4]],
+///     )
+///
+///     # 2-D along columns (axis=1 / axis=-1): each column appears `repeats` times
+///     assert np.array_equal(
+///         jix.repeat(b, 2, axis=-1).numpy(),
+///         [[1, 1, 2, 2], [3, 3, 4, 4]],
+///     )
+///
+///     # repeats=0 yields an empty array
+///     assert jix.repeat(a, 0, axis=0).numpy().shape == (0,)
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+pub fn repeat<'py>(
+    array: &Bound<'py, PyAny>,
+    repeats: u64,
+    axis: Option<i32>,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray(array)?;
+    let array = py_arr.get().to_core();
+    let axis = normalize_axis_optional(axis, array.ndim())?;
+    if repeats == 1 {
+        return Ok(py_arr); // no-op
+    }
+    let ret = jix_core::ops::Repeat::new_array(array, repeats, axis).into_py_result()?;
+    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }

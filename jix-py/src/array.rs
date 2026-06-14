@@ -860,6 +860,15 @@ impl Array {
         crate::ops::unsqueeze(slf, axis)
     }
 
+    /// Repeats each element along the given axis. See [`jix.repeat()`][jix.repeat].
+    pub fn repeat<'py>(
+        slf: &Bound<'py, Array>,
+        repeats: u64,
+        axis: Option<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::repeat(slf, repeats, axis)
+    }
+
     // == complex ops ==
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].

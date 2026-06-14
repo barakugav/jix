@@ -22,6 +22,9 @@ pub use concatenate::*;
 mod stack;
 pub use stack::*;
 
+mod repeat;
+pub use repeat::*;
+
 use crate::ops::AxesArg;
 use crate::storage::Compact;
 use crate::{Array, ArrayStorage, IntoDimension};
@@ -93,6 +96,19 @@ where
     #[track_caller]
     pub fn permute_axes(self, axes: &[usize]) -> Array<PermuteAxes<S>> {
         PermuteAxes::new_array(self, axes).unwrap()
+    }
+
+    /// Returns a lazy view with each element repeated `repeats` times along `axis`.
+    /// See [`Repeat`] for details and examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `axis >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
+    /// internal axis is required), or if `self.shape()[axis] * repeats` overflows `u64`.
+    #[inline]
+    #[track_caller]
+    pub fn repeat(self, repeats: u64, axis: usize) -> Array<Repeat<S>> {
+        Repeat::new_array(self, repeats, axis).unwrap()
     }
 
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.
