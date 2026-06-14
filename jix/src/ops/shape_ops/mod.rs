@@ -22,6 +22,18 @@ pub use concatenate::*;
 mod stack;
 pub use stack::*;
 
+mod repeat;
+pub use repeat::*;
+
+mod flip;
+pub use flip::*;
+
+mod roll;
+pub use roll::*;
+
+mod tile;
+pub use tile::*;
+
 use crate::ops::AxesArg;
 use crate::storage::Compact;
 use crate::{Array, ArrayStorage, IntoDimension};
@@ -93,6 +105,66 @@ where
     #[track_caller]
     pub fn permute_axes(self, axes: &[usize]) -> Array<PermuteAxes<S>> {
         PermuteAxes::new_array(self, axes).unwrap()
+    }
+
+    /// Returns a lazy view with each element repeated `repeats` times along `axis`.
+    /// See [`Repeat`] for details and examples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `axis >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
+    /// internal axis is required), or if `self.shape()[axis] * repeats` overflows `u64`.
+    #[inline]
+    #[track_caller]
+    pub fn repeat(self, repeats: u64, axis: usize) -> Array<Repeat<S>> {
+        Repeat::new_array(self, repeats, axis).unwrap()
+    }
+
+    /// Returns a lazy view of the array with the order of elements reversed along the
+    /// specified axes. See [`Flip`] for details and examples.
+    ///
+    /// `axis` accepts any [`AxesArg`]: a single `usize`, an array `[usize; N]`, a tuple
+    /// `(usize, ...)`, a `Vec<usize>`, or a slice `&[usize]`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any axis is out of bounds or duplicated.
+    #[inline]
+    #[track_caller]
+    pub fn flip(self, axis: impl AxesArg) -> Array<Flip<S>> {
+        Flip::new_array(self, axis).unwrap()
+    }
+
+    /// Returns a lazy view of the array with elements rolled along the given axis.
+    /// See [`Roll`] for details and examples.
+    ///
+    /// `shift` is reduced modulo `shape[axis]`. Positive shifts move elements toward
+    /// larger indices (wrapping around at the end); negative shifts move them the other
+    /// way.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `axis >= self.ndim()`.
+    #[inline]
+    #[track_caller]
+    pub fn roll(self, shift: i64, axis: usize) -> Array<Roll<S>> {
+        Roll::new_array(self, shift, axis).unwrap()
+    }
+
+    /// Returns a lazy view of the array replicated `reps` times along `axis`.
+    /// See [`Tile`] for details and examples.
+    ///
+    /// Unlike NumPy's `tile`, `axis` must satisfy `axis < self.ndim()`; the array is
+    /// not extended with new leading dimensions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `axis >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
+    /// internal axis is required), or if `self.shape()[axis] * reps` overflows `u64`.
+    #[inline]
+    #[track_caller]
+    pub fn tile(self, reps: u64, axis: usize) -> Array<Tile<S>> {
+        Tile::new_array(self, reps, axis).unwrap()
     }
 
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.

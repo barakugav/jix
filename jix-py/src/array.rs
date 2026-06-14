@@ -860,6 +860,44 @@ impl Array {
         crate::ops::unsqueeze(slf, axis)
     }
 
+    /// Repeats each element along the given axis. See [`jix.repeat()`][jix.repeat].
+    pub fn repeat<'py>(
+        slf: &Bound<'py, Array>,
+        repeats: u64,
+        axis: Option<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::repeat(slf, repeats, axis)
+    }
+
+    /// Reverses the order of elements along the given axis. See [`jix.flip()`][jix.flip].
+    #[pyo3(signature = (axis=None))]
+    pub fn flip<'py>(
+        slf: &Bound<'py, Array>,
+        axis: Option<ItemOrSequence<i32>>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::flip(slf, axis)
+    }
+
+    /// Rolls elements along an axis, wrapping at the boundary. See [`jix.roll()`][jix.roll].
+    #[pyo3(signature = (shift, axis=None))]
+    pub fn roll<'py>(
+        slf: &Bound<'py, Array>,
+        shift: i64,
+        axis: Option<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::roll(slf, shift, axis)
+    }
+
+    /// Replicates the array along a single axis. See [`jix.tile()`][jix.tile].
+    #[pyo3(signature = (reps, axis=None))]
+    pub fn tile<'py>(
+        slf: &Bound<'py, Array>,
+        reps: u64,
+        axis: Option<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::tile(slf, reps, axis)
+    }
+
     // == complex ops ==
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].

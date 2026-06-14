@@ -35,8 +35,8 @@ cargo fmt
 # Build and install Python package (development mode)
 cd jix-py && maturin develop
 
-# Run Python tests
-cd jix-py && pytest python/tests/
+# Run Python tests (always pass --numprocesses auto for parallel execution)
+cd jix-py && pytest python/tests/ --numprocesses auto
 
 # Generate Python type stubs (.pyi)
 cargo run -p jix-python --bin gen_pyi

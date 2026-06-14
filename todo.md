@@ -1,19 +1,13 @@
 - ops
     - clip, clamp
-    - split
-    - 'cumprod', 'cumsum', diff
-    - repeat, tile
     - allclose, isclose
-    - flip, roll, split
-    - log variants, log10, log2, log1p
-- move pyi gen to a separate crate
-- squeeze()
+    - square
+    - sign
 - consider matching insert_axis to numpy's expand_dims instead of using gap indices
 - rename Maximum scalar trait to PartialMax
 - optimize reduce_max with state of (current max, nan_seen)
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
-- python `jix.add(1,2)` should create i64, not u8
 - build wheels for free threaded python (blocked by https://github.com/Jij-Inc/pyo3-stub-gen/issues/305)
 - add "why should i use this" to readme(s)
 - add link (pyproject metadata + readme) to readthedocs
