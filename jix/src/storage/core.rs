@@ -60,7 +60,7 @@ pub trait ArrayStorage {
     /// Operations that require knowing the element type (arithmetic, comparisons, reductions,
     /// cast) are bounded on [`ArrayStorageTyped`](crate::storage::ArrayStorageTyped), a shorthand for
     /// `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
-    /// [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert the expected element
+    /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
     type ElementType: ElementType;
 

@@ -10,14 +10,14 @@ use crate::{Array, ArrayStorage, ElementType};
 
 /// A lazy storage adapter that re-tags an array's element-type parameter without copying data.
 ///
-/// `ToType<S, ET>` wraps an [`Array<S>`](crate::Array) and presents it as having element type
+/// `IntoType<S, ET>` wraps an [`Array<S>`](crate::Array) and presents it as having element type
 /// `ET`, without touching the underlying bytes. At construction time, if `ET` is a concrete type
 /// ([`Ty<T>`](crate::Ty)), the runtime [`Dtype`](crate::dtype::Dtype) is validated to
 /// match `T`; if it is [`TypeDyn`](crate::TypeDyn) the conversion always succeeds.
 ///
 /// The typical entry points are [`Array::into_type`](crate::Array::into_type),
 /// [`Array::into_typed`](crate::Array::into_typed), and
-/// [`Array::into_type_dyn`](crate::Array::into_type_dyn), which either wrap the array in `ToType`
+/// [`Array::into_type_dyn`](crate::Array::into_type_dyn), which either wrap the array in `IntoType`
 /// or, for some storages, swap the element-type parameter in-place. For example,
 /// [`Ref`](crate::storage::Ref) can not be re-tagged in-place, but
 /// [`Compact`](crate::storage::Compact) can.
@@ -37,29 +37,29 @@ use crate::{Array, ArrayStorage, ElementType};
 ///
 /// // Erase the static element type - always succeeds.
 /// let dyn_a = a.as_ref().into_type_dyn();
-/// // dyn_a: Array<ToType<AsRef<Compact<Ty<f32>, Dim<1>>>, TypeDyn>>
+/// // dyn_a: Array<IntoType<AsRef<Compact<Ty<f32>, Dim<1>>>, TypeDyn>>
 /// // dyn_a: Array<Storage::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
 ///
 /// // Recover the concrete type - validated at runtime.
 /// let typed_a = dyn_a.into_typed::<f32>()?;
-/// // typed_a: Array<ToType<..., Ty<f32>>>
+/// // typed_a: Array<IntoType<..., Ty<f32>>>
 /// // typed_a: Array<Storage::ElementType = Ty<f32>>
 ///
 /// // Element-wise operations are available again.
 /// let result = typed_a.exp().to_ndarray()?;
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct ToType<S, ET> {
+pub struct IntoType<S, ET> {
     inner: S,
     element_type: PhantomData<ET>,
 }
-impl<S, ET> ToType<S, ET>
+impl<S, ET> IntoType<S, ET>
 where
     S: ArrayStorage,
     ET: ElementType,
 {
-    /// Constructs a [`ToType`] storage. See the struct docs for semantics and examples.
+    /// Constructs a [`IntoType`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> Result<Self> {
         if let Some(expected_dtype) = ET::DTYPE {
             check_dtype(array.dtype(), &expected_dtype)?;
@@ -70,12 +70,12 @@ where
         })
     }
 
-    /// Constructs an array with [`ToType`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`IntoType`] storage. See the storage struct docs for semantics and examples.
     pub fn new_array(array: Array<S>) -> Result<Array<Self>> {
         Self::new(array.into_storage()).map(Array::from_storage)
     }
 }
-impl<S, ET> ArrayStorage for ToType<S, ET>
+impl<S, ET> ArrayStorage for IntoType<S, ET>
 where
     S: ArrayStorage,
     ET: ElementType,
@@ -122,33 +122,33 @@ where
         self.inner.spec()
     }
 
-    type DimensionChange<NewD: crate::Dimension> = ToType<S::DimensionChange<NewD>, ET>;
+    type DimensionChange<NewD: crate::Dimension> = IntoType<S::DimensionChange<NewD>, ET>;
     #[inline]
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        Ok(ToType {
+        Ok(IntoType {
             inner: self.inner.dimension_change()?,
             element_type: PhantomData,
         })
     }
 
-    type ElementTypeChange<NewET: ElementType> = ToType<S, NewET>;
+    type ElementTypeChange<NewET: ElementType> = IntoType<S, NewET>;
     #[inline]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
-        ToType::new(self.inner)
+        IntoType::new(self.inner)
     }
 }
 
 macro_rules! impl_element_type_change_default {
     () => {
-        type ElementTypeChange<NewET: crate::ElementType> = crate::ops::ToType<Self, NewET>;
+        type ElementTypeChange<NewET: crate::ElementType> = crate::ops::IntoType<Self, NewET>;
 
         #[inline]
         fn element_type_change<NewET: crate::ElementType>(
             self,
         ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
-            crate::ops::ToType::new(self)
+            crate::ops::IntoType::new(self)
         }
     };
 }

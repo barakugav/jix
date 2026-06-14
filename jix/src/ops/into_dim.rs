@@ -10,13 +10,13 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 
 /// A lazy storage adapter that re-tags an array's dimension parameter without copying data.
 ///
-/// `ToDim<S, D>` wraps an [`Array<S>`](crate::Array) and presents it as having dimension type
+/// `IntoDim<S, D>` wraps an [`Array<S>`](crate::Array) and presents it as having dimension type
 /// `D`, without touching the underlying bytes. At construction time, if `D` is a concrete static
 /// dimension ([`Dim<N>`](crate::Dim)), the runtime ndim is validated to equal `N`; if it is
 /// [`DimDyn`](crate::DimDyn) the conversion always succeeds.
 ///
 /// The typical entry points are [`Array::into_dim`](crate::Array::into_dim) and
-/// [`Array::into_dim_dyn`](crate::Array::into_dim_dyn), which either wrap the array in `ToDim`
+/// [`Array::into_dim_dyn`](crate::Array::into_dim_dyn), which either wrap the array in `IntoDim`
 /// or, for some storages, swap the dimension parameter in-place. For example,
 /// [`Ref`](crate::storage::Ref) can not be re-tagged in-place, but
 /// [`Compact`](crate::storage::Compact) can.
@@ -35,7 +35,7 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 ///
 /// // Assert it is 3-D; returns an error if the ndim does not match.
 /// let a3d = a.as_ref().into_dim::<Dim<3>>()?;
-/// // a3d: Array<ToDim<AsRef<Compact<TypeDyn, DimDyn>>, Dim<3>>>
+/// // a3d: Array<IntoDim<AsRef<Compact<TypeDyn, DimDyn>>, Dim<3>>>
 /// // a3d: Array<Storage::Dimension = Dim<3>>
 ///
 /// // Subsequent operations propagate Dim<3> through the type system.
@@ -43,16 +43,16 @@ use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct ToDim<S, D> {
+pub struct IntoDim<S, D> {
     inner: S,
     dim: PhantomData<D>,
 }
-impl<S, D> ToDim<S, D>
+impl<S, D> IntoDim<S, D>
 where
     S: ArrayStorage,
     D: Dimension,
 {
-    /// Constructs a [`ToDim`] storage. See the struct docs for semantics and examples.
+    /// Constructs a [`IntoDim`] storage. See the struct docs for semantics and examples.
     pub fn new(array: S) -> Result<Self> {
         if let Some(ndim) = D::NDIM {
             let shape = array.shape();
@@ -71,12 +71,12 @@ where
         })
     }
 
-    /// Constructs an array with [`ToDim`] storage. See the storage struct docs for semantics and examples.
+    /// Constructs an array with [`IntoDim`] storage. See the storage struct docs for semantics and examples.
     pub fn new_array(array: Array<S>) -> Result<Array<Self>> {
         Self::new(array.into_storage()).map(Array::from_storage)
     }
 }
-impl<S, D> ArrayStorage for ToDim<S, D>
+impl<S, D> ArrayStorage for IntoDim<S, D>
 where
     S: ArrayStorage,
     D: Dimension,
@@ -123,18 +123,18 @@ where
         self.inner.spec()
     }
 
-    type DimensionChange<NewD: Dimension> = ToDim<S, NewD>;
+    type DimensionChange<NewD: Dimension> = IntoDim<S, NewD>;
     #[inline]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        ToDim::new(self.inner)
+        IntoDim::new(self.inner)
     }
 
-    type ElementTypeChange<NewET: crate::ElementType> = ToDim<S::ElementTypeChange<NewET>, D>;
+    type ElementTypeChange<NewET: crate::ElementType> = IntoDim<S::ElementTypeChange<NewET>, D>;
     #[inline]
     fn element_type_change<NewET: crate::ElementType>(
         self,
     ) -> Result<Self::ElementTypeChange<NewET>> {
-        Ok(ToDim {
+        Ok(IntoDim {
             inner: self.inner.element_type_change()?,
             dim: PhantomData,
         })
@@ -143,13 +143,13 @@ where
 
 macro_rules! impl_dimension_change_default {
     () => {
-        type DimensionChange<NewD: crate::Dimension> = crate::ops::ToDim<Self, NewD>;
+        type DimensionChange<NewD: crate::Dimension> = crate::ops::IntoDim<Self, NewD>;
 
         #[inline]
         fn dimension_change<NewD: crate::Dimension>(
             self,
         ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-            crate::ops::ToDim::new(self)
+            crate::ops::IntoDim::new(self)
         }
     };
 }

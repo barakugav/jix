@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use jix_core::dtype::{Dtype, DtypeScalarKind, Dtyped};
-use jix_core::ops::ToType;
+use jix_core::ops::IntoType;
 use jix_core::storage::ArrayStorageAny;
 use jix_core::{Array as CoreArray, ArrayAny, Ty};
 use pyo3::prelude::*;
@@ -10,7 +10,7 @@ use crate::ops::astype_impl;
 use crate::ops::common::{CastKind, Operand, Precision, Scalar};
 use crate::util::{IntoPyResult, ItemOrSequence, IterExt};
 
-type TypedOperand<T> = CoreArray<ToType<ArrayStorageAny, Ty<T>>>;
+type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 
 pub(crate) struct OpDescriptor<const IN_N: usize, ExtraArgs> {
     name: &'static str,
