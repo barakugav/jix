@@ -17,8 +17,8 @@ define_op2!(
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Examples:
     ///     ```python
@@ -55,8 +55,8 @@ define_op2!(
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Examples:
     ///     ```python
@@ -88,8 +88,8 @@ define_op2!(
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Examples:
     ///     ```python
@@ -122,7 +122,7 @@ define_op1!(
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Examples:
     ///     ```python
@@ -157,8 +157,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
@@ -197,8 +197,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
@@ -237,8 +237,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
@@ -272,7 +272,7 @@ define_op1!(
     /// For signed integers the result is `-(x + 1)` (e.g. `~0` on `int32` gives `-1`).
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -311,8 +311,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that jix.asarray() accepts.
-    ///     b: May be anything that jix.asarray() accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
@@ -353,8 +353,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that jix.asarray() accepts.
-    ///     b: May be anything that jix.asarray() accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
@@ -392,8 +392,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that jix.asarray() accepts.
-    ///     b: May be anything that jix.asarray() accepts. Must be castable to `u32`.
+    ///     a: Value to rotate.
+    ///     b: Rotation amount. Must be castable to `u32`.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
@@ -440,8 +440,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that jix.asarray() accepts.
-    ///     b: May be anything that jix.asarray() accepts. Must be castable to `u32`.
+    ///     a: Value to rotate.
+    ///     b: Rotation amount. Must be castable to `u32`.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
@@ -484,7 +484,7 @@ define_op1!(
     /// (including the sign bit) is used.
     ///
     /// Args:
-    ///     array: May be anything that jix.asarray() accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
@@ -517,7 +517,7 @@ define_op1!(
     /// representation (including the sign bit) is used.
     ///
     /// Args:
-    ///     array: May be anything that jix.asarray() accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
@@ -555,7 +555,7 @@ define_op1!(
     /// `uint32` zero).
     ///
     /// Args:
-    ///     array: May be anything that jix.asarray() accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
@@ -593,7 +593,7 @@ define_op1!(
     /// `uint32` zero).
     ///
     /// Args:
-    ///     array: May be anything that jix.asarray() accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
@@ -631,7 +631,7 @@ define_op1!(
     /// one byte is a no-op.
     ///
     /// Args:
-    ///     array: May be anything that jix.asarray() accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -663,7 +663,7 @@ define_op1!(
     /// The most-significant bit becomes the least-significant and vice versa.
     ///
     /// Args:
-    ///     array: May be anything that jix.asarray() accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until

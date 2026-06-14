@@ -23,8 +23,8 @@ define_op2!(
     /// exactly (prepend missing leading dimensions as 1, then expand size-1 dims).
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
@@ -77,8 +77,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
@@ -120,8 +120,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
@@ -163,8 +163,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
@@ -209,8 +209,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
@@ -246,8 +246,8 @@ define_op2!(
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     a: First operand.
+    ///     b: Second operand.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype and broadcast shape. No computation

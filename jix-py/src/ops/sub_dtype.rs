@@ -13,7 +13,7 @@ use crate::Array;
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts, including NumPy structured arrays.
+///     array: Input array. Must have a struct dtype (e.g. a NumPy structured array).
 ///     sub_field: The name of the field to extract.
 ///
 /// Raises:

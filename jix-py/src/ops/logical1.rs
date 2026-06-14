@@ -8,7 +8,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`. `True` where the
@@ -36,7 +36,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`. `True` for finite
@@ -64,7 +64,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`. `True` only for

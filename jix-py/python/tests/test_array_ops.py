@@ -508,3 +508,73 @@ def test_read_array_mmap():
         jix.write_array(za, path)
         loaded = jix.read_array(path, mmap=True)
         np.testing.assert_array_equal(loaded.numpy(), arr)
+
+
+# ---------------------------------------------------------------------------
+# Relaxed inputs: shape ops + astype now accept anything `jix.asarray` accepts
+# (numpy arrays, Python lists, tuples, scalars), not just `jix.Array` instances.
+# ---------------------------------------------------------------------------
+
+
+def test_astype_accepts_numpy_array():
+    result = jix.astype(np.array([1, 2, 3], dtype=np.int32), np.float64)
+    assert result.dtype == np.float64
+    np.testing.assert_array_equal(result.numpy(), [1.0, 2.0, 3.0])
+
+
+def test_astype_accepts_python_list():
+    result = jix.astype([1, 2, 3], np.float32)
+    assert result.dtype == np.float32
+    np.testing.assert_array_equal(result.numpy(), [1.0, 2.0, 3.0])
+
+
+def test_reshape_accepts_numpy_array():
+    np_a = np.arange(6, dtype=np.int32)
+    result = jix.reshape(np_a, [2, 3])
+    assert result.shape == (2, 3)
+    np.testing.assert_array_equal(result.numpy(), np_a.reshape(2, 3))
+
+
+def test_reshape_accepts_python_list():
+    result = jix.reshape([1, 2, 3, 4], [2, 2])
+    assert result.shape == (2, 2)
+    np.testing.assert_array_equal(result.numpy(), [[1, 2], [3, 4]])
+
+
+def test_flatten_accepts_numpy_array():
+    np_a = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    result = jix.flatten(np_a)
+    assert result.shape == (6,)
+    np.testing.assert_array_equal(result.numpy(), [1, 2, 3, 4, 5, 6])
+
+
+def test_broadcast_accepts_numpy_array():
+    np_a = np.array([[1, 2, 3]], dtype=np.int32)  # shape (1, 3)
+    result = jix.broadcast(np_a, [2, 3])
+    assert result.shape == (2, 3)
+    np.testing.assert_array_equal(result.numpy(), [[1, 2, 3], [1, 2, 3]])
+
+
+def test_permute_axes_accepts_numpy_array():
+    np_a = np.arange(6, dtype=np.int32).reshape(2, 3)
+    result = jix.permute_axes(np_a, [1, 0])
+    assert result.shape == (3, 2)
+    np.testing.assert_array_equal(result.numpy(), np_a.T)
+
+
+def test_squeeze_accepts_numpy_array():
+    np_a = np.array([[[1, 2, 3]]], dtype=np.int32)  # shape (1, 1, 3)
+    result = jix.squeeze(np_a)
+    assert result.shape == (3,)
+    np.testing.assert_array_equal(result.numpy(), [1, 2, 3])
+
+
+def test_insert_axis_accepts_python_list():
+    result = jix.insert_axis([1, 2, 3], 0)
+    assert result.shape == (1, 3)
+
+
+def test_remove_axis_accepts_numpy_array():
+    np_a = np.array([[[1, 2, 3]]], dtype=np.int32)  # shape (1, 1, 3)
+    result = jix.remove_axis(np_a, 0)
+    assert result.shape == (1, 3)
