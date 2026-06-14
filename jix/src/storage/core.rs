@@ -21,13 +21,11 @@ use crate::{Dimension, ElementType};
 ///  These store the array as independently
 /// compressed nd-blocks and are the primary on-disk format.
 ///
-/// # Adapters
+/// # Adapter
 ///
-/// Two adapters let plain data participate in the same `Array<S>` world:
+/// An adapter lets plain data participate in the same `Array<S>` world:
 /// - `plain::Plain` - wraps a contiguous or strided in-memory ndarray, used when
 ///   operating on regular Rust/ndarray data alongside compressed arrays.
-/// - `scalar::Scalar<T>` - represents a single scalar value broadcast to any shape,
-///   used as the right-hand side in operations like `array + scalar`.
 ///
 /// # Lazy operation views
 ///
@@ -71,7 +69,7 @@ pub trait ArrayStorage {
     /// This associated type lets the compiler track how many axes an array has through a chain
     /// of lazy operations. When the dimension is known statically (e.g. arrays created from a
     /// statically-dimensioned ndarray, or after calling
-    /// [`Array::to_dim::<Dim<N>>`](crate::Array::to_dim)), it is [`Dim<N>`](crate::Dim);
+    /// [`Array::into_dim::<Dim<N>>`](crate::Array::into_dim)), it is [`Dim<N>`](crate::Dim);
     /// when it is only known at runtime (e.g. for arrays loaded from a file or created with
     /// slice-based shape arguments) it is [`DimDyn`](crate::DimDyn).
     ///
@@ -151,9 +149,8 @@ pub trait ArrayStorage {
                 chunk.try_into().unwrap()
             }
         }
-        debug_assert!(buf.as_slice().len().is_multiple_of(size_of::<T>()));
         Ok(DefaultReadData {
-            len_: buf.as_slice().len() / size_of::<T>(),
+            len_: nitems,
             buf,
             _phantom: std::marker::PhantomData,
         })
@@ -179,4 +176,40 @@ pub trait ArrayStorage {
     fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
         None
     }
+
+    /// The concrete storage type after swapping the dimension to `NewD`.
+    type DimensionChange<NewD: Dimension>: ArrayStorage<
+        ElementType = Self::ElementType,
+        Dimension = NewD,
+    >
+    where
+        Self: Sized;
+
+    /// Consume `self`, validate the new dimension against the runtime ndim, and return the
+    /// re-tagged storage.
+    ///
+    /// Returns [`ErrorKind::InvalidShapeOperation`](crate::ErrorKind::InvalidShapeOperation) if
+    /// `NewD = Dim<N>` and the runtime ndim does not equal `N`. Always succeeds for
+    /// `NewD = DimDyn`.
+    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>>
+    where
+        Self: Sized;
+
+    /// The concrete storage type after swapping the element type to `NewET`.
+    type ElementTypeChange<NewET: ElementType>: ArrayStorage<
+        ElementType = NewET,
+        Dimension = Self::Dimension,
+    >
+    where
+        Self: Sized;
+
+    /// Consume `self`, validate the new element type against the runtime dtype, and return the
+    /// re-tagged storage.
+    ///
+    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
+    /// `NewET = Ty<T>` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
+    /// `NewET = TypeDyn`.
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>>
+    where
+        Self: Sized;
 }

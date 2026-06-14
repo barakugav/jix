@@ -1118,7 +1118,7 @@ impl Array {
 ///
 ///     # Compacting a lazy computation pipeline
 ///     d = jix.compact([[1.5, 2.0], [3.14, 6.17]], dtype=np.float32)
-///     e = (d * 7.399) \    # Array<Mul<Compact, Scalar<f32>>> (lazy views, rust internal types)
+///     e = (d * 7.399) \    # Array<Mul<Compact, Scalar<f32>>> (lazy views, rust internal types
 ///         .floor() \       # Array<Floor<Mul<Compact, Scalar<f32>>>>
 ///         .compact()       # Array<Compact> - materialize the pipeline
 ///
@@ -1283,7 +1283,7 @@ mod tests {
         D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
     {
         let core = CoreArray::compact_ndarray(ndarray).unwrap();
-        let core = core.to_type_dyn().to_dim_dyn();
+        let core = core.into_type_dyn().into_dim_dyn();
         Bound::new(py, Array::from_core(core.into_any())).unwrap()
     }
 

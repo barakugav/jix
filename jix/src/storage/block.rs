@@ -187,7 +187,8 @@ where
         &self.decoder_config
     }
 
-    pub(crate) fn into_type<NewET: ElementType>(self) -> Result<BlockTable<S, NewET>>
+    #[inline]
+    pub(crate) fn element_type_change<NewET: ElementType>(self) -> Result<BlockTable<S, NewET>>
     where
         ET: ElementType,
     {
@@ -643,7 +644,7 @@ mod tests {
         let len = bytes.len() as u64;
         BlockTable::read_from(Cursor::new(bytes), len)
             .unwrap()
-            .into_type::<Ty<T>>()
+            .element_type_change::<Ty<T>>()
             .unwrap()
     }
 

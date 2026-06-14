@@ -31,7 +31,7 @@ use crate::Dimension;
 ///
 /// `Compact<ET, D>` has two type parameters:
 ///
-/// - **`ET: ElementType`** - compile-time element type, either [`Ty<Scalar>`](crate::Ty)
+/// - **`ET: ElementType`** - compile-time element type, either [`Ty<T>`](crate::Ty)
 ///   (element type known at compile time) or [`TypeDyn`](crate::TypeDyn) (runtime only).
 ///   Arrays constructed from typed sources carry `Ty<_>` automatically; arrays loaded from disk
 ///   carry `TypeDyn`.
@@ -40,7 +40,7 @@ use crate::Dimension;
 ///   ndim) or [`DimDyn`](crate::DimDyn) (runtime only).
 ///
 /// Use [`Array::into_dim`](crate::Array::into_dim) to convert between `D` variants in-place, or
-/// [`Array::to_typed`](crate::Array::to_typed) to assert a concrete element type and go from
+/// [`Array::into_typed`](crate::Array::into_typed) to assert a concrete element type and go from
 /// `TypeDyn` to `Ty<T>`.
 ///
 /// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray), [`Array::compact`](crate::Array::compact)
@@ -120,29 +120,17 @@ macro_rules! impl_array_storage {
                     decoder_params: self.0.decoder_params.clone(),
                 }))
             }
-        }
 
-        impl<$($lt,)? ET, D> crate::ops::ElementTypeChange for $ty<$($lt,)? ET, D>
-        where
-            ET: crate::ElementType,
-            D: crate::Dimension,
-        {
-            type ElementTypeChange<NewET: ElementType> = $ty<$($lt,)? NewET, D>;
-
-            fn change_type<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
-                Ok($ty(self.0.into_type()?))
-            }
-        }
-
-        impl<$($lt,)? ET, D> crate::ops::DimensionChange for $ty<$($lt,)? ET, D>
-        where
-            ET: crate::ElementType,
-            D: crate::Dimension,
-        {
             type DimensionChange<NewD: Dimension> = $ty<$($lt,)? ET, NewD>;
-
+            #[inline]
             fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
                 Ok($ty(self.0.dimension_change()?))
+            }
+
+            type ElementTypeChange<NewET: ElementType> = $ty<$($lt,)? NewET, D>;
+            #[inline]
+            fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+                Ok($ty(self.0.element_type_change()?))
             }
         }
     };
@@ -364,14 +352,15 @@ where
         Ok(())
     }
 
-    pub(crate) fn into_type<NewET: ElementType>(
+    #[inline]
+    pub(crate) fn element_type_change<NewET: ElementType>(
         self,
     ) -> Result<ArrayBlockTableStorageBase<S, NewET, D>>
     where
         ET: ElementType,
     {
         Ok(ArrayBlockTableStorageBase {
-            blocks: self.blocks.into_type()?,
+            blocks: self.blocks.element_type_change()?,
             shape: self.shape,
             blocks_layout: self.blocks_layout,
             block_grid_shape: self.block_grid_shape,
@@ -380,6 +369,7 @@ where
         })
     }
 
+    #[inline]
     pub(crate) fn dimension_change<NewD: Dimension>(
         self,
     ) -> Result<ArrayBlockTableStorageBase<S, ET, NewD>>

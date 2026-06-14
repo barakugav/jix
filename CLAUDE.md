@@ -56,7 +56,7 @@ The central type is `Array<S>` where `S` implements `ArrayStorage`:
 
 `ArrayStorageTyped` is a supertrait shorthand for `ArrayStorage<ElementType = Ty<T>>`. All element-wise operations (arithmetic, comparisons, cast, reductions) require it.
 
-Storage backends: `Compact<T, D>` (heap-allocated block-compressed), `CompactMmap<T, D>` (memory-mapped), `Plain<A, T, D>` (uncompressed buffer), `Scalar<T>` (broadcast scalar).
+Storage backends: `Compact<T, D>` (heap-allocated block-compressed), `CompactMmap<T, D>` (memory-mapped), `Plain<A, T, D>` (uncompressed buffer).
 
 ### Lazy Evaluation
 

@@ -15,13 +15,12 @@ use crate::{Array, ArrayStorage, ElementType};
 /// ([`Ty<T>`](crate::Ty)), the runtime [`Dtype`](crate::dtype::Dtype) is validated to
 /// match `T`; if it is [`TypeDyn`](crate::TypeDyn) the conversion always succeeds.
 ///
-/// The typical entry points are [`Array::to_type`](crate::Array::to_type),
-/// [`Array::to_typed`](crate::Array::to_typed), and
-/// [`Array::to_type_dyn`](crate::Array::to_type_dyn).
-///
-/// For concrete block-compressed or plain storages that implement [`ElementTypeChange`], prefer
-/// [`Array::into_type`](crate::Array::into_type) instead - it re-tags the element type in-place
-/// without adding this wrapper layer.
+/// The typical entry points are [`Array::into_type`](crate::Array::into_type),
+/// [`Array::into_typed`](crate::Array::into_typed), and
+/// [`Array::into_type_dyn`](crate::Array::into_type_dyn), which either wrap the array in `ToType`
+/// or, for some storages, swap the element-type parameter in-place. For example,
+/// [`Ref`](crate::storage::Ref) can not be re-tagged in-place, but
+/// [`Compact`](crate::storage::Compact) can.
 ///
 /// # Examples
 ///
@@ -37,14 +36,14 @@ use crate::{Array, ArrayStorage, ElementType};
 /// // a: Array<Compact<Ty<f32>, Dim<1>>>
 ///
 /// // Erase the static element type - always succeeds.
-/// let dyn_a = a.to_type_dyn();
-/// // dyn_a: Array<ToType<Compact<Ty<f32>, Dim<1>>, TypeDyn>>
+/// let dyn_a = a.as_ref().into_type_dyn();
+/// // dyn_a: Array<ToType<AsRef<Compact<Ty<f32>, Dim<1>>>, TypeDyn>>
 /// // dyn_a: Array<Storage::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);
 ///
 /// // Recover the concrete type - validated at runtime.
-/// let typed_a = dyn_a.to_typed::<f32>()?;
-/// // typed_a: Array<ToType<ToType<..., TypeDyn>, Ty<f32>>>
+/// let typed_a = dyn_a.into_typed::<f32>()?;
+/// // typed_a: Array<ToType<..., Ty<f32>>>
 /// // typed_a: Array<Storage::ElementType = Ty<f32>>
 ///
 /// // Element-wise operations are available again.
@@ -122,37 +121,35 @@ where
     fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
         self.inner.spec()
     }
+
+    type DimensionChange<NewD: crate::Dimension> = ToType<S::DimensionChange<NewD>, ET>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(ToType {
+            inner: self.inner.dimension_change()?,
+            element_type: PhantomData,
+        })
+    }
+
+    type ElementTypeChange<NewET: ElementType> = ToType<S, NewET>;
+    #[inline]
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+        ToType::new(self.inner)
+    }
 }
 
-/// Opt-in trait for storage types that can swap their element-type parameter in-place.
-///
-/// Storages that implement this trait can change their [`ElementType`] without wrapping
-/// themselves in a [`ToType`] adapter. The result is a leaner type: e.g. `Compact<NewET, D>`
-/// instead of `ToType<Compact<ET, D>, NewET>`.
-///
-/// Implementors: [`Compact`](crate::storage::Compact),
-/// [`CompactMmap`](crate::storage::CompactMmap),
-/// [`CompactBorrowed`](crate::storage::CompactBorrowed),
-/// [`Plain`](crate::storage::Plain).
-///
-/// The typical entry points are [`Array::into_type`](crate::Array::into_type),
-/// [`Array::into_typed`](crate::Array::into_typed), and
-/// [`Array::into_type_dyn`](crate::Array::into_type_dyn). Use
-/// [`Array::to_type`](crate::Array::to_type) / [`Array::to_typed`](crate::Array::to_typed) for
-/// storage types that do not implement this trait.
-pub trait ElementTypeChange {
-    /// The concrete storage type after swapping the element type to `NewET`.
-    type ElementTypeChange<NewET: ElementType>: ArrayStorage<ElementType = NewET>
-    where
-        Self: ArrayStorage;
+macro_rules! impl_element_type_change_default {
+    () => {
+        type ElementTypeChange<NewET: crate::ElementType> = crate::ops::ToType<Self, NewET>;
 
-    /// Consume `self`, validate the new element type against the runtime dtype, and return the
-    /// re-tagged storage.
-    ///
-    /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
-    /// `NewET = Ty<T>` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
-    /// `NewET = TypeDyn`.
-    fn change_type<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>>
-    where
-        Self: ArrayStorage;
+        #[inline]
+        fn element_type_change<NewET: crate::ElementType>(
+            self,
+        ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+            crate::ops::ToType::new(self)
+        }
+    };
 }
+pub(crate) use impl_element_type_change_default;

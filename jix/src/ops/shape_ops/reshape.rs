@@ -4,7 +4,6 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::ops::DimensionChange;
 use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
@@ -399,19 +398,27 @@ where
             ..self.array.spec()
         }
     }
-}
 
-impl<S, D> DimensionChange for Reshape<S, D>
-where
-    S: ArrayStorage,
-    D: Dimension,
-{
-    type DimensionChange<NewD: Dimension> = Reshape<S, NewD>;
-
-    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
+    type DimensionChange<NewD: crate::Dimension> = Reshape<S, NewD>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
         Ok(Reshape {
             array: self.array,
             new_shape: NewD::from_slice(self.new_shape.as_slice())?,
+            blocks_layout: self.blocks_layout,
+        })
+    }
+
+    type ElementTypeChange<NewET: crate::ElementType> = Reshape<S::ElementTypeChange<NewET>, D>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(Reshape {
+            array: self.array.element_type_change()?,
+            new_shape: self.new_shape,
             blocks_layout: self.blocks_layout,
         })
     }

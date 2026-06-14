@@ -266,6 +266,33 @@ where
             ..self.array.spec()
         }
     }
+
+    type DimensionChange<NewD: crate::Dimension> = InsertAxis<S, NewD>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        let shape = NewD::from_slice(self.shape())?;
+        Ok(InsertAxis {
+            array: self.array,
+            is_inserted: self.is_inserted,
+            shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
+
+    type ElementTypeChange<NewET: crate::ElementType> = InsertAxis<S::ElementTypeChange<NewET>, D>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(InsertAxis {
+            array: self.array.element_type_change()?,
+            is_inserted: self.is_inserted,
+            shape: self.shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -217,6 +217,16 @@ where
     type ElementType = crate::Ty<T>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
+
+    type DimensionChange<NewD: crate::Dimension> = Cast<S::DimensionChange<NewD>, T>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Cast(self.0.dimension_change()?))
+    }
+
+    crate::ops::impl_element_type_change_default!();
 }
 
 impl<S> Array<S>

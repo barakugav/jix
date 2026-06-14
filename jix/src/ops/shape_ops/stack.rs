@@ -214,6 +214,9 @@ where
             ..self.arrays.spec(0)
         }
     }
+
+    crate::ops::impl_dimension_change_default!();
+    crate::ops::impl_element_type_change_default!();
 }
 
 #[cfg(test)]

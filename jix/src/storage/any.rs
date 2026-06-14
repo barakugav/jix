@@ -64,4 +64,7 @@ impl ArrayStorage for ArrayStorageAny {
     fn spec(&self) -> ArrayStorageSpec<'_> {
         self.inner.spec()
     }
+
+    crate::ops::impl_dimension_change_default!();
+    crate::ops::impl_element_type_change_default!();
 }

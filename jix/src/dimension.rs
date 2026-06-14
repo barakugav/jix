@@ -36,7 +36,7 @@ pub const NDIM_MAX: usize = 8;
 /// (that accept [`AxesArg`](crate::ops::AxesArg)).
 ///
 /// Because `DimDyn::Smaller = DimDyn` and `DimDyn::Larger = DimDyn`, operations on a dynamic
-/// array always return a dynamic array. Use [`Array::to_dim`](crate::Array::to_dim) to
+/// array always return a dynamic array. Use [`Array::into_dim`](crate::Array::into_dim) to
 /// recover static tracking once the ndim becomes known.
 ///
 /// # Boundary cases
@@ -57,7 +57,7 @@ pub const NDIM_MAX: usize = 8;
 ///
 /// // Asserting "I know this is 2-D" converts to static Dim<2>.
 /// // Returns Err if a.ndim() != 2.
-/// let a2d = a.to_dim::<Dim<2>>()?;
+/// let a2d = a.into_dim::<Dim<2>>()?;
 ///
 /// // insert_axis(0): usize arg -> D::Larger = Dim<3>
 /// let a3d = a2d.insert_axis(0);
@@ -163,7 +163,7 @@ pub trait Dimension:
 ///
 /// `DimDyn::Smaller = DimDyn` and `DimDyn::Larger = DimDyn`: the dimension type stays
 /// dynamic through any chain of shape-changing operations. Use
-/// [`Array::to_dim`](crate::Array::to_dim) to recover a static [`Dim<N>`] when the ndim
+/// [`Array::into_dim`](crate::Array::into_dim) to recover a static [`Dim<N>`] when the ndim
 /// becomes known.
 #[derive(Clone)]
 pub struct DimDyn(DimArray<u64>);

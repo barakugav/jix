@@ -5,6 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::common::AxesArg;
+use crate::ops::BulkInfo;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
@@ -40,7 +41,7 @@ pub(crate) trait ReductionOpKernel<T> {
     fn init_state(&self, first: Option<T>) -> Self::State;
     /// Fold `item` (at 0-based stream position `idx`) into `state`. `idx` is always `>= 1`
     /// since position `0` is consumed by [`init_state`](Self::init_state).
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64);
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State;
     /// Produce the final result. `nitems` is the total number of stream elements that
     /// were folded into `state` (one for `init_state` + one per `update_state` call),
     /// so `nitems == 0` exactly when `first` was `None`.
@@ -137,6 +138,70 @@ where
 
     #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        // this is a compile time check, the compiler knows the value of `BULK`
+        let read_fn = match <S::Item as BulkInfo>::BULK {
+            1 => Self::read_data_impl::<1>,
+            2 => Self::read_data_impl::<2>,
+            4 => Self::read_data_impl::<4>,
+            8 => Self::read_data_impl::<8>,
+            16 => Self::read_data_impl::<16>,
+            32 => Self::read_data_impl::<32>,
+            64 => Self::read_data_impl::<64>,
+            128 => Self::read_data_impl::<128>,
+            256 => Self::read_data_impl::<256>,
+            512 => Self::read_data_impl::<512>,
+            _ => Self::read_data_impl::<1024>,
+        };
+        read_fn(self, index, buf, context)
+    }
+
+    #[inline(always)]
+    fn shape(&self) -> &[u64] {
+        self.shape.as_slice()
+    }
+    #[inline(always)]
+    fn dtype(&self) -> &Dtype {
+        let dtype = &self.out_dtype_;
+        unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
+        dtype
+    }
+    fn spec(&self) -> ArrayStorageSpec<'_> {
+        ArrayStorageSpec {
+            blocks_layout: &self.blocks_layout,
+            ..self.array.spec()
+        }
+    }
+
+    type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(ReductionOp {
+            kernel: self.kernel,
+            array: self.array,
+            is_reduced: self.is_reduced,
+            out_dtype_: self.out_dtype_,
+            shape: NewD::from_slice(self.shape.as_slice())?,
+            blocks_layout: self.blocks_layout,
+        })
+    }
+
+    crate::ops::impl_element_type_change_default!();
+}
+impl<S, K, D> ReductionOp<S, K, D>
+where
+    S: ArrayStorageTyped,
+    K: ReductionOpKernel<S::Item, Output: Dtyped>,
+    D: Dimension,
+{
+    #[inline]
+    fn read_data_impl<const SIMD: usize>(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> Result<()> {
         // Streams the reduction over a two-level chunking of the inner array so peak scratch
         // memory stays bounded *and* each downstream `self.array.read_data` call is sized to
         // roughly fit the caller's request in cache.
@@ -431,29 +496,46 @@ where
                         .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
                     let mut item_idx = base_item_idx;
 
-                    let state = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
-                    let state = if !state_initialized {
+                    let state_ref = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                    if !state_initialized {
                         // init state with the first item
                         debug_assert_eq!(item_idx, 0);
                         let first = reduction_iter.next();
-                        let state = state.write(self.kernel.init_state(first));
+                        state_ref.write(self.kernel.init_state(first));
                         if first.is_some() {
                             item_idx += 1;
                         }
-                        state
-                    } else {
-                        // SAFETY: every state was written during the first bulk.
-                        unsafe { state.assume_init_mut() }
-                    };
+                    }
+                    // SAFETY: every state was written during the first bulk.
+                    let mut state = unsafe { state_ref.assume_init_read() };
 
-                    // Fold this tile's `reduction_size` items into the running state.
+                    // Fold the first SIMD block
+                    while item_idx < item_idx_end.min(SIMD as u64) {
+                        let item = reduction_iter.next();
+                        let item = unsafe { item.unwrap_unchecked() };
+                        state = self.kernel.update_state(state, item, item_idx);
+                        item_idx += 1;
+                    }
+                    // Fold all SIMD blocks
+                    let simd_idx_end = item_idx_end.saturating_sub(SIMD as u64);
+                    while item_idx < simd_idx_end {
+                        let items: [_; SIMD] = std::array::from_fn(|_| unsafe {
+                            reduction_iter.next().unwrap_unchecked()
+                        });
+                        for (i, item) in items.into_iter().enumerate() {
+                            state = self.kernel.update_state(state, item, item_idx + i as u64);
+                        }
+                        item_idx += SIMD as u64;
+                    }
+                    // Fold the tail
                     while item_idx < item_idx_end {
                         let item = reduction_iter.next();
                         let item = unsafe { item.unwrap_unchecked() };
-                        self.kernel.update_state(state, item, item_idx);
+                        state = self.kernel.update_state(state, item, item_idx);
                         item_idx += 1;
                     }
                     debug_assert!(reduction_iter.next().is_none());
+                    state_ref.write(state);
                 }
             }
 
@@ -516,29 +598,6 @@ where
         Ok(())
     }
 
-    #[inline(always)]
-    fn shape(&self) -> &[u64] {
-        self.shape.as_slice()
-    }
-    #[inline(always)]
-    fn dtype(&self) -> &Dtype {
-        let dtype = &self.out_dtype_;
-        unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
-        dtype
-    }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
-    }
-}
-impl<S, K, D> ReductionOp<S, K, D>
-where
-    S: ArrayStorageTyped,
-    K: ReductionOpKernel<S::Item, Output: Dtyped>,
-    D: Dimension,
-{
     /// Choose the per-tile inner read shape.
     ///
     /// Tiles seed from the source array's storage-block hint (the natural unit of work
@@ -657,8 +716,9 @@ macro_rules! define_reduction_op {
         {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
-
             crate::storage::impl_array_storage_forward!(<S>);
+            crate::ops::impl_dimension_change_default!();
+            crate::ops::impl_element_type_change_default!();
         }
     };
 
@@ -705,8 +765,17 @@ macro_rules! define_reduction_op {
         {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = D;
-
             crate::storage::impl_array_storage_forward!(<S, D>);
+
+            type DimensionChange<NewD: crate::Dimension> = $Op<S, NewD>;
+            #[inline]
+            fn dimension_change<NewD: crate::Dimension>(
+                self,
+            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+                Ok($Op(self.0.dimension_change()?))
+            }
+
+            crate::ops::impl_element_type_change_default!();
         }
     };
 }
@@ -735,7 +804,7 @@ pub(crate) mod _traits {
         /// Return the initial accumulator (zero).
         fn init() -> Self::Output;
         /// Fold `item` into the running sum.
-        fn update(state: &mut Self::Output, item: Self);
+        fn update(state: Self::Output, item: Self) -> Self::Output;
     }
 
     macro_rules! impl_sum {
@@ -748,8 +817,8 @@ pub(crate) mod _traits {
                     <i32 as crate::scalar::Cast<Self::Output>>::cast(0)
                 }
                 #[inline(always)]
-                fn update(state: &mut Self::Output, item: Self) {
-                    *state += <_ as crate::scalar::Cast<Self::Output>>::cast(item);
+                fn update(state: Self::Output, item: Self) -> Self::Output {
+                    state + <_ as crate::scalar::Cast<Self::Output>>::cast(item)
                 }
             }
         };
@@ -782,7 +851,7 @@ pub(crate) mod _traits {
         /// Return the initial accumulator (one).
         fn init() -> Self::Output;
         /// Fold `item` into the running product.
-        fn update(state: &mut Self::Output, item: Self);
+        fn update(state: Self::Output, item: Self) -> Self::Output;
     }
     macro_rules! impl_product {
         ($item_ty:ty, $output_ty:ty) => {
@@ -794,8 +863,8 @@ pub(crate) mod _traits {
                     <i32 as crate::scalar::Cast<Self::Output>>::cast(1)
                 }
                 #[inline(always)]
-                fn update(state: &mut Self::Output, item: Self) {
-                    *state *= <_ as crate::scalar::Cast<Self::Output>>::cast(item);
+                fn update(state: Self::Output, item: Self) -> Self::Output {
+                    state * <_ as crate::scalar::Cast<Self::Output>>::cast(item)
                 }
             }
         };
@@ -832,7 +901,7 @@ pub(crate) mod _traits {
         /// Return the initial (empty) accumulator.
         fn init() -> Self::State;
         /// Fold `item` into the running sum.
-        fn update(state: &mut Self::State, item: Self);
+        fn update(state: Self::State, item: Self) -> Self::State;
         /// Finalize `state` into the mean. Returns `None` if `nitems == 0`; otherwise
         /// returns `state / nitems` (cast to the output domain).
         fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output>;
@@ -848,8 +917,8 @@ pub(crate) mod _traits {
                     <Self as Sum>::init()
                 }
                 #[inline(always)]
-                fn update(state: &mut Self::State, item: Self) {
-                    <Self as Sum>::update(state, item);
+                fn update(state: Self::State, item: Self) -> Self::State {
+                    <Self as Sum>::update(state, item)
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output> {
@@ -907,7 +976,7 @@ pub(crate) mod _traits {
         fn init() -> Self::State;
         /// Fold `item` into the running Welford accumulator. `idx` is the 0-based stream position
         /// of `item.
-        fn update(state: &mut Self::State, item: Self, idx: u64);
+        fn update(state: Self::State, item: Self, idx: u64) -> Self::State;
         /// Finalize `state` into the variance using `ddof` degrees-of-freedom correction.
         /// `nitems` is the total number of elements folded in.
         ///
@@ -928,12 +997,13 @@ pub(crate) mod _traits {
                     }
                 }
                 #[inline(always)]
-                fn update(state: &mut Self::State, item: Self, idx: u64) {
+                fn update(mut state: Self::State, item: Self, idx: u64) -> Self::State {
                     let x = <_ as crate::scalar::Cast<$mean_ty>>::cast(item);
                     let $delta = x - state.mean;
                     state.mean += $delta / (idx + 1) as f64;
                     let $delta2 = x - state.mean;
                     state.m2 += $m2_expr;
+                    state
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output {
@@ -1004,14 +1074,14 @@ define_reduction_op!(
     Max,
     MaxKernel,
     where {
-        S: crate::storage::ArrayStorageTyped,
-        S::Item: crate::scalar::Maximum<Output = S::Item> + crate::dtype::Dtyped,
+        S: ArrayStorageTyped,
+        S::Item: crate::scalar::Maximum<Output = S::Item> + Dtyped,
     }
     output = S::Item,
 );
 impl<T> ReductionOpKernel<T> for MaxKernel
 where
-    T: crate::scalar::Maximum<Output = T> + Copy,
+    T: crate::scalar::Maximum<Output = T>,
 {
     type Output = T;
     type State = T;
@@ -1021,8 +1091,8 @@ where
         first.unwrap()
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        *state = (*state).maximum(item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        state.maximum(item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1068,14 +1138,14 @@ define_reduction_op!(
     Min,
     MinKernel,
     where {
-        S: crate::storage::ArrayStorageTyped,
-        S::Item: crate::scalar::Minimum<Output = S::Item> + crate::dtype::Dtyped,
+        S: ArrayStorageTyped,
+        S::Item: crate::scalar::Minimum<Output = S::Item> + Dtyped,
     }
     output = S::Item,
 );
 impl<T> ReductionOpKernel<T> for MinKernel
 where
-    T: crate::scalar::Minimum<Output = T> + Copy,
+    T: crate::scalar::Minimum<Output = T>,
 {
     type Output = T;
     type State = T;
@@ -1085,8 +1155,8 @@ where
         first.unwrap()
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        *state = (*state).minimum(item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        state.minimum(item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1134,7 +1204,7 @@ define_reduction_op!(
     ArgMax,
     ArgMaxKernel,
     where {
-        S: crate::storage::ArrayStorageTyped,
+        S: ArrayStorageTyped,
         S::Item: PartialOrd,
     }
     output = u64,
@@ -1153,16 +1223,17 @@ where
         (0, first.unwrap())
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
-        let (best_idx, best_val) = (&mut state.0, &mut state.1);
-        if item > *best_val {
-            *best_idx = idx;
-            *best_val = item;
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
+        let (best_idx, best_val) = state;
+        if item > best_val {
+            (idx, item)
+        } else {
+            (best_idx, best_val)
         }
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
-        let (best_idx, _best_val) = (state.0, state.1);
+        let (best_idx, _best_val) = state;
         best_idx
     }
     #[inline(always)]
@@ -1207,7 +1278,7 @@ define_reduction_op!(
     ArgMin,
     ArgMinKernel,
     where {
-        S: crate::storage::ArrayStorageTyped,
+        S: ArrayStorageTyped,
         S::Item: PartialOrd,
     }
     output = u64,
@@ -1226,16 +1297,17 @@ where
         (0, first.unwrap())
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
-        let (best_idx, best_val) = (&mut state.0, &mut state.1);
-        if item < *best_val {
-            *best_idx = idx;
-            *best_val = item;
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
+        let (best_idx, best_val) = state;
+        if item < best_val {
+            (idx, item)
+        } else {
+            (best_idx, best_val)
         }
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
-        let (best_idx, _best_val) = (state.0, state.1);
+        let (best_idx, _best_val) = state;
         best_idx
     }
     #[inline(always)]
@@ -1285,8 +1357,8 @@ define_reduction_op!(
     Sum,
     SumKernel,
     where {
-        S: crate::storage::ArrayStorageTyped,
-        S::Item: crate::scalar::Sum<Output: crate::dtype::Dtyped>,
+        S: ArrayStorageTyped,
+        S::Item: crate::scalar::Sum<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Sum>::Output,
 );
@@ -1301,13 +1373,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Sum>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        <T as crate::scalar::Sum>::update(state, item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        <T as crate::scalar::Sum>::update(state, item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1360,8 +1432,8 @@ define_reduction_op!(
     Product,
     ProductKernel,
     where {
-        S: crate::storage::ArrayStorageTyped,
-        S::Item: crate::scalar::Product<Output: crate::dtype::Dtyped>,
+        S: ArrayStorageTyped,
+        S::Item: crate::scalar::Product<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Product>::Output,
 );
@@ -1376,13 +1448,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Product>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        <T as crate::scalar::Product>::update(state, item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        <T as crate::scalar::Product>::update(state, item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1428,8 +1500,8 @@ define_reduction_op!(
     Mean,
     MeanKernel,
     where {
-        S: crate::storage::ArrayStorageTyped,
-        S::Item: crate::scalar::Mean<Output: crate::dtype::Dtyped>,
+        S: ArrayStorageTyped,
+        S::Item: crate::scalar::Mean<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Mean>::Output,
 );
@@ -1444,13 +1516,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Mean>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, _idx: u64) {
-        <T as crate::scalar::Mean>::update(state, item);
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        <T as crate::scalar::Mean>::update(state, item)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -1501,8 +1573,8 @@ define_reduction_op!(
     Variance,
     VarianceKernel { ddof: f64 },
     where {
-        S: crate::storage::ArrayStorageTyped,
-        S::Item: crate::scalar::Variance<Output: crate::dtype::Dtyped>,
+        S: ArrayStorageTyped,
+        S::Item: crate::scalar::Variance<Output: Dtyped>,
     }
     output = <S::Item as crate::scalar::Variance>::Output,
 );
@@ -1517,13 +1589,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
-        <T as crate::scalar::Variance>::update(state, item, idx);
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
+        <T as crate::scalar::Variance>::update(state, item, idx)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -1570,8 +1642,8 @@ define_reduction_op!(
     StandardDeviation,
     StandardDeviationKernel { ddof: f64 },
     where {
-        S: crate::storage::ArrayStorageTyped,
-        S::Item: crate::scalar::Variance<Output: num_traits::Float + crate::dtype::Dtyped>,
+        S: ArrayStorageTyped,
+        S::Item: crate::scalar::Variance<Output: num_traits::Float + Dtyped>,
     }
     output = <S::Item as crate::scalar::Variance>::Output,
 );
@@ -1586,13 +1658,13 @@ where
     fn init_state(&self, first: Option<T>) -> Self::State {
         let mut state = <T as crate::scalar::Variance>::init();
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: T, idx: u64) {
-        <T as crate::scalar::Variance>::update(state, item, idx);
+    fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State {
+        <T as crate::scalar::Variance>::update(state, item, idx)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -1637,7 +1709,7 @@ define_reduction_op!(
     All,
     AllKernel,
     where {
-        S: crate::storage::ArrayStorageTyped<Item = bool>,
+        S: ArrayStorageTyped<Item = bool>,
     }
     output = bool,
 );
@@ -1649,13 +1721,13 @@ impl ReductionOpKernel<bool> for AllKernel {
     fn init_state(&self, first: Option<bool>) -> Self::State {
         let mut state = true;
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: bool, _idx: u64) {
-        *state = *state && item;
+    fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
+        state && item
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1699,7 +1771,7 @@ define_reduction_op!(
     Any,
     AnyKernel,
     where {
-        S: crate::storage::ArrayStorageTyped<Item = bool>,
+        S: ArrayStorageTyped<Item = bool>,
     }
     output = bool,
 );
@@ -1711,13 +1783,13 @@ impl ReductionOpKernel<bool> for AnyKernel {
     fn init_state(&self, first: Option<bool>) -> Self::State {
         let mut state = false;
         if let Some(item) = first {
-            self.update_state(&mut state, item, 0);
+            state = self.update_state(state, item, 0);
         }
         state
     }
     #[inline(always)]
-    fn update_state(&self, state: &mut Self::State, item: bool, _idx: u64) {
-        *state = *state || item;
+    fn update_state(&self, state: Self::State, item: bool, _idx: u64) -> Self::State {
+        state || item
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1727,6 +1799,315 @@ impl ReductionOpKernel<bool> for AnyKernel {
     fn supports_empty(&self) -> bool {
         true
     }
+}
+
+/// Reduces one or more axes by repeatedly applying a user-supplied binary closure to the
+/// elements along those axes.
+///
+/// The output dtype is the same as the input dtype (`S::Item`). The closure has signature
+/// `Fn(S::Item, S::Item) -> S::Item` and is applied with the running accumulator on the
+/// left, mirroring [`Iterator::reduce`]: for a non-empty stream `x0, x1, ..., xn`, the
+/// result is `f(f(f(x0, x1), x2), ..., xn)`.
+///
+/// # Traversal order
+///
+/// - **Single reduced axis**: elements along that axis are visited in logical order (index
+///   `0` upward). The result is well-defined for non-commutative / non-associative closures.
+/// - **Multiple reduced axes**: elements are visited in an *implementation-defined* order
+///   driven by the storage's internal tiling. The order is not stable across array shapes,
+///   block sizes, or library versions. Closures used here MUST be both associative and
+///   commutative for the result to be well-defined.
+///
+/// # Empty reductions
+///
+/// Empty reductions (any reduced dimension has length `0`) are **not supported**: there is
+/// no initial accumulator and no first element to seed it. Calling [`Array::reduce`] in
+/// that case panics at construction time, and [`Reduce::new`] returns an `Err`.
+/// Use [`Fold`] when an explicit empty-case value is needed.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation; the operation is also available as
+/// [`Array::reduce()`](crate::Array::reduce).
+///
+/// # Examples
+///
+/// Custom maximum over a single axis (closure is commutative and associative):
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// let nd = array![[1i32, 5, 3], [4, 2, 6]];
+/// let row_max = Array::compact_ndarray(&nd)?
+///     .reduce(1, |a, b| if a > b { a } else { b })
+///     .to_ndarray()?;
+/// assert_eq!(row_max.as_slice().unwrap(), &[5, 6]);
+/// # Ok::<(), jix::Error>(())
+/// ```
+///
+/// Single-axis subtraction: order matters, and a single reduced axis is guaranteed to be
+/// visited in logical order:
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// // (((1 - 2) - 3) - 4) = -8
+/// let nd = array![1i64, 2, 3, 4];
+/// let diff = Array::compact_ndarray(&nd)?
+///     .reduce(0, |a, b| a - b)
+///     .to_ndarray()?;
+/// assert_eq!(diff[[]], -8);
+/// # Ok::<(), jix::Error>(())
+/// ```
+///
+/// Multi-axis reduction (closure MUST be associative and commutative):
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// let nd = array![[1i32, 2, 3], [4, 5, 6]];
+/// let total = Array::compact_ndarray(&nd)?
+///     .reduce((0, 1), |a, b| a + b)
+///     .to_ndarray()?;
+/// assert_eq!(total[[]], 21);
+/// # Ok::<(), jix::Error>(())
+/// ```
+pub struct Reduce<S, D, F>(ReductionOp<S, VanillaReduceKernel<F>, D>);
+impl<S, D, F> Reduce<S, D, F> {
+    /// Constructs a [`Reduce`] storage. See the struct docs for semantics and examples.
+    pub fn new<Ax>(array: S, axes: Ax, f: F) -> Result<Self>
+    where
+        S: ArrayStorageTyped,
+        F: Fn(S::Item, S::Item) -> S::Item,
+        D: Dimension,
+        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+    {
+        Ok(Self(ReductionOp::new(array, VanillaReduceKernel(f), axes)?))
+    }
+
+    /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<Ax>(array: Array<S>, axes: Ax, f: F) -> Result<Array<Reduce<S, D, F>>>
+    where
+        S: ArrayStorageTyped,
+        F: Fn(S::Item, S::Item) -> S::Item,
+        D: Dimension,
+        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+    {
+        Self::new(array.into_storage(), axes, f).map(Array::from_storage)
+    }
+}
+struct VanillaReduceKernel<F>(F);
+impl<T, F> ReductionOpKernel<T> for VanillaReduceKernel<F>
+where
+    F: Fn(T, T) -> T,
+{
+    type Output = T;
+    type State = T;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        first.unwrap()
+    }
+    #[inline(always)]
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        (self.0)(state, item)
+    }
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        state
+    }
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        false
+    }
+}
+impl<S, D, F> ArrayStorage for Reduce<S, D, F>
+where
+    S: ArrayStorageTyped,
+    D: Dimension,
+    F: Fn(S::Item, S::Item) -> S::Item,
+{
+    type ElementType = Ty<S::Item>;
+    type Dimension = D;
+    crate::storage::impl_array_storage_forward!(<S, D, F>);
+
+    type DimensionChange<NewD: crate::Dimension> = Reduce<S, NewD, F>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Reduce(self.0.dimension_change::<NewD>()?))
+    }
+
+    crate::ops::impl_element_type_change_default!();
+}
+
+/// Reduces one or more axes by folding the elements along those axes through a
+/// user-supplied closure, starting from an explicit initial accumulator.
+///
+/// The output dtype is the accumulator type `B` (which can differ from the input element
+/// type `S::Item`). The closure has signature `Fn(B, S::Item) -> B` and is applied with
+/// the running accumulator on the left, mirroring [`Iterator::fold`]: for a stream
+/// `x0, x1, ..., xn`, the result is `f(f(f(init, x0), x1), ..., xn)`.
+///
+/// `B` must implement [`Dtyped`](crate::dtype::Dtyped) (i.e. `Copy + Send + Sync + 'static`
+/// plus the jix dtype contract). The initial value is stored inside the storage and cloned
+/// (via `Copy`) once per output cell.
+///
+/// # Traversal order
+///
+/// - **Single reduced axis**: elements along that axis are visited in logical order (index
+///   `0` upward). The result is well-defined for non-commutative / non-associative
+///   closures.
+/// - **Multiple reduced axes**: elements are visited in an *implementation-defined* order
+///   driven by the storage's internal tiling. The order is not stable across array shapes,
+///   block sizes, or library versions. Closures used here MUST be both associative and
+///   commutative for the result to be well-defined.
+///
+/// # Empty reductions
+///
+/// Unlike [`Reduce`], `Fold` supports empty reductions: when a reduced axis has length
+/// `0`, every output cell receives `init` unchanged (the closure is never invoked).
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation; the operation is also available as
+/// [`Array::fold()`](crate::Array::fold).
+///
+/// # Examples
+///
+/// Sum with a wider accumulator (the input is `u8`, the result is `i64`):
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// let nd = array![[1u8, 2, 3], [4, 5, 6]];
+/// let total = Array::compact_ndarray(&nd)?
+///     .fold((0, 1), 0i64, |a, x| a + x as i64)
+///     .to_ndarray()?;
+/// assert_eq!(total[[]], 21);
+/// # Ok::<(), jix::Error>(())
+/// ```
+///
+/// Single-axis fold: order is guaranteed to be logical, so the non-commutative closure
+/// produces a deterministic result:
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// // ((((100 - 10) - 1) - 2) - 3) = 84
+/// let nd = array![10i32, 1, 2, 3];
+/// let result = Array::compact_ndarray(&nd)?
+///     .fold(0, 100i32, |a, x| a - x)
+///     .to_ndarray()?;
+/// assert_eq!(result[[]], 84);
+/// # Ok::<(), jix::Error>(())
+/// ```
+///
+/// Counting elements satisfying a predicate (per row):
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// let nd = array![[1i32, 5, 3, 7], [4, 2, 8, 1]];
+/// // Count elements > 3 along each row.
+/// let counts = Array::compact_ndarray(&nd)?
+///     .fold(1, 0u64, |c, x| c + (x > 3) as u64)
+///     .to_ndarray()?;
+/// assert_eq!(counts.as_slice().unwrap(), &[2, 2]);
+/// # Ok::<(), jix::Error>(())
+/// ```
+pub struct Fold<S, D, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>, D>);
+impl<S, D, B, F> Fold<S, D, B, F> {
+    /// Constructs a [`Fold`] storage. See the struct docs for semantics and examples.
+    pub fn new<Ax>(array: S, axes: Ax, init: B, f: F) -> Result<Self>
+    where
+        S: ArrayStorageTyped,
+        B: Dtyped,
+        F: Fn(B, S::Item) -> B,
+        D: Dimension,
+        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+    {
+        Ok(Self(ReductionOp::new(
+            array,
+            VanillaFoldKernel { init, f },
+            axes,
+        )?))
+    }
+
+    /// Constructs an array with [`Fold`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array<Ax>(
+        array: Array<S>,
+        axes: Ax,
+        init: B,
+        f: F,
+    ) -> Result<Array<Fold<S, D, B, F>>>
+    where
+        S: ArrayStorageTyped,
+        B: Dtyped,
+        F: Fn(B, S::Item) -> B,
+        D: Dimension,
+        Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
+    {
+        Self::new(array.into_storage(), axes, init, f).map(Array::from_storage)
+    }
+}
+struct VanillaFoldKernel<B, F> {
+    init: B,
+    f: F,
+}
+impl<T, B, F> ReductionOpKernel<T> for VanillaFoldKernel<B, F>
+where
+    B: Dtyped,
+    F: Fn(B, T) -> B,
+{
+    type Output = B;
+    type State = B;
+
+    #[inline(always)]
+    fn init_state(&self, first: Option<T>) -> Self::State {
+        let mut state = self.init;
+        if let Some(item) = first {
+            state = self.update_state(state, item, 0);
+        }
+        state
+    }
+
+    #[inline(always)]
+    fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
+        (self.f)(state, item)
+    }
+
+    #[inline(always)]
+    fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
+        state
+    }
+
+    #[inline(always)]
+    fn supports_empty(&self) -> bool {
+        true
+    }
+}
+impl<S, D, B, F> ArrayStorage for Fold<S, D, B, F>
+where
+    S: ArrayStorageTyped,
+    D: Dimension,
+    B: Dtyped,
+    F: Fn(B, S::Item) -> B,
+{
+    type ElementType = Ty<B>;
+    type Dimension = D;
+    crate::storage::impl_array_storage_forward!(<S, D, B, F>);
+
+    type DimensionChange<NewD: crate::Dimension> = Fold<S, NewD, B, F>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Fold(self.0.dimension_change::<NewD>()?))
+    }
+
+    crate::ops::impl_element_type_change_default!();
 }
 
 /// Emits an `Array::$method(...)` helper that forwards to `$Op::new_array(...)`. The full
@@ -1775,21 +2156,21 @@ where
     define_array_reduction_method!(
         max: Max,
         where {
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: crate::scalar::Maximum<Output = S::Item> + crate::dtype::Dtyped,
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Maximum<Output = S::Item> + Dtyped,
         }
     );
     define_array_reduction_method!(
         min: Min,
         where {
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: crate::scalar::Minimum<Output = S::Item> + crate::dtype::Dtyped,
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Minimum<Output = S::Item> + Dtyped,
         }
     );
     define_array_reduction_method!(
         argmax: ArgMax,
         where {
-            S: crate::storage::ArrayStorageTyped,
+            S: ArrayStorageTyped,
             S::Item: PartialOrd,
         },
         single_axis
@@ -1797,7 +2178,7 @@ where
     define_array_reduction_method!(
         argmin: ArgMin,
         where {
-            S: crate::storage::ArrayStorageTyped,
+            S: ArrayStorageTyped,
             S::Item: PartialOrd,
         },
         single_axis
@@ -1805,52 +2186,85 @@ where
     define_array_reduction_method!(
         sum: Sum,
         where {
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: crate::scalar::Sum<Output: crate::dtype::Dtyped>,
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Sum<Output: Dtyped>,
         }
     );
     define_array_reduction_method!(
         product: Product,
         where {
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: crate::scalar::Product<Output: crate::dtype::Dtyped>,
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Product<Output: Dtyped>,
         }
     );
     define_array_reduction_method!(
         mean: Mean,
         where {
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: crate::scalar::Mean<Output: crate::dtype::Dtyped>,
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Mean<Output: Dtyped>,
         }
     );
     define_array_reduction_method!(
         var: Variance,
         where {
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: crate::scalar::Variance<Output: crate::dtype::Dtyped>,
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Variance<Output: Dtyped>,
         },
         extra_args = (ddof: f64)
     );
     define_array_reduction_method!(
         std: StandardDeviation,
         where {
-            S: crate::storage::ArrayStorageTyped,
-            S::Item: crate::scalar::Variance<Output: num_traits::Float + crate::dtype::Dtyped>,
+            S: ArrayStorageTyped,
+            S::Item: crate::scalar::Variance<Output: num_traits::Float + Dtyped>,
         },
         extra_args = (ddof: f64)
     );
     define_array_reduction_method!(
         all: All,
         where {
-            S: crate::storage::ArrayStorageTyped<Item = bool>,
+            S: ArrayStorageTyped<Item = bool>,
         }
     );
     define_array_reduction_method!(
         any: Any,
         where {
-            S: crate::storage::ArrayStorageTyped<Item = bool>,
+            S: ArrayStorageTyped<Item = bool>,
         }
     );
+
+    /// Applies the [`Reduce`] operation, see the op struct docs for details.
+    #[track_caller]
+    pub fn reduce<F, Ax>(
+        self,
+        axes: Ax,
+        f: F,
+    ) -> Array<Reduce<S, Ax::ReducedDimension<S::Dimension>, F>>
+    where
+        S: ArrayStorageTyped,
+        F: Fn(S::Item, S::Item) -> S::Item,
+        Ax: AxesArg,
+    {
+        Reduce::new_array(self, axes, f).unwrap()
+    }
+
+    /// Applies the [`Fold`] operation, see the op struct docs for details.
+    #[track_caller]
+    #[allow(clippy::type_complexity)]
+    pub fn fold<F, B, Ax>(
+        self,
+        axes: Ax,
+        init: B,
+        f: F,
+    ) -> Array<Fold<S, Ax::ReducedDimension<S::Dimension>, B, F>>
+    where
+        S: ArrayStorageTyped,
+        B: Dtyped,
+        F: Fn(B, S::Item) -> B,
+        Ax: AxesArg,
+    {
+        Fold::new_array(self, axes, init, f).unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -2300,6 +2714,138 @@ pub(crate) mod tests {
         let std_row = a.as_ref().std(1, 0.0).to_ndarray().unwrap();
         assert!((std_row[[0]] - 0.8164).abs() < 0.001);
     }
+
+    #[test]
+    fn reduce_single_axis_in_logical_order() {
+        // A single reduced axis must be visited in logical (index-ascending) order, so
+        // non-commutative closures produce a well-defined result. Subtraction is the
+        // canonical witness: (((1 - 2) - 3) - 4) = -8.
+        let a = Array::compact_ndarray(&array![1i64, 2, 3, 4]).unwrap();
+        let r = a.as_ref().reduce(0, |a, b| a - b).to_ndarray().unwrap();
+        assert_eq!(r[[]], -8);
+    }
+
+    #[test]
+    fn reduce_single_axis_per_row() {
+        // Single axis on a 2D array: reduce axis 1 (columns). Each row is folded
+        // left-to-right with subtraction.
+        // row 0: ((10 - 1) - 2) = 7
+        // row 1: ((20 - 5) - 3) = 12
+        let a = Array::compact_ndarray(&array![[10i32, 1, 2], [20, 5, 3]]).unwrap();
+        let r = a.as_ref().reduce(1, |a, b| a - b).to_ndarray().unwrap();
+        assert_eq!(r.as_slice().unwrap(), &[7, 12]);
+    }
+
+    #[test]
+    fn reduce_multi_axis_sum() {
+        // Multi-axis reduction. The closure here is associative + commutative, which is
+        // required for the result to be well-defined (the traversal order across multiple
+        // reduced axes is implementation-defined).
+        let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
+        let r = a
+            .as_ref()
+            .reduce((0, 1), |a, b| a + b)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(r[[]], 21);
+    }
+
+    #[test]
+    fn reduce_preserves_dtype() {
+        // The output dtype must equal the input dtype.
+        use crate::dtype::Dtyped;
+        let a = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
+        let r = a.as_ref().reduce(0, |a, b| a + b);
+        assert_eq!(r.dtype(), &<i32 as Dtyped>::DTYPE);
+    }
+
+    #[test]
+    #[should_panic]
+    fn reduce_panics_on_empty_axis() {
+        // Reducing along an empty axis is unsupported: there's no first element to seed
+        // the accumulator. `Array::reduce` unwraps the construction error and panics.
+        use ndarray::Array2;
+        let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
+        let a = Array::compact_ndarray(&empty).unwrap();
+        let _ = a.as_ref().reduce(1, |a, b| a + b);
+    }
+
+    #[test]
+    fn fold_single_axis_in_logical_order() {
+        // Single-axis fold with a non-commutative closure (subtraction). Logical-order
+        // traversal makes the result deterministic:
+        // ((((100 - 10) - 1) - 2) - 3) = 84.
+        let a = Array::compact_ndarray(&array![10i32, 1, 2, 3]).unwrap();
+        let r = a
+            .as_ref()
+            .fold(0, 100i32, |a, x| a - x)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(r[[]], 84);
+    }
+
+    #[test]
+    fn fold_widens_output_dtype() {
+        // The accumulator type `B` is independent of the input element type. Here we sum
+        // a u8 array into an i64.
+        let a = Array::compact_ndarray(&array![[1u8, 2, 3], [4, 5, 6]]).unwrap();
+        let r = a
+            .as_ref()
+            .fold((0, 1), 0i64, |a, x| a + x as i64)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(r[[]], 21);
+        // dtype is the accumulator type, not the input type.
+        use crate::dtype::Dtyped;
+        let r = a.as_ref().fold((0, 1), 0i64, |a, x| a + x as i64);
+        assert_eq!(r.dtype(), &<i64 as Dtyped>::DTYPE);
+    }
+
+    #[test]
+    fn fold_multi_axis_count_predicate() {
+        // Per-row count via fold along axis 1. The closure is commutative + associative
+        // (addition), so single-axis order doesn't matter here - but axis 1 is a single
+        // axis, so order is still guaranteed.
+        let a = Array::compact_ndarray(&array![[1i32, 5, 3, 7], [4, 2, 8, 1]]).unwrap();
+        let r = a
+            .as_ref()
+            .fold(1, 0u64, |c, x| c + (x > 3) as u64)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(r.as_slice().unwrap(), &[2, 2]);
+    }
+
+    #[test]
+    fn fold_empty_axis_returns_init() {
+        // Folding over an empty axis must produce the init accumulator at every output
+        // cell - the closure is never invoked. Reducing axis 1 of a `(2, 0)` array
+        // yields shape `[2]` with both cells equal to `init`.
+        use ndarray::Array2;
+        let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
+        let a = Array::compact_ndarray(&empty).unwrap();
+        let r = a
+            .as_ref()
+            .fold(1, 42i64, |a, x| a + x as i64)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(r.as_slice().unwrap(), &[42, 42]);
+    }
+
+    #[test]
+    fn fold_init_passed_through_when_closure_never_runs() {
+        // A scalar reduction (reduce all axes) over a 0-element input collapses to a
+        // single output cell whose value is exactly `init`.
+        use ndarray::Array1;
+        let empty: Array1<i32> = Array1::from_shape_vec(0, vec![]).unwrap();
+        let a = Array::compact_ndarray(&empty).unwrap();
+        let r = a
+            .as_ref()
+            .fold(0, 999i64, |a, x| a + x as i64)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(r[[]], 999);
+    }
+
     // test_reduction!(
     //     all,
     //     |items| { items.fold(true, |m, x| m && <_ as crate::scalar::Cast<bool>>::cast(x)) },

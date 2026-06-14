@@ -1,5 +1,4 @@
-use crate::dtype::{DtypeScalarKind, Dtyped};
-use crate::scalar::Complex;
+use crate::dtype::Dtyped;
 use crate::{DimDyn, Dimension};
 
 macro_rules! define_array_op1_method {
@@ -72,69 +71,18 @@ macro_rules! define_array_op2_method {
 
 pub(crate) use {define_array_op1_method, define_array_op2_method};
 
-// TODO: remove
 pub(crate) trait BulkInfo {
     const BULK: usize;
 }
-macro_rules! impl_bulk_info {
-    ($ty:ty, $bulk:expr) => {
-        impl BulkInfo for $ty {
-            const BULK: usize = $bulk;
+impl<T: Dtyped> BulkInfo for T {
+    const BULK: usize = {
+        if size_of::<T>() == 0 {
+            1024
+        } else {
+            (128 / size_of::<T>()).next_power_of_two()
         }
     };
 }
-impl_bulk_info!(i8, 128 / size_of::<i8>());
-impl_bulk_info!(i16, 128 / size_of::<i16>());
-impl_bulk_info!(i32, 128 / size_of::<i32>());
-impl_bulk_info!(i64, 128 / size_of::<i64>());
-impl_bulk_info!(u8, 128 / size_of::<u8>());
-impl_bulk_info!(u16, 128 / size_of::<u16>());
-impl_bulk_info!(u32, 128 / size_of::<u32>());
-impl_bulk_info!(u64, 128 / size_of::<u64>());
-impl_bulk_info!(crate::scalar::f16, 128 / size_of::<crate::scalar::f16>());
-impl_bulk_info!(f32, 128 / size_of::<f32>());
-impl_bulk_info!(f64, 128 / size_of::<f64>());
-impl_bulk_info!(Complex<f32>, 128 / size_of::<Complex<f32>>());
-impl_bulk_info!(Complex<f64>, 128 / size_of::<Complex<f64>>());
-impl_bulk_info!(bool, 128 / size_of::<bool>());
-
-#[inline(always)]
-pub(crate) fn bulk_size<T: Dtyped>() -> usize {
-    // this is a compile time check, the compiler knows the value of `T::DTYPE.try_to_scalar()`
-    match T::DTYPE.try_to_scalar() {
-        Some(scalar) => match scalar {
-            DtypeScalarKind::I8 => i8::BULK,
-            DtypeScalarKind::I16 => i16::BULK,
-            DtypeScalarKind::I32 => i32::BULK,
-            DtypeScalarKind::I64 => i64::BULK,
-            DtypeScalarKind::U8 => u8::BULK,
-            DtypeScalarKind::U16 => u16::BULK,
-            DtypeScalarKind::U32 => u32::BULK,
-            DtypeScalarKind::U64 => u64::BULK,
-            DtypeScalarKind::F16 => crate::scalar::f16::BULK,
-            DtypeScalarKind::F32 => f32::BULK,
-            DtypeScalarKind::F64 => f64::BULK,
-            DtypeScalarKind::ComplexF32 => Complex::<f32>::BULK,
-            DtypeScalarKind::ComplexF64 => Complex::<f64>::BULK,
-            DtypeScalarKind::Bool => bool::BULK,
-        },
-        None => {
-            if size_of::<T>() == 0 {
-                return 1024;
-            }
-            (128 / size_of::<T>()).next_power_of_two()
-        }
-    }
-}
-// #[inline(always)]
-// pub(crate) fn bulk_size2<T1: Dtyped, T2: Dtyped>() -> usize {
-//     let (bs1, bs2) = (bulk_size::<T1>(), bulk_size::<T2>());
-//     if bs1 < bs2 {
-//         bs1
-//     } else {
-//         bs2
-//     }
-// }
 
 /// An argument that specifies a set of axis indices, encoding the dimension change in the type.
 ///

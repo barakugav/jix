@@ -174,6 +174,36 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
             ..self.array.spec()
         }
     }
+
+    type DimensionChange<NewD: crate::Dimension> = PermuteAxes<S::DimensionChange<NewD>>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        let shape = NewD::from_slice(self.shape())?;
+        let array = self.array.dimension_change::<NewD>()?;
+        Ok(PermuteAxes {
+            shape,
+            array,
+            axes: self.axes,
+            inv_axes: self.inv_axes,
+            blocks_layout: self.blocks_layout,
+        })
+    }
+
+    type ElementTypeChange<NewET: crate::ElementType> = PermuteAxes<S::ElementTypeChange<NewET>>;
+    #[inline]
+    fn element_type_change<NewET: crate::ElementType>(
+        self,
+    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+        Ok(PermuteAxes {
+            array: self.array.element_type_change()?,
+            axes: self.axes,
+            inv_axes: self.inv_axes,
+            shape: self.shape,
+            blocks_layout: self.blocks_layout,
+        })
+    }
 }
 
 #[cfg(test)]

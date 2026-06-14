@@ -63,7 +63,7 @@ pub(crate) trait ArraySequenceImpl {
 /// let b = Array::compact_ndarray(&array![4i32, 5, 6])?;
 /// // Lazy view has a different storage type from the original Compact arrays,
 /// // but a tuple still implements ArraySequence.
-/// let c = a + 8;
+/// let c = a.map(|x| x + 8);
 /// let stacked = jix::ops::stack((b, c), 0);
 /// assert_eq!(stacked.shape(), &[2, 3]);
 /// # Ok::<(), jix::Error>(())

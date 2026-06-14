@@ -36,11 +36,11 @@
 //!
 //! // Build a lazy operation pipeline - no data is read yet.
 //! let ones = Array::compact_ndarray(&ndarray::Array2::<f32>::ones((2, 3)))?;
-//! let result = a             // Array<Compact>
-//!     .exp()                 // Array<Exp<Compact>>
-//!     .floor()               // Array<Floor<Exp<Compact>>>
-//!     * 2.0f32               // Array<Mul<Floor<...>, Scalar<f32>>>
-//!     + ones;                // Array<Add<Mul<...>, Compact>>
+//! let result = a                  // Array<Compact>
+//!     .exp()                      // Array<Exp<Compact>>
+//!     .floor()                    // Array<Floor<Exp<Compact>>>
+//!     .map(|x| x * 2.0f32)        // Array<Map<Floor<...>>>
+//!     + ones;                     // Array<Add<Map<...>, Compact>>
 //!
 //! // materialize the pipeline into a new compressed Array<Compact>
 //! let result_compressed = result.compact()?;
@@ -81,7 +81,6 @@
 //! | [`Array<Compact<...>>`](storage::Compact) | Heap-allocated block-compressed array. The main backend of the library. |
 //! | [`Array<Op<...>>`](ops) | Lazy operation views defined in [`ops`]. Wrap one or more arrays; apply their transformation on each read. |
 //! | [`Array<Plain<...>>`](storage::Plain) | Zero-copy view of a contiguous or strided in-memory buffer. Created by [`Array::plain_ndarray_ref`]. |
-//! | [`Array<Scalar<T>>`](storage::Scalar) | A single scalar broadcast to any shape, used as an operand in expressions like `array + 1.0`. |
 //!
 //! # Operations
 //!
@@ -91,9 +90,12 @@
 //! **Element-wise unary** - `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
 //! `round`, `sign`, `sin`, `cos`, `tan`, ...
 //!
-//! **Element-wise binary** (array op array, or array op scalar, via `+`, `-`, `*`, `/`,
+//! **Element-wise binary** (array op array, via `+`, `-`, `*`, `/`,
 //! operator overloads and named methods) - `add`, `sub`, `mul`, `div`, `pow`, `minimum`,
 //! `maximum`, ...
+//!
+//! For scaling, shifting, or any element-wise transform involving a constant value, use
+//! [`map`](Array::map) - e.g. `a.map(|x| x * 2.0f32)` rather than `a * 2.0f32`.
 //!
 //! **Comparisons** - `equal`, `not_equal`, `greater`, `greater_equal`, `less`, ...
 //!
@@ -166,7 +168,7 @@
 //! // src: Array<Compact<TypeDyn, DimDyn>> - element type unknown at compile time
 //! // src: Array<S::ElementType = TypeDyn>
 //!
-//! let typed = src.to_typed::<f32>()?; // runtime check: dtype must be f32
+//! let typed = src.into_typed::<f32>()?; // runtime check: dtype must be f32
 //! // typed: Array<S::ElementType = Ty<f32>>
 //! let result = typed.exp().sum(0).compact()?;
 //! # Ok::<(), jix::Error>(())
@@ -311,7 +313,7 @@
 //! };
 //!
 //! // Build a lazy pipeline over the mmap'd data.
-//! let processed = src.to_typed::<f32>()?.exp() + 1.0f32;
+//! let processed = src.into_typed::<f32>()?.exp().map(|x| x + 1.0f32);
 //!
 //! // Streaming write: blocks are decompressed, transformed, and re-compressed one at a time.
 //! processed.write_to(BufWriter::new(File::create(
@@ -376,3 +378,8 @@ pub use error::{Error, ErrorKind};
 ///
 /// Create one with [`Array::into_any`] or [`ArrayStorageAny::new`](storage::ArrayStorageAny::new).
 pub type ArrayAny = Array<storage::ArrayStorageAny>;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::storage::scalar::Scalar;
+}

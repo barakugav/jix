@@ -11,9 +11,8 @@
 //! - [`Compact`] - heap-allocated
 //! - [`CompactMmap`] - memory-mapped file
 //!
-//! Two adapters let non-compressed data participate in the same `Array` world (such as math operations with compressed arrays):
+//! An adapter lets non-compressed data participate in the same `Array` world (such as math operations with compressed arrays):
 //! - [`Plain`] - a zero-copy view into a contiguous or strided in-memory buffer.
-//! - [`Scalar<T>`] - a single value broadcast to any shape.
 //!
 //! Operations on `Array` produce lazy views whose storage wraps the original and applies
 //! the transformation at read time. These are defined in [`jix::ops`](crate::ops) and include shape
@@ -47,13 +46,13 @@
 //! - [`ArrayStorage`] - the trait all storage backends implement.
 //! - [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`] - compile-time element type tracking.
 //! - [`Compact`] - the main block-compressed storage backend.
-//! - [`Plain`] and [`Scalar`] - adapters for non-compressed data.
+//! - [`Plain`] - adapter for non-compressed data.
 //! - [`BlocksLayout`] - block geometry hints attached to every storage.
 
 use crate::codec::{DecoderParams, EncoderParams};
 use crate::dtype::Dtyped;
 use crate::error::{check_dtype, ensure, Result};
-use crate::ops::bulk_size;
+use crate::ops::BulkInfo;
 use crate::util::cast_slice_mut;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
@@ -68,13 +67,11 @@ pub use compressed::*;
 mod plain;
 pub use plain::*;
 
-mod scalar;
-pub use scalar::*;
-
 mod any;
 pub use any::*;
 
 pub(crate) mod block;
+pub(crate) mod scalar;
 
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
 ///
@@ -162,6 +159,8 @@ where
     type Dimension = S::Dimension;
 
     impl_array_storage_forward!('b, T, <S>);
+    crate::ops::impl_dimension_change_default!();
+    crate::ops::impl_element_type_change_default!();
 }
 impl<'a, S> Clone for Ref<'a, S> {
     fn clone(&self) -> Self {
@@ -218,7 +217,9 @@ macro_rules! impl_array_storage_forward {
 }
 pub(crate) use impl_array_storage_forward;
 
-/// An iterator-like trait for reading items from an `ArrayStorage` in bulk.
+/// An interface trait for reading items from an `ArrayStorage` in bulk.
+///
+/// Returned by [`ArrayStorage::read_data_typed`], used by element-wise operations.
 pub trait ReadData<T> {
     /// The total number of items available to read.
     fn len(&self) -> usize;
@@ -287,10 +288,8 @@ pub trait ReadData<T> {
             Ok(())
         }
 
-        let bulk_size = bulk_size::<T>();
-        assert!(bulk_size.is_power_of_two());
-        // this is a compile time check, the compiler knows the value of `bulk_size::<T>()`
-        let read_fn = match bulk_size {
+        // this is a compile time check, the compiler knows the value of BULK
+        let read_fn = match <T as BulkInfo>::BULK {
             1 => read_to_buf_impl::<T, 1>,
             2 => read_to_buf_impl::<T, 2>,
             4 => read_to_buf_impl::<T, 4>,

@@ -595,7 +595,7 @@ pub(crate) fn assert_array_matches<S, T, D>(
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
     let expected = expected.view().into_dyn();
-    let actual = actual.as_ref().to_typed::<T>().unwrap();
+    let actual = actual.as_ref().into_typed::<T>().unwrap();
     let full = actual.to_ndarray().unwrap();
     assert_eq!(&full.into_dyn(), expected);
 

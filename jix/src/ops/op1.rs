@@ -83,6 +83,20 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         self.array.spec()
     }
+
+    type DimensionChange<NewD: crate::Dimension> = Op1<S::DimensionChange<NewD>, K>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(Op1 {
+            array: self.array.dimension_change()?,
+            out_dtype_: self.out_dtype_,
+            kernel: self.kernel,
+        })
+    }
+
+    crate::ops::impl_element_type_change_default!();
 }
 
 impl<F, T, O> Op1Kernel<T> for F
@@ -141,6 +155,16 @@ macro_rules! define_op1 {
             type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!(<S>);
+
+            type DimensionChange<NewD: crate::Dimension> = $Op<S::DimensionChange<NewD>>;
+            #[inline]
+            fn dimension_change<NewD: crate::Dimension>(
+                self,
+            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+                Ok($Op(self.0.dimension_change()?))
+            }
+
+            crate::ops::impl_element_type_change_default!();
         }
 
         define_op1!(@define_core
@@ -226,6 +250,16 @@ macro_rules! define_op1 {
             type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!(<S>);
+
+            type DimensionChange<NewD: crate::Dimension> = $Op<S::DimensionChange<NewD>>;
+            #[inline]
+            fn dimension_change<NewD: crate::Dimension>(
+                self,
+            ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+                Ok($Op(self.0.dimension_change()?))
+            }
+
+            crate::ops::impl_element_type_change_default!();
         }
     };
 

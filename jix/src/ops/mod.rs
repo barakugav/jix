@@ -74,7 +74,7 @@
 //! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
 //! // src is Array<Compact<TypeDyn, DimDyn>> - ops not yet available
 //!
-//! let typed = src.to_typed::<f32>()?; // validates dtype at runtime
+//! let typed = src.into_typed::<f32>()?; // validates dtype at runtime
 //! let result = typed.exp().cast::<f64>().compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```
@@ -128,8 +128,8 @@ mod sub_dtype;
 pub use sub_dtype::*;
 
 mod common;
-pub(crate) use common::bulk_size;
 pub use common::AxesArg;
+pub(crate) use common::BulkInfo;
 
 pub(crate) mod _traits {
     pub use super::cast::_traits::*;

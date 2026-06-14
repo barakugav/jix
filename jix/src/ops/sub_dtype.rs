@@ -155,6 +155,28 @@ where
     fn spec(&self) -> ArrayStorageSpec<'_> {
         self.array.spec()
     }
+
+    type DimensionChange<NewD: crate::Dimension> = SubDtype<S::DimensionChange<NewD>, ET>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(SubDtype {
+            array: self.array.dimension_change()?,
+            dst_type: self.dst_type,
+            sub_field_offset: self.sub_field_offset,
+        })
+    }
+
+    type ElementTypeChange<NewET: ElementType> = SubDtype<S, NewET>;
+    #[inline]
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+        Ok(SubDtype {
+            array: self.array,
+            dst_type: NewET::from_dtype(self.dst_type.dtype().clone())?,
+            sub_field_offset: self.sub_field_offset,
+        })
+    }
 }
 
 #[cfg(test)]

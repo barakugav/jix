@@ -3,7 +3,6 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::ops::ElementTypeChange;
 use crate::storage::{
     ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ElementType, Ty, TypeDyn,
 };
@@ -367,34 +366,9 @@ where
             // decoder_config: None,
         }
     }
-}
 
-impl<A, ET, D> ElementTypeChange for Plain<A, ET, D>
-where
-    ET: ElementType,
-    D: Dimension,
-{
-    type ElementTypeChange<NewET: ElementType> = Plain<A, NewET, D>;
-
-    fn change_type<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
-        Ok(Plain {
-            allocation: self.allocation,
-            data: self.data,
-            shape: self.shape,
-            strides: self.strides,
-            element_type: NewET::from_dtype(self.element_type.dtype().clone())?,
-            blocks_layout: self.blocks_layout,
-        })
-    }
-}
-
-impl<A, ET, D> crate::ops::DimensionChange for Plain<A, ET, D>
-where
-    ET: ElementType,
-    D: Dimension,
-{
     type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;
-
+    #[inline]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
         let shape = NewD::from_slice(self.shape())?;
         Ok(Plain {
@@ -403,6 +377,19 @@ where
             shape,
             strides: self.strides,
             element_type: self.element_type,
+            blocks_layout: self.blocks_layout,
+        })
+    }
+
+    type ElementTypeChange<NewET: ElementType> = Plain<A, NewET, D>;
+    #[inline]
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
+        Ok(Plain {
+            allocation: self.allocation,
+            data: self.data,
+            shape: self.shape,
+            strides: self.strides,
+            element_type: NewET::from_dtype(self.element_type.dtype().clone())?,
             blocks_layout: self.blocks_layout,
         })
     }
