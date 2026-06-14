@@ -55,7 +55,7 @@ impl<S: ArrayStorage> Roll<S> {
         let shift = if len == 0 {
             0
         } else {
-            (shift as i64).rem_euclid(len as i64) as u64
+            shift.rem_euclid(len as i64) as u64
         };
 
         Ok(Self { array, axis, shift })

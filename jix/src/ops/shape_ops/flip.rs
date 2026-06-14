@@ -261,14 +261,14 @@ mod tests {
 
     #[test]
     fn input_form_single_usize() {
-        // .flip(usize) — single axis.
+        // .flip(usize) - single axis.
         let got = make(arange(6), &[3u64, 2]).flip(0).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5], [2, 3], [0, 1]]);
     }
 
     #[test]
     fn input_form_array_two_axes() {
-        // .flip([usize; 2]) — two axes via fixed-size array.
+        // .flip([usize; 2]) - two axes via fixed-size array.
         let got = make(arange(6), &[3u64, 2])
             .flip([0, 1])
             .to_ndarray()
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn input_form_tuple_two_axes() {
-        // .flip((usize, usize)) — two axes via tuple.
+        // .flip((usize, usize)) - two axes via tuple.
         let got = make(arange(6), &[3u64, 2])
             .flip((0, 1))
             .to_ndarray()
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn input_form_slice_dynamic() {
-        // .flip(&[usize]) — dynamic axis count via slice.
+        // .flip(&[usize]) - dynamic axis count via slice.
         let axes: Vec<usize> = vec![0, 1];
         let got = make(arange(6), &[3u64, 2])
             .flip(axes.as_slice())

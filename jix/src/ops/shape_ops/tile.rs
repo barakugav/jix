@@ -132,7 +132,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         // was already short-circuited above).
         let s_in = s % l;
 
-        // Case A — single read, no wrap: the requested output range maps to one contiguous
+        // Case A - single read, no wrap: the requested output range maps to one contiguous
         // input range along axis k. Read directly into `buf` (no tmp_buf, no nd_copy).
         if s_in + total <= l {
             let inner_index = dim_arr(ndim, |d| {
@@ -148,7 +148,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
         let dst_strides = default_strides(&out_shape, itemsize as u64);
 
-        // Case B — two reads, single wrap (total <= L): split the request into two
+        // Case B - two reads, single wrap (total <= L): split the request into two
         // contiguous input ranges along axis k and read each into a separate tmp_buf, then
         // place them at the right axis-k offset in `buf`.
         if total <= l {
@@ -189,7 +189,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             return Ok(());
         }
 
-        // Case C — span > L: read the full period [0, L) along axis k into tmp_buf once,
+        // Case C - span > L: read the full period [0, L) along axis k into tmp_buf once,
         // then memcpy chunks into `buf`. Layout along axis k:
         //   head:   tmp[s_in..L]      -> buf[0..head_len)
         //   middle: tmp[0..L] x F      -> buf[head_len..head_len + F*L)   (F = num_full)
@@ -422,7 +422,10 @@ mod tests {
     #[test]
     fn identity_full_read_returns_input() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
-        let got = make(arange(12), &[3u64, 4]).tile(1, 0).to_ndarray().unwrap();
+        let got = make(arange(12), &[3u64, 4])
+            .tile(1, 0)
+            .to_ndarray()
+            .unwrap();
         assert_eq!(got, nd);
     }
 
@@ -437,7 +440,10 @@ mod tests {
 
     #[test]
     fn zero_reps_full_read_is_empty() {
-        let got = make(arange(12), &[3u64, 4]).tile(0, 0).to_ndarray().unwrap();
+        let got = make(arange(12), &[3u64, 4])
+            .tile(0, 0)
+            .to_ndarray()
+            .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
         assert_eq!(got.len(), 0);
     }
@@ -485,7 +491,10 @@ mod tests {
     #[test]
     fn full_read_3d_middle_axis() {
         // [2, 2, 2] tile 2 axis 1 -> [2, 4, 2]
-        let got = make(arange(8), &[2u64, 2, 2]).tile(2, 1).to_ndarray().unwrap();
+        let got = make(arange(8), &[2u64, 2, 2])
+            .tile(2, 1)
+            .to_ndarray()
+            .unwrap();
         assert_eq!(
             got,
             array![
@@ -575,10 +584,7 @@ mod tests {
             .tile(3, 0)
             .to_ndarray_sub(&[0..12], &ReadContext::default())
             .unwrap();
-        assert_eq!(
-            got,
-            array![10, 20, 30, 40, 10, 20, 30, 40, 10, 20, 30, 40]
-        );
+        assert_eq!(got, array![10, 20, 30, 40, 10, 20, 30, 40, 10, 20, 30, 40]);
     }
 
     #[test]
