@@ -478,13 +478,14 @@ def test_mixed_dtype_op2_does_not_error_on_safe_combos():
             pytest.fail(f"add({da.__name__}, {db.__name__}) raised: {e}")
 
 
-def test_mixed_dtype_op2_errors_on_complex_arithmetic():
-    """Complex + int64/uint64 should fail: no impl can hold Int/P8 cast to Complex."""
+def test_mixed_dtype_op2_complex_plus_large_int_upcasts_to_complex128():
+    """complex64 + int64/uint64 upcasts to complex128 (f64-precision complex)."""
     for int_dtype in [np.int64, np.uint64]:
         a = jix.compact([1 + 2j, 3 + 4j], dtype=np.complex64)
         b = jix.compact([1, 2], dtype=int_dtype)
-        with pytest.raises(Exception):
-            _ = jix.add(a, b).numpy()
+        result = jix.add(a, b)
+        assert result.dtype == np.complex128
+        np.testing.assert_array_equal(result.numpy(), np.array([2 + 2j, 5 + 4j]))
 
 
 def test_complex_plus_small_int_upcasts_to_complex128():

@@ -43,9 +43,7 @@ import jix
 def test_int64_scalar_promotes_array_to_int64(arr_dtype):
     a = jix.compact([1, 2, 3], dtype=arr_dtype)
     result = a + np.int64(5)
-    assert result.dtype == np.int64, (
-        f"int64 scalar + {arr_dtype.__name__} array: expected int64, got {result.dtype}"
-    )
+    assert result.dtype == np.int64, f"int64 scalar + {arr_dtype.__name__} array: expected int64, got {result.dtype}"
 
 
 def test_int64_scalar_value_not_truncated():
@@ -69,9 +67,7 @@ def test_uint64_scalar_promotes_array_to_uint64(arr_dtype):
     """Symmetric check for the analogous uint64 path."""
     a = jix.compact([1, 2, 3], dtype=arr_dtype)
     result = a + np.uint64(5)
-    assert result.dtype == np.uint64, (
-        f"uint64 scalar + {arr_dtype.__name__} array: expected uint64, got {result.dtype}"
-    )
+    assert result.dtype == np.uint64, f"uint64 scalar + {arr_dtype.__name__} array: expected uint64, got {result.dtype}"
 
 
 def test_uint64_scalar_value_not_truncated():
@@ -153,10 +149,19 @@ def test_unary_bool_auto_casts_to_i8():
 @pytest.mark.parametrize(
     "dtype",
     [
-        np.uint8, np.uint16, np.uint32, np.uint64,
-        np.int8, np.int16, np.int32, np.int64,
-        np.float16, np.float32, np.float64,
-        np.complex64, np.complex128,
+        np.uint8,
+        np.uint16,
+        np.uint32,
+        np.uint64,
+        np.int8,
+        np.int16,
+        np.int32,
+        np.int64,
+        np.float16,
+        np.float32,
+        np.float64,
+        np.complex64,
+        np.complex128,
     ],
 )
 def test_binary_same_dtype_preserves_dtype(dtype):
@@ -268,12 +273,12 @@ _TYPED_SCALAR_CASES = [
     (np.uint32, np.uint64(1), np.uint64),
     # Mixing typed uint with int array follows the UInt -> Int rule.
     (np.int16, np.uint8(1), np.int16),  # u8 fits in i16 safely
-    (np.int8, np.uint8(1), np.int16),   # neither u8 nor i8 holds both -> i16
+    (np.int8, np.uint8(1), np.int16),  # neither u8 nor i8 holds both -> i16
     # Typed float scalars.
     (np.float32, np.float32(1.5), np.float32),
     (np.float32, np.float64(1.5), np.float64),
     (np.int32, np.float32(1.5), np.float64),  # int P4 -> f32 fails -> f64
-    (np.int8, np.float32(1.5), np.float32),   # int P1.higher() = P2 <= P4 -> f32
+    (np.int8, np.float32(1.5), np.float32),  # int P1.higher() = P2 <= P4 -> f32
     (np.int64, np.float64(1.5), np.float64),
     # Typed complex scalars.
     (np.float32, np.complex64(1 + 2j), np.complex64),
