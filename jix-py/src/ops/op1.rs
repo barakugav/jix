@@ -15,10 +15,10 @@ define_op1!(
     /// Available via the unary `-` operator on arrays: `-arr`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts. Unsigned integer
-    ///         inputs are automatically cast to the next larger signed integer type before negation
-    ///         (Safe casting rules): `u8 -> i16`, `u16 -> i32`, `u32 -> i64`. This differs from
-    ///         numpy, which overflow for unsigned negation.
+    ///     array: Input array. Unsigned integer inputs are automatically cast to the next
+    ///         larger signed integer type before negation (Safe casting rules): `u8 -> i16`,
+    ///         `u16 -> i32`, `u32 -> i64`. This differs from numpy, which overflow for unsigned
+    ///         negation.
     ///         A `bool` input is cast to `i8` (False -> 0, True -> -1).
     ///
     /// Returns:
@@ -54,7 +54,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -82,7 +82,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -114,7 +114,7 @@ define_op1!(
     /// (banker's rounding) used by Python's built-in `round()` and `numpy.round_`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -144,7 +144,7 @@ define_op1!(
     /// Negative inputs produce `NaN`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -176,7 +176,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -207,7 +207,7 @@ define_op1!(
     /// Negative inputs produce `NaN`; zero produces `-inf`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -242,7 +242,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -271,7 +271,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -300,7 +300,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -331,7 +331,7 @@ define_op1!(
     /// Inputs outside `[-1, 1]` produce `NaN`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -362,7 +362,7 @@ define_op1!(
     /// Inputs outside `[-1, 1]` produce `NaN`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -392,7 +392,7 @@ define_op1!(
     /// Supported dtypes: `f16`, `f32`, `f64`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -424,7 +424,7 @@ define_op1!(
     /// Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns `-1.0`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
@@ -465,7 +465,7 @@ define_op1!(
     /// wraps back to `-128`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until

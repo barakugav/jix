@@ -1,7 +1,10 @@
+use jix_core::ops::{SliceItem, SliceSpec};
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::{any_to_core_array, asarray};
-use crate::util::{normalize_axes, normalize_axis, IntoPyResult, ItemOrSequence};
+use crate::util::{normalize_axes, normalize_axis, DimArray, IntoPyResult, ItemOrSequence};
 use crate::{compact, Array};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
@@ -24,7 +27,7 @@ use crate::{compact, Array};
 ///   dimensions automatically)
 ///
 /// Args:
-///     array: Must already be a [`jix.Array`][jix.Array] (no implicit `asarray()` conversion).
+///     array: Array to broadcast.
 ///     shape: Target shape. Must have the same number of dimensions as the input. Use `-1`
 ///         to keep a dimension unchanged.
 ///
@@ -49,15 +52,11 @@ use crate::{compact, Array};
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (
-    array,
-    shape,
-))]
 pub fn broadcast<'py>(
-    array: &Bound<'py, Array>,
+    array: &Bound<'py, PyAny>,
     shape: ItemOrSequence<i64>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = array;
+    let py_arr = asarray(array)?;
     let array = &py_arr.get().arr;
     let new_shape = shape.into_vec();
     let old_shape = array.shape();
@@ -93,7 +92,252 @@ pub fn broadcast<'py>(
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
 
-// TODO slice
+/// Selects a sub-region of an array as a lazy view.
+///
+/// `index` accepts the same forms as [`Array.numpy()`][jix.Array.numpy] / `__getitem__`:
+///
+/// | Form | Example | Effect |
+/// |---|---|---|
+/// | integer | `jix.slice(a, 2)` | select a single position along axis 0 (drops the axis) |
+/// | slice | `jix.slice(a, slice(1, 4))` | select a range along axis 0 (keeps the axis) |
+/// | `...` | `jix.slice(a, ...)` | fill all remaining axes with full slices |
+/// | tuple | `jix.slice(a, (0, slice(1, 3), ...))` | index each axis independently |
+///
+/// **Integers** select one position and drop the corresponding axis. Negative indices
+/// are supported. **Slices** select a contiguous range and keep the axis. The
+/// **step must be 1**; non-unit steps raise `ValueError`. Bounds are checked
+/// strictly (no numpy-style clamping). At most one ellipsis is allowed; missing
+/// trailing axes receive implicit full-range slices.
+///
+/// Output dtype equals the input dtype.
+///
+/// The result is a lazy [`jix.Array`][jix.Array] view; no decompression occurs until the result is
+/// read. Unlike `arr[...]` / `arr.numpy(...)`, this does **not** materialize the
+/// selection into a NumPy array - use `.numpy()` afterward when you want the data.
+///
+/// Args:
+///     array: Array to slice.
+///     index: See the table above. Same syntax as `__getitem__` / `numpy(index=...)`.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view of the selected sub-region.
+///
+/// Raises:
+///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,
+///         more index items than array dimensions, or more than one ellipsis.
+///     ValueError: Slice step other than 1.
+///     TypeError: Unsupported index item type.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
+///
+///     # Single row -- axis 0 is dropped, shape goes (3, 4) -> (4,).
+///     row = jix.slice(a, 1)
+///     assert row.shape == (4,)
+///     assert np.array_equal(row.numpy(), [4, 5, 6, 7])
+///
+///     # Slice on each axis keeps both axes.
+///     sub = jix.slice(a, (slice(0, 2), slice(1, 3)))
+///     assert sub.shape == (2, 2)
+///     assert np.array_equal(sub.numpy(), [[1, 2], [5, 6]])
+///
+///     # Ellipsis fills remaining axes.
+///     col = jix.slice(a, (..., 2))
+///     assert col.shape == (3,)
+///     assert np.array_equal(col.numpy(), [2, 6, 10])
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+pub fn slice<'py>(
+    array: &Bound<'py, PyAny>,
+    index: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray(array)?;
+    let arr = py_arr.get().to_core();
+    let parsed = parse_basic_index(arr.shape(), Some(index))?;
+
+    let spec = SliceSpec::new(parsed.items.as_slice());
+    let sliced = jix_core::ops::Slice::new_array(arr, spec)
+        .into_py_result()?
+        .into_any();
+    let result = if parsed.drop_axes.is_empty() {
+        sliced
+    } else {
+        jix_core::ops::RemoveAxis::new_array(sliced, parsed.drop_axes.as_slice())
+            .into_py_result()?
+            .into_any()
+    };
+    Bound::new(py_arr.py(), Array::from_core(result))
+}
+
+/// Parse a Python `__getitem__`-style index into a per-axis [`SliceItem`] list.
+///
+/// Accepts an integer, a `slice`, `Ellipsis`, or a tuple of these. Slice steps other
+/// than 1 are rejected. Bounds are validated strictly (no numpy-style clamping).
+/// Returns one `SliceItem` per array dimension plus the list of integer-indexed axes.
+pub(crate) fn parse_basic_index<'py>(
+    shape: &[u64],
+    index: Option<&Bound<'py, PyAny>>,
+) -> PyResult<ParsedBasicIndex> {
+    let ndim = shape.len();
+
+    enum RawIdxItem {
+        Int(i64),
+        Slice(SliceItem),
+        Ellipsis,
+    }
+
+    let raw = match index {
+        Some(index) => {
+            if let Ok(tup) = index.cast::<PyTuple>() {
+                tup.iter().collect::<Vec<_>>()
+            } else {
+                vec![index.clone()]
+            }
+        }
+        None => vec![],
+    };
+    let raw = raw
+        .into_iter()
+        .map(|item| {
+            if item.is_instance_of::<PyEllipsis>() {
+                return Ok(RawIdxItem::Ellipsis);
+            }
+            if let Ok(slice) = item.cast::<PySlice>() {
+                let start = slice.getattr("start")?.extract::<Option<i64>>()?;
+                let stop = slice.getattr("stop")?.extract::<Option<i64>>()?;
+                let step = slice
+                    .getattr("step")?
+                    .extract::<Option<i64>>()?
+                    .unwrap_or(1);
+                return Ok(RawIdxItem::Slice(SliceItem {
+                    start,
+                    end: stop,
+                    step,
+                }));
+            }
+            if let Ok(i) = item.extract::<i64>() {
+                return Ok(RawIdxItem::Int(i));
+            }
+            Err(PyTypeError::new_err(
+                "only integers, slices (`:`), and ellipsis (`...`) are valid indices",
+            ))
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+
+    let mut ellipsis_count = 0usize;
+    let mut consumers = 0usize;
+    for r in &raw {
+        match r {
+            RawIdxItem::Ellipsis => ellipsis_count += 1,
+            RawIdxItem::Int(_) | RawIdxItem::Slice(_) => consumers += 1,
+        }
+    }
+    if ellipsis_count > 1 {
+        return Err(PyIndexError::new_err(
+            "an index can only have a single ellipsis ('...')",
+        ));
+    }
+    if consumers > ndim {
+        return Err(PyIndexError::new_err(format!(
+            "too many indices for array: array is {ndim}-dimensional, \
+             but {consumers} were indexed"
+        )));
+    }
+
+    let fill = ndim - consumers;
+    let mut items: DimArray<SliceItem> = DimArray::new();
+    let mut drop_axes: Vec<usize> = Vec::new();
+    let mut axis_cursor = 0usize;
+    for r in raw {
+        match r {
+            RawIdxItem::Ellipsis => {
+                for _ in 0..fill {
+                    items.push(SliceItem {
+                        start: Some(0),
+                        end: Some(shape[axis_cursor] as i64),
+                        step: 1,
+                    });
+                    axis_cursor += 1;
+                }
+            }
+            RawIdxItem::Int(i) => {
+                let len = shape[axis_cursor] as i64;
+                let i_resolved = if i < 0 { i + len } else { i };
+                if i_resolved < 0 || i_resolved >= len {
+                    return Err(PyIndexError::new_err(format!(
+                        "index {i} is out of bounds for axis {axis_cursor} with size {len}"
+                    )));
+                }
+                items.push(SliceItem {
+                    start: Some(i_resolved),
+                    end: Some(i_resolved + 1),
+                    step: 1,
+                });
+                drop_axes.push(axis_cursor);
+                axis_cursor += 1;
+            }
+            RawIdxItem::Slice(s) => {
+                if s.step != 1 {
+                    return Err(PyValueError::new_err("slice step must be 1"));
+                }
+                let len = shape[axis_cursor] as i64;
+                let start = s.start.unwrap_or(0);
+                let stop = s.end.unwrap_or(len);
+                let start_norm = if start < 0 { start + len } else { start };
+                let stop_norm = if stop < 0 { stop + len } else { stop };
+                if start_norm < 0 || start_norm >= len {
+                    return Err(PyIndexError::new_err(format!(
+                        "slice start {start} is out of bounds for axis {axis_cursor} with size {len}"
+                    )));
+                }
+                if stop_norm < 0 || stop_norm > len {
+                    return Err(PyIndexError::new_err(format!(
+                        "slice stop {stop} is out of bounds for axis {axis_cursor} with size {len}"
+                    )));
+                }
+                if start_norm > stop_norm {
+                    return Err(PyIndexError::new_err(format!(
+                        "slice start {start} must be <= stop {stop} for axis {axis_cursor}"
+                    )));
+                }
+                items.push(SliceItem {
+                    start: Some(start_norm),
+                    end: Some(stop_norm),
+                    step: 1,
+                });
+                axis_cursor += 1;
+            }
+        }
+    }
+    while axis_cursor < ndim {
+        items.push(SliceItem {
+            start: Some(0),
+            end: Some(shape[axis_cursor] as i64),
+            step: 1,
+        });
+        axis_cursor += 1;
+    }
+
+    Ok(ParsedBasicIndex { items, drop_axes })
+}
+
+/// Parsed result of a basic-indexing expression (`int`, `slice`, `...`, or tuple of these).
+///
+/// Integer-indexed axes are kept in `items` as single-element slices (`start..start+1`)
+/// and listed in `drop_axes`; callers can remove those axes after slicing to recover
+/// numpy `arr[i]` semantics.
+pub(crate) struct ParsedBasicIndex {
+    /// One resolved `SliceItem` per array dimension. `start` and `end` are absolute
+    /// (non-negative) indices in the input shape; `step` is always 1.
+    pub items: DimArray<SliceItem>,
+    /// Axes (0-based, increasing) that came from integer indices.
+    pub drop_axes: Vec<usize>,
+}
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape.
 ///
@@ -139,16 +383,16 @@ pub fn broadcast<'py>(
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn insert_axis<'py>(
-    array: &Bound<'py, Array>,
+    array: &Bound<'py, PyAny>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     // NOTE: API different than numpy: axes are specified with respect to the original ndim, not the new ndim. Same
     // axis can be specified multiple times to insert multiple axes in the same place.
-    let py_arr = array;
+    let py_arr = asarray(array)?;
     let array = py_arr.get().to_core();
     let axes = normalize_axes(axis.into_vec(), array.ndim() + 1)?;
     if axes.is_empty() {
-        return Ok(py_arr.clone()); // no-op if no axes to insert
+        return Ok(py_arr); // no-op if no axes to insert
     }
     let ret = jix_core::ops::InsertAxis::new_array(array, &axes).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
@@ -165,7 +409,7 @@ pub fn insert_axis<'py>(
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn unsqueeze<'py>(
-    array: &Bound<'py, Array>,
+    array: &Bound<'py, PyAny>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     insert_axis(array, axis)
@@ -204,14 +448,14 @@ pub fn unsqueeze<'py>(
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn remove_axis<'py>(
-    array: &Bound<'py, Array>,
+    array: &Bound<'py, PyAny>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = array;
+    let py_arr = asarray(array)?;
     let array = py_arr.get().to_core();
     let axes = normalize_axes(axis.into_vec(), array.ndim())?;
     if axes.is_empty() {
-        return Ok(py_arr.clone()); // no-op if no axes to remove
+        return Ok(py_arr); // no-op if no axes to remove
     }
     let ret = jix_core::ops::RemoveAxis::new_array(array, &axes).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
@@ -248,12 +492,13 @@ pub fn remove_axis<'py>(
 #[pyfunction]
 #[pyo3(signature = (array, axis=None))]
 pub fn squeeze<'py>(
-    array: &Bound<'py, Array>,
+    array: &Bound<'py, PyAny>,
     axis: Option<ItemOrSequence<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray(array)?;
     let axis = axis.unwrap_or_else(|| {
         ItemOrSequence::Sequence(
-            array
+            py_arr
                 .get()
                 .arr
                 .shape()
@@ -263,7 +508,7 @@ pub fn squeeze<'py>(
                 .collect(),
         )
     });
-    remove_axis(array, axis)
+    remove_axis(&py_arr, axis)
 }
 
 /// Reorders the axes of an array (generalized transpose).
@@ -309,14 +554,14 @@ pub fn squeeze<'py>(
     axes=None,
 ))]
 pub fn permute_axes<'py>(
-    array: &Bound<'py, Array>,
+    array: &Bound<'py, PyAny>,
     axes: Option<Vec<usize>>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = array;
+    let py_arr = asarray(array)?;
     let array = py_arr.get().to_core();
     let axes = axes.unwrap_or_else(|| (0..array.ndim()).rev().collect());
     if axes.len() == array.ndim() && axes.iter().enumerate().all(|(i, &ax)| i == ax) {
-        return Ok(py_arr.clone()); // no-op permutation
+        return Ok(py_arr); // no-op permutation
     }
     let ret = jix_core::ops::PermuteAxes::new_array(array, &axes).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
@@ -336,7 +581,7 @@ pub fn permute_axes<'py>(
 /// boundaries - use with care.
 ///
 /// Args:
-///     array: Must already be a [`jix.Array`][jix.Array] (no implicit `asarray()` conversion).
+///     array: Array to reshape.
 ///     shape: New shape. Exactly one dimension may be `-1` (inferred). Product must equal
 ///         the total element count.
 ///     copy: If `True` (default), returns an eagerly materialized compact array. If `False`,
@@ -369,12 +614,12 @@ pub fn permute_axes<'py>(
     copy=true,
 ))]
 pub fn reshape<'py>(
-    array: &Bound<'py, Array>,
+    array: &Bound<'py, PyAny>,
     shape: ItemOrSequence<i64>,
     copy: bool,
 ) -> PyResult<Bound<'py, Array>> {
     let new_shape = shape;
-    let py_arr = array;
+    let py_arr = asarray(array)?;
     let array = &py_arr.get().arr;
 
     // handle -1 in new_shape
@@ -436,7 +681,7 @@ pub fn reshape<'py>(
 /// original storage is block-based and the shape is not aligned with block boundaries.
 ///
 /// Args:
-///     array: Input array.
+///     array: Array to flatten.
 ///     copy: If `True` (default), returns an eagerly materialized compact array. If `False`,
 ///         returns a lazy view.
 ///
@@ -456,9 +701,10 @@ pub fn reshape<'py>(
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 #[pyo3(signature = (array, *, copy=true))]
-pub fn flatten<'py>(array: &Bound<'py, Array>, copy: bool) -> PyResult<Bound<'py, Array>> {
-    let size = array.get().arr.shape().iter().product::<u64>();
-    reshape(array, ItemOrSequence::Item(size as i64), copy)
+pub fn flatten<'py>(array: &Bound<'py, PyAny>, copy: bool) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray(array)?;
+    let size = py_arr.get().arr.shape().iter().product::<u64>();
+    reshape(&py_arr, ItemOrSequence::Item(size as i64), copy)
 }
 
 /// Joins a sequence of arrays along an existing axis.
@@ -474,8 +720,8 @@ pub fn flatten<'py>(array: &Bound<'py, Array>, copy: bool) -> PyResult<Bound<'py
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     arrays: Sequence of arrays to concatenate. Each element may be anything that
-///         [`jix.asarray()`][jix.asarray] accepts. All must have the same dtype and number of dimensions.
+///     arrays: Sequence of arrays to concatenate. All must have the same dtype and number
+///         of dimensions.
 ///     axis: Axis along which to concatenate. Supports negative values.
 ///
 /// Returns:
@@ -552,8 +798,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     arrays: Sequence of arrays to stack. Each element may be anything that
-///         [`jix.asarray()`][jix.asarray] accepts. All must have identical shapes and the same dtype.
+///     arrays: Sequence of arrays to stack. All must have identical shapes and the same dtype.
 ///     axis: Position of the new axis in the output. Supports negative values.
 ///
 /// Returns:

@@ -30,6 +30,9 @@ pub use reduction::*;
 mod sub_dtype;
 pub use sub_dtype::*;
 
+mod complex;
+pub use complex::*;
+
 use jix_core::dtype::{Dtype, DtypeScalarKind};
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
@@ -58,7 +61,7 @@ use crate::dtype::dtype_from_any;
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     array: The array to cast. May be anything that [`jix.asarray()`][jix.asarray] accepts.
+///     array: Array to cast.
 ///     dtype: The target dtype. Accepts a numpy dtype object, a dtype string (e.g.
 ///         `'float32'`), or a Python type like `np.float32`.
 ///
@@ -81,10 +84,10 @@ use crate::dtype::dtype_from_any;
 ///     assert np.array_equal(result.numpy(), [False, True, True, False])
 ///     ```
 pub fn astype<'py>(
-    array: &Bound<'py, Array>,
+    array: &Bound<'py, PyAny>,
     dtype: &Bound<'_, PyAny>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = array;
+    let py_arr = crate::ops::asarray(array)?;
     let array = &py_arr.get().arr;
     let dtype = dtype_from_any(dtype)?;
     let array = astype_impl(array.clone(), &dtype)?;

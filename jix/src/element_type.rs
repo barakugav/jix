@@ -12,7 +12,7 @@ use crate::util::assert_unchecked_eq;
 /// - [`Ty<T>`] - the concrete element type `T` is known at compile time. All element-wise
 ///   operations (arithmetic, comparisons, reductions, cast) are available.
 /// - [`TypeDyn`] - the element type is only available at runtime. Arrays loaded from disk
-///   start with this. Call [`Array::to_typed::<T>()`](crate::Array::to_typed) to assert
+///   start with this. Call [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert
 ///   the expected element type and recover compile-time tracking.
 pub trait ElementType: Clone + Send + Sync {
     /// `Some(dtype)` when the element type is statically known ([`Ty<T>`]),
@@ -35,7 +35,7 @@ pub trait ElementType: Clone + Send + Sync {
 /// known at compile time (e.g. arrays loaded from a `.jix` file).
 ///
 /// Arrays with `TypeDyn` do not support most element-wise operations directly; call
-/// [`Array::to_typed::<T>()`](crate::Array::to_typed) first to assert the expected
+/// [`Array::into_typed::<T>()`](crate::Array::into_typed) first to assert the expected
 /// element type and recover [`ArrayStorageTyped`](crate::ArrayStorage).
 #[derive(Clone)]
 pub struct TypeDyn(Dtype);

@@ -62,19 +62,22 @@
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
-//! Arrays loaded from disk carry [`TypeDyn`](crate::TypeDyn) because the element type
-//! comes from the file header. Use [`Array::to_typed`](crate::Array::to_typed) to assert the
-//! expected element type and recover compile-time tracking:
+//! Arrays loaded from disk carry [`TypeDyn`](crate::TypeDyn) and [`DimDyn`](crate::DimDyn) because
+//! the element type and shape are only known at runtime.
+//! Use [`Array::into_typed`](crate::Array::into_typed) and [`Array::into_dim`](crate::Array::into_dim)
+//! to assert the  expected element type and dimension and recover compile-time tracking:
 //!
 //! ```no_run
 //! use std::path::Path;
 //!
-//! use jix::{Array, ArrayParams};
+//! use jix::{Array, ArrayParams, Dim};
 //!
 //! let src = Array::read_from_file(Path::new("data.jix"), ArrayParams::default())?;
 //! // src is Array<Compact<TypeDyn, DimDyn>> - ops not yet available
 //!
-//! let typed = src.into_typed::<f32>()?; // validates dtype at runtime
+//! // validates dtype and ndim at runtime
+//! let typed = src.into_typed::<f32>()?.into_dim::<Dim<2>>()?;
+//! // typed is Array<Compact<Ty<f32>, Dim<2>>> - ops available
 //! let result = typed.exp().cast::<f64>().compact()?;
 //! # Ok::<(), jix::Error>(())
 //! ```
@@ -127,6 +130,9 @@ pub use where_op::*;
 mod sub_dtype;
 pub use sub_dtype::*;
 
+mod complex;
+pub use complex::*;
+
 mod common;
 pub use common::AxesArg;
 pub(crate) use common::BulkInfo;
@@ -138,8 +144,8 @@ pub(crate) mod _traits {
     pub use super::reduction::_traits::*;
 }
 
-mod to_type;
-pub use to_type::*;
+mod into_type;
+pub use into_type::*;
 
-mod to_dim;
-pub use to_dim::*;
+mod into_dim;
+pub use into_dim::*;

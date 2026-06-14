@@ -19,9 +19,9 @@ use crate::Array;
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// Args:
-///     condition: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-///     x: May be anything that [`jix.asarray()`][jix.asarray] accepts.
-///     y: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+///     condition: Boolean selector array.
+///     x: Values to use where `condition` is True.
+///     y: Values to use where `condition` is False.
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] with the same shape as the broadcast of `condition`, `x`, and `y`.

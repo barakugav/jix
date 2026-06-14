@@ -423,6 +423,31 @@ struct DimSlice {
 
 impl DimSlice {
     fn resolve(item: &SliceItem, dim_len: u64) -> Result<Self> {
+        let resolve_endpoint = |idx: i64, label: &str| -> Result<u64> {
+            let norm = if idx < 0 { idx + dim_len as i64 } else { idx };
+            ensure!(
+                (0..=dim_len as i64).contains(&norm),
+                InvalidIndex,
+                "slice {label} {idx} is out of bounds for axis with size {dim_len}"
+            );
+            Ok(norm as u64)
+        };
+
+        let start = match item.start {
+            None => 0,
+            Some(s) => resolve_endpoint(s, "start")?,
+        };
+        let end = match item.end {
+            None => dim_len,
+            Some(e) => resolve_endpoint(e, "end")?,
+        };
+
+        ensure!(
+            start <= end,
+            InvalidIndex,
+            "slice start {start} must be <= end {end}"
+        );
+
         ensure!(
             item.step >= 1,
             InvalidIndex,
@@ -431,26 +456,12 @@ impl DimSlice {
         );
         let step = item.step as u64;
 
-        let resolve_index = |idx: i64| -> u64 {
-            if idx < 0 {
-                (dim_len as i64 + idx).max(0) as u64
-            } else {
-                (idx as u64).min(dim_len)
-            }
-        };
-
-        let start = item.start.map(resolve_index).unwrap_or(0);
-        let end = item.end.map(resolve_index).unwrap_or(dim_len);
-
         Ok(Self { start, end, step })
     }
 
     fn len(&self) -> u64 {
-        if self.start >= self.end {
-            0
-        } else {
-            (self.end - self.start).div_ceil(self.step)
-        }
+        debug_assert!(self.start <= self.end);
+        (self.end - self.start).div_ceil(self.step)
     }
 
     fn is_contiguous(&self) -> bool {
@@ -782,6 +793,84 @@ mod tests {
                     .collect();
                 (nd, za, items)
             })
+    }
+
+    // -----------------------------------------------------------------------
+    // Bound checks in DimSlice::resolve.
+    // -----------------------------------------------------------------------
+
+    fn try_slice_one_dim(
+        arr: Array<Compact<Ty<i32>, Dim<2>>>,
+        item: SliceItem,
+    ) -> super::Result<()> {
+        super::Slice::new_array(
+            arr,
+            super::SliceSpec::new(&[item, SliceItem::new(None, None, 1)]),
+        )
+        .map(|_| ())
+    }
+
+    #[test]
+    fn resolve_rejects_start_positive_out_of_range() {
+        // axis 0 has size 3; start = 4 is out of [-3, 3].
+        let arr = make2d(arange(12), 3, 4);
+        let err = try_slice_one_dim(arr, SliceItem::new(Some(4), None, 1)).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+    }
+
+    #[test]
+    fn resolve_rejects_start_negative_out_of_range() {
+        // axis 0 has size 3; start = -4 normalizes to -1 (out of [0, 3]).
+        let arr = make2d(arange(12), 3, 4);
+        let err = try_slice_one_dim(arr, SliceItem::new(Some(-4), None, 1)).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+    }
+
+    #[test]
+    fn resolve_rejects_end_positive_out_of_range() {
+        let arr = make2d(arange(12), 3, 4);
+        let err = try_slice_one_dim(arr, SliceItem::new(None, Some(4), 1)).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+    }
+
+    #[test]
+    fn resolve_rejects_end_negative_out_of_range() {
+        let arr = make2d(arange(12), 3, 4);
+        let err = try_slice_one_dim(arr, SliceItem::new(None, Some(-4), 1)).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+    }
+
+    #[test]
+    fn resolve_rejects_start_greater_than_end() {
+        let arr = make2d(arange(12), 3, 4);
+        let err = try_slice_one_dim(arr, SliceItem::new(Some(2), Some(1), 1)).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidIndex);
+    }
+
+    #[test]
+    fn resolve_accepts_start_equal_to_end_empty_slice() {
+        // start == end (anywhere inside [0, dim_len]) is a valid empty slice.
+        assert_eq!(make2d(arange(12), 3, 4).slice((2..2, ..)).shape(), &[0, 4]);
+    }
+
+    #[test]
+    fn resolve_accepts_start_equal_to_dim_len_empty_slice() {
+        // start == dim_len (with end == dim_len) is allowed: empty slice at the end.
+        assert_eq!(make2d(arange(12), 3, 4).slice((3..3, ..)).shape(), &[0, 4]);
+    }
+
+    #[test]
+    fn resolve_accepts_end_equal_to_dim_len() {
+        assert_eq!(make2d(arange(12), 3, 4).slice((..3, ..)).shape(), &[3, 4]);
+    }
+
+    #[test]
+    fn resolve_accepts_negative_endpoints_within_range() {
+        // start = -3 -> 0; end = -1 -> 2 on axis 0 of size 3.
+        assert_eq!(
+            make2d(arange(12), 3, 4).slice(((-3i64..-1i64), ..)).shape(),
+            &[2, 4]
+        );
     }
 
     proptest::proptest! {

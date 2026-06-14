@@ -82,7 +82,7 @@ Defined in `jix/src/codec.rs`; codec/filter parameters serialized in protobuf he
 
 **Compile-time element type - `ElementType`** (in `jix/src/storage/mod.rs`):
 - `Ty<T>` - concrete element type `T` known at compile time; enables all element-wise ops
-- `TypeDyn` - runtime-only; arrays from disk start here; call `Array::to_typed::<T>()` to recover `Ty<T>`
+- `TypeDyn` - runtime-only; arrays from disk start here; call `Array::into_typed::<T>()` to recover `Ty<T>`
 - `f16` and `Complex<T>` live in `jix::scalar` (previously they were in `jix::dtype`)
 
 ### Serialization

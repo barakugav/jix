@@ -156,7 +156,7 @@
 //!
 //! - [`TypeDyn`] - the element type is only known at runtime. Arrays loaded
 //!   from disk start with this (`Array<Compact<TypeDyn, DimDyn>>`). Call
-//!   [`Array::to_typed::<T>()`](Array::to_typed) to assert the expected element type (checked
+//!   [`Array::into_typed::<T>()`](Array::into_typed) to assert the expected element type (checked
 //!   against the file header at runtime) and unlock element-wise operations:
 //!
 //! ```no_run

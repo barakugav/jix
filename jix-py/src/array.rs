@@ -2,15 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use jix_core::codec::{Codec, EncoderParams};
-use jix_core::ops::SliceItem;
 use jix_core::{Array as CoreArray, ArrayAny};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyEllipsis, PyTuple};
+use pyo3::types::{PyDict, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
-use pyo3::types::{PyAnyMethods, PySlice};
+use pyo3::types::PyAnyMethods;
 use std::ops::Range;
 
 use crate::codec::ReadContext;
@@ -375,152 +374,20 @@ impl Array {
         context: Option<&Bound<'py, ReadContext>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
         let shape = self.arr.shape();
-        let ndim = shape.len();
+        let parsed = crate::ops::parse_basic_index(shape, index)?;
 
-        enum RawIdxItem {
-            Int(i64),
-            Slice(SliceItem),
-            Ellipsis,
-        }
-
-        enum IdxItem {
-            Int(u64),        // already resolved, consumes a real axis, drops it
-            Slice(u64, u64), // already resolved, consumes a real axis, keeps it
-        }
-
-        // 1. Normalize index into a tuple of items.
-        let raw = match index {
-            Some(index) => {
-                if let Ok(tup) = index.cast::<PyTuple>() {
-                    tup.iter().collect::<Vec<_>>()
-                } else {
-                    vec![index.clone()]
-                }
-            }
-            None => vec![],
-        };
-        let raw = raw
-            .into_iter()
-            .map(|item| {
-                if item.is_instance_of::<PyEllipsis>() {
-                    return Ok(RawIdxItem::Ellipsis);
-                }
-                if let Ok(slice) = item.cast::<PySlice>() {
-                    // Pull start/stop/step as Option<i64>. PySlice exposes them as attrs
-                    // that are either int or None.
-                    let start = slice.getattr("start")?.extract::<Option<i64>>()?;
-                    let stop = slice.getattr("stop")?.extract::<Option<i64>>()?;
-                    let step = slice
-                        .getattr("step")?
-                        .extract::<Option<i64>>()?
-                        .unwrap_or(1);
-                    return Ok(RawIdxItem::Slice(SliceItem {
-                        start,
-                        end: stop,
-                        step,
-                    }));
-                }
-                if let Ok(i) = item.extract::<i64>() {
-                    return Ok(RawIdxItem::Int(i));
-                }
-                Err(PyTypeError::new_err(
-                    "only integers, slices (`:`), and ellipsis (`...`) are valid indices",
-                ))
-            })
-            .collect::<PyResult<Vec<_>>>()?;
-
-        // 2. Validate ellipsis count and real-axis-consumer count.
-        let mut ellipsis_count = 0usize;
-        let mut consumers = 0usize; // Int + Slice + Ellipsis-as-one-slot
-        for r in &raw {
-            match r {
-                RawIdxItem::Ellipsis => ellipsis_count += 1,
-                RawIdxItem::Int(_) | RawIdxItem::Slice(_) => consumers += 1,
-            }
-        }
-        if ellipsis_count > 1 {
-            return Err(PyIndexError::new_err(
-                "an index can only have a single ellipsis ('...')",
-            ));
-        }
-        if consumers > ndim {
-            return Err(PyIndexError::new_err(format!(
-                "too many indices for array: array is {ndim}-dimensional, \
-                 but {consumers} were indexed"
-            )));
-        }
-
-        // 3. Expand ellipsis (or pad at the end if absent) so we get exactly
-        //    ndim real-axis consumers. NewAxis entries pass through.
-        let fill = ndim - consumers;
-        let mut axes: Vec<IdxItem> = Vec::with_capacity(ndim);
-        let mut axis_cursor = 0usize; // which real axis we're on
-        for r in raw {
-            match r {
-                RawIdxItem::Ellipsis => {
-                    for _ in 0..fill {
-                        axes.push(IdxItem::Slice(0, shape[axis_cursor]));
-                        axis_cursor += 1;
-                    }
-                }
-                RawIdxItem::Int(i) => {
-                    let len = shape[axis_cursor] as i64;
-                    let i = if i < 0 { i + len } else { i };
-                    if i < 0 || i >= len {
-                        return Err(PyIndexError::new_err(format!(
-                            "index {i} is out of bounds for axis {axis_cursor} with size {len}"
-                        )));
-                    }
-                    axes.push(IdxItem::Int(i as u64));
-                    axis_cursor += 1;
-                }
-                RawIdxItem::Slice(s) => {
-                    if s.step != 1 {
-                        return Err(PyValueError::new_err("slice step must be 1"));
-                    }
-                    let len = shape[axis_cursor] as i64;
-                    let start = s.start.unwrap_or(0);
-                    let stop = s.end.unwrap_or(len);
-                    let start_norm = if start < 0 { start + len } else { start };
-                    let stop_norm = if stop < 0 { stop + len } else { stop };
-                    if start_norm < 0 || start_norm >= len {
-                        return Err(PyIndexError::new_err(format!(
-                            "slice start {start} is out of bounds for axis {axis_cursor} with size {len}"
-                        )));
-                    }
-                    if stop_norm < 0 || stop_norm > len {
-                        return Err(PyIndexError::new_err(format!(
-                            "slice stop {stop} is out of bounds for axis {axis_cursor} with size {len}"
-                        )));
-                    }
-                    axes.push(IdxItem::Slice(start_norm as u64, stop_norm as u64));
-                    axis_cursor += 1;
-                }
-            }
-        }
-        // fewer consumers than ndim: pad at the end.
-        while axis_cursor < ndim {
-            axes.push(IdxItem::Slice(0, shape[axis_cursor]));
-            axis_cursor += 1;
-        }
-
-        // 4. Build the ranges for get_data (length == ndim) and the output
-        //    shape (length == number of kept axes + NewAxis entries).
-        let mut ranges = DimArray::new();
-        let mut out_shape: Vec<usize> = Vec::with_capacity(axes.len());
-        for ax in &axes {
-            match ax {
-                IdxItem::Int(i) => ranges.push(*i..*i + 1),
-                IdxItem::Slice(s, e) => {
-                    ranges.push(*s..*e);
-                    out_shape.push((e - s) as usize);
-                }
+        let mut ranges: DimArray<Range<u64>> = DimArray::new();
+        let mut out_shape: Vec<usize> = Vec::with_capacity(parsed.items.len());
+        for (axis, item) in parsed.items.iter().enumerate() {
+            let start = item.start.unwrap() as u64;
+            let end = item.end.unwrap() as u64;
+            ranges.push(start..end);
+            if !parsed.drop_axes.contains(&axis) {
+                out_shape.push((end - start) as usize);
             }
         }
 
-        // 5. Read data
         let np_arr = self.to_numpy(py, &ranges, context)?;
-
         let np_arr: Bound<'_, PyUntypedArray> =
             np_arr.call_method1("reshape", (out_shape,))?.cast_into()?;
         Ok(np_arr)
@@ -673,6 +540,16 @@ impl Array {
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
     pub fn __rtruediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(other, slf)
+    }
+
+    /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
+    pub fn __floordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::floor_divide(slf, other)
+    }
+
+    /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
+    pub fn __rfloordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::floor_divide(other, slf)
     }
 
     // TODO: __pow__
@@ -958,6 +835,14 @@ impl Array {
         crate::ops::broadcast(slf, shape)
     }
 
+    /// Selects a sub-region of the array as a lazy view. See [`jix.slice()`][jix.slice].
+    pub fn slice<'py>(
+        slf: &Bound<'py, Array>,
+        index: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::slice(slf, index)
+    }
+
     /// Removes length-1 dimensions from the array's shape. See [`jix.squeeze()`][jix.squeeze].
     #[pyo3(signature = (axis=None))]
     pub fn squeeze<'py>(
@@ -973,6 +858,20 @@ impl Array {
         axis: ItemOrSequence<i32>,
     ) -> PyResult<Bound<'py, Array>> {
         crate::ops::unsqueeze(slf, axis)
+    }
+
+    // == complex ops ==
+
+    /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
+    #[getter]
+    pub fn real(slf: &Bound<'_, Array>) -> PyResult<Array> {
+        crate::ops::real(slf)
+    }
+
+    /// Extracts the imaginary part of each complex element. See [`jix.imag()`][jix.imag].
+    #[getter]
+    pub fn imag(slf: &Bound<'_, Array>) -> PyResult<Array> {
+        crate::ops::imag(slf)
     }
 
     // == trigonometric ops ==

@@ -1361,7 +1361,7 @@ where
     /// Most element-wise operations require a static element type (`ArrayStorageTyped`).
     ///
     /// This method replaces the inner storage with `S::ElementTypeChange<NewET>`, which is
-    /// implemented by the simpler [`ToType<S, NewET>`](crate::ops::ToType) adaptor for some
+    /// implemented by the simpler [`IntoType<S, NewET>`](crate::ops::IntoType) adaptor for some
     /// storages, but may be implemented as an in-place replacement for others.
     ///
     /// See [`into_type_dyn`](Self::into_type_dyn).
@@ -1417,7 +1417,7 @@ where
     /// statically known, which can yield better performance.
     ///
     /// This method replace the inner storage with `S::DimensionChange<D>`, which is implemented by
-    /// simpler [`ToDim<S, D>`](crate::ops::ToDim) adaptor for some storages, but may be implemented
+    /// simpler [`IntoDim<S, D>`](crate::ops::IntoDim) adaptor for some storages, but may be implemented
     /// as an in-place replacement for others.
     ///
     /// See [`into_dim_dyn`](Self::into_dim_dyn).

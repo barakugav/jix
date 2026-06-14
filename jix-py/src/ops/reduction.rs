@@ -138,7 +138,7 @@ define_reduction_op!(
     /// non-`NaN` values. If all elements are `NaN`, the result is `NaN`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
     ///         When `None`, reduces over all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
@@ -177,7 +177,7 @@ define_reduction_op!(
     /// non-`NaN` values. If all elements are `NaN`, the result is `NaN`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
     ///         When `None`, reduces over all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
@@ -215,7 +215,7 @@ define_reduction_op!(
     /// value, so they are never selected unless all elements are `NaN`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Single axis to reduce along. Accepts negative values. For 1-D arrays,
     ///         `None` is equivalent to `axis=0`.
     ///     keepdims: If `True`, the reduced axis is kept as a length-1 dimension. Default `False`.
@@ -254,7 +254,7 @@ define_reduction_op!(
     /// value, so they are never selected unless all elements are `NaN`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Single axis to reduce along. Accepts negative values. For 1-D arrays,
     ///         `None` is equivalent to `axis=0`.
     ///     keepdims: If `True`, the reduced axis is kept as a length-1 dimension. Default `False`.
@@ -290,7 +290,7 @@ define_reduction_op!(
     /// large sums, consider casting to a wider type first.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
     ///         When `None`, reduces over all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
@@ -325,7 +325,7 @@ define_reduction_op!(
     /// casting to a wider type first.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
     ///         When `None`, reduces over all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
@@ -359,7 +359,7 @@ define_reduction_op!(
     /// For integer inputs, cast to `f64` first with [`jix.astype(array, 'float64')`][jix.astype].
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
     ///         When `None`, reduces over all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
@@ -390,7 +390,7 @@ define_reduction_op!(
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values. When `None`, reduces over
     ///         all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
@@ -424,7 +424,7 @@ define_reduction_op!(
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values. When `None`, reduces over
     ///         all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
@@ -461,7 +461,7 @@ define_reduction_op!(
     /// dimensions is truthy; returns `True` for empty reductions.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
     ///         When `None`, reduces over all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.
@@ -496,7 +496,7 @@ define_reduction_op!(
     /// dimensions is truthy; returns `False` for empty reductions.
     ///
     /// Args:
-    ///     array: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     array: Input array.
     ///     axis: Axis or axes to reduce. Accepts negative values (e.g. `-1` for the last axis).
     ///         When `None`, reduces over all axes, returning a scalar.
     ///     keepdims: If `True`, reduced axes are kept as length-1 dimensions. Default `False`.

@@ -40,7 +40,7 @@ mod jix {
     pub use crate::ops::{asarray, astype};
 
     #[pymodule_export]
-    pub use crate::ops::{add, divide, multiply, power, subtract};
+    pub use crate::ops::{add, divide, floor_divide, multiply, power, subtract};
 
     #[pymodule_export]
     pub use crate::ops::{
@@ -60,8 +60,8 @@ mod jix {
 
     #[pymodule_export]
     pub use crate::ops::{
-        broadcast, concatenate, flatten, insert_axis, permute_axes, remove_axis, reshape, squeeze,
-        stack, unsqueeze,
+        broadcast, concatenate, flatten, insert_axis, permute_axes, remove_axis, reshape, slice,
+        squeeze, stack, unsqueeze,
     };
 
     #[pymodule_export]
@@ -78,6 +78,9 @@ mod jix {
 
     #[pymodule_export]
     pub use crate::ops::dtype_sub_field;
+
+    #[pymodule_export]
+    pub use crate::ops::{imag, real};
 
     #[pymodule_init]
     fn init(m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> pyo3::PyResult<()> {

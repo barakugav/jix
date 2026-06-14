@@ -2,7 +2,7 @@ use jix_core::dtype::{DtypeScalarKind, Itemsize};
 
 use crate::ops::common::scalar_kind_to_rank_precision;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Rank {
     Bool = 0,
     UInt = 1,
@@ -82,13 +82,26 @@ impl CastKind {
                     }
 
                     // uint to int
-                    (Rank::UInt, Rank::Int)
+                    (Rank::UInt, Rank::Int) => {
+                        // Higher precision is required
+                        #[allow(clippy::unnecessary_unwrap)]
+                        if src_precision.is_none() {
+                            true
+                        } else if let Some(src_precision) = src_precision.unwrap().higher() {
+                            src_precision <= dst_precision
+                        } else {
+                            false
+                        }
+                    }
                     // u/int to float/complex
-                    | (Rank::UInt | Rank::Int, Rank::Float)
+                    (Rank::UInt | Rank::Int, Rank::Float)
                     | (Rank::UInt | Rank::Int, Rank::Complex) => {
                         // Higher precision is required
                         #[allow(clippy::unnecessary_unwrap)]
                         if src_precision.is_none() {
+                            true
+                        } else if dst_precision == Precision::P8 {
+                            // Allow any precision to be cast to 64-bit float/complex
                             true
                         } else if let Some(src_precision) = src_precision.unwrap().higher() {
                             src_precision <= dst_precision
