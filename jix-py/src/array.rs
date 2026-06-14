@@ -675,6 +675,16 @@ impl Array {
         crate::ops::divide(other, slf)
     }
 
+    /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
+    pub fn __floordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::floor_divide(slf, other)
+    }
+
+    /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
+    pub fn __rfloordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
+        crate::ops::floor_divide(other, slf)
+    }
+
     // TODO: __pow__
 
     /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].

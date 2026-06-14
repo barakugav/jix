@@ -145,13 +145,13 @@ define_op2!(
     }
 );
 define_op2!(
-    /// Element-wise division of two arrays (`a / b`).
+    /// Element-wise (true) division of two arrays (`a / b`).
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
-    /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
+    /// Supported dtypes: `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
+    /// For integer dtypes use [`jix.floor_divide()`][jix.floor_divide] (or the `//`
+    /// operator).
     ///
-    /// For **integer** types the result truncates toward zero; dividing by zero raises
-    /// an error. For **float** types, division by zero produces `+/-inf` or `NaN`.
+    /// For **float** types, division by zero produces `+/-inf` or `NaN`.
     /// For **complex** types this is full complex division.
     ///
     /// Available via the `/` operator on arrays.
@@ -175,15 +175,61 @@ define_op2!(
     ///     import jix
     ///     import numpy as np
     ///
-    ///     a = jix.compact([10, 20, 30], dtype=np.int32)
-    ///     b = jix.compact([2, 4, 5], dtype=np.int32)
+    ///     a = jix.compact([10.0, 20.0, 30.0], dtype=np.float32)
+    ///     b = jix.compact([4.0, 5.0, 8.0], dtype=np.float32)
     ///     result = jix.divide(a, b)  # same as `a / b`
-    ///     assert np.array_equal(result.numpy(), [5, 5, 6])
+    ///     assert np.array_equal(result.numpy(), [2.5, 4.0, 3.75])
     ///     ```
     divide,
     Div,
     dispatch = {
-        [u8, i8, u16, i16, u32, i32, u64, i64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        [f16, f32, f64, Complex<f32>, Complex<f64>],
+        Safe
+    }
+);
+define_op2!(
+    /// Element-wise integer division of two arrays (`a // b`).
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+    /// For float and complex dtypes use [`jix.divide()`][jix.divide] (or the `/`
+    /// operator).
+    ///
+    /// The result truncates toward zero (matching Rust's `/` on integers), so for
+    /// signed operands with a negative quotient this differs from numpy's
+    /// `floor_divide`, which rounds toward negative infinity (e.g. `-7 // 2` is `-3`
+    /// here, but `-4` in numpy). For unsigned operands the two agree. Dividing by
+    /// zero raises an error.
+    ///
+    /// Available via the `//` operator on arrays.
+    ///
+    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to the
+    /// smallest type that can represent both without information loss (Safe casting
+    /// rules). For example `u8 // i32 -> i32`.
+    ///
+    /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
+    ///
+    /// Args:
+    ///     a: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///     b: May be anything that [`jix.asarray()`][jix.asarray] accepts.
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
+    ///     No computation occurs until the result is read.
+    ///
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([10, 20, 30], dtype=np.int32)
+    ///     b = jix.compact([3, 4, 7], dtype=np.int32)
+    ///     result = jix.floor_divide(a, b)  # same as `a // b`
+    ///     assert np.array_equal(result.numpy(), [3, 5, 4])
+    ///     ```
+    floor_divide,
+    Div,
+    dispatch = {
+        [u8, i8, u16, i16, u32, i32, u64, i64],
         Safe
     }
 );

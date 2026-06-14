@@ -173,20 +173,16 @@ def test_multiply_custom_inputs():
     check(zac * [1 + 1j, 2 + 0j], dc * np.array([1 + 1j, 2 + 0j]))
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
+@pytest.mark.parametrize("dtype", floats + complexes)
 @given(st.data())
 def test_divide(dtype: np.dtype, data: DataObject):
-    # Use non-zero strategy for both operands to avoid integer division-by-zero panics.
-    # Mirrors Rust's test_op2!(div, ..., op_safe_non_zero_strategy).
+    # divide dispatches only on float/complex dtypes; integer dtypes go through
+    # floor_divide (see test_floor_divide). Non-zero strategy avoids inf/NaN from
+    # division-by-zero for the float case (mirrors Rust's op_safe_non_zero_strategy).
     nz = op_safe_non_zero_element_strategy(dtype)
     (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
     result = za / zb
-    # jix integer division truncates toward zero (Rust semantics); numpy // is floor division.
-    # Cast through float64 and back to get truncation-toward-zero for all signed/unsigned combos.
-    if np.issubdtype(dtype, np.integer):
-        expected = (np_a.astype(np.float64) / np_b.astype(np.float64)).astype(dtype)
-    else:
-        expected = np_a / np_b
+    expected = np_a / np_b
     # Complex division algorithms differ slightly between jix (Rust) and numpy;
     # allow a few ULP of tolerance. Float32 eps ~1.2e-7, float64 eps ~2.2e-16.
     rtol = 1e-5 if np.issubdtype(dtype, np.complexfloating) else 0.0
@@ -194,39 +190,85 @@ def test_divide(dtype: np.dtype, data: DataObject):
 
 
 def test_divide_custom_inputs():
-    def check_int(result, expected_int):
-        # jix integer division truncates (same as //); numpy / would give float
-        np.testing.assert_array_equal(result.numpy(), expected_int)
-
-    def check_float(result, expected):
+    def check(result, expected):
         np.testing.assert_array_equal(result.numpy(), expected)
-
-    # int64 (use // for reference: floor div == truncating for positive values)
-    d = np.array([[10, 20, 30], [40, 50, 60]], dtype=np.int64)
-    za = jix.compact(d)
-    check_int(za / np.int64(10), d // 10)
-    check_int(np.int64(60) / za, 60 // d)  # __rtruediv__ (int64 natural)
-    check_int(za / [[5, 4, 3], [2, 5, 6]], d // [[5, 4, 3], [2, 5, 6]])
-    check_int(za / ((5, 4, 3), (2, 5, 6)), d // ((5, 4, 3), (2, 5, 6)))
-    check_int(jix.divide(za, np.int64(10)), d // 10)
 
     # float64
     df = np.array([10.0, 20.0, 30.0])
     zaf = jix.compact(df)
-    check_float(zaf / 2.0, df / 2.0)
-    check_float(60.0 / zaf, 60.0 / df)  # __rtruediv__ (float64 natural)
-    check_float(zaf / [2.0, 4.0, 5.0], df / [2.0, 4.0, 5.0])
-    check_float(zaf / (2.0, 4.0, 5.0), df / (2.0, 4.0, 5.0))
+    check(zaf / 2.0, df / 2.0)
+    check(60.0 / zaf, 60.0 / df)  # __rtruediv__ (float64 natural)
+    check(zaf / [2.0, 4.0, 5.0], df / [2.0, 4.0, 5.0])
+    check(zaf / (2.0, 4.0, 5.0), df / (2.0, 4.0, 5.0))
+    check(jix.divide(zaf, 2.0), df / 2.0)
+    check(jix.divide(60.0, zaf), 60.0 / df)  # scalar first via free-function
 
     # float32: use jix.divide() for scalar-first to bypass numpy promotion
     df32 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
-    check_float(zaf32 / np.float32(2.0), df32 / np.float32(2.0))
-    check_float(jix.divide(np.float32(60.0), zaf32), np.float32(60.0) / df32)  # scalar first via free-function
-    check_float(
+    check(zaf32 / np.float32(2.0), df32 / np.float32(2.0))
+    check(jix.divide(np.float32(60.0), zaf32), np.float32(60.0) / df32)  # scalar first via free-function
+    check(
         zaf32 / np.array([2.0, 4.0, 5.0], dtype=np.float32),
         df32 / np.array([2.0, 4.0, 5.0], dtype=np.float32),
     )
+
+    # complex128
+    dc = np.array([2 + 4j, 6 + 8j], dtype=np.complex128)
+    zac = jix.compact(dc)
+    check(zac / complex(2, 0), dc / complex(2, 0))
+    check(zac / [1 + 0j, 2 + 0j], dc / np.array([1 + 0j, 2 + 0j]))
+
+
+@pytest.mark.parametrize("dtype", ints + uints)
+@given(st.data())
+def test_floor_divide(dtype: np.dtype, data: DataObject):
+    # floor_divide dispatches only on integer/unsigned dtypes. Non-zero strategy
+    # avoids divide-by-zero panics. jix's `//` truncates toward zero (Rust `/`
+    # semantics) — for signed-negative quotients this differs from numpy's `//`
+    # which floors toward -inf, so the expected is computed via float / and cast.
+    nz = op_safe_non_zero_element_strategy(dtype)
+    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
+    result = za // zb
+    expected = (np_a.astype(np.float64) / np_b.astype(np.float64)).astype(dtype)
+    assert_array_matches(result, expected, data=data)
+
+
+def test_floor_divide_custom_inputs():
+    def check(result, expected):
+        np.testing.assert_array_equal(result.numpy(), expected)
+
+    # int64: Python ints coerce to int64 naturally. For non-negative operands //
+    # and truncation-toward-zero agree, so numpy's // is the reference.
+    d = np.array([[10, 20, 30], [40, 50, 60]], dtype=np.int64)
+    za = jix.compact(d)
+    check(za // np.int64(3), d // 3)
+    check(np.int64(60) // za, 60 // d)  # __rfloordiv__ (int64 natural)
+    check(za // [[5, 4, 3], [2, 5, 6]], d // [[5, 4, 3], [2, 5, 6]])
+    check(za // ((5, 4, 3), (2, 5, 6)), d // ((5, 4, 3), (2, 5, 6)))
+    check(jix.floor_divide(za, np.int64(3)), d // 3)
+    check(jix.floor_divide(np.int64(60), za), 60 // d)  # scalar first via free-function
+
+    # int32: signed-negative quotient — jix truncates toward zero, numpy floors
+    # toward -inf, so they diverge. Compute expected via Python int truncation.
+    neg = np.array([-7, -8, 9], dtype=np.int32)
+    zn = jix.compact(neg)
+    trunc = np.array([int(x / 2) for x in neg], dtype=np.int32)  # [-3, -4, 4]
+    check(zn // np.int32(2), trunc)
+
+    # uint32: unsigned floor div has no sign issue
+    du = np.array([10, 20, 30], dtype=np.uint32)
+    zu = jix.compact(du)
+    check(zu // np.uint32(3), du // np.uint32(3))
+    check(zu // np.array([2, 7, 4], dtype=np.uint32), du // np.array([2, 7, 4], dtype=np.uint32))
+
+
+def test_floor_divide_rejects_floats():
+    """floor_divide dispatches only on integer/unsigned dtypes; floats must error."""
+    a = jix.compact([1.0, 2.0, 3.0], dtype=np.float32)
+    b = jix.compact([1.0, 2.0, 3.0], dtype=np.float32)
+    with pytest.raises(Exception):
+        _ = jix.floor_divide(a, b).numpy()
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])

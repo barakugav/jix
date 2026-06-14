@@ -163,37 +163,40 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
         Err(jix_core::Error::new(
             jix_core::ErrorKind::UnsupportedDtype,
             format!(
-                "Op {} does not support operands with dtypes {:?}",
+                "Op {} does not support operands with dtypes [{}]",
                 self.name,
-                inputs.each_ref().map(|dtype| match dtype {
-                    Operand::Array(array) => Cow::Owned(format!("{}", array.dtype())),
-                    Operand::Scalar {
-                        value,
-                        shape: _,
-                        precision,
-                    } => Cow::Borrowed(match (value, precision) {
-                        (Scalar::Bool(_), _) => "bool",
-                        (Scalar::UInt(_), None) => "uint",
-                        (Scalar::UInt(_), Some(Precision::P1)) => "u8",
-                        (Scalar::UInt(_), Some(Precision::P2)) => "u16",
-                        (Scalar::UInt(_), Some(Precision::P4)) => "u32",
-                        (Scalar::UInt(_), Some(Precision::P8)) => "u64",
-                        (Scalar::Int(_), None) => "int",
-                        (Scalar::Int(_), Some(Precision::P1)) => "i8",
-                        (Scalar::Int(_), Some(Precision::P2)) => "i16",
-                        (Scalar::Int(_), Some(Precision::P4)) => "i32",
-                        (Scalar::Int(_), Some(Precision::P8)) => "i64",
-                        (Scalar::Float(_), None) => "float",
-                        (Scalar::Float(_), Some(Precision::P2)) => "f16",
-                        (Scalar::Float(_), Some(Precision::P4)) => "f32",
-                        (Scalar::Float(_), Some(Precision::P8)) => "f64",
-                        (Scalar::Float(_), Some(_)) => "float<?>",
-                        (Scalar::Complex(_), None) => "Complex",
-                        (Scalar::Complex(_), Some(Precision::P4)) => "Complex<f32>",
-                        (Scalar::Complex(_), Some(Precision::P8)) => "Complex<f64>",
-                        (Scalar::Complex(_), Some(_)) => "Complex<?>",
-                    }),
-                })
+                inputs
+                    .each_ref()
+                    .map(|dtype| match dtype {
+                        Operand::Array(array) => Cow::Owned(format!("{}", array.dtype())),
+                        Operand::Scalar {
+                            value,
+                            shape: _,
+                            precision,
+                        } => Cow::Borrowed(match (value, precision) {
+                            (Scalar::Bool(_), _) => "bool",
+                            (Scalar::UInt(_), None) => "uint",
+                            (Scalar::UInt(_), Some(Precision::P1)) => "u8",
+                            (Scalar::UInt(_), Some(Precision::P2)) => "u16",
+                            (Scalar::UInt(_), Some(Precision::P4)) => "u32",
+                            (Scalar::UInt(_), Some(Precision::P8)) => "u64",
+                            (Scalar::Int(_), None) => "int",
+                            (Scalar::Int(_), Some(Precision::P1)) => "i8",
+                            (Scalar::Int(_), Some(Precision::P2)) => "i16",
+                            (Scalar::Int(_), Some(Precision::P4)) => "i32",
+                            (Scalar::Int(_), Some(Precision::P8)) => "i64",
+                            (Scalar::Float(_), None) => "float",
+                            (Scalar::Float(_), Some(Precision::P2)) => "f16",
+                            (Scalar::Float(_), Some(Precision::P4)) => "f32",
+                            (Scalar::Float(_), Some(Precision::P8)) => "f64",
+                            (Scalar::Float(_), Some(_)) => "float<?>",
+                            (Scalar::Complex(_), None) => "Complex",
+                            (Scalar::Complex(_), Some(Precision::P4)) => "Complex<f32>",
+                            (Scalar::Complex(_), Some(Precision::P8)) => "Complex<f64>",
+                            (Scalar::Complex(_), Some(_)) => "Complex<?>",
+                        }),
+                    })
+                    .join(", ")
             ),
         ))
         .into_py_result()
