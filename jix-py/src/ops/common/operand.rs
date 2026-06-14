@@ -76,7 +76,7 @@ impl Operand {
                 ),
                 DtypeScalarKind::I64 => (
                     Scalar::Int(item.extract::<i64>()? as i64),
-                    Some(Precision::P4),
+                    Some(Precision::P8),
                 ),
                 DtypeScalarKind::U8 => (
                     Scalar::UInt(item.extract::<u8>()? as u64),
