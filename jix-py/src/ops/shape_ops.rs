@@ -1033,3 +1033,68 @@ pub fn roll<'py>(
     let ret = jix_core::ops::Roll::new_array(core, shift, axis).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
+
+/// Replicates the array along a single axis.
+///
+/// The output shape matches the input except `shape[axis]` is multiplied by `reps`. Element
+/// `i` along the output axis comes from input element `i mod shape[axis]`, so the whole
+/// sequence is repeated rather than each element in place. This differs from
+/// [`jix.repeat()`][jix.repeat], which repeats each element.
+///
+/// Unlike `numpy.tile`, this function only accepts a single integer `reps` along a single
+/// `axis`, and does not extend the array with new leading axes. `axis` must satisfy
+/// `-ndim <= axis < ndim`.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// Args:
+///     array: Input array.
+///     reps: Number of times to repeat the array along `axis`. Must be non-negative.
+///     axis: Axis to tile along. Negative indices are supported. When `None` (the default),
+///         the input must be 1-D and the only axis is tiled.
+///
+/// Returns:
+///     A [`jix.Array`][jix.Array] with `shape[axis]` multiplied by `reps`.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # 1-D: the whole sequence is repeated `reps` times
+///     a = jix.compact([1, 2, 3], dtype=np.int32)
+///     assert np.array_equal(jix.tile(a, 2).numpy(), [1, 2, 3, 1, 2, 3])
+///
+///     # 2-D along rows (axis=0): the matrix is stacked on top of itself
+///     b = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
+///     assert np.array_equal(
+///         jix.tile(b, 2, axis=0).numpy(),
+///         [[1, 2], [3, 4], [1, 2], [3, 4]],
+///     )
+///
+///     # 2-D along columns (axis=1): each row is repeated horizontally
+///     assert np.array_equal(
+///         jix.tile(b, 2, axis=1).numpy(),
+///         [[1, 2, 1, 2], [3, 4, 3, 4]],
+///     )
+///
+///     # reps=0 yields an empty array along that axis
+///     assert jix.tile(a, 0).numpy().shape == (0,)
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+#[pyo3(signature = (array, reps, axis=None))]
+pub fn tile<'py>(
+    array: &Bound<'py, PyAny>,
+    reps: u64,
+    axis: Option<i32>,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray(array)?;
+    let core = py_arr.get().to_core();
+    let axis = normalize_axis_optional(axis, core.ndim())?;
+    if reps == 1 {
+        return Ok(py_arr); // no-op
+    }
+    let ret = jix_core::ops::Tile::new_array(core, reps, axis).into_py_result()?;
+    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+}

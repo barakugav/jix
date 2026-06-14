@@ -1,5 +1,4 @@
 - ops
-    - tile
     - clip, clamp
     - allclose, isclose
     - square

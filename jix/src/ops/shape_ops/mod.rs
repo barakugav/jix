@@ -31,6 +31,9 @@ pub use flip::*;
 mod roll;
 pub use roll::*;
 
+mod tile;
+pub use tile::*;
+
 use crate::ops::AxesArg;
 use crate::storage::Compact;
 use crate::{Array, ArrayStorage, IntoDimension};
@@ -146,6 +149,22 @@ where
     #[track_caller]
     pub fn roll(self, shift: i64, axis: usize) -> Array<Roll<S>> {
         Roll::new_array(self, shift, axis).unwrap()
+    }
+
+    /// Returns a lazy view of the array replicated `reps` times along `axis`.
+    /// See [`Tile`] for details and examples.
+    ///
+    /// Unlike NumPy's `tile`, `axis` must satisfy `axis < self.ndim()`; the array is
+    /// not extended with new leading dimensions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `axis >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
+    /// internal axis is required), or if `self.shape()[axis] * reps` overflows `u64`.
+    #[inline]
+    #[track_caller]
+    pub fn tile(self, reps: u64, axis: usize) -> Array<Tile<S>> {
+        Tile::new_array(self, reps, axis).unwrap()
     }
 
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.

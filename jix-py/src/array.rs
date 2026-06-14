@@ -888,6 +888,16 @@ impl Array {
         crate::ops::roll(slf, shift, axis)
     }
 
+    /// Replicates the array along a single axis. See [`jix.tile()`][jix.tile].
+    #[pyo3(signature = (reps, axis=None))]
+    pub fn tile<'py>(
+        slf: &Bound<'py, Array>,
+        reps: u64,
+        axis: Option<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::tile(slf, reps, axis)
+    }
+
     // == complex ops ==
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].

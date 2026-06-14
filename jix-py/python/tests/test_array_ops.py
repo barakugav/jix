@@ -782,3 +782,78 @@ def test_roll_large_shift_wraps():
     a = jix.compact(arr)
     r = jix.roll(a, 12, axis=0)
     np.testing.assert_array_equal(r.numpy(), np.roll(arr, 12, axis=0))
+
+
+# ---------------------------------------------------------------------------
+# tile
+# ---------------------------------------------------------------------------
+
+
+def test_tile_1d():
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    np.testing.assert_array_equal(jix.tile(a, 2).numpy(), [1, 2, 3, 1, 2, 3])
+
+
+def test_tile_axis0():
+    arr = np.array([[1, 2], [3, 4]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.tile(a, 3, axis=0)
+    np.testing.assert_array_equal(r.numpy(), np.tile(arr, (3, 1)))
+
+
+def test_tile_axis1():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.tile(a, 2, axis=1)
+    np.testing.assert_array_equal(r.numpy(), np.tile(arr, (1, 2)))
+
+
+def test_tile_negative_axis():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.tile(a, 2, axis=-1)
+    np.testing.assert_array_equal(r.numpy(), np.tile(arr, (1, 2)))
+
+
+def test_tile_axis_none_on_non_1d_raises():
+    a = jix.compact([[1, 2], [3, 4]], dtype=np.int32)
+    with pytest.raises(Exception):
+        jix.tile(a, 2)
+
+
+def test_tile_out_of_bounds_axis_raises():
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    with pytest.raises(Exception):
+        jix.tile(a, 2, axis=1)
+
+
+def test_tile_reps_zero_yields_empty():
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    r = jix.tile(a, 0)
+    assert r.numpy().shape == (0,)
+
+
+def test_tile_reps_one_is_identity():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.tile(a, 1, axis=0)
+    np.testing.assert_array_equal(r.numpy(), arr)
+
+
+def test_tile_method_on_array():
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+    a = jix.compact(arr)
+    r = a.tile(2, axis=0)
+    np.testing.assert_array_equal(r.numpy(), np.tile(arr, (2, 1)))
+
+
+def test_tile_accepts_python_list():
+    r = jix.tile([1, 2, 3], 2)
+    np.testing.assert_array_equal(r.numpy(), [1, 2, 3, 1, 2, 3])
+
+
+def test_tile_large_reps():
+    arr = np.arange(4, dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.tile(a, 7)
+    np.testing.assert_array_equal(r.numpy(), np.tile(arr, 7))
