@@ -980,3 +980,56 @@ pub fn flip<'py>(
     let ret = jix_core::ops::Flip::new_array(array, axes.as_slice()).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
+
+/// Rolls elements along an axis, wrapping around at the boundary.
+///
+/// Elements pushed off the end of an axis re-enter at the beginning, so the shape and dtype
+/// of the output equal the input. `shift` is taken modulo `shape[axis]`; positive shifts
+/// move elements toward larger indices, negative shifts toward smaller indices.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// Args:
+///     array: Input array.
+///     shift: Number of places to shift.
+///     axis: Axis to roll. Negative indices are supported. When `None` (the default), the
+///         input must be 1-D and the only axis is rolled. Unlike `numpy.roll`, this
+///         function does not flatten higher-dimensional inputs when `axis` is omitted.
+///
+/// Returns:
+///     A [`jix.Array`][jix.Array] with the same shape and dtype as the input.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # 1-D positive shift wraps the tail to the front.
+///     a = jix.compact([0, 1, 2, 3, 4], dtype=np.int32)
+///     assert np.array_equal(jix.roll(a, 2).numpy(), [3, 4, 0, 1, 2])
+///
+///     # Negative shift wraps the head to the back.
+///     assert np.array_equal(jix.roll(a, -1).numpy(), [1, 2, 3, 4, 0])
+///
+///     # 2-D roll along an explicit axis (axis must be given when ndim > 1).
+///     b = jix.compact([[0, 1, 2], [3, 4, 5]], dtype=np.int32)
+///     assert np.array_equal(jix.roll(b, 1, axis=0).numpy(), [[3, 4, 5], [0, 1, 2]])
+///     assert np.array_equal(jix.roll(b, 1, axis=1).numpy(), [[2, 0, 1], [5, 3, 4]])
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyfunction]
+#[pyo3(signature = (array, shift, axis=None))]
+pub fn roll<'py>(
+    array: &Bound<'py, PyAny>,
+    shift: i64,
+    axis: Option<i32>,
+) -> PyResult<Bound<'py, Array>> {
+    let py_arr = asarray(array)?;
+    let core = py_arr.get().to_core();
+    let axis = normalize_axis_optional(axis, core.ndim())?;
+    if shift == 0 {
+        return Ok(py_arr); // no-op if no shift
+    }
+    let ret = jix_core::ops::Roll::new_array(core, shift, axis).into_py_result()?;
+    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+}

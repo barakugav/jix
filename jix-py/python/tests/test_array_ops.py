@@ -722,3 +722,63 @@ def test_flip_method_on_array():
 def test_flip_accepts_python_list():
     r = jix.flip([1, 2, 3], axis=0)
     np.testing.assert_array_equal(r.numpy(), [3, 2, 1])
+
+
+# ---------------------------------------------------------------------------
+# roll
+# ---------------------------------------------------------------------------
+
+
+def test_roll_1d_positive():
+    a = jix.compact([0, 1, 2, 3, 4], dtype=np.int32)
+    np.testing.assert_array_equal(jix.roll(a, 2).numpy(), [3, 4, 0, 1, 2])
+
+
+def test_roll_1d_negative():
+    a = jix.compact([0, 1, 2, 3, 4], dtype=np.int32)
+    np.testing.assert_array_equal(jix.roll(a, -1).numpy(), [1, 2, 3, 4, 0])
+
+
+def test_roll_axis_int():
+    arr = np.arange(12, dtype=np.int32).reshape(3, 4)
+    a = jix.compact(arr)
+    r = jix.roll(a, 1, axis=0)
+    np.testing.assert_array_equal(r.numpy(), np.roll(arr, 1, axis=0))
+
+
+def test_roll_negative_axis():
+    arr = np.arange(12, dtype=np.int32).reshape(3, 4)
+    a = jix.compact(arr)
+    r = jix.roll(a, 1, axis=-1)
+    np.testing.assert_array_equal(r.numpy(), np.roll(arr, 1, axis=-1))
+
+
+def test_roll_axis_none_on_non_1d_raises():
+    a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
+    with pytest.raises(Exception):
+        jix.roll(a, 1)
+
+
+def test_roll_out_of_bounds_axis_raises():
+    a = jix.compact([1, 2, 3], dtype=np.int32)
+    with pytest.raises(Exception):
+        jix.roll(a, 1, axis=1)
+
+
+def test_roll_method_on_array():
+    arr = np.arange(12, dtype=np.int32).reshape(3, 4)
+    a = jix.compact(arr)
+    r = a.roll(1, axis=0)
+    np.testing.assert_array_equal(r.numpy(), np.roll(arr, 1, axis=0))
+
+
+def test_roll_accepts_python_list():
+    r = jix.roll([1, 2, 3, 4], 1)
+    np.testing.assert_array_equal(r.numpy(), [4, 1, 2, 3])
+
+
+def test_roll_large_shift_wraps():
+    arr = np.arange(5, dtype=np.int32)
+    a = jix.compact(arr)
+    r = jix.roll(a, 12, axis=0)
+    np.testing.assert_array_equal(r.numpy(), np.roll(arr, 12, axis=0))

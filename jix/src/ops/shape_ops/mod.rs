@@ -28,6 +28,9 @@ pub use repeat::*;
 mod flip;
 pub use flip::*;
 
+mod roll;
+pub use roll::*;
+
 use crate::ops::AxesArg;
 use crate::storage::Compact;
 use crate::{Array, ArrayStorage, IntoDimension};
@@ -127,6 +130,22 @@ where
     #[track_caller]
     pub fn flip(self, axis: impl AxesArg) -> Array<Flip<S>> {
         Flip::new_array(self, axis).unwrap()
+    }
+
+    /// Returns a lazy view of the array with elements rolled along the given axis.
+    /// See [`Roll`] for details and examples.
+    ///
+    /// `shift` is reduced modulo `shape[axis]`. Positive shifts move elements toward
+    /// larger indices (wrapping around at the end); negative shifts move them the other
+    /// way.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `axis >= self.ndim()`.
+    #[inline]
+    #[track_caller]
+    pub fn roll(self, shift: i64, axis: usize) -> Array<Roll<S>> {
+        Roll::new_array(self, shift, axis).unwrap()
     }
 
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.

@@ -878,6 +878,16 @@ impl Array {
         crate::ops::flip(slf, axis)
     }
 
+    /// Rolls elements along an axis, wrapping at the boundary. See [`jix.roll()`][jix.roll].
+    #[pyo3(signature = (shift, axis=None))]
+    pub fn roll<'py>(
+        slf: &Bound<'py, Array>,
+        shift: i64,
+        axis: Option<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::roll(slf, shift, axis)
+    }
+
     // == complex ops ==
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
