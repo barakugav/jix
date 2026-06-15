@@ -71,11 +71,11 @@ macro_rules! define_array_op2_method {
 
 pub(crate) use {define_array_op1_method, define_array_op2_method};
 
-pub(crate) trait BulkInfo {
-    const BULK: usize;
+pub(crate) trait LanesInfo {
+    const LANES: usize;
 }
-impl<T: Dtyped> BulkInfo for T {
-    const BULK: usize = {
+impl<T: Dtyped> LanesInfo for T {
+    const LANES: usize = {
         if size_of::<T>() == 0 {
             1024
         } else {

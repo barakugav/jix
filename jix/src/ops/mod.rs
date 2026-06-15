@@ -135,7 +135,7 @@ pub use complex::*;
 
 mod common;
 pub use common::AxesArg;
-pub(crate) use common::BulkInfo;
+pub(crate) use common::LanesInfo;
 
 pub(crate) mod _traits {
     pub use super::cast::_traits::*;

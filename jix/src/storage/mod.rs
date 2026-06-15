@@ -52,7 +52,7 @@
 use crate::codec::{DecoderParams, EncoderParams};
 use crate::dtype::Dtyped;
 use crate::error::{check_dtype, ensure, Result};
-use crate::ops::BulkInfo;
+use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
 use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
@@ -265,7 +265,7 @@ pub trait ReadData<T> {
         assert_eq!(buf.len(), nitems);
 
         #[inline(always)]
-        unsafe fn read_to_buf_impl<T, const BULK: usize>(
+        unsafe fn read_to_buf_impl<T, const LANES: usize>(
             data: &mut impl ReadData<T>,
             buf: &mut [T],
         ) -> Result<()>
@@ -275,10 +275,10 @@ pub trait ReadData<T> {
             let nitems = data.len();
             assert_eq!(buf.len(), nitems);
             let mut offset = 0;
-            while offset + BULK <= nitems {
-                let chunk = data.read_bulk::<BULK>(offset);
-                buf[offset..][..BULK].copy_from_slice(&chunk);
-                offset += BULK;
+            while offset + LANES <= nitems {
+                let chunk = data.read_bulk::<LANES>(offset);
+                buf[offset..][..LANES].copy_from_slice(&chunk);
+                offset += LANES;
             }
             while offset < nitems {
                 let item = data.read_bulk::<1>(offset)[0];
@@ -288,8 +288,8 @@ pub trait ReadData<T> {
             Ok(())
         }
 
-        // this is a compile time check, the compiler knows the value of BULK
-        let read_fn = match <T as BulkInfo>::BULK {
+        // this is a compile time check, the compiler knows the value of LANES
+        let read_fn = match <T as LanesInfo>::LANES {
             1 => read_to_buf_impl::<T, 1>,
             2 => read_to_buf_impl::<T, 2>,
             4 => read_to_buf_impl::<T, 4>,

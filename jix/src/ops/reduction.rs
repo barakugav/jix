@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
-use crate::ops::BulkInfo;
+use crate::ops::LanesInfo;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
@@ -138,8 +138,8 @@ where
 
     #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        // this is a compile time check, the compiler knows the value of `BULK`
-        let read_fn = match <S::Item as BulkInfo>::BULK {
+        // this is a compile time check, the compiler knows the value of `LANES`
+        let read_fn = match <S::Item as LanesInfo>::LANES {
             1 => Self::read_data_impl::<1>,
             2 => Self::read_data_impl::<2>,
             4 => Self::read_data_impl::<4>,
@@ -200,7 +200,7 @@ where
     D: Dimension,
 {
     #[inline]
-    fn read_data_impl<const SIMD: usize>(
+    fn read_data_impl<const LANES: usize>(
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
@@ -528,23 +528,23 @@ where
                     // SAFETY: every state was written during the first bulk.
                     let mut state = unsafe { state_ref.assume_init_read() };
 
-                    // Fold the first SIMD block
-                    while item_idx < item_idx_end.min(SIMD as u64) {
+                    // Fold the first LANES block
+                    while item_idx < item_idx_end.min(LANES as u64) {
                         let item = reduction_iter.next();
                         let item = unsafe { item.unwrap_unchecked() };
                         state = self.kernel.update_state(state, item, item_idx);
                         item_idx += 1;
                     }
-                    // Fold all SIMD blocks
-                    let simd_idx_end = item_idx_end.saturating_sub(SIMD as u64);
-                    while item_idx < simd_idx_end {
-                        let items: [_; SIMD] = std::array::from_fn(|_| unsafe {
+                    // Fold all LANES blocks
+                    let item_idx_end_lanes = item_idx_end.saturating_sub(LANES as u64);
+                    while item_idx < item_idx_end_lanes {
+                        let items: [_; LANES] = std::array::from_fn(|_| unsafe {
                             reduction_iter.next().unwrap_unchecked()
                         });
                         for (i, item) in items.into_iter().enumerate() {
                             state = self.kernel.update_state(state, item, item_idx + i as u64);
                         }
-                        item_idx += SIMD as u64;
+                        item_idx += LANES as u64;
                     }
                     // Fold the tail
                     while item_idx < item_idx_end {
