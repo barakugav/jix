@@ -9,9 +9,8 @@
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
 - build wheels for free threaded python (blocked by https://github.com/Jij-Inc/pyo3-stub-gen/issues/305)
-- add "why should i use this" to readme(s)
 - add link (pyproject metadata + readme) to readthedocs
-- build wheels for windows
+- build wheels for windows, wsam
 - add NdIter.foreach() and NdIter.try_foreach()
 - have some SIMD friendly api in NdIter.foreach(), like when detecting the last dim is continuous
 - tmp_buf_typed should return a typed version of TmpBuf
@@ -22,3 +21,4 @@
 - bump pyo3 to 0.29
 - rework block shape and read shape propagation through ops
 - cache python pointers, such as `numpy.astype` func itself
+- change reshape to not create a copy by default
