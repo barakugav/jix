@@ -22,7 +22,7 @@ impl<S> NdIterExtension for NdIterExtStridesPtr<S>
 where
     S: Idx + 'static,
 {
-    type Item<'a> = *const u8;
+    type Item = *const u8;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
@@ -71,7 +71,7 @@ impl<S> NdIterExtension for NdIterExtStridesPtrMut<S>
 where
     S: Idx + 'static,
 {
-    type Item<'a> = *mut u8;
+    type Item = *mut u8;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
@@ -115,10 +115,7 @@ impl NdIterExtStridesOffset {
     }
 }
 impl NdIterExtension for NdIterExtStridesOffset {
-    type Item<'a>
-        = u64
-    where
-        Self: 'a;
+    type Item = u64;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {

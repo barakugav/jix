@@ -459,7 +459,6 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                     ),
                 );
                 while let Some((idx, out)) = iter.next() {
-                    let idx = D::from_slice(idx).unwrap();
                     let value = (self.f)(idx.to_index());
                     unsafe { out.cast::<T>().write(value) };
                 }
@@ -825,9 +824,9 @@ impl<S: ArrayStorage> Array<S> {
             S::Dimension::from_slice(&block_begin).unwrap(),
             S::Dimension::from_slice(&block_end).unwrap(),
             NdIterExtBlockOffsetSize::new(
-                &elem_begin,
-                &elem_end,
-                &dim_arr(ndim, |dim| read_shape[dim] as u64),
+                S::Dimension::from_slice(&elem_begin).unwrap(),
+                S::Dimension::from_slice(&elem_end).unwrap(),
+                S::Dimension::from_slice(&dim_arr(ndim, |dim| read_shape[dim] as u64)).unwrap(),
             ),
         );
 
@@ -843,7 +842,7 @@ impl<S: ArrayStorage> Array<S> {
                 start..end
             });
             let tmp_buf = {
-                let read_nitems = block_size.iter().product::<u64>();
+                let read_nitems = block_size.as_slice().iter().product::<u64>();
                 tmp_buf.set_len(read_nitems as usize * dtype.itemsize() as usize);
                 tmp_buf.as_mut_slice()
             };
@@ -858,8 +857,8 @@ impl<S: ArrayStorage> Array<S> {
                 nd_copy(
                     tmp_buf.as_ptr(),
                     dst_ptr,
-                    S::Dimension::from_slice(block_size).unwrap(),
-                    &default_strides(block_size, itemsize as _),
+                    block_size.clone(),
+                    &default_strides(block_size.as_slice(), itemsize as _),
                     &out_strides,
                     itemsize,
                 )
@@ -1225,9 +1224,9 @@ impl<S: ArrayStorage> Array<S> {
         let mut block_iter = NdIter::new(
             S::Dimension::from_slice(&grid_shape).unwrap(),
             NdIterExtBlockOffsetSize::new(
-                &dim_arr(ndim, |_| 0),
-                shape,
-                &dim_arr(ndim, |dim| block_shape[dim] as u64),
+                S::Dimension::from_slice(&dim_arr(ndim, |_| 0)).unwrap(),
+                S::Dimension::from_slice(shape).unwrap(),
+                S::Dimension::from_slice(&dim_arr(ndim, |dim| block_shape[dim] as u64)).unwrap(),
             ),
         );
 
@@ -1260,6 +1259,7 @@ impl<S: ArrayStorage> Array<S> {
                     debug_assert_eq!(
                         block_logical_idx,
                         block_idx
+                            .as_slice()
                             .iter()
                             .zip(&grid_logical_strides)
                             .map(|(i, s)| i * s)
@@ -1285,7 +1285,8 @@ impl<S: ArrayStorage> Array<S> {
                         tmp_block_plain.as_mut_slice()
                     } else {
                         tmp_block_plain.fill(0); // zero-pad
-                        let b_size_bytes = block_size.iter().product::<u64>() as usize * itemsize;
+                        let b_size_bytes =
+                            block_size.as_slice().iter().product::<u64>() as usize * itemsize;
                         let tmp_block_plain2 = &mut *tmp_block_compressed;
                         let align_padding = tmp_block_compressed_len.ceil_to_multiple(alignment)
                             - tmp_block_compressed_len;
@@ -1308,7 +1309,7 @@ impl<S: ArrayStorage> Array<S> {
                             nd_copy(
                                 read_data_buf.as_ptr(),
                                 tmp_block_plain_ptr,
-                                S::Dimension::from_slice(block_size).unwrap(),
+                                block_size.clone(),
                                 &src_strides,
                                 &block_strides,
                                 itemsize,

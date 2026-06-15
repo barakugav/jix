@@ -1,5 +1,6 @@
 use crate::util::iter::NdIterExtension;
 use crate::util::{dim_arr, DimArray};
+use crate::Dimension;
 
 /// [`NdIterExtension`] that tracks the per-block inner offset and active size for each dimension
 /// as a block-space index advances through an N-dimensional sub-range.
@@ -17,16 +18,16 @@ use crate::util::{dim_arr, DimArray};
 /// `inner_offset` and `block_size` are per-dimension slices describing which elements of the
 /// current block fall inside the requested range. Interior blocks (fully covered) always have
 /// `inner_offset = 0` and `block_size = block_shape`; border blocks carry their partial values.
-pub(crate) struct NdIterExtBlockOffsetSize {
+pub(crate) struct NdIterExtBlockOffsetSize<D> {
     /// The size of a full block in each dimension.
-    block_shape: DimArray<u64>,
+    block_shape: D,
     /// Low and high border descriptors for each dimension.
     borders: DimArray<(BlocksIterBorder, BlocksIterBorder)>,
 
     /// Per-dimension element offset within the current block.
-    inner_offset: DimArray<u64>,
+    inner_offset: D,
     /// Per-dimension number of active elements in the current block.
-    current_block_size: DimArray<u64>,
+    current_block_size: D,
 }
 /// Describes the boundary block on one end of a single dimension.
 struct BlocksIterBorder {
@@ -37,12 +38,15 @@ struct BlocksIterBorder {
     /// The number of elements from this block that fall inside the requested range.
     length: u64,
 }
-impl NdIterExtBlockOffsetSize {
+impl<D> NdIterExtBlockOffsetSize<D>
+where
+    D: Dimension,
+{
     #[inline(always)]
-    pub(crate) fn new(begin: &[u64], end: &[u64], block_shape: &[u64]) -> Self {
-        let ndim = begin.len();
-        assert_eq!(ndim, end.len());
-        assert_eq!(ndim, block_shape.len());
+    pub(crate) fn new(begin: D, end: D, block_shape: D) -> Self {
+        let ndim = begin.ndim();
+        assert_eq!(ndim, end.ndim());
+        assert_eq!(ndim, block_shape.ndim());
 
         let mut borders = DimArray::new();
         for dim in 0..ndim {
@@ -73,22 +77,23 @@ impl NdIterExtBlockOffsetSize {
             ));
         }
 
-        let inner_offset = dim_arr(ndim, |dim| borders[dim].0.inner_offset);
-        let current_block_size = dim_arr(ndim, |dim| borders[dim].0.length);
+        let inner_offset =
+            D::from_slice(&dim_arr(ndim, |dim| borders[dim].0.inner_offset)).unwrap();
+        let current_block_size =
+            D::from_slice(&dim_arr(ndim, |dim| borders[dim].0.length)).unwrap();
         Self {
-            block_shape: DimArray::from_slice(block_shape).unwrap(),
+            block_shape,
             borders,
             inner_offset,
             current_block_size,
         }
     }
 }
-impl NdIterExtension for NdIterExtBlockOffsetSize {
-    type Item<'a>
-        = (&'a [u64], &'a [u64])
-    where
-        Self: 'a;
-
+impl<D> NdIterExtension for NdIterExtBlockOffsetSize<D>
+where
+    D: Dimension,
+{
+    type Item = (D, D);
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, after: u64, _diff: u64) {
         let (low, high) = &self.borders[dim];
@@ -116,16 +121,16 @@ impl NdIterExtension for NdIterExtBlockOffsetSize {
     }
 
     #[inline(always)]
-    fn next(&self) -> Self::Item<'_> {
-        (&self.inner_offset, &self.current_block_size)
+    fn next(&self) -> Self::Item {
+        (self.inner_offset.clone(), self.current_block_size.clone())
     }
 
     #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.block_shape.len(), ndim);
+        assert_eq!(self.block_shape.ndim(), ndim);
         assert_eq!(self.borders.len(), ndim);
-        assert_eq!(self.inner_offset.len(), ndim);
-        assert_eq!(self.current_block_size.len(), ndim);
+        assert_eq!(self.inner_offset.ndim(), ndim);
+        assert_eq!(self.current_block_size.ndim(), ndim);
     }
 }
 
@@ -139,8 +144,12 @@ mod tests {
         begin: &[u64],
         end: &[u64],
         block: &[u64],
-    ) -> NdIter<DimDyn, NdIterExtBlockOffsetSize> {
-        let ext = NdIterExtBlockOffsetSize::new(begin, end, block);
+    ) -> NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>> {
+        let ext = NdIterExtBlockOffsetSize::new(
+            DimDyn::from_slice(begin).unwrap(),
+            DimDyn::from_slice(end).unwrap(),
+            DimDyn::from_slice(block).unwrap(),
+        );
         let block_begin = begin
             .iter()
             .zip(block)
@@ -161,7 +170,9 @@ mod tests {
         block_size: Vec<u64>,
     }
 
-    fn collect(mut iter: NdIter<DimDyn, NdIterExtBlockOffsetSize>) -> Vec<BlocksIterItemOwned> {
+    fn collect(
+        mut iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>,
+    ) -> Vec<BlocksIterItemOwned> {
         let mut out = Vec::new();
         while let Some((block_idx, (inner_offset, block_size))) = iter.next() {
             out.push(BlocksIterItemOwned {

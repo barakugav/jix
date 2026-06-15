@@ -303,9 +303,9 @@ where
             (
                 nd_iter_ext_logical_global_index(&self.block_grid_shape, &block_begin),
                 NdIterExtBlockOffsetSize::new(
-                    &elem_begin,
-                    &elem_end,
-                    &dim_arr(ndim, |dim| block_shape[dim] as u64),
+                    D::from_slice(&elem_begin).unwrap(),
+                    D::from_slice(&elem_end).unwrap(),
+                    D::from_slice(&dim_arr(ndim, |dim| block_shape[dim] as u64)).unwrap(),
                 ),
             ),
         );
@@ -341,7 +341,7 @@ where
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    D::from_slice(block_size).unwrap(),
+                    block_size.clone(),
                     &block_strides,
                     &out_strides,
                     itemsize,

@@ -362,9 +362,11 @@ where
             S::Dimension::from_slice(&bulk_grid_begin).unwrap(),
             S::Dimension::from_slice(&bulk_grid_end).unwrap(),
             NdIterExtBlockOffsetSize::new(
-                &dim_arr(inner_ndim, |dim| inner_range_full[dim].start),
-                &dim_arr(inner_ndim, |dim| inner_range_full[dim].end),
-                &bulk_shape,
+                S::Dimension::from_slice(&dim_arr(inner_ndim, |dim| inner_range_full[dim].start))
+                    .unwrap(),
+                S::Dimension::from_slice(&dim_arr(inner_ndim, |dim| inner_range_full[dim].end))
+                    .unwrap(),
+                S::Dimension::from_slice(&bulk_shape).unwrap(),
             ),
         );
 
@@ -410,7 +412,11 @@ where
             let mut tile_iter = NdIter::new_with_begin(
                 S::Dimension::from_slice(&tile_grid_begin).unwrap(),
                 S::Dimension::from_slice(&tile_grid_end).unwrap(),
-                NdIterExtBlockOffsetSize::new(&bulk_begin, &bulk_end, &tile_shape),
+                NdIterExtBlockOffsetSize::new(
+                    S::Dimension::from_slice(&bulk_begin).unwrap(),
+                    S::Dimension::from_slice(&bulk_end).unwrap(),
+                    S::Dimension::from_slice(&tile_shape).unwrap(),
+                ),
             );
             debug_assert!(
                 (0..inner_ndim)
@@ -433,14 +439,16 @@ where
 
                 // Read this tile's items
                 items_buf.set_len(
-                    (tile_size.iter().product::<u64>() * size_of::<S::Item>() as u64) as usize,
+                    (tile_size.as_slice().iter().product::<u64>() * size_of::<S::Item>() as u64)
+                        as usize,
                 );
                 let items_buf = items_buf.as_mut_slice();
                 self.array.read_data(&tile, items_buf, context)?;
 
                 // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
                 // `tile_state_base` shifts `state_buf` to its first slot.
-                let items_buf_strides = default_strides(tile_size, size_of::<S::Item>() as u64);
+                let items_buf_strides =
+                    default_strides(tile_size.as_slice(), size_of::<S::Item>() as u64);
                 let items_buf_strides_for_out_iter = items_buf_strides
                     .iter()
                     .zip(&self.is_reduced)
