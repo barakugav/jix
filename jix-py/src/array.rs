@@ -374,7 +374,7 @@ impl Array {
         context: Option<&Bound<'py, ReadContext>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
         let shape = self.arr.shape();
-        let parsed = crate::ops::parse_basic_index(shape, index)?;
+        let parsed = crate::ops::parse_basic_index(py, shape, index)?;
 
         let mut ranges: DimArray<Range<u64>> = DimArray::new();
         let mut out_shape: Vec<usize> = Vec::with_capacity(parsed.items.len());

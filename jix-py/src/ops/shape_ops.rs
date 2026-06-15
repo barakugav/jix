@@ -166,7 +166,7 @@ pub fn slice<'py>(
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
     let arr = py_arr.get().to_core();
-    let parsed = parse_basic_index(arr.shape(), Some(index))?;
+    let parsed = parse_basic_index(py_arr.py(), arr.shape(), Some(index))?;
 
     let spec = SliceSpec::new(parsed.items.as_slice());
     let sliced = jix_core::ops::Slice::new_array(arr, spec)
@@ -188,6 +188,7 @@ pub fn slice<'py>(
 /// than 1 are rejected. Bounds are validated strictly (no numpy-style clamping).
 /// Returns one `SliceItem` per array dimension plus the list of integer-indexed axes.
 pub(crate) fn parse_basic_index<'py>(
+    py: Python<'py>,
     shape: &[u64],
     index: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<ParsedBasicIndex> {
@@ -209,6 +210,9 @@ pub(crate) fn parse_basic_index<'py>(
         }
         None => vec![],
     };
+    let start_str = "start".into_pyobject(py)?;
+    let stop_str = "stop".into_pyobject(py)?;
+    let step_str = "step".into_pyobject(py)?;
     let raw = raw
         .into_iter()
         .map(|item| {
@@ -216,10 +220,10 @@ pub(crate) fn parse_basic_index<'py>(
                 return Ok(RawIdxItem::Ellipsis);
             }
             if let Ok(slice) = item.cast::<PySlice>() {
-                let start = slice.getattr("start")?.extract::<Option<i64>>()?;
-                let stop = slice.getattr("stop")?.extract::<Option<i64>>()?;
+                let start = slice.getattr(&start_str)?.extract::<Option<i64>>()?;
+                let stop = slice.getattr(&stop_str)?.extract::<Option<i64>>()?;
                 let step = slice
-                    .getattr("step")?
+                    .getattr(&step_str)?
                     .extract::<Option<i64>>()?
                     .unwrap_or(1);
                 return Ok(RawIdxItem::Slice(SliceItem {
