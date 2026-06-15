@@ -119,7 +119,7 @@ where
             borders.push(shape[axis]);
         }
 
-        let shape = ArraysT::Dimension::from_slice(&shape).unwrap();
+        let shape = ArraysT::Dimension::from_slice(&shape);
         Ok(Self {
             shape,
             arrays,
@@ -214,8 +214,7 @@ where
             });
             let sub_shape = Self::Dimension::from_fn(index.len(), |dim| {
                 (sub_index[dim].end - sub_index[dim].start) as u64
-            })
-            .unwrap();
+            });
             let sub_size_bytes = sub_shape.as_slice().iter().product::<u64>() as usize * itemsize;
             let buf_offset = buf_concat_offset * concat_stride;
 

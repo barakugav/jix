@@ -14,7 +14,7 @@ use std::ops::Range;
 
 use crate::codec::{DecoderParams, EncoderParams, ReadContext};
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, Result};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout, ElementType};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
@@ -290,13 +290,11 @@ where
         let block_strides = default_strides(block_shape, itemsize as BlockSize); // TODO: precomute me
 
         // Block-space begin/end for NdIter.
-        let block_begin =
-            D::from_fn(ndim, |dim| index[dim].start / block_shape[dim] as u64).unwrap();
-        let block_end =
-            D::from_fn(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64)).unwrap();
+        let block_begin = D::from_fn(ndim, |dim| index[dim].start / block_shape[dim] as u64);
+        let block_end = D::from_fn(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64));
         // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = D::from_fn(ndim, |dim| index[dim].start).unwrap();
-        let elem_end = D::from_fn(ndim, |dim| index[dim].end).unwrap();
+        let elem_begin = D::from_fn(ndim, |dim| index[dim].start);
+        let elem_end = D::from_fn(ndim, |dim| index[dim].end);
         let block_global_idx_ext =
             nd_iter_ext_logical_global_index(&self.block_grid_shape, block_begin.as_slice());
 
@@ -308,7 +306,7 @@ where
                 NdIterExtBlockOffsetSize::new(
                     elem_begin,
                     elem_end,
-                    D::from_fn(ndim, |dim| block_shape[dim] as u64).unwrap(),
+                    D::from_fn(ndim, |dim| block_shape[dim] as u64),
                 ),
             ),
         );
@@ -379,7 +377,8 @@ where
     where
         D: Dimension,
     {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(ArrayBlockTableStorageBase {
             blocks: self.blocks,
             shape,

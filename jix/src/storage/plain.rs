@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::{
     ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ElementType, Ty, TypeDyn,
 };
@@ -328,7 +328,7 @@ where
         check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.shape.ndim();
-        let out_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start).unwrap();
+        let out_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
         let out_strides = default_strides(out_shape.as_slice(), itemsize as u64);
 
         let in_offset = (0..ndim)
@@ -370,7 +370,8 @@ where
     type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;
     #[inline]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(Plain {
             allocation: self.allocation,
             data: self.data,

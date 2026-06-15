@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
@@ -327,8 +327,7 @@ where
             } else {
                 1
             }
-        })
-        .unwrap();
+        });
 
         let mut tmp_buf = context.tmp_buf(
             orig_read_shape.iter().product::<u64>() as usize * dtype.itemsize() as usize,
@@ -345,8 +344,7 @@ where
             } else {
                 index[dim].end - index[dim].start
             }
-        })
-        .unwrap();
+        });
         let mut iter = NdIter::new(iteration_shape, ());
         while let Some((idx, ())) = iter.next() {
             let read_range = dim_arr(orig_ndim, |dim| {
@@ -406,9 +404,12 @@ where
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        check_ndim::<NewD>(self.shape().len())?;
+        let new_shape = NewD::from_slice(self.shape());
+
         Ok(Reshape {
             array: self.array,
-            new_shape: NewD::from_slice(self.new_shape.as_slice())?,
+            new_shape,
             blocks_layout: self.blocks_layout,
         })
     }

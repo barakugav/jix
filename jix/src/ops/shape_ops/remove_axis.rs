@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_range, ensure, Result};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::{ArrayStorageSpec, BlocksLayout, ReadData};
 use crate::util::DimArray;
@@ -121,7 +121,7 @@ where
                 preferred.push(inner_layout.preferred_read_shape[input_dim]);
             }
         }
-        let shape = D::from_slice(&shape).unwrap();
+        let shape = D::from_slice(&shape);
 
         let mut b_layout = inner_layout.clone();
         b_layout.block_shape_hint = hint;
@@ -215,7 +215,8 @@ where
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(RemoveAxis {
             array: self.array,
             is_removed: self.is_removed,

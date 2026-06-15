@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::{ArrayStorageSpec, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
@@ -86,7 +86,7 @@ impl<S: ArrayStorage> PermuteAxes<S> {
         }
 
         let input_shape = array.shape();
-        let shape = S::Dimension::from_fn(ndim, |i| input_shape[axes[i]]).unwrap();
+        let shape = S::Dimension::from_fn(ndim, |i| input_shape[axes[i]]);
 
         let mut b_layout = array.spec().blocks_layout.clone();
         b_layout.block_shape_hint = dim_arr(ndim, |i| b_layout.block_shape_hint[axes[i]]);
@@ -139,7 +139,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let src_strides_in = default_strides(&sub_shape_in, itemsize);
 
         // The output buffer is C-contiguous over sub_shape_out (output dim order).
-        let sub_shape_out = S::Dimension::from_fn(ndim, |i| index[i].end - index[i].start).unwrap();
+        let sub_shape_out = S::Dimension::from_fn(ndim, |i| index[i].end - index[i].start);
         let dst_strides = default_strides(sub_shape_out.as_slice(), itemsize as u64);
 
         // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
@@ -178,7 +178,8 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         let array = self.array.dimension_change::<NewD>()?;
         Ok(PermuteAxes {
             shape,

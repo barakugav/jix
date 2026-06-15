@@ -471,7 +471,7 @@ where
             .read_message::<schema::ArrayHeader>()
             .map_err(Error::io)?;
         let ndim = header.shape.len();
-        check_ndim(ndim)?;
+        check_ndim::<DimDyn>(ndim)?;
         let shape = DimArray::from_slice(header.shape.as_slice()).unwrap();
         ensure!(
             header.block_shape.len() == ndim,
@@ -558,7 +558,7 @@ where
             blocks.dtype().itemsize(),
         )?;
 
-        let shape = DimDyn::from_slice(&shape).unwrap();
+        let shape = DimDyn::from_slice(&shape);
         Ok(Self::new(
             blocks,
             shape,

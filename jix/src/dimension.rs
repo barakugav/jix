@@ -1,7 +1,7 @@
 use std::hint::assert_unchecked;
 use std::ops::{Index, IndexMut};
 
-use crate::error::{bail, Result};
+use crate::error::{check_ndim, Result};
 
 /// Maximum number of dimensions supported by the library for an array.
 pub const NDIM_MAX: usize = 8;
@@ -117,18 +117,18 @@ pub trait Dimension:
 
     /// Construct a `Dimension` by calling `f(i)` for each axis index `i` in `0..ndim`.
     ///
-    /// Returns an error if `ndim` does not match the statically expected ndim (for `Dim<N>`)
+    /// Panics if `ndim` does not match the statically expected ndim (for `Dim<N>`)
     /// or exceeds [`NDIM_MAX`] (for `DimDyn`).
-    fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Result<Self>
+    fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Self
     where
         Self: Sized;
 
     /// Construct a `Dimension` value from a shape slice.
     ///
-    /// Returns an error if the slice length does not match the statically expected ndim (for
+    /// Panics if the slice length does not match the statically expected ndim (for
     /// `Dim<N>`) or exceeds [`NDIM_MAX`] (for `DimDyn`).
     #[inline(always)]
-    fn from_slice(slice: &[u64]) -> Result<Self>
+    fn from_slice(slice: &[u64]) -> Self
     where
         Self: Sized,
     {
@@ -182,14 +182,12 @@ impl Dimension for DimDyn {
     type Index<'a> = &'a [u64];
 
     #[inline(always)]
-    fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Result<Self> {
-        if ndim > NDIM_MAX {
-            bail!(
-                TooManyDimensions,
-                "cannot create DimDyn with ndim {ndim}: exceeds NDIM_MAX ({NDIM_MAX})"
-            );
-        }
-        Ok(Self(dim_arr(ndim, f)))
+    fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Self {
+        assert!(
+            ndim <= NDIM_MAX,
+            "cannot create DimDyn with ndim {ndim}: exceeds NDIM_MAX ({NDIM_MAX})"
+        );
+        Self(dim_arr(ndim, f))
     }
 
     #[inline(always)]
@@ -276,15 +274,13 @@ macro_rules! impl_dim {
             type Index<'a> = $index;
 
             #[inline(always)]
-            fn from_fn(ndim: usize, mut f: impl FnMut(usize) -> u64) -> Result<Self> {
-                if ndim != $dim {
-                    bail!(
-                        TooManyDimensions,
-                        "cannot create Dim<{}> with ndim {ndim}",
-                        $dim
-                    );
-                }
-                Ok(Self(std::array::from_fn(|i| f(i))))
+            fn from_fn(ndim: usize, mut f: impl FnMut(usize) -> u64) -> Self {
+                assert_eq!(
+                    ndim, $dim,
+                    "cannot create Dim<{}> with ndim {ndim}",
+                    $dim
+                );
+                Self(std::array::from_fn(|i| f(i)))
             }
 
             #[inline(always)]
@@ -401,7 +397,8 @@ impl IntoDimension for &[u64] {
 
     #[inline(always)]
     fn into_dimension(self) -> Result<Self::Dimension> {
-        DimDyn::from_slice(self)
+        check_ndim::<DimDyn>(self.len())?;
+        Ok(DimDyn::from_slice(self))
     }
 }
 impl IntoDimension for &Vec<u64> {
@@ -511,16 +508,9 @@ impl IntoDimension for ndarray::IxDyn {
     fn into_dimension(self) -> Result<Self::Dimension> {
         let dim = <Self as ndarray::Dimension>::as_array_view(&self);
         let dim = dim.as_slice().unwrap();
-        if dim.len() > NDIM_MAX {
-            bail!(
-                TooManyDimensions,
-                "ndarray dimension length {} exceeds NDIM_MAX ({})",
-                dim.len(),
-                NDIM_MAX
-            );
-        }
+        check_ndim::<DimDyn>(dim.len())?;
         let dim = dim_arr(dim.len(), |i| dim[i] as u64);
-        DimDyn::from_slice(&dim)
+        Ok(DimDyn::from_slice(&dim))
     }
 }
 

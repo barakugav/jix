@@ -98,11 +98,10 @@ where
             "axis out of bounds: axis {axis} >= array ndim {}",
             shape0.len()
         );
-        check_ndim(shape0.len() + 1)?;
+        check_ndim::<<Self as ArrayStorage>::Dimension>(shape0.len() + 1)?;
         let mut new_shape = DimArray::from_slice(shape0).unwrap();
         new_shape.insert(axis, narrays as u64);
-        let new_shape =
-            <ArraysT::Dimension as crate::Dimension>::Larger::from_slice(&new_shape).unwrap();
+        let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
 
         let mut b_layout = arrays.spec(0).blocks_layout.clone();
         b_layout.block_shape_hint.insert(axis, 1);
@@ -146,8 +145,7 @@ where
             .collect::<DimArray<_>>();
         let arr_range_shape = ArraysT::Dimension::from_fn(arr_range.len(), |dim| {
             arr_range[dim].end - arr_range[dim].start
-        })
-        .unwrap();
+        });
         let itemsize = dtype.itemsize() as usize;
         let arr_size_bytes = arr_range_shape.as_slice().iter().product::<u64>() as usize * itemsize;
         let mut tmp_buf = in_place

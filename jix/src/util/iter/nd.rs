@@ -70,7 +70,7 @@ where
     #[inline(always)]
     pub(crate) fn new(shape: impl IntoDimension<Dimension = D>, extensions: E) -> Self {
         let shape = shape.into_dimension().unwrap();
-        let begin = D::from_fn(shape.ndim(), |_| 0).unwrap();
+        let begin = D::from_fn(shape.ndim(), |_| 0);
         Self::new_with_begin(begin, shape, extensions)
     }
 

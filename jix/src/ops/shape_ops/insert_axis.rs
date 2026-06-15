@@ -96,7 +96,7 @@ where
     {
         let orig_ndim = array.shape().len();
         let new_ndim = orig_ndim + axis.len();
-        check_ndim(new_ndim)?;
+        check_ndim::<D>(new_ndim)?;
         let mut axes = dim_arr(axis.len(), |i| axis.get(i));
 
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
@@ -136,7 +136,7 @@ where
             is_inserted.push(true);
             shape.push(1u64);
         }
-        let shape = D::from_slice(&shape).unwrap();
+        let shape = D::from_slice(&shape);
 
         // Build blocks_layout: inserted dims get block_shape = 1 (Any); non-inserted dims
         // inherit the corresponding input dim's layout unchanged.
@@ -273,7 +273,8 @@ where
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(InsertAxis {
             array: self.array,
             is_inserted: self.is_inserted,

@@ -77,8 +77,8 @@ where
             ));
         }
 
-        let inner_offset = D::from_fn(ndim, |dim| borders[dim].0.inner_offset).unwrap();
-        let current_block_size = D::from_fn(ndim, |dim| borders[dim].0.length).unwrap();
+        let inner_offset = D::from_fn(ndim, |dim| borders[dim].0.inner_offset);
+        let current_block_size = D::from_fn(ndim, |dim| borders[dim].0.length);
         Self {
             block_shape,
             borders,
@@ -144,9 +144,9 @@ mod tests {
         block: &[u64],
     ) -> NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>> {
         let ext = NdIterExtBlockOffsetSize::new(
-            DimDyn::from_slice(begin).unwrap(),
-            DimDyn::from_slice(end).unwrap(),
-            DimDyn::from_slice(block).unwrap(),
+            DimDyn::from_slice(begin),
+            DimDyn::from_slice(end),
+            DimDyn::from_slice(block),
         );
         let block_begin = begin
             .iter()

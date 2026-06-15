@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
-use crate::error::{check_dtype, check_get_buffer_size, check_get_range, Result};
+use crate::error::{check_dtype, check_get_buffer_size, check_get_range, check_ndim, Result};
 use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ReadData, Ty};
 use crate::util::{cast_slice_mut, dim_arr};
 use crate::{Dimension, ElementType, IntoDimension};
@@ -165,7 +165,8 @@ where
     type DimensionChange<NewD: Dimension> = Scalar<T, NewD>;
     #[inline]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(Scalar {
             data: self.data,
             shape,

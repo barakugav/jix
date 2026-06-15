@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
@@ -92,7 +92,7 @@ where
         }
         let is_identity = is_broadcast.iter().all(|&b| !b);
 
-        let new_shape = S::Dimension::from_slice(new_shape).unwrap();
+        let new_shape = S::Dimension::from_slice(new_shape);
         let new_shape_slice = new_shape.as_slice();
 
         // For broadcast dims: Any tag, hint=1, preferred=new size (full extent reads are free).
@@ -182,8 +182,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         }
 
         // Destination strides: C-contiguous over the requested output sub-shape.
-        let out_shape =
-            S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start).unwrap();
+        let out_shape = S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start);
         let dst_strides = default_strides(out_shape.as_slice(), itemsize as u64);
 
         unsafe {
@@ -219,11 +218,14 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        check_ndim::<NewD>(self.shape().len())?;
+        let new_shape = NewD::from_slice(self.shape());
+
         Ok(Broadcast {
             array: self.array.dimension_change()?,
             is_broadcast: self.is_broadcast,
             is_identity: self.is_identity,
-            new_shape: NewD::from_slice(self.new_shape.as_slice())?,
+            new_shape,
             blocks_layout: self.blocks_layout,
         })
     }

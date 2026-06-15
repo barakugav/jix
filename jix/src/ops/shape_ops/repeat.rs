@@ -2,7 +2,9 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Error, ErrorKind, Result};
+use crate::error::{
+    check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
+};
 use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
@@ -68,8 +70,7 @@ impl<S: ArrayStorage> Repeat<S> {
         })?;
 
         let new_shape =
-            S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] })
-                .unwrap();
+            S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] });
 
         let mut b_layout = array.spec().blocks_layout.clone();
         b_layout.block_shape_hint[axis] = b_layout.block_shape_hint[axis]
@@ -202,7 +203,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    DimDyn::from_slice(&copy_shape).unwrap(),
+                    DimDyn::from_slice(&copy_shape),
                     &src_strides,
                     &dst_strides_split,
                     itemsize,
@@ -261,7 +262,9 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let new_shape = NewD::from_slice(self.new_shape.as_slice())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let new_shape = NewD::from_slice(self.shape());
+
         Ok(Repeat {
             array: self.array.dimension_change()?,
             axis: self.axis,

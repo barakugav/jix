@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use crate::dtype::Dtype;
-use crate::NDIM_MAX;
+use crate::{Dimension, NDIM_MAX};
 
 /// Error type for all operations in this crate.
 ///
@@ -105,12 +105,20 @@ macro_rules! ensure {
 pub(crate) use {bail, ensure};
 
 #[inline(always)]
-pub(crate) fn check_ndim(ndim: usize) -> Result<()> {
-    ensure!(
-        ndim <= NDIM_MAX,
-        TooManyDimensions,
-        "Too many dimensions: {ndim} (max={NDIM_MAX})"
-    );
+pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
+    if let Some(expected) = D::NDIM {
+        ensure!(
+            ndim == expected,
+            TooManyDimensions,
+            "ndim {ndim} does not match expected {expected} for this dimension type"
+        );
+    } else {
+        ensure!(
+            ndim <= NDIM_MAX,
+            TooManyDimensions,
+            "Too many dimensions: {ndim} (max={NDIM_MAX})"
+        );
+    }
     Ok(())
 }
 

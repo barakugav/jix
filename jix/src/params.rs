@@ -4,7 +4,7 @@ use crate::error::{check_ndim, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::{BlockShapeTag, BlocksLayout};
 use crate::util::DimArray;
-use crate::{Array, ArrayStorage};
+use crate::{Array, ArrayStorage, DimDyn};
 
 /// Parameters controlling the encoding/decoding configs of an [`Array`], and its block layout.
 ///
@@ -90,7 +90,7 @@ impl ArrayParams {
     /// [`block_shape_tag`](Self::block_shape_tag) is also set, meaning the shape will be
     /// preserved as-is if this `ArrayParams` is later used as a propagation source.
     pub fn block_shape(&mut self, block_shape: &[BlockSize]) -> &mut Self {
-        check_ndim(block_shape.len()).unwrap();
+        check_ndim::<DimDyn>(block_shape.len()).unwrap();
         self.block_shape = Some(block_shape.iter().cloned().collect());
         self
     }
@@ -106,7 +106,7 @@ impl ArrayParams {
     /// `tags` must have the same length as `block_shape`. Requires `block_shape` to also be set.
     /// See [`BlockShapeTag`] for the available options.
     pub fn block_shape_tag(&mut self, tags: &[BlockShapeTag]) -> &mut Self {
-        check_ndim(tags.len()).unwrap();
+        check_ndim::<DimDyn>(tags.len()).unwrap();
         self.block_shape_tag = Some(tags.iter().cloned().collect());
         self
     }
@@ -137,7 +137,7 @@ impl ArrayParams {
     /// approximately this shape. It is typically larger than the storage block shape, targeting
     /// the L2 cache. When not set, it is auto-computed from [`preferred_read_size_hint`](Self::preferred_read_size_hint).
     pub fn preferred_read_shape(&mut self, read_shape: &[BlockSize]) -> &mut Self {
-        check_ndim(read_shape.len()).unwrap();
+        check_ndim::<DimDyn>(read_shape.len()).unwrap();
         self.preferred_read_shape = Some(read_shape.iter().cloned().collect());
         self
     }

@@ -125,7 +125,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
                 nd_copy(
                     tmp.as_ptr(),
                     buf.as_mut_ptr().add(dst_byte_offset),
-                    S::Dimension::from_slice(region_shape).unwrap(),
+                    S::Dimension::from_slice(region_shape),
                     &src_strides,
                     &dst_strides,
                     itemsize,

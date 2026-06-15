@@ -2,6 +2,7 @@ use crate::dtype::Itemsize;
 use crate::error::{check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::util::{dim_arr, DimArray, Idx, IterExt};
+use crate::DimDyn;
 
 /// Block geometry hints for an nd-array storage.
 ///
@@ -125,7 +126,7 @@ impl BlocksLayout {
         itemsize: Itemsize,
     ) -> Result<Self> {
         let ndim = shape.len();
-        check_ndim(ndim)?;
+        check_ndim::<DimDyn>(ndim)?;
         let itemsize = itemsize as u64;
 
         let cache_sizes = crate::util::cpu_cache::cache_sizes();

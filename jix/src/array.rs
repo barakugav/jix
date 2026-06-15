@@ -450,7 +450,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 _context: &ReadContext,
             ) -> Result<()> {
                 let ndim = self.shape().len();
-                let read_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start).unwrap();
+                let read_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
                 let read_strides = default_strides(read_shape.as_slice(), size_of::<T>() as u64);
                 let mut iter = NdIter::new(
                     read_shape,
@@ -813,13 +813,12 @@ impl<S: ArrayStorage> Array<S> {
 
         // Block-space begin/end for NdIter.
         let block_begin =
-            S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim] as u64).unwrap();
+            S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim] as u64);
         let block_end =
-            S::Dimension::from_fn(ndim, |dim| index[dim].end.div_ceil(read_shape[dim] as u64))
-                .unwrap();
+            S::Dimension::from_fn(ndim, |dim| index[dim].end.div_ceil(read_shape[dim] as u64));
         // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start).unwrap();
-        let elem_end = S::Dimension::from_fn(ndim, |dim| index[dim].end).unwrap();
+        let elem_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start);
+        let elem_end = S::Dimension::from_fn(ndim, |dim| index[dim].end);
         // NdIter that yields blocks of size <= read_shape
         let mut block_iter = NdIter::new_with_begin(
             block_begin,
@@ -827,7 +826,7 @@ impl<S: ArrayStorage> Array<S> {
             NdIterExtBlockOffsetSize::new(
                 elem_begin,
                 elem_end,
-                S::Dimension::from_fn(ndim, |dim| read_shape[dim] as u64).unwrap(),
+                S::Dimension::from_fn(ndim, |dim| read_shape[dim] as u64),
             ),
         );
 
@@ -990,7 +989,7 @@ impl<S: ArrayStorage> Array<S> {
         );
         let decoder_params = params.decoder_params.unwrap_or_default();
 
-        let shape = S::Dimension::from_slice(&shape).unwrap();
+        let shape = S::Dimension::from_slice(&shape);
         Ok(Array {
             storage: Compact(ArrayBlockTableStorageBase::new(
                 blocks,
@@ -1218,8 +1217,7 @@ impl<S: ArrayStorage> Array<S> {
         let block_shape = params.block_shape.as_ref().unwrap().clone();
         let block_size = block_shape.iter().cloned().try_product().unwrap();
         let grid_shape =
-            S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64))
-                .unwrap();
+            S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
 
         let encoder_cfg = params.encoder_params.as_ref().unwrap();
         let mut encoder = Encoder::new(encoder_cfg, dtype.clone())?;
@@ -1227,9 +1225,9 @@ impl<S: ArrayStorage> Array<S> {
         let mut block_iter = NdIter::new(
             grid_shape.clone(),
             NdIterExtBlockOffsetSize::new(
-                S::Dimension::from_fn(ndim, |_| 0).unwrap(),
-                S::Dimension::from_slice(shape).unwrap(),
-                S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64).unwrap(),
+                S::Dimension::from_fn(ndim, |_| 0),
+                S::Dimension::from_slice(shape),
+                S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64),
             ),
         );
 
@@ -1554,7 +1552,7 @@ mod tests {
         Array {
             storage: Compact(ArrayBlockTableStorageBase::new(
                 make_block_table(blocks),
-                Sh::Dimension::from_slice(&shape).unwrap(),
+                Sh::Dimension::from_slice(&shape),
                 layout,
                 EncoderParams::default(),
                 DecoderParams::default(),
