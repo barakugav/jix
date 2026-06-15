@@ -67,8 +67,9 @@ impl<S: ArrayStorage> Repeat<S> {
             )
         })?;
 
-        let new_shape_raw = dim_arr(ndim, |d| if d == axis { new_len } else { input_shape[d] });
-        let new_shape = S::Dimension::from_slice(&new_shape_raw).unwrap();
+        let new_shape =
+            S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] })
+                .unwrap();
 
         let mut b_layout = array.spec().blocks_layout.clone();
         b_layout.block_shape_hint[axis] = b_layout.block_shape_hint[axis]

@@ -70,7 +70,7 @@ where
     #[inline(always)]
     pub(crate) fn new(shape: impl IntoDimension<Dimension = D>, extensions: E) -> Self {
         let shape = shape.into_dimension().unwrap();
-        let begin = D::zeros(shape.ndim()).unwrap();
+        let begin = D::from_fn(shape.ndim(), |_| 0).unwrap();
         Self::new_with_begin(begin, shape, extensions)
     }
 
@@ -356,7 +356,7 @@ mod tests {
     {
         let mut out = Vec::new();
         while let Some(idx) = iter.next() {
-            out.push(idx.to_vec());
+            out.push(idx.as_slice().to_vec());
         }
         out
     }
@@ -483,7 +483,7 @@ mod tests {
     fn collect_indices<D: Dimension, E: NdIterExtension>(mut iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
         while let Some((idx, _)) = iter.next() {
-            out.push(idx.to_vec());
+            out.push(idx.as_slice().to_vec());
         }
         out
     }

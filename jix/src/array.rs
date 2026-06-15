@@ -450,13 +450,11 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 _context: &ReadContext,
             ) -> Result<()> {
                 let ndim = self.shape().len();
-                let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+                let read_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start).unwrap();
+                let read_strides = default_strides(read_shape.as_slice(), size_of::<T>() as u64);
                 let mut iter = NdIter::new(
-                    D::from_slice(&read_shape).unwrap(),
-                    NdIterExtStridesPtrMut::new(
-                        &default_strides(&read_shape, size_of::<T>() as u64),
-                        buf.as_mut_ptr(),
-                    ),
+                    read_shape,
+                    NdIterExtStridesPtrMut::new(&read_strides, buf.as_mut_ptr()),
                 );
                 while let Some((idx, out)) = iter.next() {
                     let value = (self.f)(idx.to_index());
@@ -814,19 +812,22 @@ impl<S: ArrayStorage> Array<S> {
         }
 
         // Block-space begin/end for NdIter.
-        let block_begin = dim_arr(ndim, |dim| index[dim].start / read_shape[dim] as u64);
-        let block_end = dim_arr(ndim, |dim| index[dim].end.div_ceil(read_shape[dim] as u64));
+        let block_begin =
+            S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim] as u64).unwrap();
+        let block_end =
+            S::Dimension::from_fn(ndim, |dim| index[dim].end.div_ceil(read_shape[dim] as u64))
+                .unwrap();
         // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = dim_arr(ndim, |dim| index[dim].start);
-        let elem_end = dim_arr(ndim, |dim| index[dim].end);
+        let elem_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start).unwrap();
+        let elem_end = S::Dimension::from_fn(ndim, |dim| index[dim].end).unwrap();
         // NdIter that yields blocks of size <= read_shape
         let mut block_iter = NdIter::new_with_begin(
-            S::Dimension::from_slice(&block_begin).unwrap(),
-            S::Dimension::from_slice(&block_end).unwrap(),
+            block_begin,
+            block_end,
             NdIterExtBlockOffsetSize::new(
-                S::Dimension::from_slice(&elem_begin).unwrap(),
-                S::Dimension::from_slice(&elem_end).unwrap(),
-                S::Dimension::from_slice(&dim_arr(ndim, |dim| read_shape[dim] as u64)).unwrap(),
+                elem_begin,
+                elem_end,
+                S::Dimension::from_fn(ndim, |dim| read_shape[dim] as u64).unwrap(),
             ),
         );
 
@@ -1216,17 +1217,19 @@ impl<S: ArrayStorage> Array<S> {
 
         let block_shape = params.block_shape.as_ref().unwrap().clone();
         let block_size = block_shape.iter().cloned().try_product().unwrap();
-        let grid_shape = dim_arr(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
+        let grid_shape =
+            S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64))
+                .unwrap();
 
         let encoder_cfg = params.encoder_params.as_ref().unwrap();
         let mut encoder = Encoder::new(encoder_cfg, dtype.clone())?;
 
         let mut block_iter = NdIter::new(
-            S::Dimension::from_slice(&grid_shape).unwrap(),
+            grid_shape.clone(),
             NdIterExtBlockOffsetSize::new(
-                S::Dimension::from_slice(&dim_arr(ndim, |_| 0)).unwrap(),
+                S::Dimension::from_fn(ndim, |_| 0).unwrap(),
                 S::Dimension::from_slice(shape).unwrap(),
-                S::Dimension::from_slice(&dim_arr(ndim, |dim| block_shape[dim] as u64)).unwrap(),
+                S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64).unwrap(),
             ),
         );
 
@@ -1235,7 +1238,7 @@ impl<S: ArrayStorage> Array<S> {
             tmp_block_offsets: Vec<u64>,
         }
 
-        let grid_logical_strides = default_strides(&grid_shape, 1);
+        let grid_logical_strides = default_strides(grid_shape.as_slice(), 1);
         let itemsize = encoder.dtype.itemsize() as usize;
         let alignment = encoder.dtype.alignment().as_usize();
         let block_size_bytes = block_size as usize * itemsize;

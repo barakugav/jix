@@ -1,5 +1,5 @@
 use crate::util::iter::NdIterExtension;
-use crate::util::{dim_arr, DimArray};
+use crate::util::DimArray;
 use crate::Dimension;
 
 /// [`NdIterExtension`] that tracks the per-block inner offset and active size for each dimension
@@ -77,10 +77,8 @@ where
             ));
         }
 
-        let inner_offset =
-            D::from_slice(&dim_arr(ndim, |dim| borders[dim].0.inner_offset)).unwrap();
-        let current_block_size =
-            D::from_slice(&dim_arr(ndim, |dim| borders[dim].0.length)).unwrap();
+        let inner_offset = D::from_fn(ndim, |dim| borders[dim].0.inner_offset).unwrap();
+        let current_block_size = D::from_fn(ndim, |dim| borders[dim].0.length).unwrap();
         Self {
             block_shape,
             borders,
@@ -176,9 +174,9 @@ mod tests {
         let mut out = Vec::new();
         while let Some((block_idx, (inner_offset, block_size))) = iter.next() {
             out.push(BlocksIterItemOwned {
-                block_idx: block_idx.to_vec(),
-                inner_offset: inner_offset.to_vec(),
-                block_size: block_size.to_vec(),
+                block_idx: block_idx.as_slice().to_vec(),
+                inner_offset: inner_offset.as_slice().to_vec(),
+                block_size: block_size.as_slice().to_vec(),
             });
         }
         out

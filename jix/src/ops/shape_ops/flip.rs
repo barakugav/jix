@@ -129,8 +129,10 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the
         // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
-        let iter_shape = dim_arr(ndim, |d| if is_flipped[d] { out_shape[d] } else { 1 });
-        let slab_shape = dim_arr(ndim, |d| if is_flipped[d] { 1 } else { out_shape[d] });
+        let iter_shape =
+            S::Dimension::from_fn(ndim, |d| if is_flipped[d] { out_shape[d] } else { 1 }).unwrap();
+        let slab_shape =
+            S::Dimension::from_fn(ndim, |d| if is_flipped[d] { 1 } else { out_shape[d] }).unwrap();
 
         // src strides ext: forward strides on flipped axes; 0 elsewhere (non-flipped axes
         // are iter_shape=1 so they don't step regardless, but 0 keeps it explicit).
@@ -147,7 +149,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let dst_base = unsafe { buf.as_mut_ptr().add(dst_base_offset as usize) };
 
         let mut iter = NdIter::new(
-            S::Dimension::from_slice(&iter_shape).unwrap(),
+            iter_shape,
             NdIterExtStridesPtr::new(&src_ptr_strides, tmp_base),
         );
         while let Some((_idx, src_ptr)) = iter.next() {
@@ -158,7 +160,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    S::Dimension::from_slice(&slab_shape).unwrap(),
+                    slab_shape.clone(),
                     &strides,
                     &strides,
                     itemsize,

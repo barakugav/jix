@@ -321,31 +321,33 @@ where
                 1
             }
         });
-        let new_read_shape = dim_arr(ndim, |dim| {
+        let new_read_shape = D::from_fn(ndim, |dim| {
             if same_logical_stride[dim].is_some() {
                 index[dim].end - index[dim].start
             } else {
                 1
             }
-        });
+        })
+        .unwrap();
 
         let mut tmp_buf = context.tmp_buf(
             orig_read_shape.iter().product::<u64>() as usize * dtype.itemsize() as usize,
             dtype.alignment(),
         );
-        let tmp_buf_strides = default_strides(&new_read_shape, dtype.itemsize() as _);
+        let tmp_buf_strides = default_strides(new_read_shape.as_slice(), dtype.itemsize() as _);
         let out_buf_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let dst_strides = default_strides(&out_buf_shape, dtype.itemsize() as _);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
-        let iteration_shape = dim_arr(ndim, |dim| {
+        let iteration_shape = D::from_fn(ndim, |dim| {
             if same_logical_stride[dim].is_some() {
                 1
             } else {
                 index[dim].end - index[dim].start
             }
-        });
-        let mut iter = NdIter::new(D::from_slice(&iteration_shape).unwrap(), ());
+        })
+        .unwrap();
+        let mut iter = NdIter::new(iteration_shape, ());
         while let Some((idx, ())) = iter.next() {
             let read_range = dim_arr(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {
@@ -373,7 +375,7 @@ where
                 nd_copy(
                     tmp_buf.as_ptr(),
                     dst_ptr,
-                    D::from_slice(&new_read_shape).unwrap(),
+                    new_read_shape.clone(),
                     &tmp_buf_strides,
                     &dst_strides,
                     dtype.itemsize() as _,

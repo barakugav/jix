@@ -81,8 +81,9 @@ impl<S: ArrayStorage> Tile<S> {
             )
         })?;
 
-        let new_shape_raw = dim_arr(ndim, |d| if d == axis { new_len } else { input_shape[d] });
-        let new_shape = S::Dimension::from_slice(&new_shape_raw).unwrap();
+        let new_shape =
+            S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] })
+                .unwrap();
 
         let mut b_layout = array.spec().blocks_layout.clone();
         let reps_u32 = reps.min(u32::MAX as u64) as u32;
@@ -211,13 +212,15 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
         // Head: tmp[s_in..L] -> buf[0..head_len)
         {
-            let copy_shape = dim_arr(ndim, |d| if d == k { head_len } else { out_shape[d] });
+            let copy_shape =
+                S::Dimension::from_fn(ndim, |d| if d == k { head_len } else { out_shape[d] })
+                    .unwrap();
             let src_off = (s_in * src_strides[k]) as usize;
             unsafe {
                 nd_copy(
                     tmp.as_ptr().add(src_off),
                     buf.as_mut_ptr(),
-                    S::Dimension::from_slice(&copy_shape).unwrap(),
+                    copy_shape,
                     &src_strides,
                     &dst_strides,
                     itemsize,
@@ -260,13 +263,15 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
         // Tail: tmp[0..tail_len] -> buf[head_len + num_full * L..total)
         if tail_len > 0 {
-            let copy_shape = dim_arr(ndim, |d| if d == k { tail_len } else { out_shape[d] });
+            let copy_shape =
+                S::Dimension::from_fn(ndim, |d| if d == k { tail_len } else { out_shape[d] })
+                    .unwrap();
             let dst_off = ((head_len + num_full * l) * dst_strides[k]) as usize;
             unsafe {
                 nd_copy(
                     tmp.as_ptr(),
                     buf.as_mut_ptr().add(dst_off),
-                    S::Dimension::from_slice(&copy_shape).unwrap(),
+                    copy_shape,
                     &src_strides,
                     &dst_strides,
                     itemsize,

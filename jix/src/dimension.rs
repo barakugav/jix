@@ -2,7 +2,6 @@ use std::hint::assert_unchecked;
 use std::ops::{Index, IndexMut};
 
 use crate::error::{bail, Result};
-use crate::{Error, ErrorKind};
 
 /// Maximum number of dimensions supported by the library for an array.
 pub const NDIM_MAX: usize = 8;
@@ -116,16 +115,25 @@ pub trait Dimension:
     where
         Self: 'a;
 
-    /// Construct a `Dimension` with all axes of size zero.
-    fn zeros(ndim: usize) -> Result<Self>;
+    /// Construct a `Dimension` by calling `f(i)` for each axis index `i` in `0..ndim`.
+    ///
+    /// Returns an error if `ndim` does not match the statically expected ndim (for `Dim<N>`)
+    /// or exceeds [`NDIM_MAX`] (for `DimDyn`).
+    fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Result<Self>
+    where
+        Self: Sized;
 
     /// Construct a `Dimension` value from a shape slice.
     ///
     /// Returns an error if the slice length does not match the statically expected ndim (for
     /// `Dim<N>`) or exceeds [`NDIM_MAX`] (for `DimDyn`).
+    #[inline(always)]
     fn from_slice(slice: &[u64]) -> Result<Self>
     where
-        Self: Sized;
+        Self: Sized,
+    {
+        Self::from_fn(slice.len(), |i| slice[i])
+    }
 
     /// Return the shape as a slice, with one element per dimension.
     fn as_slice(&self) -> &[u64];
@@ -174,28 +182,14 @@ impl Dimension for DimDyn {
     type Index<'a> = &'a [u64];
 
     #[inline(always)]
-    fn zeros(ndim: usize) -> Result<Self> {
+    fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Result<Self> {
         if ndim > NDIM_MAX {
             bail!(
                 TooManyDimensions,
                 "cannot create DimDyn with ndim {ndim}: exceeds NDIM_MAX ({NDIM_MAX})"
             );
         }
-        Ok(Self(dim_arr(ndim, |_| 0)))
-    }
-
-    #[inline(always)]
-    fn from_slice(slice: &[u64]) -> Result<Self> {
-        Ok(Self(DimArray::from_slice(slice).ok_or_else(|| {
-            Error::new(
-                ErrorKind::TooManyDimensions,
-                format!(
-                    "slice length {} exceeds NDIM_MAX ({})",
-                    slice.len(),
-                    NDIM_MAX
-                ),
-            )
-        })?))
+        Ok(Self(dim_arr(ndim, f)))
     }
 
     #[inline(always)]
@@ -282,7 +276,7 @@ macro_rules! impl_dim {
             type Index<'a> = $index;
 
             #[inline(always)]
-            fn zeros(ndim: usize) -> Result<Self> {
+            fn from_fn(ndim: usize, mut f: impl FnMut(usize) -> u64) -> Result<Self> {
                 if ndim != $dim {
                     bail!(
                         TooManyDimensions,
@@ -290,17 +284,7 @@ macro_rules! impl_dim {
                         $dim
                     );
                 }
-                Ok(Self([0; $dim]))
-            }
-
-            #[inline(always)]
-            fn from_slice(slice: &[u64]) -> Result<Self> {
-                Ok(Self(slice.try_into().map_err(|_| {
-                    Error::new(
-                        ErrorKind::TooManyDimensions,
-                        format!("slice length {} does not match expected dimension {}", slice.len(), $dim),
-                    )
-                })?))
+                Ok(Self(std::array::from_fn(|i| f(i))))
             }
 
             #[inline(always)]

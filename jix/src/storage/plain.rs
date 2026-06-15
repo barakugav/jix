@@ -328,8 +328,8 @@ where
         check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.shape.ndim();
-        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let out_strides = default_strides(&out_shape, itemsize as u64);
+        let out_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start).unwrap();
+        let out_strides = default_strides(out_shape.as_slice(), itemsize as u64);
 
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])
@@ -341,7 +341,7 @@ where
             nd_copy(
                 src_ptr,
                 dst_ptr,
-                D::from_slice(&out_shape).unwrap(),
+                out_shape,
                 &self.strides,
                 &out_strides,
                 itemsize,

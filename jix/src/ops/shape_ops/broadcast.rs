@@ -182,14 +182,15 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         }
 
         // Destination strides: C-contiguous over the requested output sub-shape.
-        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(&out_shape, itemsize as u64);
+        let out_shape =
+            S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start).unwrap();
+        let dst_strides = default_strides(out_shape.as_slice(), itemsize as u64);
 
         unsafe {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                S::Dimension::from_slice(&out_shape).unwrap(),
+                out_shape,
                 &src_strides,
                 &dst_strides,
                 itemsize,

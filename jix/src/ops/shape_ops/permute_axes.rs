@@ -86,14 +86,12 @@ impl<S: ArrayStorage> PermuteAxes<S> {
         }
 
         let input_shape = array.shape();
-        let shape = dim_arr(ndim, |i| input_shape[axes[i]]);
+        let shape = S::Dimension::from_fn(ndim, |i| input_shape[axes[i]]).unwrap();
 
         let mut b_layout = array.spec().blocks_layout.clone();
         b_layout.block_shape_hint = dim_arr(ndim, |i| b_layout.block_shape_hint[axes[i]]);
         b_layout.block_shape_tag = dim_arr(ndim, |i| b_layout.block_shape_tag[axes[i]]);
         b_layout.preferred_read_shape = dim_arr(ndim, |i| b_layout.preferred_read_shape[axes[i]]);
-
-        let shape = S::Dimension::from_slice(&shape).unwrap();
         Ok(Self {
             shape,
             blocks_layout: b_layout,
@@ -141,8 +139,8 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let src_strides_in = default_strides(&sub_shape_in, itemsize);
 
         // The output buffer is C-contiguous over sub_shape_out (output dim order).
-        let sub_shape_out = dim_arr(ndim, |i| index[i].end - index[i].start);
-        let dst_strides = default_strides(&sub_shape_out, itemsize as u64);
+        let sub_shape_out = S::Dimension::from_fn(ndim, |i| index[i].end - index[i].start).unwrap();
+        let dst_strides = default_strides(sub_shape_out.as_slice(), itemsize as u64);
 
         // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
         let src_strides_out = dim_arr(ndim, |i| src_strides_in[self.axes[i]]);
@@ -151,7 +149,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                S::Dimension::from_slice(&sub_shape_out).unwrap(),
+                sub_shape_out,
                 &src_strides_out,
                 &dst_strides,
                 itemsize,

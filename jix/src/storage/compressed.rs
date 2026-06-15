@@ -289,23 +289,26 @@ where
         let out_strides = default_strides(&out_shape, itemsize);
         let block_strides = default_strides(block_shape, itemsize as BlockSize); // TODO: precomute me
 
-        // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = dim_arr(ndim, |dim| index[dim].start);
-        let elem_end = dim_arr(ndim, |dim| index[dim].end);
-
         // Block-space begin/end for NdIter.
-        let block_begin = dim_arr(ndim, |dim| index[dim].start / block_shape[dim] as u64);
-        let block_end = dim_arr(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64));
+        let block_begin =
+            D::from_fn(ndim, |dim| index[dim].start / block_shape[dim] as u64).unwrap();
+        let block_end =
+            D::from_fn(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64)).unwrap();
+        // Element-space begin/end for NdIterExtBlockOffsetSize.
+        let elem_begin = D::from_fn(ndim, |dim| index[dim].start).unwrap();
+        let elem_end = D::from_fn(ndim, |dim| index[dim].end).unwrap();
+        let block_global_idx_ext =
+            nd_iter_ext_logical_global_index(&self.block_grid_shape, block_begin.as_slice());
 
         let mut block_iter = NdIter::new_with_begin(
-            D::from_slice(&block_begin).unwrap(),
-            D::from_slice(&block_end).unwrap(),
+            block_begin,
+            block_end,
             (
-                nd_iter_ext_logical_global_index(&self.block_grid_shape, &block_begin),
+                block_global_idx_ext,
                 NdIterExtBlockOffsetSize::new(
-                    D::from_slice(&elem_begin).unwrap(),
-                    D::from_slice(&elem_end).unwrap(),
-                    D::from_slice(&dim_arr(ndim, |dim| block_shape[dim] as u64)).unwrap(),
+                    elem_begin,
+                    elem_end,
+                    D::from_fn(ndim, |dim| block_shape[dim] as u64).unwrap(),
                 ),
             ),
         );

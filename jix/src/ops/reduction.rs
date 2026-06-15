@@ -332,7 +332,7 @@ where
             })
         };
 
-        let out_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
+        let out_shape = D::from_fn(index.len(), |dim| index[dim].end - index[dim].start).unwrap();
 
         let tile_shape = self.choose_tile_shape(&inner_range_full);
 
@@ -340,33 +340,34 @@ where
         // tile-along-reduced), full source extent on non-reduced dims (so the requested
         // output range sits in one bulk along that dim - otherwise consecutive bulks would
         // re-walk the same outputs and double-count).
-        let bulk_shape = dim_arr(inner_ndim, |dim| {
+        let bulk_shape = S::Dimension::from_fn(inner_ndim, |dim| {
             if self.is_reduced[dim] {
                 tile_shape[dim]
             } else {
                 inner_shape[dim].max(1)
             }
-        });
-        let bulk_grid_begin = dim_arr(inner_ndim, |dim| {
+        })
+        .unwrap();
+        let bulk_grid_begin = S::Dimension::from_fn(inner_ndim, |dim| {
             inner_range_full[dim].start / bulk_shape[dim]
-        });
-        let bulk_grid_end = dim_arr(inner_ndim, |dim| {
+        })
+        .unwrap();
+        let bulk_grid_end = S::Dimension::from_fn(inner_ndim, |dim| {
             inner_range_full[dim].end.div_ceil(bulk_shape[dim])
-        });
+        })
+        .unwrap();
         debug_assert!(
             (0..inner_ndim)
                 .all(|d| self.is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
             "non-reduced dim must produce at most one bulk-block",
         );
         let mut bulk_iter = NdIter::new_with_begin(
-            S::Dimension::from_slice(&bulk_grid_begin).unwrap(),
-            S::Dimension::from_slice(&bulk_grid_end).unwrap(),
+            bulk_grid_begin,
+            bulk_grid_end,
             NdIterExtBlockOffsetSize::new(
-                S::Dimension::from_slice(&dim_arr(inner_ndim, |dim| inner_range_full[dim].start))
-                    .unwrap(),
-                S::Dimension::from_slice(&dim_arr(inner_ndim, |dim| inner_range_full[dim].end))
-                    .unwrap(),
-                S::Dimension::from_slice(&bulk_shape).unwrap(),
+                S::Dimension::from_fn(inner_ndim, |dim| inner_range_full[dim].start).unwrap(),
+                S::Dimension::from_fn(inner_ndim, |dim| inner_range_full[dim].end).unwrap(),
+                bulk_shape.clone(),
             ),
         );
 
@@ -383,17 +384,22 @@ where
             (state_buf.as_mut_slice(), buf.as_mut_ptr())
         };
         let state_buf = unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(state_buf) };
-        let state_strides = default_strides(&out_shape, size_of::<MaybeUninit<K::State>>() as u64);
+        let state_strides = default_strides(
+            out_shape.as_slice(),
+            size_of::<MaybeUninit<K::State>>() as u64,
+        );
         let mut state_initialized = false;
 
         let mut items_buf = context.tmp_buf(0, Alignment::of::<S::Item>());
         let mut base_item_idx = 0;
         while let Some((bulk_idx, (bulk_inner_offset, bulk_size))) = bulk_iter.next() {
             // The bulk's absolute element range, used as the tile iterator's universe.
-            let bulk_begin = dim_arr(inner_ndim, |dim| {
+            let bulk_begin = S::Dimension::from_fn(inner_ndim, |dim| {
                 bulk_idx[dim] * bulk_shape[dim] + bulk_inner_offset[dim]
-            });
-            let bulk_end = dim_arr(inner_ndim, |dim| bulk_begin[dim] + bulk_size[dim]);
+            })
+            .unwrap();
+            let bulk_end =
+                S::Dimension::from_fn(inner_ndim, |dim| bulk_begin[dim] + bulk_size[dim]).unwrap();
 
             // Each bulk contributes `reduction_size` items to every output it covers
             // (which is every output, since non-reduced dims sit in one bulk). That count
@@ -407,21 +413,24 @@ where
             // Tile iterator: walks the bulk's range partitioned by `tile_shape`. Reduced
             // dims have exactly one tile per bulk (tile_shape[reduced] == bulk reduced
             // width), non-reduced dims are subdivided.
-            let tile_grid_begin = dim_arr(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
-            let tile_grid_end = dim_arr(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
-            let mut tile_iter = NdIter::new_with_begin(
-                S::Dimension::from_slice(&tile_grid_begin).unwrap(),
-                S::Dimension::from_slice(&tile_grid_end).unwrap(),
-                NdIterExtBlockOffsetSize::new(
-                    S::Dimension::from_slice(&bulk_begin).unwrap(),
-                    S::Dimension::from_slice(&bulk_end).unwrap(),
-                    S::Dimension::from_slice(&tile_shape).unwrap(),
-                ),
-            );
+            let tile_grid_begin =
+                S::Dimension::from_fn(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]).unwrap();
+            let tile_grid_end =
+                S::Dimension::from_fn(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]))
+                    .unwrap();
             debug_assert!(
                 (0..inner_ndim)
                     .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
                 "reduced dim must produce at most one tile per bulk",
+            );
+            let mut tile_iter = NdIter::new_with_begin(
+                tile_grid_begin,
+                tile_grid_end,
+                NdIterExtBlockOffsetSize::new(
+                    bulk_begin,
+                    bulk_end,
+                    S::Dimension::from_slice(&tile_shape).unwrap(),
+                ),
             );
 
             while let Some((tile_idx, (tile_inner_offset, tile_size))) = tile_iter.next() {
@@ -485,18 +494,22 @@ where
 
                 // Reduction-axis walk inside `items_buf`. `tile_size[reduced] == bulk_size[reduced]`
                 // so this equals `reduction_size`.
-                let reduction_shape = dim_arr(inner_ndim, |dim| {
+                let reduction_shape = S::Dimension::from_fn(inner_ndim, |dim| {
                     if self.is_reduced[dim] {
                         tile_size[dim]
                     } else {
                         1
                     }
-                });
-                debug_assert_eq!(reduction_shape.iter().product::<u64>(), reduction_size);
+                })
+                .unwrap();
+                debug_assert_eq!(
+                    reduction_shape.as_slice().iter().product::<u64>(),
+                    reduction_size
+                );
 
                 while let Some((_idx, (src_base, state))) = out_iter.next() {
                     let reduction_iter = NdIter::new(
-                        S::Dimension::from_slice(&reduction_shape).unwrap(),
+                        reduction_shape.clone(),
                         NdIterExtStridesPtr::new(&items_buf_strides, src_base),
                     );
                     debug_assert_eq!(reduction_size, reduction_iter.len());
@@ -570,10 +583,10 @@ where
         // out_ptr may be an alias to it
         #[allow(dropping_references)]
         drop(state_buf);
-        let out_strides = default_strides(&out_shape, size_of::<K::Output>() as u64);
+        let out_strides = default_strides(out_shape.as_slice(), size_of::<K::Output>() as u64);
         if state_initialized {
             let mut out_iter = NdIter::new(
-                D::from_slice(&out_shape).unwrap(),
+                out_shape,
                 (
                     // CAREFUL: state_ptr and out_ptr may alias
                     NdIterExtStridesPtrMut::new(&state_strides, state_ptr.cast()),
@@ -592,7 +605,7 @@ where
         } else {
             // Empty reduction: write the empty-stream result to every output.
             let mut out_iter = NdIter::new(
-                D::from_slice(&out_shape).unwrap(),
+                out_shape,
                 NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);

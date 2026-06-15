@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
-use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
+use crate::util::{default_strides, nd_copy, ArraySequence, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
@@ -144,20 +144,23 @@ where
             .chain(index[self.stack_axis + 1..].iter())
             .cloned()
             .collect::<DimArray<_>>();
-        let arr_range_shape = dim_arr(arr_range.len(), |dim| {
+        let arr_range_shape = ArraysT::Dimension::from_fn(arr_range.len(), |dim| {
             arr_range[dim].end - arr_range[dim].start
-        });
+        })
+        .unwrap();
         let itemsize = dtype.itemsize() as usize;
-        let arr_size_bytes = arr_range_shape.iter().product::<u64>() as usize * itemsize;
+        let arr_size_bytes = arr_range_shape.as_slice().iter().product::<u64>() as usize * itemsize;
         let mut tmp_buf = in_place
             .not()
             .then(|| context.tmp_buf(arr_size_bytes, dtype.alignment()));
         // Stride of the stack axis in the output buffer (= size of one sub-array slice).
-        let stack_axis_stride =
-            arr_range_shape[self.stack_axis..].iter().product::<u64>() as usize * itemsize;
+        let stack_axis_stride = arr_range_shape.as_slice()[self.stack_axis..]
+            .iter()
+            .product::<u64>() as usize
+            * itemsize;
         let n_stack = (index[self.stack_axis].end - index[self.stack_axis].start) as usize;
         let out_of_place_strides = in_place.not().then(|| {
-            let arr_strides = default_strides(&arr_range_shape, itemsize as u64);
+            let arr_strides = default_strides(arr_range_shape.as_slice(), itemsize as u64);
             // For dims before the stack axis the output stride is n_stack times wider;
             // for dims at or after it the stride is unchanged.
             let mut out_strides = arr_strides.clone();
@@ -188,7 +191,7 @@ where
                     nd_copy(
                         arr_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
-                        ArraysT::Dimension::from_slice(&arr_range_shape).unwrap(),
+                        arr_range_shape.clone(),
                         arr_strides,
                         out_strides,
                         itemsize,
