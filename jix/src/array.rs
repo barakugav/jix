@@ -452,11 +452,11 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 let ndim = self.shape().len();
                 let read_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
                 let read_strides = default_strides(read_shape.as_slice(), size_of::<T>() as u64);
-                let mut iter = NdIter::new(
+                let iter = NdIter::new(
                     read_shape,
                     NdIterExtStridesPtrMut::new(&read_strides, buf.as_mut_ptr()),
                 );
-                while let Some((idx, out)) = iter.next() {
+                for (idx, out) in iter {
                     let value = (self.f)(idx.to_index());
                     unsafe { out.cast::<T>().write(value) };
                 }
@@ -820,7 +820,7 @@ impl<S: ArrayStorage> Array<S> {
         let elem_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start);
         let elem_end = S::Dimension::from_fn(ndim, |dim| index[dim].end);
         // NdIter that yields blocks of size <= read_shape
-        let mut block_iter = NdIter::new_with_begin(
+        let block_iter = NdIter::new_with_begin(
             block_begin,
             block_end,
             NdIterExtBlockOffsetSize::new(
@@ -835,7 +835,7 @@ impl<S: ArrayStorage> Array<S> {
         let out_strides = default_strides(&out_shape, itemsize);
 
         let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
-        while let Some((block_idx, (block_inner_offset, block_size))) = block_iter.next() {
+        for (block_idx, (block_inner_offset, block_size)) in block_iter {
             let inner_index = dim_arr(ndim, |dim| {
                 let start = block_idx[dim] * read_shape[dim] as u64 + block_inner_offset[dim];
                 let end = start + block_size[dim];

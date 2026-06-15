@@ -345,8 +345,8 @@ where
                 index[dim].end - index[dim].start
             }
         });
-        let mut iter = NdIter::new(iteration_shape, ());
-        while let Some((idx, ())) = iter.next() {
+        let iter = NdIter::new(iteration_shape, ());
+        for (idx, ()) in iter {
             let read_range = dim_arr(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {
                     debug_assert_eq!(idx[new_dim as usize], 0);

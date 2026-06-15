@@ -362,7 +362,7 @@ where
                 .all(|d| self.is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
             "non-reduced dim must produce at most one bulk-block",
         );
-        let mut bulk_iter = NdIter::new_with_begin(
+        let bulk_iter = NdIter::new_with_begin(
             bulk_grid_begin,
             bulk_grid_end,
             NdIterExtBlockOffsetSize::new(
@@ -393,7 +393,7 @@ where
 
         let mut items_buf = context.tmp_buf(0, Alignment::of::<S::Item>());
         let mut base_item_idx = 0;
-        while let Some((bulk_idx, (bulk_inner_offset, bulk_size))) = bulk_iter.next() {
+        for (bulk_idx, (bulk_inner_offset, bulk_size)) in bulk_iter {
             // The bulk's absolute element range, used as the tile iterator's universe.
             let bulk_begin = S::Dimension::from_fn(inner_ndim, |dim| {
                 bulk_idx[dim] * bulk_shape[dim] + bulk_inner_offset[dim]
@@ -422,7 +422,7 @@ where
                     .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
                 "reduced dim must produce at most one tile per bulk",
             );
-            let mut tile_iter = NdIter::new_with_begin(
+            let tile_iter = NdIter::new_with_begin(
                 tile_grid_begin,
                 tile_grid_end,
                 NdIterExtBlockOffsetSize::new(
@@ -432,7 +432,7 @@ where
                 ),
             );
 
-            while let Some((tile_idx, (tile_inner_offset, tile_size))) = tile_iter.next() {
+            for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
                 let tile = dim_arr(inner_ndim, |dim| {
                     let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
                     start..start + tile_size[dim]
@@ -480,7 +480,7 @@ where
                         .offset(state_offset_bytes as isize)
                 };
 
-                let mut out_iter = NdIter::new(
+                let out_iter = NdIter::new(
                     D::from_slice(&tile_out_shape),
                     (
                         NdIterExtStridesPtr::new(
@@ -505,7 +505,7 @@ where
                     reduction_size
                 );
 
-                while let Some((_idx, (src_base, state))) = out_iter.next() {
+                for (_idx, (src_base, state)) in out_iter {
                     let reduction_iter = NdIter::new(
                         reduction_shape.clone(),
                         NdIterExtStridesPtr::new(&items_buf_strides, src_base),
@@ -583,7 +583,7 @@ where
         drop(state_buf);
         let out_strides = default_strides(out_shape.as_slice(), size_of::<K::Output>() as u64);
         if state_initialized {
-            let mut out_iter = NdIter::new(
+            let out_iter = NdIter::new(
                 out_shape,
                 (
                     // CAREFUL: state_ptr and out_ptr may alias
@@ -591,7 +591,7 @@ where
                     NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
                 ),
             );
-            while let Some((_idx, (state, out_ptr))) = out_iter.next() {
+            for (_idx, (state, out_ptr)) in out_iter {
                 // CAREFUL: state and out_ptr may alias
                 let res = {
                     let state = unsafe { &*state.cast::<MaybeUninit<K::State>>() };
@@ -602,12 +602,12 @@ where
             }
         } else {
             // Empty reduction: write the empty-stream result to every output.
-            let mut out_iter = NdIter::new(
+            let out_iter = NdIter::new(
                 out_shape,
                 NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);
-            while let Some((_idx, out_ptr)) = out_iter.next() {
+            for (_idx, out_ptr) in out_iter {
                 let state = self.kernel.init_state(None);
                 let res = self.kernel.finalize_state(state, 0);
                 unsafe { out_ptr.cast::<K::Output>().write(res) };

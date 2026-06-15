@@ -114,12 +114,30 @@ where
         }
     }
 
+    #[inline(always)]
+    pub(crate) fn get_current_and_advance_status(&mut self) -> (D, E::Item) {
+        self.status.advance();
+        (self.current_idx.clone(), self.extensions.next())
+    }
+
+    #[inline(always)]
+    pub(crate) fn len(&self) -> u64 {
+        self.status.len()
+    }
+}
+impl<D, E> Iterator for NdIter<D, E>
+where
+    D: Dimension,
+    E: NdIterExtension,
+{
+    type Item = (D, E::Item);
+
     /// Advances to the next index in row-major order and returns `(current_index, extension_item)`.
     ///
     /// On each step the rightmost dimension that has not yet reached its bound is incremented,
     /// and all dimensions to its right are reset to `begin`.
     #[inline(always)]
-    pub(crate) fn next(&mut self) -> Option<(D, E::Item)> {
+    fn next(&mut self) -> Option<Self::Item> {
         if self.status.is_exhausted() {
             return None;
         }
@@ -155,49 +173,9 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn get_current_and_advance_status(&mut self) -> (D, E::Item) {
-        self.status.advance();
-        (self.current_idx.clone(), self.extensions.next())
-    }
-
-    #[inline(always)]
-    pub(crate) fn len(&self) -> u64 {
-        self.status.len()
-    }
-
-    #[inline(always)]
-    pub(crate) fn map<T>(
-        self,
-        f: impl FnMut((D, E::Item)) -> T + Clone,
-    ) -> impl Iterator<Item = T> + Clone
-    where
-        Self: Clone,
-        E: Clone,
-    {
-        #[derive(Clone)]
-        struct Iter<D, E, F> {
-            iter: NdIter<D, E>,
-            f: F,
-        }
-        impl<D, E, F, T> Iterator for Iter<D, E, F>
-        where
-            D: Dimension,
-            E: NdIterExtension + Clone,
-            F: FnMut((D, E::Item)) -> T + Clone,
-        {
-            type Item = T;
-            #[inline(always)]
-            fn next(&mut self) -> Option<Self::Item> {
-                self.iter.next().map(|step| (self.f)(step))
-            }
-
-            #[inline(always)]
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                let len = self.iter.status.len() as usize;
-                (len, Some(len))
-            }
-        }
-        Iter { iter: self, f }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.status.len() as usize;
+        (len, Some(len))
     }
 }
 

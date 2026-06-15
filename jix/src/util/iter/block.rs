@@ -169,10 +169,10 @@ mod tests {
     }
 
     fn collect(
-        mut iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>,
+        iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>,
     ) -> Vec<BlocksIterItemOwned> {
         let mut out = Vec::new();
-        while let Some((block_idx, (inner_offset, block_size))) = iter.next() {
+        for (block_idx, (inner_offset, block_size)) in iter {
             out.push(BlocksIterItemOwned {
                 block_idx: block_idx.as_slice().to_vec(),
                 inner_offset: inner_offset.as_slice().to_vec(),

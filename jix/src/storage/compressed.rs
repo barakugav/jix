@@ -298,7 +298,7 @@ where
         let block_global_idx_ext =
             nd_iter_ext_logical_global_index(&self.block_grid_shape, block_begin.as_slice());
 
-        let mut block_iter = NdIter::new_with_begin(
+        let block_iter = NdIter::new_with_begin(
             block_begin,
             block_end,
             (
@@ -316,9 +316,7 @@ where
         let mut tmp_buf = context.tmp_buf(full_buf_len, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
 
-        while let Some((block_idx, (block_global_id, (block_inner_offset, block_size)))) =
-            block_iter.next()
-        {
+        for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
             self.blocks.read_block(block_global_id, tmp_buf, context)?;
 
             // Navigate to the active region within the block buffer (block-local strides).

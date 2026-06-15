@@ -148,11 +148,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let tmp_base = tmp_buf.as_ptr();
         let dst_base = unsafe { buf.as_mut_ptr().add(dst_base_offset as usize) };
 
-        let mut iter = NdIter::new(
+        let iter = NdIter::new(
             iter_shape,
             NdIterExtStridesPtr::new(&src_ptr_strides, tmp_base),
         );
-        while let Some((_idx, src_ptr)) = iter.next() {
+        for (_idx, src_ptr) in iter {
             let off = unsafe { src_ptr.offset_from(tmp_base) } as usize;
             let dst_ptr = unsafe { dst_base.sub(off) };
 

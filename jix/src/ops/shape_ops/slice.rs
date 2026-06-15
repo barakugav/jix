@@ -220,8 +220,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 out_shape[dim]
             }
         });
-        let mut iter = NdIter::new(iter_shape, ());
-        while let Some((idx, ())) = iter.next() {
+        let iter = NdIter::new(iter_shape, ());
+        for (idx, ()) in iter {
             let inner_index = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
                 if ds.is_contiguous() {

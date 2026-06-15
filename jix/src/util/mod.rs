@@ -313,14 +313,14 @@ pub(crate) unsafe fn nd_copy<D, S2, S3>(
     let src_strides = &src_strides[..ndim - n_continuous_dims];
     let dst_strides = &dst_strides[..ndim - n_continuous_dims];
 
-    let mut iter = NdIter::new(
+    let iter = NdIter::new(
         shape,
         (
             NdIterExtStridesPtr::new(src_strides, src),
             NdIterExtStridesPtrMut::new(dst_strides, dst),
         ),
     );
-    while let Some((_, (src_ptr, dst_ptr))) = iter.next() {
+    for (_, (src_ptr, dst_ptr)) in iter {
         unsafe {
             std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize);
         }
