@@ -327,6 +327,7 @@ pub(crate) unsafe fn nd_copy<D, S2, S3>(
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct SendSyncPtr<T>(*const T);
 unsafe impl<T> Send for SendSyncPtr<T> {}
 unsafe impl<T> Sync for SendSyncPtr<T> {}

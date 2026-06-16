@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::{ReadContext, TmpBuf};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
-use crate::storage::{ArrayStorageSpec, CompactBorrowed, ReadData};
+use crate::storage::{ArraySpec, CompactBorrowed, ReadData};
 use crate::util::assert_unchecked_eq;
 use crate::{Dimension, ElementType};
 
@@ -163,12 +163,8 @@ pub trait ArrayStorage {
     fn dtype(&self) -> &Dtype;
 
     /// Returns metadata about this storage backend.
-    ///
-    /// Used internally by [`Array`](crate::Array) to propagate block geometry and codec
-    /// parameters through lazy view operations and when re-encoding via `compact` / `compact_with`.
-    /// Not intended to be called directly.
     #[doc(hidden)]
-    fn spec(&self) -> ArrayStorageSpec<'_>;
+    fn spec(&self) -> ArraySpec<'_>;
 
     /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]

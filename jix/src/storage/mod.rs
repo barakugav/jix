@@ -44,12 +44,9 @@
 //! # Notable items in this module
 //!
 //! - [`ArrayStorage`] - the trait all storage backends implement.
-//! - [`ElementType`], [`Ty<T>`](Ty), [`TypeDyn`] - compile-time element type tracking.
 //! - [`Compact`] - the main block-compressed storage backend.
 //! - [`Plain`] - adapter for non-compressed data.
-//! - [`BlocksLayout`] - block geometry hints attached to every storage.
 
-use crate::codec::{DecoderParams, EncoderParams};
 use crate::dtype::Dtyped;
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
@@ -58,19 +55,21 @@ use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core;
 
-mod layout;
-pub use layout::*;
-
 mod compressed;
 pub use compressed::*;
 
 mod plain;
 pub use plain::*;
 
+pub(crate) mod params;
+pub use params::{ArraySpec, BlockShapeTag};
+
 mod any;
 pub use any::*;
 
 pub(crate) mod block;
+pub use block::BlockSize;
+
 pub(crate) mod scalar;
 
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
@@ -92,51 +91,6 @@ where
     T: Dtyped,
 {
     type Item = T;
-}
-
-/// Internal metadata of ArrayStorage.
-///
-/// Carries the information [`Array`](crate::Array) needs when creating a new storage
-/// from an existing one - such as during `compact`, `compact_with`, and lazy view operations.
-/// Not intended to be used directly.
-pub struct ArrayStorageSpec<'a> {
-    pub(crate) blocks_layout: &'a BlocksLayout,
-    pub(crate) encoder_params: Option<&'a EncoderParams>,
-    pub(crate) decoder_params: Option<&'a DecoderParams>,
-    // pub(crate) decoder_config: Option<&'a DecoderCodecConfig>,
-}
-impl ArrayStorageSpec<'_> {
-    /// Returns the block layout metadata for this storage.
-    ///
-    /// Note that if the storage is not block-compressed, rather a view or adapter, the block layout
-    /// should be treated as a hint for how to choose block shapes for operations on this storage,
-    /// rather than a strict description of how the data is actually laid out on disk.
-    #[inline(always)]
-    pub fn blocks_layout(&self) -> &BlocksLayout {
-        self.blocks_layout
-    }
-
-    /// Returns the encoder params of this storage, if any.
-    ///
-    /// Note that if the storage is not block-compressed, rather a view or adapter, the encoder params
-    /// should be treated as a hint for how to choose encoder params for arrays crated from a chain of
-    /// operations applied to this storage. This allows propagating encoder params from between arrays
-    /// that are in the same context.
-    #[inline(always)]
-    pub fn encoder_params(&self) -> Option<&EncoderParams> {
-        self.encoder_params
-    }
-
-    /// Returns the decoder params of this storage, if any.
-    ///
-    /// Note that if the storage is not block-compressed, rather a view or adapter, the decoder params
-    /// should be treated as a hint for how to choose decoder params for arrays crated from a chain of
-    /// operations applied to this storage. This allows propagating decoder params from between arrays
-    /// that are in the same context.
-    #[inline(always)]
-    pub fn decoder_params(&self) -> Option<&DecoderParams> {
-        self.decoder_params
-    }
 }
 
 /// A borrowed reference to an [`ArrayStorage`], itself implementing [`ArrayStorage`].
@@ -205,7 +159,7 @@ macro_rules! impl_array_storage_forward {
         fn dtype(&self) -> &crate::dtype::Dtype {
             self.0.dtype()
         }
-        fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
+        fn spec(&self) -> crate::storage::ArraySpec<'_> {
             self.0.spec()
         }
         fn as_compact(

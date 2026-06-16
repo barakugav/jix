@@ -7,8 +7,9 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::MaybeCompact;
 use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
+use crate::storage::params::ArraySpecOwned;
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlocksLayout, Compact, Ref,
+    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, Compact, Ref,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
@@ -432,7 +433,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             dtype: Ty<T>,
             shape: D,
             f: F,
-            layout: BlocksLayout,
+            spec: ArraySpecOwned,
         }
         impl<T, D, F> ArrayStorage for FnStorage<T, D, F>
         where
@@ -471,12 +472,8 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 self.dtype.dtype()
             }
 
-            fn spec(&self) -> crate::storage::ArrayStorageSpec<'_> {
-                crate::storage::ArrayStorageSpec {
-                    blocks_layout: &self.layout,
-                    encoder_params: None,
-                    decoder_params: None,
-                }
+            fn spec(&self) -> crate::storage::ArraySpec<'_> {
+                self.spec.as_ref()
             }
 
             crate::ops::impl_dimension_change_default!();
@@ -487,19 +484,12 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
         let dtype = Ty::<T>::new();
 
         params.tune(shape.as_slice(), dtype.dtype())?;
-        let layout = BlocksLayout::new(
-            params.block_shape.clone().unwrap(),
-            params.block_shape_tag.clone().unwrap(),
-            params.block_size_hint.unwrap(),
-            params.preferred_read_shape.clone().unwrap(),
-            params.preferred_read_size_hint.unwrap(),
-        );
-
+        let spec = params.clone().into_spec(shape.as_slice(), dtype.dtype())?;
         let array = Array::from_storage(FnStorage {
             dtype,
             shape,
             f,
-            layout,
+            spec,
         });
 
         array.compact_with(params, &ReadContext::new(&DecoderParams::default())?)
@@ -799,23 +789,19 @@ impl<S: ArrayStorage> Array<S> {
         let ndim = shape.len();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
-        check_get_buffer_size(index, dtype, buf)?;
-
-        let read_shape = self.storage.spec().blocks_layout.preferred_read_shape();
-        debug_assert!(read_shape.iter().all(|l| *l > 0));
+        let nitems = check_get_buffer_size(index, dtype, buf)?;
 
         // Fast path for small reads
-        let small_read =
-            (0..ndim).all(|dim| (index[dim].end - index[dim].start) <= read_shape[dim] as u64);
+        let spec = self.storage.spec();
+        let small_read = nitems as u64 <= spec.read_size();
         if small_read {
             return self.storage.read_data(index, buf, context);
         }
 
+        let read_shape: S::Dimension = spec.read_shape_heuristic(index, shape, dtype.itemsize());
         // Block-space begin/end for NdIter.
-        let block_begin =
-            S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim] as u64);
-        let block_end =
-            S::Dimension::from_fn(ndim, |dim| index[dim].end.div_ceil(read_shape[dim] as u64));
+        let block_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim]);
+        let block_end = S::Dimension::from_fn(ndim, |dim| index[dim].end.div_ceil(read_shape[dim]));
         // Element-space begin/end for NdIterExtBlockOffsetSize.
         let elem_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start);
         let elem_end = S::Dimension::from_fn(ndim, |dim| index[dim].end);
@@ -826,7 +812,7 @@ impl<S: ArrayStorage> Array<S> {
             NdIterExtBlockOffsetSize::new(
                 elem_begin,
                 elem_end,
-                S::Dimension::from_fn(ndim, |dim| read_shape[dim] as u64),
+                S::Dimension::from_fn(ndim, |dim| read_shape[dim]),
             ),
         );
 
@@ -837,7 +823,7 @@ impl<S: ArrayStorage> Array<S> {
         let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
         for (block_idx, (block_inner_offset, block_size)) in block_iter {
             let inner_index = dim_arr(ndim, |dim| {
-                let start = block_idx[dim] * read_shape[dim] as u64 + block_inner_offset[dim];
+                let start = block_idx[dim] * read_shape[dim] + block_inner_offset[dim];
                 let end = start + block_size[dim];
                 start..end
             });
@@ -980,24 +966,9 @@ impl<S: ArrayStorage> Array<S> {
             &mut block_fn,
         )?;
 
-        let blocks_layout = BlocksLayout::new(
-            params.block_shape.unwrap(),
-            params.block_shape_tag.unwrap(),
-            params.block_size_hint.unwrap(),
-            params.preferred_read_shape.unwrap(),
-            params.preferred_read_size_hint.unwrap(),
-        );
-        let decoder_params = params.decoder_params.unwrap_or_default();
-
         let shape = S::Dimension::from_slice(&shape);
         Ok(Array {
-            storage: Compact(ArrayBlockTableStorageBase::new(
-                blocks,
-                shape,
-                blocks_layout,
-                encoder_params,
-                decoder_params,
-            )),
+            storage: Compact(ArrayBlockTableStorageBase::new(blocks, shape, params)?),
         })
     }
 
@@ -1033,11 +1004,7 @@ impl<S: ArrayStorage> Array<S> {
         self.try_read_ctx().expect("failed to create read context")
     }
     fn try_read_ctx(&self) -> Result<ReadContext> {
-        let params = self.storage.spec().decoder_params;
-        match params {
-            Some(params) => ReadContext::new(params),
-            None => ReadContext::new(&DecoderParams::default()),
-        }
+        ReadContext::new(self.storage.spec().decoder_params())
     }
 
     /// Create an array with a storage reference to this array, without cloning the underlying data.
@@ -1174,12 +1141,6 @@ impl<S: ArrayStorage> Array<S> {
     #[inline(always)]
     pub fn into_storage(self) -> S {
         self.storage
-    }
-
-    #[allow(dead_code)]
-    #[inline(always)]
-    pub(crate) fn blocks_layout(&self) -> &BlocksLayout {
-        self.storage.spec().blocks_layout
     }
 
     /// Build a [`BlockFn`] that reads and compresses this array's data block by block.
@@ -1483,12 +1444,12 @@ mod tests {
 
     use super::Array;
     use crate::array::{ArrayBlockTableStorageBase, Compact};
-    use crate::codec::{DecoderParams, EncoderParams};
+    use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
-    use crate::storage::{BlockShapeTag, BlocksLayout};
+    use crate::storage::BlockShapeTag;
     use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
-    use crate::{Dimension, ErrorKind, IntoDimension, Ty};
+    use crate::{ArrayParams, ArrayStorage, Dimension, ErrorKind, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
     // compact_ndarray roundtrip helper
@@ -1542,21 +1503,19 @@ mod tests {
             .iter()
             .map(|&x| x as BlockSize)
             .collect::<DimArray<_>>();
-        let layout = BlocksLayout::new(
-            block_shape_hint.clone(),
-            dim_arr(ndim, |_| BlockShapeTag::Fixed),
-            0,
-            block_shape_hint,
-            0,
-        );
+        let params = ArrayParams::default()
+            .block_shape(&block_shape_hint)
+            .block_shape_tag(&dim_arr(ndim, |_| BlockShapeTag::Fixed))
+            .clone();
         Array {
-            storage: Compact(ArrayBlockTableStorageBase::new(
-                make_block_table(blocks),
-                Sh::Dimension::from_slice(&shape),
-                layout,
-                EncoderParams::default(),
-                DecoderParams::default(),
-            )),
+            storage: Compact(
+                ArrayBlockTableStorageBase::new(
+                    make_block_table(blocks),
+                    Sh::Dimension::from_slice(&shape),
+                    params,
+                )
+                .unwrap(),
+            ),
         }
     }
 
@@ -1728,7 +1687,7 @@ mod tests {
     #[test]
     fn compact_ndarray_block_larger_than_shape_is_rejected() {
         // block_shape [10] > array shape [4]; must be rejected per the
-        // `b <= s.max(1)` invariant enforced by `BlocksLayout::tune`.
+        // `b <= s.max(1)` invariant enforced by `ArrayParams::tune`.
         let src = array![0u8, 1, 2, 3];
         let err = Array::compact_ndarray_with(&src, arr_params(&[10])).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
@@ -1872,7 +1831,7 @@ mod tests {
         assert_eq!(b.shape(), &[4]);
         assert_eq!(b.ndim(), 1);
         assert_eq!(b.dtype(), &u8::DTYPE);
-        assert_eq!(b.blocks_layout().block_shape_hint[..], [4]);
+        assert_eq!(b.storage.spec().block_shape()[..], [4]);
         assert_eq!(b.to_ndarray().unwrap(), array![0, 1, 2, 3]);
     }
 
@@ -1881,7 +1840,7 @@ mod tests {
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[6]);
-        assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
+        assert_eq!(b.storage.spec().block_shape()[..], [3]);
         assert_eq!(b.to_ndarray().unwrap(), array![0, 1, 2, 3, 4, 5]);
     }
 
@@ -1892,7 +1851,7 @@ mod tests {
         let a = Array::compact_ndarray_with(&src, arr_params(&[3])).unwrap();
         let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[5]);
-        assert_eq!(b.blocks_layout().block_shape_hint[..], [3]);
+        assert_eq!(b.storage.spec().block_shape()[..], [3]);
         assert_eq!(b.to_ndarray().unwrap(), src);
     }
 
@@ -1914,7 +1873,7 @@ mod tests {
         let a = array(&[&[0u8, 1, 2, 3, 4, 5]], &[2, 3], &[2, 3]);
         let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[2, 3]);
-        assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
+        assert_eq!(b.storage.spec().block_shape()[..], [2, 3]);
         assert_eq!(b.to_ndarray().unwrap(), array![[0, 1, 2], [3, 4, 5]]);
     }
 
@@ -1939,7 +1898,7 @@ mod tests {
         );
         let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[4, 6]);
-        assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 3]);
+        assert_eq!(b.storage.spec().block_shape()[..], [2, 3]);
         assert_eq!(
             b.to_ndarray().unwrap(),
             ndarray::Array::from_shape_vec([4, 6], (0u8..24).collect()).unwrap()
@@ -1978,7 +1937,7 @@ mod tests {
         let b = a.compact().unwrap();
         assert_eq!(b.shape(), &[3, 3, 5]);
         assert_eq!(b.dtype(), &u8::DTYPE);
-        assert_eq!(b.blocks_layout().block_shape_hint[..], [2, 2, 3]);
+        assert_eq!(b.storage.spec().block_shape()[..], [2, 2, 3]);
         assert_eq!(b.to_ndarray().unwrap(), src);
     }
 
@@ -1989,8 +1948,8 @@ mod tests {
         let a = Array::compact_ndarray_with(&src, arr_params(&[4])).unwrap();
         let b = a.compact().unwrap();
         assert_eq!(
-            a.blocks_layout().block_shape_hint[..],
-            b.blocks_layout().block_shape_hint[..]
+            a.storage.spec().block_shape()[..],
+            b.storage.spec().block_shape()[..]
         );
     }
 

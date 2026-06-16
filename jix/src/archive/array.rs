@@ -10,7 +10,7 @@ use crate::archive::schema;
 use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::{ArrayBlockTableStorageBase, BlocksLayout, Compact, CompactMmap};
+use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimArray, Idx, IterExt};
 use crate::{
     ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ErrorKind, TypeDyn,
@@ -451,7 +451,7 @@ where
         reader: impl Read + Seek,
         len: Option<u64>,
         storage: S,
-        params: ArrayParams,
+        mut params: ArrayParams,
         validation: ArchiveValidation,
     ) -> Result<Self>
     where
@@ -548,24 +548,10 @@ where
             expected_nblocks
         );
 
-        let b_layout = BlocksLayout::tune(
-            Some(block_shape),
-            params.block_shape_tag,
-            params.block_size_hint,
-            params.preferred_read_shape,
-            params.preferred_read_size_hint,
-            &shape,
-            blocks.dtype().itemsize(),
-        )?;
+        params.block_shape = Some(block_shape);
 
         let shape = DimDyn::from_slice(&shape);
-        Ok(Self::new(
-            blocks,
-            shape,
-            b_layout,
-            params.encoder_params.unwrap_or_default(),
-            params.decoder_params.unwrap_or_default(),
-        ))
+        Self::new(blocks, shape, params)
     }
 }
 

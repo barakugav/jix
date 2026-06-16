@@ -4,7 +4,7 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::ArrayStorageSpec;
+use crate::storage::ArraySpec;
 use crate::{ArrayStorage, Dimension, ElementType};
 
 /// Private implementation trait for [`ArraySequence`]. Not part of the public API.
@@ -19,7 +19,7 @@ pub(crate) trait ArraySequenceImpl {
     ) -> Result<()>;
     fn shape(&self, arr: usize) -> &[u64];
     fn dtype(&self, arr: usize) -> &Dtype;
-    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_>;
+    fn spec(&self, arr: usize) -> ArraySpec<'_>;
 }
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
@@ -113,7 +113,7 @@ where
         self[arr].dtype()
     }
 
-    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+    fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
     }
 }
@@ -152,7 +152,7 @@ where
         self[arr].dtype()
     }
 
-    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+    fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
     }
 }
@@ -191,7 +191,7 @@ where
         self[arr].dtype()
     }
 
-    fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+    fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
     }
 }
@@ -250,7 +250,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 }
             }
 
-            fn spec(&self, arr: usize) -> ArrayStorageSpec<'_> {
+            fn spec(&self, arr: usize) -> ArraySpec<'_> {
                 match arr {
                     $($idx => self.$idx.storage.spec(),)+
                     _ => out_of_bounds_array_index(arr),

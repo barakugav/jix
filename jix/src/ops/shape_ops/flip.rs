@@ -4,7 +4,8 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::{ArrayStorageSpec, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::ArraySpec;
 use crate::util::iter::strides::NdIterExtStridesPtr;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
@@ -45,7 +46,7 @@ pub struct Flip<S: ArrayStorage> {
     /// User-provided axes after dedup + sort + bounds check. May include size-1 axes
     /// (preserved as-is for introspection; they do not affect `read_data`).
     axes: DimArray<usize>,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> Flip<S> {
@@ -71,12 +72,16 @@ impl<S: ArrayStorage> Flip<S> {
         }
         let sorted_axes = (0..ndim).filter(|d| seen[*d]).collect::<DimArray<_>>();
 
-        let blocks_layout = array.spec().blocks_layout.clone();
+        let inner_spec = array.spec();
+        let block_spec = ArrayBlockSpec {
+            block_shape: inner_spec.block_shape().clone(),
+            block_shape_tag: inner_spec.block_shape_tag().clone(),
+        };
 
         Ok(Self {
             array,
             axes: sorted_axes,
-            blocks_layout,
+            block_spec,
         })
     }
 
@@ -180,11 +185,8 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         self.array.dtype()
     }
 
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Flip<S::DimensionChange<NewD>>;
@@ -195,7 +197,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         Ok(Flip {
             array: self.array.dimension_change()?,
             axes: self.axes,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -207,7 +209,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         Ok(Flip {
             array: self.array.element_type_change()?,
             axes: self.axes,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

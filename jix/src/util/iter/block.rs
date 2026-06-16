@@ -8,7 +8,7 @@ use crate::Dimension;
 /// # Usage
 ///
 /// 1. Create the extension with [`NdIterExtBlockOffsetSize::new`], passing the full array `shape`,
-///    the element-space `[begin, end)` range, and the [`BlocksLayout`].
+///    the element-space `[begin, end)` range.
 /// 2. Compute the block-space iteration bounds from the same inputs:
 ///    - `block_begin[d] = begin[d] / block_shape[d]`
 ///    - `block_end[d]   = end[d].div_ceil(block_shape[d])`
@@ -168,9 +168,7 @@ mod tests {
         block_size: Vec<u64>,
     }
 
-    fn collect(
-        iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>,
-    ) -> Vec<BlocksIterItemOwned> {
+    fn collect(iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>) -> Vec<BlocksIterItemOwned> {
         let mut out = Vec::new();
         for (block_idx, (inner_offset, block_size)) in iter {
             out.push(BlocksIterItemOwned {

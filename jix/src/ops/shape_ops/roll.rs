@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::ArrayStorageSpec;
+use crate::storage::ArraySpec;
 use crate::util::{default_strides, dim_arr, nd_copy};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -161,7 +161,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         self.array.dtype()
     }
 
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArraySpec<'_> {
         self.array.spec()
     }
 

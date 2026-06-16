@@ -5,7 +5,8 @@ use crate::dtype::Dtype;
 use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
 };
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
@@ -38,7 +39,7 @@ pub struct Repeat<S: ArrayStorage> {
     axis: usize,
     repeats: u64,
     new_shape: S::Dimension,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> Repeat<S> {
@@ -72,21 +73,24 @@ impl<S: ArrayStorage> Repeat<S> {
         let new_shape =
             S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] });
 
-        let mut b_layout = array.spec().blocks_layout.clone();
-        b_layout.block_shape_hint[axis] = b_layout.block_shape_hint[axis]
+        let inner_spec = array.spec();
+        let mut block_shape = inner_spec.block_shape().clone();
+        let mut block_shape_tag = inner_spec.block_shape_tag().clone();
+        block_shape[axis] = block_shape[axis]
             .saturating_mul(repeats.max(u32::MAX as u64) as u32)
             .max(1);
-        b_layout.preferred_read_shape[axis] = b_layout.preferred_read_shape[axis]
-            .saturating_mul(repeats.max(u32::MAX as u64) as u32)
-            .max(1);
-        b_layout.block_shape_tag[axis] = BlockShapeTag::Any;
+        block_shape_tag[axis] = BlockShapeTag::Any;
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
 
         Ok(Self {
             array,
             axis,
             repeats,
             new_shape,
-            blocks_layout: b_layout,
+            block_spec,
         })
     }
 
@@ -250,11 +254,8 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         self.array.dtype()
     }
 
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Repeat<S::DimensionChange<NewD>>;
@@ -270,7 +271,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             axis: self.axis,
             repeats: self.repeats,
             new_shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -284,7 +285,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             axis: self.axis,
             repeats: self.repeats,
             new_shape: self.new_shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

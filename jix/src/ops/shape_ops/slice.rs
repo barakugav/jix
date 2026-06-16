@@ -4,7 +4,8 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
@@ -69,7 +70,7 @@ pub struct Slice<S: ArrayStorage> {
     no_steps: bool,
 
     shape: S::Dimension,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> Slice<S> {
@@ -92,26 +93,27 @@ impl<S: ArrayStorage> Slice<S> {
 
         let shape = S::Dimension::from_fn(ndim, |dim| slice[dim].len());
 
-        let mut b_layout = array.spec().blocks_layout.clone();
+        let inner_spec = array.spec();
+        let mut block_shape = inner_spec.block_shape().clone();
+        let mut block_shape_tag = inner_spec.block_shape_tag().clone();
         for dim in 0..ndim {
             if shape[dim] == input_shape[dim] {
                 continue;
             }
-            b_layout.block_shape_hint[dim] = b_layout.block_shape_hint[dim]
-                .min(shape[dim] as BlockSize)
-                .max(1);
-            b_layout.block_shape_tag[dim] = BlockShapeTag::Any;
-            b_layout.preferred_read_shape[dim] = b_layout.preferred_read_shape[dim]
-                .min(shape[dim] as BlockSize)
-                .max(1);
+            block_shape[dim] = block_shape[dim].min(shape[dim] as BlockSize).max(1);
+            block_shape_tag[dim] = BlockShapeTag::Any;
         }
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
 
         Ok(Self {
             array,
             slice,
             no_steps,
             shape,
-            blocks_layout: b_layout,
+            block_spec,
         })
     }
 
@@ -261,11 +263,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Slice<S::DimensionChange<NewD>>;
@@ -280,7 +279,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             slice: self.slice,
             no_steps: self.no_steps,
             shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -294,7 +293,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             slice: self.slice,
             no_steps: self.no_steps,
             shape: self.shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

@@ -15,7 +15,8 @@ const _: () = const {
     );
 };
 
-pub(crate) type BlockSize = u32;
+/// Size of a block along one dimension.
+pub type BlockSize = u32;
 
 /// Compressed 1D storage of typed items, divided into independently-encoded fixed-size blocks.
 ///
@@ -376,16 +377,13 @@ impl<ET> BlockTable<Owned, ET> {
 /// - [`Borrowed<'a>`] - a borrowed slice `&'a [T]`; zero-copy view into existing memory.
 /// - [`Mmap`] - memory-mapped file via [`MmapData<T>`]; the `Arc<Mmap>` keeps the mapping
 ///   alive for as long as any `BlockTable<Mmap>` referencing it exists.
-pub trait BlockTableStorage {
+pub(crate) trait BlockTableStorage {
     type Data<T: 'static>: AsRef<[T]>;
 }
 
-#[doc(hidden)]
-pub struct Owned(pub(crate) PhantomData<()>);
-#[doc(hidden)]
-pub struct Borrowed<'a>(pub(crate) PhantomData<&'a ()>);
-#[doc(hidden)]
-pub struct Mmap {
+pub(crate) struct Owned(pub(crate) PhantomData<()>);
+pub(crate) struct Borrowed<'a>(pub(crate) PhantomData<&'a ()>);
+pub(crate) struct Mmap {
     pub(crate) mmap: Arc<memmap2::Mmap>,
     pub(crate) base_offset: u64,
 }
@@ -400,7 +398,7 @@ impl<'a> BlockTableStorage for Borrowed<'a> {
 /// Pairs an `Arc<Mmap>` - which keeps the memory mapping alive - with a raw pointer and
 /// length describing the typed slice within it. The pointer is derived directly from the
 /// mapped region, so no allocation or copy takes place when reading.
-pub struct MmapData<T: 'static> {
+pub(crate) struct MmapData<T: 'static> {
     #[allow(unused)]
     pub(crate) mmap: Arc<memmap2::Mmap>,
     pub(crate) data: (SendSyncPtr<T>, usize),

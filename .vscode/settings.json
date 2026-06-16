@@ -9,6 +9,11 @@
     "python.analysis.extraPaths": [
         "jix-py/python/tests/"
     ],
+    "rust-analyzer.completion.autoimport.enable": true,
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+    },
     "cSpell.words": [
         "arange",
         "argmax",

@@ -5,7 +5,8 @@ use crate::dtype::Dtype;
 use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
 };
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
@@ -52,7 +53,7 @@ pub struct Tile<S: ArrayStorage> {
     axis: usize,
     reps: u64,
     new_shape: S::Dimension,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> Tile<S> {
@@ -86,22 +87,23 @@ impl<S: ArrayStorage> Tile<S> {
         let new_shape =
             S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] });
 
-        let mut b_layout = array.spec().blocks_layout.clone();
+        let inner_spec = array.spec();
+        let mut block_shape = inner_spec.block_shape().clone();
+        let mut block_shape_tag = inner_spec.block_shape_tag().clone();
         let reps_u32 = reps.min(u32::MAX as u64) as u32;
-        b_layout.block_shape_hint[axis] = b_layout.block_shape_hint[axis]
-            .saturating_mul(reps_u32)
-            .max(1);
-        b_layout.preferred_read_shape[axis] = b_layout.preferred_read_shape[axis]
-            .saturating_mul(reps_u32)
-            .max(1);
-        b_layout.block_shape_tag[axis] = BlockShapeTag::Any;
+        block_shape[axis] = block_shape[axis].saturating_mul(reps_u32).max(1);
+        block_shape_tag[axis] = BlockShapeTag::Any;
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
 
         Ok(Self {
             array,
             axis,
             reps,
             new_shape,
-            blocks_layout: b_layout,
+            block_spec,
         })
     }
 
@@ -291,11 +293,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         self.array.dtype()
     }
 
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Tile<S::DimensionChange<NewD>>;
@@ -311,7 +310,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             axis: self.axis,
             reps: self.reps,
             new_shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -325,7 +324,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             axis: self.axis,
             reps: self.reps,
             new_shape: self.new_shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

@@ -8,7 +8,8 @@ use crate::ops::common::AxesArg;
 use crate::ops::LanesInfo;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
-use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, ArrayStorageTyped};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
@@ -23,7 +24,7 @@ pub(crate) struct ReductionOp<S, K, D> {
 
     out_dtype_: Dtype,
     shape: D,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 pub(crate) trait ReductionOpKernel<T> {
     type Output;
@@ -93,34 +94,21 @@ impl<S, K, D> ReductionOp<S, K, D> {
             .collect::<DimArray<_>>();
         let shape = D::from_slice(&shape);
 
-        let mut b_layout = array.spec().blocks_layout.clone();
-        b_layout.block_shape_hint = (0..input_ndim)
-            .filter_map(|dim| {
-                is_reduced[dim]
-                    .not()
-                    .then_some(b_layout.block_shape_hint[dim])
-            })
-            .collect();
-        b_layout.block_shape_tag = (0..input_ndim)
-            .filter_map(|dim| {
-                is_reduced[dim]
-                    .not()
-                    .then_some(b_layout.block_shape_tag[dim])
-            })
-            .collect();
-        b_layout.preferred_read_shape = (0..input_ndim)
-            .filter_map(|dim| {
-                is_reduced[dim]
-                    .not()
-                    .then_some(b_layout.preferred_read_shape[dim])
-            })
-            .collect();
+        let spec = array.spec();
+        let block_spec = ArrayBlockSpec {
+            block_shape: (0..input_ndim)
+                .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape()[dim]))
+                .collect(),
+            block_shape_tag: (0..input_ndim)
+                .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape_tag()[dim]))
+                .collect(),
+        };
 
         Ok(Self {
             kernel,
             out_dtype_: K::Output::DTYPE,
             shape,
-            blocks_layout: b_layout,
+            block_spec,
             array,
             is_reduced,
         })
@@ -165,11 +153,8 @@ where
         unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
         dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
@@ -187,7 +172,7 @@ where
             is_reduced: self.is_reduced,
             out_dtype_: self.out_dtype_,
             shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -234,23 +219,17 @@ where
         //     reduced part exactly matches one bulk's reduced range (one tile-along-reduced
         //     per bulk). Within a bulk the tile iterator sweeps the non-reduced output
         //     region. Each `(bulk, tile)` pair produces *one* `self.array.read_data` call,
-        //     sized to roughly fit the source's `preferred_read_size_hint`.
+        //     sized to roughly fit the source's `read_size`.
         //
-        // `tile_shape` is chosen once per call by [`choose_tile_shape`]: seed every dim
-        // from the source storage block hint (clamped to `inner_range_full[d].len()`), then
-        // greedily scale each dim up by an integer multiplier of its seed - reduced dims
-        // first (rightmost first), then non-reduced (rightmost first) - until the running
-        // product would exceed `target_nitems = preferred_read_size_hint /
-        // size_of::<S::Item>()`. The per-dim multiplier is also capped so the tile can't
-        // overshoot the requested range. A final fixup snaps any dim whose tile already
-        // covers the full requested range to `inner_shape[d]`: tiles are aligned to
-        // absolute multiples of `tile_shape[d]`, so a tile sized exactly to the range can
-        // still get split when `inner_range_full[d].start` is not a multiple of the tile
-        // shape - using the full source extent guarantees one tile along that dim. Setting
-        // `bulk_shape[reduced] = tile_shape[reduced]` then makes the inner read shape come
-        // out to `tile_shape` for every tile.
+        // `tile_shape` is chosen once per call by the source spec's
+        // [`read_shape_heuristic_with_scale_order`], passing a custom scale order that
+        // visits reduced dims first (rightmost first), then non-reduced dims (rightmost
+        // first). The heuristic seeds every dim from the source storage block hint and
+        // greedily scales each dim up in that order until the byte budget is spent.
+        // Setting `bulk_shape[reduced] = tile_shape[reduced]` then makes the inner read
+        // shape come out to `tile_shape` for every tile.
         //
-        // [`choose_tile_shape`]: Self::choose_tile_shape
+        // [`read_shape_heuristic_with_scale_order`]: crate::params::ArraySpec::read_shape_heuristic_with_scale_order
         //
         // Both iterators are driven by `NdIterExtBlockOffsetSize`. Each yields
         // `(blk_idx, (inner_offset, blk_size))`: the absolute element start in dim `d` is
@@ -338,7 +317,21 @@ where
 
         let out_shape = D::from_fn(index.len(), |dim| index[dim].end - index[dim].start);
 
-        let tile_shape = self.choose_tile_shape(&inner_range_full);
+        // Greedy scale-up: reduced dims first (rightmost first), then non-reduced
+        // (rightmost first). The reduction kernel walks the reduced axes inside one tile,
+        // so giving them first claim on the budget produces fewer outer iterations. Each
+        // dim grows by an integer multiplier of its seed (the storage block hint), so the
+        // tile stays a multiple of the source's natural block size along that dim.
+        let tile_scale_order = (0..inner_ndim)
+            .rev()
+            .filter(|&dim| self.is_reduced[dim])
+            .chain((0..inner_ndim).rev().filter(|&dim| !self.is_reduced[dim]));
+        let tile_shape: S::Dimension = self.array.spec().read_shape_heuristic_with_scale_order(
+            &inner_range_full,
+            self.array.shape(),
+            size_of::<S::Item>() as _,
+            tile_scale_order,
+        );
 
         // Bulk shape: tile shape on reduced dims (so each bulk has exactly one
         // tile-along-reduced), full source extent on non-reduced dims (so the requested
@@ -425,11 +418,7 @@ where
             let tile_iter = NdIter::new_with_begin(
                 tile_grid_begin,
                 tile_grid_end,
-                NdIterExtBlockOffsetSize::new(
-                    bulk_begin,
-                    bulk_end,
-                    S::Dimension::from_slice(&tile_shape),
-                ),
+                NdIterExtBlockOffsetSize::new(bulk_begin, bulk_end, tile_shape.clone()),
             );
 
             for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
@@ -615,67 +604,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Choose the per-tile inner read shape.
-    ///
-    /// Tiles seed from the source array's storage-block hint (the natural unit of work
-    /// for the inner reader) and scale up greedily - reduced dims first, rightmost first
-    /// within each group - until the byte volume reaches the source's preferred read size
-    /// hint (with a cache floor for pathologically small hints). Every per-dim choice is
-    /// clamped to `full_read_shape[d].len()` so the budget isn't spent on dims that the
-    /// requested range can't actually consume.
-    ///
-    /// Final fixup: any dim whose tile already covers the full requested range is snapped
-    /// to `inner_shape[d]`. Tiles are aligned to absolute multiples of `tile_shape[d]`, so
-    /// a tile sized exactly to the range can still get split when `full_read_shape[d].start`
-    /// is not a multiple of the tile shape; using the full source extent guarantees the
-    /// range fits in one tile along that dim.
-    fn choose_tile_shape(&self, full_read_shape: &[Range<u64>]) -> DimArray<u64> {
-        let ndim = full_read_shape.len();
-        let blocks_layout = &self.array.spec().blocks_layout;
-
-        // Target byte volume per inner read; floor to keep tiny hints from collapsing tiles.
-        let target_nitems =
-            (blocks_layout.preferred_read_size_hint / size_of::<S::Item>() as u64).max(1);
-
-        // Seed from the source storage block hint, clamped to the requested range.
-        let mut tile_shape = dim_arr(ndim, |dim| {
-            (blocks_layout.block_shape_hint[dim] as u64)
-                .min(full_read_shape[dim].end - full_read_shape[dim].start)
-                .max(1)
-        });
-
-        // Greedy scale-up: reduced dims first (rightmost first), then non-reduced
-        // (rightmost first). The reduction kernel walks the reduced axes inside one tile,
-        // so giving them first claim on the budget produces fewer outer iterations. Each
-        // dim grows by an integer multiplier of its seed (the storage block hint), so the
-        // tile stays a multiple of the source's natural block size along that dim.
-        let scale_order = (0..ndim)
-            .rev()
-            .filter(|&dim| self.is_reduced[dim])
-            .chain((0..ndim).rev().filter(|&dim| !self.is_reduced[dim]));
-        let mut current_volume = tile_shape.iter().product::<u64>();
-        for dim in scale_order {
-            let dim_len = full_read_shape[dim].end - full_read_shape[dim].start;
-            let mult_by_budget = target_nitems / current_volume.max(1);
-            let mult_by_range = dim_len.div_ceil(tile_shape[dim]);
-            let multiplier = mult_by_budget.min(mult_by_range).max(1);
-            let new_tile_size = (tile_shape[dim] * multiplier).min(dim_len);
-            current_volume = current_volume / tile_shape[dim] * new_tile_size;
-            tile_shape[dim] = new_tile_size;
-        }
-
-        // Snap any dim already covering its full requested range to `inner_shape[d]` so
-        // the tile boundary doesn't accidentally split the range along an unaligned start.
-        let inner_shape = self.array.shape();
-        for dim in 0..ndim {
-            if tile_shape[dim] == (full_read_shape[dim].end - full_read_shape[dim].start) {
-                tile_shape[dim] = inner_shape[dim].max(1);
-            }
-        }
-
-        tile_shape
     }
 }
 

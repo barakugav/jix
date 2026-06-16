@@ -4,7 +4,8 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
 use crate::{ArrayStorage, Dimension, IntoDimension};
@@ -71,7 +72,7 @@ pub struct Reshape<S, D> {
     array: S,
 
     new_shape: D,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 impl<S, D> Reshape<S, D> {
     /// Constructs a [`Reshape`] storage. See the struct docs for semantics and examples.
@@ -108,18 +109,18 @@ impl<S, D> Reshape<S, D> {
             })
             .collect::<DimArray<_>>();
 
-        let mut b_layout = array.spec().blocks_layout.clone();
-        let mut block_shape_hint = DimArray::new();
+        let inner_spec = array.spec();
+        let inner_block_shape = inner_spec.block_shape();
+        let inner_block_shape_tag = inner_spec.block_shape_tag();
+        let mut block_shape = DimArray::new();
         let mut block_shape_tag = DimArray::new();
-        let mut preferred_read_shape = DimArray::new();
         // TODO: finalize the logic here, we can find a good heuristic
         for dim in 0..new_shape.len() {
             if let Some(orig_dim) = same_logical_stride[dim] {
                 let orig_dim = orig_dim as usize;
                 let same_dim_len = orig_shape[orig_dim] == new_shape[dim];
-                block_shape_hint.push(b_layout.block_shape_hint[orig_dim]);
-                preferred_read_shape.push(b_layout.preferred_read_shape[orig_dim]);
-                block_shape_tag.push(match b_layout.block_shape_tag[orig_dim] {
+                block_shape.push(inner_block_shape[orig_dim]);
+                block_shape_tag.push(match inner_block_shape_tag[orig_dim] {
                     BlockShapeTag::Fixed => {
                         if same_dim_len {
                             BlockShapeTag::Fixed
@@ -131,18 +132,18 @@ impl<S, D> Reshape<S, D> {
                     BlockShapeTag::Any => BlockShapeTag::Any,
                 });
             } else {
-                block_shape_hint.push(1);
-                preferred_read_shape.push(1);
+                block_shape.push(1);
                 block_shape_tag.push(BlockShapeTag::Any);
             }
         }
-        b_layout.block_shape_hint = block_shape_hint;
-        b_layout.block_shape_tag = block_shape_tag;
-        b_layout.preferred_read_shape = preferred_read_shape;
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
 
         Ok(Self {
             new_shape: new_shape_raw,
-            blocks_layout: b_layout,
+            block_spec,
             array,
         })
     }
@@ -392,11 +393,8 @@ where
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Reshape<S, NewD>;
@@ -410,7 +408,7 @@ where
         Ok(Reshape {
             array: self.array,
             new_shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -422,7 +420,7 @@ where
         Ok(Reshape {
             array: self.array.element_type_change()?,
             new_shape: self.new_shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

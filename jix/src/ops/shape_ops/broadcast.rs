@@ -3,7 +3,8 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -55,7 +56,7 @@ pub struct Broadcast<S: ArrayStorage> {
     is_identity: bool,
 
     new_shape: S::Dimension,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S> Broadcast<S>
@@ -93,40 +94,34 @@ where
         let is_identity = is_broadcast.iter().all(|&b| !b);
 
         let new_shape = S::Dimension::from_slice(new_shape);
-        let new_shape_slice = new_shape.as_slice();
 
-        // For broadcast dims: Any tag, hint=1, preferred=new size (full extent reads are free).
-        // For unchanged dims: inherit from inner.
-        let mut b_layout = array.spec().blocks_layout.clone();
-        b_layout.block_shape_hint = dim_arr(ndim, |dim| {
+        // For broadcast dims: Any tag, block_shape=1. For unchanged dims: inherit from inner.
+        let inner_spec = array.spec();
+        let block_shape = dim_arr(ndim, |dim| {
             if is_broadcast[dim] {
                 1
             } else {
-                b_layout.block_shape_hint[dim]
+                inner_spec.block_shape()[dim]
             }
         });
-        b_layout.block_shape_tag = dim_arr(ndim, |dim| {
+        let block_shape_tag = dim_arr(ndim, |dim| {
             if is_broadcast[dim] {
                 BlockShapeTag::Any
             } else {
-                b_layout.block_shape_tag[dim]
+                inner_spec.block_shape_tag()[dim]
             }
         });
-        b_layout.preferred_read_shape = dim_arr(ndim, |dim| {
-            if is_broadcast[dim] {
-                // TODO: start with 1, and scale up to preferred_read_size_hint
-                new_shape_slice[dim] as u32
-            } else {
-                b_layout.preferred_read_shape[dim]
-            }
-        });
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
 
         Ok(Self {
             array,
             is_broadcast,
             is_identity,
             new_shape,
-            blocks_layout: b_layout,
+            block_spec,
         })
     }
 
@@ -206,11 +201,8 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Broadcast<S::DimensionChange<NewD>>;
@@ -226,7 +218,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             is_broadcast: self.is_broadcast,
             is_identity: self.is_identity,
             new_shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -240,7 +232,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             is_broadcast: self.is_broadcast,
             is_identity: self.is_identity,
             new_shape: self.new_shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

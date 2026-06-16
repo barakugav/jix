@@ -3,7 +3,8 @@ use std::ops::{Not, Range};
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag};
 use crate::util::{default_strides, nd_copy, ArraySequence, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -61,7 +62,7 @@ where
     stack_axis: usize,
 
     shape: <ArraysT::Dimension as crate::Dimension>::Larger,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 impl<ArraysT> Stack<ArraysT>
 where
@@ -103,14 +104,23 @@ where
         new_shape.insert(axis, narrays as u64);
         let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
 
-        let mut b_layout = arrays.spec(0).blocks_layout.clone();
-        b_layout.block_shape_hint.insert(axis, 1);
-        b_layout.block_shape_tag.insert(axis, BlockShapeTag::Any);
-        b_layout.preferred_read_shape.insert(axis, 1);
+        let spec = arrays.spec(0);
+        let block_spec = ArrayBlockSpec {
+            block_shape: {
+                let mut block_shape = spec.block_shape().clone();
+                block_shape.insert(axis, 1);
+                block_shape
+            },
+            block_shape_tag: {
+                let mut block_shape_tag = spec.block_shape_tag().clone();
+                block_shape_tag.insert(axis, BlockShapeTag::Any);
+                block_shape_tag
+            },
+        };
 
         Ok(Self {
             shape: new_shape,
-            blocks_layout: b_layout,
+            block_spec,
             arrays,
             stack_axis: axis,
         })
@@ -209,11 +219,8 @@ where
     fn dtype(&self) -> &Dtype {
         self.arrays.dtype(0)
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.arrays.spec(0)
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.arrays.spec(0).with_block_spec(&self.block_spec)
     }
 
     crate::ops::impl_dimension_change_default!();
