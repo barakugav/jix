@@ -4,112 +4,157 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jix is a high-performance multi-dimensional array library written in Rust with Python bindings. It features lazy evaluation, block-based compressed storage (Zstd), and NumPy-compatible Python bindings via PyO3.
+Jix is a multi-dimensional array library with **block-compressed, lazy-evaluated storage**, written
+in Rust with Python bindings. Two independent features: (1) arrays split into a grid of
+independently Zstd-compressed nd-blocks, so reads decompress only the touched blocks; and (2) lazy
+operation chains where every op returns a new view and the whole pipeline is encoded in the static
+type, then runs in a single decompression pass when output is requested.
 
-## Crate Structure
+## Crate Layout — there is NO Cargo workspace
 
-- **`jix/`** - Core Rust library (`Array<S>`, dtype system, ops, storage, archive)
-- **`jix-macros/`** - Procedural macros used by the core library
-- **`jix-py/`** - PyO3 Python bindings (`jix-python` crate, publishes as `jix` Python package)
+Each crate is built and tested **independently from its own directory**. The root has no
+`Cargo.toml`, and `Cargo.lock` files are per-crate (gitignored). `cargo <cmd> -p jix` from the repo
+root will NOT work — you must `cd` into the crate directory first (this is how CI runs everything).
 
-There is no workspace-level `Cargo.toml`; each crate is built independently.
+| Directory | Cargo package | Purpose |
+|-----------|---------------|---------|
+| `jix/` | `jix` | Core Rust library — `Array<S>`, dtype system, ops, storage, archive |
+| `jix-macros/` | `jix-macros` | Proc-macro crate. Provides `#[derive(Dtyped)]` |
+| `jix-py/` | `jix-python` (lib name `jix`) | PyO3 bindings; publishes the `jix` Python package. Depends on `jix` as `jix_core` with `half` + `num-complex` enabled |
+| `jix/schema/` | `jix-schema-gen` (`publish = false`) | Standalone protobuf codegen (see Serialization below) |
 
 ## Common Commands
 
+Run from within the relevant crate directory.
+
 ```bash
-# Build core library
-cargo build -p jix
+# --- Core library (cd jix) ---
+cargo build
+cargo test --all-features                 # run all Rust tests
+cargo test --all-features <test_name>     # run a single test by name substring
+cargo hack check --feature-powerset --depth 2   # CI checks the feature powerset
 
-# Build Python extension
-cargo build -p jix-python
+# --- Python bindings (cd jix-py) ---
+maturin develop                           # build + install the extension into the active venv
+cargo test --all-features --all-targets   # Rust-side tests of the bindings
+cargo run --bin gen_pyi                    # regenerate the .pyi type stubs
+pytest python/tests --numprocesses auto    # Python tests — ALWAYS use --numprocesses auto (pytest-xdist)
 
-# Run Rust tests (core)
-cargo test -p jix
+# --- Formatting & linting (per crate, plus ruff/ascii from repo root) ---
+cargo fmt --all -- --check                 # in each of jix/schema, jix-macros, jix, jix-py
+cargo clippy --all-features
+ruff --config .ruff.toml format            # Python formatting
+ruff --config .ruff.toml check             # Python linting
+python scripts/check_only_ascii.py         # see "ASCII-only" constraint below
 
-# Run a single Rust test
-cargo test -p jix <test_name>
+# --- Regenerate protobuf Rust (requires protoc installed; cd jix/schema) ---
+cargo run                                  # rewrites jix/src/archive/schema/_proto_gen/
+```
 
-# Format code (100-char line width, see .rustfmt.toml)
-cargo fmt
+Python dev dependencies: before installing them, make sure a venv is activated at
+`{repo-root}/.venv`. If it does not exist, create it with uv using Python 3.13:
 
-# Build and install Python package (development mode)
-cd jix-py && maturin develop
-
-# Run Python tests (always pass --numprocesses auto for parallel execution)
-cd jix-py && pytest python/tests/ --numprocesses auto
-
-# Generate Python type stubs (.pyi)
-cargo run -p jix-python --bin gen_pyi
+```bash
+uv venv --python 3.13 .venv      # only if .venv does not already exist
+source .venv/bin/activate
+uv pip install -r scripts/dev_requirements.txt   # maturin, pytest, pytest-xdist, hypothesis, ruff, mkdocs...
 ```
 
 ## Architecture
 
-### `Array<S: ArrayStorage>` - Generic Core
+### `Array<S: ArrayStorage>` — the generic core
 
-The central type is `Array<S>` where `S` implements `ArrayStorage`:
-- `read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>`
-- `shape() -> &[u64]`, `dtype() -> &Dtype`
+`ArrayStorage` (`jix/src/storage/core.rs`) exposes exactly three things: `shape()`, `dtype()`, and
+`read_data(index_ranges, buf, ctx)` which reads a rectangular sub-region into a caller buffer.
+**Everything** — arithmetic, slicing, reductions, serialization — is built on top of these three.
 
-`ArrayStorage` has two associated types:
-- `type ElementType: ElementType` - compile-time element type, either `Ty<T>` (concrete scalar known at compile time) or `TypeDyn` (runtime only, for arrays loaded from disk).
-- `type Dimension: Dimension` - compile-time dimension, either `Dim<N>` (known statically) or `DimDyn`.
+Storage carries two pieces of compile-time info as associated types:
+- **`ElementType`** — either `Ty<T>` (scalar type `T` known at compile time) or `TypeDyn`
+  (runtime-only; arrays loaded from disk start here). `ArrayStorageTyped` is the supertrait
+  shorthand for `ArrayStorage<ElementType = Ty<T>>`, and **all element-wise ops require it**. Recover
+  a typed array from a `TypeDyn` one with `Array::into_typed::<T>()` (runtime-checked against the
+  header).
+- **`Dimension`** — either `Dim<N>` (ndim known statically) or `DimDyn` (runtime only).
 
-`ArrayStorageTyped` is a supertrait shorthand for `ArrayStorage<ElementType = Ty<T>>`. All element-wise operations (arithmetic, comparisons, cast, reductions) require it.
+### Lazy evaluation via the type system
 
-Storage backends: `Compact<T, D>` (heap-allocated block-compressed), `CompactMmap<T, D>` (memory-mapped), `Plain<A, T, D>` (uncompressed buffer).
+Every operation returns `Array<Op<...>>` wrapping its input(s); the type parameter accumulates the
+whole pipeline (e.g. `Array<Sum<Add<PermuteAxes<Compact>, Compact>>>`). There is **no runtime
+evaluation graph or scheduler — the type IS the execution plan.** Shape ops (`Reshape`, `Slice`,
+`Broadcast`, `PermuteAxes`, `InsertAxis`, `RemoveAxis`, ...) just remap index ranges without copying.
+Nothing runs until you materialize via `.to_ndarray()`, `.compact()`, or `.write_to_file()`/`.write_to()`
+— at which point the compiler-inlined pipeline executes in a single block-by-block read loop.
 
-### Lazy Evaluation
+### Storage backends (`jix/src/storage/`)
 
-Shape operations (`Reshape`, `Slice`, `Broadcast`, `PermuteAxes`, `InsertAxis`, `RemoveAxis`) implement `ArrayStorage` as thin wrappers that transform index ranges without copying data. Data is only read when explicitly requested (e.g., `.to_ndarray()`). This means operation chains compose generically at the type level.
+- `Compact<T, D>` / `CompactMmap<T, D>` — heap-allocated / memory-mapped block-compressed storage (the
+  main backends).
+- `Plain<...>` — zero-copy view over a contiguous/strided in-memory buffer, so plain ndarrays can
+  participate in the same op chains.
+- `ArrayAny` (= `Array<ArrayStorageAny>`) — type-erased (`Arc<dyn ArrayStorage>`) for holding mixed
+  storage types in one collection; loses compile-time element-wise ops.
 
-### Block-Based Storage
+### Block storage & codec pipeline
 
-Arrays are stored in fixed-size blocks, each independently Zstd-compressed. `BlockStorage` (in `jix/src/storage/block.rs`) tracks per-block byte offsets for efficient random access. A `ReadContext` carries an optional block cache.
+Arrays are an n-d grid of fixed-size blocks, each compressed independently; `BlockStorage`
+(`jix/src/storage/block.rs`) tracks per-block offsets for random access, and a `ReadContext` carries
+an optional block cache. When no block shape is given, one is auto-selected to fit the L1 cache.
+Codec pipeline (`jix/src/codec/`): `raw bytes -> filters (byte-shuffle default, bit-shuffle) -> codec
+(zstd) -> stored bytes`, reversed on read. All settings live in `ArrayParams` and are serialized into
+the archive, so readers never need to know them in advance.
 
-### Codec Pipeline
+### Type system (`jix/src/dtype.rs`)
 
-`Input -> [ByteShuffle filter] -> [Zstd compress] -> Block bytes`
+Runtime `Dtype` records kind/size/alignment per element. Supports **scalar dtypes** (`i8..i64`,
+`u8..u64`, `f16`, `f32/f64`, `Complex<f32>/Complex<f64>`, `bool`), **struct dtypes** (named fields
+with byte offsets, NumPy-style), and an **inner shape** (a small fixed sub-array per element). The
+`Dtyped` trait maps a Rust type to its `Dtype`; `#[derive(Dtyped)]` (from `jix-macros`) implements it
+for `#[repr(C)]` structs. `f16`/`Complex` live in `jix::scalar` and are gated behind the `half` /
+`num-complex` features.
 
-Defined in `jix/src/codec.rs`; codec/filter parameters serialized in protobuf headers.
+### Serialization (`.jix` files, `jix/src/archive/`)
 
-### Type System
+Archive = protobuf metadata (shape, block shape, codec config) + raw compressed block bytes. Multiple
+arrays can be packed back-to-back in one file, each read back by byte offset + length. A lazy view can
+be streamed straight to disk without ever materializing the full result.
 
-**Runtime element type - `Dtype`** (in `jix/src/dtype.rs`):
-- Scalar types: `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f16` (optional), `f32/f64`, `Complex<f32>/Complex<f64>` (optional), `bool`
-- Struct types: named fields with offsets
-- Inner shapes: dtypes can have up to 4 inner dimensions
-- Alignment and itemsize tracked for safe raw memory access
+The `.proto` sources live in `jix/schema/proto/jix/v1/`. They are **not** compiled at build time —
+the `jix-schema-gen` crate (`cd jix/schema && cargo run`, needs `protoc`) regenerates committed Rust
+into `jix/src/archive/schema/_proto_gen/`. Edit a `.proto` → rerun the generator → commit the output.
 
-**Compile-time element type - `ElementType`** (in `jix/src/storage/mod.rs`):
-- `Ty<T>` - concrete element type `T` known at compile time; enables all element-wise ops
-- `TypeDyn` - runtime-only; arrays from disk start here; call `Array::into_typed::<T>()` to recover `Ty<T>`
-- `f16` and `Complex<T>` live in `jix::scalar` (previously they were in `jix::dtype`)
+### Python bindings (`jix-py/`)
 
-### Serialization
+PyO3 + the `numpy` crate. The Python `Array` wraps a type-erased enum; operations dispatch over the
+runtime dtype (`jix-py/src/ops/common/dispatch.rs`, `dtype_promote.rs`, `broadcast.rs`). `pyo3-stub-gen`
+produces the `.pyi` stubs via the `gen_pyi` binary. Python source (the thin `__init__.py` re-export +
+tests) is under `jix-py/python/`.
 
-Protocol Buffers (via `prost`) define the archive format under `jix/proto/jix/v1/`. `build.rs` compiles these to Rust at build time. Archive structs live in `jix/src/archive/`.
+## Adding an operation
 
-### Python Bindings (`jix-py`)
+An op typically exists in two places that must stay in sync: the Rust implementation under
+`jix/src/ops/` (e.g. `op1.rs` unary, `op2.rs` binary, `cmp.rs`, `reduction.rs`, `shape_ops/`) and its
+Python dispatch wrapper under `jix-py/src/ops/`. After changing the Python surface, regenerate stubs
+with `cargo run --bin gen_pyi`.
 
-PyO3 + `numpy` crate. The Python `Array` class wraps a type-erased `AnyArray` enum. Operations return new `Array` objects. `pyo3-stub-gen` generates `.pyi` stubs via the `gen_pyi` binary. The Python source lives in `jix-py/python/`.
+## Testing Conventions
 
-## Developer Guides
-
-- [Testing guide](docs/dev/tests.md) - test crates, shared utilities, when to use proptest, macros, and how to test a new op
+- **Rust:** tests are inline `#[cfg(test)] mod tests` blocks inside the source files (no top-level
+  `tests/` directory). Property tests use `proptest`; shared strategies/assertions live in
+  `jix/src/util/test_util.rs`.
+- **Python:** `hypothesis` property tests in `jix-py/python/tests/`, with strategies in
+  `tests_util.py` that intentionally mirror the Rust `test_util.rs`. Always run under pytest-xdist
+  (`--numprocesses auto`). Requires `maturin develop` first.
 
 ## Key Constraints
 
-- **Little-endian only** - enforced by a compile-time assertion
-- **Max 8 array dimensions** (`NDIM_MAX`)
-- **Max 4 inner dtype dimensions** (`DTYPE_MAX_NDIM`)
-- **Rust edition 2024**
-
-## graphify
-
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
-
-Rules:
-- ALWAYS read graphify-out/GRAPH_REPORT.md before reading any source files, running grep/glob searches, or answering codebase questions. The graph is your primary map of the codebase.
-- IF graphify-out/wiki/index.md EXISTS, navigate it instead of reading raw files
-- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep - these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- **ASCII-only source** — `scripts/check_only_ascii.py` fails CI on any non-ASCII byte in a tracked
+  file. Use `-` (hyphen), not em-dashes/unicode, in code and docs.
+- **`JIX_DENY_WARNINGS=1`** is set via `.cargo/config.toml`, which turns on `deny(missing_docs)` (see
+  `build.rs` + `lib.rs`). Missing doc comments on public items become **build errors** locally.
+- **Little-endian targets only** — enforced by a compile-time assertion.
+- **Max 8 array dimensions** (`NDIM_MAX`); **max 4 inner dtype dimensions** (`DTYPE_MAX_NDIM`).
+- **Rust edition 2024, MSRV 1.89.0.** Element types must be `Copy + Send + Sync + 'static` and not
+  `Drop`.
+- Formatting: rustfmt `max_width = 100` (`.rustfmt.toml`); ruff `line-length = 120` (`.ruff.toml`).
+- Cargo features (core `jix`): `half` (enables `f16`), `num-complex` (enables `Complex`); default is
+  neither. CI checks the full feature powerset, so guard feature-gated code carefully.
