@@ -77,9 +77,7 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// ```
 pub struct InsertAxis<S, D> {
     array: S,
-    /// `is_inserted[output_dim]` is `true` for every output dimension that was inserted
-    /// (length 1, no corresponding input dimension).
-    is_inserted: DimArray<bool>,
+    original_dims: DimArray<u8>,
 
     shape: D,
     block_spec: ArrayBlockSpec,
@@ -103,7 +101,7 @@ where
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
         // the last input dim". Duplicates are allowed - each occurrence inserts one additional
-        // dim at that gap. Valid range: 0..=orig_ndim.
+        // dim at that gap.
         for &ax in &axes {
             ensure!(
                 ax <= orig_ndim,
@@ -112,51 +110,26 @@ where
                      (gap indices must be in 0..={orig_ndim})"
             );
         }
-
-        // Sort a local copy so we can walk input dims and inserted gaps together in one pass.
         axes.sort_unstable();
-        let mut sorted_axes = axes.iter().peekable();
 
-        // Build is_inserted and shape by interleaving: for each gap `g` (0..=orig_ndim),
-        // first emit all inserted dims that belong at gap `g`, then emit input dim `g`
-        // (if g < orig_ndim).
-        let mut is_inserted = DimArray::new();
-        let mut shape = DimArray::new();
-
-        for input_dim in 0..orig_ndim {
-            while sorted_axes.peek() == Some(&&input_dim) {
-                is_inserted.push(true);
-                shape.push(1u64);
-                sorted_axes.next();
-            }
-            is_inserted.push(false);
-            shape.push(array.shape()[input_dim]);
-        }
-        // Remaining axes sit at gap orig_ndim (after the last input dim).
-        for _ in sorted_axes {
-            is_inserted.push(true);
-            shape.push(1u64);
+        let mut is_inserted = dim_arr(orig_ndim, |_| false);
+        let mut shape = DimArray::from_slice(array.shape()).unwrap();
+        let orig_spec = array.spec();
+        let mut block_shape = orig_spec.block_shape().clone();
+        let mut block_shape_tag = orig_spec.block_shape_tag().clone();
+        for (inserted_dim_count, dim) in axes.iter().enumerate() {
+            let insert_pos = dim + inserted_dim_count;
+            is_inserted.insert(insert_pos, true);
+            shape.insert(insert_pos, 1);
+            block_shape.insert(insert_pos, 1);
+            block_shape_tag.insert(insert_pos, BlockShapeTag::Any);
         }
         let shape = D::from_slice(&shape);
-
-        // Build block_spec: inserted dims get block_shape = 1 (Any); non-inserted dims
-        // inherit the corresponding input dim's spec unchanged.
-        let inner_spec = array.spec();
-        let inner_block_shape = inner_spec.block_shape();
-        let inner_block_shape_tag = inner_spec.block_shape_tag();
-        let mut block_shape = DimArray::new();
-        let mut block_shape_tag = DimArray::new();
-        let mut input_dim = 0usize;
-        for &inserted in is_inserted.iter() {
-            if inserted {
-                block_shape.push(1);
-                block_shape_tag.push(BlockShapeTag::Any);
-            } else {
-                block_shape.push(inner_block_shape[input_dim]);
-                block_shape_tag.push(inner_block_shape_tag[input_dim]);
-                input_dim += 1;
-            }
-        }
+        let original_dims = is_inserted
+            .into_iter()
+            .enumerate()
+            .filter_map(|(dim, inserted)| (!inserted).then_some(dim as u8))
+            .collect();
         let block_spec = ArrayBlockSpec {
             block_shape,
             block_shape_tag,
@@ -164,7 +137,7 @@ where
 
         Ok(Self {
             array,
-            is_inserted,
+            original_dims,
             shape,
             block_spec,
         })
@@ -182,24 +155,14 @@ where
     fn transform_index(&self, index: &[Range<u64>]) -> Result<Option<DimArray<Range<u64>>>> {
         check_get_range(self.shape(), index)?;
 
-        // Inserted dimensions have size 1 and do not affect the element sequence.
-        // Because the output is always C-contiguous, a size-1 dimension is a no-op
-        // in the memory layout: its stride equals the stride of the next dimension,
-        // and there is exactly one step along it, so the elements appear in the same
-        // order as without it.
-        //
-        // Therefore we simply strip all inserted dims from `index` and forward the
-        // remaining ranges to the inner storage unchanged. No temporary buffer or
-        // element rearrangement is needed.
-        let mut inner_index = DimArray::new();
-        for (dim, index) in index.iter().enumerate() {
-            if !self.is_inserted[dim] {
-                inner_index.push(index.clone());
-            } else if index.start == index.end {
+        for index in index.iter() {
+            if index.start == index.end {
                 return Ok(None);
             }
         }
-        Ok(Some(inner_index))
+        Ok(Some(dim_arr(self.original_dims.len(), |dim| {
+            index[self.original_dims[dim] as usize].clone()
+        })))
     }
 }
 
@@ -246,7 +209,7 @@ where
                 if let Some(r) = &mut self.0 {
                     r.read_bulk(offset)
                 } else {
-                    unimplemented!()
+                    unimplemented!() // !(offset < self.len())
                 }
             }
         }
@@ -274,7 +237,7 @@ where
         let shape = NewD::from_slice(self.shape());
         Ok(InsertAxis {
             array: self.array,
-            is_inserted: self.is_inserted,
+            original_dims: self.original_dims,
             shape,
             block_spec: self.block_spec,
         })
@@ -287,7 +250,7 @@ where
     ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
         Ok(InsertAxis {
             array: self.array.element_type_change()?,
-            is_inserted: self.is_inserted,
+            original_dims: self.original_dims,
             shape: self.shape,
             block_spec: self.block_spec,
         })

@@ -4,7 +4,6 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::params::ArrayBlockSpec;
 use crate::storage::ArraySpec;
 use crate::util::iter::strides::NdIterExtStridesPtr;
 use crate::util::iter::NdIter;
@@ -46,7 +45,6 @@ pub struct Flip<S: ArrayStorage> {
     /// User-provided axes after dedup + sort + bounds check. May include size-1 axes
     /// (preserved as-is for introspection; they do not affect `read_data`).
     axes: DimArray<usize>,
-    block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> Flip<S> {
@@ -72,16 +70,9 @@ impl<S: ArrayStorage> Flip<S> {
         }
         let sorted_axes = (0..ndim).filter(|d| seen[*d]).collect::<DimArray<_>>();
 
-        let inner_spec = array.spec();
-        let block_spec = ArrayBlockSpec {
-            block_shape: inner_spec.block_shape().clone(),
-            block_shape_tag: inner_spec.block_shape_tag().clone(),
-        };
-
         Ok(Self {
             array,
             axes: sorted_axes,
-            block_spec,
         })
     }
 
@@ -186,7 +177,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     }
 
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array.spec()
     }
 
     type DimensionChange<NewD: crate::Dimension> = Flip<S::DimensionChange<NewD>>;
@@ -197,7 +188,6 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         Ok(Flip {
             array: self.array.dimension_change()?,
             axes: self.axes,
-            block_spec: self.block_spec,
         })
     }
 
@@ -209,7 +199,6 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         Ok(Flip {
             array: self.array.element_type_change()?,
             axes: self.axes,
-            block_spec: self.block_spec,
         })
     }
 }

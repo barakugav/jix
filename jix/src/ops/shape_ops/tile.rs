@@ -6,7 +6,7 @@ use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
 };
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
@@ -90,7 +90,7 @@ impl<S: ArrayStorage> Tile<S> {
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
         let mut block_shape_tag = inner_spec.block_shape_tag().clone();
-        let reps_u32 = reps.min(u32::MAX as u64) as u32;
+        let reps_u32 = reps.min(BlockSize::MAX as u64) as BlockSize;
         block_shape[axis] = block_shape[axis].saturating_mul(reps_u32).max(1);
         block_shape_tag[axis] = BlockShapeTag::Any;
         let block_spec = ArrayBlockSpec {

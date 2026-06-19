@@ -63,8 +63,7 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// ```
 pub struct RemoveAxis<S, D> {
     array: S,
-    /// `is_removed[input_dim]` is `true` for every input dimension that was removed.
-    is_removed: DimArray<bool>,
+    axes_mapping: DimArray<u8>,
 
     shape: D,
     block_spec: ArrayBlockSpec,
@@ -103,8 +102,7 @@ where
             );
         }
 
-        // Build is_removed, shape, and block_spec by walking input dims.
-        let mut is_removed = DimArray::new();
+        let mut axes_mapping = DimArray::new();
         let mut shape = DimArray::new();
 
         let inner_spec = array.spec();
@@ -115,8 +113,8 @@ where
 
         for input_dim in 0..input_ndim {
             let removed = seen[input_dim];
-            is_removed.push(removed);
             if !removed {
+                axes_mapping.push(input_dim as u8);
                 shape.push(array.shape()[input_dim]);
                 block_shape.push(inner_block_shape[input_dim]);
                 block_shape_tag.push(inner_block_shape_tag[input_dim]);
@@ -131,7 +129,7 @@ where
 
         Ok(Self {
             array,
-            is_removed,
+            axes_mapping,
             shape,
             block_spec,
         })
@@ -149,22 +147,11 @@ where
     fn transform_index(&self, index: &[Range<u64>]) -> Result<DimArray<Range<u64>>> {
         check_get_range(self.shape(), index)?;
 
-        // Removed dimensions have size 1 and do not affect the element sequence.
-        // Re-insert them as `0..1` ranges and forward the full index to the inner storage.
-        let mut output_dim = 0usize;
-        let inner_index = self
-            .is_removed
-            .iter()
-            .map(|&removed| {
-                if removed {
-                    0..1
-                } else {
-                    let range = index[output_dim].clone();
-                    output_dim += 1;
-                    range
-                }
-            })
-            .collect::<DimArray<_>>();
+        let inner_ndim = self.array.shape().len();
+        let mut inner_index = dim_arr(inner_ndim, |_| 0..1);
+        for (index, &axis) in index.iter().zip(&self.axes_mapping) {
+            inner_index[axis as usize] = index.clone();
+        }
         Ok(inner_index)
     }
 }
@@ -217,7 +204,7 @@ where
         let shape = NewD::from_slice(self.shape());
         Ok(RemoveAxis {
             array: self.array,
-            is_removed: self.is_removed,
+            axes_mapping: self.axes_mapping,
             shape,
             block_spec: self.block_spec,
         })
@@ -230,7 +217,7 @@ where
     ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
         Ok(RemoveAxis {
             array: self.array.element_type_change()?,
-            is_removed: self.is_removed,
+            axes_mapping: self.axes_mapping,
             shape: self.shape,
             block_spec: self.block_spec,
         })

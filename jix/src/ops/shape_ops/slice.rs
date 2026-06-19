@@ -100,7 +100,9 @@ impl<S: ArrayStorage> Slice<S> {
             if shape[dim] == input_shape[dim] {
                 continue;
             }
-            block_shape[dim] = block_shape[dim].min(shape[dim] as BlockSize).max(1);
+            block_shape[dim] = block_shape[dim]
+                .min(shape[dim].min(BlockSize::MAX as u64) as BlockSize)
+                .max(1); // TODO
             block_shape_tag[dim] = BlockShapeTag::Any;
         }
         let block_spec = ArrayBlockSpec {

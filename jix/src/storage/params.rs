@@ -394,7 +394,7 @@ impl ArrayParams {
 
         {
             let spec = spec.as_ref();
-            let ndim = spec.block_shape().len();
+            let ndim = shape.len();
             assert_eq!(spec.block_shape().len(), ndim);
             assert!(spec
                 .block_shape()

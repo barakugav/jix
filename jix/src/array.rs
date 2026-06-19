@@ -1447,8 +1447,7 @@ mod tests {
     use crate::codec::EncoderParams;
     use crate::dtype::Dtyped;
     use crate::storage::block::{BlockSize, BlockTable};
-    use crate::storage::BlockShapeTag;
-    use crate::util::{arr_params, cast_slice, dim_arr, DimArray};
+    use crate::util::{arr_params, cast_slice, DimArray};
     use crate::{ArrayParams, ArrayStorage, Dimension, ErrorKind, IntoDimension, Ty};
 
     // -----------------------------------------------------------------------
@@ -1498,15 +1497,11 @@ mod tests {
             .iter()
             .map(|&x| x as u64)
             .collect::<DimArray<_>>();
-        let ndim = block_shape.len();
-        let block_shape_hint = block_shape
+        let block_shape = block_shape
             .iter()
             .map(|&x| x as BlockSize)
             .collect::<DimArray<_>>();
-        let params = ArrayParams::default()
-            .block_shape(&block_shape_hint)
-            .block_shape_tag(&dim_arr(ndim, |_| BlockShapeTag::Fixed))
-            .clone();
+        let params = ArrayParams::default().block_shape(&block_shape).clone();
         Array {
             storage: Compact(
                 ArrayBlockTableStorageBase::new(

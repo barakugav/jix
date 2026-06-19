@@ -47,9 +47,9 @@ use crate::{Array, ArrayStorage, Dimension};
 pub struct PermuteAxes<S: ArrayStorage> {
     array: S,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.
-    axes: DimArray<usize>,
+    axes: DimArray<u8>,
     /// `inv_axes[d]` = index of the output dimension that maps from input dimension `d`.
-    inv_axes: DimArray<usize>,
+    inv_axes: DimArray<u8>,
 
     shape: S::Dimension,
     block_spec: ArrayBlockSpec,
@@ -100,8 +100,8 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             shape,
             block_spec,
             array,
-            axes,
-            inv_axes,
+            axes: dim_arr(ndim, |i| axes[i] as u8),
+            inv_axes: dim_arr(ndim, |i| inv_axes[i] as u8),
         })
     }
 
@@ -127,27 +127,25 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         // Build the index into the underlying (un-permuted) storage.
         // Output dim i reads from input dim axes[i], so input dim d = inv_axes[output dim] needs
         // the range that was requested for output dim inv_axes[d].
-        let input_index = dim_arr(ndim, |d| index[self.inv_axes[d]].clone());
+        let input_index = dim_arr(ndim, |d| index[self.inv_axes[d] as usize].clone());
 
         // Read the underlying data contiguously into tmp_buf.
         // tmp_buf is laid out C-contiguous over sub_shape_in (input dim order).
         let sub_shape_in = dim_arr(ndim, |d| {
             (input_index[d].end - input_index[d].start) as usize
         });
-        let n_bytes = nitems * itemsize;
-        let mut tmp_buf = context.tmp_buf(n_bytes, dtype.alignment());
+        let mut tmp_buf = context.tmp_buf(nitems * itemsize, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
         self.array.read_data(&input_index, tmp_buf, context)?;
 
         // Strides in tmp_buf (C-contiguous over input dims).
         let src_strides_in = default_strides(&sub_shape_in, itemsize);
+        // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
+        let src_strides_out = dim_arr(ndim, |i| src_strides_in[self.axes[i] as usize]);
 
         // The output buffer is C-contiguous over sub_shape_out (output dim order).
         let sub_shape_out = S::Dimension::from_fn(ndim, |i| index[i].end - index[i].start);
         let dst_strides = default_strides(sub_shape_out.as_slice(), itemsize as u64);
-
-        // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
-        let src_strides_out = dim_arr(ndim, |i| src_strides_in[self.axes[i]]);
 
         unsafe {
             nd_copy(
