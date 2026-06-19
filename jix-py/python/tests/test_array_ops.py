@@ -134,7 +134,7 @@ def test_flatten_1d_noop():
 def test_flatten_lazy():
     arr = np.arange(6, dtype=np.int32)
     za = jix.compact(arr)
-    flat = jix.flatten(za, copy=False)
+    flat = jix.flatten(za)
     assert flat.shape == (6,)
     np.testing.assert_array_equal(flat.numpy(), arr)
 
@@ -163,7 +163,7 @@ def test_reshape_2d_to_1d():
 def test_reshape_lazy():
     arr = np.arange(6, dtype=np.int32)
     za = jix.compact(arr)
-    r = jix.reshape(za, [3, 2], copy=False)
+    r = jix.reshape(za, [3, 2])
     assert r.shape == (3, 2)
     np.testing.assert_array_equal(r.numpy(), arr.reshape(3, 2))
 

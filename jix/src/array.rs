@@ -53,7 +53,7 @@ use crate::{
 /// ```text
 /// Array<Compact>
 ///   .neg()                 -> Array<Neg<Compact>>
-///   .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
+///   .reshape(...)          -> Array<Reshape<Neg<Compact>>>
 ///   .permute_axes(axes)    -> Array<PermuteAxes<Reshape<...>>>
 ///   .add(other_array)      -> Array<Add<PermuteAxes<...>, Compact>>
 ///   .sum(axis)             -> Array<Sum<Add<...>>>
@@ -148,14 +148,13 @@ use crate::{
 /// of operations, etc.) choose their block shape with a heuristic, trying to preserve the original
 /// user block shape as much as possible while respecting the new shape and layout.
 ///
-/// Shape-changing operations - [`reshape_view`](Array::reshape_view),
+/// Shape-changing operations - [`reshape`](Array::reshape),
 /// [`broadcast`](Array::broadcast), [`permute_axes`](Array::permute_axes) - remap how
 /// output indices translate to positions in the underlying blocks. When the new layout crosses
 /// block boundaries that the original respected, a single read may decompress many more blocks
 /// than necessary. To avoid this, materialize with [`compact`](Array::compact) (automatic block shape)
 /// or [`compact_with`](Array::compact_with) (explicit [`ArrayParams`]) after a shape change.
-/// Some operations, like "reshape", have an eager variant [`reshape`](Array::reshape) call `compact`
-/// internally. To ensure a well-aligned block layout, pass explicit `ArrayParams` with a block
+/// To ensure a well-aligned block layout, pass explicit `ArrayParams` with a block
 /// shape that matches the expected access pattern.
 ///
 /// # Element type tracking
