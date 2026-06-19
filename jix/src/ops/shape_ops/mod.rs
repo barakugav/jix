@@ -151,7 +151,7 @@ where
         Roll::new_array(self, shift, axis).unwrap()
     }
 
-    /// Returns a lazy view of the array replicated `reps` times along `axis`.
+    /// Returns a lazy view of the array replicated `repeats` times along `axis`.
     /// See [`Tile`] for details and examples.
     ///
     /// Unlike NumPy's `tile`, `axis` must satisfy `axis < self.ndim()`; the array is
@@ -160,11 +160,11 @@ where
     /// # Panics
     ///
     /// Panics if `axis >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
-    /// internal axis is required), or if `self.shape()[axis] * reps` overflows `u64`.
+    /// internal axis is required), or if `self.shape()[axis] * repeats` overflows `u64`.
     #[inline]
     #[track_caller]
-    pub fn tile(self, reps: u64, axis: usize) -> Array<Tile<S>> {
-        Tile::new_array(self, reps, axis).unwrap()
+    pub fn tile(self, repeats: u64, axis: usize) -> Array<Tile<S>> {
+        Tile::new_array(self, repeats, axis).unwrap()
     }
 
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.

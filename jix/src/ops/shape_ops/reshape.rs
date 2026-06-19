@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
 use crate::{ArrayStorage, Dimension, IntoDimension};
@@ -86,9 +86,9 @@ impl<S, D> Reshape<S, D> {
         let new_shape = DimArray::from_slice(new_shape_raw.as_slice()).unwrap();
         let orig_shape = DimArray::from_slice(array.shape()).unwrap();
         let nitems = orig_shape.iter().cloned().try_product().unwrap();
-        let new_nitems = new_shape.iter().cloned().try_product().unwrap();
+        let new_nitems = new_shape.iter().cloned().try_product();
         ensure!(
-            nitems == new_nitems,
+            Some(nitems) == new_nitems,
             InvalidShapeOperation,
             "cannot reshape array of shape {orig_shape:?} into shape {new_shape:?}"
         );
@@ -114,12 +114,15 @@ impl<S, D> Reshape<S, D> {
         let inner_block_shape_tag = inner_spec.block_shape_tag();
         let mut block_shape = DimArray::new();
         let mut block_shape_tag = DimArray::new();
-        // TODO: finalize the logic here, we can find a good heuristic
         for dim in 0..new_shape.len() {
             if let Some(orig_dim) = same_logical_stride[dim] {
                 let orig_dim = orig_dim as usize;
                 let same_dim_len = orig_shape[orig_dim] == new_shape[dim];
-                block_shape.push(inner_block_shape[orig_dim]);
+                block_shape.push(
+                    inner_block_shape[orig_dim]
+                        .min(new_shape[dim].min(BlockSize::MAX as u64) as BlockSize)
+                        .max(1),
+                );
                 block_shape_tag.push(match inner_block_shape_tag[orig_dim] {
                     BlockShapeTag::Fixed => {
                         if same_dim_len {
