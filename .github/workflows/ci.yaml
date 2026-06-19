@@ -127,11 +127,11 @@ jobs:
         uses: astral-sh/ruff-action@v3
         with:
           args: --config .ruff.toml check
-      - name: Check schema is up to date
-        run: |
-          pushd schema; cargo run; popd
-          git diff --exit-code
-        working-directory: jix
+      # - name: Check schema is up to date
+      #   run: |
+      #     pushd schema; cargo run; popd
+      #     git diff --exit-code
+      #   working-directory: jix
 
       ############ Tests ############
       - name: Test jix

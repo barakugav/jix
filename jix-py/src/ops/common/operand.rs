@@ -44,7 +44,7 @@ impl Operand {
             (np_items.generic.bind(py), np_items.asarray.bind(py))
         };
 
-        if !value.is_instance(&np_generic)? {
+        if !value.is_instance(np_generic)? {
             let mut scalar = None;
             if let Ok(value) = value.cast::<PyBool>() {
                 scalar = Some(Scalar::Bool(value.extract()?));
@@ -87,10 +87,7 @@ impl Operand {
                     Scalar::Int(item.extract::<i32>()? as i64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::I64 => (
-                    Scalar::Int(item.extract::<i64>()? as i64),
-                    Some(Precision::P8),
-                ),
+                DtypeScalarKind::I64 => (Scalar::Int(item.extract::<i64>()?), Some(Precision::P8)),
                 DtypeScalarKind::U8 => (
                     Scalar::UInt(item.extract::<u8>()? as u64),
                     Some(Precision::P1),
@@ -103,10 +100,7 @@ impl Operand {
                     Scalar::UInt(item.extract::<u32>()? as u64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::U64 => (
-                    Scalar::UInt(item.extract::<u64>()? as u64),
-                    Some(Precision::P8),
-                ),
+                DtypeScalarKind::U64 => (Scalar::UInt(item.extract::<u64>()?), Some(Precision::P8)),
                 DtypeScalarKind::F16 => (
                     Scalar::Float(item.extract::<f32>()? as f64),
                     Some(Precision::P2),
@@ -115,10 +109,9 @@ impl Operand {
                     Scalar::Float(item.extract::<f32>()? as f64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::F64 => (
-                    Scalar::Float(item.extract::<f64>()? as f64),
-                    Some(Precision::P8),
-                ),
+                DtypeScalarKind::F64 => {
+                    (Scalar::Float(item.extract::<f64>()?), Some(Precision::P8))
+                }
                 DtypeScalarKind::ComplexF32 => {
                     let re = item.getattr("real")?.extract::<f32>()?;
                     let im = item.getattr("imag")?.extract::<f32>()?;

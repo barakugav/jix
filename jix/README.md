@@ -44,22 +44,22 @@ Array<Compact>
 
 ## When should I use this library?
 
-Jix's two main features — block-compressed ndarrays and lazy operation chains —
+Jix's two main features - block-compressed ndarrays and lazy operation chains -
 can be used independently, and each fits a different scenario.
 
 - **Random access to a compressed array.**
-    When you want to minimize the size of an array — on disk or in memory — but still need
+    When you want to minimize the size of an array - on disk or in memory - but still need
     to read small regions of it at a time, jix's compact arrays let you decompress just the
     blocks that overlap each read. The same applies when you have many small arrays and want
     to keep their combined footprint low.
     A classic example is a machine-learning data loader that randomly samples chunks from
-    a large dataset. This use case needs only the compact array — no lazy pipeline required.
+    a large dataset. This use case needs only the compact array - no lazy pipeline required.
     Note that if you want to compress an array but always read it in full, you don't need jix
-    at all — just zip and unzip the whole array with a general-purpose compressor.
+    at all - just zip and unzip the whole array with a general-purpose compressor.
 - **Computation on arrays that don't fit in memory.**
     For arrays too large to hold in memory, jix's lazy operation chains let you mmap an array
     from disk, apply a pipeline of operations on top of it, and stream the result back to
-    disk — without ever holding the full array in memory, not even in compressed form.
+    disk - without ever holding the full array in memory, not even in its compressed form.
     This use case needs only the lazy pipeline; you can build it on a plain array backed
     by an mmap'd file, without using the compact format.
 - **Long and/or complex pipelines of operations.**
@@ -68,11 +68,11 @@ can be used independently, and each fits a different scenario.
     produces NumPy-style intermediates), so for simple `map`/`zip`-style pipelines
     jix offers little over hand-written iterator code.
     The advantage shows up once the pipeline includes
-    operations that change the shape or the access pattern — reductions, broadcasts,
+    operations that change the shape or the access pattern - reductions, broadcasts,
     axis permutations, reshapes, tiling, slicing, rolling, `concatenate`/`stack`, and so on.
     These are awkward or impractical to express as plain iterator chains,
     especially when combined with element-wise operations.
     Jix composes element-wise and shape-changing operations uniformly in the same operation chain,
     all as lazy views, and because the full chain is encoded in the static type the compiler is able to
-    inline the whole pipeline into a single read loop — no virtual dispatch, no runtime scheduler,
+    inline the whole pipeline into a single read loop - no virtual dispatch, no runtime scheduler,
     no (large) intermediate allocations beyond the final output.
