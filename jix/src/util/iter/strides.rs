@@ -22,7 +22,7 @@ impl<S> NdIterExtension for NdIterExtStridesPtr<S>
 where
     S: Idx + 'static,
 {
-    type Item<'a> = *const u8;
+    type Item = *const u8;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
@@ -71,7 +71,7 @@ impl<S> NdIterExtension for NdIterExtStridesPtrMut<S>
 where
     S: Idx + 'static,
 {
-    type Item<'a> = *mut u8;
+    type Item = *mut u8;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
@@ -115,10 +115,7 @@ impl NdIterExtStridesOffset {
     }
 }
 impl NdIterExtension for NdIterExtStridesOffset {
-    type Item<'a>
-        = u64
-    where
-        Self: 'a;
+    type Item = u64;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
@@ -162,9 +159,9 @@ mod tests {
         let mut data = [0u8; 8];
         let base = data.as_mut_ptr();
         let ext = NdIterExtStridesPtrMut::new(&[1usize], base);
-        let mut iter = NdIter::new(&[8u64], ext);
+        let iter = NdIter::new(&[8u64], ext);
         let mut i = 0usize;
-        while let Some((_, ptr)) = iter.next() {
+        for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
             i += 1;
         }
@@ -177,9 +174,9 @@ mod tests {
         let base = data.as_mut_ptr();
         let stride = 8usize;
         let ext = NdIterExtStridesPtrMut::new(&[stride], base);
-        let mut iter = NdIter::new(&[8u64], ext);
+        let iter = NdIter::new(&[8u64], ext);
         let mut i = 0usize;
-        while let Some((_, ptr)) = iter.next() {
+        for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i * stride) }, "step {i}");
             i += 1;
         }
@@ -193,9 +190,9 @@ mod tests {
         let mut data = vec![0u8; rows * cols * elem];
         let base = data.as_mut_ptr();
         let ext = NdIterExtStridesPtrMut::new(&[cols * elem, elem], base);
-        let mut iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
         let mut flat = 0usize;
-        while let Some((_, ptr)) = iter.next() {
+        for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat * elem) }, "flat index {flat}");
             flat += 1;
         }
@@ -212,12 +209,12 @@ mod tests {
         let base = data.as_mut_ptr();
         // Strides: dim 0 (row) = 1, dim 1 (col) = rows = 2
         let ext = NdIterExtStridesPtrMut::new(&[1, rows], base);
-        let mut iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
         // Iteration order is row-major by *index*, but pointer jumps follow column-major layout:
         // [0,0]=0, [0,1]=2, [0,2]=4, [1,0]=1, [1,1]=3, [1,2]=5
         let expected_offsets: &[usize] = &[0, 2, 4, 1, 3, 5];
         let mut i = 0usize;
-        while let Some((_, ptr)) = iter.next() {
+        for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(expected_offsets[i]) }, "step {i}");
             i += 1;
         }
@@ -233,10 +230,10 @@ mod tests {
         let base = data.as_mut_ptr();
         let start = unsafe { base.add(1 * 4 + 1 * 1) };
         let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], start);
-        let mut iter = NdIter::new_with_begin(&[1u64, 1], &[3, 3], ext);
+        let iter = NdIter::new_with_begin(&[1u64, 1], &[3, 3], ext);
         let expected: &[usize] = &[5, 6, 9, 10];
         let mut i = 0;
-        while let Some((_, ptr)) = iter.next() {
+        for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(expected[i]) }, "step {i}");
             i += 1;
         }
@@ -256,9 +253,9 @@ mod tests {
         let data = [0u8; 8];
         let base = data.as_ptr();
         let ext = NdIterExtStridesPtr::new(&[1usize], base);
-        let mut iter = NdIter::new(&[8u64], ext);
+        let iter = NdIter::new(&[8u64], ext);
         let mut i = 0usize;
-        while let Some((_, ptr)) = iter.next() {
+        for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) });
             i += 1;
         }
@@ -272,9 +269,9 @@ mod tests {
         let data = vec![0u8; rows * cols];
         let base = data.as_ptr();
         let ext = NdIterExtStridesPtr::new(&[cols, 1], base);
-        let mut iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
         let mut flat = 0usize;
-        while let Some((_, ptr)) = iter.next() {
+        for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat) });
             flat += 1;
         }

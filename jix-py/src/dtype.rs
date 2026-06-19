@@ -18,21 +18,21 @@ pub(crate) fn dtype_to_numpy<'py>(
     let numpy_dtype = if let Some(scalar) = dtype.scalar_kind() {
         assert!(cfg!(target_endian = "little"));
         match scalar {
-            DtypeScalarKind::Bool => PyArrayDescr::new(py, "bool"),
-            DtypeScalarKind::I8 => PyArrayDescr::new(py, "<i1"),
-            DtypeScalarKind::I16 => PyArrayDescr::new(py, "<i2"),
-            DtypeScalarKind::I32 => PyArrayDescr::new(py, "<i4"),
-            DtypeScalarKind::I64 => PyArrayDescr::new(py, "<i8"),
-            DtypeScalarKind::U8 => PyArrayDescr::new(py, "<u1"),
-            DtypeScalarKind::U16 => PyArrayDescr::new(py, "<u2"),
-            DtypeScalarKind::U32 => PyArrayDescr::new(py, "<u4"),
-            DtypeScalarKind::U64 => PyArrayDescr::new(py, "<u8"),
-            DtypeScalarKind::F16 => PyArrayDescr::new(py, "<f2"),
-            DtypeScalarKind::F32 => PyArrayDescr::new(py, "<f4"),
-            DtypeScalarKind::F64 => PyArrayDescr::new(py, "<f8"),
-            DtypeScalarKind::ComplexF32 => PyArrayDescr::new(py, "<c8"),
-            DtypeScalarKind::ComplexF64 => PyArrayDescr::new(py, "<c16"),
-        }?
+            DtypeScalarKind::Bool => PyArrayDescr::of::<bool>(py),
+            DtypeScalarKind::I8 => PyArrayDescr::of::<i8>(py),
+            DtypeScalarKind::I16 => PyArrayDescr::of::<i16>(py),
+            DtypeScalarKind::I32 => PyArrayDescr::of::<i32>(py),
+            DtypeScalarKind::I64 => PyArrayDescr::of::<i64>(py),
+            DtypeScalarKind::U8 => PyArrayDescr::of::<u8>(py),
+            DtypeScalarKind::U16 => PyArrayDescr::of::<u16>(py),
+            DtypeScalarKind::U32 => PyArrayDescr::of::<u32>(py),
+            DtypeScalarKind::U64 => PyArrayDescr::of::<u64>(py),
+            DtypeScalarKind::F16 => PyArrayDescr::of::<jix_core::scalar::f16>(py),
+            DtypeScalarKind::F32 => PyArrayDescr::of::<f32>(py),
+            DtypeScalarKind::F64 => PyArrayDescr::of::<f64>(py),
+            DtypeScalarKind::ComplexF32 => PyArrayDescr::of::<jix_core::scalar::Complex<f32>>(py),
+            DtypeScalarKind::ComplexF64 => PyArrayDescr::of::<jix_core::scalar::Complex<f64>>(py),
+        }
     } else {
         let fields = dtype.fields().unwrap();
 

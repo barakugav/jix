@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::common::define_array_op1_method;
-use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, ReadData, ReadDataExt};
+use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
 use crate::{ArrayStorage, Ty};
 
@@ -80,7 +80,7 @@ where
         dtype
     }
 
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArraySpec<'_> {
         self.array.spec()
     }
 

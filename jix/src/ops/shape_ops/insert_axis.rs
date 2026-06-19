@@ -4,12 +4,14 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout, ReadData};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag, ReadData};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
-/// returned by [`Array::insert_axis`](crate::Array::insert_axis).
+/// returned by [`Array::insert_axis`](crate::Array::insert_axis). The inverse operation
+/// is [`RemoveAxis`](crate::ops::RemoveAxis).
 ///
 /// Each element of `axis` is a **gap index** that identifies a position *between* (or outside)
 /// the input dimensions:
@@ -80,7 +82,7 @@ pub struct InsertAxis<S, D> {
     is_inserted: DimArray<bool>,
 
     shape: D,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S, D> InsertAxis<S, D>
@@ -95,7 +97,7 @@ where
     {
         let orig_ndim = array.shape().len();
         let new_ndim = orig_ndim + axis.len();
-        check_ndim(new_ndim)?;
+        check_ndim::<D>(new_ndim)?;
         let mut axes = dim_arr(axis.len(), |i| axis.get(i));
 
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
@@ -135,37 +137,36 @@ where
             is_inserted.push(true);
             shape.push(1u64);
         }
-        let shape = D::from_slice(&shape).unwrap();
+        let shape = D::from_slice(&shape);
 
-        // Build blocks_layout: inserted dims get block_shape = 1 (Any); non-inserted dims
-        // inherit the corresponding input dim's layout unchanged.
-        let inner_layout = array.spec().blocks_layout;
-        let mut hint = DimArray::new();
-        let mut tag = DimArray::new();
-        let mut preferred = DimArray::new();
+        // Build block_spec: inserted dims get block_shape = 1 (Any); non-inserted dims
+        // inherit the corresponding input dim's spec unchanged.
+        let inner_spec = array.spec();
+        let inner_block_shape = inner_spec.block_shape();
+        let inner_block_shape_tag = inner_spec.block_shape_tag();
+        let mut block_shape = DimArray::new();
+        let mut block_shape_tag = DimArray::new();
         let mut input_dim = 0usize;
         for &inserted in is_inserted.iter() {
             if inserted {
-                hint.push(1);
-                tag.push(BlockShapeTag::Any);
-                preferred.push(1);
+                block_shape.push(1);
+                block_shape_tag.push(BlockShapeTag::Any);
             } else {
-                hint.push(inner_layout.block_shape_hint[input_dim]);
-                tag.push(inner_layout.block_shape_tag[input_dim]);
-                preferred.push(inner_layout.preferred_read_shape[input_dim]);
+                block_shape.push(inner_block_shape[input_dim]);
+                block_shape_tag.push(inner_block_shape_tag[input_dim]);
                 input_dim += 1;
             }
         }
-        let mut b_layout = inner_layout.clone();
-        b_layout.block_shape_hint = hint;
-        b_layout.block_shape_tag = tag;
-        b_layout.preferred_read_shape = preferred;
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
 
         Ok(Self {
             array,
             is_inserted,
             shape,
-            blocks_layout: b_layout,
+            block_spec,
         })
     }
 
@@ -260,11 +261,8 @@ where
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = InsertAxis<S, NewD>;
@@ -272,12 +270,13 @@ where
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(InsertAxis {
             array: self.array,
             is_inserted: self.is_inserted,
             shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -290,7 +289,7 @@ where
             array: self.array.element_type_change()?,
             is_inserted: self.is_inserted,
             shape: self.shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

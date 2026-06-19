@@ -2,12 +2,11 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{
-    ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ElementType, Ty, TypeDyn,
-};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::storage::params::ArraySpecOwned;
+use crate::storage::{ArraySpec, BlockShapeTag, ElementType, Ty, TypeDyn};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, SendSyncPtr};
-use crate::{Array, Dimension, IntoDimension};
+use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -63,7 +62,7 @@ pub struct Plain<A, ET, D> {
     shape: D,
     strides: DimArray<usize>, // in bytes
     element_type: ET,
-    blocks_layout: BlocksLayout,
+    spec: ArraySpecOwned,
 }
 impl<A, D> Plain<A, TypeDyn, D> {
     /// Construct a `Plain` storage from a raw pointer, shape, and byte strides.
@@ -128,15 +127,15 @@ impl<A, D> Plain<A, TypeDyn, D> {
             "Data pointer or strides are not aligned to required alignment {alignment}"
         );
 
-        let blocks_layout = BlocksLayout::tune(
-            Some(dim_arr(ndim, |_| 1)),
-            Some(dim_arr(ndim, |_| BlockShapeTag::Any)),
-            None,
-            None,
-            None,
-            shape.as_slice(),
-            dtype.itemsize(),
-        )?;
+        let params = ArrayParams {
+            block_shape: Some(dim_arr(ndim, |_| 1)),
+            block_shape_tag: Some(dim_arr(ndim, |_| BlockShapeTag::Any)),
+            block_size: None,
+            read_size: None,
+            encoder_params: None,
+            decoder_params: None,
+        };
+        let spec = params.into_spec(shape.as_slice(), &dtype)?;
 
         let element_type = TypeDyn::from_dtype(dtype).unwrap();
 
@@ -146,7 +145,7 @@ impl<A, D> Plain<A, TypeDyn, D> {
             shape,
             strides,
             element_type,
-            blocks_layout,
+            spec,
         })
     }
 }
@@ -328,8 +327,8 @@ where
         check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.shape.ndim();
-        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let out_strides = default_strides(&out_shape, itemsize as u64);
+        let out_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
+        let out_strides = default_strides(out_shape.as_slice(), itemsize as u64);
 
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])
@@ -341,7 +340,7 @@ where
             nd_copy(
                 src_ptr,
                 dst_ptr,
-                D::from_slice(&out_shape).unwrap(),
+                out_shape,
                 &self.strides,
                 &out_strides,
                 itemsize,
@@ -358,26 +357,22 @@ where
     fn dtype(&self) -> &Dtype {
         self.element_type.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            encoder_params: None,
-            decoder_params: None,
-            // decoder_config: None,
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.spec.as_ref()
     }
 
     type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;
     #[inline]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(Plain {
             allocation: self.allocation,
             data: self.data,
             shape,
             strides: self.strides,
             element_type: self.element_type,
-            blocks_layout: self.blocks_layout,
+            spec: self.spec,
         })
     }
 
@@ -390,7 +385,7 @@ where
             shape: self.shape,
             strides: self.strides,
             element_type: NewET::from_dtype(self.element_type.dtype().clone())?,
-            blocks_layout: self.blocks_layout,
+            spec: self.spec,
         })
     }
 }

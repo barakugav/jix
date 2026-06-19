@@ -3,12 +3,13 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped};
-use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
-use crate::ops::BulkInfo;
+use crate::ops::LanesInfo;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
-use crate::storage::{ArrayStorageSpec, ArrayStorageTyped, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, ArrayStorageTyped};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
@@ -23,7 +24,7 @@ pub(crate) struct ReductionOp<S, K, D> {
 
     out_dtype_: Dtype,
     shape: D,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 pub(crate) trait ReductionOpKernel<T> {
     type Output;
@@ -91,36 +92,23 @@ impl<S, K, D> ReductionOp<S, K, D> {
             .enumerate()
             .filter_map(|(dim, &s)| is_reduced[dim].not().then_some(s))
             .collect::<DimArray<_>>();
-        let shape = D::from_slice(&shape).unwrap();
+        let shape = D::from_slice(&shape);
 
-        let mut b_layout = array.spec().blocks_layout.clone();
-        b_layout.block_shape_hint = (0..input_ndim)
-            .filter_map(|dim| {
-                is_reduced[dim]
-                    .not()
-                    .then_some(b_layout.block_shape_hint[dim])
-            })
-            .collect();
-        b_layout.block_shape_tag = (0..input_ndim)
-            .filter_map(|dim| {
-                is_reduced[dim]
-                    .not()
-                    .then_some(b_layout.block_shape_tag[dim])
-            })
-            .collect();
-        b_layout.preferred_read_shape = (0..input_ndim)
-            .filter_map(|dim| {
-                is_reduced[dim]
-                    .not()
-                    .then_some(b_layout.preferred_read_shape[dim])
-            })
-            .collect();
+        let spec = array.spec();
+        let block_spec = ArrayBlockSpec {
+            block_shape: (0..input_ndim)
+                .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape()[dim]))
+                .collect(),
+            block_shape_tag: (0..input_ndim)
+                .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape_tag()[dim]))
+                .collect(),
+        };
 
         Ok(Self {
             kernel,
             out_dtype_: K::Output::DTYPE,
             shape,
-            blocks_layout: b_layout,
+            block_spec,
             array,
             is_reduced,
         })
@@ -138,8 +126,8 @@ where
 
     #[inline]
     fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        // this is a compile time check, the compiler knows the value of `BULK`
-        let read_fn = match <S::Item as BulkInfo>::BULK {
+        // this is a compile time check, the compiler knows the value of `LANES`
+        let read_fn = match <S::Item as LanesInfo>::LANES {
             1 => Self::read_data_impl::<1>,
             2 => Self::read_data_impl::<2>,
             4 => Self::read_data_impl::<4>,
@@ -165,11 +153,8 @@ where
         unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
         dtype
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
@@ -177,13 +162,17 @@ where
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        let shape = self.shape.as_slice();
+        check_ndim::<NewD>(shape.len())?;
+        let shape = NewD::from_slice(shape);
+
         Ok(ReductionOp {
             kernel: self.kernel,
             array: self.array,
             is_reduced: self.is_reduced,
             out_dtype_: self.out_dtype_,
-            shape: NewD::from_slice(self.shape.as_slice())?,
-            blocks_layout: self.blocks_layout,
+            shape,
+            block_spec: self.block_spec,
         })
     }
 
@@ -196,7 +185,7 @@ where
     D: Dimension,
 {
     #[inline]
-    fn read_data_impl<const SIMD: usize>(
+    fn read_data_impl<const LANES: usize>(
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
@@ -230,23 +219,17 @@ where
         //     reduced part exactly matches one bulk's reduced range (one tile-along-reduced
         //     per bulk). Within a bulk the tile iterator sweeps the non-reduced output
         //     region. Each `(bulk, tile)` pair produces *one* `self.array.read_data` call,
-        //     sized to roughly fit the source's `preferred_read_size_hint`.
+        //     sized to roughly fit the source's `read_size`.
         //
-        // `tile_shape` is chosen once per call by [`choose_tile_shape`]: seed every dim
-        // from the source storage block hint (clamped to `inner_range_full[d].len()`), then
-        // greedily scale each dim up by an integer multiplier of its seed - reduced dims
-        // first (rightmost first), then non-reduced (rightmost first) - until the running
-        // product would exceed `target_nitems = preferred_read_size_hint /
-        // size_of::<S::Item>()`. The per-dim multiplier is also capped so the tile can't
-        // overshoot the requested range. A final fixup snaps any dim whose tile already
-        // covers the full requested range to `inner_shape[d]`: tiles are aligned to
-        // absolute multiples of `tile_shape[d]`, so a tile sized exactly to the range can
-        // still get split when `inner_range_full[d].start` is not a multiple of the tile
-        // shape - using the full source extent guarantees one tile along that dim. Setting
-        // `bulk_shape[reduced] = tile_shape[reduced]` then makes the inner read shape come
-        // out to `tile_shape` for every tile.
+        // `tile_shape` is chosen once per call by the source spec's
+        // [`read_shape_heuristic_with_scale_order`], passing a custom scale order that
+        // visits reduced dims first (rightmost first), then non-reduced dims (rightmost
+        // first). The heuristic seeds every dim from the source storage block hint and
+        // greedily scales each dim up in that order until the byte budget is spent.
+        // Setting `bulk_shape[reduced] = tile_shape[reduced]` then makes the inner read
+        // shape come out to `tile_shape` for every tile.
         //
-        // [`choose_tile_shape`]: Self::choose_tile_shape
+        // [`read_shape_heuristic_with_scale_order`]: crate::params::ArraySpec::read_shape_heuristic_with_scale_order
         //
         // Both iterators are driven by `NdIterExtBlockOffsetSize`. Each yields
         // `(blk_idx, (inner_offset, blk_size))`: the absolute element start in dim `d` is
@@ -332,25 +315,39 @@ where
             })
         };
 
-        let out_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
+        let out_shape = D::from_fn(index.len(), |dim| index[dim].end - index[dim].start);
 
-        let tile_shape = self.choose_tile_shape(&inner_range_full);
+        // Greedy scale-up: reduced dims first (rightmost first), then non-reduced
+        // (rightmost first). The reduction kernel walks the reduced axes inside one tile,
+        // so giving them first claim on the budget produces fewer outer iterations. Each
+        // dim grows by an integer multiplier of its seed (the storage block hint), so the
+        // tile stays a multiple of the source's natural block size along that dim.
+        let tile_scale_order = (0..inner_ndim)
+            .rev()
+            .filter(|&dim| self.is_reduced[dim])
+            .chain((0..inner_ndim).rev().filter(|&dim| !self.is_reduced[dim]));
+        let tile_shape: S::Dimension = self.array.spec().read_shape_heuristic_with_scale_order(
+            &inner_range_full,
+            self.array.shape(),
+            size_of::<S::Item>() as _,
+            tile_scale_order,
+        );
 
         // Bulk shape: tile shape on reduced dims (so each bulk has exactly one
         // tile-along-reduced), full source extent on non-reduced dims (so the requested
         // output range sits in one bulk along that dim - otherwise consecutive bulks would
         // re-walk the same outputs and double-count).
-        let bulk_shape = dim_arr(inner_ndim, |dim| {
+        let bulk_shape = S::Dimension::from_fn(inner_ndim, |dim| {
             if self.is_reduced[dim] {
                 tile_shape[dim]
             } else {
                 inner_shape[dim].max(1)
             }
         });
-        let bulk_grid_begin = dim_arr(inner_ndim, |dim| {
+        let bulk_grid_begin = S::Dimension::from_fn(inner_ndim, |dim| {
             inner_range_full[dim].start / bulk_shape[dim]
         });
-        let bulk_grid_end = dim_arr(inner_ndim, |dim| {
+        let bulk_grid_end = S::Dimension::from_fn(inner_ndim, |dim| {
             inner_range_full[dim].end.div_ceil(bulk_shape[dim])
         });
         debug_assert!(
@@ -358,13 +355,13 @@ where
                 .all(|d| self.is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
             "non-reduced dim must produce at most one bulk-block",
         );
-        let mut bulk_iter = NdIter::new_with_begin(
-            S::Dimension::from_slice(&bulk_grid_begin).unwrap(),
-            S::Dimension::from_slice(&bulk_grid_end).unwrap(),
+        let bulk_iter = NdIter::new_with_begin(
+            bulk_grid_begin,
+            bulk_grid_end,
             NdIterExtBlockOffsetSize::new(
-                &dim_arr(inner_ndim, |dim| inner_range_full[dim].start),
-                &dim_arr(inner_ndim, |dim| inner_range_full[dim].end),
-                &bulk_shape,
+                S::Dimension::from_fn(inner_ndim, |dim| inner_range_full[dim].start),
+                S::Dimension::from_fn(inner_ndim, |dim| inner_range_full[dim].end),
+                bulk_shape.clone(),
             ),
         );
 
@@ -381,17 +378,21 @@ where
             (state_buf.as_mut_slice(), buf.as_mut_ptr())
         };
         let state_buf = unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(state_buf) };
-        let state_strides = default_strides(&out_shape, size_of::<MaybeUninit<K::State>>() as u64);
+        let state_strides = default_strides(
+            out_shape.as_slice(),
+            size_of::<MaybeUninit<K::State>>() as u64,
+        );
         let mut state_initialized = false;
 
         let mut items_buf = context.tmp_buf(0, Alignment::of::<S::Item>());
         let mut base_item_idx = 0;
-        while let Some((bulk_idx, (bulk_inner_offset, bulk_size))) = bulk_iter.next() {
+        for (bulk_idx, (bulk_inner_offset, bulk_size)) in bulk_iter {
             // The bulk's absolute element range, used as the tile iterator's universe.
-            let bulk_begin = dim_arr(inner_ndim, |dim| {
+            let bulk_begin = S::Dimension::from_fn(inner_ndim, |dim| {
                 bulk_idx[dim] * bulk_shape[dim] + bulk_inner_offset[dim]
             });
-            let bulk_end = dim_arr(inner_ndim, |dim| bulk_begin[dim] + bulk_size[dim]);
+            let bulk_end =
+                S::Dimension::from_fn(inner_ndim, |dim| bulk_begin[dim] + bulk_size[dim]);
 
             // Each bulk contributes `reduction_size` items to every output it covers
             // (which is every output, since non-reduced dims sit in one bulk). That count
@@ -405,20 +406,22 @@ where
             // Tile iterator: walks the bulk's range partitioned by `tile_shape`. Reduced
             // dims have exactly one tile per bulk (tile_shape[reduced] == bulk reduced
             // width), non-reduced dims are subdivided.
-            let tile_grid_begin = dim_arr(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
-            let tile_grid_end = dim_arr(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
-            let mut tile_iter = NdIter::new_with_begin(
-                S::Dimension::from_slice(&tile_grid_begin).unwrap(),
-                S::Dimension::from_slice(&tile_grid_end).unwrap(),
-                NdIterExtBlockOffsetSize::new(&bulk_begin, &bulk_end, &tile_shape),
-            );
+            let tile_grid_begin =
+                S::Dimension::from_fn(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
+            let tile_grid_end =
+                S::Dimension::from_fn(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
             debug_assert!(
                 (0..inner_ndim)
                     .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
                 "reduced dim must produce at most one tile per bulk",
             );
+            let tile_iter = NdIter::new_with_begin(
+                tile_grid_begin,
+                tile_grid_end,
+                NdIterExtBlockOffsetSize::new(bulk_begin, bulk_end, tile_shape.clone()),
+            );
 
-            while let Some((tile_idx, (tile_inner_offset, tile_size))) = tile_iter.next() {
+            for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
                 let tile = dim_arr(inner_ndim, |dim| {
                     let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
                     start..start + tile_size[dim]
@@ -433,14 +436,16 @@ where
 
                 // Read this tile's items
                 items_buf.set_len(
-                    (tile_size.iter().product::<u64>() * size_of::<S::Item>() as u64) as usize,
+                    (tile_size.as_slice().iter().product::<u64>() * size_of::<S::Item>() as u64)
+                        as usize,
                 );
                 let items_buf = items_buf.as_mut_slice();
                 self.array.read_data(&tile, items_buf, context)?;
 
                 // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
                 // `tile_state_base` shifts `state_buf` to its first slot.
-                let items_buf_strides = default_strides(tile_size, size_of::<S::Item>() as u64);
+                let items_buf_strides =
+                    default_strides(tile_size.as_slice(), size_of::<S::Item>() as u64);
                 let items_buf_strides_for_out_iter = items_buf_strides
                     .iter()
                     .zip(&self.is_reduced)
@@ -464,8 +469,8 @@ where
                         .offset(state_offset_bytes as isize)
                 };
 
-                let mut out_iter = NdIter::new(
-                    D::from_slice(&tile_out_shape).unwrap(),
+                let out_iter = NdIter::new(
+                    D::from_slice(&tile_out_shape),
                     (
                         NdIterExtStridesPtr::new(
                             &items_buf_strides_for_out_iter,
@@ -477,18 +482,21 @@ where
 
                 // Reduction-axis walk inside `items_buf`. `tile_size[reduced] == bulk_size[reduced]`
                 // so this equals `reduction_size`.
-                let reduction_shape = dim_arr(inner_ndim, |dim| {
+                let reduction_shape = S::Dimension::from_fn(inner_ndim, |dim| {
                     if self.is_reduced[dim] {
                         tile_size[dim]
                     } else {
                         1
                     }
                 });
-                debug_assert_eq!(reduction_shape.iter().product::<u64>(), reduction_size);
+                debug_assert_eq!(
+                    reduction_shape.as_slice().iter().product::<u64>(),
+                    reduction_size
+                );
 
-                while let Some((_idx, (src_base, state))) = out_iter.next() {
+                for (_idx, (src_base, state)) in out_iter {
                     let reduction_iter = NdIter::new(
-                        S::Dimension::from_slice(&reduction_shape).unwrap(),
+                        reduction_shape.clone(),
                         NdIterExtStridesPtr::new(&items_buf_strides, src_base),
                     );
                     debug_assert_eq!(reduction_size, reduction_iter.len());
@@ -509,23 +517,23 @@ where
                     // SAFETY: every state was written during the first bulk.
                     let mut state = unsafe { state_ref.assume_init_read() };
 
-                    // Fold the first SIMD block
-                    while item_idx < item_idx_end.min(SIMD as u64) {
+                    // Fold the first LANES block
+                    while item_idx < item_idx_end.min(LANES as u64) {
                         let item = reduction_iter.next();
                         let item = unsafe { item.unwrap_unchecked() };
                         state = self.kernel.update_state(state, item, item_idx);
                         item_idx += 1;
                     }
-                    // Fold all SIMD blocks
-                    let simd_idx_end = item_idx_end.saturating_sub(SIMD as u64);
-                    while item_idx < simd_idx_end {
-                        let items: [_; SIMD] = std::array::from_fn(|_| unsafe {
+                    // Fold all LANES blocks
+                    let item_idx_end_lanes = item_idx_end.saturating_sub(LANES as u64);
+                    while item_idx < item_idx_end_lanes {
+                        let items: [_; LANES] = std::array::from_fn(|_| unsafe {
                             reduction_iter.next().unwrap_unchecked()
                         });
                         for (i, item) in items.into_iter().enumerate() {
                             state = self.kernel.update_state(state, item, item_idx + i as u64);
                         }
-                        item_idx += SIMD as u64;
+                        item_idx += LANES as u64;
                     }
                     // Fold the tail
                     while item_idx < item_idx_end {
@@ -562,17 +570,17 @@ where
         // out_ptr may be an alias to it
         #[allow(dropping_references)]
         drop(state_buf);
-        let out_strides = default_strides(&out_shape, size_of::<K::Output>() as u64);
+        let out_strides = default_strides(out_shape.as_slice(), size_of::<K::Output>() as u64);
         if state_initialized {
-            let mut out_iter = NdIter::new(
-                D::from_slice(&out_shape).unwrap(),
+            let out_iter = NdIter::new(
+                out_shape,
                 (
                     // CAREFUL: state_ptr and out_ptr may alias
                     NdIterExtStridesPtrMut::new(&state_strides, state_ptr.cast()),
                     NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
                 ),
             );
-            while let Some((_idx, (state, out_ptr))) = out_iter.next() {
+            for (_idx, (state, out_ptr)) in out_iter {
                 // CAREFUL: state and out_ptr may alias
                 let res = {
                     let state = unsafe { &*state.cast::<MaybeUninit<K::State>>() };
@@ -583,12 +591,12 @@ where
             }
         } else {
             // Empty reduction: write the empty-stream result to every output.
-            let mut out_iter = NdIter::new(
-                D::from_slice(&out_shape).unwrap(),
+            let out_iter = NdIter::new(
+                out_shape,
                 NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);
-            while let Some((_idx, out_ptr)) = out_iter.next() {
+            for (_idx, out_ptr) in out_iter {
                 let state = self.kernel.init_state(None);
                 let res = self.kernel.finalize_state(state, 0);
                 unsafe { out_ptr.cast::<K::Output>().write(res) };
@@ -596,67 +604,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Choose the per-tile inner read shape.
-    ///
-    /// Tiles seed from the source array's storage-block hint (the natural unit of work
-    /// for the inner reader) and scale up greedily - reduced dims first, rightmost first
-    /// within each group - until the byte volume reaches the source's preferred read size
-    /// hint (with a cache floor for pathologically small hints). Every per-dim choice is
-    /// clamped to `full_read_shape[d].len()` so the budget isn't spent on dims that the
-    /// requested range can't actually consume.
-    ///
-    /// Final fixup: any dim whose tile already covers the full requested range is snapped
-    /// to `inner_shape[d]`. Tiles are aligned to absolute multiples of `tile_shape[d]`, so
-    /// a tile sized exactly to the range can still get split when `full_read_shape[d].start`
-    /// is not a multiple of the tile shape; using the full source extent guarantees the
-    /// range fits in one tile along that dim.
-    fn choose_tile_shape(&self, full_read_shape: &[Range<u64>]) -> DimArray<u64> {
-        let ndim = full_read_shape.len();
-        let blocks_layout = &self.array.spec().blocks_layout;
-
-        // Target byte volume per inner read; floor to keep tiny hints from collapsing tiles.
-        let target_nitems =
-            (blocks_layout.preferred_read_size_hint / size_of::<S::Item>() as u64).max(1);
-
-        // Seed from the source storage block hint, clamped to the requested range.
-        let mut tile_shape = dim_arr(ndim, |dim| {
-            (blocks_layout.block_shape_hint[dim] as u64)
-                .min(full_read_shape[dim].end - full_read_shape[dim].start)
-                .max(1)
-        });
-
-        // Greedy scale-up: reduced dims first (rightmost first), then non-reduced
-        // (rightmost first). The reduction kernel walks the reduced axes inside one tile,
-        // so giving them first claim on the budget produces fewer outer iterations. Each
-        // dim grows by an integer multiplier of its seed (the storage block hint), so the
-        // tile stays a multiple of the source's natural block size along that dim.
-        let scale_order = (0..ndim)
-            .rev()
-            .filter(|&dim| self.is_reduced[dim])
-            .chain((0..ndim).rev().filter(|&dim| !self.is_reduced[dim]));
-        let mut current_volume = tile_shape.iter().product::<u64>();
-        for dim in scale_order {
-            let dim_len = full_read_shape[dim].end - full_read_shape[dim].start;
-            let mult_by_budget = target_nitems / current_volume.max(1);
-            let mult_by_range = dim_len.div_ceil(tile_shape[dim]);
-            let multiplier = mult_by_budget.min(mult_by_range).max(1);
-            let new_tile_size = (tile_shape[dim] * multiplier).min(dim_len);
-            current_volume = current_volume / tile_shape[dim] * new_tile_size;
-            tile_shape[dim] = new_tile_size;
-        }
-
-        // Snap any dim already covering its full requested range to `inner_shape[d]` so
-        // the tile boundary doesn't accidentally split the range along an unaligned start.
-        let inner_shape = self.array.shape();
-        for dim in 0..ndim {
-            if tile_shape[dim] == (full_read_shape[dim].end - full_read_shape[dim].start) {
-                tile_shape[dim] = inner_shape[dim].max(1);
-            }
-        }
-
-        tile_shape
     }
 }
 

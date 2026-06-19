@@ -2,11 +2,10 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 use crate::dtype::Dtyped;
-use crate::params::ArrayParams;
 use crate::storage::block::BlockSize;
 use crate::storage::Compact;
 use crate::util::AlignedBytes;
-use crate::{DimDyn, Ty};
+use crate::{ArrayParams, DimDyn, Ty};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper (previously duplicated in every test module)
@@ -490,7 +489,7 @@ pub(crate) fn block_shape_strategy(
     shape: &[usize],
 ) -> impl Strategy<Value = Vec<BlockSize>> + use<> {
     // Per-dim block size is clamped to [1, max(1, s)] to satisfy the invariant
-    // enforced by `BlocksLayout::tune`: `1 <= b <= s.max(1)`.
+    // enforced by `ArrayParams::tune`: `1 <= b <= s.max(1)`.
     shape
         .iter()
         .map(|&s| 1u32..=4u32.min(s.max(1) as u32))

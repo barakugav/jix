@@ -2,14 +2,16 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_range, ensure, Result};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::{ArrayStorageSpec, BlocksLayout, ReadData};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, ReadData};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Removes length-1 dimensions from an array's shape,
-/// returned by [`Array::remove_axis`](crate::Array::remove_axis).
+/// returned by [`Array::remove_axis`](crate::Array::remove_axis). The inverse operation
+/// is [`InsertAxis`](crate::ops::InsertAxis).
 ///
 /// `axis` is a set of axis indices in the *input* shape (0-based). Each named dimension must have
 /// length exactly 1 and is dropped from the output shape. Duplicate axis indices are not allowed.
@@ -65,7 +67,7 @@ pub struct RemoveAxis<S, D> {
     is_removed: DimArray<bool>,
 
     shape: D,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S, D> RemoveAxis<S, D>
@@ -101,37 +103,37 @@ where
             );
         }
 
-        // Build is_removed, shape, and blocks_layout by walking input dims.
+        // Build is_removed, shape, and block_spec by walking input dims.
         let mut is_removed = DimArray::new();
         let mut shape = DimArray::new();
 
-        let inner_layout = array.spec().blocks_layout;
-        let mut hint = DimArray::new();
-        let mut tag = DimArray::new();
-        let mut preferred = DimArray::new();
+        let inner_spec = array.spec();
+        let inner_block_shape = inner_spec.block_shape();
+        let inner_block_shape_tag = inner_spec.block_shape_tag();
+        let mut block_shape = DimArray::new();
+        let mut block_shape_tag = DimArray::new();
 
         for input_dim in 0..input_ndim {
             let removed = seen[input_dim];
             is_removed.push(removed);
             if !removed {
                 shape.push(array.shape()[input_dim]);
-                hint.push(inner_layout.block_shape_hint[input_dim]);
-                tag.push(inner_layout.block_shape_tag[input_dim]);
-                preferred.push(inner_layout.preferred_read_shape[input_dim]);
+                block_shape.push(inner_block_shape[input_dim]);
+                block_shape_tag.push(inner_block_shape_tag[input_dim]);
             }
         }
-        let shape = D::from_slice(&shape).unwrap();
+        let shape = D::from_slice(&shape);
 
-        let mut b_layout = inner_layout.clone();
-        b_layout.block_shape_hint = hint;
-        b_layout.block_shape_tag = tag;
-        b_layout.preferred_read_shape = preferred;
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
 
         Ok(Self {
             array,
             is_removed,
             shape,
-            blocks_layout: b_layout,
+            block_spec,
         })
     }
 
@@ -202,11 +204,8 @@ where
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = RemoveAxis<S, NewD>;
@@ -214,12 +213,13 @@ where
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(RemoveAxis {
             array: self.array,
             is_removed: self.is_removed,
             shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -232,7 +232,7 @@ where
             array: self.array.element_type_change()?,
             is_removed: self.is_removed,
             shape: self.shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

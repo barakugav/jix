@@ -2,9 +2,10 @@ use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, Rang
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
@@ -69,7 +70,7 @@ pub struct Slice<S: ArrayStorage> {
     no_steps: bool,
 
     shape: S::Dimension,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> Slice<S> {
@@ -90,29 +91,29 @@ impl<S: ArrayStorage> Slice<S> {
         })?;
         let no_steps = slice.iter().all(|ds| ds.is_contiguous());
 
-        let shape = dim_arr(ndim, |dim| slice[dim].len());
+        let shape = S::Dimension::from_fn(ndim, |dim| slice[dim].len());
 
-        let mut b_layout = array.spec().blocks_layout.clone();
+        let inner_spec = array.spec();
+        let mut block_shape = inner_spec.block_shape().clone();
+        let mut block_shape_tag = inner_spec.block_shape_tag().clone();
         for dim in 0..ndim {
             if shape[dim] == input_shape[dim] {
                 continue;
             }
-            b_layout.block_shape_hint[dim] = b_layout.block_shape_hint[dim]
-                .min(shape[dim] as BlockSize)
-                .max(1);
-            b_layout.block_shape_tag[dim] = BlockShapeTag::Any;
-            b_layout.preferred_read_shape[dim] = b_layout.preferred_read_shape[dim]
-                .min(shape[dim] as BlockSize)
-                .max(1);
+            block_shape[dim] = block_shape[dim].min(shape[dim] as BlockSize).max(1);
+            block_shape_tag[dim] = BlockShapeTag::Any;
         }
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
 
-        let shape = S::Dimension::from_slice(&shape).unwrap();
         Ok(Self {
             array,
             slice,
             no_steps,
             shape,
-            blocks_layout: b_layout,
+            block_spec,
         })
     }
 
@@ -201,27 +202,28 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         let dst_strides = default_strides(&out_shape, itemsize);
 
         // inner_read_shape: 1 for strided dims, full range for non-strided dims.
-        let inner_read_shape = dim_arr(ndim, |dim| {
+        let inner_read_shape = S::Dimension::from_fn(ndim, |dim| {
             if self.slice[dim].is_contiguous() {
                 out_shape[dim]
             } else {
                 1
             }
         });
-        let src_strides = default_strides(&inner_read_shape, itemsize);
-        let tmp_buf_bytes = (inner_read_shape.iter().product::<u64>() * itemsize) as usize;
+        let src_strides = default_strides(inner_read_shape.as_slice(), itemsize);
+        let tmp_buf_bytes =
+            (inner_read_shape.as_slice().iter().product::<u64>() * itemsize) as usize;
         let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, dtype.alignment());
 
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
-        let iter_shape = dim_arr(ndim, |dim| {
+        let iter_shape = S::Dimension::from_fn(ndim, |dim| {
             if self.slice[dim].is_contiguous() {
                 1
             } else {
                 out_shape[dim]
             }
         });
-        let mut iter = NdIter::new(S::Dimension::from_slice(&iter_shape).unwrap(), ());
-        while let Some((idx, ())) = iter.next() {
+        let iter = NdIter::new(iter_shape, ());
+        for (idx, ()) in iter {
             let inner_index = dim_arr(ndim, |dim| {
                 let ds = &self.slice[dim];
                 if ds.is_contiguous() {
@@ -243,7 +245,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 nd_copy(
                     tmp.as_ptr(),
                     dst_ptr,
-                    Self::Dimension::from_slice(&inner_read_shape).unwrap(),
+                    inner_read_shape.clone(),
                     &src_strides,
                     &dst_strides,
                     itemsize as usize,
@@ -261,11 +263,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Slice<S::DimensionChange<NewD>>;
@@ -273,13 +272,14 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(Slice {
             array: self.array.dimension_change()?,
             slice: self.slice,
             no_steps: self.no_steps,
             shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -293,7 +293,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             slice: self.slice,
             no_steps: self.no_steps,
             shape: self.shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

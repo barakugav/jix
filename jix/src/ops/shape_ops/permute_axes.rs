@@ -2,8 +2,9 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::{ArrayStorageSpec, BlocksLayout};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::ArraySpec;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -51,7 +52,7 @@ pub struct PermuteAxes<S: ArrayStorage> {
     inv_axes: DimArray<usize>,
 
     shape: S::Dimension,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> PermuteAxes<S> {
@@ -86,17 +87,18 @@ impl<S: ArrayStorage> PermuteAxes<S> {
         }
 
         let input_shape = array.shape();
-        let shape = dim_arr(ndim, |i| input_shape[axes[i]]);
+        let shape = S::Dimension::from_fn(ndim, |i| input_shape[axes[i]]);
 
-        let mut b_layout = array.spec().blocks_layout.clone();
-        b_layout.block_shape_hint = dim_arr(ndim, |i| b_layout.block_shape_hint[axes[i]]);
-        b_layout.block_shape_tag = dim_arr(ndim, |i| b_layout.block_shape_tag[axes[i]]);
-        b_layout.preferred_read_shape = dim_arr(ndim, |i| b_layout.preferred_read_shape[axes[i]]);
-
-        let shape = S::Dimension::from_slice(&shape).unwrap();
+        let inner_spec = array.spec();
+        let block_shape = dim_arr(ndim, |i| inner_spec.block_shape()[axes[i]]);
+        let block_shape_tag = dim_arr(ndim, |i| inner_spec.block_shape_tag()[axes[i]]);
+        let block_spec = ArrayBlockSpec {
+            block_shape,
+            block_shape_tag,
+        };
         Ok(Self {
             shape,
-            blocks_layout: b_layout,
+            block_spec,
             array,
             axes,
             inv_axes,
@@ -141,8 +143,8 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let src_strides_in = default_strides(&sub_shape_in, itemsize);
 
         // The output buffer is C-contiguous over sub_shape_out (output dim order).
-        let sub_shape_out = dim_arr(ndim, |i| index[i].end - index[i].start);
-        let dst_strides = default_strides(&sub_shape_out, itemsize as u64);
+        let sub_shape_out = S::Dimension::from_fn(ndim, |i| index[i].end - index[i].start);
+        let dst_strides = default_strides(sub_shape_out.as_slice(), itemsize as u64);
 
         // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
         let src_strides_out = dim_arr(ndim, |i| src_strides_in[self.axes[i]]);
@@ -151,7 +153,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                S::Dimension::from_slice(&sub_shape_out).unwrap(),
+                sub_shape_out,
                 &src_strides_out,
                 &dst_strides,
                 itemsize,
@@ -168,11 +170,8 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = PermuteAxes<S::DimensionChange<NewD>>;
@@ -180,14 +179,15 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         let array = self.array.dimension_change::<NewD>()?;
         Ok(PermuteAxes {
             shape,
             array,
             axes: self.axes,
             inv_axes: self.inv_axes,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -201,7 +201,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
             axes: self.axes,
             inv_axes: self.inv_axes,
             shape: self.shape,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

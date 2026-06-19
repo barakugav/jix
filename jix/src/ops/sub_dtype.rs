@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::ArrayStorageSpec;
+use crate::storage::ArraySpec;
 use crate::{Array, ArrayStorage, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
@@ -152,7 +152,7 @@ where
     fn dtype(&self) -> &Dtype {
         self.dst_type.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArraySpec<'_> {
         self.array.spec()
     }
 

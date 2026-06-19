@@ -1,6 +1,7 @@
 use numpy::{PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::PyOverflowError;
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
 use jix_core::dtype::{DtypeScalarKind, Dtyped};
@@ -25,10 +26,25 @@ impl Operand {
         if let Ok(array) = value.cast::<Array>() {
             return Ok(Self::Array(array.get().arr.clone()));
         };
-
         let py = value.py();
-        let np = numpy::get_array_module(py)?;
-        if !value.is_instance(&np.getattr("generic")?)? {
+
+        let (np_generic, np_asarray) = {
+            struct NumpyItems {
+                generic: Py<PyAny>,
+                asarray: Py<PyAny>,
+            }
+            static NUMPY_ITEMS: PyOnceLock<NumpyItems> = PyOnceLock::new();
+            let np_items = NUMPY_ITEMS.get_or_try_init::<_, PyErr>(py, || {
+                let np = numpy::get_array_module(py)?;
+                Ok(NumpyItems {
+                    generic: np.getattr("generic")?.unbind(),
+                    asarray: np.getattr("asarray")?.unbind(),
+                })
+            })?;
+            (np_items.generic.bind(py), np_items.asarray.bind(py))
+        };
+
+        if !value.is_instance(np_generic)? {
             let mut scalar = None;
             if let Ok(value) = value.cast::<PyBool>() {
                 scalar = Some(Scalar::Bool(value.extract()?));
@@ -51,10 +67,7 @@ impl Operand {
             }
         }
 
-        let array = np
-            .getattr("asarray")?
-            .call1((value,))?
-            .cast_into::<PyUntypedArray>()?;
+        let array = np_asarray.call1((value,))?.cast_into::<PyUntypedArray>()?;
         let dtype = dtype_from_numpy(&array.dtype())?;
         if array.ndim() == 0
             && let Some(scalar) = dtype.try_to_scalar()
@@ -74,10 +87,7 @@ impl Operand {
                     Scalar::Int(item.extract::<i32>()? as i64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::I64 => (
-                    Scalar::Int(item.extract::<i64>()? as i64),
-                    Some(Precision::P8),
-                ),
+                DtypeScalarKind::I64 => (Scalar::Int(item.extract::<i64>()?), Some(Precision::P8)),
                 DtypeScalarKind::U8 => (
                     Scalar::UInt(item.extract::<u8>()? as u64),
                     Some(Precision::P1),
@@ -90,10 +100,7 @@ impl Operand {
                     Scalar::UInt(item.extract::<u32>()? as u64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::U64 => (
-                    Scalar::UInt(item.extract::<u64>()? as u64),
-                    Some(Precision::P8),
-                ),
+                DtypeScalarKind::U64 => (Scalar::UInt(item.extract::<u64>()?), Some(Precision::P8)),
                 DtypeScalarKind::F16 => (
                     Scalar::Float(item.extract::<f32>()? as f64),
                     Some(Precision::P2),
@@ -102,10 +109,9 @@ impl Operand {
                     Scalar::Float(item.extract::<f32>()? as f64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::F64 => (
-                    Scalar::Float(item.extract::<f64>()? as f64),
-                    Some(Precision::P8),
-                ),
+                DtypeScalarKind::F64 => {
+                    (Scalar::Float(item.extract::<f64>()?), Some(Precision::P8))
+                }
                 DtypeScalarKind::ComplexF32 => {
                     let re = item.getattr("real")?.extract::<f32>()?;
                     let im = item.getattr("imag")?.extract::<f32>()?;

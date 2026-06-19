@@ -4,7 +4,8 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::{ArrayStorageSpec, BlocksLayout};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::ArraySpec;
 use crate::util::iter::strides::NdIterExtStridesPtr;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
@@ -16,6 +17,9 @@ use crate::{Array, ArrayStorage, Dimension};
 /// Output shape and dtype equal the input. Axes not listed in `axes` are passed through
 /// unchanged. `axes` may be empty (no-op), and axes of size 0 or 1 do not require any
 /// data motion.
+///
+/// See also [`Roll`](crate::ops::Roll), which cyclically shifts elements along an axis
+/// without reversing them.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -42,7 +46,7 @@ pub struct Flip<S: ArrayStorage> {
     /// User-provided axes after dedup + sort + bounds check. May include size-1 axes
     /// (preserved as-is for introspection; they do not affect `read_data`).
     axes: DimArray<usize>,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> Flip<S> {
@@ -68,12 +72,16 @@ impl<S: ArrayStorage> Flip<S> {
         }
         let sorted_axes = (0..ndim).filter(|d| seen[*d]).collect::<DimArray<_>>();
 
-        let blocks_layout = array.spec().blocks_layout.clone();
+        let inner_spec = array.spec();
+        let block_spec = ArrayBlockSpec {
+            block_shape: inner_spec.block_shape().clone(),
+            block_shape_tag: inner_spec.block_shape_tag().clone(),
+        };
 
         Ok(Self {
             array,
             axes: sorted_axes,
-            blocks_layout,
+            block_spec,
         })
     }
 
@@ -126,8 +134,10 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the
         // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
-        let iter_shape = dim_arr(ndim, |d| if is_flipped[d] { out_shape[d] } else { 1 });
-        let slab_shape = dim_arr(ndim, |d| if is_flipped[d] { 1 } else { out_shape[d] });
+        let iter_shape =
+            S::Dimension::from_fn(ndim, |d| if is_flipped[d] { out_shape[d] } else { 1 });
+        let slab_shape =
+            S::Dimension::from_fn(ndim, |d| if is_flipped[d] { 1 } else { out_shape[d] });
 
         // src strides ext: forward strides on flipped axes; 0 elsewhere (non-flipped axes
         // are iter_shape=1 so they don't step regardless, but 0 keeps it explicit).
@@ -143,11 +153,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let tmp_base = tmp_buf.as_ptr();
         let dst_base = unsafe { buf.as_mut_ptr().add(dst_base_offset as usize) };
 
-        let mut iter = NdIter::new(
-            S::Dimension::from_slice(&iter_shape).unwrap(),
+        let iter = NdIter::new(
+            iter_shape,
             NdIterExtStridesPtr::new(&src_ptr_strides, tmp_base),
         );
-        while let Some((_idx, src_ptr)) = iter.next() {
+        for (_idx, src_ptr) in iter {
             let off = unsafe { src_ptr.offset_from(tmp_base) } as usize;
             let dst_ptr = unsafe { dst_base.sub(off) };
 
@@ -155,7 +165,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    S::Dimension::from_slice(&slab_shape).unwrap(),
+                    slab_shape.clone(),
                     &strides,
                     &strides,
                     itemsize,
@@ -175,11 +185,8 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         self.array.dtype()
     }
 
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.array.spec()
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array.spec().with_block_spec(&self.block_spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Flip<S::DimensionChange<NewD>>;
@@ -190,7 +197,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         Ok(Flip {
             array: self.array.dimension_change()?,
             axes: self.axes,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 
@@ -202,7 +209,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         Ok(Flip {
             array: self.array.element_type_change()?,
             axes: self.axes,
-            blocks_layout: self.blocks_layout,
+            block_spec: self.block_spec,
         })
     }
 }

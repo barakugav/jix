@@ -70,7 +70,7 @@ where
     #[inline(always)]
     pub(crate) fn new(shape: impl IntoDimension<Dimension = D>, extensions: E) -> Self {
         let shape = shape.into_dimension().unwrap();
-        let begin = D::zeros(shape.ndim()).unwrap();
+        let begin = D::from_fn(shape.ndim(), |_| 0);
         Self::new_with_begin(begin, shape, extensions)
     }
 
@@ -114,12 +114,30 @@ where
         }
     }
 
+    #[inline(always)]
+    pub(crate) fn get_current_and_advance_status(&mut self) -> (D, E::Item) {
+        self.status.advance();
+        (self.current_idx.clone(), self.extensions.next())
+    }
+
+    #[inline(always)]
+    pub(crate) fn len(&self) -> u64 {
+        self.status.len()
+    }
+}
+impl<D, E> Iterator for NdIter<D, E>
+where
+    D: Dimension,
+    E: NdIterExtension,
+{
+    type Item = (D, E::Item);
+
     /// Advances to the next index in row-major order and returns `(current_index, extension_item)`.
     ///
     /// On each step the rightmost dimension that has not yet reached its bound is incremented,
     /// and all dimensions to its right are reset to `begin`.
     #[inline(always)]
-    pub(crate) fn next(&mut self) -> Option<(&[u64], E::Item<'_>)> {
+    fn next(&mut self) -> Option<Self::Item> {
         if self.status.is_exhausted() {
             return None;
         }
@@ -155,49 +173,9 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn get_current_and_advance_status(&mut self) -> (&[u64], E::Item<'_>) {
-        self.status.advance();
-        (self.current_idx.as_slice(), self.extensions.next())
-    }
-
-    #[inline(always)]
-    pub(crate) fn len(&self) -> u64 {
-        self.status.len()
-    }
-
-    #[inline(always)]
-    pub(crate) fn map<T>(
-        self,
-        f: impl FnMut((&[u64], E::Item<'_>)) -> T + Clone,
-    ) -> impl Iterator<Item = T> + Clone
-    where
-        Self: Clone,
-        E: Clone,
-    {
-        #[derive(Clone)]
-        struct Iter<D, E, F> {
-            iter: NdIter<D, E>,
-            f: F,
-        }
-        impl<D, E, F, T> Iterator for Iter<D, E, F>
-        where
-            D: Dimension,
-            E: NdIterExtension + Clone,
-            F: FnMut((&[u64], E::Item<'_>)) -> T + Clone,
-        {
-            type Item = T;
-            #[inline(always)]
-            fn next(&mut self) -> Option<Self::Item> {
-                self.iter.next().map(|step| (self.f)(step))
-            }
-
-            #[inline(always)]
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                let len = self.iter.status.len() as usize;
-                (len, Some(len))
-            }
-        }
-        Iter { iter: self, f }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.status.len() as usize;
+        (len, Some(len))
     }
 }
 
@@ -209,9 +187,7 @@ where
 /// return the current derived value via [`next`](NdIterExtension::next).
 pub(crate) trait NdIterExtension {
     /// The derived value produced at each iteration step.
-    type Item<'a>
-    where
-        Self: 'a;
+    type Item;
 
     /// Called when dimension `dim` changes from `before` to `after`.
     ///
@@ -221,7 +197,7 @@ pub(crate) trait NdIterExtension {
     fn on_decrease(&mut self, dim: usize, before: u64, after: u64, diff: u64);
 
     /// Returns the current derived value after all index changes have been applied.
-    fn next<'a>(&'a self) -> Self::Item<'a>;
+    fn next(&self) -> Self::Item;
 
     fn assert_ndim(&self, ndim: usize);
 }
@@ -242,7 +218,7 @@ where
 
     /// Returns the next multi-dimensional index, or `None` when exhausted.
     #[inline(always)]
-    pub(crate) fn next(&mut self) -> Option<&[u64]> {
+    pub(crate) fn next(&mut self) -> Option<D> {
         Some(self.0.next()?.0)
     }
 }
@@ -253,7 +229,7 @@ where
 // ---------------------------------------------------------------------------
 
 impl NdIterExtension for () {
-    type Item<'a> = ();
+    type Item = ();
     #[inline(always)]
     fn on_increase(&mut self, _dim: usize, _before: u64, _after: u64, _diff: u64) {}
     #[inline(always)]
@@ -267,10 +243,7 @@ impl<T1> NdIterExtension for (T1,)
 where
     T1: NdIterExtension,
 {
-    type Item<'a>
-        = (T1::Item<'a>,)
-    where
-        T1: 'a;
+    type Item = (T1::Item,);
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
         self.0.on_increase(dim, before, after, diff);
@@ -280,7 +253,7 @@ where
         self.0.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn next<'a>(&'a self) -> (T1::Item<'a>,) {
+    fn next(&self) -> (T1::Item,) {
         (self.0.next(),)
     }
     #[inline(always)]
@@ -293,11 +266,7 @@ where
     T1: NdIterExtension,
     T2: NdIterExtension,
 {
-    type Item<'a>
-        = (T1::Item<'a>, T2::Item<'a>)
-    where
-        T1: 'a,
-        T2: 'a;
+    type Item = (T1::Item, T2::Item);
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
         self.0.on_increase(dim, before, after, diff);
@@ -309,7 +278,7 @@ where
         self.1.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn next<'a>(&'a self) -> (T1::Item<'a>, T2::Item<'a>) {
+    fn next(&self) -> (T1::Item, T2::Item) {
         (self.0.next(), self.1.next())
     }
     #[inline(always)]
@@ -324,12 +293,7 @@ where
     T2: NdIterExtension,
     T3: NdIterExtension,
 {
-    type Item<'a>
-        = (T1::Item<'a>, T2::Item<'a>, T3::Item<'a>)
-    where
-        T1: 'a,
-        T2: 'a,
-        T3: 'a;
+    type Item = (T1::Item, T2::Item, T3::Item);
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
         self.0.on_increase(dim, before, after, diff);
@@ -343,7 +307,7 @@ where
         self.2.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn next<'a>(&'a self) -> (T1::Item<'a>, T2::Item<'a>, T3::Item<'a>) {
+    fn next(&self) -> (T1::Item, T2::Item, T3::Item) {
         (self.0.next(), self.1.next(), self.2.next())
     }
     #[inline(always)]
@@ -370,7 +334,7 @@ mod tests {
     {
         let mut out = Vec::new();
         while let Some(idx) = iter.next() {
-            out.push(idx.to_vec());
+            out.push(idx.as_slice().to_vec());
         }
         out
     }
@@ -385,7 +349,7 @@ mod tests {
         }
     }
     impl NdIterExtension for ChangeLog {
-        type Item<'a> = usize; // number of on_increase/decrease calls so far when next() is called
+        type Item = usize; // number of on_increase/decrease calls so far when next() is called
         fn on_increase(&mut self, dim: usize, before: u64, after: u64, _diff: u64) {
             self.log.push((dim, before, after));
         }
@@ -497,7 +461,7 @@ mod tests {
     fn collect_indices<D: Dimension, E: NdIterExtension>(mut iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
         while let Some((idx, _)) = iter.next() {
-            out.push(idx.to_vec());
+            out.push(idx.as_slice().to_vec());
         }
         out
     }

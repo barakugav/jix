@@ -12,16 +12,17 @@
 
 use std::ops::Range;
 
-use crate::codec::{DecoderParams, EncoderParams, ReadContext};
+use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, Result};
+use crate::error::{check_get_buffer_size, check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlocksLayout, ElementType};
+use crate::storage::params::ArraySpecOwned;
+use crate::storage::{ArraySpec, ElementType};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::Dimension;
+use crate::{ArrayParams, ArrayStorage, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -99,13 +100,8 @@ macro_rules! impl_array_storage {
                 self.0.blocks.dtype()
             }
 
-            fn spec(&self) -> ArrayStorageSpec<'_> {
-                ArrayStorageSpec {
-                    blocks_layout: &self.0.blocks_layout,
-                    encoder_params: Some(&self.0.encoder_params),
-                    decoder_params: Some(&self.0.decoder_params),
-                    // decoder_config: Some(&self.0.blocks.decoder_config),
-                }
+            fn spec(&self) -> ArraySpec<'_> {
+                self.0.spec.as_ref()
             }
 
             fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
@@ -113,11 +109,9 @@ macro_rules! impl_array_storage {
                     blocks: self.0.blocks.as_ref(),
                     shape: self.0.shape.clone(),
 
-                    blocks_layout: self.0.blocks_layout.clone(),
                     block_grid_shape: self.0.block_grid_shape.clone(),
 
-                    encoder_params: self.0.encoder_params.clone(),
-                    decoder_params: self.0.decoder_params.clone(),
+                    spec: self.0.spec.clone(),
                 }))
             }
 
@@ -160,12 +154,10 @@ where
     pub(crate) blocks: BlockTable<S, ET>,
     shape: D,
 
-    blocks_layout: BlocksLayout,
     /// Number of blocks per dimension: `ceil(shape[d] / block_shape[d])`.
     block_grid_shape: DimArray<u64>,
 
-    encoder_params: EncoderParams,
-    decoder_params: DecoderParams,
+    spec: ArraySpecOwned,
 }
 impl<S, ET, D> ArrayBlockTableStorageBase<S, ET, D>
 where
@@ -175,37 +167,29 @@ where
     ///
     /// `blocks_layout.block_shape_hint` must match the block geometry already encoded in
     /// `blocks`. `block_grid_shape` is derived from `shape` and the block shape.
-    pub(crate) fn new(
-        blocks: BlockTable<S, ET>,
-        shape: D,
-        blocks_layout: BlocksLayout,
-        encoder_params: EncoderParams,
-        decoder_params: DecoderParams,
-    ) -> Self
+    pub(crate) fn new(blocks: BlockTable<S, ET>, shape: D, params: ArrayParams) -> Result<Self>
     where
+        ET: ElementType,
         D: Dimension,
     {
         let shape_slice = shape.as_slice();
         let ndim = shape_slice.len();
+        let spec = params.into_spec(shape_slice, blocks.dtype())?;
         let block_grid_shape = dim_arr(ndim, |dim| {
-            shape_slice[dim].div_ceil(blocks_layout.block_shape_hint[dim] as u64)
+            shape_slice[dim].div_ceil(spec.as_ref().block_shape()[dim] as u64)
         });
-        Self {
+        Ok(Self {
             blocks,
             shape,
-
-            blocks_layout,
             block_grid_shape,
-
-            encoder_params,
-            decoder_params,
-        }
+            spec,
+        })
     }
 
     /// Returns the nd-block shape (items per dimension) used by this storage.
     #[inline(always)]
     pub(crate) fn block_shape(&self) -> &[BlockSize] {
-        &self.blocks_layout.block_shape_hint
+        self.spec.as_ref().block_shape()
     }
 
     #[inline(always)]
@@ -289,23 +273,24 @@ where
         let out_strides = default_strides(&out_shape, itemsize);
         let block_strides = default_strides(block_shape, itemsize as BlockSize); // TODO: precomute me
 
-        // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = dim_arr(ndim, |dim| index[dim].start);
-        let elem_end = dim_arr(ndim, |dim| index[dim].end);
-
         // Block-space begin/end for NdIter.
-        let block_begin = dim_arr(ndim, |dim| index[dim].start / block_shape[dim] as u64);
-        let block_end = dim_arr(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64));
+        let block_begin = D::from_fn(ndim, |dim| index[dim].start / block_shape[dim] as u64);
+        let block_end = D::from_fn(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64));
+        // Element-space begin/end for NdIterExtBlockOffsetSize.
+        let elem_begin = D::from_fn(ndim, |dim| index[dim].start);
+        let elem_end = D::from_fn(ndim, |dim| index[dim].end);
+        let block_global_idx_ext =
+            nd_iter_ext_logical_global_index(&self.block_grid_shape, block_begin.as_slice());
 
-        let mut block_iter = NdIter::new_with_begin(
-            D::from_slice(&block_begin).unwrap(),
-            D::from_slice(&block_end).unwrap(),
+        let block_iter = NdIter::new_with_begin(
+            block_begin,
+            block_end,
             (
-                nd_iter_ext_logical_global_index(&self.block_grid_shape, &block_begin),
+                block_global_idx_ext,
                 NdIterExtBlockOffsetSize::new(
-                    &elem_begin,
-                    &elem_end,
-                    &dim_arr(ndim, |dim| block_shape[dim] as u64),
+                    elem_begin,
+                    elem_end,
+                    D::from_fn(ndim, |dim| block_shape[dim] as u64),
                 ),
             ),
         );
@@ -315,9 +300,7 @@ where
         let mut tmp_buf = context.tmp_buf(full_buf_len, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
 
-        while let Some((block_idx, (block_global_id, (block_inner_offset, block_size)))) =
-            block_iter.next()
-        {
+        for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
             self.blocks.read_block(block_global_id, tmp_buf, context)?;
 
             // Navigate to the active region within the block buffer (block-local strides).
@@ -341,7 +324,7 @@ where
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    D::from_slice(block_size).unwrap(),
+                    block_size.clone(),
                     &block_strides,
                     &out_strides,
                     itemsize,
@@ -362,10 +345,8 @@ where
         Ok(ArrayBlockTableStorageBase {
             blocks: self.blocks.element_type_change()?,
             shape: self.shape,
-            blocks_layout: self.blocks_layout,
             block_grid_shape: self.block_grid_shape,
-            encoder_params: self.encoder_params,
-            decoder_params: self.decoder_params,
+            spec: self.spec,
         })
     }
 
@@ -376,14 +357,13 @@ where
     where
         D: Dimension,
     {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(ArrayBlockTableStorageBase {
             blocks: self.blocks,
             shape,
-            blocks_layout: self.blocks_layout,
             block_grid_shape: self.block_grid_shape,
-            encoder_params: self.encoder_params,
-            decoder_params: self.decoder_params,
+            spec: self.spec,
         })
     }
 }

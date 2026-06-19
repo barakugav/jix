@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::ArrayStorageSpec;
+use crate::storage::ArraySpec;
 use crate::util::{default_strides, dim_arr, nd_copy};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -14,6 +14,9 @@ use crate::{Array, ArrayStorage, Dimension};
 /// `L = shape[axis]`. A positive `shift` moves elements toward larger indices (elements
 /// that fall off the end re-enter at the beginning); a negative `shift` moves them toward
 /// smaller indices. `shift` is reduced modulo `L`, so any signed integer is accepted.
+///
+/// See also [`Flip`](crate::ops::Flip), which reverses element order along an axis
+/// without wrapping.
 ///
 /// Output shape and dtype equal the input. The result is a lazy view; no computation
 /// occurs until the array is read.
@@ -122,7 +125,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
                 nd_copy(
                     tmp.as_ptr(),
                     buf.as_mut_ptr().add(dst_byte_offset),
-                    S::Dimension::from_slice(region_shape).unwrap(),
+                    S::Dimension::from_slice(region_shape),
                     &src_strides,
                     &dst_strides,
                     itemsize,
@@ -158,7 +161,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         self.array.dtype()
     }
 
-    fn spec(&self) -> ArrayStorageSpec<'_> {
+    fn spec(&self) -> ArraySpec<'_> {
         self.array.spec()
     }
 

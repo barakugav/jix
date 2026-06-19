@@ -374,7 +374,7 @@ impl Array {
         context: Option<&Bound<'py, ReadContext>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
         let shape = self.arr.shape();
-        let parsed = crate::ops::parse_basic_index(shape, index)?;
+        let parsed = crate::ops::parse_basic_index(py, shape, index)?;
 
         let mut ranges: DimArray<Range<u64>> = DimArray::new();
         let mut out_shape: Vec<usize> = Vec::with_capacity(parsed.items.len());
@@ -1002,7 +1002,7 @@ impl Array {
 ///             matches your access pattern is the most important tuning knob: if you always read
 ///             row slices, a block shape of `[1, <row_length>]` avoids decompressing neighboring
 ///             rows. When not set, the shape is auto-computed to fit approximately
-///             `block_size_hint` bytes.
+///             `block_size` bytes.
 ///         - `block_shape_tag`: Per-dimension constraint on how `block_shape` is scaled when a
 ///             downstream operation auto-computes a new block shape. One string per dimension:
 ///             `"fixed"` pins the block size exactly (the default when `block_shape` is set by
@@ -1010,16 +1010,11 @@ impl Array {
 ///             given value; `"any"` allows free choice (used when an op makes the original size
 ///             irrelevant, e.g. a broadcast dimension). Requires `block_shape` to also be set.
 ///             Length must equal the number of dimensions.
-///         - `block_size_hint`: Target block size in bytes, used when auto-computing or scaling the
+///         - `block_size`: Target block size in bytes, used when auto-computing or scaling the
 ///             block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
 ///             are `"fixed"`. Defaults to the L1 data cache size.
-///         - `preferred_read_shape`: Recommended region size to request in a single read, as a list
-///             of integers (one per dimension). Reads that cover a region of approximately this
-///             shape avoid decompressing unnecessary blocks. Typically larger than `block_shape`
-///             and targets the L2 cache. When not set, auto-computed from
-///             `preferred_read_size_hint`.
-///         - `preferred_read_size_hint`: Target size in bytes for the preferred read region, used
-///             when auto-computing `preferred_read_shape`. Defaults to the L2 cache size.
+///         - `read_size`: Target size in bytes for the preferred read region.
+///             Defaults to the L2 cache size.
 ///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
 ///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
 ///         - `compression_level`: Compression level passed to the codec. For Zstd the valid range
@@ -1121,9 +1116,8 @@ pub(crate) fn resolve_array_params(
             }
             let block_shape = extract_arg!("block_shape", Vec<u32>)?;
             let block_shape_tag = extract_arg!("block_shape_tag", Vec<String>)?;
-            let block_size_hint = extract_arg!("block_size_hint", u64)?;
-            let preferred_read_shape = extract_arg!("preferred_read_shape", Vec<u32>)?;
-            let preferred_read_size_hint = extract_arg!("preferred_read_size_hint", u64)?;
+            let block_size = extract_arg!("block_size", u64)?;
+            let read_size = extract_arg!("read_size", u64)?;
             let codec = extract_arg!("codec", String)?;
             let compression_level = extract_arg!("compression_level", u32)?;
             let filters = extract_arg!("filters", Vec<String>)?;
@@ -1152,14 +1146,11 @@ pub(crate) fn resolve_array_params(
                     .collect::<Result<Vec<_>, _>>()?;
                 params.block_shape_tag(&block_shape_tag);
             }
-            if let Some(block_size_hint) = block_size_hint {
-                params.block_size_hint(block_size_hint);
+            if let Some(block_size) = block_size {
+                params.block_size(block_size);
             }
-            if let Some(preferred_read_shape) = preferred_read_shape {
-                params.preferred_read_shape(&preferred_read_shape);
-            }
-            if let Some(preferred_read_size_hint) = preferred_read_size_hint {
-                params.preferred_read_size_hint(preferred_read_size_hint);
+            if let Some(read_size) = read_size {
+                params.read_size(read_size);
             }
 
             if codec.is_some() || compression_level.is_some() || filters.is_some() {

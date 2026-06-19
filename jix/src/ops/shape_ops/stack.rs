@@ -3,8 +3,9 @@ use std::ops::{Not, Range};
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::{ArrayStorageSpec, BlockShapeTag, BlocksLayout};
-use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
+use crate::storage::params::ArrayBlockSpec;
+use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::util::{default_strides, nd_copy, ArraySequence, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
@@ -61,7 +62,7 @@ where
     stack_axis: usize,
 
     shape: <ArraysT::Dimension as crate::Dimension>::Larger,
-    blocks_layout: BlocksLayout,
+    block_spec: ArrayBlockSpec,
 }
 impl<ArraysT> Stack<ArraysT>
 where
@@ -98,20 +99,28 @@ where
             "axis out of bounds: axis {axis} >= array ndim {}",
             shape0.len()
         );
-        check_ndim(shape0.len() + 1)?;
+        check_ndim::<<Self as ArrayStorage>::Dimension>(shape0.len() + 1)?;
         let mut new_shape = DimArray::from_slice(shape0).unwrap();
         new_shape.insert(axis, narrays as u64);
-        let new_shape =
-            <ArraysT::Dimension as crate::Dimension>::Larger::from_slice(&new_shape).unwrap();
+        let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
 
-        let mut b_layout = arrays.spec(0).blocks_layout.clone();
-        b_layout.block_shape_hint.insert(axis, 1);
-        b_layout.block_shape_tag.insert(axis, BlockShapeTag::Any);
-        b_layout.preferred_read_shape.insert(axis, 1);
+        let spec = arrays.spec(0);
+        let block_spec = ArrayBlockSpec {
+            block_shape: {
+                let mut block_shape = spec.block_shape().clone();
+                block_shape.insert(axis, 1);
+                block_shape
+            },
+            block_shape_tag: {
+                let mut block_shape_tag = spec.block_shape_tag().clone();
+                block_shape_tag.insert(axis, BlockShapeTag::Any);
+                block_shape_tag
+            },
+        };
 
         Ok(Self {
             shape: new_shape,
-            blocks_layout: b_layout,
+            block_spec,
             arrays,
             stack_axis: axis,
         })
@@ -144,20 +153,22 @@ where
             .chain(index[self.stack_axis + 1..].iter())
             .cloned()
             .collect::<DimArray<_>>();
-        let arr_range_shape = dim_arr(arr_range.len(), |dim| {
+        let arr_range_shape = ArraysT::Dimension::from_fn(arr_range.len(), |dim| {
             arr_range[dim].end - arr_range[dim].start
         });
         let itemsize = dtype.itemsize() as usize;
-        let arr_size_bytes = arr_range_shape.iter().product::<u64>() as usize * itemsize;
+        let arr_size_bytes = arr_range_shape.as_slice().iter().product::<u64>() as usize * itemsize;
         let mut tmp_buf = in_place
             .not()
             .then(|| context.tmp_buf(arr_size_bytes, dtype.alignment()));
         // Stride of the stack axis in the output buffer (= size of one sub-array slice).
-        let stack_axis_stride =
-            arr_range_shape[self.stack_axis..].iter().product::<u64>() as usize * itemsize;
+        let stack_axis_stride = arr_range_shape.as_slice()[self.stack_axis..]
+            .iter()
+            .product::<u64>() as usize
+            * itemsize;
         let n_stack = (index[self.stack_axis].end - index[self.stack_axis].start) as usize;
         let out_of_place_strides = in_place.not().then(|| {
-            let arr_strides = default_strides(&arr_range_shape, itemsize as u64);
+            let arr_strides = default_strides(arr_range_shape.as_slice(), itemsize as u64);
             // For dims before the stack axis the output stride is n_stack times wider;
             // for dims at or after it the stride is unchanged.
             let mut out_strides = arr_strides.clone();
@@ -188,7 +199,7 @@ where
                     nd_copy(
                         arr_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
-                        ArraysT::Dimension::from_slice(&arr_range_shape).unwrap(),
+                        arr_range_shape.clone(),
                         arr_strides,
                         out_strides,
                         itemsize,
@@ -208,11 +219,8 @@ where
     fn dtype(&self) -> &Dtype {
         self.arrays.dtype(0)
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            ..self.arrays.spec(0)
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.arrays.spec(0).with_block_spec(&self.block_spec)
     }
 
     crate::ops::impl_dimension_change_default!();

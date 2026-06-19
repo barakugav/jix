@@ -1,11 +1,12 @@
 use std::ops::Range;
 
 use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped, Itemsize};
-use crate::error::{check_dtype, check_get_buffer_size, check_get_range, Result};
-use crate::storage::{ArrayStorage, ArrayStorageSpec, BlockShapeTag, BlocksLayout, ReadData, Ty};
+use crate::dtype::{Dtype, Dtyped};
+use crate::error::{check_dtype, check_get_buffer_size, check_get_range, check_ndim, Result};
+use crate::storage::params::ArraySpecOwned;
+use crate::storage::{ArraySpec, ArrayStorage, BlockShapeTag, ReadData, Ty};
 use crate::util::{cast_slice_mut, dim_arr};
-use crate::{Dimension, ElementType, IntoDimension};
+use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -34,7 +35,7 @@ pub struct Scalar<T, D> {
     data: T,
     shape: D,
     element_type: Ty<T>,
-    blocks_layout: BlocksLayout,
+    spec: ArraySpecOwned,
 }
 impl<T, D> Scalar<T, D> {
     /// Create a `Scalar` storage that broadcasts `data` across `shape`.
@@ -55,21 +56,21 @@ impl<T, D> Scalar<T, D> {
         let shape = shape.into_dimension()?;
         let ndim = shape.ndim();
 
-        let blocks_layout = BlocksLayout::tune(
-            Some(dim_arr(ndim, |_| 1)),
-            Some(dim_arr(ndim, |_| BlockShapeTag::Any)),
-            None,
-            None,
-            None,
-            shape.as_slice(),
-            size_of::<T>() as Itemsize,
-        )?;
+        let params = ArrayParams {
+            block_shape: Some(dim_arr(ndim, |_| 1)),
+            block_shape_tag: Some(dim_arr(ndim, |_| BlockShapeTag::Any)),
+            block_size: None,
+            read_size: None,
+            encoder_params: None,
+            decoder_params: None,
+        };
+        let spec = params.into_spec(shape.as_slice(), &T::DTYPE)?;
 
         Ok(Self {
             data,
             shape,
             element_type: Ty::new(),
-            blocks_layout,
+            spec,
         })
     }
 
@@ -153,24 +154,20 @@ where
     fn dtype(&self) -> &Dtype {
         self.element_type.dtype()
     }
-    fn spec(&self) -> ArrayStorageSpec<'_> {
-        ArrayStorageSpec {
-            blocks_layout: &self.blocks_layout,
-            encoder_params: None,
-            decoder_params: None,
-            // decoder_config: None,
-        }
+    fn spec(&self) -> ArraySpec<'_> {
+        self.spec.as_ref()
     }
 
     type DimensionChange<NewD: Dimension> = Scalar<T, NewD>;
     #[inline]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
-        let shape = NewD::from_slice(self.shape())?;
+        check_ndim::<NewD>(self.shape().len())?;
+        let shape = NewD::from_slice(self.shape());
         Ok(Scalar {
             data: self.data,
             shape,
             element_type: self.element_type,
-            blocks_layout: self.blocks_layout,
+            spec: self.spec,
         })
     }
 
