@@ -100,7 +100,7 @@
 //! ```text
 //! Array<Compact>
 //!   .neg()                 -> Array<Neg<Compact>>
-//!   .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
+//!   .reshape(...)          -> Array<Reshape<Neg<Compact>>>
 //!   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
 //!   .add(other)            -> Array<Add<PermuteAxes<...>, Compact>>
 //!   .sum(0).               -> Array<Sum<Add<...>>>
@@ -278,12 +278,12 @@
 //! # Ok::<(), jix::Error>(())
 //! ```
 //!
-//! Shape-changing operations (`reshape_view`, `permute_axes`, `broadcast`) remap how output indices
+//! Shape-changing operations (`reshape`, `permute_axes`, `broadcast`) remap how output indices
 //! translate to positions in the underlying blocks. When the new layout crosses block boundaries
 //! that the original layout respected, a single read may decompress many more blocks than
 //! needed.
 //!
-//! To avoid this, call [`.compact()`](Array::compact) (or the eager variant `reshape`)
+//! To avoid this, call [`.compact()`](Array::compact)
 //! after a shape change to re-encode with a freshly derived block shape:
 //!
 //! ```

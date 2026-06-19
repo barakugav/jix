@@ -14,8 +14,7 @@
 - compress offsets array
 - change offsets array to have length of num_blocks-1 instead of num_blocks+1
 - bump pyo3 to 0.29
-- change reshape to not create a copy by default
 - read a bigger chunk that block shape when compacting a new array
 - support out of order blocks, len(offsets)=2*blocks_num
 - make EncoderParams and DecoderParams private, only ArrayParams should be public
-- optimize Dtype size
+- buf-break workflow

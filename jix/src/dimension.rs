@@ -11,7 +11,7 @@ pub const NDIM_MAX: usize = 8;
 /// Every [`ArrayStorage`](crate::ArrayStorage) carries an associated
 /// `type Dimension: Dimension` that records how many axes the array has. The compiler propagates
 /// this through a chain of lazy operations, such as unary and binary operations, and shape changing
-/// operations: `insert_axis`, `remove_axis`, `reshape_view`, and
+/// operations: `insert_axis`, `remove_axis`, `reshape`, and
 /// reductions all adjust the dimension type of their output. When the argument type is known
 /// statically (e.g. `usize` or `[u64; N]`), the dimension change is encoded in the return type
 /// so callers can reason about shape purely in types.
@@ -61,11 +61,11 @@ pub const NDIM_MAX: usize = 8;
 /// // insert_axis(0): usize arg -> D::Larger = Dim<3>
 /// let a3d = a2d.insert_axis(0);
 ///
-/// // reshape_view([6u64]): [u64; 1] arg -> Dim<1> output
-/// let flat = a3d.reshape_view([6u64]);
+/// // reshape([6u64]): [u64; 1] arg -> Dim<1> output
+/// let flat = a3d.reshape([6u64]);
 ///
-/// // reshape_view(&shape[..]): &[u64] arg -> DimDyn output
-/// let flat_dyn = flat.reshape_view(&[6u64][..]);
+/// // reshape(&shape[..]): &[u64] arg -> DimDyn output
+/// let flat_dyn = flat.reshape(&[6u64][..]);
 /// assert_eq!(flat_dyn.shape(), &[6]);
 /// # Ok::<(), jix::Error>(())
 /// ```
@@ -240,7 +240,7 @@ impl ndarray::IntoDimension for DimDyn {
 ///
 /// `Dim<N>` is the preferred dimension type when the number of axes is determined by the code
 /// structure rather than runtime data. Passing typed arguments to shape-manipulating operations
-/// (e.g. `[u64; 2]` to `reshape_view`, `usize` to `insert_axis`) causes the compiler to select
+/// (e.g. `[u64; 2]` to `reshape`, `usize` to `insert_axis`) causes the compiler to select
 /// `Dim<N>` automatically, so callers rarely need to name this type explicitly.
 ///
 /// # Neighbors

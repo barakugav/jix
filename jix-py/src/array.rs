@@ -81,11 +81,12 @@ use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
 ///
 /// ## Shape operations
 ///
-/// Shape operations remap the array's indices without copying data. Most accept a `copy`
-/// keyword (default `True`) that immediately re-encodes with a block layout suited to the
-/// new shape. Pass `copy=False` for a zero-copy view - but be aware that if the new layout
-/// crosses block boundaries that the original layout respected, reads may decompress more
-/// data than necessary.
+/// Shape operations remap the array's indices without copying data, returning lazy views.
+/// Reshape (and its `flatten` shorthand) are uniquely prone to read-amplification: when the
+/// new layout crosses block boundaries that the original layout respected, reading the view
+/// may decompress more data than the request appears to touch. Materialize the result with
+/// [`jix.compact()`][jix.Array.compact] to re-encode with a block layout suited to the new
+/// shape when you intend to read it more than once.
 ///
 /// # Persistence
 ///
@@ -795,19 +796,16 @@ impl Array {
     // == shape ops ==
 
     /// Reinterprets an array with a different shape. See [`jix.reshape()`][jix.reshape].
-    #[pyo3(signature = (shape, *, copy=true))]
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
         shape: ItemOrSequence<i64>,
-        copy: bool,
     ) -> PyResult<Bound<'py, Self>> {
-        crate::ops::reshape(slf, shape, copy)
+        crate::ops::reshape(slf, shape)
     }
 
     /// Collapses the array into a single dimension. See [`jix.flatten()`][jix.flatten].
-    #[pyo3(signature = (*, copy=true))]
-    pub fn flatten<'py>(slf: &Bound<'py, Self>, copy: bool) -> PyResult<Bound<'py, Self>> {
-        crate::ops::flatten(slf, copy)
+    pub fn flatten<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
+        crate::ops::flatten(slf)
     }
 
     /// Reorders the axes of an array (generalized transpose). See [`jix.permute_axes()`][jix.permute_axes].

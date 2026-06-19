@@ -36,7 +36,7 @@ The storage type `S` carries the full operation chain at the type level:
 ```text
 Array<Compact>
   .neg()                 -> Array<Neg<Compact>>
-  .reshape_view(...)     -> Array<Reshape<Neg<Compact>>>
+  .reshape(...)          -> Array<Reshape<Neg<Compact>>>
   .permute_axes(&[1, 0]) -> Array<PermuteAxes<Reshape<...>>>
   .sum(0)                -> Array<Sum<PermuteAxes<...>>>
   .compact()?            -> Array<Compact>   <- materialize
