@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::storage::ArraySpec;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
@@ -95,19 +95,19 @@ impl<S: ArrayStorage> Slice<S> {
 
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
-        let mut block_shape_tag = inner_spec.block_shape_tag().clone();
         for dim in 0..ndim {
             if shape[dim] == input_shape[dim] {
-                continue;
+                continue; // dim is unchanged
+            } else if shape[dim] >= block_shape[dim] as u64 {
+                continue; // dim is sliced, but still larger than the block size - no change
+            } else {
+                block_shape[dim] = (shape[dim] as BlockSize).max(1);
+                // block_shape_tag is unchanged
             }
-            block_shape[dim] = block_shape[dim]
-                .min(shape[dim].min(BlockSize::MAX as u64) as BlockSize)
-                .max(1); // TODO
-            block_shape_tag[dim] = BlockShapeTag::Any;
         }
         let block_spec = ArrayBlockSpec {
             block_shape,
-            block_shape_tag,
+            block_shape_tag: inner_spec.block_shape_tag().clone(),
         };
 
         Ok(Self {

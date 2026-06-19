@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -95,11 +95,11 @@ where
 
         let new_shape = S::Dimension::from_slice(new_shape);
 
-        // For broadcast dims: Any tag, block_shape=1. For unchanged dims: inherit from inner.
+        // For broadcast dims: Any tag, block_shape=max. For unchanged dims: inherit from inner.
         let inner_spec = array.spec();
         let block_shape = dim_arr(ndim, |dim| {
             if is_broadcast[dim] {
-                1
+                (new_shape[dim].min(BlockSize::MAX as u64) as BlockSize).max(1)
             } else {
                 inner_spec.block_shape()[dim]
             }

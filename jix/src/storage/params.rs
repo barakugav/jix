@@ -124,7 +124,7 @@ impl ArrayParams {
 
     /// Sets the target size in bytes for a single preferred read region.
     ///
-    /// Defaults to the L2 cache size when not set explicitly.
+    /// Defaults to the L1 cache size when not set explicitly.
     pub fn read_size(&mut self, size_hint: u64) -> &mut Self {
         self.read_size = Some(size_hint);
         self
@@ -217,7 +217,7 @@ impl ArrayParams {
     ///   the block shape. Defaults to the L1 data cache size when the shape is not fully
     ///   [`BlockShapeTag::Fixed`].
     /// - `read_size` - target size for the preferred read region in bytes.
-    ///   Defaults to the L2 cache size.
+    ///   Defaults to the L1 cache size.
     /// - `shape` - the array shape, used to clamp block dimensions that would exceed the array.
     /// - `itemsize` - bytes per array element.
     ///
@@ -303,8 +303,8 @@ impl ArrayParams {
                 block_shape.iter().map(|&b| b as u64).try_product().unwrap() * itemsize
             })
             .max(1);
-        // read_size default to L2 cache size
-        let read_size = self.read_size.unwrap_or(cache_sizes.l2 as u64).max(1);
+        // read_size default to L1 cache size
+        let read_size = self.read_size.unwrap_or(cache_sizes.l1_data as u64).max(1);
 
         self.block_shape = Some(block_shape);
         self.block_shape_tag = Some(block_shape_tag);
@@ -568,11 +568,23 @@ impl<'a> ArraySpec<'a> {
         let target_nitems = (self.read_size() / itemsize as u64).max(1);
 
         // Seed from the source storage block hint, clamped to the requested range.
-        let mut read_shape = D::from_fn(ndim, |dim| {
-            (self.block_shape()[dim] as u64)
-                .min(index[dim].end - index[dim].start)
-                .max(1)
-        });
+        let mut read_shape = {
+            let mut max_dim_size = (1u64 << 30).min(self.read_size().next_power_of_two());
+            loop {
+                let read_shape = D::from_fn(ndim, |dim| {
+                    (self.block_shape()[dim] as u64)
+                        .min(max_dim_size)
+                        .min(index[dim].end - index[dim].start)
+                        .max(1)
+                });
+                if let Some(read_size) = read_shape.as_slice().iter().copied().try_product() {
+                    if read_size / 2 <= target_nitems || max_dim_size <= 1 {
+                        break read_shape;
+                    }
+                }
+                max_dim_size = (max_dim_size / 2).max(1);
+            }
+        };
 
         // Greedy scale-up.
         let mut current_volume = read_shape.as_slice().iter().product::<u64>();

@@ -76,10 +76,22 @@ impl<S: ArrayStorage> Repeat<S> {
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
         let mut block_shape_tag = inner_spec.block_shape_tag().clone();
-        block_shape[axis] = block_shape[axis]
+        let new_axis_block_size = block_shape[axis]
             .saturating_mul(repeats.min(BlockSize::MAX as u64) as BlockSize)
+            .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);
-        block_shape_tag[axis] = BlockShapeTag::Any;
+        block_shape_tag[axis] = match block_shape_tag[axis] {
+            BlockShapeTag::Fixed => BlockShapeTag::Fixed,
+            BlockShapeTag::MultipleOf => BlockShapeTag::MultipleOf,
+            BlockShapeTag::Any => {
+                if block_shape[axis] == 1 {
+                    BlockShapeTag::MultipleOf
+                } else {
+                    BlockShapeTag::Any
+                }
+            }
+        };
+        block_shape[axis] = new_axis_block_size;
         let block_spec = ArrayBlockSpec {
             block_shape,
             block_shape_tag,

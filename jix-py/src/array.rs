@@ -889,13 +889,13 @@ impl Array {
     }
 
     /// Replicates the array along a single axis. See [`jix.tile()`][jix.tile].
-    #[pyo3(signature = (reps, axis=None))]
+    #[pyo3(signature = (repeats, axis=None))]
     pub fn tile<'py>(
         slf: &Bound<'py, Array>,
-        reps: u64,
+        repeats: u64,
         axis: Option<i32>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::ops::tile(slf, reps, axis)
+        crate::ops::tile(slf, repeats, axis)
     }
 
     // == complex ops ==
@@ -1014,7 +1014,7 @@ impl Array {
 ///             block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
 ///             are `"fixed"`. Defaults to the L1 data cache size.
 ///         - `read_size`: Target size in bytes for the preferred read region.
-///             Defaults to the L2 cache size.
+///             Defaults to the L1 cache size.
 ///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
 ///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
 ///         - `compression_level`: Compression level passed to the codec. For Zstd the valid range

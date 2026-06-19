@@ -82,7 +82,7 @@ where
         let input_ndim = array.shape().len();
 
         // Validate axis indices and check for duplicates.
-        let mut seen = DimArray::<bool>::from_iter(std::iter::repeat_n(false, input_ndim));
+        let mut is_removed = DimArray::<bool>::from_iter(std::iter::repeat_n(false, input_ndim));
         let axes = dim_arr(axis.len(), |i| axis.get(i));
         for &ax in &axes {
             ensure!(
@@ -91,8 +91,12 @@ where
                 "axis {ax} out of bounds for array of ndim {input_ndim} \
                  (axis indices must be in 0..{input_ndim})"
             );
-            ensure!(!seen[ax], InvalidShapeOperation, "duplicate axis {ax}");
-            seen[ax] = true;
+            ensure!(
+                !is_removed[ax],
+                InvalidShapeOperation,
+                "duplicate axis {ax}"
+            );
+            is_removed[ax] = true;
 
             ensure!(
                 array.shape()[ax] == 1,
@@ -112,8 +116,7 @@ where
         let mut block_shape_tag = DimArray::new();
 
         for input_dim in 0..input_ndim {
-            let removed = seen[input_dim];
-            if !removed {
+            if !is_removed[input_dim] {
                 axes_mapping.push(input_dim as u8);
                 shape.push(array.shape()[input_dim]);
                 block_shape.push(inner_block_shape[input_dim]);

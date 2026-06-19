@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 18a2661b0a5811de66b04f322e7495417349840b57bddc534ab0a78e5ed59625 # shrinks to (nd, za, axis, reps) = ([], shape=[0], strides=[0], layout=CFcf (0xf), dynamic ndim=1, Array { shape: [0], dtype: Dtype::Scalar { scalar: I32, shape: [], itemsize: 4, alignment: 4 } }, 0, 2)
