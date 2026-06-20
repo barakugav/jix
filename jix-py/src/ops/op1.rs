@@ -1,6 +1,11 @@
-use jix_core::scalar::{f16, Complex};
+use std::sync::LazyLock;
 
-use crate::ops::common::define_op1;
+use jix_core::dtype::Dtyped;
+use jix_core::scalar::{f16, Complex};
+use pyo3::prelude::*;
+
+use crate::ops::common::{define_op1, CastKind, OpDescriptor, OpFnDescriptor, Operand};
+use crate::util::IntoPyResult;
 
 define_op1!(
     /// Arithmetic negation applied element-wise (`-array`).
@@ -199,43 +204,94 @@ define_op1!(
         Safe
     }
 );
-define_op1!(
-    /// Computes the natural logarithm (`ln x`) of each element.
-    ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
-    ///
-    /// Negative inputs produce `NaN`; zero produces `-inf`.
-    ///
-    /// Args:
-    ///     array: Input array.
-    ///
-    /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
-    ///
-    /// Examples:
-    ///     ```python
-    ///     import jix
-    ///     import numpy as np
-    ///
-    ///     a = jix.compact([1.0, np.e], dtype=np.float32)
-    ///     result = jix.log(a)
-    ///     assert abs(result.numpy()[0]) < 1e-5   # ln(1) = 0
-    ///     assert abs(result.numpy()[1] - 1.0) < 1e-5  # ln(e) = 1
-    ///
-    ///     # Zero produces -inf; negative input produces NaN.
-    ///     b = jix.compact([0.0, -1.0], dtype=np.float32)
-    ///     result_b = jix.log(b)
-    ///     assert np.isneginf(result_b.numpy()[0])
-    ///     assert np.isnan(result_b.numpy()[1])
-    ///     ```
-    log,
-    Ln,
-    dispatch = {
-        [f16, f32, f64],
-        Safe
+/// Computes the logarithm of each element.
+///
+/// When `base` is `None` (the default), computes the natural logarithm (`ln x`).
+/// When `base` is provided, computes `log_base(x) = ln(x) / ln(base)`.
+///
+/// Supported dtypes: `f16`, `f32`, `f64`.
+///
+/// Negative inputs produce `NaN`; zero produces `-inf`.
+///
+/// Args:
+///     array: Input array.
+///     base: Optional logarithm base. When omitted or `None`, the natural logarithm is computed.
+///         Must be a positive number other than 1.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
+///         the result is read.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     # Natural logarithm (default).
+///     a = jix.compact([1.0, np.e], dtype=np.float32)
+///     result = jix.log(a)
+///     assert abs(result.numpy()[0]) < 1e-5         # ln(1) = 0
+///     assert abs(result.numpy()[1] - 1.0) < 1e-5   # ln(e) = 1
+///
+///     # Base-2 logarithm.
+///     c = jix.compact([1.0, 2.0, 8.0], dtype=np.float32)
+///     result_c = jix.log(c, base=2)
+///     assert abs(result_c.numpy()[0]) < 1e-5        # log2(1) = 0
+///     assert abs(result_c.numpy()[1] - 1.0) < 1e-5  # log2(2) = 1
+///     assert abs(result_c.numpy()[2] - 3.0) < 1e-5  # log2(8) = 3
+///
+///     # Base-10 logarithm.
+///     d = jix.compact([1.0, 10.0, 100.0], dtype=np.float64)
+///     result_d = jix.log(d, base=10)
+///     assert abs(result_d.numpy()[0]) < 1e-10       # log10(1) = 0
+///     assert abs(result_d.numpy()[1] - 1.0) < 1e-10 # log10(10) = 1
+///     assert abs(result_d.numpy()[2] - 2.0) < 1e-10 # log10(100) = 2
+///
+///     # Zero produces -inf; negative input produces NaN.
+///     b = jix.compact([0.0, -1.0], dtype=np.float32)
+///     result_b = jix.log(b)
+///     assert np.isneginf(result_b.numpy()[0])
+///     assert np.isnan(result_b.numpy()[1])
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyo3::pyfunction(signature = (array, base=None))]
+pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<crate::Array> {
+    struct LogArgs {
+        multiplier: Option<f64>,
     }
-);
+    fn log_op_descriptor<T>() -> OpFnDescriptor<1, LogArgs>
+    where
+        T: Dtyped + num_traits::Float,
+        f64: jix_core::scalar::Cast<T>,
+    {
+        OpFnDescriptor::new1_args::<T>(CastKind::Safe, |a, args: LogArgs| {
+            let res = jix_core::ops::Ln::new_array(a).into_py_result()?;
+            Ok(if let Some(multiplier) = args.multiplier {
+                let multiplier = <f64 as jix_core::scalar::Cast<T>>::cast(multiplier);
+                let res = res.map(move |x| x * multiplier);
+                res.into_type_dyn().into_any()
+            } else {
+                res.into_type_dyn().into_any()
+            })
+        })
+    }
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, LogArgs>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "log",
+            vec![
+                log_op_descriptor::<f16>(),
+                log_op_descriptor::<f32>(),
+                log_op_descriptor::<f64>(),
+            ],
+        )
+    });
+    let array = Operand::from_any(array)?;
+    let args = LogArgs {
+        multiplier: base.map(|b| 1.0 / b.ln()),
+    };
+    let res = DISPATCH_TABLE.dispatch_args([array], args)?;
+    Ok(crate::Array::from_core(res))
+}
 define_op1!(
     /// Computes the sine of each element (input in radians).
     ///

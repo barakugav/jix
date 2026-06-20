@@ -973,9 +973,10 @@ impl Array {
         crate::ops::atan(slf)
     }
 
-    /// Computes the natural logarithm (`ln x`) of each element. See [`jix.log()`][jix.log].
-    pub fn log(slf: &Bound<'_, Self>) -> PyResult<Self> {
-        crate::ops::log(slf)
+    /// Computes the logarithm of each element; defaults to the natural logarithm. See [`jix.log()`][jix.log].
+    #[pyo3(signature = (base=None))]
+    pub fn log(slf: &Bound<'_, Self>, base: Option<f64>) -> PyResult<Self> {
+        crate::ops::log(slf, base)
     }
 
     /// Returns the sign of each element as a floating-point value. See [`jix.sign()`][jix.sign].
