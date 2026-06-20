@@ -19,13 +19,13 @@ crate-type = [
 ]
 
 [dependencies]
-pyo3 = "0.28"
+pyo3 = "0.29"
 jix_core = { package = "jix", path = "../jix", version = "0.0.1", features = [
     "half",
     "num-complex",
 ] }
-numpy = { version = "0.28", features = ["half"] }
-pyo3-stub-gen = "0.22.3"
+numpy = { version = "0.29", features = ["half"] }
+pyo3-stub-gen = "0.23.0"
 arrayvec = "0.7"
 ndarray = "0.17.0"
 
