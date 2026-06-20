@@ -553,7 +553,38 @@ impl Array {
         crate::ops::floor_divide(other, slf)
     }
 
-    // TODO: __pow__
+    /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
+    pub fn pow(slf: &Bound<'_, Self>, exponent: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::power(slf, exponent)
+    }
+
+    /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
+    pub fn __pow__<'py>(
+        slf: &Bound<'py, Self>,
+        exponent: &Bound<'py, PyAny>,
+        modulo: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Self> {
+        if modulo.is_some() {
+            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                "modulo argument to pow() is not supported",
+            ));
+        }
+        crate::ops::power(slf, exponent)
+    }
+
+    /// Element-wise exponentiation (`b ** a`). See [`jix.power()`][jix.power].
+    pub fn __rpow__<'py>(
+        slf: &Bound<'py, Self>,
+        base: &Bound<'py, PyAny>,
+        modulo: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Self> {
+        if modulo.is_some() {
+            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                "modulo argument to pow() is not supported",
+            ));
+        }
+        crate::ops::power(base, slf)
+    }
 
     /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
     pub fn negative(slf: &Bound<'_, Self>) -> PyResult<Self> {
@@ -940,6 +971,51 @@ impl Array {
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`. See [`jix.atan()`][jix.atan].
     pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::atan(slf)
+    }
+
+    /// Computes the natural logarithm (`ln x`) of each element. See [`jix.log()`][jix.log].
+    pub fn log(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::log(slf)
+    }
+
+    /// Returns the sign of each element as a floating-point value. See [`jix.sign()`][jix.sign].
+    pub fn sign(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::sign(slf)
+    }
+
+    // == float predicates ==
+
+    /// Tests whether each element is finite. See [`jix.is_finite()`][jix.is_finite].
+    pub fn is_finite(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::is_finite(slf)
+    }
+
+    /// Tests whether each element is infinite. See [`jix.is_infinite()`][jix.is_infinite].
+    pub fn is_infinite(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::is_infinite(slf)
+    }
+
+    /// Tests whether each element is `NaN`. See [`jix.is_nan()`][jix.is_nan].
+    pub fn is_nan(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::is_nan(slf)
+    }
+
+    // == axis ops ==
+
+    /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_axis()`][jix.insert_axis].
+    pub fn insert_axis<'py>(
+        slf: &Bound<'py, Array>,
+        axis: ItemOrSequence<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::insert_axis(slf, axis)
+    }
+
+    /// Removes length-1 dimensions from the array's shape. See [`jix.remove_axis()`][jix.remove_axis].
+    pub fn remove_axis<'py>(
+        slf: &Bound<'py, Array>,
+        axis: ItemOrSequence<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::remove_axis(slf, axis)
     }
 }
 

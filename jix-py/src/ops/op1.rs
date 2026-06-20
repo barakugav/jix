@@ -436,11 +436,11 @@ define_op1!(
     ///     import numpy as np
     ///
     ///     a = jix.compact([3.0, -5.0, -0.1], dtype=np.float32)
-    ///     result = jix.signum(a)
+    ///     result = jix.sign(a)
     ///     assert np.array_equal(result.numpy(), [1.0, -1.0, -1.0])
     ///     ```
-    signum,
-    Signum,
+    sign,
+    Sign,
     dispatch = {
         [f16, f32, f64], // TODO: signed integers
         Safe

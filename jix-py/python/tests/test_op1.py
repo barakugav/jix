@@ -151,11 +151,11 @@ def test_atan(dtype: np.dtype, data: DataObject):
 
 @pytest.mark.parametrize("dtype", floats)
 @given(st.data())
-def test_signum(dtype: np.dtype, data: DataObject):
+def test_sign(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
-    # jix.signum: +1.0 for positive and +0.0, -1.0 for negative and -0.0.
+    # jix.sign: +1.0 for positive and +0.0, -1.0 for negative and -0.0.
     # np.sign returns 0.0 for 0.0; np.copysign(1, x) matches Rust's f32::signum.
-    assert_array_matches(jix.signum(za), np.copysign(np.ones_like(np_a), np_a), data=data)
+    assert_array_matches(jix.sign(za), np.copysign(np.ones_like(np_a), np_a), data=data)
 
 
 @pytest.mark.parametrize("dtype", ints + floats)

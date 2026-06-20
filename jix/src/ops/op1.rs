@@ -746,7 +746,7 @@ define_op1!(
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::signum()`](crate::Array::signum).
+    /// [`Array::sign()`](crate::Array::sign).
     ///
     /// # Examples
     /// ```
@@ -754,17 +754,17 @@ define_op1!(
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![3.0f32, -5.0, -0.1])?;
-    /// let result = a.signum().to_ndarray()?;
+    /// let result = a.sign().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0, -1.0]);
     ///
     /// // Positive zero returns +1.0.
     /// let b = Array::compact_ndarray(&array![0.0f32])?;
-    /// let result = b.signum().to_ndarray()?;
+    /// let result = b.sign().to_ndarray()?;
     /// assert_eq!(result[[0]], 1.0);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    Signum,
-    SignumKernel,
+    Sign,
+    SignKernel,
     <num_traits::Float>::signum,
     type Output<T> = T,
 );
@@ -840,7 +840,7 @@ where
     define_array_op1_method!(asin: Asin, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(acos: Acos, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(atan: Atan, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(signum: Signum, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(sign: Sign, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(abs: Abs, crate::scalar::Abs);
 }
 
@@ -921,7 +921,7 @@ pub(crate) mod tests {
     test_op1!(acos, |a| a.acos(), [f32, f64], unit_strategy);
     test_op1!(atan, |a| a.atan(), [f32, f64], op_safe_strategy);
     test_op1!(
-        signum,
+        sign,
         |a| a.signum(),
         [f32, f64],
         op_safe_strategy,
