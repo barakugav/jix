@@ -134,8 +134,8 @@ define_reduction_op!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`.
     ///
-    /// For **float** types, `NaN` values are ignored: the result is the maximum of all
-    /// non-`NaN` values. If all elements are `NaN`, the result is `NaN`.
+    /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result is
+    /// `NaN`. This matches `numpy.max` (not `numpy.nanmax`, which would ignore `NaN`).
     ///
     /// Args:
     ///     array: Input array.
@@ -145,7 +145,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -173,8 +173,8 @@ define_reduction_op!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `bool`.
     ///
-    /// For **float** types, `NaN` values are ignored: the result is the minimum of all
-    /// non-`NaN` values. If all elements are `NaN`, the result is `NaN`.
+    /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result is
+    /// `NaN`. This matches `numpy.min` (not `numpy.nanmin`, which would ignore `NaN`).
     ///
     /// Args:
     ///     array: Input array.
@@ -184,7 +184,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -211,8 +211,10 @@ define_reduction_op!(
     /// `f16`, `f32`, `f64`, `bool`.
     ///
     /// If multiple elements share the maximum value, the index of the first occurrence is
-    /// returned. For **float** types, `NaN` values are treated as less than any non-`NaN`
-    /// value, so they are never selected unless all elements are `NaN`.
+    /// returned. For **float** types, a `NaN` never displaces the running best (every
+    /// comparison against `NaN` is `False`); a `NaN` index is returned only when the first
+    /// element along the reduced axis is `NaN`, otherwise `NaN` values are skipped. This
+    /// differs from `numpy.argmax`, which returns the index of the first `NaN`.
     ///
     /// Args:
     ///     array: Input array.
@@ -222,7 +224,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `axis` is
-    ///     `None`, returns a scalar. When `keepdims=True`, the reduced axis is kept with size 1.
+    ///         `None`, returns a scalar. When `keepdims=True`, the reduced axis is kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -250,8 +252,10 @@ define_reduction_op!(
     /// `f16`, `f32`, `f64`, `bool`.
     ///
     /// If multiple elements share the minimum value, the index of the first occurrence is
-    /// returned. For **float** types, `NaN` values are treated as greater than any non-`NaN`
-    /// value, so they are never selected unless all elements are `NaN`.
+    /// returned. For **float** types, a `NaN` never displaces the running best (every
+    /// comparison against `NaN` is `False`); a `NaN` index is returned only when the first
+    /// element along the reduced axis is `NaN`, otherwise `NaN` values are skipped. This
+    /// differs from `numpy.argmin`, which returns the index of the first `NaN`.
     ///
     /// Args:
     ///     array: Input array.
@@ -261,7 +265,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] of dtype `u64` with the index of the max/min element. When `axis` is
-    ///     `None`, returns a scalar. When `keepdims=True`, the reduced axis is kept with size 1.
+    ///         `None`, returns a scalar. When `keepdims=True`, the reduced axis is kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -286,8 +290,10 @@ define_reduction_op!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
-    /// For **integer** types, the result wraps on overflow (two's complement). For
-    /// large sums, consider casting to a wider type first.
+    /// The output dtype is widened to avoid overflow: signed integers accumulate into
+    /// `i64`, unsigned integers and `bool` into `u64`, floats into `f64`, and complex into
+    /// `Complex<f64>`. A 64-bit accumulator can still wrap on a sufficiently large sum. An
+    /// empty reduction returns `0`.
     ///
     /// Args:
     ///     array: Input array.
@@ -297,7 +303,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -321,8 +327,10 @@ define_reduction_op!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
-    /// For **integer** types, the result wraps on overflow. For large products, consider
-    /// casting to a wider type first.
+    /// The output dtype is widened to avoid overflow: signed integers accumulate into
+    /// `i64`, unsigned integers into `u64`, floats into `f64`, and complex into
+    /// `Complex<f64>` (`bool` is not supported). A 64-bit accumulator can still wrap on a
+    /// sufficiently large product. An empty reduction returns `1`.
     ///
     /// Args:
     ///     array: Input array.
@@ -332,7 +340,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -355,8 +363,8 @@ define_reduction_op!(
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
     ///
-    /// This function deviates from numpy in that only float and complex types are supported.
-    /// For integer inputs, cast to `f64` first with [`jix.astype(array, 'float64')`][jix.astype].
+    /// Integer and `bool` inputs are accepted directly and promote to `f64`; complex inputs
+    /// produce a `Complex<f64>` result.
     ///
     /// Args:
     ///     array: Input array.
@@ -366,7 +374,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -399,7 +407,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -433,7 +441,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -468,7 +476,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python
@@ -503,7 +511,7 @@ define_reduction_op!(
     ///
     /// Returns:
     ///     A [`jix.Array`][jix.Array] with the specified axes reduced. When `keepdims=True`, reduced axes
-    ///     are kept with size 1.
+    ///         are kept with size 1.
     ///
     /// Examples:
     ///     ```python

@@ -558,8 +558,9 @@ impl TmpBufferPool {
     /// Returns a raw pointer to the free list for `alignment` together with the actual alignment
     /// that will be used for allocations from that list.
     ///
-    /// Alignments <= 16 are folded into the single `align16` list (allocated at 16 bytes).
-    /// Larger alignments are looked up (or inserted) in the sorted `align_other` list.
+    /// Alignments <= `CACHE_LINE_SIZE` are folded into the single `align_standard` list
+    /// (allocated at `CACHE_LINE_SIZE`-byte alignment). Larger alignments are looked up (or
+    /// inserted) in the sorted `align_other` list.
     fn get_pool(&self, alignment: Alignment) -> (*mut Vec<AlignedBytes>, Alignment) {
         let standard_alignment = Alignment::new(CACHE_LINE_SIZE).unwrap();
         let alignment = alignment.max(standard_alignment);

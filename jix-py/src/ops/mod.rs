@@ -67,7 +67,7 @@ use crate::dtype::dtype_from_any;
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view with the new dtype. No computation occurs until the result
-///     is read.
+///         is read.
 ///
 /// Examples:
 ///     ```python

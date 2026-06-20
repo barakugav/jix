@@ -43,7 +43,7 @@ pub type BlockSize = u32;
 /// - `block_size > 0`
 /// - `nitems % block_size == 0`
 /// - `block_offsets.len() == nblocks + 1` when `nblocks > 0`, or `0` when `nblocks == 0`
-/// - `block_offsets` is strictly increasing; the last entry equals `block_data.len()`
+/// - `block_offsets` is strictly increasing; the last entry does not exceed `block_data.len()`
 pub(crate) struct BlockTable<S, ET>
 where
     S: BlockTableStorage,

@@ -23,7 +23,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -58,7 +58,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -86,7 +86,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -118,7 +118,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -148,7 +148,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -180,7 +180,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -211,7 +211,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -246,7 +246,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -275,7 +275,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -304,7 +304,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -335,7 +335,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -366,7 +366,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -396,7 +396,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -428,7 +428,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -469,7 +469,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python

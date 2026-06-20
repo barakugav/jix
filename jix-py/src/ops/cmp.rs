@@ -22,7 +22,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -68,7 +68,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -108,7 +108,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -148,7 +148,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -188,7 +188,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -228,7 +228,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -269,7 +269,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] with the element-wise maximum and the broadcast shape. No
-    ///     computation occurs until the result is read.
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -317,7 +317,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] with the element-wise minimum and the broadcast shape. No
-    ///     computation occurs until the result is read.
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python

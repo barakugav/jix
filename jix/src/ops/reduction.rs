@@ -990,10 +990,9 @@ pub(crate) mod _traits {
 define_reduction_op!(
     /// Reduces one or more axes by taking the maximum element.
     ///
-    /// For **float** types, `NaN` values are ignored: if at least one non-`NaN` value
-    /// is present, the result is the maximum of the non-`NaN` values. If all elements
-    /// are `NaN`, the result is `NaN`. This deviates from the element-wise [`Maximum`](crate::ops::Maximum)
-    /// op (which propagates `NaN`) but matches `numpy.max`.
+    /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result
+    /// is `NaN`. This matches the element-wise [`Maximum`](crate::ops::Maximum) op and
+    /// `numpy.max` (not `numpy.nanmax`, which would ignore `NaN`).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1054,10 +1053,9 @@ where
 define_reduction_op!(
     /// Reduces one or more axes by taking the minimum element.
     ///
-    /// For **float** types, `NaN` values are ignored: if at least one non-`NaN` value
-    /// is present, the result is the minimum of the non-`NaN` values. If all elements
-    /// are `NaN`, the result is `NaN`. This deviates from the element-wise [`Minimum`](crate::ops::Minimum)
-    /// op (which propagates `NaN`) but matches `numpy.min`.
+    /// For **float** types, `NaN` is propagated: if any element is `NaN`, the result
+    /// is `NaN`. This matches the element-wise [`Minimum`](crate::ops::Minimum) op and
+    /// `numpy.min` (not `numpy.nanmin`, which would ignore `NaN`).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1122,8 +1120,11 @@ define_reduction_op!(
     ///
     /// Unlike [`Max`], this op accepts only a single axis. If multiple elements share
     /// the maximum value, the index of the first occurrence is returned.
-    /// For **float** types, `NaN` values are treated as less than any non-`NaN` value,
-    /// so they are never selected unless all elements are `NaN`.
+    /// For **float** types, a `NaN` never displaces the running best, because every
+    /// comparison against `NaN` evaluates to `false`. A `NaN` index is therefore returned
+    /// only when the first element along the reduced axis is `NaN`; otherwise `NaN`
+    /// values are skipped. This differs from `numpy.argmax`, which returns the index of
+    /// the first `NaN`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1196,8 +1197,11 @@ define_reduction_op!(
     ///
     /// Unlike [`Min`], this op accepts only a single axis. If multiple elements share
     /// the minimum value, the index of the first occurrence is returned.
-    /// For **float** types, `NaN` values are treated as greater than any non-`NaN` value,
-    /// so they are never selected unless all elements are `NaN`.
+    /// For **float** types, a `NaN` never displaces the running best, because every
+    /// comparison against `NaN` evaluates to `false`. A `NaN` index is therefore returned
+    /// only when the first element along the reduced axis is `NaN`; otherwise `NaN`
+    /// values are skipped. This differs from `numpy.argmin`, which returns the index of
+    /// the first `NaN`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///

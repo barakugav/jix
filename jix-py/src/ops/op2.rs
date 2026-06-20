@@ -28,7 +28,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-    ///     No computation occurs until the result is read.
+    ///         No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -82,7 +82,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-    ///     No computation occurs until the result is read.
+    ///         No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -125,7 +125,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-    ///     No computation occurs until the result is read.
+    ///         No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -168,7 +168,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-    ///     No computation occurs until the result is read.
+    ///         No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -214,7 +214,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast shape.
-    ///     No computation occurs until the result is read.
+    ///         No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -251,7 +251,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the result dtype and broadcast shape. No computation
-    ///     occurs until the result is read.
+    ///         occurs until the result is read.
     ///
     /// Examples:
     ///     ```python

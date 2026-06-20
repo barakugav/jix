@@ -25,7 +25,7 @@ use crate::Array;
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] with the same shape as the broadcast of `condition`, `x`, and `y`.
-///     Elements are drawn from `x` where `condition` is `True`, and from `y` elsewhere.
+///         Elements are drawn from `x` where `condition` is `True`, and from `y` elsewhere.
 ///
 /// Examples:
 ///     ```python

@@ -358,8 +358,8 @@ impl Array {
     ///
     /// Returns:
     ///     A NumPy array with the same dtype as `self`, shape determined by the `index`
-    ///     argument (or `self.shape` when no index is supplied), in C-contiguous (row-major)
-    ///     memory order. A brand-new allocation; the caller owns it outright.
+    ///         argument (or `self.shape` when no index is supplied), in C-contiguous (row-major)
+    ///         memory order. A brand-new allocation; the caller owns it outright.
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,

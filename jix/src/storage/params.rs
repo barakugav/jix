@@ -115,8 +115,8 @@ impl ArrayParams {
     /// the auto-computation scales the block shape so that each block is approximately this many
     /// bytes.
     ///
-    /// When not provided, defaults to block_shape.product() or the L1 data cache size if no
-    /// block shape is given.
+    /// When not provided, defaults to `block_shape.product() * itemsize` (the block size in
+    /// bytes), or the L1 data cache size if no block shape is given.
     pub fn block_size(&mut self, size_hint: u64) -> &mut Self {
         self.block_size = Some(size_hint);
         self
