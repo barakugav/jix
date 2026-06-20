@@ -20,7 +20,7 @@ def abs(array: typing.Any) -> Array:
 def concat(arrays: typing.Sequence[typing.Any], axis: builtins.int = 0) -> Array:
     """Alias for [`jix.concatenate`][jix.concatenate]"""
 
-def clip(array: typing.Any, min: typing.Optional[typing.Any] = None, max: typing.Optional[typing.Any] = None) -> Array
+def clip(array: typing.Any, min: typing.Optional[typing.Any] = None, max: typing.Optional[typing.Any] = None) -> Array:
     """Alias for [`jix.clamp`][jix.clamp]"""
 "#,
     );

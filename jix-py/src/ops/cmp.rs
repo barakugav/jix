@@ -4,6 +4,7 @@ use jix_core::dtype::Dtyped;
 use jix_core::scalar::{f16, Complex};
 use pyo3::prelude::*;
 
+use crate::asarray;
 use crate::ops::common::{define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar};
 
 define_op2!(
@@ -402,7 +403,12 @@ pub fn clamp<'py>(
     array: &Bound<'py, PyAny>,
     min: Option<&Bound<'py, PyAny>>,
     max: Option<&Bound<'py, PyAny>>,
-) -> pyo3::PyResult<crate::Array> {
+) -> pyo3::PyResult<Bound<'py, crate::Array>> {
+    if min.is_none() && max.is_none() {
+        return asarray(array);
+    }
+    let py = array.py();
+
     struct ClampArgs {
         min: Option<Scalar>,
         max: Option<Scalar>,
@@ -436,6 +442,7 @@ pub fn clamp<'py>(
                     .into_type_dyn()
                     .into_any(),
                 (Some(min), Some(max)) => {
+                    #[allow(clippy::neg_cmp_op_on_partial_ord)]
                     if !(min <= max) {
                         return Err(pyo3::exceptions::PyValueError::new_err(
                             "min must be less than or equal to max",
@@ -481,14 +488,14 @@ pub fn clamp<'py>(
         max: max.map(|m| Scalar::from_any(m)).transpose()?,
     };
     for limit in [&args.min, &args.max] {
-        if let Some(limit) = limit {
-            if matches!(limit, Scalar::Complex(_)) {
-                return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "clamp does not support complex limits",
-                ));
-            }
+        if let Some(limit) = limit
+            && matches!(limit, Scalar::Complex(_))
+        {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "clamp does not support complex limits",
+            ));
         }
     }
     let res = DISPATCH_TABLE.dispatch_args([array], args)?;
-    Ok(crate::Array::from_core(res))
+    Bound::new(py, crate::Array::from_core(res))
 }

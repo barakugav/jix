@@ -85,9 +85,9 @@ def test_exp(dtype: np.dtype, data: DataObject):
 def test_log_natural_no_base():
     a = jix.compact([1.0, np.e, np.e**2], dtype=np.float64)
     result = jix.log(a).numpy()
-    assert abs(result[0]) < 1e-12       # ln(1) = 0
-    assert abs(result[1] - 1.0) < 1e-12 # ln(e) = 1
-    assert abs(result[2] - 2.0) < 1e-12 # ln(e^2) = 2
+    assert abs(result[0]) < 1e-12  # ln(1) = 0
+    assert abs(result[1] - 1.0) < 1e-12  # ln(e) = 1
+    assert abs(result[2] - 2.0) < 1e-12  # ln(e^2) = 2
 
 
 @pytest.mark.parametrize("dtype", floats)

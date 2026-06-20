@@ -150,6 +150,7 @@ def test_clamp_none(dtype: np.dtype, data: DataObject):
 
 # --- invalid limit tests (non-property) ---
 
+
 def test_clamp_min_greater_than_max_raises():
     a = jix.compact([1, 2, 3], dtype=np.int32)
     with pytest.raises(ValueError, match="min"):

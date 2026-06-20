@@ -36,40 +36,6 @@ pub enum Codec {
 /// [`EncoderParams::default()`] uses Zstd level 3 with [`Filter::ByteShuffle`], which is a
 /// good baseline for most numeric workloads: fast encoding, reasonable ratio, and effective
 /// at exploiting the byte-level regularity of uniform-dtype arrays.
-///
-/// # Examples
-///
-/// Use the defaults (most common case):
-///
-/// ```
-/// use jix::codec::EncoderParams;
-/// use jix::{Array, ArrayParams};
-/// use ndarray::array;
-///
-/// let data = array![1.0f32, 2.0, 3.0, 4.0];
-/// let mut params = ArrayParams::new();
-/// // EncoderParams::default() is equivalent to EncoderParams::new()
-/// params.encoder_params(EncoderParams::new());
-/// let za = Array::compact_ndarray_with(&data, params)?;
-/// # Ok::<(), jix::Error>(())
-/// ```
-///
-/// Increase compression level for archival data:
-///
-/// ```
-/// use jix::codec::{EncoderParams, Filter};
-/// use jix::{Array, ArrayParams};
-/// use ndarray::array;
-///
-/// let data = array![1.0f64, 2.0, 3.0, 4.0];
-/// let mut enc = EncoderParams::new();
-/// enc.level(15)?; // slower encode, better ratio
-/// enc.filters(&[Filter::ByteShuffle])?;
-/// let mut params = ArrayParams::new();
-/// params.encoder_params(enc);
-/// let za = Array::compact_ndarray_with(&data, params)?;
-/// # Ok::<(), jix::Error>(())
-/// ```
 #[derive(Clone, Debug)]
 pub(crate) struct EncoderParams {
     pub(crate) codec: Codec,

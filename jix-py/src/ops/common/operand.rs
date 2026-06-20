@@ -27,11 +27,9 @@ impl Operand {
     }
 
     fn from_any_impl(value: &Bound<'_, PyAny>, only_scalar: bool) -> PyResult<Self> {
-        if !only_scalar {
-            if let Ok(array) = value.cast::<Array>() {
-                return Ok(Self::Array(array.get().arr.clone()));
-            };
-        }
+        if !only_scalar && let Ok(array) = value.cast::<Array>() {
+            return Ok(Self::Array(array.get().arr.clone()));
+        };
         let py = value.py();
 
         let (np_generic, np_asarray) = {

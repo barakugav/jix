@@ -981,11 +981,11 @@ impl Array {
 
     /// Clamps each element to `[min, max]`. See [`jix.clamp()`][jix.clamp].
     #[pyo3(signature = (min=None, max=None))]
-    pub fn clamp(
-        slf: &Bound<'_, Self>,
-        min: Option<&Bound<'_, PyAny>>,
-        max: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Self> {
+    pub fn clamp<'py>(
+        slf: &Bound<'py, Self>,
+        min: Option<&Bound<'py, PyAny>>,
+        max: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, Self>> {
         crate::ops::clamp(slf, min, max)
     }
 
