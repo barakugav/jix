@@ -8,12 +8,10 @@
 - optimize reduce_max with state of (current max, nan_seen)
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
-- build wheels for free threaded python (blocked by https://github.com/Jij-Inc/pyo3-stub-gen/issues/305)
 - add link (pyproject metadata + readme) to readthedocs
-- build wheels for windows, wsam
+- build wheels for wsam
 - compress offsets array
 - change offsets array to have length of num_blocks-1 instead of num_blocks+1
-- bump pyo3 to 0.29
 - read a bigger chunk that block shape when compacting a new array
 - support out of order blocks, len(offsets)=2*blocks_num
 - make EncoderParams and DecoderParams private, only ArrayParams should be public

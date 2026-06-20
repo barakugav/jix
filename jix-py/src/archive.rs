@@ -38,11 +38,11 @@ use crate::{Array, ReadContext};
 ///     params: Controls how the array is read and decoded. See [`jix.compact()`][jix.compact] for details.
 ///     validation: Controls how strictly the archive is validated. Can be one of:
 ///
-///        - `None` (default): Currently the same as the `strict` mode, may change in the future.
-///        - `minimal`: Perform only the constant-time (O(1)) consistency checks.
+///         - `None` (default): Currently the same as the `strict` mode, may change in the future.
+///         - `minimal`: Perform only the constant-time (O(1)) consistency checks.
 ///             Suitable for archives produced by a trusted source where the O(data_size) scans
 ///             would add measurable overhead with no expected benefit.
-///        - `strict`: Perform all checks, including those that scan structures whose size grows
+///         - `strict`: Perform all checks, including those that scan structures whose size grows
 ///             with the array (O(data_size)). This is the right choice unless you have a specific
 ///             reason to skip the extra scans. Use it whenever the archive's origin is untrusted
 ///             or unverified.
