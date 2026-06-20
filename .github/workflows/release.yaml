@@ -101,7 +101,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14 3.14t
           manylinux: auto
           working-directory: jix-py
       - name: Upload wheels
@@ -133,7 +133,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14 3.14t
           manylinux: musllinux_1_2
           working-directory: jix-py
       - name: Upload wheels
@@ -151,28 +151,49 @@ jobs:
           - runner: windows-latest
             target: x64
             python_arch: x64
+            python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+            artifact-suffix: ""
+          - runner: windows-latest
+            target: x64
+            python_arch: x64
+            python-version: ["3.14t"]
+            artifact-suffix: "-freethreaded"
           - runner: windows-latest
             target: x86
             python_arch: x86
+            python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+            artifact-suffix: ""
+          - runner: windows-latest
+            target: x86
+            python_arch: x86
+            python-version: ["3.14t"]
+            artifact-suffix: "-freethreaded"
           - runner: windows-11-arm
             target: aarch64
             python_arch: arm64
+            python-version: ["3.11", "3.12", "3.13", "3.14"]
+            artifact-suffix: ""
+          - runner: windows-11-arm
+            target: aarch64
+            python_arch: arm64
+            python-version: ["3.14t"]
+            artifact-suffix: "-freethreaded"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ join(matrix.platform.python-version, fromJSON('"\n"')) }}
           architecture: ${{ matrix.platform.python_arch }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist --interpreter ${{ join(matrix.platform.python-version, ' ') }}
           working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
-          name: wheels-windows-${{ matrix.platform.target }}
+          name: wheels-windows-${{ matrix.platform.target }}${{ matrix.platform.artifact-suffix }}
           path: jix-py/dist
 
   py-wheels-macos:
@@ -189,12 +210,18 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+            3.14t
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14 3.14t
           working-directory: jix-py
       - name: Upload wheels
         uses: actions/upload-artifact@v7
