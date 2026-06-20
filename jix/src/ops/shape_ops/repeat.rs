@@ -6,8 +6,8 @@ use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
 };
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
+use crate::util::{default_strides, dim_arr, nd_copy};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
@@ -76,10 +76,22 @@ impl<S: ArrayStorage> Repeat<S> {
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
         let mut block_shape_tag = inner_spec.block_shape_tag().clone();
-        block_shape[axis] = block_shape[axis]
-            .saturating_mul(repeats.max(u32::MAX as u64) as u32)
+        let new_axis_block_size = block_shape[axis]
+            .saturating_mul(repeats.min(BlockSize::MAX as u64) as BlockSize)
+            .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);
-        block_shape_tag[axis] = BlockShapeTag::Any;
+        block_shape_tag[axis] = match block_shape_tag[axis] {
+            BlockShapeTag::Fixed => BlockShapeTag::Fixed,
+            BlockShapeTag::MultipleOf => BlockShapeTag::MultipleOf,
+            BlockShapeTag::Any => {
+                if block_shape[axis] == 1 {
+                    BlockShapeTag::MultipleOf
+                } else {
+                    BlockShapeTag::Any
+                }
+            }
+        };
+        block_shape[axis] = new_axis_block_size;
         let block_spec = ArrayBlockSpec {
             block_shape,
             block_shape_tag,
@@ -156,39 +168,19 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
             // (ndim + 1)-D shape: original axes, but axis k is split into
             // (g_len, p_len) at positions k and k+1.
-            let mut copy_shape = DimArray::new();
-            for d in 0..ndim {
-                if d == k {
-                    copy_shape.push(g_len);
-                    copy_shape.push(p_len);
-                } else {
-                    copy_shape.push(out_shape[d]);
-                }
-            }
+            let mut copy_shape = out_shape.clone();
+            copy_shape[k] = g_len;
+            copy_shape.insert(k + 1, p_len);
 
             // src strides: itemsize-strides over inner_shape, with the within-group
             // (p) axis stride = 0 (the repeat trick).
-            let mut src_strides = DimArray::new();
-            for d in 0..ndim {
-                if d == k {
-                    src_strides.push(inner_strides_bytes[d]);
-                    src_strides.push(0);
-                } else {
-                    src_strides.push(inner_strides_bytes[d]);
-                }
-            }
+            let mut src_strides = inner_strides_bytes.clone();
+            src_strides.insert(k + 1, 0);
 
             // dst strides: from `dst_strides`, with axis k split into
             // (n * dst_strides[k], dst_strides[k]).
-            let mut dst_strides_split = DimArray::new();
-            for d in 0..ndim {
-                if d == k {
-                    dst_strides_split.push(dst_strides[d] * n);
-                    dst_strides_split.push(dst_strides[d]);
-                } else {
-                    dst_strides_split.push(dst_strides[d]);
-                }
-            }
+            let mut dst_strides_split = dst_strides.clone();
+            dst_strides_split.insert(k, dst_strides[k] * n);
 
             // src ptr: tmp_buf offset to (g_range.start) along the inner k axis.
             let src_byte_offset = (g_range.start as usize) * inner_strides_bytes[k];

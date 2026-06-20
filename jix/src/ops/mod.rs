@@ -38,8 +38,9 @@
 //!   [`ArrayParams`](crate::ArrayParams), giving full control over the new block shape. Use this
 //!   to guarantee your access pattern is well-aligned.
 //!
-//! The eager variant ([`Array::reshape`](crate::Array::reshape)) calls `.compact()` internally.
-//! Use the `_view` variants with care.
+//! Like every other operation, [`Array::reshape`](crate::Array::reshape) is a lazy view, so this
+//! cost is paid only when the view is read. Reshape is the operation most prone to it - call
+//! `.compact()` on the result when it will be read more than once.
 //!
 //! # Typed element requirements
 //!

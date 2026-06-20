@@ -8,7 +8,7 @@ use crate::util::{
     normalize_axes, normalize_axes_optional, normalize_axis, normalize_axis_optional, DimArray,
     IntoPyResult, ItemOrSequence,
 };
-use crate::{compact, Array};
+use crate::Array;
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions.
 ///
@@ -25,10 +25,7 @@ use crate::{compact, Array};
 ///
 /// Output dtype equals the input dtype. Output shape equals `shape`.
 ///
-/// When `copy=True` (the default) the result is an eagerly materialized compact array with a
-/// block layout matched to `shape`. When `copy=False` the result is a lazy view; reading
-/// it may decompress many blocks if the original storage is block-based and the new shape
-/// crosses block boundaries.
+/// The result is a lazy view; no data is copied until the array is read.
 ///
 /// This function deviates from `numpy.broadcast_to`:
 /// - `shape` must have the same number of dimensions as the input (numpy pads leading
@@ -593,20 +590,19 @@ pub fn permute_axes<'py>(
 ///
 /// Output dtype equals the input dtype.
 ///
-/// When `copy=True` (the default) the result is an eagerly materialized compact array with a
-/// block layout matched to `shape`. When `copy=False` the result is a lazy view; reading
-/// it may decompress many blocks if the new shape is not aligned with the original block
-/// boundaries - use with care.
+/// Like the other shape operations, the result is a lazy view; no data is copied until the array
+/// is read. Reshape is uniquely prone to read-amplification, though: when the new shape is not
+/// aligned with the original block boundaries, reading the view may decompress many more blocks
+/// than the request appears to touch. When the result will be read more than once, materialize it
+/// with [`jix.compact()`][jix.compact] to realign the block layout to `shape`.
 ///
 /// Args:
 ///     array: Array to reshape.
 ///     shape: New shape. Exactly one dimension may be `-1` (inferred). Product must equal
 ///         the total element count.
-///     copy: If `True` (default), returns an eagerly materialized compact array. If `False`,
-///         returns a lazy view.
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with the new shape.
+///     A lazy [`jix.Array`][jix.Array] view with the new shape.
 ///
 /// Examples:
 ///     ```python
@@ -628,13 +624,10 @@ pub fn permute_axes<'py>(
 #[pyo3(signature = (
     array,
     shape,
-    *,
-    copy=true,
 ))]
 pub fn reshape<'py>(
     array: &Bound<'py, PyAny>,
     shape: ItemOrSequence<i64>,
-    copy: bool,
 ) -> PyResult<Bound<'py, Array>> {
     let new_shape = shape;
     let py_arr = asarray(array)?;
@@ -681,30 +674,24 @@ pub fn reshape<'py>(
         // no-op if already the right shape
         array.clone()
     };
-    let mut array = Bound::new(py_arr.py(), Array::from_core(array))?;
-
-    if copy {
-        array = compact(&array, None, None, None)?;
-    }
-    Ok(array)
+    Bound::new(py_arr.py(), Array::from_core(array))
 }
 
 /// Collapses an array into a single dimension.
 ///
-/// Equivalent to [`jix.reshape(array, [n], copy=copy)`][jix.reshape] where `n` is the total number of
+/// Equivalent to [`jix.reshape(array, [n])`][jix.reshape] where `n` is the total number of
 /// elements. Output dtype equals the input dtype. Output shape is `[n]`.
 ///
-/// When `copy=True` (the default) the result is an eagerly materialized compact array.
-/// When `copy=False` the result is a lazy view; reading it may decompress many blocks if the
-/// original storage is block-based and the shape is not aligned with block boundaries.
+/// Like the other shape operations, the result is a lazy view; no data is copied until the array
+/// is read. Reading the view may decompress many blocks if the original storage is block-based
+/// and the flattened layout crosses block boundaries. When the result will be read more than
+/// once, materialize it with [`jix.compact()`][jix.compact].
 ///
 /// Args:
 ///     array: Array to flatten.
-///     copy: If `True` (default), returns an eagerly materialized compact array. If `False`,
-///         returns a lazy view.
 ///
 /// Returns:
-///     A 1-D [`jix.Array`][jix.Array] containing all elements.
+///     A lazy 1-D [`jix.Array`][jix.Array] view containing all elements.
 ///
 /// Examples:
 ///     ```python
@@ -718,11 +705,10 @@ pub fn reshape<'py>(
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, *, copy=true))]
-pub fn flatten<'py>(array: &Bound<'py, PyAny>, copy: bool) -> PyResult<Bound<'py, Array>> {
+pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
     let size = py_arr.get().arr.shape().iter().product::<u64>();
-    reshape(&py_arr, ItemOrSequence::Item(size as i64), copy)
+    reshape(&py_arr, ItemOrSequence::Item(size as i64))
 }
 
 /// Joins a sequence of arrays along an existing axis.
@@ -1061,13 +1047,13 @@ pub fn roll<'py>(
 
 /// Replicates the array along a single axis.
 ///
-/// The output shape matches the input except `shape[axis]` is multiplied by `reps`. Element
+/// The output shape matches the input except `shape[axis]` is multiplied by `repeats`. Element
 /// `i` along the output axis comes from input element `i mod shape[axis]`, so the whole
 /// sequence is repeated rather than each element in place. This differs from
 /// [`jix.repeat()`][jix.repeat], which repeats each element. When the input axis already
 /// has length 1, [`jix.broadcast()`][jix.broadcast] is a zero-cost alternative.
 ///
-/// Unlike `numpy.tile`, this function only accepts a single integer `reps` along a single
+/// Unlike `numpy.tile`, this function only accepts a single integer `repeats` along a single
 /// `axis`, and does not extend the array with new leading axes. `axis` must satisfy
 /// `-ndim <= axis < ndim`.
 ///
@@ -1075,19 +1061,19 @@ pub fn roll<'py>(
 ///
 /// Args:
 ///     array: Input array.
-///     reps: Number of times to repeat the array along `axis`. Must be non-negative.
+///     repeats: Number of times to repeat the array along `axis`. Must be non-negative.
 ///     axis: Axis to tile along. Negative indices are supported. When `None` (the default),
 ///         the input must be 1-D and the only axis is tiled.
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] with `shape[axis]` multiplied by `reps`.
+///     A [`jix.Array`][jix.Array] with `shape[axis]` multiplied by `repeats`.
 ///
 /// Examples:
 ///     ```python
 ///     import jix
 ///     import numpy as np
 ///
-///     # 1-D: the whole sequence is repeated `reps` times
+///     # 1-D: the whole sequence is repeated `repeats` times
 ///     a = jix.compact([1, 2, 3], dtype=np.int32)
 ///     assert np.array_equal(jix.tile(a, 2).numpy(), [1, 2, 3, 1, 2, 3])
 ///
@@ -1104,23 +1090,23 @@ pub fn roll<'py>(
 ///         [[1, 2, 1, 2], [3, 4, 3, 4]],
 ///     )
 ///
-///     # reps=0 yields an empty array along that axis
+///     # repeats=0 yields an empty array along that axis
 ///     assert jix.tile(a, 0).numpy().shape == (0,)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, reps, axis=None))]
+#[pyo3(signature = (array, repeats, axis=None))]
 pub fn tile<'py>(
     array: &Bound<'py, PyAny>,
-    reps: u64,
+    repeats: u64,
     axis: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
     let core = py_arr.get().to_core();
     let axis = normalize_axis_optional(axis, core.ndim())?;
-    if reps == 1 {
+    if repeats == 1 {
         return Ok(py_arr); // no-op
     }
-    let ret = jix_core::ops::Tile::new_array(core, reps, axis).into_py_result()?;
+    let ret = jix_core::ops::Tile::new_array(core, repeats, axis).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }

@@ -1,9 +1,10 @@
 # jix
 
-[![Crates.io](https://img.shields.io/crates/v/jix.svg)](https://crates.io/crates/jix/)
-[![Documentation](https://docs.rs/jix/badge.svg)](https://docs.rs/jix/)
+[![crates.io](https://img.shields.io/crates/v/jix.svg)](https://crates.io/crates/jix/)
+[![PyPI](https://img.shields.io/pypi/v/jix)](https://pypi.org/project/jix/)
+![docs.rs](https://img.shields.io/docsrs/jix?label=docs.rs)
+![Read the Docs](https://img.shields.io/readthedocs/jix?label=readthedocs)
 ![License](https://img.shields.io/crates/l/jix)
-[![CI](https://github.com/barakugav/jix/actions/workflows/ci.yaml/badge.svg)](https://github.com/barakugav/jix/actions/workflows/ci.yaml)
 
 
 A multi-dimensional array library with block-compressed, lazy-evaluated storage - written in Rust, with Python bindings.

@@ -593,6 +593,19 @@ pub(crate) fn assert_array_matches<S, T, D>(
     use proptest::prelude::*;
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
+    // take the opportunity to check some invariants
+    let spec = actual.storage.spec();
+    let ndim = actual.shape().len();
+    assert_eq!(spec.block_shape().len(), ndim);
+    assert!(spec
+        .block_shape()
+        .iter()
+        .zip(actual.shape())
+        .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
+    assert_eq!(spec.block_shape_tag().len(), ndim);
+    assert!(spec.block_size() > 0);
+    assert!(spec.read_size() > 0);
+
     let expected = expected.view().into_dyn();
     let actual = actual.as_ref().into_typed::<T>().unwrap();
     let full = actual.to_ndarray().unwrap();

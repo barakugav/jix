@@ -6,14 +6,14 @@ use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
 };
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
 ///
-/// Output shape equals the input except `shape[axis]` becomes `shape[axis] * reps`. The
+/// Output shape equals the input except `shape[axis]` becomes `shape[axis] * repeats`. The
 /// rolled axis is *not* extended: `axis` must satisfy `axis < ndim`. Element `i` along the
 /// output axis comes from input element `i mod L`, where `L = input.shape()[axis]`.
 ///
@@ -51,14 +51,14 @@ use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 pub struct Tile<S: ArrayStorage> {
     array: S,
     axis: usize,
-    reps: u64,
+    repeats: u64,
     new_shape: S::Dimension,
     block_spec: ArrayBlockSpec,
 }
 
 impl<S: ArrayStorage> Tile<S> {
     /// Constructs a [`Tile`] storage. See the struct docs for semantics and examples.
-    pub fn new(array: S, reps: u64, axis: usize) -> Result<Self> {
+    pub fn new(array: S, repeats: u64, axis: usize) -> Result<Self> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
 
@@ -74,12 +74,12 @@ impl<S: ArrayStorage> Tile<S> {
             "tile axis {axis} is out of bounds for array with ndim {ndim}"
         );
 
-        let new_len = input_shape[axis].checked_mul(reps).ok_or_else(|| {
+        let new_len = input_shape[axis].checked_mul(repeats).ok_or_else(|| {
             Error::new(
                 ErrorKind::InvalidShapeOperation,
                 format!(
-                    "tile overflow: shape[{axis}] ({}) * reps ({}) exceeds u64",
-                    input_shape[axis], reps,
+                    "tile overflow: shape[{axis}] ({}) * repeats ({}) exceeds u64",
+                    input_shape[axis], repeats,
                 ),
             )
         })?;
@@ -90,8 +90,8 @@ impl<S: ArrayStorage> Tile<S> {
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
         let mut block_shape_tag = inner_spec.block_shape_tag().clone();
-        let reps_u32 = reps.min(u32::MAX as u64) as u32;
-        block_shape[axis] = block_shape[axis].saturating_mul(reps_u32).max(1);
+        // there is nothing smarter than reading the whole dimension at once
+        block_shape[axis] = (new_len.min(BlockSize::MAX as u64) as BlockSize).max(1);
         block_shape_tag[axis] = BlockShapeTag::Any;
         let block_spec = ArrayBlockSpec {
             block_shape,
@@ -101,15 +101,15 @@ impl<S: ArrayStorage> Tile<S> {
         Ok(Self {
             array,
             axis,
-            reps,
+            repeats,
             new_shape,
             block_spec,
         })
     }
 
     /// Constructs an array with [`Tile`] storage. See the storage struct docs for semantics and examples.
-    pub fn new_array(array: Array<S>, reps: u64, axis: usize) -> Result<Array<Self>> {
-        Self::new(array.into_storage(), reps, axis).map(Array::from_storage)
+    pub fn new_array(array: Array<S>, repeats: u64, axis: usize) -> Result<Array<Self>> {
+        Self::new(array.into_storage(), repeats, axis).map(Array::from_storage)
     }
 }
 
@@ -133,7 +133,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let s = index[k].start;
         let e = index[k].end;
         let total = e - s;
-        // L > 0 here because output axis k has length L * reps > 0 (any zero-length range
+        // L > 0 here because output axis k has length L * repeats > 0 (any zero-length range
         // was already short-circuited above).
         let s_in = s % l;
 
@@ -308,7 +308,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         Ok(Tile {
             array: self.array.dimension_change()?,
             axis: self.axis,
-            reps: self.reps,
+            repeats: self.repeats,
             new_shape,
             block_spec: self.block_spec,
         })
@@ -322,7 +322,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         Ok(Tile {
             array: self.array.element_type_change()?,
             axis: self.axis,
-            reps: self.reps,
+            repeats: self.repeats,
             new_shape: self.new_shape,
             block_spec: self.block_spec,
         })
@@ -379,13 +379,13 @@ mod tests {
     }
 
     #[test]
-    fn shape_reps_zero() {
+    fn shape_repeats_zero() {
         // [3, 4] tile 0 along axis 0 -> [0, 4]
         assert_eq!(make(arange(12), &[3u64, 4]).tile(0, 0).shape(), &[0, 4]);
     }
 
     #[test]
-    fn shape_reps_one_is_identity() {
+    fn shape_repeats_one_is_identity() {
         let a = make(arange(12), &[3u64, 4]);
         let r = super::Tile::new_array(a.as_ref(), 1, 0)
             .unwrap()
@@ -415,14 +415,14 @@ mod tests {
     }
 
     #[test]
-    fn error_reps_overflow() {
+    fn error_repeats_overflow() {
         let a = make(arange(2), &[2u64]);
         let err = super::Tile::new_array(a.as_ref(), u64::MAX, 0).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 
     // -----------------------------------------------------------------------
-    // Fast paths: identity (reps == 1) and empty (reps == 0)
+    // Fast paths: identity (repeats == 1) and empty (repeats == 0)
     // -----------------------------------------------------------------------
 
     #[test]
@@ -445,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_reps_full_read_is_empty() {
+    fn zero_repeats_full_read_is_empty() {
         let got = make(arange(12), &[3u64, 4])
             .tile(0, 0)
             .to_ndarray()
@@ -515,7 +515,7 @@ mod tests {
     // -----------------------------------------------------------------------
     //
     // Reference layout for these tests:
-    //   input  = [10, 20, 30, 40] (L = 4), reps = 3, axis = 0
+    //   input  = [10, 20, 30, 40] (L = 4), repeats = 3, axis = 0
     //   output = [10, 20, 30, 40, 10, 20, 30, 40, 10, 20, 30, 40]  (length 12)
     //   s_in   = s mod L
 
@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn sub_read_case_c_full_output() {
-        // Case C: full read of the tiled output (s=0, e=12 = reps*L).
+        // Case C: full read of the tiled output (s=0, e=12 = repeats*L).
         let got = make_1d_tile3()
             .tile(3, 0)
             .to_ndarray_sub(&[0..12], &ReadContext::default())
@@ -725,22 +725,22 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Proptest: random shape + axis + reps vs hand-rolled reference
+    // Proptest: random shape + axis + repeats vs hand-rolled reference
     // -----------------------------------------------------------------------
 
     fn tile_reference<T: Clone + Default>(
         nd: &ndarray::ArrayD<T>,
-        reps: u64,
+        repeats: u64,
         axis: usize,
     ) -> ndarray::ArrayD<T> {
         let mut out_shape: Vec<usize> = nd.shape().to_vec();
-        out_shape[axis] *= reps as usize;
+        out_shape[axis] *= repeats as usize;
         let mut out = ndarray::ArrayD::<T>::from_elem(out_shape.as_slice(), T::default());
         let l = nd.shape()[axis];
-        if reps == 0 || l == 0 {
+        if repeats == 0 || l == 0 {
             return out;
         }
-        for r in 0..reps as usize {
+        for r in 0..repeats as usize {
             for i in 0..l {
                 let src_slice = nd.index_axis(ndarray::Axis(axis), i);
                 let out_idx = r * l + i;
@@ -773,18 +773,19 @@ mod tests {
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             );
             let axis = 0..ndim;
-            let reps = 0u64..=4u64;
-            (array_strat, axis, reps).prop_map(|((nd, za), axis, reps)| (nd, za, axis, reps))
+            let repeats = 0u64..=4u64;
+            (array_strat, axis, repeats)
+                .prop_map(|((nd, za), axis, repeats)| (nd, za, axis, repeats))
         })
     }
 
     proptest::proptest! {
         #[test]
         fn proptest_tile_generic(
-            (nd, za, axis, reps) in tile_strategy()
+            (nd, za, axis, repeats) in tile_strategy()
         ) {
-            let expected = tile_reference(&nd, reps, axis);
-            let actual = za.tile(reps, axis);
+            let expected = tile_reference(&nd, repeats, axis);
+            let actual = za.tile(repeats, axis);
             crate::util::assert_array_matches(&actual, &expected);
         }
     }

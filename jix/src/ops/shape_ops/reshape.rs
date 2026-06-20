@@ -5,12 +5,12 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
 use crate::{ArrayStorage, Dimension, IntoDimension};
 
-/// Reinterprets an array with a different shape, returned by [`Array::reshape_view`].
+/// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///
 /// The total number of elements must be the same: the product of the new shape must equal the
 /// product of the original shape. Output dtype equals the input dtype.
@@ -36,10 +36,10 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 /// span many blocks that were not contiguous in the original array, causing significant
 /// read-amplification. In the worst case every element access decompresses a different block.
 ///
-/// Prefer [`Array::reshape`] over `reshape_view` unless you intend to chain further lazy
-/// operations before materializing. If you do use `reshape_view`, call [`.compact()`](Array::compact)
-/// as soon as possible to produce a compactly-stored array with a block layout matched to the
-/// new shape.
+/// Reshape is a lazy view like every other shape operation, so a single read before discarding
+/// the result pays this cost only once. When the result will be read more than once, call
+/// [`.compact()`](Array::compact) as soon as possible to materialize a compactly-stored array
+/// with a block layout matched to the new shape.
 ///
 /// # Examples
 ///
@@ -52,18 +52,18 @@ use crate::{ArrayStorage, Dimension, IntoDimension};
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
 ///
 /// // [u64; 1] -> output D = Dim<1>: compiler knows the result is 1-D
-/// assert_eq!(a.as_ref().reshape_view([6u64]).shape(), &[6]);
+/// assert_eq!(a.as_ref().reshape([6u64]).shape(), &[6]);
 ///
 /// // (u64, u64) -> output D = Dim<2>: compiler knows the result is 2-D
-/// assert_eq!(a.as_ref().reshape_view((3u64, 2u64)).shape(), &[3, 2]);
+/// assert_eq!(a.as_ref().reshape((3u64, 2u64)).shape(), &[3, 2]);
 ///
 /// // &[u64] -> output D = DimDyn: ndim only known at runtime
 /// let new_shape = vec![6u64];
-/// assert_eq!(a.as_ref().reshape_view(new_shape.as_slice()).shape(), &[6]);
+/// assert_eq!(a.as_ref().reshape(new_shape.as_slice()).shape(), &[6]);
 ///
 /// // Elements are the same regardless of argument style
 /// assert_eq!(
-///     a.reshape_view([6u64]).to_ndarray()?.as_slice().unwrap(),
+///     a.reshape([6u64]).to_ndarray()?.as_slice().unwrap(),
 ///     &[1, 2, 3, 4, 5, 6]
 /// );
 /// # Ok::<(), jix::Error>(())
@@ -86,9 +86,9 @@ impl<S, D> Reshape<S, D> {
         let new_shape = DimArray::from_slice(new_shape_raw.as_slice()).unwrap();
         let orig_shape = DimArray::from_slice(array.shape()).unwrap();
         let nitems = orig_shape.iter().cloned().try_product().unwrap();
-        let new_nitems = new_shape.iter().cloned().try_product().unwrap();
+        let new_nitems = new_shape.iter().cloned().try_product();
         ensure!(
-            nitems == new_nitems,
+            Some(nitems) == new_nitems,
             InvalidShapeOperation,
             "cannot reshape array of shape {orig_shape:?} into shape {new_shape:?}"
         );
@@ -114,12 +114,15 @@ impl<S, D> Reshape<S, D> {
         let inner_block_shape_tag = inner_spec.block_shape_tag();
         let mut block_shape = DimArray::new();
         let mut block_shape_tag = DimArray::new();
-        // TODO: finalize the logic here, we can find a good heuristic
         for dim in 0..new_shape.len() {
             if let Some(orig_dim) = same_logical_stride[dim] {
                 let orig_dim = orig_dim as usize;
                 let same_dim_len = orig_shape[orig_dim] == new_shape[dim];
-                block_shape.push(inner_block_shape[orig_dim]);
+                block_shape.push(
+                    inner_block_shape[orig_dim]
+                        .min(new_shape[dim].min(BlockSize::MAX as u64) as BlockSize)
+                        .max(1),
+                );
                 block_shape_tag.push(match inner_block_shape_tag[orig_dim] {
                     BlockShapeTag::Fixed => {
                         if same_dim_len {
@@ -491,21 +494,21 @@ mod tests {
     #[test]
     fn shape_after_reshape_1d_to_2d() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         assert_eq!(r.shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_after_reshape_2d_to_1d() {
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
-        let r = a.reshape_view(&[12]);
+        let r = a.reshape(12);
         assert_eq!(r.shape(), &[12]);
     }
 
     #[test]
     fn shape_after_reshape_2d_to_3d() {
         let a = make2d(u8s(24), 4, 6, &[4, 6]);
-        let r = a.reshape_view(&[2, 3, 4]);
+        let r = a.reshape([2, 3, 4]);
         assert_eq!(r.shape(), &[2, 3, 4]);
     }
 
@@ -513,7 +516,7 @@ mod tests {
     fn dtype_preserved_after_reshape() {
         use crate::dtype::Dtyped;
         let a = make1d(i32s(6), 6);
-        let r = a.reshape_view(&[2, 3]);
+        let r = a.reshape([2, 3]);
         assert_eq!(r.dtype(), &i32::DTYPE);
     }
 
@@ -530,7 +533,7 @@ mod tests {
     #[test]
     fn full_read_1d_to_2d_3x4_u8() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -541,7 +544,7 @@ mod tests {
     #[test]
     fn full_read_1d_to_2d_4x3_u8() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[4, 3]);
+        let r = a.reshape([4, 3]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -552,7 +555,7 @@ mod tests {
     #[test]
     fn full_read_1d_to_2d_2x6_u8() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[2, 6]);
+        let r = a.reshape([2, 6]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -563,7 +566,7 @@ mod tests {
     #[test]
     fn full_read_1d_to_2d_6x2_u8() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[6, 2]);
+        let r = a.reshape([6, 2]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -578,7 +581,7 @@ mod tests {
     #[test]
     fn full_read_2d_to_1d_flatten() {
         let a = make2d(i32s(12), 3, 4, &[3, 4]);
-        let r = a.reshape_view(&[12]);
+        let r = a.reshape(12);
         let got = r.to_ndarray().unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([12], i32s(12)).unwrap());
     }
@@ -586,7 +589,7 @@ mod tests {
     #[test]
     fn full_read_2d_to_1d_flatten_non_square() {
         let a = make2d(u8s(20), 4, 5, &[4, 5]);
-        let r = a.reshape_view(&[20]);
+        let r = a.reshape(20);
         let got = r.to_ndarray().unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([20], u8s(20)).unwrap());
     }
@@ -599,7 +602,7 @@ mod tests {
     fn full_read_2d_to_2d_repartition() {
         // [3, 4] -> [2, 6]: rows of 3 in orig map to interleaved rows of 2 in new
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
-        let r = a.reshape_view(&[2, 6]);
+        let r = a.reshape([2, 6]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -611,7 +614,7 @@ mod tests {
     fn full_read_2d_to_2d_repartition_asymmetric() {
         // [4, 3] -> [3, 4]
         let a = make2d(u8s(12), 4, 3, &[4, 3]);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -626,7 +629,7 @@ mod tests {
     #[test]
     fn full_read_1d_to_3d() {
         let a = make1d(u8s(24), 24);
-        let r = a.reshape_view(&[2, 3, 4]);
+        let r = a.reshape([2, 3, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -637,7 +640,7 @@ mod tests {
     #[test]
     fn full_read_3d_to_1d_flatten() {
         let a = make3d(i32s(24), 2, 3, 4, &[2, 3, 4]);
-        let r = a.reshape_view(&[24]);
+        let r = a.reshape(24);
         let got = r.to_ndarray().unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([24], i32s(24)).unwrap());
     }
@@ -646,7 +649,7 @@ mod tests {
     fn full_read_3d_to_2d() {
         // [2, 3, 4] -> [6, 4]
         let a = make3d(u8s(24), 2, 3, 4, &[2, 3, 4]);
-        let r = a.reshape_view(&[6, 4]);
+        let r = a.reshape([6, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -658,7 +661,7 @@ mod tests {
     fn full_read_2d_to_3d() {
         // [6, 4] -> [2, 3, 4]
         let a = make2d(u8s(24), 6, 4, &[6, 4]);
-        let r = a.reshape_view(&[2, 3, 4]);
+        let r = a.reshape([2, 3, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -670,7 +673,7 @@ mod tests {
     fn full_read_3d_repartition() {
         // [2, 3, 4] -> [2, 12]
         let a = make3d(u8s(24), 2, 3, 4, &[2, 3, 4]);
-        let r = a.reshape_view(&[2, 12]);
+        let r = a.reshape([2, 12]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -685,7 +688,7 @@ mod tests {
     #[test]
     fn full_read_same_shape_1d() {
         let a = make1d(i32s(8), 8);
-        let r = a.reshape_view(&[8]);
+        let r = a.reshape(8);
         let got = r.to_ndarray().unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([8], i32s(8)).unwrap());
     }
@@ -693,7 +696,7 @@ mod tests {
     #[test]
     fn full_read_same_shape_2d() {
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -708,7 +711,7 @@ mod tests {
     #[test]
     fn full_read_single_element_1d_to_1d() {
         let a = make1d(vec![42u8], 1);
-        let r = a.reshape_view(&[1]);
+        let r = a.reshape(1);
         let got = r.to_ndarray().unwrap();
         assert_eq!(got, array![42u8]);
     }
@@ -720,7 +723,7 @@ mod tests {
     #[test]
     fn full_read_dtype_i32() {
         let a = make1d(i32s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -731,7 +734,7 @@ mod tests {
     #[test]
     fn full_read_dtype_f32() {
         let a = make1d(f32s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -742,7 +745,7 @@ mod tests {
     #[test]
     fn full_read_dtype_f64() {
         let a = make1d(f64s(12), 12);
-        let r = a.reshape_view(&[4, 3]);
+        let r = a.reshape([4, 3]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -762,7 +765,7 @@ mod tests {
     #[test]
     fn sub_read_first_row() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[0..1, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[0, 1, 2, 3]]);
     }
@@ -770,7 +773,7 @@ mod tests {
     #[test]
     fn sub_read_middle_row() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[1..2, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[4, 5, 6, 7]]);
     }
@@ -778,7 +781,7 @@ mod tests {
     #[test]
     fn sub_read_last_row() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[2..3, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[8, 9, 10, 11]]);
     }
@@ -786,7 +789,7 @@ mod tests {
     #[test]
     fn sub_read_first_two_rows() {
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[0..2, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[0, 1, 2, 3], [4, 5, 6, 7]]);
     }
@@ -795,7 +798,7 @@ mod tests {
     fn sub_read_first_two_columns() {
         // [0..3, 0..2] -> rows 0-2, cols 0-1
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[0..3, 0..2], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[0, 1], [4, 5], [8, 9]]);
     }
@@ -804,7 +807,7 @@ mod tests {
     fn sub_read_last_two_columns() {
         // [0..3, 2..4] -> rows 0-2, cols 2-3
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[0..3, 2..4], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[2, 3], [6, 7], [10, 11]]);
     }
@@ -813,7 +816,7 @@ mod tests {
     fn sub_read_inner_2x2() {
         // [1..3, 1..3]
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[1..3, 1..3], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[5, 6], [9, 10]]);
     }
@@ -822,7 +825,7 @@ mod tests {
     fn sub_read_single_element_center() {
         // [1..2, 2..3] -> element at (1,2) = 6
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[1..2, 2..3], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[6]]);
     }
@@ -831,7 +834,7 @@ mod tests {
     fn sub_read_single_element_corner() {
         // [2..3, 3..4] -> element at (2,3) = 11
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[2..3, 3..4], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[11]]);
     }
@@ -844,7 +847,7 @@ mod tests {
     #[test]
     fn sub_read_flatten_middle_range() {
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
-        let r = a.reshape_view(&[12]);
+        let r = a.reshape(12);
         let got = r.to_ndarray_sub(&[3..9], &r.read_ctx()).unwrap();
         assert_eq!(got, array![3, 4, 5, 6, 7, 8]);
     }
@@ -853,7 +856,7 @@ mod tests {
     fn sub_read_flatten_partial_first_row() {
         // Flat [2..6) spans the last 2 of row-0 and first 2 of row-1 (in orig [3,4])
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
-        let r = a.reshape_view(&[12]);
+        let r = a.reshape(12);
         let got = r.to_ndarray_sub(&[2..6], &r.read_ctx()).unwrap();
         assert_eq!(got, array![2, 3, 4, 5]);
     }
@@ -870,7 +873,7 @@ mod tests {
     fn sub_read_2x6_row0_partial() {
         // [0..1, 1..4] -> [1, 3] = [1, 2, 3]
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[2, 6]);
+        let r = a.reshape([2, 6]);
         let got = r.to_ndarray_sub(&[0..1, 1..4], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[1, 2, 3]]);
     }
@@ -880,7 +883,7 @@ mod tests {
         // [0..2, 2..5] -> rows 0-1, cols 2-4
         // row 0: [2, 3, 4]; row 1: [8, 9, 10]
         let a = make1d(u8s(12), 12);
-        let r = a.reshape_view(&[2, 6]);
+        let r = a.reshape([2, 6]);
         let got = r.to_ndarray_sub(&[0..2, 2..5], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[2, 3, 4], [8, 9, 10]]);
     }
@@ -897,7 +900,7 @@ mod tests {
     fn sub_read_3d_single_row() {
         // [0..1, 1..2, 0..4] -> (0,1,*) = [4, 5, 6, 7]
         let a = make1d(u8s(24), 24);
-        let r = a.reshape_view(&[2, 3, 4]);
+        let r = a.reshape([2, 3, 4]);
         let got = r
             .to_ndarray_sub(&[0..1, 1..2, 0..4], &r.read_ctx())
             .unwrap();
@@ -912,7 +915,7 @@ mod tests {
         //   (1,1,1)=17 (1,1,2)=18
         //   (1,2,1)=21 (1,2,2)=22
         let a = make1d(u8s(24), 24);
-        let r = a.reshape_view(&[2, 3, 4]);
+        let r = a.reshape([2, 3, 4]);
         let got = r
             .to_ndarray_sub(&[0..2, 1..3, 1..3], &r.read_ctx())
             .unwrap();
@@ -923,7 +926,7 @@ mod tests {
     fn sub_read_3d_second_slab() {
         // [1..2, 0..3, 0..4] -> all of the second "slab" = [12..24]
         let a = make1d(u8s(24), 24);
-        let r = a.reshape_view(&[2, 3, 4]);
+        let r = a.reshape([2, 3, 4]);
         let got = r
             .to_ndarray_sub(&[1..2, 0..3, 0..4], &r.read_ctx())
             .unwrap();
@@ -941,7 +944,7 @@ mod tests {
     fn multiblock_1d_full_read_reshape_to_2d() {
         // 12 elements, block_size=4 -> 3 blocks; reshape to [3, 4]
         let a = make1d(u8s(12), 4);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -954,7 +957,7 @@ mod tests {
         // block_size=4, reshape to [3, 4]; read row 0 of new shape
         // flat [0..4) = one full original block -> [0, 1, 2, 3]
         let a = make1d(u8s(12), 4);
-        let r = a.reshape_view(&[3, 4]);
+        let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[0..1, 0..4], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[0, 1, 2, 3]]);
     }
@@ -964,7 +967,7 @@ mod tests {
         // block_size=4, reshape to [2, 6]:
         //   row 0: [0..6) spans block0 (0-3) and part of block1 (4-5)
         let a = make1d(u8s(12), 4);
-        let r = a.reshape_view(&[2, 6]);
+        let r = a.reshape([2, 6]);
         let got = r.to_ndarray_sub(&[0..1, 0..6], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[0, 1, 2, 3, 4, 5]]);
     }
@@ -972,7 +975,7 @@ mod tests {
     #[test]
     fn multiblock_1d_to_2x6_full_read() {
         let a = make1d(u8s(12), 4);
-        let r = a.reshape_view(&[2, 6]);
+        let r = a.reshape([2, 6]);
         let got = r.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -984,7 +987,7 @@ mod tests {
     fn multiblock_2d_orig_reshape_to_1d() {
         // orig [3, 4] with block_shape [2, 2], flatten to [12]
         let a = make2d(u8s(12), 3, 4, &[2, 2]);
-        let r = a.reshape_view(&[12]);
+        let r = a.reshape(12);
         let got = r.to_ndarray().unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([12], u8s(12)).unwrap());
     }
@@ -994,7 +997,7 @@ mod tests {
         // orig [3, 4] with block_shape [2, 2], reshape to [2, 6]
         // sub-read row 1: flat [6..12) -> [6, 7, 8, 9, 10, 11]
         let a = make2d(u8s(12), 3, 4, &[2, 2]);
-        let r = a.reshape_view(&[2, 6]);
+        let r = a.reshape([2, 6]);
         let got = r.to_ndarray_sub(&[1..2, 0..6], &r.read_ctx()).unwrap();
         assert_eq!(got, array![[6, 7, 8, 9, 10, 11]]);
     }
@@ -1003,7 +1006,7 @@ mod tests {
     fn multiblock_small_blocks_reshape_3d() {
         // 24 elements, block_size=3 -> 8 blocks; reshape to [2, 3, 4]
         let a = make1d(u8s(24), 3);
-        let r = a.reshape_view(&[2, 3, 4]);
+        let r = a.reshape([2, 3, 4]);
         let got = r
             .to_ndarray_sub(&[0..2, 0..3, 0..4], &r.read_ctx())
             .unwrap();
@@ -1020,8 +1023,8 @@ mod tests {
     #[test]
     fn chained_reshape_1d_to_2d_to_3d() {
         let a = make1d(u8s(24), 24);
-        let r1 = a.reshape_view(&[4, 6]);
-        let r2 = r1.reshape_view(&[2, 3, 4]);
+        let r1 = a.reshape([4, 6]);
+        let r2 = r1.reshape([2, 3, 4]);
         let got = r2.to_ndarray().unwrap();
         assert_eq!(
             got,
@@ -1032,8 +1035,8 @@ mod tests {
     #[test]
     fn chained_reshape_then_flatten() {
         let a = make1d(i32s(12), 12);
-        let r1 = a.reshape_view(&[3, 4]);
-        let r2 = r1.reshape_view(&[12]);
+        let r1 = a.reshape([3, 4]);
+        let r2 = r1.reshape(12);
         let got = r2.to_ndarray().unwrap();
         assert_eq!(got, ndarray::Array::from_shape_vec([12], i32s(12)).unwrap());
     }
@@ -1047,11 +1050,11 @@ mod tests {
     fn flat_order_preserved_4x3_vs_3x4() {
         // Both reshape [12] -> [4,3] and [3,4] must yield same flat sequence
         let a12 = make1d(u8s(12), 12);
-        let r43 = a12.as_ref().reshape_view(&[4, 3]);
-        let r34 = a12.as_ref().reshape_view(&[3, 4]);
+        let r43 = a12.as_ref().reshape([4, 3]);
+        let r34 = a12.as_ref().reshape([3, 4]);
 
-        let flat_43 = r43.reshape_view(&[12]).to_ndarray().unwrap();
-        let flat_34 = r34.reshape_view(&[12]).to_ndarray().unwrap();
+        let flat_43 = r43.reshape(12).to_ndarray().unwrap();
+        let flat_34 = r34.reshape(12).to_ndarray().unwrap();
         assert_eq!(flat_43, flat_34);
         assert_eq!(
             flat_43,
@@ -1118,7 +1121,7 @@ mod tests {
                 nd.iter().cloned().collect::<Vec<_>>(),
             )
             .unwrap();
-            crate::util::assert_array_matches(&za.reshape_view(&out_shape), &expected);
+            crate::util::assert_array_matches(&za.reshape(&out_shape), &expected);
         }
     }
 }

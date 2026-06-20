@@ -105,17 +105,13 @@ where
         let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
 
         let spec = arrays.spec(0);
+        let mut block_shape = spec.block_shape().clone();
+        let mut block_shape_tag = spec.block_shape_tag().clone();
+        block_shape.insert(axis, 1);
+        block_shape_tag.insert(axis, BlockShapeTag::Any);
         let block_spec = ArrayBlockSpec {
-            block_shape: {
-                let mut block_shape = spec.block_shape().clone();
-                block_shape.insert(axis, 1);
-                block_shape
-            },
-            block_shape_tag: {
-                let mut block_shape_tag = spec.block_shape_tag().clone();
-                block_shape_tag.insert(axis, BlockShapeTag::Any);
-                block_shape_tag
-            },
+            block_shape,
+            block_shape_tag,
         };
 
         Ok(Self {

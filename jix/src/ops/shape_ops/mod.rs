@@ -35,44 +35,28 @@ mod tile;
 pub use tile::*;
 
 use crate::ops::AxesArg;
-use crate::storage::Compact;
 use crate::{Array, ArrayStorage, IntoDimension};
 
 impl<S> Array<S>
 where
     S: ArrayStorage,
 {
-    /// Returns a copy of the array with a new shape. See [`Reshape`] for details and examples.
-    ///
-    /// Preferred over [`reshape_view`](Self::reshape_view) when the result will be read more than
-    /// once: the copy realigns blocks to the new shape, avoiding read-amplification on future
-    /// reads.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
-    #[inline]
-    #[track_caller]
-    pub fn reshape<Sh>(self, shape: Sh) -> Array<Compact<S::ElementType, Sh::Dimension>>
-    where
-        Sh: IntoDimension,
-    {
-        self.reshape_view(shape).compact().unwrap()
-    }
-
     /// Returns a lazy view of the array with a new shape. See [`Reshape`] for details and
     /// examples.
     ///
-    /// No data is copied at construction time, but reads may be slow when the new shape crosses
-    /// block boundaries of the original layout. Call [`.compact()`](Array::compact) to realign blocks
-    /// before repeated reads, or prefer [`reshape`](Self::reshape) directly.
+    /// Like the other shape operations, reshape is lazy: no data is copied at construction time.
+    /// Reshape is uniquely prone to read-amplification, though - when the new shape crosses block
+    /// boundaries of the original layout, a single read may decompress many more blocks than it
+    /// appears to touch. When the result will be read more than once, call
+    /// [`.compact()`](Array::compact) to materialize it with a block layout matched to the new
+    /// shape.
     ///
     /// # Panics
     ///
     /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
     #[inline]
     #[track_caller]
-    pub fn reshape_view<Sh>(self, shape: Sh) -> Array<Reshape<S, Sh::Dimension>>
+    pub fn reshape<Sh>(self, shape: Sh) -> Array<Reshape<S, Sh::Dimension>>
     where
         Sh: IntoDimension,
     {
@@ -151,7 +135,7 @@ where
         Roll::new_array(self, shift, axis).unwrap()
     }
 
-    /// Returns a lazy view of the array replicated `reps` times along `axis`.
+    /// Returns a lazy view of the array replicated `repeats` times along `axis`.
     /// See [`Tile`] for details and examples.
     ///
     /// Unlike NumPy's `tile`, `axis` must satisfy `axis < self.ndim()`; the array is
@@ -160,11 +144,11 @@ where
     /// # Panics
     ///
     /// Panics if `axis >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
-    /// internal axis is required), or if `self.shape()[axis] * reps` overflows `u64`.
+    /// internal axis is required), or if `self.shape()[axis] * repeats` overflows `u64`.
     #[inline]
     #[track_caller]
-    pub fn tile(self, reps: u64, axis: usize) -> Array<Tile<S>> {
-        Tile::new_array(self, reps, axis).unwrap()
+    pub fn tile(self, repeats: u64, axis: usize) -> Array<Tile<S>> {
+        Tile::new_array(self, repeats, axis).unwrap()
     }
 
     /// Returns a lazy view of the array expanded to `shape` by repeating length-1 dimensions.
