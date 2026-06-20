@@ -7,7 +7,7 @@ build:
     rust: "1.91"
   jobs:
     post_install:
-      - cd jix-py && maturin develop
+      - cd jix-py && pip install -e .
       - cd jix-py && cargo run --bin generate_pyi
 
 mkdocs:
