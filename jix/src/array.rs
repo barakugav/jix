@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
+use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::MaybeCompact;
@@ -491,7 +491,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             spec,
         });
 
-        array.compact_with(params, &ReadContext::new(&DecoderParams::default())?)
+        array.compact_with(params, &array.try_read_ctx()?)
     }
 }
 
@@ -971,7 +971,7 @@ impl<S: ArrayStorage> Array<S> {
         })
     }
 
-    /// Create a [`ReadContext`] with parameters derived from this array's storage.
+    /// Create a [`ReadContext`] with parameters derived from this array.
     ///
     /// A context encapsulates reusable buffers and codec decompressor instance. Use it for
     /// repeated reads, sharing the allocation and initialization overhead.
@@ -982,7 +982,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// Using a context created in other ways (e.g. `ReadContext::default()`) is also valid, and will
     /// yield correct results. Using this method allows an easy way to ensure all reads from an array
-    /// use the same decoding configuration (see [`DecoderParams`]).
+    /// use the same decoding configuration.
     ///
     /// # Examples
     ///

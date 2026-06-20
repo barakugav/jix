@@ -1,10 +1,7 @@
 use std::sync::Mutex;
 
-use jix_core::codec::DecoderParams;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
-
-use crate::util::IntoPyResult;
 
 /// A context that holds reusable decompressor state across multiple array reads.
 ///
@@ -41,9 +38,9 @@ use crate::util::IntoPyResult;
 ///     ```
 #[gen_stub_pyclass]
 #[pyclass(module = "jix", frozen)]
-pub struct ReadContext(Mutex<jix_core::codec::ReadContext>);
+pub struct ReadContext(Mutex<jix_core::ReadContext>);
 impl ReadContext {
-    pub(crate) fn from_core(ctx: jix_core::codec::ReadContext) -> Self {
+    pub(crate) fn from_core(ctx: jix_core::ReadContext) -> Self {
         Self(Mutex::new(ctx))
     }
 }
@@ -51,20 +48,20 @@ impl ReadContext {
 #[gen_stub_pymethods]
 #[pymethods]
 impl ReadContext {
-    /// Creates a new `ReadContext` with default decoder parameters.
+    /// Creates a new `ReadContext` with the default configuration.
     ///
-    /// Prefer [`Array.read_ctx()`][jix.Array.read_ctx], which derives the context's decoder parameters from the array's storage.
+    /// Prefer [`Array.read_ctx()`][jix.Array.read_ctx], which derives the parameters from the array.
     ///
     /// Returns:
-    ///     A new [`jix.ReadContext`][jix.ReadContext] with default decoder parameters.
+    ///     A new [`jix.ReadContext`][jix.ReadContext] with the default configuration.
     #[new]
     pub fn new() -> PyResult<Self> {
-        let ctx = jix_core::codec::ReadContext::new(&DecoderParams::default()).into_py_result()?;
+        let ctx = jix_core::ReadContext::default();
         Ok(Self(Mutex::new(ctx)))
     }
 }
 impl ReadContext {
-    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, jix_core::codec::ReadContext> {
+    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, jix_core::ReadContext> {
         self.0.lock().unwrap()
     }
 }

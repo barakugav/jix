@@ -10,6 +10,5 @@
 - change offsets array to have length of num_blocks-1 instead of num_blocks+1
 - read a bigger chunk that block shape when compacting a new array
 - support out of order blocks, len(offsets)=2*blocks_num
-- make EncoderParams and DecoderParams private, only ArrayParams should be public
 - buf-break workflow
 - check free functions that should be added to py jix.Array

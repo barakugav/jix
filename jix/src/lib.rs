@@ -234,8 +234,10 @@
 //!
 //! Codec settings are controlled via [`ArrayParams`]:
 //!
-//! - [`encoder_params`](ArrayParams::encoder_params) - codec choice, compression level, filter.
-//! - [`decoder_params`](ArrayParams::decoder_params) - decoder configuration.
+//! - [`codec`](ArrayParams::codec) - the compression codec (e.g. [`Codec::Zstd`]).
+//! - [`level`](ArrayParams::level) - the compression level.
+//! - [`filters`](ArrayParams::filters) - the pre-compression filter pipeline (e.g.
+//!   [`Filter::ByteShuffle`]).
 //!
 //! The codec and filter configuration is serialized into the array archive, so readers never need
 //! to know ahead of time which settings were used.
@@ -378,7 +380,9 @@
 mod array;
 pub use array::Array;
 
-pub mod codec;
+pub(crate) mod codec;
+pub use codec::{Codec, Filter, ReadContext};
+
 pub mod dtype;
 
 pub mod scalar;

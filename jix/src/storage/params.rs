@@ -2,7 +2,7 @@ use std::marker::PhantomPinned;
 use std::ops::Range;
 use std::pin::Pin;
 
-use crate::codec::{DecoderParams, EncoderParams};
+use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
@@ -13,10 +13,10 @@ use crate::{dim_arr, Array, ArrayStorage, DimDyn, Dimension};
 ///
 /// `ArrayParams` groups two independent sets of configuration:
 ///
-/// - **Codec** - the compression ([`EncoderParams`]) and decompression ([`DecoderParams`])
-///   configuration used when decoding blocks from an existing array, or when encoding blocks for a
-///   new array. These affect the compression ratio and CPU usage of the codec, but not the block
-///   layout.
+/// - **Codec** - the compression configuration (codec, level, filter pipeline) applied when
+///   encoding blocks for a new array, set via [`codec`](Self::codec), [`level`](Self::level), and
+///   [`filters`](Self::filters). These affect the compression ratio and CPU usage of the codec, but
+///   not the block layout.
 ///
 /// - **Block layout** - the nd-block shape used to divide the array into blocks, each compressed
 ///   independently, and other related hints that are propagated through lazy view storage
@@ -130,29 +130,47 @@ impl ArrayParams {
         self
     }
 
-    /// Sets the encoder (compression) parameters used when writing blocks.
+    /// Sets the compression codec used when writing blocks.
     ///
-    /// Controls the codec (e.g. Zstd), compression level, and pre-compression filters (byte shuffle).
-    /// Defaults `EncoderParams::default()` when not set.
-    pub fn encoder_params(&mut self, encoder_params: EncoderParams) -> &mut Self {
-        self.encoder_params = Some(encoder_params);
+    /// Defaults to [`Codec::Zstd`] when not set. Setting any codec field materializes the codec
+    /// configuration to its defaults, then applies this override.
+    pub fn codec(&mut self, codec: Codec) -> &mut Self {
+        self.encoder_params
+            .get_or_insert_with(EncoderParams::default)
+            .codec(codec);
         self
     }
 
-    /// Returns the encoder params, or `None` if not set.
-    pub fn encoder_params_get(&self) -> Option<&EncoderParams> {
-        self.encoder_params.as_ref()
+    /// Sets the compression level (0-19).
+    ///
+    /// Higher levels trade CPU time for a better compression ratio. For Zstd, level 3 is the
+    /// default.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if `level` is out of the valid range (0-19 for Zstd).
+    pub fn level(&mut self, level: u32) -> Result<&mut Self> {
+        self.encoder_params
+            .get_or_insert_with(EncoderParams::default)
+            .level(level)?;
+        Ok(self)
     }
 
-    /// Sets the decoder (decompression) parameters used when reading blocks.
-    pub fn decoder_params(&mut self, decoder_params: DecoderParams) -> &mut Self {
-        self.decoder_params = Some(decoder_params);
-        self
-    }
-
-    /// Returns the decoder params, or `None` if not set.
-    pub fn decoder_params_get(&self) -> Option<&DecoderParams> {
-        self.decoder_params.as_ref()
+    /// Sets the pre-compression filter pipeline (up to 4 filters).
+    ///
+    /// Filters are applied in order before compression and reversed after decompression. For most
+    /// numeric dtypes [`Filter::ByteShuffle`] (the default) gives a good ratio improvement at low
+    /// cost; [`Filter::BitShuffle`] can do better on low-entropy data at higher CPU cost. Pass an
+    /// empty slice to disable filtering.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if `filters` contains more than 4 elements.
+    pub fn filters(&mut self, filters: &[Filter]) -> Result<&mut Self> {
+        self.encoder_params
+            .get_or_insert_with(EncoderParams::default)
+            .filters(filters)?;
+        Ok(self)
     }
 
     /// Fills in any unset fields in `self` from `array`'s storage params.
@@ -677,5 +695,29 @@ mod tests {
             .compact_with(out_params, &ctx)
             .unwrap();
         assert_eq!(transposed.shape(), &[1024, 1024]);
+    }
+
+    #[test]
+    fn flattened_codec_methods_roundtrip() {
+        use crate::codec::{Codec, Filter};
+
+        let mut params = ArrayParams::new();
+        // Unset by default -> getters return None.
+        assert!(params.encoder_params.is_none());
+
+        params.codec(Codec::Zstd);
+        params.level(7).unwrap();
+        params
+            .filters(&[Filter::ByteShuffle, Filter::BitShuffle])
+            .unwrap();
+
+        let encoder_params = params.encoder_params.as_ref().unwrap();
+        assert!(matches!(encoder_params.codec, Codec::Zstd));
+        assert_eq!(encoder_params.level, 7);
+        assert_eq!(encoder_params.filters.len(), 2);
+        assert_eq!(encoder_params.filters.len(), 2);
+
+        // Validation still propagates from the internal encoder configuration.
+        assert!(params.level(99).is_err());
     }
 }

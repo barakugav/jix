@@ -1,49 +1,7 @@
-//! Encoder-decoder configuration and implementation for the block-compressed storage backends.
-//!
-//! Each block of array data is encoded through a two-stage pipeline before being stored:
-//!
-//! ```text
-//! raw block bytes
-//!     |
-//!     v
-//! [ Filter 0 ] -> [ Filter 1 ] -> ...  (optional pre-compression transforms)
-//!     |
-//!     v
-//! [ Codec (e.g. Zstd) ]                (lossless compression)
-//!     |
-//!     v
-//! stored block bytes
-//! ```
-//!
-//! Decoding reverses the pipeline exactly: decompress first, then apply the filters in reverse
-//! order.
-//!
-//! # Configuration
-//!
-//! The pipeline is split across two separate configuration objects with different lifetimes:
-//!
-//! - **[`EncoderParams`]** - chosen by the user at write time. Selects the [`Codec`], compression
-//!   level, and [`Filter`] pipeline. Stored alongside the data so that the correct decoder can be
-//!   reconstructed later.
-//!
-//! - **[`DecoderParams`]** - chosen by the caller at read time. Currently carries no options, but
-//!   is the extension point for future read-time tunables (thread count, cache budget, etc.).
-//!
-//! The codec, filters, and dtype that were used during encoding are derived from the stored array
-//! metadata and passed to the internal decoder; users do not configure it directly.
-//!
-//! # Filters
-//!
-//! [`Filter`]s are byte-level transforms that rearrange element data into a layout that compresses
-//! more efficiently, then reverse the transform after decompression. For most numeric workloads
-//! [`Filter::ByteShuffle`] is the right default. [`Filter::BitShuffle`] can squeeze out more
-//! compression for low-entropy data at higher CPU cost.
-//!
-//! # Read context
-//!
-//! [`ReadContext`] holds a long-lived decompressor instance and reusable scratch buffers. Create
-//! one per thread and pass it to every read call to amortize initialization overhead across many
-//! block reads. The preferred way to obtain one is [`Array::read_ctx()`](crate::Array::read_ctx).
+//! Internal block codec implementation: filter pipeline plus the codec (Zstd) used to compress and
+//! decompress each array block. The user-facing documentation lives on
+//! [`Compact`](crate::storage::Compact); configuration is exposed through
+//! [`ArrayParams`](crate::ArrayParams).
 
 mod filter;
 pub use filter::*;
@@ -62,7 +20,7 @@ use crate::util::{AlignedBytes, AlternatingBuffers};
 #[non_exhaustive]
 pub enum Codec {
     /// [Zstandard](https://facebook.github.io/zstd/) - a fast general-purpose compressor.
-    /// Compression level is controlled by [`EncoderParams::level`].
+    /// Compression level is controlled by [`ArrayParams::level`](crate::ArrayParams::level).
     Zstd,
 }
 
@@ -113,7 +71,7 @@ pub enum Codec {
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[derive(Clone, Debug)]
-pub struct EncoderParams {
+pub(crate) struct EncoderParams {
     pub(crate) codec: Codec,
     pub(crate) level: u8,
     pub(crate) filters: ArrayVec<Filter, 4>,
@@ -128,22 +86,10 @@ impl Default for EncoderParams {
     }
 }
 impl EncoderParams {
-    /// Create a new `EncoderParams` with the default configuration.
-    ///
-    /// The default configuration is Zstd level 3 with byte shuffle.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Set the compression codec.
     pub fn codec(&mut self, codec: Codec) -> &mut Self {
         self.codec = codec;
         self
-    }
-
-    /// Get the compression codec.
-    pub fn codec_get(&self) -> &Codec {
-        &self.codec
     }
 
     /// Set the compression level (0-19).
@@ -161,11 +107,6 @@ impl EncoderParams {
         );
         self.level = level.try_into().unwrap();
         Ok(self)
-    }
-
-    /// Get the compression level.
-    pub fn level_get(&self) -> u8 {
-        self.level
     }
 
     /// Set the pre-compression filter pipeline (up to 4 filters).
@@ -192,11 +133,6 @@ impl EncoderParams {
         );
         self.filters = ArrayVec::from_slice(filters).unwrap();
         Ok(self)
-    }
-
-    /// Returns the filter pipeline.
-    pub fn filters_get(&self) -> &[Filter] {
-        &self.filters
     }
 }
 
@@ -311,7 +247,7 @@ impl Encoder {
 /// Use [`DecoderParams::default()`] in the meantime. Pass an explicit instance to
 /// [`ReadContext::new`] if you want forward-compatible control over these settings.
 #[derive(Clone, Debug, Default)]
-pub struct DecoderParams {
+pub(crate) struct DecoderParams {
     _phantom: PhantomData<()>,
 }
 
@@ -436,11 +372,10 @@ impl<'a> Decoder<'a> {
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
-/// `ReadContext::default()` (or `ReadContext::new(decoder_params)`) is available for if you need
-/// more control over the decoder parameters or want to create a context independently of a specific
-/// array.
+/// `ReadContext::default()` is also available if you need to create a context independently of a
+/// specific array.
 /// ```
-/// use jix::codec::ReadContext;
+/// use jix::ReadContext;
 /// use jix::Array;
 /// use ndarray::array;
 ///
@@ -467,7 +402,7 @@ impl ReadContext {
     ///
     /// Prefer [`Array::read_ctx()`](crate::Array::read_ctx) over calling this directly - it
     /// automatically uses the decoder parameters that match the array's stored codec configuration.
-    pub fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
+    pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         let tmp_buf1 = AlignedBytes::new_exact(CACHE_LINE_SIZE);
         let tmp_buf2 = tmp_buf1.clone();
         Ok(Self {
@@ -495,9 +430,7 @@ impl ReadContext {
     }
 }
 impl Default for ReadContext {
-    /// Creates a `ReadContext` with default [`DecoderParams`].
-    ///
-    /// Equivalent to `ReadContext::new(&DecoderParams::default()).unwrap()`.
+    /// Creates a `ReadContext` with the default configuration.
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()
     }

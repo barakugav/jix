@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use jix_core::codec::{Codec, EncoderParams};
 use jix_core::{Array as CoreArray, ArrayAny};
+use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
@@ -1151,37 +1151,33 @@ pub(crate) fn resolve_array_params(
                 params.read_size(read_size);
             }
 
-            if codec.is_some() || compression_level.is_some() || filters.is_some() {
-                let mut encoder_params = EncoderParams::default();
-                if let Some(codec) = codec {
-                    match codec.as_str() {
-                        "zstd" => {
-                            encoder_params.codec(Codec::Zstd);
-                        }
-                        _ => {
-                            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                                "Unsupported codec: {codec}"
-                            )));
-                        }
+            if let Some(codec) = codec {
+                match codec.as_str() {
+                    "zstd" => {
+                        params.codec(Codec::Zstd);
+                    }
+                    _ => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Unsupported codec: {codec}"
+                        )));
                     }
                 }
-                if let Some(compression_level) = compression_level {
-                    encoder_params.level(compression_level).into_py_result()?;
-                }
-                if let Some(filters) = filters {
-                    let filters = filters
-                        .into_iter()
-                        .map(|filter| match filter.as_str() {
-                            "byte-shuffle" => Ok(jix_core::codec::Filter::ByteShuffle),
-                            "bit-shuffle" => Ok(jix_core::codec::Filter::BitShuffle),
-                            _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-                                "Unsupported filter: {filter}"
-                            ))),
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    encoder_params.filters(&filters).into_py_result()?;
-                }
-                params.encoder_params(encoder_params);
+            }
+            if let Some(compression_level) = compression_level {
+                params.level(compression_level).into_py_result()?;
+            }
+            if let Some(filters) = filters {
+                let filters = filters
+                    .into_iter()
+                    .map(|filter| match filter.as_str() {
+                        "byte-shuffle" => Ok(Filter::ByteShuffle),
+                        "bit-shuffle" => Ok(Filter::BitShuffle),
+                        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Unsupported filter: {filter}"
+                        ))),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                params.filters(&filters).into_py_result()?;
             }
 
             Ok(params)
