@@ -24,6 +24,7 @@ from tests_util import (
     ints,
     op_safe_non_negative_element_strategy,
     unit_element_strategy,
+    uints,
 )
 
 
@@ -151,11 +152,37 @@ def test_atan(dtype: np.dtype, data: DataObject):
 
 @pytest.mark.parametrize("dtype", floats)
 @given(st.data())
-def test_sign(dtype: np.dtype, data: DataObject):
+def test_sign_float(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
-    # jix.sign: +1.0 for positive and +0.0, -1.0 for negative and -0.0.
+    # jix.sign on floats: +1.0 for positive and +0.0, -1.0 for negative and -0.0.
     # np.sign returns 0.0 for 0.0; np.copysign(1, x) matches Rust's f32::signum.
     assert_array_matches(jix.sign(za), np.copysign(np.ones_like(np_a), np_a), data=data)
+
+
+@pytest.mark.parametrize("dtype", ints)
+@given(st.data())
+def test_sign_int(dtype: np.dtype, data: DataObject):
+    np_a, za = data.draw(carray_strategy(dtype), label="array")
+    # jix.sign on signed integers: -1, 0, or +1 of the same dtype.
+    assert_array_matches(jix.sign(za), np.sign(np_a).astype(dtype), data=data)
+
+
+@pytest.mark.parametrize("dtype", uints)
+@given(st.data())
+def test_sign_uint(dtype: np.dtype, data: DataObject):
+    np_a, za = data.draw(carray_strategy(dtype), label="array")
+    # unsigned: sign is 0 when zero, 1 otherwise; output keeps the same uint dtype.
+    expected = np.where(np_a == 0, np.zeros_like(np_a), np.ones_like(np_a))
+    assert_array_matches(jix.sign(za), expected, data=data)
+
+
+def test_sign_auto_cast_bool():
+    """sign(bool) auto-casts to int8."""
+    np_a = np.array([True, False, True], dtype=np.bool_)
+    za = jix.compact(np_a)
+    result = jix.sign(za)
+    assert result.dtype == np.int8
+    np.testing.assert_array_equal(result.numpy(), np.sign(np_a.astype(np.int8)))
 
 
 @pytest.mark.parametrize("dtype", ints + floats)

@@ -416,33 +416,54 @@ define_op1!(
     }
 );
 define_op1!(
-    /// Returns the sign of each element as a floating-point value.
+    /// Returns the sign of each element.
     ///
-    /// Supported dtypes: `f16`, `f32`, `f64`.
+    /// Supported dtypes: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`,
+    /// `uint64`, `float16`, `float32`, `float64`.
     ///
-    /// Returns `+1.0` for positive values and `-1.0` for negative values.
+    /// For **signed integer** types: returns `-1`, `0`, or `+1` of the same dtype.
+    ///
+    /// For **unsigned integer** types: returns `0` or `1` of the same dtype (unsigned values
+    /// cannot be negative).
+    ///
+    /// For **float** types: returns `+1.0` for positive values and `-1.0` for negative values.
     /// Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns `-1.0`.
+    ///
+    /// **Auto-casting**: `bool` inputs are cast to `int8` before the operation.
     ///
     /// Args:
     ///     array: Input array.
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///         the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array` (after
+    ///         any auto-cast). No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
     ///     import jix
     ///     import numpy as np
     ///
-    ///     a = jix.compact([3.0, -5.0, -0.1], dtype=np.float32)
+    ///     a = jix.compact([3, -5, 0], dtype=np.int32)
     ///     result = jix.sign(a)
+    ///     assert np.array_equal(result.numpy(), [1, -1, 0])
+    ///
+    ///     b = jix.compact([3.0, -5.0, -0.1], dtype=np.float32)
+    ///     result = jix.sign(b)
     ///     assert np.array_equal(result.numpy(), [1.0, -1.0, -1.0])
+    ///
+    ///     c = jix.compact([1, 0, 5], dtype=np.uint8)
+    ///     result = jix.sign(c)
+    ///     assert result.dtype == np.uint8
+    ///     assert np.array_equal(result.numpy(), [1, 0, 1])
+    ///
+    ///     # bool auto-casts to int8.
+    ///     d = jix.compact([True, False, True], dtype=np.bool_)
+    ///     assert jix.sign(d).dtype == np.int8
     ///     ```
     sign,
     Sign,
     dispatch = {
-        [f16, f32, f64], // TODO: signed integers
+        [i8, u8, u16, i16, u32, i32, u64, i64, f16, f32, f64],
         Safe
     }
 );

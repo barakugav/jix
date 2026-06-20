@@ -2,7 +2,6 @@
     - clip, clamp
     - allclose, isclose
     - square
-    - sign
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
 - build wheels for wsam
