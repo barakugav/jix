@@ -1,5 +1,4 @@
 - ops
-    - clip, clamp
     - allclose, isclose
     - square
 - use cargo workspace
@@ -10,4 +9,3 @@
 - read a bigger chunk that block shape when compacting a new array
 - support out of order blocks, len(offsets)=2*blocks_num
 - buf-break workflow
-- check free functions that should be added to py jix.Array

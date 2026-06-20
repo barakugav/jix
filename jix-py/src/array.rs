@@ -979,6 +979,16 @@ impl Array {
         crate::ops::log(slf, base)
     }
 
+    /// Clamps each element to `[min, max]`. See [`jix.clamp()`][jix.clamp].
+    #[pyo3(signature = (min=None, max=None))]
+    pub fn clamp(
+        slf: &Bound<'_, Self>,
+        min: Option<&Bound<'_, PyAny>>,
+        max: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        crate::ops::clamp(slf, min, max)
+    }
+
     /// Returns the sign of each element as a floating-point value. See [`jix.sign()`][jix.sign].
     pub fn sign(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sign(slf)
