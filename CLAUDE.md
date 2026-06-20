@@ -37,8 +37,8 @@ cargo hack check --feature-powerset --depth 2   # CI checks the feature powerset
 # --- Python bindings (cd jix-py) ---
 maturin develop                           # build + install the extension into the active venv
 cargo test --all-features --all-targets   # Rust-side tests of the bindings
-cargo run --bin gen_pyi                    # regenerate the .pyi type stubs
-pytest python/tests --numprocesses auto    # Python tests — ALWAYS use --numprocesses auto (pytest-xdist)
+cargo run --bin generate_pyi              # regenerate the .pyi type stubs
+pytest python/tests --numprocesses auto   # Python tests — ALWAYS use --numprocesses auto (pytest-xdist)
 
 # --- Formatting & linting (per crate, plus ruff/ascii from repo root) ---
 cargo fmt --all -- --check                 # in each of jix/schema, jix-macros, jix, jix-py
@@ -126,7 +126,7 @@ into `jix/src/archive/schema/_proto_gen/`. Edit a `.proto` → rerun the generat
 
 PyO3 + the `numpy` crate. The Python `Array` wraps a type-erased enum; operations dispatch over the
 runtime dtype (`jix-py/src/ops/common/dispatch.rs`, `dtype_promote.rs`, `broadcast.rs`). `pyo3-stub-gen`
-produces the `.pyi` stubs via the `gen_pyi` binary. Python source (the thin `__init__.py` re-export +
+produces the `.pyi` stubs via the `generate_pyi` binary. Python source (the thin `__init__.py` re-export +
 tests) is under `jix-py/python/`.
 
 ## Adding an operation
@@ -134,7 +134,7 @@ tests) is under `jix-py/python/`.
 An op typically exists in two places that must stay in sync: the Rust implementation under
 `jix/src/ops/` (e.g. `op1.rs` unary, `op2.rs` binary, `cmp.rs`, `reduction.rs`, `shape_ops/`) and its
 Python dispatch wrapper under `jix-py/src/ops/`. After changing the Python surface, regenerate stubs
-with `cargo run --bin gen_pyi`.
+with `cargo run --bin generate_pyi`.
 
 ## Testing Conventions
 
