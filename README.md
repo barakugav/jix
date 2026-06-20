@@ -2,8 +2,8 @@
 
 [![crates.io](https://img.shields.io/crates/v/jix.svg)](https://crates.io/crates/jix/)
 [![PyPI](https://img.shields.io/pypi/v/jix)](https://pypi.org/project/jix/)
-![docs.rs](https://img.shields.io/docsrs/jix?label=docs.rs)
-![Read the Docs](https://img.shields.io/readthedocs/jix?label=readthedocs)
+[![docs.rs](https://img.shields.io/docsrs/jix?label=docs.rs)](https://docs.rs/jix/latest/jix/)
+[![Read the Docs](https://img.shields.io/readthedocs/jix?label=readthedocs)](https://jix.readthedocs.io/en/latest/)
 ![License](https://img.shields.io/crates/l/jix)
 
 
