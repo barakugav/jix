@@ -98,6 +98,17 @@ jobs:
           sccache: "true"
           working-directory: jix-py
 
+      ############ Docs ############
+      - name: jix docs
+        run: cargo doc
+        working-directory: jix
+      - name: jix-py docs pyi
+        run: cargo run --bin generate_pyi
+        working-directory: jix-py
+      - name: jix-py docs mkdocs
+        run: mkdocs build --strict
+        working-directory: jix-py
+
       ############ Linters ############
       - name: Clippy jix-schema
         uses: auguwu/clippy-action@1.5.0
