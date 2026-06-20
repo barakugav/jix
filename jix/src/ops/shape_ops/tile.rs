@@ -293,6 +293,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         self.array.dtype()
     }
 
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.array.spec().with_block_spec(&self.block_spec)
     }

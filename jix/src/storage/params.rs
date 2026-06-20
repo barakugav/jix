@@ -516,6 +516,7 @@ impl ArraySpecOwned {
         }
     }
 
+    #[inline]
     pub(crate) fn as_ref(&self) -> ArraySpec<'_> {
         ArraySpec {
             shared: self.shared.as_ref(),
@@ -524,6 +525,7 @@ impl ArraySpecOwned {
     }
 }
 impl<'a> ArraySpec<'a> {
+    #[inline]
     pub(crate) fn with_block_spec(&self, block: &'a ArrayBlockSpec) -> Self {
         Self {
             shared: self.shared,
@@ -531,29 +533,37 @@ impl<'a> ArraySpec<'a> {
         }
     }
 
+    #[inline(always)]
     fn shared(&self) -> &'a ArraySpecShared {
         let inner = &self.shared.0;
         unsafe { std::mem::transmute::<&ArraySpecShared, &'a ArraySpecShared>(inner) }
     }
+    #[inline(always)]
     fn block(&self) -> &'a ArrayBlockSpec {
         self.block
     }
 
+    #[inline(always)]
     pub(crate) fn block_size(&self) -> u64 {
         self.shared().block_size
     }
+    #[inline(always)]
     pub(crate) fn read_size(&self) -> u64 {
         self.shared().read_size
     }
+    #[inline(always)]
     pub(crate) fn encoder_params(&self) -> &'a EncoderParams {
         &self.shared().encoder_params
     }
+    #[inline(always)]
     pub(crate) fn decoder_params(&self) -> &'a DecoderParams {
         &self.shared().decoder_params
     }
+    #[inline(always)]
     pub(crate) fn block_shape(&self) -> &'a DimArray<BlockSize> {
         &self.block().block_shape
     }
+    #[inline(always)]
     pub(crate) fn block_shape_tag(&self) -> &'a DimArray<BlockShapeTag> {
         &self.block().block_shape_tag
     }
@@ -587,7 +597,7 @@ impl<'a> ArraySpec<'a> {
 
         // Seed from the source storage block hint, clamped to the requested range.
         let mut read_shape = {
-            let mut max_dim_size = (1u64 << 30).min(self.read_size().next_power_of_two());
+            let mut max_dim_size = (1u64 << 30).min(target_nitems.next_power_of_two());
             loop {
                 let read_shape = D::from_fn(ndim, |dim| {
                     (self.block_shape()[dim] as u64)

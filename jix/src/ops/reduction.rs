@@ -153,6 +153,7 @@ where
         unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
         dtype
     }
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.array.spec().with_block_spec(&self.block_spec)
     }

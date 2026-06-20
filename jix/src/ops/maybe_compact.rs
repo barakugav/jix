@@ -87,6 +87,7 @@ where
             ToCompactInner::Compact(c) => c.dtype(),
         }
     }
+    #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
         match &self.0 {
             ToCompactInner::Original(s) => s.spec(),

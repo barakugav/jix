@@ -80,6 +80,7 @@ where
         dtype
     }
 
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.array.spec()
     }

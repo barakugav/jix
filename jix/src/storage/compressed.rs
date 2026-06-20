@@ -145,6 +145,7 @@ macro_rules! impl_array_storage {
                 self.0.blocks.dtype()
             }
 
+            #[inline]
             fn spec(&self) -> ArraySpec<'_> {
                 self.0.spec.as_ref()
             }

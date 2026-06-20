@@ -113,6 +113,7 @@ where
         self[arr].dtype()
     }
 
+    #[inline]
     fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
     }
@@ -152,6 +153,7 @@ where
         self[arr].dtype()
     }
 
+    #[inline]
     fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
     }
@@ -191,6 +193,7 @@ where
         self[arr].dtype()
     }
 
+    #[inline]
     fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
     }
@@ -250,6 +253,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 }
             }
 
+            #[inline]
             fn spec(&self, arr: usize) -> ArraySpec<'_> {
                 match arr {
                     $($idx => self.$idx.storage.spec(),)+

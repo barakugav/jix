@@ -215,6 +215,7 @@ where
     fn dtype(&self) -> &Dtype {
         self.arrays.dtype(0)
     }
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.arrays.spec(0).with_block_spec(&self.block_spec)
     }
