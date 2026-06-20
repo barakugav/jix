@@ -577,10 +577,10 @@ impl<'a> ArraySpec<'a> {
                         .min(index[dim].end - index[dim].start)
                         .max(1)
                 });
-                if let Some(read_size) = read_shape.as_slice().iter().copied().try_product() {
-                    if read_size / 2 <= target_nitems || max_dim_size <= 1 {
-                        break read_shape;
-                    }
+                if let Some(read_size) = read_shape.as_slice().iter().copied().try_product()
+                    && (read_size / 2 <= target_nitems || max_dim_size <= 1)
+                {
+                    break read_shape;
                 }
                 max_dim_size = (max_dim_size / 2).max(1);
             }

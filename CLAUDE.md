@@ -10,15 +10,15 @@ independently Zstd-compressed nd-blocks, so reads decompress only the touched bl
 operation chains where every op returns a new view and the whole pipeline is encoded in the static
 type, then runs in a single decompression pass when output is requested.
 
-## Crate Layout — there is NO Cargo workspace
+## Crate Layout - there is NO Cargo workspace
 
 Each crate is built and tested **independently from its own directory**. The root has no
 `Cargo.toml`, and `Cargo.lock` files are per-crate (gitignored). `cargo <cmd> -p jix` from the repo
-root will NOT work — you must `cd` into the crate directory first (this is how CI runs everything).
+root will NOT work - you must `cd` into the crate directory first (this is how CI runs everything).
 
 | Directory | Cargo package | Purpose |
 |-----------|---------------|---------|
-| `jix/` | `jix` | Core Rust library — `Array<S>`, dtype system, ops, storage, archive |
+| `jix/` | `jix` | Core Rust library - `Array<S>`, dtype system, ops, storage, archive |
 | `jix-macros/` | `jix-macros` | Proc-macro crate. Provides `#[derive(Dtyped)]` |
 | `jix-py/` | `jix-python` (lib name `jix`) | PyO3 bindings; publishes the `jix` Python package. Depends on `jix` as `jix_core` with `half` + `num-complex` enabled |
 | `jix/schema/` | `jix-schema-gen` (`publish = false`) | Standalone protobuf codegen (see Serialization below) |
@@ -38,7 +38,7 @@ cargo hack check --feature-powerset --depth 2   # CI checks the feature powerset
 maturin develop                           # build + install the extension into the active venv
 cargo test --all-features --all-targets   # Rust-side tests of the bindings
 cargo run --bin generate_pyi              # regenerate the .pyi type stubs
-pytest python/tests --numprocesses auto   # Python tests — ALWAYS use --numprocesses auto (pytest-xdist)
+pytest python/tests --numprocesses auto   # Python tests - ALWAYS use --numprocesses auto (pytest-xdist)
 
 # --- Formatting & linting (per crate, plus ruff/ascii from repo root) ---
 cargo fmt --all -- --check                 # in each of jix/schema, jix-macros, jix, jix-py
@@ -62,36 +62,36 @@ uv pip install -r scripts/dev_requirements.txt   # maturin, pytest, pytest-xdist
 
 ## Architecture
 
-### `Array<S: ArrayStorage>` — the generic core
+### `Array<S: ArrayStorage>` - the generic core
 
 `ArrayStorage` (`jix/src/storage/core.rs`) exposes exactly three things: `shape()`, `dtype()`, and
 `read_data(index_ranges, buf, ctx)` which reads a rectangular sub-region into a caller buffer.
-**Everything** — arithmetic, slicing, reductions, serialization — is built on top of these three.
+**Everything** - arithmetic, slicing, reductions, serialization - is built on top of these three.
 
 Storage carries two pieces of compile-time info as associated types:
-- **`ElementType`** — either `Ty<T>` (scalar type `T` known at compile time) or `TypeDyn`
+- **`ElementType`** - either `Ty<T>` (scalar type `T` known at compile time) or `TypeDyn`
   (runtime-only; arrays loaded from disk start here). `ArrayStorageTyped` is the supertrait
   shorthand for `ArrayStorage<ElementType = Ty<T>>`, and **all element-wise ops require it**. Recover
   a typed array from a `TypeDyn` one with `Array::into_typed::<T>()` (runtime-checked against the
   header).
-- **`Dimension`** — either `Dim<N>` (ndim known statically) or `DimDyn` (runtime only).
+- **`Dimension`** - either `Dim<N>` (ndim known statically) or `DimDyn` (runtime only).
 
 ### Lazy evaluation via the type system
 
 Every operation returns `Array<Op<...>>` wrapping its input(s); the type parameter accumulates the
 whole pipeline (e.g. `Array<Sum<Add<PermuteAxes<Compact>, Compact>>>`). There is **no runtime
-evaluation graph or scheduler — the type IS the execution plan.** Shape ops (`Reshape`, `Slice`,
+evaluation graph or scheduler - the type IS the execution plan.** Shape ops (`Reshape`, `Slice`,
 `Broadcast`, `PermuteAxes`, `InsertAxis`, `RemoveAxis`, ...) just remap index ranges without copying.
 Nothing runs until you materialize via `.to_ndarray()`, `.compact()`, or `.write_to_file()`/`.write_to()`
-— at which point the compiler-inlined pipeline executes in a single block-by-block read loop.
+- at which point the compiler-inlined pipeline executes in a single block-by-block read loop.
 
 ### Storage backends (`jix/src/storage/`)
 
-- `Compact<T, D>` / `CompactMmap<T, D>` — heap-allocated / memory-mapped block-compressed storage (the
+- `Compact<T, D>` / `CompactMmap<T, D>` - heap-allocated / memory-mapped block-compressed storage (the
   main backends).
-- `Plain<...>` — zero-copy view over a contiguous/strided in-memory buffer, so plain ndarrays can
+- `Plain<...>` - zero-copy view over a contiguous/strided in-memory buffer, so plain ndarrays can
   participate in the same op chains.
-- `ArrayAny` (= `Array<ArrayStorageAny>`) — type-erased (`Arc<dyn ArrayStorage>`) for holding mixed
+- `ArrayAny` (= `Array<ArrayStorageAny>`) - type-erased (`Arc<dyn ArrayStorage>`) for holding mixed
   storage types in one collection; loses compile-time element-wise ops.
 
 ### Block storage & codec pipeline
@@ -118,9 +118,9 @@ Archive = protobuf metadata (shape, block shape, codec config) + raw compressed 
 arrays can be packed back-to-back in one file, each read back by byte offset + length. A lazy view can
 be streamed straight to disk without ever materializing the full result.
 
-The `.proto` sources live in `jix/schema/proto/jix/v1/`. They are **not** compiled at build time —
+The `.proto` sources live in `jix/schema/proto/jix/v1/`. They are **not** compiled at build time -
 the `jix-schema-gen` crate (`cd jix/schema && cargo run`, needs `protoc`) regenerates committed Rust
-into `jix/src/archive/schema/_proto_gen/`. Edit a `.proto` → rerun the generator → commit the output.
+into `jix/src/archive/schema/_proto_gen/`. Edit a `.proto` -> rerun the generator -> commit the output.
 
 ### Python bindings (`jix-py/`)
 
@@ -147,11 +147,11 @@ with `cargo run --bin generate_pyi`.
 
 ## Key Constraints
 
-- **ASCII-only source** — `scripts/check_only_ascii.py` fails CI on any non-ASCII byte in a tracked
+- **ASCII-only source** - `scripts/check_only_ascii.py` fails CI on any non-ASCII byte in a tracked
   file. Use `-` (hyphen), not em-dashes/unicode, in code and docs.
 - **`JIX_DENY_WARNINGS=1`** is set via `.cargo/config.toml`, which turns on `deny(missing_docs)` (see
   `build.rs` + `lib.rs`). Missing doc comments on public items become **build errors** locally.
-- **Little-endian targets only** — enforced by a compile-time assertion.
+- **Little-endian targets only** - enforced by a compile-time assertion.
 - **Max 8 array dimensions** (`NDIM_MAX`); **max 4 inner dtype dimensions** (`DTYPE_MAX_NDIM`).
 - **Rust edition 2024, MSRV 1.89.0.** Element types must be `Copy + Send + Sync + 'static` and not
   `Drop`.
