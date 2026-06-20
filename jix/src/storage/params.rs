@@ -634,7 +634,7 @@ impl ArraySpecPtr {
     /// modified in a way that would invalidate the reference.
     pub(crate) unsafe fn as_ref<'a>(
         &self,
-        source_spec: impl FnOnce() -> ArraySpec<'a>,
+        #[allow(unused_variables)] source_spec: impl FnOnce() -> ArraySpec<'a>,
     ) -> ArraySpec<'_> {
         #[cfg(debug_assertions)]
         {
