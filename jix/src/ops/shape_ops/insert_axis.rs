@@ -72,7 +72,10 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 ///
 /// // &[usize] -> output D = DimDyn
 /// let gaps = vec![0, 1];
-/// assert_eq!(a.insert_axis(gaps.as_slice()).shape(), &[1, 3, 1]);
+/// assert_eq!(a.as_ref().insert_axis(gaps.as_slice()).shape(), &[1, 3, 1]);
+///
+/// // duplicates are allowed; each occurrence inserts one dimension
+/// assert_eq!(a.as_ref().insert_axis([0, 0, 1, 1]).shape(), &[1, 1, 3, 1, 1]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct InsertAxis<S, D> {

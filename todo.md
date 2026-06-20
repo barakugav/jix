@@ -3,8 +3,6 @@
     - allclose, isclose
     - square
     - sign
-- consider matching insert_axis to numpy's expand_dims instead of using gap indices
-- optimize reduce_max with state of (current max, nan_seen)
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
 - build wheels for wsam
@@ -14,3 +12,4 @@
 - support out of order blocks, len(offsets)=2*blocks_num
 - make EncoderParams and DecoderParams private, only ArrayParams should be public
 - buf-break workflow
+- check free functions that should be added to py jix.Array

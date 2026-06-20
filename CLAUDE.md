@@ -126,8 +126,9 @@ into `jix/src/archive/schema/_proto_gen/`. Edit a `.proto` -> rerun the generato
 
 PyO3 + the `numpy` crate. The Python `Array` wraps a type-erased enum; operations dispatch over the
 runtime dtype (`jix-py/src/ops/common/dispatch.rs`, `dtype_promote.rs`, `broadcast.rs`). `pyo3-stub-gen`
-produces the `.pyi` stubs via the `generate_pyi` binary. Python source (the thin `__init__.py` re-export +
-tests) is under `jix-py/python/`.
+produces the `.pyi` stubs via the `generate_pyi` binary. The generated `jix-py/python/jix/__init__.pyi`
+is gitignored (regenerate locally; it won't show up in `git status`). Python source (the thin
+`__init__.py` re-export + tests) is under `jix-py/python/`.
 
 ## Adding an operation
 
