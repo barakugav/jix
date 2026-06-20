@@ -237,7 +237,7 @@ jobs:
         run: uv pip install -e . --system
         working-directory: jix-py
       - name: Generate .pyi stubs
-        run: cargo run --bin gen_pyi
+        run: cargo run --bin generate_pyi
         working-directory: jix-py
       - name: Build site
         run: mkdocs build --strict

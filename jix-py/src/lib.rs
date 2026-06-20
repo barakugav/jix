@@ -115,5 +115,5 @@ pyo3_stub_gen::module_variable!("jix", "__version__", String);
 pub mod __private {
     use pyo3_stub_gen::define_stub_info_gatherer;
 
-    define_stub_info_gatherer!(gen_pyi);
+    define_stub_info_gatherer!(generate_pyi);
 }

@@ -15,7 +15,7 @@ categories = ["data-structures", "compression", "science"]
 name = "jix"
 crate-type = [
     "cdylib",
-    "rlib",   # Required by gen_pyi
+    "rlib",   # Required by generate_pyi
 ]
 
 [dependencies]
