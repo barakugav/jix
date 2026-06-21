@@ -414,7 +414,7 @@ pub use error::{Error, ErrorKind};
 /// metadata (shape, dtype) is available; element-wise operations that require a known scalar type
 /// at compile time are not.
 ///
-/// Create one with [`Array::into_any`] or [`ArrayStorageAny::new`](storage::ArrayStorageAny::new).
+/// Create one with [`Array::into_any`].
 pub type ArrayAny = Array<storage::ArrayStorageAny>;
 
 #[doc(hidden)]

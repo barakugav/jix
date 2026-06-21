@@ -43,7 +43,7 @@ import numpy as np
 a = jix.compact(np.random.rand(1024, 1024).astype(np.float32))
 
 # Build a lazy pipeline - nothing is read yet.
-result = (a - a.mean(axis=0)) / a.std(axis=0)
+result = (a - a.mean(axis=0)) / a.std(axis=1)
 
 # Materialize: decompress, transform, and write to disk in one pass.
 result.write_to("normalized.jix")

@@ -9,3 +9,4 @@
 - read a bigger chunk that block shape when compacting a new array
 - support out of order blocks, len(offsets)=2*blocks_num
 - buf-break workflow
+- change read_size to (u64, u64), default to (L1,L2)

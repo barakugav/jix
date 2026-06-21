@@ -9,7 +9,7 @@ use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, Error, Result};
-use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
+use crate::storage::block::{BlockFn, BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimArray, Idx, IterExt};
 use crate::{
@@ -430,14 +430,21 @@ where
         };
 
         let (mut block_fn, block_compressed_bound) = self.to_block_fn(&params, context)?;
-        crate::archive::block::write_content_impl(
+        let mut block_writer = crate::archive::block::BlockArchiveWriter::start(
+            &mut writer,
             nblocks,
             block_size,
             &decoder_cfg,
-            &mut writer,
-            block_compressed_bound,
-            &mut block_fn,
         )?;
+        let chunk = crate::archive::block::chunk_for(block_compressed_bound);
+        for block_index in (0..nblocks).step_by(chunk as usize) {
+            let blocks = block_index..(block_index + chunk).min(nblocks);
+            let (data, offsets) =
+                block_fn.get_compressed_blocks(blocks, block_writer.data_len())?;
+            block_writer.write_compressed_blocks(data)?;
+            block_writer.write_offsets(offsets)?;
+        }
+        block_writer.finalize()?;
 
         writer.flush().map_err(Error::io)
     }

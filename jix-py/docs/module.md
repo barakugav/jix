@@ -31,7 +31,7 @@ assert a[999, 999] == 999_999
 assert a[0, 0:10].tolist() == list(range(10))
 
 # Build a lazy pipeline - no decompression happens yet.
-result = (a - a.mean(axis=0)) / a.std(axis=0)
+result = (a - a.mean(axis=0)) / a.std(axis=1)
 
 # Materialize the pipeline into a NumPy array.
 out = result.numpy()

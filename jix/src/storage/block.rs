@@ -414,7 +414,7 @@ impl BlockTableStorage for Mmap {
 }
 
 /// A source of pre-compressed block data consumed by [`build_block_table`] and
-/// `write_content_impl`.
+/// `BlockArchiveWriter`.
 ///
 /// Both consumers iterate over blocks in batches and call `get_compressed_blocks` once per batch.
 /// The implementor is responsible for compressing the requested blocks and returning them together
@@ -487,7 +487,7 @@ where
     S: BlockTableStorage,
 {
     /// Adapt this `BlockTable` into a [`BlockFn`] for use with [`build_block_table`] or
-    /// `write_content_impl`.
+    /// `BlockArchiveWriter`.
     ///
     /// The returned `BlockFn` slices directly into `self.block_data` and `self.block_offsets`
     /// with no copying or re-compression. The second return value is the maximum compressed size
