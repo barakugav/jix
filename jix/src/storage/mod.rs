@@ -159,6 +159,7 @@ macro_rules! impl_array_storage_forward {
         fn dtype(&self) -> &crate::dtype::Dtype {
             self.0.dtype()
         }
+        #[inline]
         fn spec(&self) -> crate::storage::ArraySpec<'_> {
             self.0.spec()
         }

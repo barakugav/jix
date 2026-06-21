@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use jix_core::codec::{Codec, EncoderParams};
 use jix_core::{Array as CoreArray, ArrayAny};
+use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
@@ -358,8 +358,8 @@ impl Array {
     ///
     /// Returns:
     ///     A NumPy array with the same dtype as `self`, shape determined by the `index`
-    ///     argument (or `self.shape` when no index is supplied), in C-contiguous (row-major)
-    ///     memory order. A brand-new allocation; the caller owns it outright.
+    ///         argument (or `self.shape` when no index is supplied), in C-contiguous (row-major)
+    ///         memory order. A brand-new allocation; the caller owns it outright.
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,
@@ -553,7 +553,38 @@ impl Array {
         crate::ops::floor_divide(other, slf)
     }
 
-    // TODO: __pow__
+    /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
+    pub fn pow(slf: &Bound<'_, Self>, exponent: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::ops::power(slf, exponent)
+    }
+
+    /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
+    pub fn __pow__<'py>(
+        slf: &Bound<'py, Self>,
+        exponent: &Bound<'py, PyAny>,
+        modulo: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Self> {
+        if modulo.is_some() {
+            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                "modulo argument to pow() is not supported",
+            ));
+        }
+        crate::ops::power(slf, exponent)
+    }
+
+    /// Element-wise exponentiation (`b ** a`). See [`jix.power()`][jix.power].
+    pub fn __rpow__<'py>(
+        slf: &Bound<'py, Self>,
+        base: &Bound<'py, PyAny>,
+        modulo: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Self> {
+        if modulo.is_some() {
+            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                "modulo argument to pow() is not supported",
+            ));
+        }
+        crate::ops::power(base, slf)
+    }
 
     /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
     pub fn negative(slf: &Bound<'_, Self>) -> PyResult<Self> {
@@ -941,6 +972,62 @@ impl Array {
     pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::atan(slf)
     }
+
+    /// Computes the logarithm of each element; defaults to the natural logarithm. See [`jix.log()`][jix.log].
+    #[pyo3(signature = (base=None))]
+    pub fn log(slf: &Bound<'_, Self>, base: Option<f64>) -> PyResult<Self> {
+        crate::ops::log(slf, base)
+    }
+
+    /// Clamps each element to `[min, max]`. See [`jix.clamp()`][jix.clamp].
+    #[pyo3(signature = (min=None, max=None))]
+    pub fn clamp<'py>(
+        slf: &Bound<'py, Self>,
+        min: Option<&Bound<'py, PyAny>>,
+        max: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, Self>> {
+        crate::ops::clamp(slf, min, max)
+    }
+
+    /// Returns the sign of each element as a floating-point value. See [`jix.sign()`][jix.sign].
+    pub fn sign(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::sign(slf)
+    }
+
+    // == float predicates ==
+
+    /// Tests whether each element is finite. See [`jix.is_finite()`][jix.is_finite].
+    pub fn is_finite(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::is_finite(slf)
+    }
+
+    /// Tests whether each element is infinite. See [`jix.is_infinite()`][jix.is_infinite].
+    pub fn is_infinite(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::is_infinite(slf)
+    }
+
+    /// Tests whether each element is `NaN`. See [`jix.is_nan()`][jix.is_nan].
+    pub fn is_nan(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::is_nan(slf)
+    }
+
+    // == axis ops ==
+
+    /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_axis()`][jix.insert_axis].
+    pub fn insert_axis<'py>(
+        slf: &Bound<'py, Array>,
+        axis: ItemOrSequence<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::insert_axis(slf, axis)
+    }
+
+    /// Removes length-1 dimensions from the array's shape. See [`jix.remove_axis()`][jix.remove_axis].
+    pub fn remove_axis<'py>(
+        slf: &Bound<'py, Array>,
+        axis: ItemOrSequence<i32>,
+    ) -> PyResult<Bound<'py, Array>> {
+        crate::ops::remove_axis(slf, axis)
+    }
 }
 
 /// Compact any array-like object to a new [`jix.Array`][jix.Array] by compressing it into new blocks.
@@ -1151,37 +1238,33 @@ pub(crate) fn resolve_array_params(
                 params.read_size(read_size);
             }
 
-            if codec.is_some() || compression_level.is_some() || filters.is_some() {
-                let mut encoder_params = EncoderParams::default();
-                if let Some(codec) = codec {
-                    match codec.as_str() {
-                        "zstd" => {
-                            encoder_params.codec(Codec::Zstd);
-                        }
-                        _ => {
-                            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                                "Unsupported codec: {codec}"
-                            )));
-                        }
+            if let Some(codec) = codec {
+                match codec.as_str() {
+                    "zstd" => {
+                        params.codec(Codec::Zstd);
+                    }
+                    _ => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Unsupported codec: {codec}"
+                        )));
                     }
                 }
-                if let Some(compression_level) = compression_level {
-                    encoder_params.level(compression_level).into_py_result()?;
-                }
-                if let Some(filters) = filters {
-                    let filters = filters
-                        .into_iter()
-                        .map(|filter| match filter.as_str() {
-                            "byte-shuffle" => Ok(jix_core::codec::Filter::ByteShuffle),
-                            "bit-shuffle" => Ok(jix_core::codec::Filter::BitShuffle),
-                            _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-                                "Unsupported filter: {filter}"
-                            ))),
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    encoder_params.filters(&filters).into_py_result()?;
-                }
-                params.encoder_params(encoder_params);
+            }
+            if let Some(compression_level) = compression_level {
+                params.level(compression_level).into_py_result()?;
+            }
+            if let Some(filters) = filters {
+                let filters = filters
+                    .into_iter()
+                    .map(|filter| match filter.as_str() {
+                        "byte-shuffle" => Ok(Filter::ByteShuffle),
+                        "bit-shuffle" => Ok(Filter::BitShuffle),
+                        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Unsupported filter: {filter}"
+                        ))),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                params.filters(&filters).into_py_result()?;
             }
 
             Ok(params)

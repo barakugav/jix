@@ -1,20 +1,16 @@
 
 Multi-dimensional array library with block-compressed, lazy-evaluated storage.
 
-The crate provide Python bindings for the core `jix` library, which is implemented in Rust.
+The package provides Python bindings for the core `jix` library, which is implemented in Rust.
 `jix` is a multi-dimensional array library that stores data in **block-compressed format**
 and evaluates operations **lazily**. It is designed around two ideas:
 
-- **Block-based compression** - the array is split into an n-dimensional grid of fixed-size
-  blocks, each compressed independently with Zstd. Only the blocks that overlap a read
-  request are decompressed, so random access into large arrays avoids loading the whole
-  dataset into memory.
+**Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each compressed independently.
+Only the blocks that overlap a read request are decompressed, so random access into large arrays is relatively cheap.
 
-- **Lazy operation chains** - every operation (arithmetic, shape manipulation, type cast,
-  reduction, ...) builds a new `Array` that records the transformation without executing
-  it. The full pipeline runs in a single decompression pass the moment you ask for output.
-  While the pass runs the GIL is released, so Python threads can make progress
-  concurrently.
+**Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast - returns a new view that wraps the
+input(s) and records the transformation, nothing is computed until data is explicitly requested.
+A chain of such operations build a pipeline that runs in a single decompression pass the moment you ask for output.
 
 The library is NumPy-compatible: arrays expose a NumPy `dtype`, accept NumPy index syntax,
 and materialize to NumPy arrays on demand.

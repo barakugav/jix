@@ -22,7 +22,7 @@ use crate::Array;
 ///
 /// Returns:
 ///     A lazy [`jix.Array`][jix.Array] view of the specified field, with the field's dtype and the same
-///     shape as the input.
+///         shape as the input.
 ///
 /// Examples:
 ///     ```python

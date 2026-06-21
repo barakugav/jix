@@ -357,6 +357,7 @@ where
     fn dtype(&self) -> &Dtype {
         self.element_type.dtype()
     }
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.spec.as_ref()
     }

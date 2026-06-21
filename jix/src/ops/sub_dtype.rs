@@ -152,6 +152,7 @@ where
     fn dtype(&self) -> &Dtype {
         self.dst_type.dtype()
     }
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.array.spec()
     }

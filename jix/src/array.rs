@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::codec::{DecoderCodecConfig, DecoderParams, Encoder, ReadContext};
+use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::MaybeCompact;
@@ -443,6 +443,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             type ElementType = Ty<T>;
             type Dimension = D;
 
+            #[inline]
             fn read_data(
                 &self,
                 index: &[Range<u64>],
@@ -463,14 +464,17 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 Ok(())
             }
 
+            #[inline(always)]
             fn shape(&self) -> &[u64] {
                 self.shape.as_slice()
             }
 
+            #[inline(always)]
             fn dtype(&self) -> &Dtype {
                 self.dtype.dtype()
             }
 
+            #[inline]
             fn spec(&self) -> crate::storage::ArraySpec<'_> {
                 self.spec.as_ref()
             }
@@ -491,7 +495,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             spec,
         });
 
-        array.compact_with(params, &ReadContext::new(&DecoderParams::default())?)
+        array.compact_with(params, &array.try_read_ctx()?)
     }
 }
 
@@ -792,7 +796,7 @@ impl<S: ArrayStorage> Array<S> {
 
         // Fast path for small reads
         let spec = self.storage.spec();
-        let small_read = nitems as u64 <= spec.read_size();
+        let small_read = nitems as u64 <= spec.read_size() * dtype.itemsize() as u64;
         if small_read {
             return self.storage.read_data(index, buf, context);
         }
@@ -828,7 +832,7 @@ impl<S: ArrayStorage> Array<S> {
             });
             let tmp_buf = {
                 let read_nitems = block_size.as_slice().iter().product::<u64>();
-                tmp_buf.set_len(read_nitems as usize * dtype.itemsize() as usize);
+                tmp_buf.set_len(read_nitems as usize * itemsize);
                 tmp_buf.as_mut_slice()
             };
             self.storage.read_data(&inner_index, tmp_buf, context)?;
@@ -971,7 +975,7 @@ impl<S: ArrayStorage> Array<S> {
         })
     }
 
-    /// Create a [`ReadContext`] with parameters derived from this array's storage.
+    /// Create a [`ReadContext`] with parameters derived from this array.
     ///
     /// A context encapsulates reusable buffers and codec decompressor instance. Use it for
     /// repeated reads, sharing the allocation and initialization overhead.
@@ -982,7 +986,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// Using a context created in other ways (e.g. `ReadContext::default()`) is also valid, and will
     /// yield correct results. Using this method allows an easy way to ensure all reads from an array
-    /// use the same decoding configuration (see [`DecoderParams`]).
+    /// use the same decoding configuration.
     ///
     /// # Examples
     ///

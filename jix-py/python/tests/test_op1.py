@@ -24,6 +24,7 @@ from tests_util import (
     ints,
     op_safe_non_negative_element_strategy,
     unit_element_strategy,
+    uints,
 )
 
 
@@ -81,6 +82,14 @@ def test_exp(dtype: np.dtype, data: DataObject):
     assert_array_matches(jix.exp(za), np.exp(np_a).astype(dtype), data=data, rtol=rtol)
 
 
+def test_log_natural_no_base():
+    a = jix.compact([1.0, np.e, np.e**2], dtype=np.float64)
+    result = jix.log(a).numpy()
+    assert abs(result[0]) < 1e-12  # ln(1) = 0
+    assert abs(result[1] - 1.0) < 1e-12  # ln(e) = 1
+    assert abs(result[2] - 2.0) < 1e-12  # ln(e^2) = 2
+
+
 @pytest.mark.parametrize("dtype", floats)
 @given(st.data())
 def test_log(dtype: np.dtype, data: DataObject):
@@ -90,6 +99,28 @@ def test_log(dtype: np.dtype, data: DataObject):
     )
     rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
     assert_array_matches(jix.log(za), np.log(np_a).astype(dtype), data=data, rtol=rtol)
+
+
+@pytest.mark.parametrize("dtype", floats)
+@given(st.data())
+def test_log_base2(dtype: np.dtype, data: DataObject):
+    np_a, za = data.draw(
+        carray_strategy(dtype, element_st=op_safe_non_negative_element_strategy(dtype)),
+        label="array",
+    )
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(jix.log(za, base=2), np.log2(np_a).astype(dtype), data=data, rtol=rtol)
+
+
+@pytest.mark.parametrize("dtype", floats)
+@given(st.data())
+def test_log_base10(dtype: np.dtype, data: DataObject):
+    np_a, za = data.draw(
+        carray_strategy(dtype, element_st=op_safe_non_negative_element_strategy(dtype)),
+        label="array",
+    )
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
+    assert_array_matches(jix.log(za, base=10), np.log10(np_a).astype(dtype), data=data, rtol=rtol)
 
 
 @pytest.mark.parametrize("dtype", floats)
@@ -151,11 +182,37 @@ def test_atan(dtype: np.dtype, data: DataObject):
 
 @pytest.mark.parametrize("dtype", floats)
 @given(st.data())
-def test_signum(dtype: np.dtype, data: DataObject):
+def test_sign_float(dtype: np.dtype, data: DataObject):
     np_a, za = data.draw(carray_strategy(dtype), label="array")
-    # jix.signum: +1.0 for positive and +0.0, -1.0 for negative and -0.0.
+    # jix.sign on floats: +1.0 for positive and +0.0, -1.0 for negative and -0.0.
     # np.sign returns 0.0 for 0.0; np.copysign(1, x) matches Rust's f32::signum.
-    assert_array_matches(jix.signum(za), np.copysign(np.ones_like(np_a), np_a), data=data)
+    assert_array_matches(jix.sign(za), np.copysign(np.ones_like(np_a), np_a), data=data)
+
+
+@pytest.mark.parametrize("dtype", ints)
+@given(st.data())
+def test_sign_int(dtype: np.dtype, data: DataObject):
+    np_a, za = data.draw(carray_strategy(dtype), label="array")
+    # jix.sign on signed integers: -1, 0, or +1 of the same dtype.
+    assert_array_matches(jix.sign(za), np.sign(np_a).astype(dtype), data=data)
+
+
+@pytest.mark.parametrize("dtype", uints)
+@given(st.data())
+def test_sign_uint(dtype: np.dtype, data: DataObject):
+    np_a, za = data.draw(carray_strategy(dtype), label="array")
+    # unsigned: sign is 0 when zero, 1 otherwise; output keeps the same uint dtype.
+    expected = np.where(np_a == 0, np.zeros_like(np_a), np.ones_like(np_a))
+    assert_array_matches(jix.sign(za), expected, data=data)
+
+
+def test_sign_auto_cast_bool():
+    """sign(bool) auto-casts to int8."""
+    np_a = np.array([True, False, True], dtype=np.bool_)
+    za = jix.compact(np_a)
+    result = jix.sign(za)
+    assert result.dtype == np.int8
+    np.testing.assert_array_equal(result.numpy(), np.sign(np_a.astype(np.int8)))
 
 
 @pytest.mark.parametrize("dtype", ints + floats)

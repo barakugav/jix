@@ -184,9 +184,10 @@ pub trait ArrayStorage {
     /// Consume `self`, validate the new dimension against the runtime ndim, and return the
     /// re-tagged storage.
     ///
-    /// Returns [`ErrorKind::InvalidShapeOperation`](crate::ErrorKind::InvalidShapeOperation) if
-    /// `NewD = Dim<N>` and the runtime ndim does not equal `N`. Always succeeds for
-    /// `NewD = DimDyn`.
+    /// Returns an error if `NewD = Dim<N>` and the runtime ndim does not equal `N`; the
+    /// concrete [`ErrorKind`](crate::ErrorKind) is backend-dependent
+    /// ([`TooManyDimensions`](crate::ErrorKind::TooManyDimensions) for the concrete storage
+    /// backends). Always succeeds for `NewD = DimDyn`.
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>>
     where
         Self: Sized;

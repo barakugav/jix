@@ -185,21 +185,74 @@ def test_insert_axis_front():
     za = jix.compact(arr)
     r = jix.insert_axis(za, 0)
     assert r.shape == (1, 3)
+    np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, 0))
 
 
 def test_insert_axis_back():
     arr = np.array([1, 2, 3], dtype=np.int32)
     za = jix.compact(arr)
+    # numpy expand_dims: axis indexes the output shape; 1 is the last axis of a 2-d result.
     r = jix.insert_axis(za, 1)
     assert r.shape == (3, 1)
+    np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, 1))
+
+
+def test_insert_axis_negative():
+    arr = np.array([1, 2, 3], dtype=np.int32)
+    za = jix.compact(arr)
+    # -1 refers to the last position of the (larger) output shape, like numpy.
+    r = jix.insert_axis(za, -1)
+    assert r.shape == (3, 1)
+    np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, -1))
 
 
 def test_insert_axis_multiple():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
-    # gap 0 = before dim0, gap 2 = after dim1 -> (1, 2, 3, 1)
+    # numpy expand_dims semantics: axes index the output shape -> (1, 2, 1, 3)
     r = jix.insert_axis(za, [0, 2])
-    assert r.shape == (1, 2, 3, 1)
+    assert r.shape == (1, 2, 1, 3)
+    np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, (0, 2)))
+
+
+def test_insert_axis_repeated_axis_raises():
+    arr = np.arange(6, dtype=np.int32).reshape(2, 3)
+    za = jix.compact(arr)
+    # like numpy.expand_dims, repeated output axes are rejected
+    with pytest.raises(Exception):
+        jix.insert_axis(za, [0, 0])
+
+
+def test_insert_axis_out_of_range_raises():
+    arr = np.array([1, 2, 3], dtype=np.int32)
+    za = jix.compact(arr)
+    # output ndim is 2 for a single insertion; axis 2 is out of range (valid -2..1)
+    with pytest.raises(Exception):
+        jix.insert_axis(za, 2)
+
+
+@pytest.mark.parametrize(
+    "shape, axis",
+    [
+        ((3,), 0),
+        ((3,), 1),
+        ((3,), -1),
+        ((3,), -2),
+        ((2, 3), [0, 2]),
+        ((2, 3), [0, 1]),
+        ((2, 3), -1),
+        ((2, 3, 4), [0, 2, 5]),
+        ((2, 3, 4), [-1, -3]),
+    ],
+)
+def test_insert_axis_matches_numpy_expand_dims(shape, axis):
+    arr = np.arange(int(np.prod(shape)), dtype=np.int32).reshape(shape)
+    za = jix.compact(arr)
+    np_axis = tuple(axis) if isinstance(axis, list) else axis
+    expected = np.expand_dims(arr, np_axis)
+    got = jix.insert_axis(za, axis).numpy()
+    assert got.shape == expected.shape
+    np.testing.assert_array_equal(got, expected)
 
 
 def test_remove_axis():
@@ -249,10 +302,18 @@ def test_unsqueeze_single():
 def test_unsqueeze_same_as_insert_axis():
     arr = np.arange(6, dtype=np.int32).reshape(2, 3)
     za = jix.compact(arr)
-    r1 = jix.unsqueeze(za, 1)
-    r2 = jix.insert_axis(za, 1)
+    r1 = jix.unsqueeze(za, [0, 2])
+    r2 = jix.insert_axis(za, [0, 2])
     assert r1.shape == r2.shape
     np.testing.assert_array_equal(r1.numpy(), r2.numpy())
+
+
+def test_unsqueeze_method_matches_numpy_expand_dims():
+    arr = np.arange(6, dtype=np.int32).reshape(2, 3)
+    za = jix.compact(arr)
+    # the Array.unsqueeze method uses the same output-world semantics
+    r = za.unsqueeze([0, 2])
+    np.testing.assert_array_equal(r.numpy(), np.expand_dims(arr, (0, 2)))
 
 
 # ---------------------------------------------------------------------------

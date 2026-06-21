@@ -1,5 +1,5 @@
 use numpy::{PyUntypedArray, PyUntypedArrayMethods};
-use pyo3::exceptions::PyOverflowError;
+use pyo3::exceptions::{PyOverflowError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
@@ -23,7 +23,11 @@ pub(crate) enum Operand {
 }
 impl Operand {
     pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
-        if let Ok(array) = value.cast::<Array>() {
+        Self::from_any_impl(value, false)
+    }
+
+    fn from_any_impl(value: &Bound<'_, PyAny>, only_scalar: bool) -> PyResult<Self> {
+        if !only_scalar && let Ok(array) = value.cast::<Array>() {
             return Ok(Self::Array(array.get().arr.clone()));
         };
         let py = value.py();
@@ -44,12 +48,21 @@ impl Operand {
             (np_items.generic.bind(py), np_items.asarray.bind(py))
         };
 
-        if !value.is_instance(np_generic)? {
+        let is_np_generic = value.is_instance(np_generic)?;
+        if !is_np_generic {
             let mut scalar = None;
             if let Ok(value) = value.cast::<PyBool>() {
                 scalar = Some(Scalar::Bool(value.extract()?));
             } else if let Ok(value) = value.cast::<PyInt>() {
-                scalar = Some(Scalar::Int(value.extract()?));
+                if let Ok(value) = value.extract::<i64>() {
+                    scalar = Some(Scalar::Int(value));
+                } else if let Ok(value) = value.extract::<u64>() {
+                    scalar = Some(Scalar::UInt(value));
+                } else {
+                    return Err(PyErr::new::<PyOverflowError, _>(
+                        "Integer value is too large to fit in 64 bits",
+                    ));
+                }
             } else if let Ok(value) = value.cast::<PyFloat>() {
                 scalar = Some(Scalar::Float(value.extract()?));
             } else if let Ok(value) = value.cast::<PyComplex>() {
@@ -65,6 +78,9 @@ impl Operand {
                     shape: DimArray::new(),
                 });
             }
+        }
+        if only_scalar && !is_np_generic {
+            return Err(PyErr::new::<PyTypeError, _>("expected a scalar value"));
         }
 
         let array = np_asarray.call1((value,))?.cast_into::<PyUntypedArray>()?;
@@ -262,4 +278,12 @@ pub(crate) enum Scalar {
     Int(i64),
     Float(f64),
     Complex(Complex<f64>),
+}
+impl Scalar {
+    pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        match Operand::from_any_impl(value, true)? {
+            Operand::Scalar { value, .. } => Ok(value),
+            Operand::Array(_) => Err(PyErr::new::<PyTypeError, _>("expected a scalar value")),
+        }
+    }
 }

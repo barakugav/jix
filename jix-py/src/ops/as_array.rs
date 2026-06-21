@@ -32,7 +32,7 @@ use crate::ops::common::Operand;
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] view of the input. If `value` is already a [`jix.Array`][jix.Array], it is returned
-///     unchanged with no copy.
+///         unchanged with no copy.
 #[gen_stub_pyfunction]
 #[pyfunction]
 pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {

@@ -140,8 +140,9 @@ define_op2!(
     /// Element-wise left shift (`a << b`).
     ///
     /// Shifts the bits of each element of `a` left by the corresponding value in `b`.
-    /// Vacated bits are filled with zeros. Shifting by a value greater than or equal to
-    /// the bit width of the type is defined to produce zero, matching `u32::unbounded_shl`.
+    /// Vacated bits are filled with zeros. The shift uses Rust's `<<` operator: shifting by
+    /// a value greater than or equal to the bit width of the type panics in debug builds and
+    /// masks the shift amount modulo the bit width in release builds (it does NOT produce zero).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -176,8 +177,9 @@ define_op2!(
     /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
     /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
     /// sign bit (the result preserves the sign of the value).
-    /// Shifting by a value greater than or equal to the bit width of the type is
-    /// defined to produce zero, matching `u32::unbounded_shr`.
+    /// The shift uses Rust's `>>` operator: shifting by a value greater than or equal to the
+    /// bit width of the type panics in debug builds and masks the shift amount modulo the bit
+    /// width in release builds (it does NOT produce zero).
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///

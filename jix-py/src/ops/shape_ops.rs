@@ -350,17 +350,14 @@ pub(crate) struct ParsedBasicIndex {
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape.
 ///
-/// Each value in `axis` is a **gap index** that identifies a position before an existing
-/// dimension: `0` inserts before dimension 0 (a new leading axis), `1` inserts between
-/// dimensions 0 and 1, ..., `ndim` appends after the last dimension. Negative values are
-/// supported and are resolved against `ndim + 1`.
+/// This matches `numpy.expand_dims`: each value in `axis` refers to a position in the
+/// **output** (larger) shape, not the input shape. With `n = len(axis)` insertions the output
+/// has `ndim + n` dimensions, and the new length-1 axes end up at exactly the requested output
+/// positions while the original dimensions fill the rest in order. Negative values are
+/// supported and are resolved against the output ndim (`ndim + n`).
 ///
-/// Duplicate gap indices are allowed and each adds another length-1 dimension at the same
-/// position. The order of values in `axis` does not matter.
-///
-/// This differs from `numpy.expand_dims`, where each axis index refers to the new (larger)
-/// shape rather than the original shape. The inverse operation is
-/// [`jix.remove_axis()`][jix.remove_axis] (which is also exposed as
+/// Repeated output axes are rejected, exactly as in `numpy.expand_dims`. The inverse operation
+/// is [`jix.remove_axis()`][jix.remove_axis] (which is also exposed as
 /// [`jix.squeeze()`][jix.squeeze]).
 ///
 /// Output dtype and total number of elements equal the input.
@@ -369,8 +366,8 @@ pub(crate) struct ParsedBasicIndex {
 ///
 /// Args:
 ///     array: Input array.
-///     axis: Gap index or sequence of gap indices at which to insert new length-1 dimensions.
-///         Negative values are resolved against `ndim + 1`.
+///     axis: Output-shape index or sequence of indices at which to place new length-1
+///         dimensions. Negative values are resolved against the output ndim (`ndim + len(axis)`).
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with new length-1 axes inserted at the specified positions.
@@ -383,13 +380,11 @@ pub(crate) struct ParsedBasicIndex {
 ///     a = jix.compact([1, 2, 3], dtype=np.int32)   # shape [3]
 ///     assert jix.insert_axis(a, 0).numpy().shape == (1, 3)  # -> [1, 3]
 ///     assert jix.insert_axis(a, 1).numpy().shape == (3, 1)  # -> [3, 1]
-///     assert jix.insert_axis(a, -1).numpy().shape == (3, 1) # negative: same as [1]
+///     assert jix.insert_axis(a, -1).numpy().shape == (3, 1) # last axis of the output
 ///
 ///     b = jix.compact([[1, 2, 3], [4, 5, 6]], dtype=np.int32)  # shape [2, 3]
+///     # axes index the output shape: positions 0 and 2 become new length-1 axes
 ///     assert jix.insert_axis(b, [0, 2]).numpy().shape == (1, 2, 1, 3)    # -> [1, 2, 1, 3]
-///
-///     # duplicate axes: multiple length-1 dimensions at the same position
-///     assert jix.insert_axis(b, [0, 0, 0, 2]).shape() == (1, 1, 1, 2, 1, 3)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
@@ -397,23 +392,42 @@ pub fn insert_axis<'py>(
     array: &Bound<'py, PyAny>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    // NOTE: API different than numpy: axes are specified with respect to the original ndim, not the new ndim. Same
-    // axis can be specified multiple times to insert multiple axes in the same place.
     let py_arr = asarray(array)?;
     let array = py_arr.get().to_core();
-    let axes = normalize_axes(axis.into_vec(), array.ndim() + 1)?;
-    if axes.is_empty() {
+    let requested = axis.into_vec();
+    if requested.is_empty() {
         return Ok(py_arr); // no-op if no axes to insert
     }
-    let ret = jix_core::ops::InsertAxis::new_array(array, &axes).into_py_result()?;
+    // numpy.expand_dims semantics: each axis indexes the output (larger) shape.
+    let out_ndim = array.ndim() + requested.len();
+    let mut out_positions = normalize_axes(requested, out_ndim)?;
+    out_positions.sort_unstable();
+    // Repeated output positions are ambiguous; numpy.expand_dims rejects them too.
+    if let Some(w) = out_positions.windows(2).find(|w| w[0] == w[1]) {
+        return Err(PyValueError::new_err(format!(
+            "repeated axis {} in `axis` argument to insert_axis",
+            w[0]
+        )));
+    }
+    // Translate each output position into the core "gap index" (a position in the *input*
+    // shape): the i-th smallest output position has exactly i new axes before it, so the
+    // number of original dimensions preceding it - the gap index - is `position - i`.
+    let gaps: Vec<usize> = out_positions
+        .iter()
+        .enumerate()
+        .map(|(i, &pos)| pos - i)
+        .collect();
+    let ret = jix_core::ops::InsertAxis::new_array(array, &gaps).into_py_result()?;
     Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
 }
 /// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for [`jix.insert_axis()`][jix.insert_axis].
 ///
+/// Like `numpy.expand_dims`, each value in `axis` indexes the output (larger) shape.
+///
 /// Args:
 ///     array: Input array.
-///     axis: Gap index or sequence of gap indices at which to insert new length-1 dimensions.
-///         Negative values are resolved against `ndim + 1`.
+///     axis: Output-shape index or sequence of indices at which to place new length-1
+///         dimensions. Negative values are resolved against the output ndim (`ndim + len(axis)`).
 ///
 /// Returns:
 ///     A [`jix.Array`][jix.Array] with new length-1 axes inserted at the specified positions.

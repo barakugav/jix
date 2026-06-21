@@ -20,6 +20,10 @@ define_op2!(
     ///     a: First operand.
     ///     b: Second operand.
     ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. `True` where both
+    ///         operands are truthy, `False` otherwise.
+    ///
     /// Examples:
     ///     ```python
     ///     import jix
@@ -50,13 +54,17 @@ define_op2!(
     /// and `bool`. Output dtype is always `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero -> `True`), then the
-    /// logical OR is applied. Returns `True` when at least one element is truthy.
+    /// logical OR is applied.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
     ///     a: First operand.
     ///     b: Second operand.
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. `True` where at least
+    ///         one operand is truthy, `False` otherwise.
     ///
     /// Examples:
     ///     ```python
@@ -83,13 +91,17 @@ define_op2!(
     /// and `bool`. Output dtype is always `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero -> `True`), then the
-    /// logical XOR is applied. Returns `True` when exactly one element is truthy.
+    /// logical XOR is applied.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
     ///     a: First operand.
     ///     b: Second operand.
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. `True` where exactly
+    ///         one operand is truthy, `False` otherwise.
     ///
     /// Examples:
     ///     ```python
@@ -116,13 +128,16 @@ define_op1!(
     /// and `bool`. Output dtype is always `bool`.
     ///
     /// Each element is first cast to `bool` (zero -> `False`, any non-zero value -> `True`),
-    /// then negated. Returns `True` for zero (falsy) elements and `False` for non-zero
-    /// (truthy) elements.
+    /// then negated.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// Args:
     ///     array: Input array.
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the same shape as `array`. `True` for zero
+    ///         (falsy) elements, `False` for non-zero (truthy) elements.
     ///
     /// Examples:
     ///     ```python
@@ -162,7 +177,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///     occurs until the result is read.
+    ///         occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -202,7 +217,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///     occurs until the result is read.
+    ///         occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -242,7 +257,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///     occurs until the result is read.
+    ///         occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -276,7 +291,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -316,7 +331,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///     occurs until the result is read.
+    ///         occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -358,7 +373,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///     occurs until the result is read.
+    ///         occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -397,7 +412,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///     occurs until the result is read.
+    ///         occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -445,7 +460,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same dtype and broadcast shape. No computation
-    ///     occurs until the result is read.
+    ///         occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -488,7 +503,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
-    ///     dtype. No computation occurs until the result is read.
+    ///         dtype. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -521,7 +536,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
-    ///     dtype. No computation occurs until the result is read.
+    ///         dtype. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -559,7 +574,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
-    ///     dtype. No computation occurs until the result is read.
+    ///         dtype. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -597,7 +612,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array` and an unsigned integer output
-    ///     dtype. No computation occurs until the result is read.
+    ///         dtype. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -635,7 +650,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -667,7 +682,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`. No computation occurs until
-    ///     the result is read.
+    ///         the result is read.
     ///
     /// Examples:
     ///     ```python

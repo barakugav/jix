@@ -1,6 +1,11 @@
-use jix_core::scalar::{f16, Complex};
+use std::sync::LazyLock;
 
-use crate::ops::common::define_op2;
+use jix_core::dtype::Dtyped;
+use jix_core::scalar::{f16, Complex};
+use pyo3::prelude::*;
+
+use crate::asarray;
+use crate::ops::common::{define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar};
 
 define_op2!(
     /// Element-wise equality test (`a == b`).
@@ -22,7 +27,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -68,7 +73,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -108,7 +113,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -148,7 +153,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -188,7 +193,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -228,7 +233,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] of dtype `bool` with the broadcast shape. No computation occurs
-    ///     until the result is read.
+    ///         until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -269,7 +274,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] with the element-wise maximum and the broadcast shape. No
-    ///     computation occurs until the result is read.
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -317,7 +322,7 @@ define_op2!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] with the element-wise minimum and the broadcast shape. No
-    ///     computation occurs until the result is read.
+    ///         computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -343,3 +348,154 @@ define_op2!(
         Safe
     }
 );
+
+/// Clamps each element to the range `[min, max]`.
+///
+/// Elements below `min` are replaced by `min`; elements above `max` are replaced by `max`.
+/// Both `min` and `max` are optional: omitting one removes that bound.
+/// Passing neither `min` nor `max` returns a lazy view of the array unchanged.
+///
+/// Supported dtypes: `bool`, `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+/// `f16`, `f32`, `f64`.
+///
+/// Args:
+///     array: Input array.
+///     min: Lower bound (inclusive). A Python scalar or NumPy scalar. When omitted or `None`,
+///         no lower bound is applied.
+///     max: Upper bound (inclusive). A Python scalar or NumPy scalar. When omitted or `None`,
+///         no upper bound is applied.
+///
+/// Returns:
+///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`. No
+///         computation occurs until the result is read.
+///
+/// Raises:
+///     ValueError: If both `min` and `max` are provided and `min > max` (or either is `NaN`).
+///     TypeError: If a complex limit is provided.
+///
+/// Examples:
+///     ```python
+///     import jix
+///     import numpy as np
+///
+///     a = jix.compact([-3, 0, 5, 10], dtype=np.int32)
+///
+///     # Clamp to [0, 7].
+///     result = jix.clamp(a, min=0, max=7)
+///     assert np.array_equal(result.numpy(), [0, 0, 5, 7])
+///
+///     # Only a lower bound.
+///     result_min = jix.clamp(a, min=2)
+///     assert np.array_equal(result_min.numpy(), [2, 2, 5, 10])
+///
+///     # Only an upper bound.
+///     result_max = jix.clamp(a, max=4)
+///     assert np.array_equal(result_max.numpy(), [-3, 0, 4, 4])
+///
+///     # Float array: clamp to [0.0, 1.0].
+///     b = jix.compact([-0.5, 0.3, 1.2], dtype=np.float32)
+///     result_f = jix.clamp(b, min=0.0, max=1.0)
+///     assert np.allclose(result_f.numpy(), [0.0, 0.3, 1.0])
+///     ```
+#[pyo3_stub_gen::derive::gen_stub_pyfunction]
+#[pyo3::pyfunction(signature = (array, min=None, max=None))]
+pub fn clamp<'py>(
+    array: &Bound<'py, PyAny>,
+    min: Option<&Bound<'py, PyAny>>,
+    max: Option<&Bound<'py, PyAny>>,
+) -> pyo3::PyResult<Bound<'py, crate::Array>> {
+    if min.is_none() && max.is_none() {
+        return asarray(array);
+    }
+    let py = array.py();
+
+    struct ClampArgs {
+        min: Option<Scalar>,
+        max: Option<Scalar>,
+    }
+    fn clamp_op_descriptor<T>() -> OpFnDescriptor<1, ClampArgs>
+    where
+        T: Dtyped + PartialOrd,
+        bool: jix_core::scalar::Cast<T>,
+        u64: jix_core::scalar::Cast<T>,
+        i64: jix_core::scalar::Cast<T>,
+        f64: jix_core::scalar::Cast<T>,
+    {
+        OpFnDescriptor::new1_args::<T>(CastKind::None, |a, args: ClampArgs| {
+            let [min, max] = [args.min, args.max].map(|limit| {
+                limit.map(|limit| match limit {
+                    Scalar::Bool(v) => <bool as jix_core::scalar::Cast<T>>::cast(v),
+                    Scalar::UInt(v) => <u64 as jix_core::scalar::Cast<T>>::cast(v),
+                    Scalar::Int(v) => <i64 as jix_core::scalar::Cast<T>>::cast(v),
+                    Scalar::Float(v) => <f64 as jix_core::scalar::Cast<T>>::cast(v),
+                    Scalar::Complex(_) => unimplemented!(),
+                })
+            });
+            Ok(match (min, max) {
+                (None, None) => a.into_type_dyn().into_any(),
+                (Some(min), None) => a
+                    .map(move |x| if x < min { min } else { x })
+                    .into_type_dyn()
+                    .into_any(),
+                (None, Some(max)) => a
+                    .map(move |x| if x > max { max } else { x })
+                    .into_type_dyn()
+                    .into_any(),
+                (Some(min), Some(max)) => {
+                    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+                    if !(min <= max) {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "min must be less than or equal to max",
+                        ));
+                    }
+                    a.map(move |x| {
+                        if x < min {
+                            min
+                        } else if x > max {
+                            max
+                        } else {
+                            x
+                        }
+                    })
+                    .into_type_dyn()
+                    .into_any()
+                }
+            })
+        })
+    }
+    static DISPATCH_TABLE: LazyLock<OpDescriptor<1, ClampArgs>> = LazyLock::new(|| {
+        OpDescriptor::new(
+            "clamp",
+            vec![
+                clamp_op_descriptor::<bool>(),
+                clamp_op_descriptor::<u8>(),
+                clamp_op_descriptor::<i8>(),
+                clamp_op_descriptor::<u16>(),
+                clamp_op_descriptor::<i16>(),
+                clamp_op_descriptor::<u32>(),
+                clamp_op_descriptor::<i32>(),
+                clamp_op_descriptor::<u64>(),
+                clamp_op_descriptor::<i64>(),
+                clamp_op_descriptor::<f16>(),
+                clamp_op_descriptor::<f32>(),
+                clamp_op_descriptor::<f64>(),
+            ],
+        )
+    });
+    let array = Operand::from_any(array)?;
+    let args = ClampArgs {
+        min: min.map(|m| Scalar::from_any(m)).transpose()?,
+        max: max.map(|m| Scalar::from_any(m)).transpose()?,
+    };
+    for limit in [&args.min, &args.max] {
+        if let Some(limit) = limit
+            && matches!(limit, Scalar::Complex(_))
+        {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "clamp does not support complex limits",
+            ));
+        }
+    }
+    let res = DISPATCH_TABLE.dispatch_args([array], args)?;
+    Bound::new(py, crate::Array::from_core(res))
+}

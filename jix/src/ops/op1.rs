@@ -80,6 +80,7 @@ where
         dtype
     }
 
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.array.spec()
     }
@@ -300,6 +301,35 @@ pub(crate) mod _traits {
         |a| a.abs(),
         [i8, i16, i32, i64, f32, f64] => "same"
     );
+    define_op1_trait!(
+        Sign,
+        sign,
+        |a| a.signum(),
+        [i8, i16, i32, i64, f32, f64] => "same"
+    );
+    #[cfg(feature = "half")]
+    impl Sign for f16 {
+        type Output = f16;
+
+        #[inline(always)]
+        fn sign(self) -> Self::Output {
+            <Self as num_traits::Float>::signum(self)
+        }
+    }
+    macro_rules! impl_sign_uint {
+        ($($t:ty),*) => {
+            $(
+                impl Sign for $t {
+                    type Output = $t;
+                    #[inline(always)]
+                    fn sign(self) -> Self::Output {
+                        if self == 0 { 0 } else { 1 }
+                    }
+                }
+            )*
+        };
+    }
+    impl_sign_uint!(u8, u16, u32, u64);
     #[cfg(feature = "half")]
     impl Abs for f16 {
         type Output = f16;
@@ -736,36 +766,47 @@ define_op1!(
     type Output<T> = T,
 );
 define_op1!(
-    /// Returns the sign of each element as a floating-point value.
+    /// Returns the sign of each element.
     ///
-    /// Returns `+1.0` for positive values and `-1.0` for negative values.
-    /// Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns `-1.0`.
-    /// Semantics follow [`f32::signum`].
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// `f16`, `f32`, `f64`.
+    ///
+    /// For **signed integer** types: returns `-1`, `0`, or `+1` of the same type.
+    ///
+    /// For **unsigned integer** types: returns `0` or `1` of the same type (since
+    /// unsigned values cannot be negative).
+    ///
+    /// For **float** types: returns `+1.0` for positive values and `-1.0` for
+    /// negative values. Zero is signed: `+0.0` returns `+1.0` and `-0.0` returns
+    /// `-1.0`. Semantics follow [`f32::signum`].
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// [`Array::signum()`](crate::Array::signum).
+    /// [`Array::sign()`](crate::Array::sign).
     ///
     /// # Examples
     /// ```
     /// use jix::Array;
     /// use ndarray::array;
     ///
-    /// let a = Array::compact_ndarray(&array![3.0f32, -5.0, -0.1])?;
-    /// let result = a.signum().to_ndarray()?;
+    /// let a = Array::compact_ndarray(&array![3i32, -5, 0])?;
+    /// let result = a.sign().to_ndarray()?;
+    /// assert_eq!(result.as_slice().unwrap(), &[1, -1, 0]);
+    ///
+    /// let b = Array::compact_ndarray(&array![3.0f32, -5.0, -0.1])?;
+    /// let result = b.sign().to_ndarray()?;
     /// assert_eq!(result.as_slice().unwrap(), &[1.0, -1.0, -1.0]);
     ///
-    /// // Positive zero returns +1.0.
-    /// let b = Array::compact_ndarray(&array![0.0f32])?;
-    /// let result = b.signum().to_ndarray()?;
+    /// // Float: positive zero returns +1.0.
+    /// let c = Array::compact_ndarray(&array![0.0f32])?;
+    /// let result = c.sign().to_ndarray()?;
     /// assert_eq!(result[[0]], 1.0);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    Signum,
-    SignumKernel,
-    <num_traits::Float>::signum,
-    type Output<T> = T,
+    Sign,
+    SignKernel,
+    <crate::scalar::Sign>::sign,
 );
 define_op1!(
     /// Computes the absolute value of each element.
@@ -839,7 +880,7 @@ where
     define_array_op1_method!(asin: Asin, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(acos: Acos, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(atan: Atan, num_traits::Float, fixed_output_type = true);
-    define_array_op1_method!(signum: Signum, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(sign: Sign, crate::scalar::Sign);
     define_array_op1_method!(abs: Abs, crate::scalar::Abs);
 }
 
@@ -920,12 +961,18 @@ pub(crate) mod tests {
     test_op1!(acos, |a| a.acos(), [f32, f64], unit_strategy);
     test_op1!(atan, |a| a.atan(), [f32, f64], op_safe_strategy);
     test_op1!(
-        signum,
+        sign,
         |a| a.signum(),
-        [f32, f64],
+        [i8, i16, i32, i64, f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]
         [f16]
+    );
+    test_op1!(
+        sign,
+        |a| if a == 0 { a - a } else { a - a + 1 },
+        [u8, u16, u32, u64],
+        op_safe_strategy
     );
     // abs: same dtype for scalar types; complex types have a different output dtype (see below).
     test_op1!(

@@ -265,6 +265,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn dtype(&self) -> &Dtype {
         self.array.dtype()
     }
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.array.spec().with_block_spec(&self.block_spec)
     }

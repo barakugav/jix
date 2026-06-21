@@ -161,6 +161,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         self.array.dtype()
     }
 
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.array.spec()
     }

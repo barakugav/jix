@@ -16,7 +16,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`, holding the
-    ///     real components.
+    ///         real components.
     ///
     /// Examples:
     ///     ```python
@@ -50,7 +50,7 @@ define_op1!(
     ///
     /// Returns:
     ///     A lazy [`jix.Array`][jix.Array] view with the same shape as `array`, holding the
-    ///     imaginary components.
+    ///         imaginary components.
     ///
     /// Examples:
     ///     ```python

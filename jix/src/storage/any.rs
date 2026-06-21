@@ -66,6 +66,7 @@ impl ArrayStorage for ArrayStorageAny {
         self.element_type.dtype()
     }
 
+    #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         unsafe { self.spec.as_ref(|| self.inner.spec()) }
     }

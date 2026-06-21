@@ -66,7 +66,7 @@ mod jix {
 
     #[pymodule_export]
     pub use crate::ops::{
-        absolute, acos, asin, atan, ceil, cos, exp, floor, log, negative, round, signum, sin, sqrt,
+        absolute, acos, asin, atan, ceil, cos, exp, floor, log, negative, round, sign, sin, sqrt,
         tan,
     };
 
@@ -74,7 +74,7 @@ mod jix {
     pub use crate::ops::{is_finite, is_infinite, is_nan};
 
     #[pymodule_export]
-    pub use crate::ops::{all, any, argmax, argmin, max, mean, min, product, std, sum, var};
+    pub use crate::ops::{all, any, argmax, argmin, clamp, max, mean, min, product, std, sum, var};
 
     #[pymodule_export]
     pub use crate::ops::dtype_sub_field;
@@ -90,6 +90,7 @@ mod jix {
         m.add("pow", m.getattr("power")?)?;
         m.add("abs", m.getattr("absolute")?)?;
         m.add("concat", m.getattr("concatenate")?)?;
+        m.add("clip", m.getattr("clamp")?)?;
 
         Ok(())
     }

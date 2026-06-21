@@ -15,8 +15,15 @@ dynamic = [
     "license",
     "keywords",
     "classifiers",
-    "urls",
 ]
+
+
+[project.urls]
+documentation = "https://jix.readthedocs.io/en/latest/"
+homepage = "https://github.com/barakugav/jix"
+source = "https://github.com/barakugav/jix"
+releasenotes = "https://github.com/barakugav/jix/releases"
+issues = "https://github.com/barakugav/jix/issues"
 
 [project.optional-dependencies]
 tests = ["pytest"]

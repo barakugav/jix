@@ -42,8 +42,17 @@ impl Precision {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CastKind {
+    /// No casting
     None,
+    /// f16->f32->f64
+    /// i8->i16->i32->i64
+    /// u8->u16->u32->u64
+    /// u8->i16
+    /// u16->i32
+    /// u32->i64
+    /// u64->f64
     Safe,
+    /// Allow any cast, even if it loses information
     Unsafe,
 }
 

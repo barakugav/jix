@@ -119,6 +119,7 @@ where
     fn dtype(&self) -> &crate::dtype::Dtype {
         self.inner.dtype()
     }
+    #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
         self.inner.spec()
     }

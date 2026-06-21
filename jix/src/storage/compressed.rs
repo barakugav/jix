@@ -46,6 +46,49 @@ use crate::{ArrayParams, ArrayStorage, Dimension};
 ///
 /// Created by [`Array::compact_ndarray`](crate::Array::compact_ndarray), [`Array::compact`](crate::Array::compact)
 /// and their variants or by deserializing an archive file. The memory-mapped equivalent is [`CompactMmap`].
+///
+/// # Block codec pipeline
+///
+/// Each block of array data is encoded through a two-stage pipeline before being stored:
+///
+/// ```text
+/// raw block bytes
+///     |
+///     v
+/// [ Filter 0 ] -> [ Filter 1 ] -> ...  (optional pre-compression transforms)
+///     |
+///     v
+/// [ Codec (e.g. Zstd) ]                (lossless compression)
+///     |
+///     v
+/// stored block bytes
+/// ```
+///
+/// Decoding reverses the pipeline exactly: decompress first, then apply the filters in reverse
+/// order.
+///
+/// ## Configuration
+///
+/// The codec, compression level, and filter pipeline are chosen at write time through
+/// [`ArrayParams`](crate::ArrayParams): [`codec`](crate::ArrayParams::codec),
+/// [`level`](crate::ArrayParams::level), and [`filters`](crate::ArrayParams::filters). They are
+/// stored alongside the data so the correct decoder is reconstructed automatically on read - readers
+/// never need to know the settings in advance.
+///
+/// ## Filters
+///
+/// [`Filter`](crate::Filter)s are byte-level transforms that rearrange element data into a layout
+/// that compresses more efficiently, then reverse the transform after decompression. For most
+/// numeric workloads [`Filter::ByteShuffle`](crate::Filter::ByteShuffle) is the right default.
+/// [`Filter::BitShuffle`](crate::Filter::BitShuffle) can squeeze out more compression for
+/// low-entropy data at higher CPU cost.
+///
+/// ## Read context
+///
+/// [`ReadContext`](crate::ReadContext) holds a long-lived decompressor instance and reusable scratch
+/// buffers. Create one per thread and pass it to every read call to amortize initialization overhead
+/// across many block reads. The preferred way to obtain one is
+/// [`Array::read_ctx()`](crate::Array::read_ctx).
 pub struct Compact<ET, D>(
     pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Owned, ET, D>,
 );
@@ -68,6 +111,8 @@ pub struct CompactBorrowed<'a, ET, D>(
 /// carry the same semantics as in [`Compact<ET, D>`](Compact).
 ///
 /// Created by [`Array::read_from_file_mmap`](crate::Array::read_from_file_mmap).
+///
+/// See [`Compact`] for more details.
 pub struct CompactMmap<ET, D>(
     pub(crate) ArrayBlockTableStorageBase<crate::storage::block::Mmap, ET, D>,
 );
@@ -100,6 +145,7 @@ macro_rules! impl_array_storage {
                 self.0.blocks.dtype()
             }
 
+            #[inline]
             fn spec(&self) -> ArraySpec<'_> {
                 self.0.spec.as_ref()
             }
