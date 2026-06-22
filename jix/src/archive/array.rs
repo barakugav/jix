@@ -9,7 +9,7 @@ use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, Error, Result};
-use crate::storage::block::{BlockFn, BlockSize, BlockTable, BlockTableStorage};
+use crate::storage::block::{BlockFn, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimArray, Idx, IterExt};
 use crate::{

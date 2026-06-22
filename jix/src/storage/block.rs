@@ -33,7 +33,7 @@ pub type BlockSize = u32;
 ///
 /// The generic parameter `S: `[`BlockTableStorage`] determines how `block_data` and `block_offsets`
 /// are held in memory:
-/// - [`Owned`] - heap-allocated; produced by [`BlockTableBuilder`] or [`Self::build_from_data`].
+/// - [`Owned`] - heap-allocated; produced by [`OwnedBlockTableBuilder`] or [`Self::build_from_data`].
 /// - [`Borrowed<'a>`] - borrowed slice; zero-copy view into an existing byte buffer.
 /// - [`Mmap`] - memory-mapped file; data is read from disk on demand by the OS.
 ///
@@ -204,16 +204,33 @@ where
     }
 }
 
-/// In-memory counterpart of
-/// [`BlockArchiveWriter`](crate::archive::block::BlockArchiveWriter): accumulates compressed
-/// blocks and their end-offsets into heap `Vec`s and produces a [`BlockTable<Owned>`].
+/// A sink that consumes a block table's compressed blocks one at a time and finalizes into some
+/// output - either an in-memory [`BlockTable`] ([`OwnedBlockTableBuilder`]) or bytes streamed to an
+/// archive ([`BlockArchiveWriter`](crate::archive::block::BlockArchiveWriter)).
 ///
-/// Driven by the same explicit loop as `BlockArchiveWriter` - [`start`](Self::start), then per
-/// block [`write_compressed_block`](Self::write_compressed_block), then
-/// [`finalize`](Self::finalize) to produce the table. The two types deliberately share method
-/// names and signatures so they can implement a common trait in the future; the only divergence is
-/// that `finalize` yields the built `BlockTable` rather than writing bytes to a sink.
-pub(crate) struct BlockTableBuilder<ET> {
+/// Construction is type-specific (the archive writer needs a sink to write into and borrows its
+/// codec config; the owned builder needs neither), so each implementor provides its own inherent
+/// `start` constructor. This trait captures the shared driving protocol: feed every block in order
+/// via [`write_compressed_block`](Self::write_compressed_block), then call
+/// [`finalize`](Self::finalize).
+pub(crate) trait BlockTableBuilder {
+    /// What [`finalize`](Self::finalize) yields: the built [`BlockTable`] for an in-memory builder,
+    /// or `()` when the blocks are streamed straight to a writer.
+    type Output;
+
+    /// Append one block's compressed bytes, recording its end-offset. Blocks must be supplied in
+    /// order, `0, 1, ..., nblocks - 1`.
+    fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()>;
+
+    /// Consume the sink, completing the block table and returning its [`Output`](Self::Output).
+    fn finalize(self) -> Result<Self::Output>;
+}
+
+/// In-memory implementor of [`BlockTableBuilder`] and counterpart of
+/// [`BlockArchiveWriter`](crate::archive::block::BlockArchiveWriter): accumulates compressed blocks
+/// and their end-offsets into heap `Vec`s and produces a [`BlockTable<Owned>`]. Construct with
+/// [`start`](Self::start), then drive via the [`BlockTableBuilder`] trait.
+pub(crate) struct OwnedBlockTableBuilder<ET> {
     block_data: Vec<u8>,
     block_offsets: Vec<u64>,
     block_size: BlockSize,
@@ -225,7 +242,7 @@ pub(crate) struct BlockTableBuilder<ET> {
     _marker: PhantomData<ET>,
 }
 
-impl<ET> BlockTableBuilder<ET>
+impl<ET> OwnedBlockTableBuilder<ET>
 where
     ET: ElementType,
 {
@@ -247,11 +264,18 @@ where
             _marker: PhantomData,
         })
     }
+}
+
+impl<ET> BlockTableBuilder for OwnedBlockTableBuilder<ET>
+where
+    ET: ElementType,
+{
+    type Output = BlockTable<Owned, ET>;
 
     /// Append one compressed block's bytes and record its end-offset. On the first call, pushes
     /// the leading `0`; the block's end-offset is derived from the running total plus
     /// `compressed.len()`.
-    pub(crate) fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
+    fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
         self.block_data.extend_from_slice(compressed);
         self.block_data_total_len += compressed.len() as u64;
         if self.block_offsets.is_empty() {
@@ -262,7 +286,7 @@ where
     }
 
     /// Consume the builder and produce the [`BlockTable`].
-    pub(crate) fn finalize(self) -> Result<BlockTable<Owned, ET>> {
+    fn finalize(self) -> Result<BlockTable<Owned, ET>> {
         debug_assert_eq!(
             self.block_offsets.len(),
             if self.nblocks == 0 {
@@ -285,7 +309,7 @@ impl<ET> BlockTable<Owned, ET> {
     ///
     /// Splits `data` into chunks of `block_size * dtype.itemsize()` bytes, compresses each
     /// chunk with `encoder`, and returns the fully constructed table.
-    /// This is the single-call alternative to the incremental [`BlockTableBuilder`].
+    /// This is the single-call alternative to the incremental [`OwnedBlockTableBuilder`].
     ///
     /// # Arguments
     ///
@@ -420,8 +444,8 @@ impl BlockTableStorage for Mmap {
     type Data<T: 'static> = MmapData<T>;
 }
 
-/// A source of pre-compressed block data consumed by [`BlockTableBuilder`] and
-/// `BlockArchiveWriter`.
+/// A source of pre-compressed block data consumed by [`BlockTableBuilder`] implementors such as
+/// [`OwnedBlockTableBuilder`] and `BlockArchiveWriter`.
 ///
 /// Both consumers iterate over blocks in order and call `get_compressed_block` once per block.
 /// The implementor is responsible for compressing the requested block and returning its bytes.

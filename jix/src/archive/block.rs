@@ -7,7 +7,9 @@ use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter};
 use crate::dtype::Dtype;
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
-use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned};
+use crate::storage::block::{
+    BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData, Owned,
+};
 use crate::util::arrayvec::ArrayVec;
 use crate::util::{cast_slice, cast_slice_mut, value_as_bytes, value_from_io, Idx, SendSyncPtr};
 use crate::{ArchiveValidation, ElementType, TypeDyn};
@@ -204,30 +206,6 @@ where
         })
     }
 
-    /// Write one compressed block's bytes at the current data-section position (no seek) and
-    /// record its end-offset. On the first call, pushes the leading `0`; the block's end-offset is
-    /// derived from the running total plus `compressed.len()`. Periodically flushes the buffered
-    /// offsets, seeking back to the data section afterward, to bound memory use.
-    pub(crate) fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
-        if self.first_block {
-            self.offsets_write_buf.push(0);
-            self.first_block = false;
-        }
-        self.writer.write_all(compressed).map_err(Error::io)?;
-        self.block_data_total_len += compressed.len() as u64;
-        self.offsets_write_buf.push(self.block_data_total_len);
-
-        if self.offsets_write_buf.len() > 8192 {
-            self.flush_offsets()?;
-            self.writer
-                .seek(SeekFrom::Start(
-                    self.block_data_offset + self.block_data_total_len,
-                ))
-                .map_err(Error::io)?;
-        }
-        Ok(())
-    }
-
     /// Write any buffered offsets to the offsets section. Leaves the stream positioned in the
     /// offsets section (callers either seek back to the data section or proceed to finalize).
     fn flush_offsets(&mut self) -> Result<()> {
@@ -243,10 +221,41 @@ where
         self.offsets_write_buf.clear();
         Ok(())
     }
+}
+
+impl<'w, W> BlockTableBuilder for BlockArchiveWriter<'w, W>
+where
+    W: Write + Seek,
+{
+    type Output = ();
+
+    /// Write one compressed block's bytes at the current data-section position (no seek) and
+    /// record its end-offset. On the first call, pushes the leading `0`; the block's end-offset is
+    /// derived from the running total plus `compressed.len()`. Periodically flushes the buffered
+    /// offsets, seeking back to the data section afterward, to bound memory use.
+    fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
+        if self.first_block {
+            self.offsets_write_buf.push(0);
+            self.first_block = false;
+        }
+        self.writer.write_all(compressed).map_err(Error::io)?;
+        self.block_data_total_len += compressed.len() as u64;
+        self.offsets_write_buf.push(self.block_data_total_len);
+
+        if self.offsets_write_buf.len() >= 8192 {
+            self.flush_offsets()?;
+            self.writer
+                .seek(SeekFrom::Start(
+                    self.block_data_offset + self.block_data_total_len,
+                ))
+                .map_err(Error::io)?;
+        }
+        Ok(())
+    }
 
     /// Overwrite the placeholder TOC with the real section positions/sizes, then restore the
     /// stream to the end of the data section. Consumes `self`, releasing the writer borrow.
-    pub(crate) fn finalize(mut self) -> Result<()> {
+    fn finalize(mut self) -> Result<()> {
         self.flush_offsets()?;
 
         let table_of_contents = [

@@ -6,7 +6,7 @@ use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::MaybeCompact;
-use crate::storage::block::{BlockFn, BlockFnWithState, BlockTableBuilder};
+use crate::storage::block::{BlockFn, BlockFnWithState, BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, Compact, Ref,
@@ -961,7 +961,7 @@ impl<S: ArrayStorage> Array<S> {
         };
 
         let mut block_fn = self.to_block_fn(&params, context)?;
-        let mut builder = BlockTableBuilder::start(nblocks, block_size, decoder_cfg)?;
+        let mut builder = OwnedBlockTableBuilder::start(nblocks, block_size, decoder_cfg)?;
         for block_index in 0..nblocks {
             let data = block_fn.get_compressed_block(block_index)?;
             builder.write_compressed_block(data)?;
