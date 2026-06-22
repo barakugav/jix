@@ -9,14 +9,13 @@ use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockFn, BlockFnWithState, BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, Compact, Ref,
+    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlockSize, Compact, Ref,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
-    assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, DimArray,
-    IterExt,
+    assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, IterExt,
 };
 use crate::{
     ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
@@ -939,6 +938,33 @@ impl<S: ArrayStorage> Array<S> {
         mut params: ArrayParams,
         context: &ReadContext,
     ) -> Result<Array<Compact<S::ElementType, S::Dimension>>> {
+        let blocks = self.compact_into_builder(
+            &mut params,
+            context,
+            |nblocks, block_shape, decoder_config| {
+                let block_size = block_shape.iter().cloned().try_product().unwrap();
+                OwnedBlockTableBuilder::start(nblocks, block_size, decoder_config)
+            },
+        )?;
+        let shape = S::Dimension::from_slice(&self.shape());
+        Ok(Array {
+            storage: Compact(ArrayBlockTableStorageBase::new(blocks, shape, params)?),
+        })
+    }
+
+    pub(crate) fn compact_into_builder<B>(
+        &self,
+        params: &mut ArrayParams,
+        context: &ReadContext,
+        builder_init: impl FnOnce(
+            /* nblocks */ u64,
+            /* block_shape */ &[BlockSize],
+            /* decoder_config */ DecoderCodecConfig,
+        ) -> Result<B>,
+    ) -> Result<B::Output>
+    where
+        B: BlockTableBuilder,
+    {
         let shape = self.shape();
         let ndim = shape.len();
         let dtype = self.dtype();
@@ -946,32 +972,24 @@ impl<S: ArrayStorage> Array<S> {
         params.override_from_storage(&self.storage);
         params.tune(shape, dtype)?;
 
-        let shape = DimArray::from_slice(shape).unwrap();
-        let encoder_params = params.encoder_params.clone().unwrap_or_default();
-
         let block_shape = params.block_shape.as_ref().unwrap();
-        let block_size = block_shape.iter().cloned().try_product().unwrap();
         let grid_shape = dim_arr(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
         let nblocks = grid_shape.iter().cloned().try_product().unwrap();
 
+        let encoder_params = params.encoder_params.clone().unwrap_or_default();
         let decoder_cfg = DecoderCodecConfig {
-            codec: encoder_params.codec.clone(),
-            filters: encoder_params.filters.clone(),
+            codec: encoder_params.codec,
+            filters: encoder_params.filters,
             dtype: dtype.clone(),
         };
 
         let mut block_fn = self.to_block_fn(&params, context)?;
-        let mut builder = OwnedBlockTableBuilder::start(nblocks, block_size, decoder_cfg)?;
+        let mut builder = builder_init(nblocks, block_shape, decoder_cfg)?;
         for block_index in 0..nblocks {
             let data = block_fn.get_compressed_block(block_index)?;
             builder.write_compressed_block(data)?;
         }
-        let blocks = builder.finalize()?;
-
-        let shape = S::Dimension::from_slice(&shape);
-        Ok(Array {
-            storage: Compact(ArrayBlockTableStorageBase::new(blocks, shape, params)?),
-        })
+        builder.finalize()
     }
 
     /// Create a [`ReadContext`] with parameters derived from this array.
