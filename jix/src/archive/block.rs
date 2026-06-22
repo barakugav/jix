@@ -17,8 +17,8 @@ use crate::{ArchiveValidation, ElementType, TypeDyn};
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
 ///
 /// [`BlockTable::read_content`] calls `read_section` twice - once for `block_data` (`T = u8`)
-/// and once for `block_offsets` (`T = u64`) - delegating all I/O and lifetime management to the
-/// storage-specific implementation:
+/// and once for `block_offsets` (`T = [u64; 2]`) - delegating all I/O and lifetime management to
+/// the storage-specific implementation:
 ///
 /// - [`Owned`] - reads the section bytes into a freshly allocated `Vec<T>`.
 /// - [`Mmap`] - returns a zero-copy [`MmapData<T>`] pointer into the already-mapped region.
@@ -83,8 +83,8 @@ where
         let mut block_writer =
             BlockArchiveWriter::start(writer, nblocks, self.block_size, self.decoder_config())?;
         for block_index in 0..nblocks {
-            let i = block_index as usize;
-            let data = &block_data[block_offsets[i] as usize..block_offsets[i + 1] as usize];
+            let [offset, length] = block_offsets[block_index as usize];
+            let data = &block_data[offset as usize..][..length as usize];
             block_writer.write_compressed_block(data)?;
         }
         block_writer.finalize()
@@ -104,28 +104,26 @@ where
 /// ```text
 /// [ protobuf BlockTableHeader ]
 /// [ TOC placeholder: 2 * Section (overwritten by finalize) ]
-/// [ alignment padding to u64 boundary ]
-/// [ block_offsets: (nblocks + 1) * u64, or 0 entries when nblocks == 0 ]
+/// [ alignment padding to 8-byte boundary ]
+/// [ block_offsets: nblocks * [u64; 2]  (one [offset, length] pair per block) ]
 /// [ block_data:    concatenated compressed block bytes ]
 /// ```
 pub(crate) struct BlockArchiveWriter<'w, W> {
     writer: &'w mut ArchiveWriter<W>,
     /// Absolute offset of the TOC placeholder, overwritten by `finalize`.
     toc_offset: u64,
-    /// Absolute offset where the `block_offsets` section begins (u64-aligned).
+    /// Absolute offset where the `block_offsets` section begins (8-byte aligned).
     block_offsets_offset: u64,
     /// Absolute offset where the `block_data` section begins.
     block_data_offset: u64,
-    /// Number of u64 entries in the offsets section: `nblocks + 1`, or 0 when `nblocks == 0`.
+    /// Number of `[u64; 2]` pair entries in the offsets section, one per block: `nblocks`.
     block_offsets_num: u64,
-    /// Offsets accumulated since the last flush.
-    offsets_write_buf: Vec<u64>,
-    /// Number of offset entries already persisted to the offsets section.
+    /// Offset pairs accumulated since the last flush.
+    offsets_write_buf: Vec<[u64; 2]>,
+    /// Number of offset pairs already persisted to the offsets section.
     written_offsets_num: u64,
     /// Total bytes of compressed block data written so far.
     block_data_total_len: u64,
-    /// Whether the leading `0` offset has been pushed yet.
-    first_block: bool,
 }
 
 impl<'w, W> BlockArchiveWriter<'w, W>
@@ -175,7 +173,8 @@ where
 
         let block_offsets_offset = {
             let current_offset = writer.stream_position().map_err(Error::io)?;
-            let block_offsets_offset = current_offset.ceil_to_multiple(align_of::<u64>() as u64);
+            let block_offsets_offset =
+                current_offset.ceil_to_multiple(align_of::<[u64; 2]>() as u64);
             let padding = (block_offsets_offset - current_offset) as usize;
             if padding > 0 {
                 let padding_buf = [0u8; size_of::<u64>()];
@@ -185,8 +184,9 @@ where
             }
             block_offsets_offset
         };
-        let block_offsets_num = if nblocks == 0 { 0 } else { nblocks + 1 };
-        let block_data_offset = block_offsets_offset + block_offsets_num * size_of::<u64>() as u64;
+        let block_offsets_num = nblocks;
+        let block_data_offset =
+            block_offsets_offset + block_offsets_num * size_of::<[u64; 2]>() as u64;
 
         // Seek to data section; the loop writes there without seeking.
         writer
@@ -202,7 +202,6 @@ where
             offsets_write_buf: Vec::new(),
             written_offsets_num: 0,
             block_data_total_len: 0,
-            first_block: true,
         })
     }
 
@@ -210,12 +209,12 @@ where
     /// offsets section (callers either seek back to the data section or proceed to finalize).
     fn flush_offsets(&mut self) -> Result<()> {
         let offsets_offset =
-            self.block_offsets_offset + self.written_offsets_num * size_of::<u64>() as u64;
+            self.block_offsets_offset + self.written_offsets_num * size_of::<[u64; 2]>() as u64;
         self.writer
             .seek(SeekFrom::Start(offsets_offset))
             .map_err(Error::io)?;
         self.writer
-            .write_all(unsafe { cast_slice::<u64, u8>(self.offsets_write_buf.as_slice()) })
+            .write_all(unsafe { cast_slice::<[u64; 2], u8>(self.offsets_write_buf.as_slice()) })
             .map_err(Error::io)?;
         self.written_offsets_num += self.offsets_write_buf.len() as u64;
         self.offsets_write_buf.clear();
@@ -230,17 +229,15 @@ where
     type Output = ();
 
     /// Write one compressed block's bytes at the current data-section position (no seek) and
-    /// record its end-offset. On the first call, pushes the leading `0`; the block's end-offset is
-    /// derived from the running total plus `compressed.len()`. Periodically flushes the buffered
-    /// offsets, seeking back to the data section afterward, to bound memory use.
+    /// record its `[offset, length]` pair: the offset is the running total before the write and the
+    /// length is `compressed.len()`. Periodically flushes the buffered offsets, seeking back to the
+    /// data section afterward, to bound memory use.
     fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
-        if self.first_block {
-            self.offsets_write_buf.push(0);
-            self.first_block = false;
-        }
+        let offset = self.block_data_total_len;
         self.writer.write_all(compressed).map_err(Error::io)?;
         self.block_data_total_len += compressed.len() as u64;
-        self.offsets_write_buf.push(self.block_data_total_len);
+        self.offsets_write_buf
+            .push([offset, compressed.len() as u64]);
 
         if self.offsets_write_buf.len() >= 8192 {
             self.flush_offsets()?;
@@ -261,7 +258,7 @@ where
         let table_of_contents = [
             Section {
                 offset: self.block_offsets_offset as i64 - self.writer.base_offset as i64,
-                size: self.block_offsets_num * size_of::<u64>() as u64,
+                size: self.block_offsets_num * size_of::<[u64; 2]>() as u64,
             },
             Section {
                 offset: self.block_data_offset as i64 - self.writer.base_offset as i64,
@@ -385,7 +382,8 @@ where
                 };
 
                 let block_data = storage.read_section(reader, block_data_section)?;
-                let block_offsets = storage.read_section(reader, block_offsets_section)?;
+                let block_offsets =
+                    storage.read_section::<[u64; 2], _>(reader, block_offsets_section)?;
                 (block_data, block_offsets)
             }
             None => bail!(InvalidArchive, "missing body description in header"),
@@ -396,15 +394,18 @@ where
             ArchiveValidation::Minimal => false,
             ArchiveValidation::Strict => true,
         };
-        if check_offsets && !block_offsets.as_ref().is_empty() {
-            let block_offsets = block_offsets.as_ref();
-            let monotonic = block_offsets.windows(2).all(|w| w[0] <= w[1]);
-            // enough to check the last because of monotonicity
-            let in_bounds = *block_offsets.last().unwrap() <= block_data.as_ref().len() as u64;
+        if check_offsets {
+            let data_len = block_data.as_ref().len() as u64;
+            // Each block's [offset, length] range must lie within the data section. Blocks may be
+            // stored in any order, so there is no cross-block ordering to check.
+            let valid = block_offsets
+                .as_ref()
+                .iter()
+                .all(|&[offset, length]| offset <= data_len && length <= data_len - offset);
             ensure!(
-                monotonic && in_bounds,
+                valid,
                 InvalidArchive,
-                "invalid block offsets: monotonic={monotonic}, in_bounds={in_bounds}"
+                "invalid block offsets: an [offset, length] pair is out of bounds"
             );
         }
 
