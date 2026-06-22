@@ -328,7 +328,9 @@ where
             .filter(|&dim| self.is_reduced[dim])
             .chain((0..inner_ndim).rev().filter(|&dim| !self.is_reduced[dim]));
         let tile_shape: S::Dimension = self.array.spec().read_shape_heuristic_with_scale_order(
-            &inner_range_full,
+            &dim_arr(inner_ndim, |dim| {
+                inner_range_full[dim].end - inner_range_full[dim].start
+            }),
             self.array.shape(),
             size_of::<S::Item>() as _,
             tile_scale_order,

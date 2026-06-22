@@ -15,7 +15,8 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
-    assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, AlignedBytes, IterExt,
+    assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, scale_read_shape,
+    AlignedBytes, IterExt,
 };
 use crate::{
     ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
@@ -800,7 +801,9 @@ impl<S: ArrayStorage> Array<S> {
             return self.storage.read_data(index, buf, context);
         }
 
-        let read_shape: S::Dimension = spec.read_shape_heuristic(index, shape, dtype.itemsize());
+        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let read_shape: S::Dimension =
+            spec.read_shape_heuristic(&out_shape, shape, dtype.itemsize());
         // Block-space begin/end for NdIter.
         let block_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim]);
         let block_end = S::Dimension::from_fn(ndim, |dim| index[dim].end.div_ceil(read_shape[dim]));
@@ -819,8 +822,7 @@ impl<S: ArrayStorage> Array<S> {
         );
 
         let itemsize = dtype.itemsize() as usize;
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_strides = default_strides(&out_shape, itemsize);
+        let out_strides = default_strides(&out_shape, itemsize as u64);
 
         let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
         for (block_idx, (block_inner_offset, block_size)) in block_iter {
@@ -837,7 +839,9 @@ impl<S: ArrayStorage> Array<S> {
             self.storage.read_data(&inner_index, tmp_buf, context)?;
 
             let out_offset = (0..ndim)
-                .map(|dim| (inner_index[dim].start - index[dim].start) as usize * out_strides[dim])
+                .map(|dim| {
+                    (inner_index[dim].start - index[dim].start) as usize * out_strides[dim] as usize
+                })
                 .sum::<usize>();
             let dst_ptr = unsafe { buf.as_mut_ptr().add(out_offset) };
 
@@ -958,13 +962,15 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Block layout
     ///
-    /// `params.block_shape` divides the array into an N-dimensional grid of blocks. To read from
-    /// `self` efficiently, data is fetched in larger *chunks* - a fixed square of
-    /// `CHUNK_BLOCKS_PER_DIM` target blocks per dimension - with a single `read_data` call per
-    /// chunk, then carved into individual target blocks in memory. Blocks are therefore produced in
-    /// chunk-traversal order rather than global C order, so each block is handed to the builder
-    /// together with its logical (C-order) `block_index`. Boundary blocks - those that extend
-    /// beyond the array's shape - are zero-padded to fill the full `block_shape` before compression.
+    /// `params.block_shape` divides the array into an N-dimensional grid of target blocks. To read
+    /// from `self` efficiently, data is fetched in larger *chunks* - each spanning a whole number of
+    /// target blocks per dimension - with a single `read_data` call per chunk, then carved into
+    /// individual target blocks in memory. The chunk shape is derived from `self`'s own block shape
+    /// and scaled toward its preferred read size (see `scale_read_shape`), keeping reads aligned to
+    /// how `self` is stored. Blocks are therefore produced in chunk-traversal order rather than
+    /// global C order, so each block is handed to the builder together with its logical (C-order)
+    /// `block_index`. Boundary blocks - those that extend beyond the array's shape - are zero-padded
+    /// to fill the full `block_shape` before compression.
     ///
     /// # Errors
     ///
@@ -982,9 +988,6 @@ impl<S: ArrayStorage> Array<S> {
     where
         B: BlockTableBuilder,
     {
-        // Number of target blocks spanned by a read chunk along each dimension.
-        const CHUNK_BLOCKS_PER_DIM: u64 = 2;
-
         let shape = self.shape();
         let ndim = shape.len();
         let dtype = self.dtype();
@@ -994,12 +997,17 @@ impl<S: ArrayStorage> Array<S> {
 
         let block_shape = params.block_shape.as_ref().unwrap().clone();
         let block_size = block_shape.iter().cloned().try_product().unwrap();
-        let grid_shape =
+        let block_grid_shape =
             S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
-        let nblocks = grid_shape.as_slice().iter().cloned().try_product().unwrap();
+        let nblocks = block_grid_shape
+            .as_slice()
+            .iter()
+            .cloned()
+            .try_product()
+            .unwrap();
         // C-order strides over the block grid, used to map a block's grid position to its logical
         // index (blocks are produced out of C order, so each one carries its own index).
-        let grid_strides = default_strides(grid_shape.as_slice(), 1);
+        let block_grid_strides = default_strides(block_grid_shape.as_slice(), 1);
 
         let encoder_params = params.encoder_params.clone().unwrap_or_default();
         let mut encoder = Encoder::new(&encoder_params, dtype.clone())?;
@@ -1015,10 +1023,24 @@ impl<S: ArrayStorage> Array<S> {
         let block_strides = default_strides(&block_shape, itemsize as _);
         let block_compressed_bound = encoder.encode_bound(block_size_bytes);
 
-        // A chunk spans `CHUNK_BLOCKS_PER_DIM` target blocks in every dimension (element units). We
-        // read a whole chunk from `self` in one pass, then carve the target blocks out of it.
-        let chunk_shape =
-            S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64 * CHUNK_BLOCKS_PER_DIM);
+        let spec = self.storage.spec();
+        let current_block_shape = spec.block_shape();
+        let mut chunk_shape_in_blocks = S::Dimension::from_fn(ndim, |dim| {
+            (current_block_shape[dim] / block_shape[dim]).max(1) as u64
+        });
+        scale_read_shape(
+            &mut chunk_shape_in_blocks,
+            block_grid_shape.as_slice(),
+            &block_grid_shape.as_slice(),
+            (spec.read_size() / block_size_bytes as u64).max(1),
+            (0..ndim).rev(),
+        );
+
+        // A chunk spans `chunk_shape_in_blocks` target blocks per dimension (element units). We read
+        // a whole chunk from `self` in one pass, then carve the target blocks out of it.
+        let chunk_shape = S::Dimension::from_fn(ndim, |dim| {
+            block_shape[dim] as u64 * chunk_shape_in_blocks[dim]
+        });
         let chunk_grid_shape =
             S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(chunk_shape[dim]));
 
@@ -1051,6 +1073,9 @@ impl<S: ArrayStorage> Array<S> {
                 .read_data(&read_range, chunk_buf.as_mut_slice(), context)?;
             let chunk_strides =
                 default_strides(&dim_arr(ndim, |dim| chunk_size[dim] as usize), itemsize);
+            let chunk_offset_base = (0..ndim)
+                .map(|dim| chunk_idx[dim] * chunk_shape_in_blocks[dim] * block_grid_strides[dim])
+                .sum::<u64>();
 
             // Inner loop over the target blocks within the chunk.
             let block_iter = NdIter::new(
@@ -1066,12 +1091,10 @@ impl<S: ArrayStorage> Array<S> {
             for (block_in_chunk_idx, (block_inner_offset, block_active_size)) in block_iter {
                 debug_assert!(block_inner_offset.as_slice().iter().all(|&off| off == 0));
                 // Logical (C-order) index of this block in the full grid.
-                let block_index = (0..ndim)
-                    .map(|dim| {
-                        (chunk_idx[dim] * CHUNK_BLOCKS_PER_DIM + block_in_chunk_idx[dim])
-                            * grid_strides[dim]
-                    })
-                    .sum::<u64>();
+                let block_index = chunk_offset_base
+                    + (0..ndim)
+                        .map(|dim| block_in_chunk_idx[dim] * block_grid_strides[dim])
+                        .sum::<u64>();
                 let full_block =
                     (0..ndim).all(|dim| block_active_size[dim] == block_shape[dim] as u64);
 
@@ -1090,6 +1113,8 @@ impl<S: ArrayStorage> Array<S> {
                             * chunk_strides[dim]
                     })
                     .sum::<usize>();
+                // TODO: this nd_copy may be redundant if the chunk and block strides are identical.
+                // In that case, we can compress directly from the chunk buffer
                 unsafe {
                     nd_copy(
                         chunk_buf.as_ptr().add(src_byte_offset),

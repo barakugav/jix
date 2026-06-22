@@ -5,8 +5,8 @@
 - consider AlignedBytes with compile time alignment
 - build wheels for wsam
 - compress offsets array
-- change offsets array to have length of num_blocks-1 instead of num_blocks+1
-- read a bigger chunk that block shape when compacting a new array
-- support out of order blocks, len(offsets)=2*blocks_num
 - buf-break workflow
 - change read_size to (u64, u64), default to (L1,L2)
+- default_strides should return Dimension
+- nd_copy should be typed by T
+- consider block shape tag in scale_read_shape
