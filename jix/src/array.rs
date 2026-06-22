@@ -952,15 +952,19 @@ impl<S: ArrayStorage> Array<S> {
         })
     }
 
-    /// Read this array's data block by block, compress each block, and feed the compressed bytes
-    /// to a [`BlockTableBuilder`] created by `builder_init` (invoked once with the block count,
-    /// block shape, and decoder config once they are known).
+    /// Read this array's data, compress it block by block, and feed each compressed block to a
+    /// [`BlockTableBuilder`] created by `builder_init` (invoked once with the block count, block
+    /// shape, and decoder config once they are known).
     ///
     /// # Block layout
     ///
-    /// `params.block_shape` divides the array into an N-dimensional grid of blocks. Blocks are
-    /// visited in C order (last axis varies fastest). Boundary blocks - those that extend beyond
-    /// the array's shape - are zero-padded to fill the full `block_shape` before compression.
+    /// `params.block_shape` divides the array into an N-dimensional grid of blocks. To read from
+    /// `self` efficiently, data is fetched in larger *chunks* - a fixed square of
+    /// `CHUNK_BLOCKS_PER_DIM` target blocks per dimension - with a single `read_data` call per
+    /// chunk, then carved into individual target blocks in memory. Blocks are therefore produced in
+    /// chunk-traversal order rather than global C order, so each block is handed to the builder
+    /// together with its logical (C-order) `block_index`. Boundary blocks - those that extend
+    /// beyond the array's shape - are zero-padded to fill the full `block_shape` before compression.
     ///
     /// # Errors
     ///
@@ -978,6 +982,9 @@ impl<S: ArrayStorage> Array<S> {
     where
         B: BlockTableBuilder,
     {
+        // Number of target blocks spanned by a read chunk along each dimension.
+        const CHUNK_BLOCKS_PER_DIM: u64 = 2;
+
         let shape = self.shape();
         let ndim = shape.len();
         let dtype = self.dtype();
@@ -990,6 +997,9 @@ impl<S: ArrayStorage> Array<S> {
         let grid_shape =
             S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
         let nblocks = grid_shape.as_slice().iter().cloned().try_product().unwrap();
+        // C-order strides over the block grid, used to map a block's grid position to its logical
+        // index (blocks are produced out of C order, so each one carries its own index).
+        let grid_strides = default_strides(grid_shape.as_slice(), 1);
 
         let encoder_params = params.encoder_params.clone().unwrap_or_default();
         let mut encoder = Encoder::new(&encoder_params, dtype.clone())?;
@@ -999,79 +1009,108 @@ impl<S: ArrayStorage> Array<S> {
             dtype: dtype.clone(),
         };
 
-        let block_iter = NdIter::new(
-            grid_shape,
-            NdIterExtBlockOffsetSize::new(
-                S::Dimension::from_fn(ndim, |_| 0),
-                S::Dimension::from_slice(shape),
-                S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64),
-            ),
-        );
-
         let itemsize = encoder.dtype.itemsize() as usize;
         let alignment = encoder.dtype.alignment().as_usize();
         let block_size_bytes = block_size as usize * itemsize;
         let block_strides = default_strides(&block_shape, itemsize as _);
+        let block_compressed_bound = encoder.encode_bound(block_size_bytes);
+
+        // A chunk spans `CHUNK_BLOCKS_PER_DIM` target blocks in every dimension (element units). We
+        // read a whole chunk from `self` in one pass, then carve the target blocks out of it.
+        let chunk_shape =
+            S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64 * CHUNK_BLOCKS_PER_DIM);
+        let chunk_grid_shape =
+            S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(chunk_shape[dim]));
+
+        let mut chunk_buf = AlignedBytes::new_padded(alignment);
         let mut tmp_block_plain = AlignedBytes::new_padded(alignment);
         let mut tmp_block_compressed = AlignedBytes::new_padded(alignment);
-        let block_compressed_bound = encoder.encode_bound(block_size_bytes);
         let mut builder = builder_init(nblocks, &block_shape, decoder_cfg)?;
 
-        for (block_idx, (block_inner_offset, block_size)) in block_iter {
+        // Outer loop over chunks. The extension yields each chunk's active element extent, clamped
+        // to the array at the high boundary.
+        let chunk_iter = NdIter::new(
+            chunk_grid_shape,
+            NdIterExtBlockOffsetSize::new(
+                S::Dimension::from_fn(ndim, |_| 0),
+                S::Dimension::from_slice(shape),
+                chunk_shape.clone(),
+            ),
+        );
+        for (chunk_idx, (chunk_inner_offset, chunk_size)) in chunk_iter {
+            debug_assert!(chunk_inner_offset.as_slice().iter().all(|&off| off == 0));
             let read_range = dim_arr(ndim, |dim| {
-                let start = block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
-                let end = start + block_size[dim];
-                start..end
+                let start = chunk_idx[dim] * chunk_shape[dim];
+                start..start + chunk_size[dim]
             });
-            let full_block = (0..ndim).all(|dim| {
-                block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim] as u64
-            });
-
-            // Read block plain data
-            tmp_block_compressed.clear();
-            tmp_block_plain.clear();
-            tmp_block_plain.reserve(block_size_bytes);
-            unsafe { tmp_block_plain.set_len(block_size_bytes) };
-            let tmp_block_plain_ptr = tmp_block_plain.as_mut_ptr();
-            let read_data_buf = if full_block {
-                tmp_block_plain.as_mut_slice()
-            } else {
-                tmp_block_plain.fill(0); // zero-pad
-                let b_size_bytes =
-                    block_size.as_slice().iter().product::<u64>() as usize * itemsize;
-                // Borrow the (cleared, aligned) compressed buffer as scratch for the strided
-                // read, then release it before compressing into it below.
-                tmp_block_compressed.reserve(b_size_bytes);
-                unsafe { tmp_block_compressed.set_len(b_size_bytes) };
-                tmp_block_compressed.as_mut_slice()
-            };
+            let chunk_bytes = chunk_size.as_slice().iter().product::<u64>() as usize * itemsize;
+            chunk_buf.clear();
+            chunk_buf.reserve(chunk_bytes);
+            unsafe { chunk_buf.set_len(chunk_bytes) };
             self.storage
-                .read_data(&read_range, read_data_buf, context)?;
-            if !full_block {
-                // Copy from temporary buffer to output block with correct strides.
-                let src_strides =
-                    default_strides(&dim_arr(ndim, |dim| block_size[dim] as usize), itemsize);
+                .read_data(&read_range, chunk_buf.as_mut_slice(), context)?;
+            let chunk_strides =
+                default_strides(&dim_arr(ndim, |dim| chunk_size[dim] as usize), itemsize);
+
+            // Inner loop over the target blocks within the chunk.
+            let block_iter = NdIter::new(
+                S::Dimension::from_fn(ndim, |dim| {
+                    chunk_size[dim].div_ceil(block_shape[dim] as u64)
+                }),
+                NdIterExtBlockOffsetSize::new(
+                    S::Dimension::from_fn(ndim, |_| 0),
+                    chunk_size.clone(),
+                    S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64),
+                ),
+            );
+            for (block_in_chunk_idx, (block_inner_offset, block_active_size)) in block_iter {
+                debug_assert!(block_inner_offset.as_slice().iter().all(|&off| off == 0));
+                // Logical (C-order) index of this block in the full grid.
+                let block_index = (0..ndim)
+                    .map(|dim| {
+                        (chunk_idx[dim] * CHUNK_BLOCKS_PER_DIM + block_in_chunk_idx[dim])
+                            * grid_strides[dim]
+                    })
+                    .sum::<u64>();
+                let full_block =
+                    (0..ndim).all(|dim| block_active_size[dim] == block_shape[dim] as u64);
+
+                // Gather the block out of the chunk buffer with the target block strides,
+                // zero-padding boundary blocks first.
+                tmp_block_plain.clear();
+                tmp_block_plain.reserve(block_size_bytes);
+                unsafe { tmp_block_plain.set_len(block_size_bytes) };
+                if !full_block {
+                    tmp_block_plain.fill(0); // zero-pad
+                }
+                let src_byte_offset = (0..ndim)
+                    .map(|dim| {
+                        block_in_chunk_idx[dim] as usize
+                            * block_shape[dim] as usize
+                            * chunk_strides[dim]
+                    })
+                    .sum::<usize>();
                 unsafe {
                     nd_copy(
-                        read_data_buf.as_ptr(),
-                        tmp_block_plain_ptr,
-                        block_size.clone(),
-                        &src_strides,
+                        chunk_buf.as_ptr().add(src_byte_offset),
+                        tmp_block_plain.as_mut_ptr(),
+                        block_active_size.clone(),
+                        &chunk_strides,
                         &block_strides,
                         itemsize,
                     )
                 };
-                unsafe { tmp_block_compressed.set_len(0) };
+                let plain_data = tmp_block_plain.as_slice();
+
+                // Compress block data
+                tmp_block_compressed.clear();
+                tmp_block_compressed.reserve(block_compressed_bound);
+                unsafe { tmp_block_compressed.set_len(block_compressed_bound) };
+                let cdata_len = encoder.encode(plain_data, tmp_block_compressed.as_mut_slice())?;
+                unsafe { tmp_block_compressed.set_len(cdata_len) };
+
+                builder.write_compressed_block(block_index, tmp_block_compressed.as_slice())?;
             }
-            let plain_data = tmp_block_plain.as_slice();
-
-            // Compress block data
-            tmp_block_compressed.reserve(block_compressed_bound);
-            unsafe { tmp_block_compressed.set_len(block_compressed_bound) };
-            let cdata_len = encoder.encode(plain_data, tmp_block_compressed.as_mut_slice())?;
-            unsafe { tmp_block_compressed.set_len(cdata_len) };
-
-            builder.write_compressed_block(tmp_block_compressed.as_slice())?;
         }
 
         builder.finalize()

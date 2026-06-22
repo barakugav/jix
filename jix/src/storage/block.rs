@@ -209,17 +209,18 @@ where
 ///
 /// Construction is type-specific (the archive writer needs a sink to write into and borrows its
 /// codec config; the owned builder needs neither), so each implementor provides its own inherent
-/// `start` constructor. This trait captures the shared driving protocol: feed every block in order
-/// via [`write_compressed_block`](Self::write_compressed_block), then call
-/// [`finalize`](Self::finalize).
+/// `start` constructor. This trait captures the shared driving protocol: feed every block via
+/// [`write_compressed_block`](Self::write_compressed_block) - in any order, each tagged with its
+/// logical index - then call [`finalize`](Self::finalize).
 pub(crate) trait BlockTableBuilder {
     /// What [`finalize`](Self::finalize) yields: the built [`BlockTable`] for an in-memory builder,
     /// or `()` when the blocks are streamed straight to a writer.
     type Output;
 
-    /// Append one block's compressed bytes, recording its `[offset, length]` pair. Blocks must be
-    /// supplied in order, `0, 1, ..., nblocks - 1`, and are stored back-to-back.
-    fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()>;
+    /// Append one block's compressed bytes and record its `[offset, length]` pair at logical index
+    /// `block_index`. Bytes are appended in call order, but `block_index` may be supplied in any
+    /// order, so the data buffer's physical layout need not match the logical block order.
+    fn write_compressed_block(&mut self, block_index: u64, compressed: &[u8]) -> Result<()>;
 
     /// Consume the sink, completing the block table and returning its [`Output`](Self::Output).
     fn finalize(self) -> Result<Self::Output>;
@@ -234,10 +235,6 @@ pub(crate) struct OwnedBlockTableBuilder<ET> {
     block_offsets: Vec<[u64; 2]>,
     block_size: BlockSize,
     decoder_config: DecoderCodecConfig,
-    /// Total bytes of compressed block data accumulated so far.
-    block_data_total_len: u64,
-    /// Total block count; used for capacity reservation and a final consistency check.
-    nblocks: u64,
     _marker: PhantomData<ET>,
 }
 
@@ -254,11 +251,9 @@ where
     ) -> Result<Self> {
         Ok(Self {
             block_data: Vec::new(),
-            block_offsets: Vec::with_capacity(nblocks as usize),
+            block_offsets: vec![[0, 0]; nblocks as usize],
             block_size,
             decoder_config,
-            block_data_total_len: 0,
-            nblocks,
             _marker: PhantomData,
         })
     }
@@ -270,20 +265,18 @@ where
 {
     type Output = BlockTable<Owned, ET>;
 
-    /// Append one compressed block's bytes and record its `[offset, length]` pair. The blocks are
-    /// stored back-to-back, so each block's offset is the running total before the append and its
-    /// length is `compressed.len()`.
-    fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
-        let offset = self.block_data_total_len;
+    /// Append one compressed block's bytes - in call order, contiguously - and record its
+    /// `[offset, length]` pair at `block_index`. The offset is the current end of the data buffer
+    /// and the length is `compressed.len()`.
+    fn write_compressed_block(&mut self, block_index: u64, compressed: &[u8]) -> Result<()> {
+        let offset = self.block_data.len() as u64;
         self.block_data.extend_from_slice(compressed);
-        self.block_data_total_len += compressed.len() as u64;
-        self.block_offsets.push([offset, compressed.len() as u64]);
+        self.block_offsets[block_index as usize] = [offset, compressed.len() as u64];
         Ok(())
     }
 
     /// Consume the builder and produce the [`BlockTable`].
     fn finalize(self) -> Result<BlockTable<Owned, ET>> {
-        debug_assert_eq!(self.block_offsets.len(), self.nblocks as usize);
         BlockTable::new(
             self.block_data,
             self.block_offsets,

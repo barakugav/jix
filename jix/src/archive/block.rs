@@ -85,7 +85,7 @@ where
         for block_index in 0..nblocks {
             let [offset, length] = block_offsets[block_index as usize];
             let data = &block_data[offset as usize..][..length as usize];
-            block_writer.write_compressed_block(data)?;
+            block_writer.write_compressed_block(block_index, data)?;
         }
         block_writer.finalize()
     }
@@ -116,13 +116,10 @@ pub(crate) struct BlockArchiveWriter<'w, W> {
     block_offsets_offset: u64,
     /// Absolute offset where the `block_data` section begins.
     block_data_offset: u64,
-    /// Number of `[u64; 2]` pair entries in the offsets section, one per block: `nblocks`.
-    block_offsets_num: u64,
-    /// Offset pairs accumulated since the last flush.
-    offsets_write_buf: Vec<[u64; 2]>,
-    /// Number of offset pairs already persisted to the offsets section.
-    written_offsets_num: u64,
-    /// Total bytes of compressed block data written so far.
+    /// One `[offset, length]` pair per block, indexed by logical block index. Written to the
+    /// offsets section in `finalize`, since blocks may arrive out of order.
+    block_offsets: Vec<[u64; 2]>,
+    /// Total bytes of compressed block data written so far (the running data-section offset).
     block_data_total_len: u64,
 }
 
@@ -184,9 +181,7 @@ where
             }
             block_offsets_offset
         };
-        let block_offsets_num = nblocks;
-        let block_data_offset =
-            block_offsets_offset + block_offsets_num * size_of::<[u64; 2]>() as u64;
+        let block_data_offset = block_offsets_offset + nblocks * size_of::<[u64; 2]>() as u64;
 
         // Seek to data section; the loop writes there without seeking.
         writer
@@ -198,27 +193,9 @@ where
             toc_offset,
             block_offsets_offset,
             block_data_offset,
-            block_offsets_num,
-            offsets_write_buf: Vec::new(),
-            written_offsets_num: 0,
+            block_offsets: vec![[0, 0]; nblocks as usize],
             block_data_total_len: 0,
         })
-    }
-
-    /// Write any buffered offsets to the offsets section. Leaves the stream positioned in the
-    /// offsets section (callers either seek back to the data section or proceed to finalize).
-    fn flush_offsets(&mut self) -> Result<()> {
-        let offsets_offset =
-            self.block_offsets_offset + self.written_offsets_num * size_of::<[u64; 2]>() as u64;
-        self.writer
-            .seek(SeekFrom::Start(offsets_offset))
-            .map_err(Error::io)?;
-        self.writer
-            .write_all(unsafe { cast_slice::<[u64; 2], u8>(self.offsets_write_buf.as_slice()) })
-            .map_err(Error::io)?;
-        self.written_offsets_num += self.offsets_write_buf.len() as u64;
-        self.offsets_write_buf.clear();
-        Ok(())
     }
 }
 
@@ -228,37 +205,34 @@ where
 {
     type Output = ();
 
-    /// Write one compressed block's bytes at the current data-section position (no seek) and
-    /// record its `[offset, length]` pair: the offset is the running total before the write and the
-    /// length is `compressed.len()`. Periodically flushes the buffered offsets, seeking back to the
-    /// data section afterward, to bound memory use.
-    fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
+    /// Write one compressed block's bytes at the current data-section position (no seek), in call
+    /// order, and record its `[offset, length]` pair at logical index `block_index`: the offset is
+    /// the running data-section total before the write and the length is `compressed.len()`. The
+    /// offsets are buffered in memory and written out in [`finalize`](Self::finalize).
+    fn write_compressed_block(&mut self, block_index: u64, compressed: &[u8]) -> Result<()> {
         let offset = self.block_data_total_len;
         self.writer.write_all(compressed).map_err(Error::io)?;
         self.block_data_total_len += compressed.len() as u64;
-        self.offsets_write_buf
-            .push([offset, compressed.len() as u64]);
-
-        if self.offsets_write_buf.len() >= 8192 {
-            self.flush_offsets()?;
-            self.writer
-                .seek(SeekFrom::Start(
-                    self.block_data_offset + self.block_data_total_len,
-                ))
-                .map_err(Error::io)?;
-        }
+        self.block_offsets[block_index as usize] = [offset, compressed.len() as u64];
         Ok(())
     }
 
-    /// Overwrite the placeholder TOC with the real section positions/sizes, then restore the
-    /// stream to the end of the data section. Consumes `self`, releasing the writer borrow.
-    fn finalize(mut self) -> Result<()> {
-        self.flush_offsets()?;
+    /// Write the accumulated offsets section, overwrite the placeholder TOC with the real section
+    /// positions/sizes, then restore the stream to the end of the data section. Consumes `self`,
+    /// releasing the writer borrow.
+    fn finalize(self) -> Result<()> {
+        // The block data was written sequentially; now persist the full offsets section.
+        self.writer
+            .seek(SeekFrom::Start(self.block_offsets_offset))
+            .map_err(Error::io)?;
+        self.writer
+            .write_all(unsafe { cast_slice::<[u64; 2], u8>(self.block_offsets.as_slice()) })
+            .map_err(Error::io)?;
 
         let table_of_contents = [
             Section {
                 offset: self.block_offsets_offset as i64 - self.writer.base_offset as i64,
-                size: self.block_offsets_num * size_of::<[u64; 2]>() as u64,
+                size: self.block_offsets.len() as u64 * size_of::<[u64; 2]>() as u64,
             },
             Section {
                 offset: self.block_data_offset as i64 - self.writer.base_offset as i64,
