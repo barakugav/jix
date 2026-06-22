@@ -1031,7 +1031,7 @@ impl<S: ArrayStorage> Array<S> {
         scale_read_shape(
             &mut chunk_shape_in_blocks,
             block_grid_shape.as_slice(),
-            &block_grid_shape.as_slice(),
+            block_grid_shape.as_slice(),
             (spec.read_size() / block_size_bytes as u64).max(1),
             (0..ndim).rev(),
         );

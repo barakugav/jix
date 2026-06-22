@@ -17,12 +17,13 @@ message BlockTableHeader {
   oneof body_description {
     // The compressed block data is stored in a single continuous buffer, but the blocks within it
     // may appear in any order ("continuous" refers to the data buffer, not to block ordering).
-    // The body is two continuous sections: one for the block offsets and one for the compressed
-    // block data. The offsets section holds nblocks [offset, length] pairs of u64 (block i occupies
-    // the `length` bytes of block_data starting at `offset`); blocks need not be contiguous or in
-    // order.
+    // The body is two continuous sections: one for the block locations and one for the compressed
+    // block data. The locations section holds (nblocks + 1) / 2 entries, each packing two blocks'
+    // (offset: u64, len: u32) locations into one 24-byte entry (avoiding the padding a lone
+    // u64 + u32 would incur); block i occupies the `len` bytes of block_data starting at `offset`.
+    // Blocks need not be contiguous or in order.
     // A table with { offset: i64, size: u64 } (C struct) rows exists immediately after this message,
-    // with the first row describing the block offsets section and the second row describing the
+    // with the first row describing the block locations section and the second row describing the
     // compressed block data section.
     // The TOC is encoded in this way instead of repeated protobuf messages so it will have a fixed
     // size and we can override it in-place after writing the file body.

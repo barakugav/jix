@@ -8,7 +8,8 @@ use crate::codec::{Codec, DecoderCodecConfig, Filter};
 use crate::dtype::Dtype;
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::storage::block::{
-    BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData, Owned,
+    BlockLocation2, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData,
+    Owned,
 };
 use crate::util::arrayvec::ArrayVec;
 use crate::util::{cast_slice, cast_slice_mut, value_as_bytes, value_from_io, Idx, SendSyncPtr};
@@ -17,7 +18,7 @@ use crate::{ArchiveValidation, ElementType, TypeDyn};
 /// Extension of [`BlockTableStorage`] that can populate its `Data<T>` arrays from an archive.
 ///
 /// [`BlockTable::read_content`] calls `read_section` twice - once for `block_data` (`T = u8`)
-/// and once for `block_offsets` (`T = [u64; 2]`) - delegating all I/O and lifetime management to
+/// and once for `blocks_loc` (`T = BlockLocation2`) - delegating all I/O and lifetime management to
 /// the storage-specific implementation:
 ///
 /// - [`Owned`] - reads the section bytes into a freshly allocated `Vec<T>`.
@@ -67,7 +68,7 @@ where
     /// Write this `BlockTable`'s content into an already-opened [`ArchiveWriter`].
     ///
     /// Drives a [`BlockArchiveWriter`] with an explicit loop, feeding it one block at a time by
-    /// slicing directly into `self.block_data` / `self.block_offsets` (zero-copy - no
+    /// slicing directly into `self.block_data` at each block's recorded location (zero-copy - no
     /// re-compression). Use this when embedding into a larger archive that already has an open
     /// writer; use [`write_to`](Self::write_to) for standalone files.
     pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> Result<()>
@@ -78,13 +79,12 @@ where
         let nblocks = self.nitems / self.block_size as u64;
 
         let block_data = self.block_data.as_ref();
-        let block_offsets = self.block_offsets.as_ref();
 
         let mut block_writer =
             BlockArchiveWriter::start(writer, nblocks, self.block_size, self.decoder_config())?;
         for block_index in 0..nblocks {
-            let [offset, length] = block_offsets[block_index as usize];
-            let data = &block_data[offset as usize..][..length as usize];
+            let (offset, len) = self.block_location(block_index);
+            let data = &block_data[offset as usize..][..len as usize];
             block_writer.write_compressed_block(block_index, data)?;
         }
         block_writer.finalize()
@@ -105,20 +105,20 @@ where
 /// [ protobuf BlockTableHeader ]
 /// [ TOC placeholder: 2 * Section (overwritten by finalize) ]
 /// [ alignment padding to 8-byte boundary ]
-/// [ block_offsets: nblocks * [u64; 2]  (one [offset, length] pair per block) ]
+/// [ blocks_loc:   ((nblocks + 1) >> 1) * BlockLocation2  (two blocks packed per entry) ]
 /// [ block_data:    concatenated compressed block bytes ]
 /// ```
 pub(crate) struct BlockArchiveWriter<'w, W> {
     writer: &'w mut ArchiveWriter<W>,
     /// Absolute offset of the TOC placeholder, overwritten by `finalize`.
     toc_offset: u64,
-    /// Absolute offset where the `block_offsets` section begins (8-byte aligned).
-    block_offsets_offset: u64,
+    /// Absolute offset where the `blocks_loc` section begins (8-byte aligned).
+    blocks_loc_offset: u64,
     /// Absolute offset where the `block_data` section begins.
     block_data_offset: u64,
-    /// One `[offset, length]` pair per block, indexed by logical block index. Written to the
-    /// offsets section in `finalize`, since blocks may arrive out of order.
-    block_offsets: Vec<[u64; 2]>,
+    /// Packed block locations indexed by logical block index. Written to the locations section in
+    /// `finalize`, since blocks may arrive out of order.
+    blocks_loc: Vec<BlockLocation2>,
     /// Total bytes of compressed block data written so far (the running data-section offset).
     block_data_total_len: u64,
 }
@@ -168,20 +168,21 @@ where
             .write_all(unsafe { value_as_bytes(&table_of_contents) })
             .map_err(Error::io)?;
 
-        let block_offsets_offset = {
+        let blocks_loc_offset = {
             let current_offset = writer.stream_position().map_err(Error::io)?;
-            let block_offsets_offset =
-                current_offset.ceil_to_multiple(align_of::<[u64; 2]>() as u64);
-            let padding = (block_offsets_offset - current_offset) as usize;
+            let blocks_loc_offset =
+                current_offset.ceil_to_multiple(align_of::<BlockLocation2>() as u64);
+            let padding = (blocks_loc_offset - current_offset) as usize;
             if padding > 0 {
-                let padding_buf = [0u8; size_of::<u64>()];
+                let padding_buf = [0u8; align_of::<BlockLocation2>()];
                 writer
                     .write_all(&padding_buf[..padding])
                     .map_err(Error::io)?;
             }
-            block_offsets_offset
+            blocks_loc_offset
         };
-        let block_data_offset = block_offsets_offset + nblocks * size_of::<[u64; 2]>() as u64;
+        let block_data_offset =
+            blocks_loc_offset + ((nblocks + 1) >> 1) * size_of::<BlockLocation2>() as u64;
 
         // Seek to data section; the loop writes there without seeking.
         writer
@@ -191,9 +192,9 @@ where
         Ok(Self {
             writer,
             toc_offset,
-            block_offsets_offset,
+            blocks_loc_offset,
             block_data_offset,
-            block_offsets: vec![[0, 0]; nblocks as usize],
+            blocks_loc: vec![BlockLocation2::default(); ((nblocks + 1) >> 1) as usize],
             block_data_total_len: 0,
         })
     }
@@ -206,33 +207,37 @@ where
     type Output = ();
 
     /// Write one compressed block's bytes at the current data-section position (no seek), in call
-    /// order, and record its `[offset, length]` pair at logical index `block_index`: the offset is
+    /// order, and record its `(offset, len)` location at logical index `block_index`: the offset is
     /// the running data-section total before the write and the length is `compressed.len()`. The
-    /// offsets are buffered in memory and written out in [`finalize`](Self::finalize).
+    /// locations are buffered in memory and written out in [`finalize`](Self::finalize).
     fn write_compressed_block(&mut self, block_index: u64, compressed: &[u8]) -> Result<()> {
         let offset = self.block_data_total_len;
         self.writer.write_all(compressed).map_err(Error::io)?;
         self.block_data_total_len += compressed.len() as u64;
-        self.block_offsets[block_index as usize] = [offset, compressed.len() as u64];
+
+        let loc = &mut self.blocks_loc[(block_index >> 1) as usize];
+        let lane = (block_index & 1) as usize;
+        loc.offset[lane] = offset;
+        loc.len[lane] = compressed.len() as u32;
         Ok(())
     }
 
-    /// Write the accumulated offsets section, overwrite the placeholder TOC with the real section
+    /// Write the accumulated locations section, overwrite the placeholder TOC with the real section
     /// positions/sizes, then restore the stream to the end of the data section. Consumes `self`,
     /// releasing the writer borrow.
     fn finalize(self) -> Result<()> {
-        // The block data was written sequentially; now persist the full offsets section.
+        // The block data was written sequentially; now persist the full locations section.
         self.writer
-            .seek(SeekFrom::Start(self.block_offsets_offset))
+            .seek(SeekFrom::Start(self.blocks_loc_offset))
             .map_err(Error::io)?;
         self.writer
-            .write_all(unsafe { cast_slice::<[u64; 2], u8>(self.block_offsets.as_slice()) })
+            .write_all(unsafe { cast_slice::<BlockLocation2, u8>(self.blocks_loc.as_slice()) })
             .map_err(Error::io)?;
 
         let table_of_contents = [
             Section {
-                offset: self.block_offsets_offset as i64 - self.writer.base_offset as i64,
-                size: self.block_offsets.len() as u64 * size_of::<[u64; 2]>() as u64,
+                offset: self.blocks_loc_offset as i64 - self.writer.base_offset as i64,
+                size: self.blocks_loc.len() as u64 * size_of::<BlockLocation2>() as u64,
             },
             Section {
                 offset: self.block_data_offset as i64 - self.writer.base_offset as i64,
@@ -300,7 +305,7 @@ where
     /// Deserialize a `BlockTable` from an already-opened [`ArchiveReader`].
     ///
     /// Reads the protobuf `BlockTableHeader`, resolves the codec and filters, validates the TOC,
-    /// then dispatches to `storage.read_section()` for the raw block-data and block-offsets
+    /// then dispatches to `storage.read_section()` for the raw block-data and block-locations
     /// sections. The `storage` parameter determines how those sections are held in memory:
     /// [`Owned`] copies them into heap `Vec`s; [`Mmap`] returns zero-copy pointers into the
     /// mapping.
@@ -349,19 +354,36 @@ where
             .collect::<Result<Vec<_>>>()?;
 
         // Read body data sections
-        let (block_data, block_offsets) = match header.body_description {
+        let (block_data, blocks_loc) = match header.body_description {
             Some(schema::block_table_header::BodyDescription::ContinuousV1(())) => {
-                let [block_offsets_section, block_data_section] = unsafe {
+                let [blocks_loc_section, block_data_section] = unsafe {
                     value_from_io::<[Section; 2]>(reader.reader_mut()).map_err(Error::io)?
                 };
 
                 let block_data = storage.read_section(reader, block_data_section)?;
-                let block_offsets =
-                    storage.read_section::<[u64; 2], _>(reader, block_offsets_section)?;
-                (block_data, block_offsets)
+                let blocks_loc =
+                    storage.read_section::<BlockLocation2, _>(reader, blocks_loc_section)?;
+                (block_data, blocks_loc)
             }
             None => bail!(InvalidArchive, "missing body description in header"),
         };
+
+        let block_size = header.block_size as BlockSize;
+        ensure!(block_size > 0, InvalidArchive, "block_size must be > 0");
+        ensure!(
+            header.nitems.is_multiple_of(block_size as u64),
+            InvalidArchive,
+            "nitems {} is not a multiple of block_size {block_size}",
+            header.nitems
+        );
+        let nblocks = header.nitems / block_size as u64;
+        ensure!(
+            blocks_loc.as_ref().len() as u64 == (nblocks + 1) >> 1,
+            InvalidArchive,
+            "block locations length {} does not match expected {} for {nblocks} blocks",
+            blocks_loc.as_ref().len(),
+            (nblocks + 1) >> 1
+        );
 
         // validation checks
         let check_offsets = match validation {
@@ -370,16 +392,18 @@ where
         };
         if check_offsets {
             let data_len = block_data.as_ref().len() as u64;
-            // Each block's [offset, length] range must lie within the data section. Blocks may be
+            let blocks_loc_ref = blocks_loc.as_ref();
+            // Each block's (offset, len) location must lie within the data section. Blocks may be
             // stored in any order, so there is no cross-block ordering to check.
-            let valid = block_offsets
-                .as_ref()
-                .iter()
-                .all(|&[offset, length]| offset <= data_len && length <= data_len - offset);
+            let valid = (0..nblocks).all(|i| {
+                let loc = &blocks_loc_ref[(i >> 1) as usize];
+                let lane = (i & 1) as usize;
+                loc.offset[lane] <= data_len && loc.len[lane] as u64 <= data_len - loc.offset[lane]
+            });
             ensure!(
                 valid,
                 InvalidArchive,
-                "invalid block offsets: an [offset, length] pair is out of bounds"
+                "invalid block location: an (offset, len) pair is out of bounds"
             );
         }
 
@@ -391,12 +415,7 @@ where
             dtype: Dtype::from_proto(header.dtype.as_ref().unwrap()).unwrap(),
         };
 
-        Self::new(
-            block_data,
-            block_offsets,
-            header.block_size as BlockSize,
-            decoder_config,
-        )
+        Self::new(block_data, blocks_loc, nblocks, block_size, decoder_config)
     }
 }
 
