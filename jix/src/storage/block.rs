@@ -482,62 +482,6 @@ where
     }
 }
 
-impl<S, ET> BlockTable<S, ET>
-where
-    S: BlockTableStorage,
-{
-    /// Adapt this `BlockTable` into a [`BlockFn`] for use with [`build_block_table`] or
-    /// `BlockArchiveWriter`.
-    ///
-    /// The returned `BlockFn` slices directly into `self.block_data` and `self.block_offsets`
-    /// with no copying or re-compression. The second return value is the maximum compressed size
-    /// of any single block, used by callers to compute a batch size that targets ~64 KB per call.
-    pub(crate) fn to_block_fn<'a>(&'a self) -> (impl BlockFn + 'a, usize) {
-        assert!(self.nitems.is_multiple_of(self.block_size as u64));
-        let compressed_block_size_bound = self
-            .block_offsets
-            .as_ref()
-            .windows(2)
-            .map(|w| w[1] - w[0])
-            .max()
-            .unwrap_or(0);
-
-        struct BlockFnImpl<'a, S, ET>
-        where
-            S: BlockTableStorage,
-        {
-            table: &'a BlockTable<S, ET>,
-        }
-        impl<'a, S, ET> BlockFn for BlockFnImpl<'a, S, ET>
-        where
-            S: BlockTableStorage,
-        {
-            fn get_compressed_blocks(
-                &mut self,
-                blocks: Range<u64>,
-                base_offset: u64,
-            ) -> Result<(&[u8], &[u64])> {
-                let start = blocks.start as usize;
-                let end = blocks.end as usize;
-                let all_offsets = self.table.block_offsets.as_ref();
-
-                assert_eq!(base_offset, all_offsets[start]);
-
-                let data_start = all_offsets[start] as usize;
-                let data_end = all_offsets[end] as usize;
-                let data = &self.table.block_data.as_ref()[data_start..data_end];
-                let offsets = &all_offsets[start + 1..=end];
-
-                Ok((data, offsets))
-            }
-        }
-        (
-            BlockFnImpl { table: self },
-            compressed_block_size_bound as usize,
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;

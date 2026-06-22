@@ -7,9 +7,7 @@ use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter};
 use crate::dtype::Dtype;
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
-use crate::storage::block::{
-    BlockFn, BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned,
-};
+use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage, Mmap, MmapData, Owned};
 use crate::util::arrayvec::ArrayVec;
 use crate::util::{cast_slice, cast_slice_mut, value_as_bytes, value_from_io, Idx, SendSyncPtr};
 use crate::{ArchiveValidation, ElementType, TypeDyn};
@@ -66,10 +64,10 @@ where
 
     /// Write this `BlockTable`'s content into an already-opened [`ArchiveWriter`].
     ///
-    /// Obtains a zero-copy [`BlockFn`] via [`BlockTable::to_block_fn`] and drives a
-    /// [`BlockArchiveWriter`] with an explicit batch loop. Use this when embedding into a larger
-    /// archive that already has an open writer; use [`write_to`](Self::write_to) for standalone
-    /// files.
+    /// Drives a [`BlockArchiveWriter`] with an explicit loop, feeding it one block at a time by
+    /// slicing directly into `self.block_data` / `self.block_offsets` (zero-copy - no
+    /// re-compression). Use this when embedding into a larger archive that already has an open
+    /// writer; use [`write_to`](Self::write_to) for standalone files.
     pub(crate) fn write_content<W>(&self, writer: &mut ArchiveWriter<W>) -> Result<()>
     where
         W: Write + Seek,
@@ -77,16 +75,16 @@ where
         assert!(self.nitems.is_multiple_of(self.block_size as u64));
         let nblocks = self.nitems / self.block_size as u64;
 
-        let (mut block_fn, compressed_block_size_bound) = self.to_block_fn();
+        let block_data = self.block_data.as_ref();
+        let block_offsets = self.block_offsets.as_ref();
+
         let mut block_writer =
             BlockArchiveWriter::start(writer, nblocks, self.block_size, self.decoder_config())?;
-        let chunk = chunk_for(compressed_block_size_bound);
-        for block_index in (0..nblocks).step_by(chunk as usize) {
-            let blocks = block_index..(block_index + chunk).min(nblocks);
-            let (data, offsets) =
-                block_fn.get_compressed_blocks(blocks, block_writer.data_len())?;
+        for block_index in 0..nblocks {
+            let i = block_index as usize;
+            let data = &block_data[block_offsets[i] as usize..block_offsets[i + 1] as usize];
             block_writer.write_compressed_blocks(data)?;
-            block_writer.write_offsets(offsets)?;
+            block_writer.write_offsets(std::slice::from_ref(&block_offsets[i + 1]))?;
         }
         block_writer.finalize()
     }
