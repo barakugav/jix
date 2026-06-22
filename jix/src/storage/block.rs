@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::ops::Range;
 use std::sync::Arc;
 
 use crate::codec::{Codec, Compressor, DecoderCodecConfig, Encoder, EncoderParams, ReadContext};
@@ -205,31 +204,22 @@ where
     }
 }
 
-/// Choose how many blocks to process per batch so that roughly 64 KB of compressed data is
-/// produced per call. `compressed_block_size_bound` is the largest single block's compressed size.
-pub(crate) fn chunk_for(compressed_block_size_bound: usize) -> u64 {
-    (64 * 1024 / compressed_block_size_bound.max(1)).max(1) as u64
-}
-
 /// In-memory counterpart of
 /// [`BlockArchiveWriter`](crate::archive::block::BlockArchiveWriter): accumulates compressed
 /// blocks and their end-offsets into heap `Vec`s and produces a [`BlockTable<Owned>`].
 ///
 /// Driven by the same explicit loop as `BlockArchiveWriter` - [`start`](Self::start), then per
-/// batch [`write_compressed_blocks`](Self::write_compressed_blocks) and
-/// [`write_offsets`](Self::write_offsets), then [`finalize`](Self::finalize) to produce the table.
-/// The two types deliberately share method names and signatures so they can implement a common
-/// trait in the future; the only divergence is that `finalize` yields the built `BlockTable`
-/// rather than writing bytes to a sink.
+/// block [`write_compressed_block`](Self::write_compressed_block), then
+/// [`finalize`](Self::finalize) to produce the table. The two types deliberately share method
+/// names and signatures so they can implement a common trait in the future; the only divergence is
+/// that `finalize` yields the built `BlockTable` rather than writing bytes to a sink.
 pub(crate) struct BlockTableBuilder<ET> {
     block_data: Vec<u8>,
     block_offsets: Vec<u64>,
     block_size: BlockSize,
     decoder_config: DecoderCodecConfig,
-    /// Total bytes of compressed block data accumulated so far (also the next batch's base offset).
+    /// Total bytes of compressed block data accumulated so far.
     block_data_total_len: u64,
-    /// Whether the leading `0` offset has been pushed yet.
-    first_batch: bool,
     /// Total block count; used for capacity reservation and a final consistency check.
     nblocks: u64,
     _marker: PhantomData<ET>,
@@ -253,36 +243,21 @@ where
             block_size,
             decoder_config,
             block_data_total_len: 0,
-            first_batch: true,
             nblocks,
             _marker: PhantomData,
         })
     }
 
-    /// The total compressed bytes accumulated so far; pass this as `base_offset` to
-    /// [`BlockFn::get_compressed_blocks`].
-    pub(crate) fn data_len(&self) -> u64 {
-        self.block_data_total_len
-    }
-
-    /// Append one batch of compressed block bytes.
-    pub(crate) fn write_compressed_blocks(&mut self, data: &[u8]) -> Result<()> {
-        self.block_data.extend_from_slice(data);
-        Ok(())
-    }
-
-    /// Record one batch's cumulative end-offsets. On the first call, pushes the leading `0`.
-    /// Advances `data_len` to the last offset in the batch.
-    pub(crate) fn write_offsets(&mut self, offsets: &[u64]) -> Result<()> {
-        debug_assert!(self.block_data_total_len <= *offsets.first().unwrap());
-        debug_assert!(offsets.windows(2).all(|w| w[0] <= w[1]));
-        self.block_data_total_len = *offsets.last().unwrap();
-
-        if self.first_batch {
+    /// Append one compressed block's bytes and record its end-offset. On the first call, pushes
+    /// the leading `0`; the block's end-offset is derived from the running total plus
+    /// `compressed.len()`.
+    pub(crate) fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
+        self.block_data.extend_from_slice(compressed);
+        self.block_data_total_len += compressed.len() as u64;
+        if self.block_offsets.is_empty() {
             self.block_offsets.push(0);
-            self.first_batch = false;
         }
-        self.block_offsets.extend_from_slice(offsets);
+        self.block_offsets.push(self.block_data_total_len);
         Ok(())
     }
 
@@ -448,42 +423,31 @@ impl BlockTableStorage for Mmap {
 /// A source of pre-compressed block data consumed by [`BlockTableBuilder`] and
 /// `BlockArchiveWriter`.
 ///
-/// Both consumers iterate over blocks in batches and call `get_compressed_blocks` once per batch.
-/// The implementor is responsible for compressing the requested blocks and returning them together
-/// with their cumulative end-offsets.
+/// Both consumers iterate over blocks in order and call `get_compressed_block` once per block.
+/// The implementor is responsible for compressing the requested block and returning its bytes.
 ///
 /// One implementation is provided in this module: [`BlockFnWithState`] - closure-based, used when
 /// encoding an [`Array`](crate::Array)'s data into compressed blocks.
 pub(crate) trait BlockFn {
-    /// Produce compressed data for a contiguous range of block indices.
+    /// Produce the compressed bytes for a single block.
     ///
     /// # Arguments
     ///
-    /// - `blocks` - half-open range of block indices to compress, e.g. `4..8`.
-    /// - `base_offset` - the caller's accumulated byte count *before* this batch; equal to the
-    ///   absolute byte offset where `blocks.start`'s compressed data begins. Used by
-    ///   implementations that need to produce absolute offsets.
+    /// - `block_idx` - zero-based index of the block to compress. Blocks must be requested in
+    ///   increasing order (`0, 1, ..., nblocks - 1`); the index identifies the block to encode.
     ///
     /// # Returns
     ///
-    /// A pair `(data, offsets)` where:
-    /// - `data` - concatenated compressed bytes for all blocks in `blocks`.
-    /// - `offsets` - cumulative end-offsets of each block within the *entire* data stream
-    ///   (not relative to this batch). `offsets[i]` is the absolute byte position immediately
-    ///   after block `blocks.start + i`. Length must equal `blocks.end - blocks.start`.
-    fn get_compressed_blocks(
-        &mut self,
-        blocks: Range<u64>,
-        base_offset: u64,
-    ) -> Result<(&[u8], &[u64])>;
+    /// The compressed bytes of block `block_idx`. The returned slice is valid until the next call.
+    fn get_compressed_block(&mut self, block_idx: u64) -> Result<&[u8]>;
 }
 
 /// Closure-based [`BlockFn`] implementation that carries its own mutable state.
 ///
-/// Wraps a closure `F` of the form
-/// `FnMut(Range<u64>, u64, &mut E) -> Result<(&[u8], &[u64])>` together with a mutable extension
-/// value `E` that can hold reusable scratch buffers (e.g., pre-allocated compressed-data and
-/// offset vectors). This avoids per-call allocations while keeping the closure signature clean.
+/// Wraps a closure `F` of the form `FnMut(u64, &mut E) -> Result<&[u8]>` together with a mutable
+/// extension value `E` that can hold a reusable scratch buffer (e.g., a pre-allocated
+/// compressed-data buffer). This avoids per-call allocations while keeping the closure signature
+/// clean.
 ///
 /// Construct with [`BlockFnWithState::from_fn`].
 pub(crate) struct BlockFnWithState<F, E> {
@@ -493,21 +457,17 @@ pub(crate) struct BlockFnWithState<F, E> {
 impl<F, E> BlockFnWithState<F, E> {
     pub(crate) fn from_fn(extension: E, impl_fn: F) -> Self
     where
-        F: for<'a> FnMut(Range<u64>, u64, &'a mut E) -> Result<(&'a [u8], &'a [u64])>,
+        F: for<'a> FnMut(u64, &'a mut E) -> Result<&'a [u8]>,
     {
         Self { impl_fn, extension }
     }
 }
 impl<F, E> BlockFn for BlockFnWithState<F, E>
 where
-    F: for<'a> FnMut(Range<u64>, u64, &'a mut E) -> Result<(&'a [u8], &'a [u64])>,
+    F: for<'a> FnMut(u64, &'a mut E) -> Result<&'a [u8]>,
 {
-    fn get_compressed_blocks(
-        &mut self,
-        blocks: Range<u64>,
-        base_offset: u64,
-    ) -> Result<(&[u8], &[u64])> {
-        (self.impl_fn)(blocks, base_offset, &mut self.extension)
+    fn get_compressed_block(&mut self, block_idx: u64) -> Result<&[u8]> {
+        (self.impl_fn)(block_idx, &mut self.extension)
     }
 }
 

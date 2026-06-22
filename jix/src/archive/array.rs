@@ -429,20 +429,16 @@ where
             dtype: dtype.clone(),
         };
 
-        let (mut block_fn, block_compressed_bound) = self.to_block_fn(&params, context)?;
+        let mut block_fn = self.to_block_fn(&params, context)?;
         let mut block_writer = crate::archive::block::BlockArchiveWriter::start(
             &mut writer,
             nblocks,
             block_size,
             &decoder_cfg,
         )?;
-        let chunk = crate::storage::block::chunk_for(block_compressed_bound);
-        for block_index in (0..nblocks).step_by(chunk as usize) {
-            let blocks = block_index..(block_index + chunk).min(nblocks);
-            let (data, offsets) =
-                block_fn.get_compressed_blocks(blocks, block_writer.data_len())?;
-            block_writer.write_compressed_blocks(data)?;
-            block_writer.write_offsets(offsets)?;
+        for block_index in 0..nblocks {
+            let data = block_fn.get_compressed_block(block_index)?;
+            block_writer.write_compressed_block(data)?;
         }
         block_writer.finalize()?;
 

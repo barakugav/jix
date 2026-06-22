@@ -83,8 +83,7 @@ where
         for block_index in 0..nblocks {
             let i = block_index as usize;
             let data = &block_data[block_offsets[i] as usize..block_offsets[i + 1] as usize];
-            block_writer.write_compressed_blocks(data)?;
-            block_writer.write_offsets(std::slice::from_ref(&block_offsets[i + 1]))?;
+            block_writer.write_compressed_block(data)?;
         }
         block_writer.finalize()
     }
@@ -94,9 +93,9 @@ where
 /// [`ArchiveWriter`], owning all the section-offset bookkeeping.
 ///
 /// The caller drives an explicit loop: [`start`](Self::start) writes the header and TOC
-/// placeholder and positions the stream at the data section; then for each batch of blocks the
-/// caller calls [`write_compressed_blocks`](Self::write_compressed_blocks)
-/// and [`write_offsets`](Self::write_offsets); finally[`finalize`](Self::finalize) close it out.
+/// placeholder and positions the stream at the data section; then for each block the caller calls
+/// [`write_compressed_block`](Self::write_compressed_block); finally [`finalize`](Self::finalize)
+/// closes it out.
 ///
 /// # Wire layout (within the writer's section)
 ///
@@ -121,10 +120,10 @@ pub(crate) struct BlockArchiveWriter<'w, W> {
     offsets_write_buf: Vec<u64>,
     /// Number of offset entries already persisted to the offsets section.
     written_offsets_num: u64,
-    /// Total bytes of compressed block data written so far (also the next batch's base offset).
+    /// Total bytes of compressed block data written so far.
     block_data_total_len: u64,
     /// Whether the leading `0` offset has been pushed yet.
-    first_batch: bool,
+    first_block: bool,
 }
 
 impl<'w, W> BlockArchiveWriter<'w, W>
@@ -201,33 +200,23 @@ where
             offsets_write_buf: Vec::new(),
             written_offsets_num: 0,
             block_data_total_len: 0,
-            first_batch: true,
+            first_block: true,
         })
     }
 
-    /// The total compressed bytes written so far; pass this as `base_offset` to
-    /// [`BlockFn::get_compressed_blocks`](crate::storage::block::BlockFn::get_compressed_blocks).
-    pub(crate) fn data_len(&self) -> u64 {
-        self.block_data_total_len
-    }
-
-    /// Append one batch of compressed block bytes at the current data-section position (no seek).
-    pub(crate) fn write_compressed_blocks(&mut self, data: &[u8]) -> Result<()> {
-        self.writer.write_all(data).map_err(Error::io)
-    }
-
-    /// Record one batch's cumulative end-offsets. On the first call, pushes the leading `0`.
-    /// Advances `data_len` to the last offset in the batch.
-    pub(crate) fn write_offsets(&mut self, offsets: &[u64]) -> Result<()> {
-        debug_assert!(self.block_data_total_len <= *offsets.first().unwrap());
-        debug_assert!(offsets.windows(2).all(|w| w[0] <= w[1]));
-        self.block_data_total_len = *offsets.last().unwrap();
-
-        if self.first_batch {
+    /// Write one compressed block's bytes at the current data-section position (no seek) and
+    /// record its end-offset. On the first call, pushes the leading `0`; the block's end-offset is
+    /// derived from the running total plus `compressed.len()`. Periodically flushes the buffered
+    /// offsets, seeking back to the data section afterward, to bound memory use.
+    pub(crate) fn write_compressed_block(&mut self, compressed: &[u8]) -> Result<()> {
+        if self.first_block {
             self.offsets_write_buf.push(0);
-            self.first_batch = false;
+            self.first_block = false;
         }
-        self.offsets_write_buf.extend_from_slice(offsets);
+        self.writer.write_all(compressed).map_err(Error::io)?;
+        self.block_data_total_len += compressed.len() as u64;
+        self.offsets_write_buf.push(self.block_data_total_len);
+
         if self.offsets_write_buf.len() > 8192 {
             self.flush_offsets()?;
             self.writer
