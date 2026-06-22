@@ -957,8 +957,7 @@ impl<S: ArrayStorage> Array<S> {
     }
 
     /// Read this array's data, compress it block by block, and feed each compressed block to a
-    /// [`BlockTableBuilder`] created by `builder_init` (invoked once with the block count, block
-    /// shape, and decoder config once they are known).
+    /// builder created by `builder_init`.
     ///
     /// # Block layout
     ///
@@ -971,10 +970,6 @@ impl<S: ArrayStorage> Array<S> {
     /// global C order, so each block is handed to the builder together with its logical (C-order)
     /// `block_index`. Boundary blocks - those that extend beyond the array's shape - are zero-padded
     /// to fill the full `block_shape` before compression.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the encoder cannot be constructed from `params`.
     pub(crate) fn compact_into_builder<B>(
         &self,
         params: &mut ArrayParams,

@@ -400,13 +400,7 @@ where
         if let Some(storage) = self.storage.as_compact() {
             let header = schema::ArrayHeader {
                 shape,
-                block_shape: storage
-                    .0
-                    .block_shape()
-                    .iter()
-                    .cloned()
-                    .map(|s| s as u64)
-                    .collect(),
+                block_shape: storage.0.block_shape().iter().map(|s| *s as u64).collect(),
             };
             writer.write_message(&header).map_err(Error::io)?;
 
@@ -420,7 +414,7 @@ where
             |nblocks, block_shape, decoder_config| {
                 let header = schema::ArrayHeader {
                     shape,
-                    block_shape: block_shape.iter().cloned().map(|s| s as u64).collect(),
+                    block_shape: block_shape.iter().map(|s| *s as u64).collect(),
                 };
                 writer.write_message(&header).map_err(Error::io)?;
 

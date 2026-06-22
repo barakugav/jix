@@ -117,7 +117,8 @@ where
         debug_assert!((0..nblocks).all(|i| {
             let loc = &blocks_loc.as_ref()[(i >> 1) as usize];
             let lane = (i & 1) as usize;
-            loc.offset[lane] <= data_len && loc.len[lane] as u64 <= data_len - loc.offset[lane]
+            let (offset, len) = (loc.offset[lane], loc.len[lane] as u64);
+            offset <= data_len && len <= data_len - offset
         }));
         let element_type = ET::from_dtype(decoder_config.dtype.clone())?;
         Ok(Self {
@@ -235,15 +236,9 @@ where
 /// A sink that consumes a block table's compressed blocks one at a time and finalizes into some
 /// output - either an in-memory [`BlockTable`] ([`OwnedBlockTableBuilder`]) or bytes streamed to an
 /// archive ([`BlockArchiveWriter`](crate::archive::block::BlockArchiveWriter)).
-///
-/// Construction is type-specific (the archive writer needs a sink to write into and borrows its
-/// codec config; the owned builder needs neither), so each implementor provides its own inherent
-/// `start` constructor. This trait captures the shared driving protocol: feed every block via
-/// [`write_compressed_block`](Self::write_compressed_block) - in any order, each tagged with its
-/// logical index - then call [`finalize`](Self::finalize).
 pub(crate) trait BlockTableBuilder {
-    /// What [`finalize`](Self::finalize) yields: the built [`BlockTable`] for an in-memory builder,
-    /// or `()` when the blocks are streamed straight to a writer.
+    /// What [`finalize`](Self::finalize) yields. For example the built [`BlockTable`] for an
+    /// in-memory builder.
     type Output;
 
     /// Append one block's compressed bytes and record its `[offset, length]` pair at logical index
@@ -251,21 +246,18 @@ pub(crate) trait BlockTableBuilder {
     /// order, so the data buffer's physical layout need not match the logical block order.
     fn write_compressed_block(&mut self, block_index: u64, compressed: &[u8]) -> Result<()>;
 
-    /// Consume the sink, completing the block table and returning its [`Output`](Self::Output).
+    /// Consume the builder, completing the block table and returning its [`Output`](Self::Output).
     fn finalize(self) -> Result<Self::Output>;
 }
 
-/// In-memory implementor of [`BlockTableBuilder`] and counterpart of
-/// [`BlockArchiveWriter`](crate::archive::block::BlockArchiveWriter): accumulates compressed blocks
-/// and their packed [`BlockLocation2`] entries into heap `Vec`s and produces a [`BlockTable<Owned>`].
-/// Construct with [`start`](Self::start), then drive via the [`BlockTableBuilder`] trait.
+/// In-memory implementor of [`BlockTableBuilder`].
+///
+/// Accumulates compressed blocks into heap `Vec`s and produces a [`BlockTable<Owned>`].
 pub(crate) struct OwnedBlockTableBuilder<ET> {
     block_data: Vec<u8>,
     blocks_loc: Vec<BlockLocation2>,
     block_size: BlockSize,
     decoder_config: DecoderCodecConfig,
-    /// Total block count; `blocks_loc` packs two per entry, so the count is passed on to
-    /// [`BlockTable::new`] explicitly.
     nblocks: u64,
     _marker: PhantomData<ET>,
 }
@@ -274,8 +266,6 @@ impl<ET> OwnedBlockTableBuilder<ET>
 where
     ET: ElementType,
 {
-    /// Create a builder for a table of `nblocks` blocks of `block_size` items each, storing the
-    /// codec/dtype configuration to write into the produced table.
     pub(crate) fn start(
         nblocks: u64,
         block_size: BlockSize,
@@ -311,7 +301,6 @@ where
         Ok(())
     }
 
-    /// Consume the builder and produce the [`BlockTable`].
     fn finalize(self) -> Result<BlockTable<Owned, ET>> {
         BlockTable::new(
             self.block_data,

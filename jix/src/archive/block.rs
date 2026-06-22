@@ -365,7 +365,10 @@ where
                     storage.read_section::<BlockLocation2, _>(reader, blocks_loc_section)?;
                 (block_data, blocks_loc)
             }
-            None => bail!(InvalidArchive, "missing body description in header"),
+            None => bail!(
+                InvalidArchive,
+                "missing or unknown body description in header"
+            ),
         };
 
         let block_size = header.block_size as BlockSize;
@@ -377,28 +380,29 @@ where
             header.nitems
         );
         let nblocks = header.nitems / block_size as u64;
+        let expected_blocks_loc_len = (nblocks + 1) >> 1;
         ensure!(
-            blocks_loc.as_ref().len() as u64 == (nblocks + 1) >> 1,
+            blocks_loc.as_ref().len() as u64 == expected_blocks_loc_len,
             InvalidArchive,
-            "block locations length {} does not match expected {} for {nblocks} blocks",
-            blocks_loc.as_ref().len(),
-            (nblocks + 1) >> 1
+            "block locations length {} does not match expected {expected_blocks_loc_len} for {nblocks} blocks",
+            blocks_loc.as_ref().len()
         );
 
         // validation checks
-        let check_offsets = match validation {
+        let check_block_locations = match validation {
             ArchiveValidation::Minimal => false,
             ArchiveValidation::Strict => true,
         };
-        if check_offsets {
+        if check_block_locations {
             let data_len = block_data.as_ref().len() as u64;
-            let blocks_loc_ref = blocks_loc.as_ref();
+            let blocks_loc = blocks_loc.as_ref();
             // Each block's (offset, len) location must lie within the data section. Blocks may be
             // stored in any order, so there is no cross-block ordering to check.
             let valid = (0..nblocks).all(|i| {
-                let loc = &blocks_loc_ref[(i >> 1) as usize];
+                let loc = &blocks_loc[(i >> 1) as usize];
                 let lane = (i & 1) as usize;
-                loc.offset[lane] <= data_len && loc.len[lane] as u64 <= data_len - loc.offset[lane]
+                let (offset, len) = (loc.offset[lane], loc.len[lane] as u64);
+                offset <= data_len && len <= data_len - offset
             });
             ensure!(
                 valid,
