@@ -205,72 +205,104 @@ where
     }
 }
 
-/// Build a [`BlockTable<Owned>`] by pulling compressed blocks from `block_fn`.
+/// Choose how many blocks to process per batch so that roughly 64 KB of compressed data is
+/// produced per call. `compressed_block_size_bound` is the largest single block's compressed size.
+pub(crate) fn chunk_for(compressed_block_size_bound: usize) -> u64 {
+    (64 * 1024 / compressed_block_size_bound.max(1)).max(1) as u64
+}
+
+/// In-memory counterpart of
+/// [`BlockArchiveWriter`](crate::archive::block::BlockArchiveWriter): accumulates compressed
+/// blocks and their end-offsets into heap `Vec`s and produces a [`BlockTable<Owned>`].
 ///
-/// Iterates over all `nblocks` blocks in batches sized to produce roughly 64 KB of compressed
-/// output per call, delegating each batch to [`BlockFn::get_compressed_blocks`]. The returned
-/// bytes and end-offsets are accumulated into the final `BlockTable`.
-///
-/// # Arguments
-///
-/// - `nblocks` - total number of blocks to build; may be zero.
-/// - `block_size` - items per block (passed through to [`BlockTable::new`]).
-/// - `decoder_config` - codec/dtype configuration stored in the table.
-/// - `compressed_block_size_bound` - upper bound on a single block's compressed byte size;
-///   used only to size the iteration chunk (no correctness requirement, just a performance hint).
-/// - `block_fn` - the data source; called once per batch.
-///
-/// # Errors
-///
-/// Propagates any error returned by `block_fn` or by [`BlockTable::new`].
-pub(crate) fn build_block_table<ET>(
-    nblocks: u64,
+/// Driven by the same explicit loop as `BlockArchiveWriter` - [`start`](Self::start), then per
+/// batch [`write_compressed_blocks`](Self::write_compressed_blocks) and
+/// [`write_offsets`](Self::write_offsets), then [`finalize`](Self::finalize) to produce the table.
+/// The two types deliberately share method names and signatures so they can implement a common
+/// trait in the future; the only divergence is that `finalize` yields the built `BlockTable`
+/// rather than writing bytes to a sink.
+pub(crate) struct BlockTableBuilder<ET> {
+    block_data: Vec<u8>,
+    block_offsets: Vec<u64>,
     block_size: BlockSize,
     decoder_config: DecoderCodecConfig,
-    compressed_block_size_bound: usize,
-    block_fn: &mut impl BlockFn,
-) -> Result<BlockTable<Owned, ET>>
+    /// Total bytes of compressed block data accumulated so far (also the next batch's base offset).
+    block_data_total_len: u64,
+    /// Whether the leading `0` offset has been pushed yet.
+    first_batch: bool,
+    /// Total block count; used for capacity reservation and a final consistency check.
+    nblocks: u64,
+    _marker: PhantomData<ET>,
+}
+
+impl<ET> BlockTableBuilder<ET>
 where
     ET: ElementType,
 {
-    let mut block_data = Vec::<u8>::new();
-    let mut block_offsets = Vec::<u64>::new();
-
-    let mut block_data_total_len = 0;
-    let chunk = (64 * 1024 / compressed_block_size_bound).max(1) as u64; // try to write 64KB at a time
-
-    for block_index in (0..nblocks).step_by(chunk as usize) {
-        let blocks = block_index..(block_index + chunk).min(nblocks);
-        let base_offset = block_data_total_len;
-
-        // Get blocks data
-        let (data, offsets) = block_fn.get_compressed_blocks(blocks.clone(), base_offset)?;
-        debug_assert_eq!(offsets.len(), (blocks.end - blocks.start) as usize);
-
-        // Write compressed data
-        block_data.extend_from_slice(data);
-
-        // Record offsets
-        if block_index == 0 {
-            block_offsets.push(0);
-        }
-        let x = *offsets.last().unwrap();
-        debug_assert!(block_data_total_len <= x);
-        debug_assert!(offsets.windows(2).all(|w| w[0] <= w[1]));
-        block_offsets.extend_from_slice(offsets);
-
-        block_data_total_len = *offsets.last().unwrap();
+    /// Create a builder for a table of `nblocks` blocks of `block_size` items each, storing the
+    /// codec/dtype configuration to write into the produced table.
+    pub(crate) fn start(
+        nblocks: u64,
+        block_size: BlockSize,
+        decoder_config: DecoderCodecConfig,
+    ) -> Result<Self> {
+        let block_offsets_num = if nblocks == 0 { 0 } else { nblocks + 1 };
+        Ok(Self {
+            block_data: Vec::new(),
+            block_offsets: Vec::with_capacity(block_offsets_num as usize),
+            block_size,
+            decoder_config,
+            block_data_total_len: 0,
+            first_batch: true,
+            nblocks,
+            _marker: PhantomData,
+        })
     }
 
-    debug_assert_eq!(
-        block_offsets.len(),
-        if nblocks == 0 {
-            0
-        } else {
-            nblocks as usize + 1
+    /// The total compressed bytes accumulated so far; pass this as `base_offset` to
+    /// [`BlockFn::get_compressed_blocks`].
+    pub(crate) fn data_len(&self) -> u64 {
+        self.block_data_total_len
+    }
+
+    /// Append one batch of compressed block bytes.
+    pub(crate) fn write_compressed_blocks(&mut self, data: &[u8]) -> Result<()> {
+        self.block_data.extend_from_slice(data);
+        Ok(())
+    }
+
+    /// Record one batch's cumulative end-offsets. On the first call, pushes the leading `0`.
+    /// Advances `data_len` to the last offset in the batch.
+    pub(crate) fn write_offsets(&mut self, offsets: &[u64]) -> Result<()> {
+        debug_assert!(self.block_data_total_len <= *offsets.first().unwrap());
+        debug_assert!(offsets.windows(2).all(|w| w[0] <= w[1]));
+        self.block_data_total_len = *offsets.last().unwrap();
+
+        if self.first_batch {
+            self.block_offsets.push(0);
+            self.first_batch = false;
         }
-    );
-    BlockTable::new(block_data, block_offsets, block_size, decoder_config)
+        self.block_offsets.extend_from_slice(offsets);
+        Ok(())
+    }
+
+    /// Consume the builder and produce the [`BlockTable`].
+    pub(crate) fn finalize(self) -> Result<BlockTable<Owned, ET>> {
+        debug_assert_eq!(
+            self.block_offsets.len(),
+            if self.nblocks == 0 {
+                0
+            } else {
+                self.nblocks as usize + 1
+            }
+        );
+        BlockTable::new(
+            self.block_data,
+            self.block_offsets,
+            self.block_size,
+            self.decoder_config,
+        )
+    }
 }
 
 impl<ET> BlockTable<Owned, ET> {
@@ -413,18 +445,15 @@ impl BlockTableStorage for Mmap {
     type Data<T: 'static> = MmapData<T>;
 }
 
-/// A source of pre-compressed block data consumed by [`build_block_table`] and
+/// A source of pre-compressed block data consumed by [`BlockTableBuilder`] and
 /// `BlockArchiveWriter`.
 ///
 /// Both consumers iterate over blocks in batches and call `get_compressed_blocks` once per batch.
 /// The implementor is responsible for compressing the requested blocks and returning them together
 /// with their cumulative end-offsets.
 ///
-/// Two implementations are provided in this module:
-/// - [`BlockFnWithState`] - closure-based, used when encoding an [`Array`](crate::Array) into a
-///   new `BlockTable`.
-/// - The inner `BlockFnImpl` returned by [`BlockTable::to_block_fn`] - zero-copy slice into an
-///   existing `BlockTable`, used when re-serializing already-compressed data.
+/// One implementation is provided in this module: [`BlockFnWithState`] - closure-based, used when
+/// encoding an [`Array`](crate::Array)'s data into compressed blocks.
 pub(crate) trait BlockFn {
     /// Produce compressed data for a contiguous range of block indices.
     ///

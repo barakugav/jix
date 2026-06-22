@@ -436,7 +436,7 @@ where
             block_size,
             &decoder_cfg,
         )?;
-        let chunk = crate::archive::block::chunk_for(block_compressed_bound);
+        let chunk = crate::storage::block::chunk_for(block_compressed_bound);
         for block_index in (0..nblocks).step_by(chunk as usize) {
             let blocks = block_index..(block_index + chunk).min(nblocks);
             let (data, offsets) =

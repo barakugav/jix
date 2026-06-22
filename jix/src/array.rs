@@ -6,7 +6,7 @@ use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::MaybeCompact;
-use crate::storage::block::{build_block_table, BlockFn, BlockFnWithState};
+use crate::storage::block::{BlockFn, BlockFnWithState, BlockTableBuilder};
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, Compact, Ref,
@@ -961,13 +961,15 @@ impl<S: ArrayStorage> Array<S> {
         };
 
         let (mut block_fn, block_compressed_bound) = self.to_block_fn(&params, context)?;
-        let blocks = build_block_table(
-            nblocks,
-            block_size,
-            decoder_cfg,
-            block_compressed_bound,
-            &mut block_fn,
-        )?;
+        let mut builder = BlockTableBuilder::start(nblocks, block_size, decoder_cfg)?;
+        let chunk = crate::storage::block::chunk_for(block_compressed_bound);
+        for block_index in (0..nblocks).step_by(chunk as usize) {
+            let blocks = block_index..(block_index + chunk).min(nblocks);
+            let (data, offsets) = block_fn.get_compressed_blocks(blocks, builder.data_len())?;
+            builder.write_compressed_blocks(data)?;
+            builder.write_offsets(offsets)?;
+        }
+        let blocks = builder.finalize()?;
 
         let shape = S::Dimension::from_slice(&shape);
         Ok(Array {
@@ -1148,7 +1150,7 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Build a [`BlockFn`] that reads and compresses this array's data block by block.
     ///
-    /// Called by [`Array::maybe_compact`] (and its variants) to feed [`build_block_table`] with
+    /// Called by [`Array::maybe_compact`] (and its variants) to feed [`BlockTableBuilder`] with
     /// compressed block data without materializing all blocks at once.
     ///
     /// # Block layout

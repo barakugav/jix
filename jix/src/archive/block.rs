@@ -90,12 +90,6 @@ where
     }
 }
 
-/// Choose how many blocks to process per batch so that roughly 64 KB of compressed data is
-/// produced per call. `compressed_block_size_bound` is the largest single block's compressed size.
-pub(crate) fn chunk_for(compressed_block_size_bound: usize) -> u64 {
-    (64 * 1024 / compressed_block_size_bound.max(1)).max(1) as u64
-}
-
 /// Stateful writer that serializes a block table's content into an already-opened
 /// [`ArchiveWriter`], owning all the section-offset bookkeeping.
 ///
