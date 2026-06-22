@@ -6,7 +6,7 @@ use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::MaybeCompact;
-use crate::storage::block::{BlockFn, BlockFnWithState, BlockTableBuilder, OwnedBlockTableBuilder};
+use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlockSize, Compact, Ref,
@@ -946,12 +946,25 @@ impl<S: ArrayStorage> Array<S> {
                 OwnedBlockTableBuilder::start(nblocks, block_size, decoder_config)
             },
         )?;
-        let shape = S::Dimension::from_slice(&self.shape());
+        let shape = S::Dimension::from_slice(self.shape());
         Ok(Array {
             storage: Compact(ArrayBlockTableStorageBase::new(blocks, shape, params)?),
         })
     }
 
+    /// Read this array's data block by block, compress each block, and feed the compressed bytes
+    /// to a [`BlockTableBuilder`] created by `builder_init` (invoked once with the block count,
+    /// block shape, and decoder config once they are known).
+    ///
+    /// # Block layout
+    ///
+    /// `params.block_shape` divides the array into an N-dimensional grid of blocks. Blocks are
+    /// visited in C order (last axis varies fastest). Boundary blocks - those that extend beyond
+    /// the array's shape - are zero-padded to fill the full `block_shape` before compression.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the encoder cannot be constructed from `params`.
     pub(crate) fn compact_into_builder<B>(
         &self,
         params: &mut ArrayParams,
@@ -972,23 +985,95 @@ impl<S: ArrayStorage> Array<S> {
         params.override_from_storage(&self.storage);
         params.tune(shape, dtype)?;
 
-        let block_shape = params.block_shape.as_ref().unwrap();
-        let grid_shape = dim_arr(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
-        let nblocks = grid_shape.iter().cloned().try_product().unwrap();
+        let block_shape = params.block_shape.as_ref().unwrap().clone();
+        let block_size = block_shape.iter().cloned().try_product().unwrap();
+        let grid_shape =
+            S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
+        let nblocks = grid_shape.as_slice().iter().cloned().try_product().unwrap();
 
         let encoder_params = params.encoder_params.clone().unwrap_or_default();
+        let mut encoder = Encoder::new(&encoder_params, dtype.clone())?;
         let decoder_cfg = DecoderCodecConfig {
             codec: encoder_params.codec,
             filters: encoder_params.filters,
             dtype: dtype.clone(),
         };
 
-        let mut block_fn = self.to_block_fn(&params, context)?;
-        let mut builder = builder_init(nblocks, block_shape, decoder_cfg)?;
-        for block_index in 0..nblocks {
-            let data = block_fn.get_compressed_block(block_index)?;
-            builder.write_compressed_block(data)?;
+        let block_iter = NdIter::new(
+            grid_shape,
+            NdIterExtBlockOffsetSize::new(
+                S::Dimension::from_fn(ndim, |_| 0),
+                S::Dimension::from_slice(shape),
+                S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64),
+            ),
+        );
+
+        let itemsize = encoder.dtype.itemsize() as usize;
+        let alignment = encoder.dtype.alignment().as_usize();
+        let block_size_bytes = block_size as usize * itemsize;
+        let block_strides = default_strides(&block_shape, itemsize as _);
+        let mut tmp_block_plain = AlignedBytes::new_padded(alignment);
+        let mut tmp_block_compressed = AlignedBytes::new_padded(alignment);
+        let block_compressed_bound = encoder.encode_bound(block_size_bytes);
+        let mut builder = builder_init(nblocks, &block_shape, decoder_cfg)?;
+
+        for (block_idx, (block_inner_offset, block_size)) in block_iter {
+            let read_range = dim_arr(ndim, |dim| {
+                let start = block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
+                let end = start + block_size[dim];
+                start..end
+            });
+            let full_block = (0..ndim).all(|dim| {
+                block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim] as u64
+            });
+
+            // Read block plain data
+            tmp_block_compressed.clear();
+            tmp_block_plain.clear();
+            tmp_block_plain.reserve(block_size_bytes);
+            unsafe { tmp_block_plain.set_len(block_size_bytes) };
+            let tmp_block_plain_ptr = tmp_block_plain.as_mut_ptr();
+            let read_data_buf = if full_block {
+                tmp_block_plain.as_mut_slice()
+            } else {
+                tmp_block_plain.fill(0); // zero-pad
+                let b_size_bytes =
+                    block_size.as_slice().iter().product::<u64>() as usize * itemsize;
+                // Borrow the (cleared, aligned) compressed buffer as scratch for the strided
+                // read, then release it before compressing into it below.
+                tmp_block_compressed.reserve(b_size_bytes);
+                unsafe { tmp_block_compressed.set_len(b_size_bytes) };
+                tmp_block_compressed.as_mut_slice()
+            };
+            self.storage
+                .read_data(&read_range, read_data_buf, context)?;
+            if !full_block {
+                // Copy from temporary buffer to output block with correct strides.
+                let src_strides =
+                    default_strides(&dim_arr(ndim, |dim| block_size[dim] as usize), itemsize);
+                unsafe {
+                    nd_copy(
+                        read_data_buf.as_ptr(),
+                        tmp_block_plain_ptr,
+                        block_size.clone(),
+                        &src_strides,
+                        &block_strides,
+                        itemsize,
+                    )
+                };
+                unsafe { tmp_block_compressed.set_len(0) };
+            }
+            let plain_data = tmp_block_plain.as_slice();
+
+            // Compress block data
+            tmp_block_compressed.reserve(block_compressed_bound);
+            unsafe { tmp_block_compressed.set_len(block_compressed_bound) };
+            let cdata_len = encoder.encode(plain_data, tmp_block_compressed.as_mut_slice())?;
+            unsafe { tmp_block_compressed.set_len(cdata_len) };
+
+            builder.write_compressed_block(tmp_block_compressed.as_slice())?;
         }
+
         builder.finalize()
     }
 
@@ -1161,132 +1246,6 @@ impl<S: ArrayStorage> Array<S> {
     #[inline(always)]
     pub fn into_storage(self) -> S {
         self.storage
-    }
-
-    /// Build a [`BlockFn`] that reads and compresses this array's data block by block.
-    ///
-    /// Called by [`Array::maybe_compact`] (and its variants) to feed [`BlockTableBuilder`] with
-    /// compressed block data without materializing all blocks at once.
-    ///
-    /// # Block layout
-    ///
-    /// `params.block_shape` divides the array into an N-dimensional grid of blocks. Blocks are
-    /// visited in C order (last axis varies fastest). Boundary blocks - those that extend beyond
-    /// the array's shape - are zero-padded to fill the full `block_shape` before compression.
-    ///
-    /// # Returned value
-    ///
-    /// Returns a [`BlockFnWithState`] closure that, for each requested block (in order), reads the
-    /// block from storage, compresses it with the encoder from `params` into an internal
-    /// `AlignedBytes` buffer, and returns that buffer's slice.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the encoder cannot be constructed from `params`.
-    pub(crate) fn to_block_fn<'a>(
-        &'a self,
-        params: &ArrayParams,
-        context: &'a ReadContext,
-    ) -> Result<impl BlockFn + 'a> {
-        let shape = self.shape();
-        let ndim = shape.len();
-        let dtype = self.dtype();
-
-        let block_shape = params.block_shape.as_ref().unwrap().clone();
-        let block_size = block_shape.iter().cloned().try_product().unwrap();
-        let grid_shape =
-            S::Dimension::from_fn(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
-
-        let encoder_cfg = params.encoder_params.as_ref().unwrap();
-        let mut encoder = Encoder::new(encoder_cfg, dtype.clone())?;
-
-        let mut block_iter = NdIter::new(
-            grid_shape.clone(),
-            NdIterExtBlockOffsetSize::new(
-                S::Dimension::from_fn(ndim, |_| 0),
-                S::Dimension::from_slice(shape),
-                S::Dimension::from_fn(ndim, |dim| block_shape[dim] as u64),
-            ),
-        );
-
-        let grid_logical_strides = default_strides(grid_shape.as_slice(), 1);
-        let itemsize = encoder.dtype.itemsize() as usize;
-        let alignment = encoder.dtype.alignment().as_usize();
-        let block_size_bytes = block_size as usize * itemsize;
-        let block_strides = default_strides(&block_shape, itemsize as _);
-        let mut tmp_block_plain = AlignedBytes::new_padded(alignment);
-        let block_compressed_bound = encoder.encode_bound(block_size_bytes);
-        let block_fn = BlockFnWithState::from_fn(
-            AlignedBytes::new_padded(alignment),
-            move |block_logical_idx: u64, tmp_block_compressed: &mut AlignedBytes| {
-                tmp_block_compressed.clear();
-
-                let (block_idx, (block_inner_offset, block_size)) = block_iter.next().unwrap();
-                debug_assert_eq!(
-                    block_logical_idx,
-                    block_idx
-                        .as_slice()
-                        .iter()
-                        .zip(&grid_logical_strides)
-                        .map(|(i, s)| i * s)
-                        .sum::<u64>()
-                );
-                let read_range = dim_arr(ndim, |dim| {
-                    let start = block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
-                    let end = start + block_size[dim];
-                    start..end
-                });
-                let full_block = (0..ndim).all(|dim| {
-                    block_inner_offset[dim] == 0 && block_size[dim] == block_shape[dim] as u64
-                });
-
-                // Read block plain data
-                tmp_block_plain.clear();
-                tmp_block_plain.reserve(block_size_bytes);
-                unsafe { tmp_block_plain.set_len(block_size_bytes) };
-                let tmp_block_plain_ptr = tmp_block_plain.as_mut_ptr();
-                let read_data_buf = if full_block {
-                    tmp_block_plain.as_mut_slice()
-                } else {
-                    tmp_block_plain.fill(0); // zero-pad
-                    let b_size_bytes =
-                        block_size.as_slice().iter().product::<u64>() as usize * itemsize;
-                    // Borrow the (cleared, aligned) compressed buffer as scratch for the strided
-                    // read, then release it before compressing into it below.
-                    tmp_block_compressed.reserve(b_size_bytes);
-                    unsafe { tmp_block_compressed.set_len(b_size_bytes) };
-                    tmp_block_compressed.as_mut_slice()
-                };
-                self.storage
-                    .read_data(&read_range, read_data_buf, context)?;
-                if !full_block {
-                    // Copy from temporary buffer to output block with correct strides.
-                    let src_strides =
-                        default_strides(&dim_arr(ndim, |dim| block_size[dim] as usize), itemsize);
-                    unsafe {
-                        nd_copy(
-                            read_data_buf.as_ptr(),
-                            tmp_block_plain_ptr,
-                            block_size.clone(),
-                            &src_strides,
-                            &block_strides,
-                            itemsize,
-                        )
-                    };
-                    unsafe { tmp_block_compressed.set_len(0) };
-                }
-                let plain_data = tmp_block_plain.as_slice();
-
-                // Compress block data
-                tmp_block_compressed.reserve(block_compressed_bound);
-                unsafe { tmp_block_compressed.set_len(block_compressed_bound) };
-                let cdata_len = encoder.encode(plain_data, tmp_block_compressed.as_mut_slice())?;
-                unsafe { tmp_block_compressed.set_len(cdata_len) };
-
-                Ok(tmp_block_compressed.as_slice())
-            },
-        );
-        Ok(block_fn)
     }
 }
 

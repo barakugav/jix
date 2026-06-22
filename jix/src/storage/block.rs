@@ -444,57 +444,6 @@ impl BlockTableStorage for Mmap {
     type Data<T: 'static> = MmapData<T>;
 }
 
-/// A source of pre-compressed block data consumed by [`BlockTableBuilder`] implementors such as
-/// [`OwnedBlockTableBuilder`] and `BlockArchiveWriter`.
-///
-/// Both consumers iterate over blocks in order and call `get_compressed_block` once per block.
-/// The implementor is responsible for compressing the requested block and returning its bytes.
-///
-/// One implementation is provided in this module: [`BlockFnWithState`] - closure-based, used when
-/// encoding an [`Array`](crate::Array)'s data into compressed blocks.
-pub(crate) trait BlockFn {
-    /// Produce the compressed bytes for a single block.
-    ///
-    /// # Arguments
-    ///
-    /// - `block_idx` - zero-based index of the block to compress. Blocks must be requested in
-    ///   increasing order (`0, 1, ..., nblocks - 1`); the index identifies the block to encode.
-    ///
-    /// # Returns
-    ///
-    /// The compressed bytes of block `block_idx`. The returned slice is valid until the next call.
-    fn get_compressed_block(&mut self, block_idx: u64) -> Result<&[u8]>;
-}
-
-/// Closure-based [`BlockFn`] implementation that carries its own mutable state.
-///
-/// Wraps a closure `F` of the form `FnMut(u64, &mut E) -> Result<&[u8]>` together with a mutable
-/// extension value `E` that can hold a reusable scratch buffer (e.g., a pre-allocated
-/// compressed-data buffer). This avoids per-call allocations while keeping the closure signature
-/// clean.
-///
-/// Construct with [`BlockFnWithState::from_fn`].
-pub(crate) struct BlockFnWithState<F, E> {
-    impl_fn: F,
-    extension: E,
-}
-impl<F, E> BlockFnWithState<F, E> {
-    pub(crate) fn from_fn(extension: E, impl_fn: F) -> Self
-    where
-        F: for<'a> FnMut(u64, &'a mut E) -> Result<&'a [u8]>,
-    {
-        Self { impl_fn, extension }
-    }
-}
-impl<F, E> BlockFn for BlockFnWithState<F, E>
-where
-    F: for<'a> FnMut(u64, &'a mut E) -> Result<&'a [u8]>,
-{
-    fn get_compressed_block(&mut self, block_idx: u64) -> Result<&[u8]> {
-        (self.impl_fn)(block_idx, &mut self.extension)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
