@@ -236,22 +236,36 @@ define_op2!(
 define_op2!(
     /// Element-wise exponentiation (`a` raised to the power `b`).
     ///
-    /// Supported dtypes: `f32`, `f64`. Output dtype and shape equal the input.
+    /// Supported base dtypes: `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,
+    /// `f32`, `f64`. For an **integer** base the exponent must be a non-negative
+    /// integer (it is cast to an unsigned type); for a **float** base the exponent
+    /// may be an integer or a float. Complex dtypes are not supported yet.
+    ///
+    /// For a directly supported `(base, exponent)` pair the output dtype equals the
+    /// base dtype - e.g. `u8 ** u8 -> u8`, `i32 ** u32 -> i32`, `f32 ** i32 -> f32`,
+    /// `f64 ** f64 -> f64`. Integer results wrap on overflow (two's complement).
     ///
     /// Negative base with a non-integer exponent produces `NaN`.
     ///
-    /// **Type promotion**: if `a` and `b` have different dtypes, both are cast to a
-    /// common float type (Safe casting rules; `f32 + f64 -> f64`).
+    /// **Type promotion**: when `a` and `b` do not directly match a supported pair,
+    /// both operands are cast under Safe casting rules and the first matching pair
+    /// is used. Two consequences are worth noting:
+    /// - A **signed** exponent cannot fill the unsigned-exponent slot, so an integer
+    ///   base with a signed exponent promotes to float: `i8 ** i8 -> f32`,
+    ///   `i32 ** i32 -> f64`. (A plain Python `int` exponent is signed, so
+    ///   `power(int_array, 3)` is float; pass `np.uint32(3)` to keep an integer result.)
+    /// - The widest exponent slot is 32-bit, so a 64-bit exponent also promotes the
+    ///   result to float: `u8 ** u64 -> f64`.
     ///
     /// **Broadcasting**: shapes are broadcast to a common shape following numpy rules.
     ///
     /// Args:
-    ///     a: First operand.
-    ///     b: Second operand.
+    ///     a: First operand (the base).
+    ///     b: Second operand (the exponent).
     ///
     /// Returns:
-    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype and broadcast shape. No computation
-    ///         occurs until the result is read.
+    ///     A lazy [`jix.Array`][jix.Array] view with the result dtype (after type promotion) and broadcast
+    ///         shape. No computation occurs until the result is read.
     ///
     /// Examples:
     ///     ```python
@@ -266,12 +280,37 @@ define_op2!(
     ///     # Raise each element to a fixed exponent using a typed scalar.
     ///     result2 = jix.power(a, np.float32(2.0))
     ///     assert np.array_equal(result2.numpy(), [4.0, 9.0, 16.0])
+    ///
+    ///     # Integer base with an unsigned integer exponent keeps the base dtype.
+    ///     ai = jix.compact([2, 3, 4], dtype=np.int32)
+    ///     result3 = jix.power(ai, np.uint32(3))
+    ///     assert result3.dtype == np.dtype("int32")
+    ///     assert np.array_equal(result3.numpy(), [8, 27, 64])
     ///     ```
     power,
     Pow,
     dispatch = {
-        // [u8, i8, u16, i16, u32, i32, u64, i64, f32, f64], // TODO
-        [f32, f64],
+        [
+            // integers, exponent must be unsigned
+            (u8, u8),
+            (i8, u8),
+            (u16, u16),
+            (i16, u16),
+            (u32, u32),
+            (i32, u32),
+            (u64, u32),
+            (i64, u32),
+            // floats
+            (f32, i32),
+            (f32, f32),
+            (f64, i32),
+            (f64, f64)
+            // complex TODO
+            // (Complex<f32>, i32),
+            // (Complex<f32>, f32),
+            // (Complex<f64>, i64),
+            // (Complex<f64>, f64)
+        ],
         Safe
     }
 );

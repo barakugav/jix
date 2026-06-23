@@ -271,26 +271,120 @@ def test_floor_divide_rejects_floats():
         _ = jix.floor_divide(a, b).numpy()
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+# Every (base_dtype, exponent_dtype) pair the power dispatch table accepts directly.
+# Each pair maps onto exactly one impl, so the result dtype is the base dtype.
+# Integer bases require an unsigned exponent; float bases accept int or float.
+_POWER_DIRECT_PAIRS = [
+    (np.uint8, np.uint8),
+    (np.int8, np.uint8),
+    (np.uint16, np.uint16),
+    (np.int16, np.uint16),
+    (np.uint32, np.uint32),
+    (np.int32, np.uint32),
+    (np.uint64, np.uint32),
+    (np.int64, np.uint32),
+    (np.float32, np.int32),
+    (np.float32, np.float32),
+    (np.float64, np.int32),
+    (np.float64, np.float64),
+]
+
+
+@pytest.mark.parametrize("base_dtype,exp_dtype", _POWER_DIRECT_PAIRS)
 @given(st.data())
-def test_power(dtype: np.dtype, data: DataObject):
+def test_power(base_dtype, exp_dtype, data: DataObject):
+    """For a directly-supported pair the result keeps the base dtype and values match.
+
+    Bases and exponents are kept small so no integer power overflows its base type
+    (the extension is a debug build that panics on overflow).
+    """
+    base_is_int = np.issubdtype(base_dtype, np.integer)
+    if base_is_int:
+        base_st = st.integers(-3, 3) if np.issubdtype(base_dtype, np.signedinteger) else st.integers(0, 3)
+        exp_st = st.integers(0, 4)
+    else:
+        base_st = st.integers(1, 5).map(float)  # positive, integer-valued -> exact results
+        exp_st = st.integers(0, 4) if np.issubdtype(exp_dtype, np.integer) else st.integers(0, 4).map(float)
+
     (np_a, za), (np_b, zb) = data.draw(
-        carrays2_strategy(dtype, element_st=st.integers(1, 5).map(float)),
+        carrays2_mixed_strategy(base_dtype, exp_dtype, element_st_a=base_st, element_st_b=exp_st),
         label="arrays",
     )
     result = jix.power(za, zb)
-    assert_array_matches(result, np_a**np_b, data=data)
+    assert result.dtype == np.dtype(base_dtype), f"dtype: {result.dtype} != {base_dtype}"
+    expected = np.power(np_a, np_b).astype(base_dtype)
+    rtol = 0.0 if base_is_int else 1e-6
+    assert_array_matches(result, expected, data=data, rtol=rtol)
+
+
+# (base_dtype, exp_dtype, expected_result_dtype) for pairs that do NOT match the
+# dispatch table directly and so promote. Hand-derived from the Safe-cast rules and
+# verified against the implementation.
+_POWER_PROMOTE_CASES = [
+    # Signed exponent can't fill the unsigned-exponent slot -> promote to float.
+    (np.int8, np.int8, np.float32),
+    (np.int16, np.int16, np.float32),
+    (np.int32, np.int32, np.float64),  # 32-bit base needs f64, not f32
+    (np.int64, np.int64, np.float64),
+    (np.uint32, np.int8, np.float64),  # u32 base only fits f64
+    # Widening within the unsigned-exponent family stays integer.
+    (np.uint8, np.uint16, np.uint16),
+    (np.uint8, np.uint32, np.uint32),
+    (np.int8, np.uint16, np.int16),
+    # 64-bit exponent has no slot (widest is 32-bit) -> promote to float.
+    (np.uint8, np.uint64, np.float64),
+    (np.uint64, np.uint64, np.float64),
+    # f16 has no impl; it promotes to f32 (or f64).
+    (np.float16, np.float16, np.float32),
+    (np.float32, np.float64, np.float64),
+]
+
+
+@pytest.mark.parametrize("base_dtype,exp_dtype,expected_dtype", _POWER_PROMOTE_CASES)
+@given(st.data())
+def test_power_promotes_mixed_dtypes(base_dtype, exp_dtype, expected_dtype, data: DataObject):
+    """Mixed (base, exponent) dtypes promote to expected_dtype and values still match."""
+    base_st = st.integers(1, 3) if np.issubdtype(base_dtype, np.integer) else st.integers(1, 3).map(float)
+    exp_st = st.integers(0, 3) if np.issubdtype(exp_dtype, np.integer) else st.integers(0, 3).map(float)
+    (np_a, za), (np_b, zb) = data.draw(
+        carrays2_mixed_strategy(base_dtype, exp_dtype, element_st_a=base_st, element_st_b=exp_st),
+        label="arrays",
+    )
+    result = jix.power(za, zb)
+    assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
+    expected = np.power(np_a, np_b).astype(expected_dtype)
+    rtol = 0.0 if np.issubdtype(expected_dtype, np.integer) else 1e-6
+    assert_array_matches(result, expected, data=data, rtol=rtol)
 
 
 def test_power_custom_inputs():
     def check(result, expected):
         np.testing.assert_array_equal(result.numpy(), expected)
 
+    # int32 base: an unsigned-typed scalar exponent keeps the base dtype, but a plain
+    # Python int (signed) promotes to float (it can't fill the unsigned exponent slot).
+    di32 = np.array([2, 3, 4], dtype=np.int32)
+    zai32 = jix.compact(di32)
+    r = jix.power(zai32, np.uint32(3))  # typed unsigned scalar, broadcast
+    assert r.dtype == np.int32
+    check(r, di32**3)
+    check(
+        jix.power(zai32, np.array([1, 2, 3], dtype=np.uint32)),  # uint32 array exponent
+        di32 ** np.array([1, 2, 3]),
+    )
+    assert jix.power(zai32, 3).dtype == np.float64  # plain Python int exponent -> float
+
+    # Broadcasting: (2, 1) base ** (1, 3) exponent -> (2, 3)
+    base_2d = jix.compact(np.array([[2], [3]], dtype=np.int32))
+    exp_2d = jix.compact(np.array([[1, 2, 3]], dtype=np.uint32))
+    assert jix.power(base_2d, exp_2d).shape == (2, 3)
+
     # float32: typed numpy scalars/arrays required
     df32 = np.array([2.0, 3.0, 4.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
     check(jix.power(zaf32, np.float32(2.0)), df32 ** np.float32(2.0))  # scalar, broadcast
     check(jix.power(np.float32(2.0), zaf32), np.float32(2.0) ** df32)  # scalar first
+    check(jix.power(zaf32, np.int32(2)), (df32**2).astype(np.float32))  # integer exponent
     check(
         jix.power(zaf32, np.array([3.0, 2.0, 0.5], dtype=np.float32)),
         df32 ** np.array([3.0, 2.0, 0.5], dtype=np.float32),
