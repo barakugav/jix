@@ -1,5 +1,4 @@
 - ops
-    - allclose, isclose
     - square
 - use cargo workspace
 - consider AlignedBytes with compile time alignment

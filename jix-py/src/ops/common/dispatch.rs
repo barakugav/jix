@@ -116,6 +116,37 @@ impl OpFnDescriptor<2, ()> {
         Self::new_args(input_desc, move |inputs, _| f(inputs))
     }
 }
+impl<ExtraArgs> OpFnDescriptor<2, ExtraArgs> {
+    /// Like [`new2`] but passes `extra_args` through to the closure.
+    /// Both inputs must have the same dtype `T`.
+    pub(crate) fn new2_args<T>(
+        allowed_cast: CastKind,
+        f: impl Fn(TypedOperand<T>, TypedOperand<T>, ExtraArgs) -> PyResult<ArrayAny>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self
+    where
+        T: Dtyped,
+    {
+        let input_desc = [
+            OpFnInputDescriptor {
+                dtype: T::DTYPE.try_to_scalar().unwrap(),
+                allowed_cast,
+            },
+            OpFnInputDescriptor {
+                dtype: T::DTYPE.try_to_scalar().unwrap(),
+                allowed_cast,
+            },
+        ];
+        Self::new_args(input_desc, move |inputs, extra_args| {
+            let [input1, input2] = inputs;
+            let input1 = input1.into_typed::<T>().unwrap();
+            let input2 = input2.into_typed::<T>().unwrap();
+            f(input1, input2, extra_args)
+        })
+    }
+}
 
 impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
     #[inline(never)]

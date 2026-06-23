@@ -55,7 +55,7 @@ mod jix {
 
     #[pymodule_export]
     pub use crate::ops::{
-        equal, greater, greater_equal, less, less_equal, maximum, minimum, not_equal,
+        equal, greater, greater_equal, isclose, less, less_equal, maximum, minimum, not_equal,
     };
 
     #[pymodule_export]

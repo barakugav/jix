@@ -511,7 +511,12 @@ define_op2!(
 ///
 /// Produces a `bool` array that is `true` at each position where the corresponding elements of
 /// the two input arrays are within the specified tolerances:
-/// `|self - other| <= max(atol, rtol * max(|self|, |other|))`.
+/// `|a - b| <= max(atol, rtol * max(|a|, |b|))`.
+///
+/// **Not equivalent to `numpy.isclose`.** NumPy uses `|a - b| <= atol + rtol * |b|`: the
+/// tolerances are combined additively and the relative term is asymmetric (scaled by `|b|` only).
+/// Jix treats `atol` and `rtol` as independent thresholds and uses the symmetric
+/// `max(|a|, |b|)` as the scale.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
