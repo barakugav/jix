@@ -4,10 +4,10 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::archive::block::BlockTableStorageRead;
+use crate::archive::block::{BlockArchiveWriter, BlockTableStorageRead};
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
-use crate::codec::{DecoderCodecConfig, ReadContext};
+use crate::codec::ReadContext;
 use crate::error::{check_ndim, ensure, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
@@ -393,50 +393,34 @@ where
         mut params: ArrayParams,
         context: &ReadContext,
     ) -> Result<()> {
-        let shape = self.shape();
-        let ndim = shape.len();
-        let dtype = self.dtype();
-        params.override_from_storage(&self.storage);
-        params.tune(shape, dtype)?;
-        let block_shape = if let Some(storage) = self.storage.as_compact() {
-            DimArray::from_slice(storage.0.block_shape()).unwrap()
-        } else {
-            params.block_shape.clone().unwrap()
-        };
-
         let mut writer =
             ArchiveWriter::new(writer, schema::ArchiveType::ArrayV1).map_err(Error::io)?;
-        let header = schema::ArrayHeader {
-            shape: shape.to_vec(),
-            block_shape: block_shape.iter().cloned().map(|s| s as u64).collect(),
-        };
-        writer.write_message(&header).map_err(Error::io)?;
+        let shape = self.shape().to_vec();
 
         if let Some(storage) = self.storage.as_compact() {
+            let header = schema::ArrayHeader {
+                shape,
+                block_shape: storage.0.block_shape().iter().map(|s| *s as u64).collect(),
+            };
+            writer.write_message(&header).map_err(Error::io)?;
+
             storage.0.blocks.write_content(&mut writer)?;
             return writer.flush().map_err(Error::io);
         }
 
-        let block_shape = params.block_shape.as_ref().unwrap();
-        let block_size = block_shape.iter().cloned().try_product().unwrap();
-        let grid_shape = dim_arr(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
-        let nblocks = grid_shape.iter().cloned().product::<u64>();
+        self.compact_into_builder(
+            &mut params,
+            context,
+            |nblocks, block_shape, decoder_config| {
+                let header = schema::ArrayHeader {
+                    shape,
+                    block_shape: block_shape.iter().map(|s| *s as u64).collect(),
+                };
+                writer.write_message(&header).map_err(Error::io)?;
 
-        let encoder_cfg = params.encoder_params.as_ref().unwrap();
-        let decoder_cfg = DecoderCodecConfig {
-            codec: encoder_cfg.codec.clone(),
-            filters: encoder_cfg.filters.clone(),
-            dtype: dtype.clone(),
-        };
-
-        let (mut block_fn, block_compressed_bound) = self.to_block_fn(&params, context)?;
-        crate::archive::block::write_content_impl(
-            nblocks,
-            block_size,
-            &decoder_cfg,
-            &mut writer,
-            block_compressed_bound,
-            &mut block_fn,
+                let block_size = block_shape.iter().cloned().try_product().unwrap();
+                BlockArchiveWriter::start(&mut writer, nblocks, block_size, &decoder_config)
+            },
         )?;
 
         writer.flush().map_err(Error::io)

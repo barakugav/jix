@@ -1,7 +1,7 @@
 #![cfg_attr(deny_warnings, deny(missing_docs))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! Multi-dimensional array library with block-compressed, lazy-evaluated storage.
+//! Multi-dimensional array library with block-compressed storage and lazy-evaluated operations.
 //!
 //! Jix arrays behave like regular n-dimensional arrays, but store their data in compressed blocks
 //! and decode them on demand. The library is designed around two ideas:
@@ -414,7 +414,7 @@ pub use error::{Error, ErrorKind};
 /// metadata (shape, dtype) is available; element-wise operations that require a known scalar type
 /// at compile time are not.
 ///
-/// Create one with [`Array::into_any`] or [`ArrayStorageAny::new`](storage::ArrayStorageAny::new).
+/// Create one with [`Array::into_any`].
 pub type ArrayAny = Array<storage::ArrayStorageAny>;
 
 #[doc(hidden)]

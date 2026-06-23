@@ -28,7 +28,7 @@ pub struct ArrayStorageAny {
 }
 impl ArrayStorageAny {
     /// Wrap an existing `Arc`-boxed storage as an `ArrayStorageAny`.
-    pub fn new(
+    pub(crate) fn new(
         storage: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
     ) -> Self {
         Self {

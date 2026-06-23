@@ -327,6 +327,56 @@ pub(crate) unsafe fn nd_copy<D, S2, S3>(
     }
 }
 
+pub(crate) fn scale_read_shape(
+    read_shape: &mut impl Dimension,
+    total_read_shape: &[u64],
+    array_shape: &[u64],
+    target_nitems: u64,
+    scale_order: impl Iterator<Item = usize>,
+) {
+    let ndim = total_read_shape.len();
+    assert_eq!(array_shape.len(), ndim);
+
+    // Scale down
+    {
+        let mut max_dim_size = (1u64 << 30).min(target_nitems.next_power_of_two());
+        loop {
+            for dim in 0..ndim {
+                read_shape[dim] = read_shape[dim]
+                    .min(max_dim_size)
+                    .min(total_read_shape[dim])
+                    .max(1);
+            }
+            if let Some(read_size) = read_shape.as_slice().iter().copied().try_product()
+                && (read_size / 2 <= target_nitems || max_dim_size <= 1)
+            {
+                break;
+            }
+            max_dim_size = (max_dim_size / 2).max(1);
+        }
+    };
+
+    // Scale up
+    let mut current_volume = read_shape.as_slice().iter().product::<u64>();
+    for dim in scale_order {
+        let dim_len = total_read_shape[dim];
+        let mult_by_budget = target_nitems / current_volume.max(1);
+        let mult_by_range = dim_len.div_ceil(read_shape[dim]);
+        let multiplier = mult_by_budget.min(mult_by_range).max(1);
+        let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
+        current_volume = current_volume / read_shape[dim] * new_read_size;
+        read_shape[dim] = new_read_size;
+    }
+
+    // Snap any dim already covering its full requested range to `shape[d]` so
+    // the read boundary doesn't accidentally split the range along an unaligned start.
+    for dim in 0..ndim {
+        if read_shape[dim] == total_read_shape[dim] {
+            read_shape[dim] = array_shape[dim].max(1);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct SendSyncPtr<T>(*const T);
 unsafe impl<T> Send for SendSyncPtr<T> {}

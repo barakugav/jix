@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::hint::assert_unchecked;
 use std::ops::{Index, IndexMut};
 
@@ -80,6 +81,7 @@ pub trait Dimension:
     + Clone
     + Send
     + Sync
+    + Debug
 {
     /// The number of axes, if known at compile time.
     ///
@@ -235,6 +237,11 @@ impl ndarray::IntoDimension for DimDyn {
         nd_dim
     }
 }
+impl Debug for DimDyn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <_ as Debug>::fmt(self.as_slice(), f)
+    }
+}
 
 /// A statically-dimensioned shape with exactly `NDIM` axes, known at compile time.
 ///
@@ -324,6 +331,11 @@ macro_rules! impl_dim {
                     nd_dim[i] = size as usize;
                 }
                 nd_dim
+            }
+        }
+        impl Debug for Dim<$dim> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                <_ as Debug>::fmt(&self.0, f)
             }
         }
     };

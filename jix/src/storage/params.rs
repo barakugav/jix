@@ -1,12 +1,11 @@
 use std::marker::PhantomPinned;
-use std::ops::Range;
 use std::pin::Pin;
 
 use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::util::{DimArray, Idx, IterExt, SendSyncPtr};
+use crate::util::{scale_read_shape, DimArray, Idx, IterExt, SendSyncPtr};
 use crate::{dim_arr, Array, ArrayStorage, DimDyn, Dimension};
 
 /// Parameters controlling the encoding/decoding configs of an [`Array`], and its block layout.
@@ -570,19 +569,24 @@ impl<'a> ArraySpec<'a> {
 
     pub(crate) fn read_shape_heuristic<D>(
         &self,
-        index: &[Range<u64>],
+        total_read_shape: &[u64],
         shape: &[u64],
         itemsize: Itemsize,
     ) -> D
     where
         D: Dimension,
     {
-        self.read_shape_heuristic_with_scale_order(index, shape, itemsize, (0..index.len()).rev())
+        self.read_shape_heuristic_with_scale_order(
+            total_read_shape,
+            shape,
+            itemsize,
+            (0..total_read_shape.len()).rev(),
+        )
     }
 
     pub(crate) fn read_shape_heuristic_with_scale_order<D>(
         &self,
-        index: &[Range<u64>],
+        total_read_shape: &[u64],
         shape: &[u64],
         itemsize: Itemsize,
         scale_order: impl Iterator<Item = usize>,
@@ -590,50 +594,15 @@ impl<'a> ArraySpec<'a> {
     where
         D: Dimension,
     {
-        let ndim = index.len();
-
-        // Target byte volume per read shape
-        let target_nitems = (self.read_size() / itemsize as u64).max(1);
-
-        // Seed from the source storage block hint, clamped to the requested range.
-        let mut read_shape = {
-            let mut max_dim_size = (1u64 << 30).min(target_nitems.next_power_of_two());
-            loop {
-                let read_shape = D::from_fn(ndim, |dim| {
-                    (self.block_shape()[dim] as u64)
-                        .min(max_dim_size)
-                        .min(index[dim].end - index[dim].start)
-                        .max(1)
-                });
-                if let Some(read_size) = read_shape.as_slice().iter().copied().try_product()
-                    && (read_size / 2 <= target_nitems || max_dim_size <= 1)
-                {
-                    break read_shape;
-                }
-                max_dim_size = (max_dim_size / 2).max(1);
-            }
-        };
-
-        // Greedy scale-up.
-        let mut current_volume = read_shape.as_slice().iter().product::<u64>();
-        for dim in scale_order {
-            let dim_len = index[dim].end - index[dim].start;
-            let mult_by_budget = target_nitems / current_volume.max(1);
-            let mult_by_range = dim_len.div_ceil(read_shape[dim]);
-            let multiplier = mult_by_budget.min(mult_by_range).max(1);
-            let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
-            current_volume = current_volume / read_shape[dim] * new_read_size;
-            read_shape[dim] = new_read_size;
-        }
-
-        // Snap any dim already covering its full requested range to `shape[d]` so
-        // the read boundary doesn't accidentally split the range along an unaligned start.
-        for dim in 0..ndim {
-            if read_shape[dim] == (index[dim].end - index[dim].start) {
-                read_shape[dim] = shape[dim].max(1);
-            }
-        }
-
+        let block_shape = self.block_shape();
+        let mut read_shape = D::from_fn(shape.len(), |dim| block_shape[dim] as u64);
+        scale_read_shape(
+            &mut read_shape,
+            total_read_shape,
+            shape,
+            (self.read_size() / itemsize as u64).max(1),
+            scale_order,
+        );
         read_shape
     }
 }
