@@ -442,22 +442,40 @@ impl ScalarStrategy for crate::scalar::Complex<f64> {
 }
 
 pub(crate) fn shape_strategy() -> impl Strategy<Value = Vec<usize>> {
-    prop::strategy::Union::new_weighted(vec![
-        // 1D
-        (8, proptest::collection::vec(1usize..=100, 1)),
-        (2, proptest::collection::vec(100..=1000, 1)),
-        // 2D
-        (8, proptest::collection::vec(1..=20, 2)),
-        (2, proptest::collection::vec(20..=50, 2)),
-        // 3D
-        (5, proptest::collection::vec(1..=16, 3)),
-        // 4D
-        (5, proptest::collection::vec(1..=10, 4)),
-        // Many dims
-        (3, proptest::collection::vec(1..=4, 1..=8)),
-        // Zero-length dims
-        (1, proptest::collection::vec(0..=3, 0..=8)),
-    ])
+    if cfg!(not(miri)) {
+        prop::strategy::Union::new_weighted(vec![
+            // 1D
+            (8, proptest::collection::vec(1usize..=100, 1)),
+            (2, proptest::collection::vec(100..=1000, 1)),
+            // 2D
+            (8, proptest::collection::vec(1..=20, 2)),
+            (2, proptest::collection::vec(20..=50, 2)),
+            // 3D
+            (5, proptest::collection::vec(1..=16, 3)),
+            // 4D
+            (5, proptest::collection::vec(1..=10, 4)),
+            // Many dims
+            (3, proptest::collection::vec(1..=4, 1..=8)),
+            // Zero-length dims
+            (1, proptest::collection::vec(0..=3, 0..=8)),
+        ])
+    } else {
+        prop::strategy::Union::new_weighted(vec![
+            // 1D
+            (8, proptest::collection::vec(1usize..=100, 1)),
+            // 2D
+            (8, proptest::collection::vec(1..=16, 2)),
+            (2, proptest::collection::vec(10..=25, 2)),
+            // 3D
+            (5, proptest::collection::vec(1..=5, 3)),
+            // 4D
+            (5, proptest::collection::vec(1..=5, 4)),
+            // Many dims
+            (3, proptest::collection::vec(1..=4, 1..=8)),
+            // Zero-length dims
+            (1, proptest::collection::vec(0..=3, 0..=8)),
+        ])
+    }
 }
 
 // pub(crate) fn ndarray_strategy<T>() -> impl Strategy<Value = ndarray::ArrayD<T>>
@@ -522,12 +540,25 @@ where
 {
     data.prop_flat_map(|arr| {
         let block_shape = block_shape_strategy(arr.shape());
-        (Just(arr), block_shape)
+        let block_size = Just(None)
+            .boxed()
+            .prop_union((1u64..100).prop_map(Some).boxed());
+        let read_size = Just(None)
+            .boxed()
+            .prop_union((1u64..600).prop_map(Some).boxed());
+
+        (Just(arr), block_shape, block_size, read_size)
     })
-    .prop_map(|(arr, block_shape)| {
+    .prop_map(|(arr, block_shape, block_size, read_size)| {
         let block_shape = block_shape;
         let mut params = ArrayParams::default();
         params.block_shape(&block_shape);
+        if let Some(block_size) = block_size {
+            params.block_size(block_size);
+        }
+        if let Some(read_size) = read_size {
+            params.read_size(read_size);
+        }
         let compact = crate::Array::compact_ndarray_with(&arr, params).unwrap();
         (arr, compact)
     })

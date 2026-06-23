@@ -114,8 +114,7 @@ where
     where
         T2: Dtyped,
     {
-        let dtype = T::DTYPE;
-        check_dtype(&T2::DTYPE, &dtype)?;
+        check_dtype(&T2::DTYPE, &T::DTYPE)?;
         check_get_range(self.shape(), index)?;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
         struct ScalarReadData<T2> {
