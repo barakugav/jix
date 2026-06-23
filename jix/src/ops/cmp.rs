@@ -218,8 +218,8 @@ pub(crate) mod _traits {
             rtol: &Self::RelativeTolerance,
             atol: &Self::AbsoluteTolerance,
         ) -> bool {
-            self.re.approx_eq(&other.re, &rtol, &atol.re)
-                && self.im.approx_eq(&other.im, &rtol, &atol.im)
+            self.re.approx_eq(&other.re, rtol, &atol.re)
+                && self.im.approx_eq(&other.im, rtol, &atol.im)
         }
     }
 }

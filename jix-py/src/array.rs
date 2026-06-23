@@ -616,6 +616,11 @@ impl Array {
         crate::ops::sqrt(slf)
     }
 
+    /// Squares each element (`x * x`). See [`jix.square()`][jix.square].
+    pub fn square(slf: &Bound<'_, Self>) -> PyResult<Self> {
+        crate::ops::square(slf)
+    }
+
     /// Rounds each element up to the nearest integer (towards +inf). See [`jix.ceil()`][jix.ceil].
     pub fn ceil(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::ceil(slf)

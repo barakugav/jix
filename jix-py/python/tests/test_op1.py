@@ -235,6 +235,40 @@ def test_absolute_complex(dtype: np.dtype, data: DataObject):
     assert_array_matches(result, expected, data=data, rtol=1e-5)
 
 
+@pytest.mark.parametrize("dtype", ints + uints)
+@given(st.data())
+def test_square_int(dtype: np.dtype, data: DataObject):
+    # op_safe ranges keep x*x within the dtype, so squaring does not overflow.
+    np_a, za = data.draw(carray_strategy(dtype), label="array")
+    result = jix.square(za)
+    assert result.dtype == dtype  # square preserves the input dtype
+    assert_array_matches(result, np.square(np_a), data=data)
+
+
+@pytest.mark.parametrize("dtype", floats + complexes)
+@given(st.data())
+def test_square_float_complex(dtype: np.dtype, data: DataObject):
+    np_a, za = data.draw(carray_strategy(dtype), label="array")
+    result = jix.square(za)
+    assert result.dtype == dtype  # square preserves the input dtype
+    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype in (np.float32, np.complex64) else 1e-12)
+    assert_array_matches(result, np.square(np_a), data=data, rtol=rtol)
+
+
+def test_square_method_matches_function():
+    """Array.square() matches the jix.square() free function."""
+    np_a = np.array([1.5, -2.0, 3.0], dtype=np.float32)
+    za = jix.compact(np_a)
+    np.testing.assert_array_equal(za.square().numpy(), jix.square(za).numpy())
+
+
+def test_square_unsupported_bool_raises():
+    """square() does not auto-cast bool (CastKind::None); it raises."""
+    za = jix.compact(np.array([True, False], dtype=np.bool_))
+    with pytest.raises(Exception):
+        jix.square(za)
+
+
 # ---------------------------------------------------------------------------
 # Auto-cast (Safe dispatch) for op1
 #

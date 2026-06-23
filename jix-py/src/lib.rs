@@ -67,7 +67,7 @@ mod jix {
     #[pymodule_export]
     pub use crate::ops::{
         absolute, acos, asin, atan, ceil, cos, exp, floor, log, negative, round, sign, sin, sqrt,
-        tan,
+        square, tan,
     };
 
     #[pymodule_export]

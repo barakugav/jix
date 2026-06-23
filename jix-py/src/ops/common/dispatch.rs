@@ -12,6 +12,13 @@ use crate::util::{IntoPyResult, ItemOrSequence, IterExt};
 
 type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 
+/// Runtime dtype-dispatch table for an op with `IN_N` array inputs.
+///
+/// Holds one [`OpFnDescriptor`] per supported (typed) implementation. At call time
+/// [`dispatch_args`](Self::dispatch_args) walks `fns` in order and picks the first whose input
+/// dtypes are reachable from the operands' dtypes under each descriptor's [`CastKind`], casting
+/// the operands to that descriptor's dtypes before invoking it. Order therefore matters: list
+/// exact/narrower dtypes before wider cast targets. Returns `UnsupportedDtype` if none match.
 pub(crate) struct OpDescriptor<const IN_N: usize, ExtraArgs> {
     name: &'static str,
     fns: Vec<OpFnDescriptor<IN_N, ExtraArgs>>,
