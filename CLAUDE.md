@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jix is a multi-dimensional array library with **block-compressed, lazy-evaluated storage**, written
+Jix is a multi-dimensional array library with **block-compressed storage** and **lazy-evaluated operations**, written
 in Rust with Python bindings. Two independent features: (1) arrays split into a grid of
 independently Zstd-compressed nd-blocks, so reads decompress only the touched blocks; and (2) lazy
 operation chains where every op returns a new view and the whole pipeline is encoded in the static

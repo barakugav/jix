@@ -1,6 +1,6 @@
 # jix
 
-A multi-dimensional array library with block-compressed, lazy-evaluated storage.
+A multi-dimensional array library with block-compressed storage and lazy-evaluated operations.
 
 **Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each compressed independently.
 Only the blocks that overlap a read request are decompressed, so random access into large arrays is relatively cheap.

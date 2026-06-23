@@ -3,11 +3,11 @@
 [![crates.io](https://img.shields.io/crates/v/jix.svg)](https://crates.io/crates/jix/)
 [![PyPI](https://img.shields.io/pypi/v/jix)](https://pypi.org/project/jix/)
 [![docs.rs](https://img.shields.io/docsrs/jix?label=docs.rs)](https://docs.rs/jix/latest/jix/)
-[![Read the Docs](https://img.shields.io/readthedocs/jix?label=readthedocs)](https://jix.readthedocs.io/en/latest/)
+[![Read the Docs](https://img.shields.io/badge/readthedocs-passing-brightgreen)](https://jix.readthedocs.io/en/latest/)
 ![License](https://img.shields.io/crates/l/jix)
 
 
-A multi-dimensional array library with block-compressed, lazy-evaluated storage - written in Rust, with Python bindings.
+A multi-dimensional array library with block-compressed storage and lazy-evaluated operations - written in Rust, with Python bindings.
 
 **Block-based compression.** An array is split into a grid of fixed-size nd-blocks, each compressed independently.
 Only the blocks that overlap a read request are decompressed, so random access into large arrays is relatively cheap.

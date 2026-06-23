@@ -1,5 +1,5 @@
 site_name: jix
-site_description: Multi-dimensional array library with block-compressed, lazy-evaluated storage.
+site_description: Multi-dimensional array library with block-compressed storage and lazy-evaluated operations.
 repo_url: https://github.com/barakugav/jix
 repo_name: barakugav/jix
 

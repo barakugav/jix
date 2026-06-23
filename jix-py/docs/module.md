@@ -1,5 +1,5 @@
 
-Multi-dimensional array library with block-compressed, lazy-evaluated storage.
+Multi-dimensional array library with block-compressed storage and lazy-evaluated operations.
 
 The package provides Python bindings for the core `jix` library, which is implemented in Rust.
 `jix` is a multi-dimensional array library that stores data in **block-compressed format**
