@@ -1,8 +1,11 @@
-use crate::ops::common::define_array_op2_method;
+use crate::error::Result;
 use crate::ops::op2::define_op2;
+use crate::ops::Op2Kernel;
+use crate::ops::{common::define_array_op2_method, Op2};
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
-use crate::{Array, ArrayStorage};
+use crate::storage::ArrayStorageTyped;
+use crate::{Array, ArrayStorage, Ty};
 
 pub(crate) mod _traits {
     #[allow(unused_imports)]
@@ -121,6 +124,104 @@ pub(crate) mod _traits {
     impl_float_minimum!(f32, f64);
     #[cfg(feature = "half")]
     impl_float_minimum!(f16);
+
+    /// Approximate equality check of two scalar values.
+    ///
+    /// Returns `true` when two values are *close enough* under absolute and/or relative
+    /// tolerance. Namely if `|self - other| <= max(atol, rtol * max(|self|, |other|))`
+    /// returns `true`, otherwise `false`.
+    ///
+    /// `NaN` inputs always return `false` because `NaN != NaN`.
+    ///
+    /// Implemented for `f32`, `f64`, `f16` (feature `half`), and
+    /// [`Complex<F>`](crate::scalar::Complex) (feature `num-complex`).
+    /// For [`Complex<F>`](crate::scalar::Complex) the check is applied independently to the
+    /// real and imaginary parts: `atol` is `Complex<F>` (separate per-component absolute
+    /// tolerances) and `rtol` is `F` (a shared relative tolerance applied per component).
+    pub trait ApproxEq {
+        /// The type used for the absolute tolerance parameter (`atol`).
+        type AbsoluteTolerance;
+        /// The type used for the relative tolerance parameter (`rtol`).
+        type RelativeTolerance;
+
+        /// Returns `true` if `self` and `other` are approximately equal under the given
+        /// tolerances, `|self - other| <= max(atol, rtol * max(|self|, |other|))`.
+        fn approx_eq(
+            &self,
+            other: &Self,
+            rtol: &Self::RelativeTolerance,
+            atol: &Self::AbsoluteTolerance,
+        ) -> bool;
+    }
+    macro_rules! impl_approx_eq {
+        ($T:ty) => {
+            impl ApproxEq for $T {
+                type AbsoluteTolerance = $T;
+                type RelativeTolerance = $T;
+
+                #[inline(always)]
+                fn approx_eq(
+                    &self,
+                    other: &Self,
+                    rtol: &Self::RelativeTolerance,
+                    atol: &Self::AbsoluteTolerance,
+                ) -> bool {
+                    // credit to https://github.com/brendanzab/approx
+
+                    // Handle same infinities
+                    if self == other {
+                        return true;
+                    }
+
+                    // Handle remaining infinities
+                    if <$T>::is_infinite(*self) || <$T>::is_infinite(*other) {
+                        return false;
+                    }
+
+                    let abs_diff = <$T as num_traits::Float>::abs(self - other);
+
+                    // For when the numbers are really close together
+                    if abs_diff <= *atol {
+                        return true;
+                    }
+
+                    let abs_self = <$T as num_traits::Float>::abs(*self);
+                    let abs_other = <$T as num_traits::Float>::abs(*other);
+
+                    let largest = if abs_other > abs_self {
+                        abs_other
+                    } else {
+                        abs_self
+                    };
+
+                    // Use a relative difference comparison
+                    abs_diff <= largest * rtol
+                }
+            }
+        };
+    }
+    impl_approx_eq!(f32);
+    impl_approx_eq!(f64);
+    #[cfg(feature = "half")]
+    impl_approx_eq!(f16);
+
+    impl<F> ApproxEq for Complex<F>
+    where
+        F: ApproxEq<AbsoluteTolerance = F, RelativeTolerance = F>,
+    {
+        type AbsoluteTolerance = Complex<F>;
+        type RelativeTolerance = F;
+
+        fn approx_eq(
+            &self,
+            other: &Self,
+            rtol: &Self::RelativeTolerance,
+            atol: &Self::AbsoluteTolerance,
+        ) -> bool {
+            self.re.approx_eq(&other.re, &rtol, &atol.re)
+                && self.im.approx_eq(&other.im, &rtol, &atol.im)
+        }
+    }
 }
 
 define_op2!(
@@ -406,6 +507,115 @@ define_op2!(
     <crate::scalar::Minimum>::minimum(a, b),
 );
 
+/// Element-wise approximate equality test.
+///
+/// Produces a `bool` array that is `true` at each position where the corresponding elements of
+/// the two input arrays are within the specified tolerances:
+/// `|self - other| <= max(atol, rtol * max(|self|, |other|))`.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation; the operation is also available as
+/// [`Array::approx_equal()`](crate::Array::approx_equal).
+///
+/// # Examples
+///
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// // atol=0.02 covers the 0.01 gap; the 1.0 difference in the third element does not fit.
+/// let a = Array::compact_ndarray(&array![1.0f32, 2.0, 3.0])?;
+/// let b = Array::compact_ndarray(&array![1.0f32, 2.01, 4.0])?;
+/// let result = a.approx_equal(b, 0.0, 0.02).to_ndarray()?;
+/// assert_eq!(result.as_slice().unwrap(), &[true, true, false]);
+///
+/// // rtol=0.1 accepts a ~9 % relative difference but rejects an ~11 % one.
+/// let c = Array::compact_ndarray(&array![100.0f32, 1.0])?;
+/// let d = Array::compact_ndarray(&array![109.0f32, 1.12])?;
+/// let result = c.approx_equal(d, 0.1, 0.0).to_ndarray()?;
+/// assert_eq!(result.as_slice().unwrap(), &[true, false]);
+///
+/// // NaN inputs always produce false.
+/// let e = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
+/// let f = Array::compact_ndarray(&array![f32::NAN, 1.0f32])?;
+/// let result = e.approx_equal(f, 0.0, 0.0).to_ndarray()?;
+/// assert_eq!(result.as_slice().unwrap(), &[false, true]);
+///
+/// // Same infinities are equal; opposite signs are not.
+/// let g = Array::compact_ndarray(&array![f32::INFINITY, f32::NEG_INFINITY])?;
+/// let h = Array::compact_ndarray(&array![f32::INFINITY, f32::INFINITY])?;
+/// let result = g.approx_equal(h, 0.0, 0.0).to_ndarray()?;
+/// assert_eq!(result.as_slice().unwrap(), &[true, false]);
+/// # Ok::<(), jix::Error>(())
+/// ```
+pub struct ApproxEq<S1, S2>(Op2<S1, S2, ApproxEqKernel<S1::Item>>)
+where
+    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>;
+struct ApproxEqKernel<T: crate::scalar::ApproxEq> {
+    rtol: <T as crate::scalar::ApproxEq>::RelativeTolerance,
+    atol: <T as crate::scalar::ApproxEq>::AbsoluteTolerance,
+}
+impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
+    type Output = bool;
+
+    fn apply(&self, a: T, b: T) -> Self::Output {
+        a.approx_eq(&b, &self.rtol, &self.atol)
+    }
+}
+impl<S1, S2> ApproxEq<S1, S2>
+where
+    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
+{
+    /// Constructs a [`ApproxEq`] storage. See the struct docs for semantics and examples.
+    pub fn new(
+        a: S1,
+        b: S2,
+        rtol: <S1::Item as crate::scalar::ApproxEq>::RelativeTolerance,
+        atol: <S1::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
+    ) -> Result<Self>
+    where
+        S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
+        S2: ArrayStorageTyped<Item = S1::Item, Dimension = S1::Dimension>,
+    {
+        Ok(Self(Op2::new(a, b, ApproxEqKernel { rtol, atol })?))
+    }
+
+    /// Constructs an array with [`ApproxEq`] storage. See the storage struct docs for semantics and examples.
+    pub fn new_array(
+        a: Array<S1>,
+        b: Array<S2>,
+        rtol: <S1::Item as crate::scalar::ApproxEq>::RelativeTolerance,
+        atol: <S1::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
+    ) -> Result<Array<Self>>
+    where
+        S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
+        S2: ArrayStorageTyped<Item = S1::Item, Dimension = S1::Dimension>,
+    {
+        Self::new(a.into_storage(), b.into_storage(), rtol, atol).map(Array::from_storage)
+    }
+}
+impl<S1, S2> ArrayStorage for ApproxEq<S1, S2>
+where
+    S1: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
+    S2: ArrayStorageTyped<Item = S1::Item, Dimension = S1::Dimension>,
+{
+    type ElementType = Ty<bool>;
+    type Dimension = S1::Dimension;
+    crate::storage::impl_array_storage_forward!(<S1, S2>);
+
+    type DimensionChange<NewD: crate::Dimension> =
+        ApproxEq<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        Ok(ApproxEq(self.0.dimension_change()?))
+    }
+
+    crate::ops::impl_element_type_change_default!();
+}
+
 impl<S> Array<S>
 where
     S: ArrayStorage,
@@ -418,6 +628,22 @@ where
     define_array_op2_method!(less_equal: LessEqual, PartialOrd, fixed_output_type = true);
     define_array_op2_method!(maximum: Maximum, crate::scalar::Maximum);
     define_array_op2_method!(minimum: Minimum, crate::scalar::Minimum);
+
+    /// Applies the [`ApproxEq`] operation, see the op struct docs for details.
+    #[inline]
+    #[track_caller]
+    pub fn approx_equal<S2>(
+        self,
+        other: crate::Array<S2>,
+        rtol: <S::Item as crate::scalar::ApproxEq>::RelativeTolerance,
+        atol: <S::Item as crate::scalar::ApproxEq>::AbsoluteTolerance,
+    ) -> crate::Array<ApproxEq<S, S2>>
+    where
+        S: ArrayStorageTyped<Item: crate::scalar::ApproxEq>,
+        S2: ArrayStorageTyped<Item = S::Item, Dimension = S::Dimension>,
+    {
+        ApproxEq::new_array(self, other, rtol, atol).unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -514,6 +740,140 @@ mod tests {
         #[cfg(feature = "half")]
         [f16]
     );
+
+    // approx_equal: output is bool so NaN inputs are safe; use dedicated proptest tests because
+    // the method takes extra rtol/atol parameters that test_op2! cannot supply.
+    fn ref_approx_eq<T: num_traits::Float>(a: T, b: T, rtol: T, atol: T) -> bool {
+        if a == b {
+            return true;
+        }
+        if a.is_infinite() || b.is_infinite() {
+            return false;
+        }
+        let diff = (a - b).abs();
+        if diff <= atol {
+            return true;
+        }
+        let largest = if a.abs() > b.abs() { a.abs() } else { b.abs() };
+        diff <= largest * rtol
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn approx_equal_f32(
+            (arrays, rtol, atol) in (
+                crate::util::carrays2_strategy_generic::<f32>(
+                    crate::util::shape_strategy(),
+                    <f32 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
+                ),
+                0.0f32..=0.5f32,
+                0.0f32..=0.5f32,
+            )
+        ) {
+            let ((nd_a, za), (nd_b, zb)) = arrays;
+            let result = za.approx_equal(zb, rtol, atol);
+            let expected = ndarray::Zip::from(&nd_a)
+                .and(&nd_b)
+                .map_collect(|&a, &b| ref_approx_eq(a, b, rtol, atol));
+            crate::util::assert_array_matches(&result, &expected);
+        }
+
+        #[test]
+        fn approx_equal_f64(
+            (arrays, rtol, atol) in (
+                crate::util::carrays2_strategy_generic::<f64>(
+                    crate::util::shape_strategy(),
+                    <f64 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
+                ),
+                0.0f64..=0.5f64,
+                0.0f64..=0.5f64,
+            )
+        ) {
+            let ((nd_a, za), (nd_b, zb)) = arrays;
+            let result = za.approx_equal(zb, rtol, atol);
+            let expected = ndarray::Zip::from(&nd_a)
+                .and(&nd_b)
+                .map_collect(|&a, &b| ref_approx_eq(a, b, rtol, atol));
+            crate::util::assert_array_matches(&result, &expected);
+        }
+    }
+
+    #[cfg(feature = "half")]
+    proptest::proptest! {
+        #[test]
+        fn approx_equal_f16(
+            (arrays, rtol_f32, atol_f32) in (
+                crate::util::carrays2_strategy_generic::<f16>(
+                    crate::util::shape_strategy(),
+                    <f16 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
+                ),
+                0.0f32..=0.5f32,
+                0.0f32..=0.5f32,
+            )
+        ) {
+            let rtol = f16::from_f32(rtol_f32);
+            let atol = f16::from_f32(atol_f32);
+            let ((nd_a, za), (nd_b, zb)) = arrays;
+            let result = za.approx_equal(zb, rtol, atol);
+            let expected = ndarray::Zip::from(&nd_a)
+                .and(&nd_b)
+                .map_collect(|&a, &b| {
+                    ref_approx_eq(a.to_f32(), b.to_f32(), rtol_f32, atol_f32)
+                });
+            crate::util::assert_array_matches(&result, &expected);
+        }
+    }
+
+    #[cfg(feature = "num-complex")]
+    proptest::proptest! {
+        #[test]
+        fn approx_equal_complex_f32(
+            (arrays, rtol, atol_re, atol_im) in (
+                crate::util::carrays2_strategy_generic::<complex_f32>(
+                    crate::util::shape_strategy(),
+                    <complex_f32 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
+                ),
+                0.0f32..=0.5f32,
+                0.0f32..=0.5f32,
+                0.0f32..=0.5f32,
+            )
+        ) {
+            let ((nd_a, za), (nd_b, zb)) = arrays;
+            let atol = complex_f32 { re: atol_re, im: atol_im };
+            let result = za.approx_equal(zb, rtol, atol);
+            let expected = ndarray::Zip::from(&nd_a)
+                .and(&nd_b)
+                .map_collect(|a, b| {
+                    ref_approx_eq(a.re, b.re, rtol, atol_re)
+                        && ref_approx_eq(a.im, b.im, rtol, atol_im)
+                });
+            crate::util::assert_array_matches(&result, &expected);
+        }
+
+        #[test]
+        fn approx_equal_complex_f64(
+            (arrays, rtol, atol_re, atol_im) in (
+                crate::util::carrays2_strategy_generic::<complex_f64>(
+                    crate::util::shape_strategy(),
+                    <complex_f64 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
+                ),
+                0.0f64..=0.5f64,
+                0.0f64..=0.5f64,
+                0.0f64..=0.5f64,
+            )
+        ) {
+            let ((nd_a, za), (nd_b, zb)) = arrays;
+            let atol = complex_f64 { re: atol_re, im: atol_im };
+            let result = za.approx_equal(zb, rtol, atol);
+            let expected = ndarray::Zip::from(&nd_a)
+                .and(&nd_b)
+                .map_collect(|a, b| {
+                    ref_approx_eq(a.re, b.re, rtol, atol_re)
+                        && ref_approx_eq(a.im, b.im, rtol, atol_im)
+                });
+            crate::util::assert_array_matches(&result, &expected);
+        }
+    }
 
     // maximum / minimum: NaN propagates to the float *output*, which breaks assert_eq via PartialEq.
     // Use op_safe_strategy for floats to keep all outputs finite.
