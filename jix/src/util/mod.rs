@@ -30,14 +30,14 @@ pub(crate) trait Idx:
     + core::ops::Mul<Output = Self>
     + core::ops::Div<Output = Self>
     + core::ops::Rem<Output = Self>
-    + TryInto<usize, Error: core::fmt::Debug>
-    + TryFrom<usize, Error: core::fmt::Debug>
     + core::fmt::Display
     + core::fmt::Debug
     + core::iter::Sum
 {
     const ZERO: Self;
     const ONE: Self;
+
+    fn usize(self) -> usize;
 
     fn div_ceil(self, rhs: Self) -> Self;
     fn checked_mul(self, rhs: Self) -> Option<Self>;
@@ -59,6 +59,10 @@ macro_rules! impl_idx_for_primitive {
         impl Idx for $t {
             const ZERO: Self = 0;
             const ONE: Self = 1;
+
+            fn usize(self) -> usize {
+                self as usize
+            }
 
             #[inline(always)]
             fn div_ceil(self, rhs: Self) -> Self {
@@ -276,17 +280,17 @@ impl<'a> AlternatingBuffers<'a> {
     }
 }
 
-pub(crate) unsafe fn nd_copy<D, S2, S3>(
+pub(crate) unsafe fn nd_copy<D, SrcS, DstS>(
     src: *const u8,
     dst: *mut u8,
     shape: impl IntoDimension<Dimension = D>,
-    src_strides: &[S2],
-    dst_strides: &[S3],
+    src_strides: &[SrcS],
+    dst_strides: &[DstS],
     itemsize: usize,
 ) where
     D: Dimension,
-    S2: Idx + 'static,
-    S3: Idx + 'static,
+    SrcS: Idx + 'static,
+    DstS: Idx + 'static,
 {
     let shape = shape.into_dimension().unwrap();
     let shape = shape.as_slice();
@@ -298,8 +302,8 @@ pub(crate) unsafe fn nd_copy<D, S2, S3>(
     let n_continuous_dims = (0..ndim)
         .rev()
         .scan(itemsize, |expected_stride, dim| {
-            let src_stride: usize = src_strides[dim].try_into().unwrap();
-            let dst_stride: usize = dst_strides[dim].try_into().unwrap();
+            let src_stride = src_strides[dim].usize();
+            let dst_stride = dst_strides[dim].usize();
             let is_contiguous = src_stride == *expected_stride && dst_stride == *expected_stride;
             *expected_stride *= shape[dim] as usize;
             Some(is_contiguous)

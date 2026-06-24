@@ -98,10 +98,7 @@ where
             .as_slice()
             .iter()
             .zip(end.as_slice())
-            .map(|(&b, &e)| {
-                let n: usize = (e - b).try_into().unwrap();
-                n as u64
-            })
+            .map(|(&b, &e)| e - b)
             .product::<u64>();
         let status = IterStatus::new(nitems);
 

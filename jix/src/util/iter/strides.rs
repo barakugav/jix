@@ -75,14 +75,14 @@ where
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
-        let diff: usize = diff.try_into().unwrap();
-        let stride: usize = self.strides[dim].try_into().unwrap();
+        let diff = diff as usize;
+        let stride = self.strides[dim].usize();
         self.current_ptr = unsafe { self.current_ptr.add(diff * stride) };
     }
     #[inline(always)]
     fn on_decrease(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
-        let diff: usize = diff.try_into().unwrap();
-        let stride: usize = self.strides[dim].try_into().unwrap();
+        let diff = diff as usize;
+        let stride = self.strides[dim].usize();
         self.current_ptr = unsafe { self.current_ptr.sub(diff * stride) };
     }
 
