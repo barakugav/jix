@@ -15,8 +15,8 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
-    assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, scale_read_shape,
-    AlignedBytes, IterExt,
+    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_strides, dim_arr, nd_copy,
+    scale_read_shape, AlignedBytes, IterExt,
 };
 use crate::{
     ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
@@ -806,7 +806,9 @@ impl<S: ArrayStorage> Array<S> {
             spec.read_shape_heuristic(&out_shape, shape, dtype.itemsize());
         // Block-space begin/end for NdIter.
         let block_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim]);
-        let block_end = S::Dimension::from_fn(ndim, |dim| index[dim].end.div_ceil(read_shape[dim]));
+        let block_end = S::Dimension::from_fn(ndim, |dim| {
+            calc_block_end(index[dim].start, index[dim].end, read_shape[dim])
+        });
         // Element-space begin/end for NdIterExtBlockOffsetSize.
         let elem_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start);
         let elem_end = S::Dimension::from_fn(ndim, |dim| index[dim].end);

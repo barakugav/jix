@@ -44,13 +44,13 @@ pub(crate) trait Idx:
 
     #[inline(always)]
     fn ceil_to_multiple(self, m: Self) -> Self {
-        assert!(m > Self::ZERO);
+        debug_assert!(m > Self::ZERO);
         self.div_ceil(m) * m
     }
 
     #[inline(always)]
     fn floor_to_multiple(self, m: Self) -> Self {
-        assert!(m > Self::ZERO);
+        debug_assert!(m > Self::ZERO);
         (self / m) * m
     }
 }
@@ -455,9 +455,53 @@ macro_rules! or_else {
 // }
 pub(crate) use or_else;
 
+pub(crate) fn calc_block_end(begin: u64, end: u64, block_size: u64) -> u64 {
+    debug_assert!(begin <= end);
+    // div_ceil always works for all cases, except for empty ranges where begin is not aligned with block_size
+    if begin == end {
+        end / block_size
+    } else {
+        end.div_ceil(block_size)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{default_strides, AlignedBytes, AlternatingBuffers};
+    use super::{calc_block_end, default_strides, AlignedBytes, AlternatingBuffers};
+
+    #[test]
+    fn calc_block_end_non_empty_ranges() {
+        // Non-empty ranges behave like div_ceil of the end.
+        assert_eq!(calc_block_end(0, 4, 4), 1); // exactly one block
+        assert_eq!(calc_block_end(0, 3, 4), 1); // partial block
+        assert_eq!(calc_block_end(1, 5, 4), 2); // spans two blocks
+        assert_eq!(calc_block_end(0, 8, 4), 2); // two full blocks
+    }
+
+    #[test]
+    fn calc_block_end_empty_aligned_ranges() {
+        // An empty range starting on a block boundary touches zero blocks.
+        assert_eq!(calc_block_end(0, 0, 4), 0); // 0 blocks, begin = 0 / 4 = 0
+        assert_eq!(calc_block_end(4, 4, 4), 1); // 0 blocks, begin = 4 / 4 = 1
+        assert_eq!(calc_block_end(8, 8, 4), 2); // 0 blocks, begin = 8 / 4 = 2
+    }
+
+    #[test]
+    fn calc_block_end_empty_unaligned_ranges() {
+        // Regression: an empty range whose start is NOT block-aligned must still
+        // touch zero blocks. The buggy `end.div_ceil(block_size)` returned one
+        // block too many here (e.g. ceil(3 / 4) = 1 while begin / 4 = 0).
+        for block_size in 1..=8u64 {
+            for begin in 0..=16u64 {
+                // begin == end -> empty range -> zero blocks -> end == begin block.
+                assert_eq!(
+                    calc_block_end(begin, begin, block_size),
+                    begin / block_size,
+                    "empty range [{begin}, {begin}) with block_size {block_size}",
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_default_strides() {

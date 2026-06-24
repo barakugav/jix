@@ -21,7 +21,7 @@ use crate::storage::{ArraySpec, ElementType};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy, DimArray};
 use crate::{ArrayParams, ArrayStorage, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
@@ -221,8 +221,9 @@ where
         let shape_slice = shape.as_slice();
         let ndim = shape_slice.len();
         let spec = params.into_spec(shape_slice, blocks.dtype())?;
+        let block_shape = spec.as_ref().block_shape();
         let block_grid_shape = dim_arr(ndim, |dim| {
-            shape_slice[dim].div_ceil(spec.as_ref().block_shape()[dim] as u64)
+            shape_slice[dim].div_ceil(block_shape[dim] as u64)
         });
         Ok(Self {
             blocks,
@@ -299,7 +300,7 @@ where
         for dim in 0..ndim {
             let b = block_shape[dim] as u64;
             let (i_start, i_end) = (index[dim].start, index[dim].end);
-            let (b_begin, b_end) = (i_start / b, i_end.div_ceil(b));
+            let (b_begin, b_end) = (i_start / b, calc_block_end(i_start, i_end, b));
             b_range.push(b_begin..b_end);
             single_full_block &=
                 b_begin + 1 == b_end && i_start.is_multiple_of(b) && i_end.is_multiple_of(b);
@@ -321,7 +322,9 @@ where
 
         // Block-space begin/end for NdIter.
         let block_begin = D::from_fn(ndim, |dim| index[dim].start / block_shape[dim] as u64);
-        let block_end = D::from_fn(ndim, |dim| index[dim].end.div_ceil(block_shape[dim] as u64));
+        let block_end = D::from_fn(ndim, |dim| {
+            calc_block_end(index[dim].start, index[dim].end, block_shape[dim] as u64)
+        });
         // Element-space begin/end for NdIterExtBlockOffsetSize.
         let elem_begin = D::from_fn(ndim, |dim| index[dim].start);
         let elem_end = D::from_fn(ndim, |dim| index[dim].end);

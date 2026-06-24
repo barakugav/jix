@@ -136,6 +136,7 @@ where
 mod tests {
     use super::*;
     use crate::dimension::DimDyn;
+    use crate::util::calc_block_end;
     use crate::util::iter::NdIter;
 
     fn make_iter(
@@ -148,16 +149,13 @@ mod tests {
             DimDyn::from_slice(end),
             DimDyn::from_slice(block),
         );
-        let block_begin = begin
+        let (block_begin, block_end) = begin
             .iter()
+            .zip(end)
             .zip(block)
-            .map(|(&b, &c)| b / c)
-            .collect::<Vec<_>>();
-        let block_end = end
-            .iter()
-            .zip(block)
-            .map(|(&e, &c)| e.div_ceil(c))
-            .collect::<Vec<_>>();
+            .map(|((&b, &e), &c)| (b / c, calc_block_end(b, e, c)))
+            .unzip::<_, _, Vec<_>, Vec<_>>();
+
         NdIter::new_with_begin(&block_begin, &block_end, ext)
     }
 

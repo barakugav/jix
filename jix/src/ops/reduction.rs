@@ -13,7 +13,9 @@ use crate::storage::{ArraySpec, ArrayStorageTyped};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
-use crate::util::{assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, DimArray};
+use crate::util::{
+    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_strides, dim_arr, DimArray,
+};
 use crate::{Array, ArrayStorage, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
@@ -351,7 +353,11 @@ where
             inner_range_full[dim].start / bulk_shape[dim]
         });
         let bulk_grid_end = S::Dimension::from_fn(inner_ndim, |dim| {
-            inner_range_full[dim].end.div_ceil(bulk_shape[dim])
+            calc_block_end(
+                inner_range_full[dim].start,
+                inner_range_full[dim].end,
+                bulk_shape[dim],
+            )
         });
         debug_assert!(
             (0..inner_ndim)
@@ -411,8 +417,9 @@ where
             // width), non-reduced dims are subdivided.
             let tile_grid_begin =
                 S::Dimension::from_fn(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
-            let tile_grid_end =
-                S::Dimension::from_fn(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
+            let tile_grid_end = S::Dimension::from_fn(inner_ndim, |dim| {
+                calc_block_end(bulk_begin[dim], bulk_end[dim], tile_shape[dim])
+            });
             debug_assert!(
                 (0..inner_ndim)
                     .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
