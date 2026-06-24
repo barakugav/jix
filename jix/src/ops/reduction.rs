@@ -376,17 +376,17 @@ where
 
         let state_in_out_buf = size_of::<K::State>() == size_of::<K::Output>()
             && align_of::<K::State>() <= align_of::<K::Output>();
-        let mut state_buf;
+        let out_ptr: *mut u8 = buf.as_mut_ptr();
+        let mut tmp_state_buf;
         // CAREFUL: state_buf and out_ptr may alias
-        let (state_buf, out_ptr) = if state_in_out_buf {
-            // use the output buffer as the state buffer
-            let out_ptr = buf.as_mut_ptr();
-            (buf, out_ptr)
+        let state_buf: &mut [MaybeUninit<K::State>] = if state_in_out_buf {
+            unsafe {
+                std::slice::from_raw_parts_mut(out_ptr.cast::<MaybeUninit<K::State>>(), out_nitems)
+            }
         } else {
-            state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
-            (state_buf.as_mut_slice(), buf.as_mut_ptr())
+            tmp_state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
+            unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(tmp_state_buf.as_mut_slice()) }
         };
-        let state_buf = unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(state_buf) };
         let state_strides = default_strides(
             out_shape.as_slice(),
             size_of::<MaybeUninit<K::State>>() as u64,
@@ -576,10 +576,8 @@ where
         );
         // CAREFUL: state_buf and out_ptr may alias
         let state_ptr = state_buf.as_mut_ptr();
-        // drop doesn't do anything, but indicate we don't hold a mut ref to the state buf, as
-        // out_ptr may be an alias to it
-        #[allow(dropping_references)]
-        drop(state_buf);
+        // From here on the state/output buffers are touched only through `state_ptr` and
+        // `out_ptr`. Dont use `state_buf`.
         let out_strides = default_strides(out_shape.as_slice(), size_of::<K::Output>() as u64);
         if state_initialized {
             let out_iter = NdIter::new(
