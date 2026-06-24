@@ -1,8 +1,14 @@
-use crate::dtype::Dtyped;
-use crate::error::Result;
+use std::ops::Range;
+
+use crate::dtype::{Dtype, Dtyped};
+use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
-use crate::storage::ArrayStorageTyped;
-use crate::{Array, ArrayStorage, Ty};
+use crate::storage::{ArrayStorageTyped, ReadData, ReadDataExt};
+use crate::util::assert_unchecked_eq;
+use crate::{
+    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, ReadContext,
+    ReadDataTuple, Ty,
+};
 
 impl<S> Array<S>
 where
@@ -173,6 +179,185 @@ where
     Map2::new_array(a, b, map_fn).unwrap()
 }
 
+/// Applies a function element-wise across a sequence of arrays.
+///
+/// All input arrays must have the same shape. For each element position the corresponding element
+/// of every input array is gathered into an
+/// [`ItemSequence`](crate::util::ArraySequenceTyped::ItemSequence) and passed to `map_fn`. The
+/// output array has that same shape, and dtype determined by the output of
+/// `F: Fn(ArraysT::ItemSequence<'_>) -> O`. This generalizes [`Map`] (one input) and [`Map2`] (two
+/// inputs) to an arbitrary number of arrays.
+///
+/// The shape of the value handed to `map_fn` depends on the [`ArraySequence`](crate::util::ArraySequence)
+/// type:
+///
+/// | Sequence type | `ItemSequence` passed to `map_fn` |
+/// |---------------|-----------------------------------|
+/// | `[Array<S>; N]` or `&[Array<S>; N]` | `[S::Item; N]` - fixed-length array |
+/// | `Vec<Array<S>>` or `&[Array<S>]` | `&[S::Item]` - slice, one entry per array |
+/// | `(Array<S0>, Array<S1>, ...)` | `(S0::Item, S1::Item, ...)` - tuple, may be heterogeneous |
+///
+/// Use a tuple when the inputs have different element types; use a fixed-length array, slice, or
+/// `Vec` when they are homogeneous.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation, the operation is also available as
+/// [`map_multiple`].
+///
+/// # Examples
+///
+/// Combine a homogeneous fixed-length array of inputs (the closure receives `[i32; 3]`):
+///
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
+/// let b = Array::compact_ndarray(&array![10i32, 20, 30])?;
+/// let c = Array::compact_ndarray(&array![100i32, 200, 300])?;
+///
+/// let result = jix::ops::map_multiple([a, b, c], |xs: [i32; 3]| xs.iter().sum::<i32>())
+///     .to_ndarray()?;
+/// assert_eq!(result, array![111, 222, 333]);
+/// # Ok::<(), jix::Error>(())
+/// ```
+///
+/// Combine a heterogeneous tuple of inputs (the closure receives `(i32, f32, bool)`):
+///
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// let a = Array::compact_ndarray(&array![1i32, 2, 3])?;
+/// let b = Array::compact_ndarray(&array![0.5f32, 1.5, 2.5])?;
+/// let c = Array::compact_ndarray(&array![true, false, true])?;
+///
+/// let result = jix::ops::map_multiple((a, b, c), |(x, y, flag): (i32, f32, bool)| {
+///     if flag { x as f32 + y } else { x as f32 * y }
+/// })
+///     .to_ndarray()?;
+/// assert_eq!(result, array![1.5f32, 3.0, 5.5]);
+/// # Ok::<(), jix::Error>(())
+/// ```
+pub struct MapMultiple<ArraysT, F> {
+    arrays: ArraysT,
+    map_fn: F,
+    out_dtype_: Dtype,
+}
+impl<ArraysT, F> MapMultiple<ArraysT, F> {
+    /// Constructs a [`MapMultiple`] storage. See the struct docs for semantics and examples.
+    pub fn new<O>(arrays: ArraysT, map_fn: F) -> Result<Self>
+    where
+        ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+        F: Fn(ArraysT::ItemSequence<'_>) -> O,
+        O: Dtyped,
+    {
+        let narrays = arrays.narrays();
+        if narrays > 1 {
+            let shape = arrays.shape(0);
+            ensure!(
+                (1..narrays).all(|i| arrays.shape(i) == shape),
+                InvalidArgument,
+                "MapMultiple shape mismatch: {:?}",
+                (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
+            );
+        }
+        Ok(Self {
+            arrays,
+            map_fn,
+            out_dtype_: O::DTYPE,
+        })
+    }
+}
+impl<ArraysT, O, F> ArrayStorage for MapMultiple<ArraysT, F>
+where
+    ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+    F: Fn(ArraysT::ItemSequence<'_>) -> O,
+    O: Dtyped,
+{
+    type ElementType = Ty<O>;
+    type Dimension = ArraysT::Dimension;
+
+    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+        self.read_data_typed::<O>(index, context)?.to_buf(buf)
+    }
+
+    #[inline(always)]
+    fn read_data_typed<'a, T>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadData<T> + use<'a, T, ArraysT, O, F>>
+    where
+        T: Dtyped,
+    {
+        check_dtype(&T::DTYPE, &O::DTYPE)?;
+        let data = self.arrays.read_data_typed(index, context)?;
+
+        struct ReadDataImpl<'a, ArraysT, D, F> {
+            data: D,
+            f: &'a F,
+            phantom: std::marker::PhantomData<ArraysT>,
+        }
+        impl<'a, ArraysT, F, O, D> ReadData<O> for ReadDataImpl<'a, ArraysT, D, F>
+        where
+            ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+            F: Fn(ArraysT::ItemSequence<'_>) -> O,
+            O: Dtyped,
+            D: ReadDataTuple<ArraysT>,
+        {
+            fn len(&self) -> usize {
+                self.data.len()
+            }
+
+            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [O; N] {
+                let mut data_itr = self.data.read_bulk_as_iter::<N>(offset);
+                std::array::from_fn(|_| (self.f)(data_itr.next().unwrap()))
+            }
+        }
+        ReadDataImpl {
+            data,
+            f: &self.map_fn,
+            phantom: std::marker::PhantomData,
+        }
+        .transmute_items::<T>()
+    }
+
+    fn shape(&self) -> &[u64] {
+        self.arrays.shape(0)
+    }
+
+    fn dtype(&self) -> &Dtype {
+        let dtype = &self.out_dtype_;
+        unsafe { assert_unchecked_eq!(*dtype, O::DTYPE) };
+        dtype
+    }
+
+    fn spec(&self) -> crate::storage::ArraySpec<'_> {
+        self.arrays.spec(0)
+    }
+
+    crate::ops::impl_dimension_change_default!();
+    crate::ops::impl_element_type_change_default!();
+}
+
+/// Applies a function element-wise across a sequence of arrays. See [`MapMultiple`] for details
+/// and examples.
+///
+/// # Panics
+///
+/// Panics if the input arrays do not all have the same shape.
+#[track_caller]
+pub fn map_multiple<ArraysT, O, F>(arrays: ArraysT, map_fn: F) -> Array<MapMultiple<ArraysT, F>>
+where
+    ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+    O: Dtyped,
+    F: Fn(ArraysT::ItemSequence<'_>) -> O,
+{
+    Array::from_storage(MapMultiple::new(arrays, map_fn).unwrap())
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::array;
@@ -307,6 +492,180 @@ mod tests {
             },
         ];
         assert_eq!(actual, expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // map_multiple - one test per ArraySequence variant, plus dtype/shape cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn map_multiple_fixed_len_array() {
+        // `[Array<S>; N]` variant: the closure receives `[i32; 3]`.
+        let a = Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap();
+        let b = Array::compact_ndarray_with(&array![10i32, 20, 30], arr_params(&[3])).unwrap();
+        let c = Array::compact_ndarray_with(&array![100i32, 200, 300], arr_params(&[3])).unwrap();
+        let actual = crate::ops::map_multiple([a, b, c], |xs: [i32; 3]| xs.iter().sum::<i32>())
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(actual, array![111, 222, 333]);
+    }
+
+    #[test]
+    fn map_multiple_ref_fixed_len_array() {
+        // `&[Array<S>; N]` variant: still yields `[i32; 2]`, but borrows the inputs.
+        let arrays = [
+            Array::compact_ndarray_with(&array![1i32, 2, 3, 4], arr_params(&[4])).unwrap(),
+            Array::compact_ndarray_with(&array![5i32, 6, 7, 8], arr_params(&[4])).unwrap(),
+        ];
+        let actual = crate::ops::map_multiple(&arrays, |xs: [i32; 2]| xs[0] * xs[1])
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(actual, array![5, 12, 21, 32]);
+    }
+
+    #[test]
+    fn map_multiple_vec() {
+        // `Vec<Array<S>>` variant: the closure receives `&[i32]`, one entry per array.
+        let arrays = vec![
+            Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap(),
+            Array::compact_ndarray_with(&array![4i32, 5, 6], arr_params(&[3])).unwrap(),
+            Array::compact_ndarray_with(&array![7i32, 8, 9], arr_params(&[3])).unwrap(),
+        ];
+        let actual = crate::ops::map_multiple(arrays, |xs: &[i32]| xs.iter().sum::<i32>())
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(actual, array![12, 15, 18]);
+    }
+
+    #[test]
+    fn map_multiple_slice() {
+        // `&[Array<S>]` variant: also yields `&[i32]`.
+        let arrays = vec![
+            Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap(),
+            Array::compact_ndarray_with(&array![4i32, 5, 6], arr_params(&[3])).unwrap(),
+        ];
+        let actual =
+            crate::ops::map_multiple(arrays.as_slice(), |xs: &[i32]| xs.iter().product::<i32>())
+                .to_ndarray()
+                .unwrap();
+        assert_eq!(actual, array![4, 10, 18]);
+    }
+
+    #[test]
+    fn map_multiple_tuple_homogeneous() {
+        // Tuple variant with matching element types - mirrors `map2`.
+        let a = Array::compact_ndarray_with(&array![1i32, 2, 3, 4], arr_params(&[2])).unwrap();
+        let b = Array::compact_ndarray_with(&array![10i32, 20, 30, 40], arr_params(&[2])).unwrap();
+        let actual = crate::ops::map_multiple((a, b), |(x, y): (i32, i32)| x + y)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(actual, array![11, 22, 33, 44]);
+    }
+
+    #[test]
+    fn map_multiple_tuple_heterogeneous() {
+        // Tuple variant with three different dtypes - the case a homogeneous sequence cannot express.
+        let a = Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap();
+        let b = Array::compact_ndarray_with(&array![0.5f32, 1.5, 2.5], arr_params(&[3])).unwrap();
+        let c = Array::compact_ndarray_with(&array![true, false, true], arr_params(&[3])).unwrap();
+        let actual =
+            crate::ops::map_multiple(
+                (a, b, c),
+                |(x, y, flag): (i32, f32, bool)| {
+                    if flag {
+                        x as f32 + y
+                    } else {
+                        x as f32 - y
+                    }
+                },
+            )
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(actual, array![1.5f32, 0.5, 5.5]);
+    }
+
+    #[test]
+    fn map_multiple_multi_block() {
+        // Force small blocks so the read loop crosses block boundaries.
+        let a =
+            Array::compact_ndarray_with(&array![1i32, 2, 3, 4, 5, 6], arr_params(&[2])).unwrap();
+        let b =
+            Array::compact_ndarray_with(&array![6i32, 5, 4, 3, 2, 1], arr_params(&[2])).unwrap();
+        let actual = crate::ops::map_multiple([a, b], |xs: [i32; 2]| xs[0] + xs[1])
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(actual, array![7, 7, 7, 7, 7, 7]);
+    }
+
+    #[test]
+    fn map_multiple_2d_multi_block() {
+        let a = ndarray::Array::from_shape_fn((3, 4), |idx| (idx.0 * 4 + idx.1) as i32);
+        let b = ndarray::Array::from_shape_fn((3, 4), |idx| (idx.0 + idx.1) as i32);
+        let za = Array::compact_ndarray_with(&a, arr_params(&[2, 2])).unwrap();
+        let zb = Array::compact_ndarray_with(&b, arr_params(&[2, 2])).unwrap();
+        let actual = crate::ops::map_multiple((za, zb), |(x, y): (i32, i32)| x * 10 + y)
+            .to_ndarray()
+            .unwrap();
+        let expected = ndarray::Array::from_shape_fn((3, 4), |idx| {
+            let x = (idx.0 * 4 + idx.1) as i32;
+            let y = (idx.0 + idx.1) as i32;
+            x * 10 + y
+        });
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn map_multiple_output_dtype_change() {
+        // i32 inputs -> f64 output; the result dtype follows the closure's return type.
+        let a = Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap();
+        let b = Array::compact_ndarray_with(&array![4i32, 5, 6], arr_params(&[3])).unwrap();
+        let mapped = crate::ops::map_multiple([a, b], |xs: [i32; 2]| (xs[0] + xs[1]) as f64 / 2.0);
+        use crate::dtype::Dtyped;
+        assert_eq!(mapped.dtype(), &f64::DTYPE);
+        let actual = mapped.to_ndarray().unwrap();
+        assert_eq!(actual, array![2.5f64, 3.5, 4.5]);
+    }
+
+    #[test]
+    fn map_multiple_struct_output() {
+        #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[repr(C)]
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+
+        let a = Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap();
+        let b = Array::compact_ndarray_with(&array![4i32, 5, 6], arr_params(&[3])).unwrap();
+        let actual = crate::ops::map_multiple((a, b), |(x, y): (i32, i32)| Point { x, y })
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(
+            actual,
+            array![
+                Point { x: 1, y: 4 },
+                Point { x: 2, y: 5 },
+                Point { x: 3, y: 6 },
+            ]
+        );
+    }
+
+    #[test]
+    fn map_multiple_single_array() {
+        // narrays == 1: the shape-equality check is skipped and it behaves like `map`.
+        let a = Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap();
+        let actual = crate::ops::map_multiple([a], |xs: [i32; 1]| xs[0] * 2)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(actual, array![2, 4, 6]);
+    }
+
+    #[test]
+    #[should_panic(expected = "shape mismatch")]
+    fn map_multiple_shape_mismatch_panics() {
+        let a = Array::compact_ndarray_with(&array![1i32, 2, 3], arr_params(&[3])).unwrap();
+        let b = Array::compact_ndarray_with(&array![1i32, 2, 3, 4], arr_params(&[4])).unwrap();
+        let _ = crate::ops::map_multiple([a, b], |xs: [i32; 2]| xs[0] + xs[1]);
     }
 
     proptest::proptest! {

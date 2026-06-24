@@ -4,8 +4,8 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::ArraySpec;
-use crate::{ArrayStorage, Dimension, ElementType};
+use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData};
+use crate::{ArrayExt, ArrayStorage, Dimension, ElementType};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).
@@ -98,6 +98,48 @@ pub trait ArraySequenceDimension: ArraySequence {
     type Dimension: Dimension;
 }
 
+/// Subtrait of [`ArraySequence`] for sequences whose arrays all have a statically-known element
+/// type (`Ty<T>`), so their elements can be read back as concrete Rust values.
+///
+/// This is the bound required by element-wise multi-array operations such as
+/// [`map_multiple`](crate::ops::map_multiple). Unlike [`ArraySequenceElementType`] it does *not*
+/// require every array to share the same element type, which is what allows heterogeneous tuples
+/// like `(Array<..i32..>, Array<..f32..>)` to be combined.
+#[allow(private_bounds)]
+pub trait ArraySequenceTyped: ArraySequence + ArraySequenceTypedImpl<Self> {
+    /// The value handed to a per-element closure: one element drawn from each array in the
+    /// sequence, grouped by position.
+    ///
+    /// The concrete type depends on the sequence: `[T; N]` for fixed-length arrays `[Array<S>; N]`
+    /// (and references to them), `&[T]` for `Vec<Array<S>>` and `&[Array<S>]` slices, and a tuple
+    /// `(S0::Item, S1::Item, ...)` for tuples of arrays.
+    type ItemSequence<'a>;
+}
+pub(crate) trait ArraySequenceTypedImpl<ArraysT: ArraySequenceTyped + ?Sized = Self> {
+    fn read_data_typed<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadDataTuple<ArraysT> + use<'a, ArraysT, Self>>;
+}
+
+pub(crate) trait ReadDataTuple<ArraysT: ArraySequenceTyped + ?Sized> {
+    fn len(&self) -> usize;
+
+    #[allow(unused)]
+    #[inline(always)]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn read_bulk_as_iter<'a, const N: usize>(
+        &'a mut self,
+        offset: usize,
+    ) -> impl Iterator<Item = ArraysT::ItemSequence<'a>> + 'a
+    where
+        Self: Sized;
+}
+
 impl<S: ArrayStorage, const N: usize> ArraySequence for [Array<S>; N] {}
 impl<S, const N: usize> ArraySequenceImpl for [Array<S>; N]
 where
@@ -140,6 +182,46 @@ impl<S: ArrayStorage, const N: usize> ArraySequenceElementType for [Array<S>; N]
 }
 impl<S: ArrayStorage, const N: usize> ArraySequenceDimension for [Array<S>; N] {
     type Dimension = S::Dimension;
+}
+impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for [Array<S>; N] {
+    type ItemSequence<'a> = [S::Item; N];
+}
+impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
+    fn read_data_typed<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadDataTuple<Self> + use<'a, S, N>> {
+        let data = self
+            .each_ref()
+            .try_map_(|arr| arr.storage.read_data_typed::<S::Item>(index, context))?;
+        struct ReadDataTupleImpl<D, const N: usize> {
+            data: [D; N],
+        }
+        impl<S, D, const N: usize> ReadDataTuple<[Array<S>; N]> for ReadDataTupleImpl<D, N>
+        where
+            S: ArrayStorageTyped,
+            D: ReadData<S::Item>,
+        {
+            fn len(&self) -> usize {
+                self.data.first().map_or(0, |d| d.len())
+            }
+
+            fn read_bulk_as_iter<'a, const M: usize>(
+                &'a mut self,
+                offset: usize,
+            ) -> impl Iterator<Item = [S::Item; N]> + 'a
+            where
+                Self: Sized,
+            {
+                let items = self.data.each_mut().map(|data| data.read_bulk::<M>(offset));
+                (0..M).map(move |item_idx| {
+                    std::array::from_fn::<_, N, _>(|arr_idx| items[arr_idx][item_idx])
+                })
+            }
+        }
+        Ok(ReadDataTupleImpl { data })
+    }
 }
 
 impl<S: ArrayStorage, const N: usize> ArraySequence for &[Array<S>; N] {}
@@ -184,6 +266,46 @@ impl<S: ArrayStorage, const N: usize> ArraySequenceElementType for &[Array<S>; N
 impl<S: ArrayStorage, const N: usize> ArraySequenceDimension for &[Array<S>; N] {
     type Dimension = S::Dimension;
 }
+impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for &[Array<S>; N] {
+    type ItemSequence<'a> = [S::Item; N];
+}
+impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N] {
+    fn read_data_typed<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadDataTuple<Self> + use<'a, 'b, S, N>> {
+        let data = self
+            .each_ref()
+            .try_map_(|arr| arr.storage.read_data_typed::<S::Item>(index, context))?;
+        struct ReadDataTupleImpl<D, const N: usize> {
+            data: [D; N],
+        }
+        impl<S, D, const N: usize> ReadDataTuple<&[Array<S>; N]> for ReadDataTupleImpl<D, N>
+        where
+            S: ArrayStorageTyped,
+            D: ReadData<S::Item>,
+        {
+            fn len(&self) -> usize {
+                self.data.first().map_or(0, |d| d.len())
+            }
+
+            fn read_bulk_as_iter<'a, const M: usize>(
+                &'a mut self,
+                offset: usize,
+            ) -> impl Iterator<Item = [S::Item; N]> + 'a
+            where
+                Self: Sized,
+            {
+                let items = self.data.each_mut().map(|data| data.read_bulk::<M>(offset));
+                (0..M).map(move |item_idx| {
+                    std::array::from_fn::<_, N, _>(|arr_idx| items[arr_idx][item_idx])
+                })
+            }
+        }
+        Ok(ReadDataTupleImpl { data })
+    }
+}
 
 impl<S: ArrayStorage> ArraySequence for Vec<Array<S>> {}
 impl<S> ArraySequenceImpl for Vec<Array<S>>
@@ -226,6 +348,61 @@ impl<S: ArrayStorage> ArraySequenceElementType for Vec<Array<S>> {
 }
 impl<S: ArrayStorage> ArraySequenceDimension for Vec<Array<S>> {
     type Dimension = S::Dimension;
+}
+impl<S: ArrayStorageTyped> ArraySequenceTyped for Vec<Array<S>> {
+    type ItemSequence<'a> = &'a [S::Item];
+}
+impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
+    fn read_data_typed<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadDataTuple<Self> + use<'a, S>> {
+        let data = self
+            .iter()
+            .map(|arr| arr.storage.read_data_typed::<S::Item>(index, context))
+            .collect::<Result<Vec<_>>>()?;
+        struct ReadDataTupleImpl<D, T> {
+            data: Vec<D>,
+            tmp_buf: Vec<T>,
+        }
+        impl<S, D> ReadDataTuple<Vec<Array<S>>> for ReadDataTupleImpl<D, S::Item>
+        where
+            S: ArrayStorageTyped,
+            D: ReadData<S::Item>,
+        {
+            fn len(&self) -> usize {
+                self.data.first().map_or(0, |d| d.len())
+            }
+
+            fn read_bulk_as_iter<'a, const M: usize>(
+                &'a mut self,
+                offset: usize,
+            ) -> impl Iterator<Item = &'a [S::Item]> + 'a
+            where
+                Self: Sized,
+            {
+                let narrays = self.data.len();
+                self.tmp_buf.clear();
+                self.tmp_buf.reserve(narrays * M);
+                unsafe { self.tmp_buf.set_len(narrays * M) };
+                let tmp_buf = self.tmp_buf.as_mut_slice();
+
+                for (arr, data) in self.data.iter_mut().enumerate() {
+                    for (item_idx, item) in data.read_bulk::<M>(offset).into_iter().enumerate() {
+                        tmp_buf[item_idx * narrays + arr] = item;
+                    }
+                }
+
+                std::array::from_fn::<_, M, _>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
+                    .into_iter()
+            }
+        }
+        Ok(ReadDataTupleImpl {
+            data,
+            tmp_buf: Vec::new(),
+        })
+    }
 }
 
 impl<S: ArrayStorage> ArraySequence for &[Array<S>] {}
@@ -270,9 +447,64 @@ impl<S: ArrayStorage> ArraySequenceElementType for &[Array<S>] {
 impl<S: ArrayStorage> ArraySequenceDimension for &[Array<S>] {
     type Dimension = S::Dimension;
 }
+impl<S: ArrayStorageTyped> ArraySequenceTyped for &[Array<S>] {
+    type ItemSequence<'a> = &'a [S::Item];
+}
+impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
+    fn read_data_typed<'a>(
+        &'a self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+    ) -> Result<impl ReadDataTuple<Self> + use<'a, 'b, S>> {
+        let data = self
+            .iter()
+            .map(|arr| arr.storage.read_data_typed::<S::Item>(index, context))
+            .collect::<Result<Vec<_>>>()?;
+        struct ReadDataTupleImpl<D, T> {
+            data: Vec<D>,
+            tmp_buf: Vec<T>,
+        }
+        impl<S, D> ReadDataTuple<&[Array<S>]> for ReadDataTupleImpl<D, S::Item>
+        where
+            S: ArrayStorageTyped,
+            D: ReadData<S::Item>,
+        {
+            fn len(&self) -> usize {
+                self.data.first().map_or(0, |d| d.len())
+            }
+
+            fn read_bulk_as_iter<'a, const M: usize>(
+                &'a mut self,
+                offset: usize,
+            ) -> impl Iterator<Item = &'a [S::Item]> + 'a
+            where
+                Self: Sized,
+            {
+                let narrays = self.data.len();
+                self.tmp_buf.clear();
+                self.tmp_buf.reserve(narrays * M);
+                unsafe { self.tmp_buf.set_len(narrays * M) };
+                let tmp_buf = self.tmp_buf.as_mut_slice();
+
+                for (arr, data) in self.data.iter_mut().enumerate() {
+                    for (item_idx, item) in data.read_bulk::<M>(offset).into_iter().enumerate() {
+                        tmp_buf[item_idx * narrays + arr] = item;
+                    }
+                }
+
+                std::array::from_fn::<_, M, _>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
+                    .into_iter()
+            }
+        }
+        Ok(ReadDataTupleImpl {
+            data,
+            tmp_buf: Vec::new(),
+        })
+    }
+}
 
 macro_rules! impl_array_sequence_for_tuple {
-    ($($idx:tt : $S:ident),+ $(,)?) => {
+    ($($idx:tt : $S:ident, $D:ident),+ $(,)?) => {
         impl<$($S),+> ArraySequence for ($(Array<$S>,)+)
         where
             $($S: ArrayStorage,)+
@@ -339,6 +571,50 @@ macro_rules! impl_array_sequence_for_tuple {
         {
             type Dimension = D;
         }
+        impl<$($S),+> ArraySequenceTyped for ($(Array<$S>,)+)
+        where
+            $($S: ArrayStorageTyped,)+
+        {
+            type ItemSequence<'a> = ($($S::Item,)+);
+        }
+        impl<$($S),+> ArraySequenceTypedImpl for ($(Array<$S>,)+)
+        where
+            $($S: ArrayStorageTyped,)+
+        {
+            fn read_data_typed<'a>(
+                &'a self,
+                index: &[Range<u64>],
+                context: &'a ReadContext,
+            ) -> Result<impl ReadDataTuple<Self> + use<'a, $($S),+>> {
+                struct ReadDataTupleImpl<$($D),+>($($D),+);
+                impl<$($S),+, $($D),+> ReadDataTuple<($(Array<$S>,)+)> for ReadDataTupleImpl<$($D),+>
+                where
+                    $($S: ArrayStorageTyped,)+
+                    $($D: ReadData<$S::Item>,)+
+                {
+                    fn len(&self) -> usize {
+                        self.0.len()
+                    }
+
+                    fn read_bulk_as_iter<'a, const N: usize>(&'a mut self, offset: usize) -> impl Iterator<Item = ($($S::Item,)+)> + 'a
+                    where
+                        Self: Sized,
+                    {
+                        let items = ($(
+                            self.$idx.read_bulk::<N>(offset),
+                        )+);
+                        (0..N).map(move |item_idx| {
+                            ($(items.$idx[item_idx],)+)
+                        })
+                    }
+                }
+                Ok(ReadDataTupleImpl (
+                    $(
+                        self.$idx.storage.read_data_typed::<$S::Item>(index, context)?
+                    ),+
+                ))
+            }
+        }
     };
 
     (@count $($t:tt)+) => {
@@ -347,16 +623,16 @@ macro_rules! impl_array_sequence_for_tuple {
     (@replace $_t:tt $sub:expr) => { $sub };
 }
 
-impl_array_sequence_for_tuple!(0: S0);
-impl_array_sequence_for_tuple!(0: S0, 1: S1);
-impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2);
-impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3);
-impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4);
-impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5);
-impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5, 6: S6);
-impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5, 6: S6, 7: S7);
-impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5, 6: S6, 7: S7, 8: S8);
-impl_array_sequence_for_tuple!(0: S0, 1: S1, 2: S2, 3: S3, 4: S4, 5: S5, 6: S6, 7: S7, 8: S8, 9: S9);
+impl_array_sequence_for_tuple!(0: S0, D0);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8);
+impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4, D4, 5: S5, D5, 6: S6, D6, 7: S7, D7, 8: S8, D8, 9: S9, D9);
 
 #[cold]
 #[inline(never)]

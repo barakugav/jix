@@ -474,6 +474,25 @@ pub(crate) fn calc_block_end(begin: u64, end: u64, block_size: u64) -> u64 {
     }
 }
 
+pub(crate) trait ArrayExt<T, const N: usize> {
+    fn try_map_<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
+    where
+        Self: Sized;
+}
+impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
+    fn try_map_<U, E>(self, mut f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
+    where
+        Self: Sized,
+    {
+        let res = self.map(|x| f(x));
+        if res.iter().all(|r| r.is_ok()) {
+            Ok(res.map(|items| unsafe { items.unwrap_unchecked() }))
+        } else {
+            Err(res.into_iter().filter_map(|r| r.err()).next().unwrap())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{calc_block_end, default_strides, AlignedBytes, AlternatingBuffers};

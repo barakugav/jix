@@ -11,3 +11,4 @@
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
 - use multiple threads for reads
 - instead of map2, have map_zip which takes a tuple of arrays
+- remove ::storage from public API, re-export everything from lib.rs
