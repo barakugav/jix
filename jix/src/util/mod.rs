@@ -77,6 +77,7 @@ impl_idx_for_primitive!(u16);
 impl_idx_for_primitive!(u32);
 impl_idx_for_primitive!(u64);
 
+#[inline(always)]
 pub(crate) fn default_strides<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<Ix> {
     let ndim = shape.len();
     let mut strides = dim_arr(ndim, |_| itemsize);
@@ -86,6 +87,10 @@ pub(crate) fn default_strides<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<I
         }
     }
     strides
+}
+#[inline(always)]
+pub(crate) fn default_logical_strides<Ix: Idx>(shape: &[Ix]) -> DimArray<Ix> {
+    default_strides(shape, Ix::ONE)
 }
 
 #[inline(always)]

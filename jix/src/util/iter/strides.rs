@@ -1,28 +1,28 @@
 use crate::util::iter::NdIterExtension;
-use crate::util::{default_strides, DimArray, Idx};
+use crate::util::{default_logical_strides, DimArray, Idx};
 
 /// An nd-iterator extension that tracks a `*const u8` pointer into a strided buffer.
 ///
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
 #[derive(Clone)]
-pub(crate) struct NdIterExtStridesPtr<S>(NdIterExtStridesPtrMut<S>);
+pub(crate) struct NdIterExtStridesPtr<T, S>(NdIterExtStridesPtrMut<T, S>);
 
-impl<S> NdIterExtStridesPtr<S> {
+impl<T, S> NdIterExtStridesPtr<T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
     #[inline(always)]
-    pub fn new(strides: &[S], initial_ptr: *const u8) -> Self
+    pub fn new(strides: &[S], initial_ptr: *const T) -> Self
     where
         S: Copy,
     {
         Self(NdIterExtStridesPtrMut::new(strides, initial_ptr.cast_mut()))
     }
 }
-impl<S> NdIterExtension for NdIterExtStridesPtr<S>
+impl<T, S> NdIterExtension for NdIterExtStridesPtr<T, S>
 where
     S: Idx + 'static,
 {
-    type Item = *const u8;
+    type Item = *const T;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
@@ -34,13 +34,13 @@ where
     }
 
     #[inline(always)]
-    fn next(&self) -> *const u8 {
-        <NdIterExtStridesPtrMut<S> as NdIterExtension>::next(&self.0).cast_const()
+    fn next(&self) -> *const T {
+        <NdIterExtStridesPtrMut<T, S> as NdIterExtension>::next(&self.0).cast_const()
     }
 
     #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
-        <NdIterExtStridesPtrMut<S> as NdIterExtension>::assert_ndim(&self.0, ndim);
+        <NdIterExtStridesPtrMut<T, S> as NdIterExtension>::assert_ndim(&self.0, ndim);
     }
 }
 
@@ -49,15 +49,15 @@ where
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
 #[derive(Clone)]
-pub(crate) struct NdIterExtStridesPtrMut<S> {
+pub(crate) struct NdIterExtStridesPtrMut<T, S> {
     strides: DimArray<S>,
-    current_ptr: *mut u8,
+    current_ptr: *mut T,
 }
 
-impl<S> NdIterExtStridesPtrMut<S> {
+impl<T, S> NdIterExtStridesPtrMut<T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
     #[inline(always)]
-    pub fn new(strides: &[S], initial_ptr: *mut u8) -> Self
+    pub fn new(strides: &[S], initial_ptr: *mut T) -> Self
     where
         S: Copy,
     {
@@ -67,11 +67,11 @@ impl<S> NdIterExtStridesPtrMut<S> {
         }
     }
 }
-impl<S> NdIterExtension for NdIterExtStridesPtrMut<S>
+impl<T, S> NdIterExtension for NdIterExtStridesPtrMut<T, S>
 where
     S: Idx + 'static,
 {
-    type Item = *mut u8;
+    type Item = *mut T;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
@@ -87,7 +87,7 @@ where
     }
 
     #[inline(always)]
-    fn next(&self) -> *mut u8 {
+    fn next(&self) -> *mut T {
         self.current_ptr
     }
 
@@ -142,7 +142,7 @@ pub(crate) fn nd_iter_ext_logical_global_index(
     shape: &[u64],
     begin: &[u64],
 ) -> NdIterExtStridesOffset {
-    let logical_strides = default_strides(shape, 1);
+    let logical_strides = default_logical_strides(shape);
     let initial_offset = (0..shape.len())
         .map(|dim| begin[dim] * logical_strides[dim])
         .sum();

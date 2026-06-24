@@ -27,8 +27,10 @@
         "Inplace",
         "isnan",
         "itemsize",
+        "jix",
         "keepdims",
         "Kwargs",
+        "lstrides",
         "memoryview",
         "mmap",
         "ndim",
@@ -40,7 +42,6 @@
         "rtol",
         "seekable",
         "strided",
-        "unsqueeze",
-        "jix"
+        "unsqueeze"
     ]
 }

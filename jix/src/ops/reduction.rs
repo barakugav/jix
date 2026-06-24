@@ -14,7 +14,7 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
 use crate::util::{
-    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_strides, dim_arr, DimArray,
+    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray,
 };
 use crate::{Array, ArrayStorage, Dimension, Ty};
 
@@ -376,7 +376,7 @@ where
 
         let state_in_out_buf = size_of::<K::State>() == size_of::<K::Output>()
             && align_of::<K::State>() <= align_of::<K::Output>();
-        let out_ptr: *mut u8 = buf.as_mut_ptr();
+        let out_ptr = buf.as_mut_ptr().cast::<K::Output>();
         let mut tmp_state_buf;
         // CAREFUL: state_buf and out_ptr may alias
         let state_buf: &mut [MaybeUninit<K::State>] = if state_in_out_buf {
@@ -387,10 +387,7 @@ where
             tmp_state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
             unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(tmp_state_buf.as_mut_slice()) }
         };
-        let state_strides = default_strides(
-            out_shape.as_slice(),
-            size_of::<MaybeUninit<K::State>>() as u64,
-        );
+        let state_lstrides = default_logical_strides(out_shape.as_slice());
         let mut state_initialized = false;
 
         let mut items_buf = context.tmp_buf(0, Alignment::of::<S::Item>());
@@ -454,9 +451,8 @@ where
 
                 // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
                 // `tile_state_base` shifts `state_buf` to its first slot.
-                let items_buf_strides =
-                    default_strides(tile_size.as_slice(), size_of::<S::Item>() as u64);
-                let items_buf_strides_for_out_iter = items_buf_strides
+                let items_buf_lstrides = default_logical_strides(tile_size.as_slice());
+                let items_buf_lstrides_for_out_iter = items_buf_lstrides
                     .iter()
                     .zip(&self.is_reduced)
                     .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
@@ -465,28 +461,23 @@ where
                     .filter(|&d| !self.is_reduced[d])
                     .map(|d| tile_size[d])
                     .collect::<DimArray<_>>();
-                let state_offset_bytes = (0..inner_ndim)
+                let state_offset = (0..inner_ndim)
                     .filter(|&d| !self.is_reduced[d])
                     .enumerate()
                     .map(|(out_d, d)| {
-                        (tile[d].start - inner_range_full[d].start) * state_strides[out_d]
+                        (tile[d].start - inner_range_full[d].start) * state_lstrides[out_d]
                     })
                     .sum::<u64>();
-                let tile_state_base = unsafe {
-                    state_buf
-                        .as_mut_ptr()
-                        .cast::<u8>()
-                        .offset(state_offset_bytes as isize)
-                };
+                let tile_state_base = unsafe { state_buf.as_mut_ptr().add(state_offset as usize) };
 
                 let out_iter = NdIter::new(
                     D::from_slice(&tile_out_shape),
                     (
                         NdIterExtStridesPtr::new(
-                            &items_buf_strides_for_out_iter,
-                            items_buf.as_ptr(),
+                            &items_buf_lstrides_for_out_iter,
+                            items_buf.as_ptr().cast::<S::Item>(),
                         ),
-                        NdIterExtStridesPtrMut::new(&state_strides, tile_state_base),
+                        NdIterExtStridesPtrMut::new(&state_lstrides, tile_state_base),
                     ),
                 );
 
@@ -507,14 +498,14 @@ where
                 for (_idx, (src_base, state)) in out_iter {
                     let reduction_iter = NdIter::new(
                         reduction_shape.clone(),
-                        NdIterExtStridesPtr::new(&items_buf_strides, src_base),
+                        NdIterExtStridesPtr::new(&items_buf_lstrides, src_base),
                     );
                     debug_assert_eq!(reduction_size, reduction_iter.len());
-                    let mut reduction_iter = reduction_iter
-                        .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+                    let mut reduction_iter =
+                        reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.read() });
                     let mut item_idx = base_item_idx;
 
-                    let state_ref = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                    let state_ref = unsafe { &mut *state };
                     if !state_initialized {
                         // init state with the first item
                         debug_assert_eq!(item_idx, 0);
@@ -578,36 +569,35 @@ where
         let state_ptr = state_buf.as_mut_ptr();
         // From here on the state/output buffers are touched only through `state_ptr` and
         // `out_ptr`. Dont use `state_buf`.
-        let out_strides = default_strides(out_shape.as_slice(), size_of::<K::Output>() as u64);
+        let out_lstrides = default_logical_strides(out_shape.as_slice());
         if state_initialized {
             let out_iter = NdIter::new(
                 out_shape,
                 (
                     // CAREFUL: state_ptr and out_ptr may alias
-                    NdIterExtStridesPtrMut::new(&state_strides, state_ptr.cast()),
-                    NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
+                    NdIterExtStridesPtrMut::new(&state_lstrides, state_ptr),
+                    NdIterExtStridesPtrMut::new(&out_lstrides, out_ptr),
                 ),
             );
             for (_idx, (state, out_ptr)) in out_iter {
                 // CAREFUL: state and out_ptr may alias
                 let res = {
-                    let state = unsafe { &*state.cast::<MaybeUninit<K::State>>() };
-                    let state = unsafe { state.assume_init_read() };
+                    let state = unsafe { (&*state).assume_init_read() };
                     self.kernel.finalize_state(state, reduction_size_overall)
                 };
-                unsafe { out_ptr.cast::<K::Output>().write(res) };
+                unsafe { out_ptr.write(res) };
             }
         } else {
             // Empty reduction: write the empty-stream result to every output.
             let out_iter = NdIter::new(
                 out_shape,
-                NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
+                NdIterExtStridesPtrMut::new(&out_lstrides, out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);
             for (_idx, out_ptr) in out_iter {
                 let state = self.kernel.init_state(None);
                 let res = self.kernel.finalize_state(state, 0);
-                unsafe { out_ptr.cast::<K::Output>().write(res) };
+                unsafe { out_ptr.write(res) };
             }
         }
 
