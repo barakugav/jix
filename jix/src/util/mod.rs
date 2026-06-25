@@ -2,7 +2,7 @@ mod aligned_vec;
 pub(crate) use aligned_vec::AlignedBytes;
 
 mod arr_sequence;
-pub use arr_sequence::ArraySequence;
+pub use arr_sequence::*;
 
 pub(crate) mod arrayvec;
 pub(crate) mod cpu_cache;

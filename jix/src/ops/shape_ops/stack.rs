@@ -5,7 +5,10 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag};
-use crate::util::{default_strides, nd_copy, ArraySequence, DimArray};
+use crate::util::{
+    default_strides, nd_copy, ArraySequence, ArraySequenceDimension, ArraySequenceElementType,
+    DimArray,
+};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
@@ -16,7 +19,7 @@ use crate::{Array, ArrayStorage, Dimension};
 #[track_caller]
 pub fn stack<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Stack<ArraysT>>
 where
-    ArraysT: ArraySequence,
+    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     Array::from_storage(Stack::new(arrays, axis).unwrap())
 }
@@ -29,9 +32,9 @@ where
 /// [`Concatenate`](crate::ops::Concatenate), which joins along an existing axis.
 ///
 /// The output dimension type `Stack<ArraysT>::Dimension` is
-/// `ArraysT::FirstArrayDimension::Larger` - one dimension wider than the inputs. This means a
-/// static dimension is propagated when all input arrays share a known `Dim<N>`, producing
-/// `Dim<N+1>` for the output.
+/// `<ArraysT::Dimension as Dimension>::Larger` (where `ArraysT::Dimension` comes from
+/// [`ArraySequenceDimension`]) - one dimension wider than the inputs. This means a static dimension
+/// is propagated when all input arrays share a known `Dim<N>`, producing `Dim<N+1>` for the output.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
@@ -56,7 +59,7 @@ where
 /// ```
 pub struct Stack<ArraysT>
 where
-    ArraysT: ArraySequence,
+    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     arrays: ArraysT,
     stack_axis: usize,
@@ -66,7 +69,7 @@ where
 }
 impl<ArraysT> Stack<ArraysT>
 where
-    ArraysT: ArraySequence,
+    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     /// Constructs a [`Stack`] storage. See the struct docs for semantics and examples.
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
@@ -129,7 +132,7 @@ where
 }
 impl<ArraysT> ArrayStorage for Stack<ArraysT>
 where
-    ArraysT: ArraySequence,
+    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     type ElementType = ArraysT::ElementType;
     type Dimension = <ArraysT::Dimension as crate::Dimension>::Larger;
