@@ -37,7 +37,12 @@ libc = "0.2"
 
 [features]
 default = []
+
+# Add the `half` crate for f16, and implement scalar kernels for it.
 half = ["dep:half"]
+
+# Add the `num-complex` crate for complex numbers, and implement scalar kernels for Complex<f32>
+# and Complex<f64>.
 num-complex = ["dep:num-complex"]
 
 
@@ -47,6 +52,40 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 
 [dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+fastrand = "2"
 paste = "1"
 proptest = "1"
 tempfile = "3"
+
+
+[profile.bench]
+inherits = "release"
+debug = true
+
+[[bench]]
+name = "compact"
+harness = false
+
+[[bench]]
+name = "compress_ratio"
+harness = false
+
+[[bench]]
+name = "read"
+harness = false
+
+[[bench]]
+name = "op1"
+harness = false
+
+[[bench]]
+name = "reduction"
+harness = false
+
+[[bench]]
+name = "nd_copy"
+harness = false
+
+[lib]
+bench = false

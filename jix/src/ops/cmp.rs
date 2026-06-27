@@ -85,8 +85,6 @@ pub(crate) mod _traits {
     /// equivalent. The trait therefore provides a single uniform interface usable across all
     /// supported numeric dtypes.
     pub trait Minimum<Rhs = Self> {
-        // TODO: rename this to MinimumPartial
-
         /// The output element type of this minimum operation.
         type Output;
         /// Return the element-wise minimum of `self` and `other`, propagating `NaN` for floats.

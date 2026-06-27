@@ -733,3 +733,6 @@ mod tests {
 mod test_util;
 #[cfg(test)]
 pub(crate) use test_util::*;
+
+#[doc(hidden)]
+pub mod bench_util;
