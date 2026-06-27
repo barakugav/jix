@@ -2239,6 +2239,64 @@ pub(crate) mod tests {
     use crate::storage::Compact;
     use crate::{DimDyn, Ty};
 
+    /// Per-dtype comparison policy for the reduction property tests.
+    ///
+    /// A reduction reads its input block-by-block, so a floating accumulator
+    /// reassociates and can land a few ULP away from the sequential reference
+    /// fold. Every float and complex reduction folds into the widening
+    /// `f64` / `Complex<f64>` accumulator (which is therefore the element type of
+    /// `expected`), so those two types are compared with [`ApproxEq`]; integer
+    /// and `bool` reductions are exact and compared bit-for-bit. `f32` / `f16`
+    /// (and `Complex<f32>`) only ever surface here as `max` / `min` results,
+    /// which just select an input element and so also compare exactly.
+    ///
+    /// [`ApproxEq`]: crate::scalar::ApproxEq
+    trait ReductionCompare: crate::dtype::Dtyped + std::fmt::Debug + Clone {
+        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>);
+    }
+
+    /// Implements [`ReductionCompare`] with exact, bit-for-bit comparison.
+    macro_rules! reduction_compare_exact {
+        ($($t:ty),* $(,)?) => {$(
+            impl ReductionCompare for $t {
+                fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+                    crate::util::assert_array_matches(actual, expected);
+                }
+            }
+        )*};
+    }
+    reduction_compare_exact!(i8, i16, i32, i64, u8, u16, u32, u64, bool, f32);
+    #[cfg(feature = "half")]
+    reduction_compare_exact!(f16);
+    #[cfg(feature = "num-complex")]
+    reduction_compare_exact!(complex_f32);
+
+    impl ReductionCompare for f64 {
+        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+            crate::util::assert_array_matches_approx(actual, expected, 1e-9, 1e-6);
+        }
+    }
+    #[cfg(feature = "num-complex")]
+    impl ReductionCompare for complex_f64 {
+        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+            crate::util::assert_array_matches_approx(
+                actual,
+                expected,
+                1e-9,
+                Complex::new(1e-6, 1e-6),
+            );
+        }
+    }
+
+    /// Asserts a reduction result matches its reference, dispatching exact vs.
+    /// approximate comparison on the accumulator type via [`ReductionCompare`].
+    fn assert_reduction_matches<S: crate::ArrayStorage, T: ReductionCompare>(
+        actual: &Array<S>,
+        expected: &ArrayD<T>,
+    ) {
+        T::assert_matches(actual, expected);
+    }
+
     pub(crate) fn axis_strategy(ndim: usize) -> impl proptest::strategy::Strategy<Value = usize> {
         0..ndim
     }
@@ -2349,7 +2407,7 @@ pub(crate) mod tests {
                                 $body
                             }
                         );
-                        crate::util::assert_array_matches(&result, &expected);
+                        crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
                     }
                 }
             }
@@ -2378,7 +2436,7 @@ pub(crate) mod tests {
                                 $body
                             }
                         );
-                        crate::util::assert_array_matches(&result, &expected);
+                        crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
                     }
                 }
             }
@@ -2407,7 +2465,7 @@ pub(crate) mod tests {
                                 $body
                             }
                         );
-                        crate::util::assert_array_matches(&result, &expected);
+                        crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
                     }
                 }
             }
