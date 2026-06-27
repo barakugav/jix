@@ -317,6 +317,7 @@ jobs:
         with:
           python-version: 3.13
           activate-environment: true
+          enable-cache: false
       - name: Publish to PyPI
         if: ${{ inputs.dry-run == false }}
         run: uv publish 'wheels-*/*'
