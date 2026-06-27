@@ -1,9 +1,5 @@
 /target
 
-# Byte-compiled / optimized / DLL files
-__pycache__/
-.pytest_cache/
-*.py[cod]
 
 # C extensions
 *.so
@@ -75,3 +71,6 @@ docs/_build/
 
 # auto generated stubs
 python/jix/__init__.pyi
+
+# Benchmark output
+/python/benches/results/

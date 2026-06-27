@@ -41,6 +41,10 @@ cargo test --all-features --all-targets   # Rust-side tests of the bindings
 cargo run --bin generate_pyi              # regenerate the .pyi type stubs
 pytest python/tests --numprocesses auto   # Python tests - ALWAYS use --numprocesses auto (pytest-xdist)
 
+# --- Benchmarks ---
+cd jix-py && python python/benches/run_all.py   # Python comparison suite (jix vs numpy/blosc2/zarr) -> results/
+cd jix && cargo bench                            # Rust benchmarks (criterion; HTML at target/criterion/report/index.html)
+
 # --- Formatting & linting (per crate, plus ruff/ascii from repo root) ---
 cargo fmt --all -- --check                 # in each of jix/schema, jix-macros, jix, jix-py
 cargo clippy --all-features

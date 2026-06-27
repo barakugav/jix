@@ -9,3 +9,4 @@
 - ArrayParams stream syntax
 - resolve TODOs across the repo
 - add likely/unlikely branch hints
+- return strided buf from read_data
