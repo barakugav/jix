@@ -864,6 +864,81 @@ define_op1!(
     <crate::scalar::Abs>::abs,
 );
 
+/// Squares each element (`x * x`).
+///
+/// The output dtype is `<T as Mul>::Output`, which is the same as the input dtype
+/// for all built-in scalar and complex types.
+///
+/// For **integer** types squaring can overflow, following the semantics of the `*`
+/// operator: it wraps in release builds and panics in debug builds.
+///
+/// The result is a lazy view; no computation occurs until the array is read.
+///
+/// This struct is the bare storage implementation, the operation is also available as
+/// [`Array::square()`](crate::Array::square).
+///
+/// # Examples
+/// ```
+/// use jix::Array;
+/// use ndarray::array;
+///
+/// let a = Array::compact_ndarray(&array![1.0f32, -2.0, 3.0])?;
+/// let result = a.square().to_ndarray()?;
+/// assert_eq!(result.as_slice().unwrap(), &[1.0, 4.0, 9.0]);
+///
+/// // Works on integer types too.
+/// let b = Array::compact_ndarray(&array![2i32, -3, 4])?;
+/// let result = b.square().to_ndarray()?;
+/// assert_eq!(result.as_slice().unwrap(), &[4, 9, 16]);
+/// # Ok::<(), jix::Error>(())
+/// ```
+pub struct Square<S>(Op1<S, SquareKernel>);
+struct SquareKernel;
+impl<T> Op1Kernel<T> for SquareKernel
+where
+    T: core::ops::Mul + Copy,
+{
+    type Output = <T as core::ops::Mul>::Output;
+
+    #[inline(always)]
+    fn apply(&self, x: T) -> Self::Output {
+        x * x
+    }
+}
+impl<S> Square<S>
+where
+    S: ArrayStorageTyped,
+    S::Item: core::ops::Mul<Output: Dtyped>,
+{
+    /// Constructs a [`Square`] storage. See the struct docs for semantics and examples.
+    pub fn new(array: S) -> Result<Self> {
+        Ok(Self(Op1::new(array, SquareKernel)?))
+    }
+
+    /// Constructs an array with [`Square`] storage. See the storage struct docs for semantics
+    /// and examples.
+    pub fn new_array(array: Array<S>) -> Result<Array<Self>> {
+        Self::new(array.into_storage()).map(Array::from_storage)
+    }
+}
+impl<S> ArrayStorage for Square<S>
+where
+    S: ArrayStorageTyped,
+    S::Item: core::ops::Mul<Output: Dtyped>,
+{
+    type ElementType = Ty<<S::Item as core::ops::Mul>::Output>;
+    type Dimension = S::Dimension;
+    crate::storage::impl_array_storage_forward!(<S>);
+
+    type DimensionChange<NewD: crate::Dimension> = Square<S::DimensionChange<NewD>>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
+        Ok(Square(self.0.dimension_change()?))
+    }
+
+    crate::ops::impl_element_type_change_default!();
+}
+
 impl<S> Array<S>
 where
     S: ArrayStorage,
@@ -872,6 +947,7 @@ where
     define_array_op1_method!(ceil: Ceil, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(round: Round, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(sqrt: Sqrt, num_traits::Float, fixed_output_type = true);
+    define_array_op1_method!(square: Square, core::ops::Mul);
     define_array_op1_method!(exp: Exp, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(ln: Ln, num_traits::Float, fixed_output_type = true);
     define_array_op1_method!(sin: Sin, num_traits::Float, fixed_output_type = true);
@@ -935,6 +1011,16 @@ pub(crate) mod tests {
     test_op1!(
         neg,
         |a| -a,
+        [i8, i16, i32, i64, f32, f64],
+        op_safe_strategy,
+        #[cfg(feature = "half")]
+        [f16],
+        #[cfg(feature = "num-complex")]
+        [complex_f32, complex_f64]
+    );
+    test_op1!(
+        square,
+        |a| a * a,
         [i8, i16, i32, i64, f32, f64],
         op_safe_strategy,
         #[cfg(feature = "half")]

@@ -143,10 +143,8 @@ pub trait ArrayStorage {
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N] {
                 let len = self.len();
                 assert!(offset + N <= len);
-                let buf = self.buf.as_slice().as_ptr().cast::<T>();
-                let buf = unsafe { std::slice::from_raw_parts(buf, len) };
-                let chunk = &buf[offset..offset + N];
-                chunk.try_into().unwrap()
+                let ptr = self.buf.as_slice().as_ptr().cast::<T>();
+                unsafe { ptr.add(offset).cast::<[T; N]>().read() }
             }
         }
         Ok(DefaultReadData {

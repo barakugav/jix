@@ -13,7 +13,9 @@ use crate::storage::{ArraySpec, ArrayStorageTyped};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
-use crate::util::{assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, DimArray};
+use crate::util::{
+    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray,
+};
 use crate::{Array, ArrayStorage, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
@@ -351,7 +353,11 @@ where
             inner_range_full[dim].start / bulk_shape[dim]
         });
         let bulk_grid_end = S::Dimension::from_fn(inner_ndim, |dim| {
-            inner_range_full[dim].end.div_ceil(bulk_shape[dim])
+            calc_block_end(
+                inner_range_full[dim].start,
+                inner_range_full[dim].end,
+                bulk_shape[dim],
+            )
         });
         debug_assert!(
             (0..inner_ndim)
@@ -370,21 +376,18 @@ where
 
         let state_in_out_buf = size_of::<K::State>() == size_of::<K::Output>()
             && align_of::<K::State>() <= align_of::<K::Output>();
-        let mut state_buf;
+        let out_ptr = buf.as_mut_ptr().cast::<K::Output>();
+        let mut tmp_state_buf;
         // CAREFUL: state_buf and out_ptr may alias
-        let (state_buf, out_ptr) = if state_in_out_buf {
-            // use the output buffer as the state buffer
-            let out_ptr = buf.as_mut_ptr();
-            (buf, out_ptr)
+        let state_buf: &mut [MaybeUninit<K::State>] = if state_in_out_buf {
+            unsafe {
+                std::slice::from_raw_parts_mut(out_ptr.cast::<MaybeUninit<K::State>>(), out_nitems)
+            }
         } else {
-            state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
-            (state_buf.as_mut_slice(), buf.as_mut_ptr())
+            tmp_state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
+            unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(tmp_state_buf.as_mut_slice()) }
         };
-        let state_buf = unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(state_buf) };
-        let state_strides = default_strides(
-            out_shape.as_slice(),
-            size_of::<MaybeUninit<K::State>>() as u64,
-        );
+        let state_lstrides = default_logical_strides(out_shape.as_slice());
         let mut state_initialized = false;
 
         let mut items_buf = context.tmp_buf(0, Alignment::of::<S::Item>());
@@ -411,8 +414,9 @@ where
             // width), non-reduced dims are subdivided.
             let tile_grid_begin =
                 S::Dimension::from_fn(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
-            let tile_grid_end =
-                S::Dimension::from_fn(inner_ndim, |dim| bulk_end[dim].div_ceil(tile_shape[dim]));
+            let tile_grid_end = S::Dimension::from_fn(inner_ndim, |dim| {
+                calc_block_end(bulk_begin[dim], bulk_end[dim], tile_shape[dim])
+            });
             debug_assert!(
                 (0..inner_ndim)
                     .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
@@ -447,9 +451,8 @@ where
 
                 // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
                 // `tile_state_base` shifts `state_buf` to its first slot.
-                let items_buf_strides =
-                    default_strides(tile_size.as_slice(), size_of::<S::Item>() as u64);
-                let items_buf_strides_for_out_iter = items_buf_strides
+                let items_buf_lstrides = default_logical_strides(tile_size.as_slice());
+                let items_buf_lstrides_for_out_iter = items_buf_lstrides
                     .iter()
                     .zip(&self.is_reduced)
                     .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
@@ -458,28 +461,23 @@ where
                     .filter(|&d| !self.is_reduced[d])
                     .map(|d| tile_size[d])
                     .collect::<DimArray<_>>();
-                let state_offset_bytes = (0..inner_ndim)
+                let state_offset = (0..inner_ndim)
                     .filter(|&d| !self.is_reduced[d])
                     .enumerate()
                     .map(|(out_d, d)| {
-                        (tile[d].start - inner_range_full[d].start) * state_strides[out_d]
+                        (tile[d].start - inner_range_full[d].start) * state_lstrides[out_d]
                     })
                     .sum::<u64>();
-                let tile_state_base = unsafe {
-                    state_buf
-                        .as_mut_ptr()
-                        .cast::<u8>()
-                        .offset(state_offset_bytes as isize)
-                };
+                let tile_state_base = unsafe { state_buf.as_mut_ptr().add(state_offset as usize) };
 
                 let out_iter = NdIter::new(
                     D::from_slice(&tile_out_shape),
                     (
                         NdIterExtStridesPtr::new(
-                            &items_buf_strides_for_out_iter,
-                            items_buf.as_ptr(),
+                            &items_buf_lstrides_for_out_iter,
+                            items_buf.as_ptr().cast::<S::Item>(),
                         ),
-                        NdIterExtStridesPtrMut::new(&state_strides, tile_state_base),
+                        NdIterExtStridesPtrMut::new(&state_lstrides, tile_state_base),
                     ),
                 );
 
@@ -500,14 +498,14 @@ where
                 for (_idx, (src_base, state)) in out_iter {
                     let reduction_iter = NdIter::new(
                         reduction_shape.clone(),
-                        NdIterExtStridesPtr::new(&items_buf_strides, src_base),
+                        NdIterExtStridesPtr::new(&items_buf_lstrides, src_base),
                     );
                     debug_assert_eq!(reduction_size, reduction_iter.len());
-                    let mut reduction_iter = reduction_iter
-                        .map(|(_idx, in_ptr)| unsafe { in_ptr.cast::<S::Item>().read() });
+                    let mut reduction_iter =
+                        reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.read() });
                     let mut item_idx = base_item_idx;
 
-                    let state_ref = unsafe { &mut *state.cast::<MaybeUninit<K::State>>() };
+                    let state_ref = unsafe { &mut *state };
                     if !state_initialized {
                         // init state with the first item
                         debug_assert_eq!(item_idx, 0);
@@ -569,40 +567,37 @@ where
         );
         // CAREFUL: state_buf and out_ptr may alias
         let state_ptr = state_buf.as_mut_ptr();
-        // drop doesn't do anything, but indicate we don't hold a mut ref to the state buf, as
-        // out_ptr may be an alias to it
-        #[allow(dropping_references)]
-        drop(state_buf);
-        let out_strides = default_strides(out_shape.as_slice(), size_of::<K::Output>() as u64);
+        // From here on the state/output buffers are touched only through `state_ptr` and
+        // `out_ptr`. Dont use `state_buf`.
+        let out_lstrides = default_logical_strides(out_shape.as_slice());
         if state_initialized {
             let out_iter = NdIter::new(
                 out_shape,
                 (
                     // CAREFUL: state_ptr and out_ptr may alias
-                    NdIterExtStridesPtrMut::new(&state_strides, state_ptr.cast()),
-                    NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
+                    NdIterExtStridesPtrMut::new(&state_lstrides, state_ptr),
+                    NdIterExtStridesPtrMut::new(&out_lstrides, out_ptr),
                 ),
             );
             for (_idx, (state, out_ptr)) in out_iter {
                 // CAREFUL: state and out_ptr may alias
                 let res = {
-                    let state = unsafe { &*state.cast::<MaybeUninit<K::State>>() };
-                    let state = unsafe { state.assume_init_read() };
+                    let state = unsafe { (&*state).assume_init_read() };
                     self.kernel.finalize_state(state, reduction_size_overall)
                 };
-                unsafe { out_ptr.cast::<K::Output>().write(res) };
+                unsafe { out_ptr.write(res) };
             }
         } else {
             // Empty reduction: write the empty-stream result to every output.
             let out_iter = NdIter::new(
                 out_shape,
-                NdIterExtStridesPtrMut::new(&out_strides, out_ptr),
+                NdIterExtStridesPtrMut::new(&out_lstrides, out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);
             for (_idx, out_ptr) in out_iter {
                 let state = self.kernel.init_state(None);
                 let res = self.kernel.finalize_state(state, 0);
-                unsafe { out_ptr.cast::<K::Output>().write(res) };
+                unsafe { out_ptr.write(res) };
             }
         }
 
@@ -2244,6 +2239,64 @@ pub(crate) mod tests {
     use crate::storage::Compact;
     use crate::{DimDyn, Ty};
 
+    /// Per-dtype comparison policy for the reduction property tests.
+    ///
+    /// A reduction reads its input block-by-block, so a floating accumulator
+    /// reassociates and can land a few ULP away from the sequential reference
+    /// fold. Every float and complex reduction folds into the widening
+    /// `f64` / `Complex<f64>` accumulator (which is therefore the element type of
+    /// `expected`), so those two types are compared with [`ApproxEq`]; integer
+    /// and `bool` reductions are exact and compared bit-for-bit. `f32` / `f16`
+    /// (and `Complex<f32>`) only ever surface here as `max` / `min` results,
+    /// which just select an input element and so also compare exactly.
+    ///
+    /// [`ApproxEq`]: crate::scalar::ApproxEq
+    trait ReductionCompare: crate::dtype::Dtyped + std::fmt::Debug + Clone {
+        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>);
+    }
+
+    /// Implements [`ReductionCompare`] with exact, bit-for-bit comparison.
+    macro_rules! reduction_compare_exact {
+        ($($t:ty),* $(,)?) => {$(
+            impl ReductionCompare for $t {
+                fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+                    crate::util::assert_array_matches(actual, expected);
+                }
+            }
+        )*};
+    }
+    reduction_compare_exact!(i8, i16, i32, i64, u8, u16, u32, u64, bool, f32);
+    #[cfg(feature = "half")]
+    reduction_compare_exact!(f16);
+    #[cfg(feature = "num-complex")]
+    reduction_compare_exact!(complex_f32);
+
+    impl ReductionCompare for f64 {
+        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+            crate::util::assert_array_matches_approx(actual, expected, 1e-9, 1e-6);
+        }
+    }
+    #[cfg(feature = "num-complex")]
+    impl ReductionCompare for complex_f64 {
+        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+            crate::util::assert_array_matches_approx(
+                actual,
+                expected,
+                1e-9,
+                Complex::new(1e-6, 1e-6),
+            );
+        }
+    }
+
+    /// Asserts a reduction result matches its reference, dispatching exact vs.
+    /// approximate comparison on the accumulator type via [`ReductionCompare`].
+    fn assert_reduction_matches<S: crate::ArrayStorage, T: ReductionCompare>(
+        actual: &Array<S>,
+        expected: &ArrayD<T>,
+    ) {
+        T::assert_matches(actual, expected);
+    }
+
     pub(crate) fn axis_strategy(ndim: usize) -> impl proptest::strategy::Strategy<Value = usize> {
         0..ndim
     }
@@ -2354,7 +2407,7 @@ pub(crate) mod tests {
                                 $body
                             }
                         );
-                        crate::util::assert_array_matches(&result, &expected);
+                        crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
                     }
                 }
             }
@@ -2383,7 +2436,7 @@ pub(crate) mod tests {
                                 $body
                             }
                         );
-                        crate::util::assert_array_matches(&result, &expected);
+                        crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
                     }
                 }
             }
@@ -2412,7 +2465,7 @@ pub(crate) mod tests {
                                 $body
                             }
                         );
-                        crate::util::assert_array_matches(&result, &expected);
+                        crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
                     }
                 }
             }

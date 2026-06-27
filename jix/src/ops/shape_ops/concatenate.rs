@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::ArraySpec;
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
 ///
@@ -16,7 +16,7 @@ use crate::{Array, ArrayStorage, Dimension};
 #[track_caller]
 pub fn concatenate<ArraysT>(arrays: ArraysT, axis: usize) -> Array<Concatenate<ArraysT>>
 where
-    ArraysT: ArraySequence,
+    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     Array::from_storage(Concatenate::new(arrays, axis).unwrap())
 }
@@ -28,8 +28,8 @@ where
 /// same [`Dtype`]. The output has the same number of dimensions as the inputs - unlike
 /// [`Stack`](crate::ops::Stack), which introduces a new axis.
 ///
-/// The output dimension type `Concatenate<ArraysT>::Dimension` equals
-/// `ArraysT::FirstArrayDimension` - it is taken from the first array in the sequence. This
+/// The output dimension type `Concatenate<ArraysT>::Dimension` equals `ArraysT::Dimension` (from
+/// [`ArraySequenceDimension`]) - the common dimension shared by every array in the sequence. This
 /// means the static dimension is propagated when all input arrays share a known `Dim<N>`.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
@@ -61,7 +61,7 @@ where
 /// ```
 pub struct Concatenate<ArraysT>
 where
-    ArraysT: ArraySequence,
+    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     arrays: ArraysT,
     concat_axis: usize,
@@ -71,7 +71,7 @@ where
 }
 impl<ArraysT> Concatenate<ArraysT>
 where
-    ArraysT: ArraySequence,
+    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     /// Constructs a [`Concatenate`] storage. See the struct docs for semantics and examples.
     pub fn new(arrays: ArraysT, axis: usize) -> Result<Self> {
@@ -135,7 +135,7 @@ where
 }
 impl<ArraysT> ArrayStorage for Concatenate<ArraysT>
 where
-    ArraysT: ArraySequence,
+    ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     type ElementType = ArraysT::ElementType;
     type Dimension = ArraysT::Dimension;

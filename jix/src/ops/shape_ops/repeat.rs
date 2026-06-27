@@ -7,7 +7,7 @@ use crate::error::{
 };
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
-use crate::util::{default_strides, dim_arr, nd_copy};
+use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
@@ -131,7 +131,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         let s = index[k].start;
         let e = index[k].end;
         let g_start = s / n;
-        let g_end = e.div_ceil(n);
+        let g_end = calc_block_end(s, e, n);
 
         // Read the inner sub-region with axis k collapsed to [g_start..g_end).
         let inner_index = dim_arr(ndim, |d| {

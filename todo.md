@@ -1,6 +1,3 @@
-- ops
-    - allclose, isclose
-    - square
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
 - build wheels for wsam
@@ -8,5 +5,10 @@
 - buf-break workflow
 - change read_size to (u64, u64), default to (L1,L2)
 - default_strides should return Dimension
-- nd_copy should be typed by T
 - consider block shape tag in scale_read_shape
+- optimize shuffle filter
+- delegate power to square/sqrt if exponent is 2/0.5
+- if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
+- use multiple threads for reads
+- instead of map2, have map_zip which takes a tuple of arrays
+- remove ::storage from public API, re-export everything from lib.rs

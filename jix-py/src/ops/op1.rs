@@ -176,6 +176,44 @@ define_op1!(
     }
 );
 define_op1!(
+    /// Squares each element (`x * x`).
+    ///
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f16`, `f32`, `f64`,
+    /// `c32`, `c64`. The output dtype always matches the input dtype.
+    ///
+    /// For **integer** types squaring can overflow, following two's-complement `*` semantics
+    /// (the result wraps).
+    ///
+    /// Args:
+    ///     array: Input array.
+    ///
+    /// Returns:
+    ///     A lazy [`jix.Array`][jix.Array] view with the same shape and dtype as `array`. No
+    ///         computation occurs until the result is read.
+    ///
+    /// Examples:
+    ///     ```python
+    ///     import jix
+    ///     import numpy as np
+    ///
+    ///     a = jix.compact([1.0, -2.0, 3.0], dtype=np.float32)
+    ///     result = jix.square(a)
+    ///     assert np.array_equal(result.numpy(), [1.0, 4.0, 9.0])
+    ///
+    ///     # Integer dtypes are preserved.
+    ///     b = jix.compact([2, -3, 4], dtype=np.int32)
+    ///     result = jix.square(b)
+    ///     assert result.dtype == np.int32
+    ///     assert np.array_equal(result.numpy(), [4, 9, 16])
+    ///     ```
+    square,
+    Square,
+    dispatch = {
+        [i8, i16, i32, i64, u8, u16, u32, u64, f16, f32, f64, Complex<f32>, Complex<f64>],
+        None
+    }
+);
+define_op1!(
     /// Computes the natural exponential (`e^x`) of each element.
     ///
     /// Supported dtypes: `f16`, `f32`, `f64`.

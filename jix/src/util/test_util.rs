@@ -442,22 +442,40 @@ impl ScalarStrategy for crate::scalar::Complex<f64> {
 }
 
 pub(crate) fn shape_strategy() -> impl Strategy<Value = Vec<usize>> {
-    prop::strategy::Union::new_weighted(vec![
-        // 1D
-        (8, proptest::collection::vec(1usize..=100, 1)),
-        (2, proptest::collection::vec(100..=1000, 1)),
-        // 2D
-        (8, proptest::collection::vec(1..=20, 2)),
-        (2, proptest::collection::vec(20..=50, 2)),
-        // 3D
-        (5, proptest::collection::vec(1..=16, 3)),
-        // 4D
-        (5, proptest::collection::vec(1..=10, 4)),
-        // Many dims
-        (3, proptest::collection::vec(1..=4, 1..=8)),
-        // Zero-length dims
-        (1, proptest::collection::vec(0..=3, 0..=8)),
-    ])
+    if cfg!(not(miri)) {
+        prop::strategy::Union::new_weighted(vec![
+            // 1D
+            (8, proptest::collection::vec(1usize..=100, 1)),
+            (2, proptest::collection::vec(100..=1000, 1)),
+            // 2D
+            (8, proptest::collection::vec(1..=20, 2)),
+            (2, proptest::collection::vec(20..=50, 2)),
+            // 3D
+            (5, proptest::collection::vec(1..=16, 3)),
+            // 4D
+            (5, proptest::collection::vec(1..=10, 4)),
+            // Many dims
+            (3, proptest::collection::vec(1..=4, 1..=8)),
+            // Zero-length dims
+            (1, proptest::collection::vec(0..=3, 0..=8)),
+        ])
+    } else {
+        prop::strategy::Union::new_weighted(vec![
+            // 1D
+            (8, proptest::collection::vec(1usize..=100, 1)),
+            // 2D
+            (8, proptest::collection::vec(1..=16, 2)),
+            (2, proptest::collection::vec(10..=25, 2)),
+            // 3D
+            (5, proptest::collection::vec(1..=5, 3)),
+            // 4D
+            (5, proptest::collection::vec(1..=5, 4)),
+            // Many dims
+            (3, proptest::collection::vec(1..=4, 1..=8)),
+            // Zero-length dims
+            (1, proptest::collection::vec(0..=3, 0..=8)),
+        ])
+    }
 }
 
 // pub(crate) fn ndarray_strategy<T>() -> impl Strategy<Value = ndarray::ArrayD<T>>
@@ -522,12 +540,25 @@ where
 {
     data.prop_flat_map(|arr| {
         let block_shape = block_shape_strategy(arr.shape());
-        (Just(arr), block_shape)
+        let block_size = Just(None)
+            .boxed()
+            .prop_union((1u64..100).prop_map(Some).boxed());
+        let read_size = Just(None)
+            .boxed()
+            .prop_union((1u64..600).prop_map(Some).boxed());
+
+        (Just(arr), block_shape, block_size, read_size)
     })
-    .prop_map(|(arr, block_shape)| {
+    .prop_map(|(arr, block_shape, block_size, read_size)| {
         let block_shape = block_shape;
         let mut params = ArrayParams::default();
         params.block_shape(&block_shape);
+        if let Some(block_size) = block_size {
+            params.block_size(block_size);
+        }
+        if let Some(read_size) = read_size {
+            params.read_size(read_size);
+        }
         let compact = crate::Array::compact_ndarray_with(&arr, params).unwrap();
         (arr, compact)
     })
@@ -580,8 +611,13 @@ pub(crate) fn sub_range_strategy(shape: &[u64]) -> BoxedStrategy<Vec<Range<u64>>
     })
 }
 
-/// Asserts that `actual` contains the same values as `expected`.
-/// Checks the full array first, then 16 random sub-ranges via `to_ndarray_sub`.
+/// Asserts that `actual` contains the same values as `expected`, comparing each
+/// element bit-for-bit. Checks the full array first, then 16 random sub-ranges
+/// via `to_ndarray_sub`.
+///
+/// Use [`assert_array_matches_approx`] for results of order-dependent
+/// floating-point arithmetic (e.g. reductions), where exact equality is too
+/// strict.
 pub(crate) fn assert_array_matches<S, T, D>(
     actual: &crate::Array<S>,
     expected: &ndarray::Array<T, D>,
@@ -590,7 +626,44 @@ pub(crate) fn assert_array_matches<S, T, D>(
     T: crate::dtype::Dtyped + std::fmt::Debug + Clone + PartialEq,
     D: ndarray::Dimension,
 {
-    use proptest::prelude::*;
+    assert_array_matches_with(actual, expected, |a, b| a == b);
+}
+
+/// Like [`assert_array_matches`], but compares elements with [`ApproxEq`] under
+/// the given relative and absolute tolerances instead of bit-for-bit equality.
+///
+/// This is the right check for results of order-dependent floating-point
+/// arithmetic: a reduction reads its input block-by-block, so the accumulator
+/// reassociates and may land a few ULP away from a reference computed by a
+/// straight sequential fold.
+///
+/// [`ApproxEq`]: crate::scalar::ApproxEq
+pub(crate) fn assert_array_matches_approx<S, T, D>(
+    actual: &crate::Array<S>,
+    expected: &ndarray::Array<T, D>,
+    rtol: <T as crate::scalar::ApproxEq>::RelativeTolerance,
+    atol: <T as crate::scalar::ApproxEq>::AbsoluteTolerance,
+) where
+    S: crate::ArrayStorage,
+    T: crate::dtype::Dtyped + std::fmt::Debug + Clone + crate::scalar::ApproxEq,
+    D: ndarray::Dimension,
+{
+    assert_array_matches_with(actual, expected, move |a, b| a.approx_eq(b, &rtol, &atol));
+}
+
+/// Shared implementation of [`assert_array_matches`] and
+/// [`assert_array_matches_approx`]: checks storage invariants, then compares the
+/// full read and 16 random sub-range reads against `expected` using the
+/// element-wise comparator `eq`.
+fn assert_array_matches_with<S, T, D>(
+    actual: &crate::Array<S>,
+    expected: &ndarray::Array<T, D>,
+    eq: impl Fn(&T, &T) -> bool,
+) where
+    S: crate::ArrayStorage,
+    T: crate::dtype::Dtyped + std::fmt::Debug + Clone,
+    D: ndarray::Dimension,
+{
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
     // take the opportunity to check some invariants
@@ -608,8 +681,10 @@ pub(crate) fn assert_array_matches<S, T, D>(
 
     let expected = expected.view().into_dyn();
     let actual = actual.as_ref().into_typed::<T>().unwrap();
-    let full = actual.to_ndarray().unwrap();
-    assert_eq!(&full.into_dyn(), expected);
+    let full = actual.to_ndarray().unwrap().into_dyn();
+    if let Err(msg) = elementwise_eq(&full, &expected, &eq) {
+        unreachable!("full array mismatch: {msg}");
+    }
 
     let ctx = actual.read_ctx();
     let shape = actual.shape();
@@ -628,10 +703,40 @@ pub(crate) fn assert_array_matches<S, T, D>(
                 .map(|r| r.start as usize..r.end as usize)
                 .collect();
             let expected_sub = ndarray_slice(&expected, &ranges_usize);
-            prop_assert_eq!(actual_sub.into_dyn(), expected_sub);
+            elementwise_eq(&actual_sub.into_dyn(), &expected_sub, &eq)
+                .map_err(TestCaseError::fail)?;
             Ok(())
         })
         .unwrap();
+}
+
+/// Compares two dynamic-dimension arrays element-wise (in logical order) with
+/// `eq`. Returns `Err` describing the first shape or value mismatch found.
+fn elementwise_eq<A, B, T>(
+    actual: &ndarray::ArrayBase<A, ndarray::IxDyn>,
+    expected: &ndarray::ArrayBase<B, ndarray::IxDyn>,
+    eq: &impl Fn(&T, &T) -> bool,
+) -> Result<(), String>
+where
+    A: ndarray::Data<Elem = T>,
+    B: ndarray::Data<Elem = T>,
+    T: std::fmt::Debug,
+{
+    if actual.shape() != expected.shape() {
+        return Err(format!(
+            "shape mismatch: actual {:?} != expected {:?}",
+            actual.shape(),
+            expected.shape()
+        ));
+    }
+    for (i, (a, b)) in actual.iter().zip(expected.iter()).enumerate() {
+        if !eq(a, b) {
+            return Err(format!(
+                "value mismatch at flat index {i}: actual {a:?} != expected {b:?}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn ndarray_slice<S, D>(

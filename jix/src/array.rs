@@ -15,8 +15,8 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
-    assert_unchecked_eq, cast_slice_mut, default_strides, dim_arr, nd_copy, scale_read_shape,
-    AlignedBytes, IterExt,
+    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_logical_strides, default_strides,
+    dim_arr, nd_copy, scale_read_shape, AlignedBytes, IterExt,
 };
 use crate::{
     ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
@@ -452,14 +452,14 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             ) -> Result<()> {
                 let ndim = self.shape().len();
                 let read_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
-                let read_strides = default_strides(read_shape.as_slice(), size_of::<T>() as u64);
+                let read_lstrides = default_logical_strides(read_shape.as_slice());
                 let iter = NdIter::new(
                     read_shape,
-                    NdIterExtStridesPtrMut::new(&read_strides, buf.as_mut_ptr()),
+                    NdIterExtStridesPtrMut::new(&read_lstrides, buf.as_mut_ptr().cast::<T>()),
                 );
                 for (idx, out) in iter {
                     let value = (self.f)(idx.to_index());
-                    unsafe { out.cast::<T>().write(value) };
+                    unsafe { out.write(value) };
                 }
                 Ok(())
             }
@@ -806,7 +806,9 @@ impl<S: ArrayStorage> Array<S> {
             spec.read_shape_heuristic(&out_shape, shape, dtype.itemsize());
         // Block-space begin/end for NdIter.
         let block_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim]);
-        let block_end = S::Dimension::from_fn(ndim, |dim| index[dim].end.div_ceil(read_shape[dim]));
+        let block_end = S::Dimension::from_fn(ndim, |dim| {
+            calc_block_end(index[dim].start, index[dim].end, read_shape[dim])
+        });
         // Element-space begin/end for NdIterExtBlockOffsetSize.
         let elem_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start);
         let elem_end = S::Dimension::from_fn(ndim, |dim| index[dim].end);
@@ -1002,7 +1004,7 @@ impl<S: ArrayStorage> Array<S> {
             .unwrap();
         // C-order strides over the block grid, used to map a block's grid position to its logical
         // index (blocks are produced out of C order, so each one carries its own index).
-        let block_grid_strides = default_strides(block_grid_shape.as_slice(), 1);
+        let block_grid_lstrides = default_logical_strides(block_grid_shape.as_slice());
 
         let encoder_params = params.encoder_params.clone().unwrap_or_default();
         let mut encoder = Encoder::new(&encoder_params, dtype.clone())?;
@@ -1069,7 +1071,7 @@ impl<S: ArrayStorage> Array<S> {
             let chunk_strides =
                 default_strides(&dim_arr(ndim, |dim| chunk_size[dim] as usize), itemsize);
             let chunk_offset_base = (0..ndim)
-                .map(|dim| chunk_idx[dim] * chunk_shape_in_blocks[dim] * block_grid_strides[dim])
+                .map(|dim| chunk_idx[dim] * chunk_shape_in_blocks[dim] * block_grid_lstrides[dim])
                 .sum::<u64>();
 
             // Inner loop over the target blocks within the chunk.
@@ -1088,7 +1090,7 @@ impl<S: ArrayStorage> Array<S> {
                 // Logical (C-order) index of this block in the full grid.
                 let block_index = chunk_offset_base
                     + (0..ndim)
-                        .map(|dim| block_in_chunk_idx[dim] * block_grid_strides[dim])
+                        .map(|dim| block_in_chunk_idx[dim] * block_grid_lstrides[dim])
                         .sum::<u64>();
                 let full_block =
                     (0..ndim).all(|dim| block_active_size[dim] == block_shape[dim] as u64);

@@ -12,6 +12,13 @@ use crate::util::{IntoPyResult, ItemOrSequence, IterExt};
 
 type TypedOperand<T> = CoreArray<IntoType<ArrayStorageAny, Ty<T>>>;
 
+/// Runtime dtype-dispatch table for an op with `IN_N` array inputs.
+///
+/// Holds one [`OpFnDescriptor`] per supported (typed) implementation. At call time
+/// [`dispatch_args`](Self::dispatch_args) walks `fns` in order and picks the first whose input
+/// dtypes are reachable from the operands' dtypes under each descriptor's [`CastKind`], casting
+/// the operands to that descriptor's dtypes before invoking it. Order therefore matters: list
+/// exact/narrower dtypes before wider cast targets. Returns `UnsupportedDtype` if none match.
 pub(crate) struct OpDescriptor<const IN_N: usize, ExtraArgs> {
     name: &'static str,
     fns: Vec<OpFnDescriptor<IN_N, ExtraArgs>>,
@@ -114,6 +121,37 @@ impl OpFnDescriptor<2, ()> {
         ];
 
         Self::new_args(input_desc, move |inputs, _| f(inputs))
+    }
+}
+impl<ExtraArgs> OpFnDescriptor<2, ExtraArgs> {
+    /// Like [`new2`] but passes `extra_args` through to the closure.
+    /// Both inputs must have the same dtype `T`.
+    pub(crate) fn new2_args<T>(
+        allowed_cast: CastKind,
+        f: impl Fn(TypedOperand<T>, TypedOperand<T>, ExtraArgs) -> PyResult<ArrayAny>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self
+    where
+        T: Dtyped,
+    {
+        let input_desc = [
+            OpFnInputDescriptor {
+                dtype: T::DTYPE.try_to_scalar().unwrap(),
+                allowed_cast,
+            },
+            OpFnInputDescriptor {
+                dtype: T::DTYPE.try_to_scalar().unwrap(),
+                allowed_cast,
+            },
+        ];
+        Self::new_args(input_desc, move |inputs, extra_args| {
+            let [input1, input2] = inputs;
+            let input1 = input1.into_typed::<T>().unwrap();
+            let input2 = input2.into_typed::<T>().unwrap();
+            f(input1, input2, extra_args)
+        })
     }
 }
 

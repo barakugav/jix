@@ -402,7 +402,7 @@ pub use dimension::*;
 pub use element_type::*;
 
 mod util;
-pub use util::ArraySequence;
+pub use util::*;
 
 mod error;
 pub use error::{Error, ErrorKind};
