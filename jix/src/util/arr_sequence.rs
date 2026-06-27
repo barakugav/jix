@@ -385,7 +385,10 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
                 let narrays = self.data.len();
                 self.tmp_buf.clear();
                 self.tmp_buf.reserve(narrays * M);
-                unsafe { self.tmp_buf.set_len(narrays * M) };
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    self.tmp_buf.set_len(narrays * M)
+                };
                 let tmp_buf = self.tmp_buf.as_mut_slice();
 
                 for (arr, data) in self.data.iter_mut().enumerate() {
@@ -483,7 +486,10 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
                 let narrays = self.data.len();
                 self.tmp_buf.clear();
                 self.tmp_buf.reserve(narrays * M);
-                unsafe { self.tmp_buf.set_len(narrays * M) };
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    self.tmp_buf.set_len(narrays * M)
+                };
                 let tmp_buf = self.tmp_buf.as_mut_slice();
 
                 for (arr, data) in self.data.iter_mut().enumerate() {

@@ -480,11 +480,11 @@ pub(crate) trait ArrayExt<T, const N: usize> {
         Self: Sized;
 }
 impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
-    fn try_map_<U, E>(self, mut f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
+    fn try_map_<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
     where
         Self: Sized,
     {
-        let res = self.map(|x| f(x));
+        let res = self.map(f);
         if res.iter().all(|r| r.is_ok()) {
             Ok(res.map(|items| unsafe { items.unwrap_unchecked() }))
         } else {

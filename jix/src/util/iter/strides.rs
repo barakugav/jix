@@ -277,4 +277,121 @@ mod tests {
         }
         assert_eq!(flat, rows * cols);
     }
+
+    // --- Non-u8 pointer types ---------------------------------------------------------------
+    // With `T != u8`, `ptr.add(n)` advances `n * size_of::<T>()` bytes, so strides are in units
+    // of `T` elements (not bytes). The tests below pin down that element-size scaling for the
+    // generic `*const T` / `*mut T` pointers.
+
+    #[test]
+    fn strides_ptr_const_scales_by_element_size() {
+        // Stride 1 over a `u64` buffer must advance one element (8 bytes) per step, not one byte.
+        let data = [0u64; 4];
+        let base = data.as_ptr();
+        let base_byte = base as usize;
+        let ext = NdIterExtStridesPtr::new(&[1usize], base);
+        let iter = NdIter::new(&[4u64], ext);
+        let mut i = 0usize;
+        for (_, ptr) in iter {
+            assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
+            assert_eq!(
+                ptr as usize,
+                base_byte + i * size_of::<u64>(),
+                "byte offset step {i}"
+            );
+            i += 1;
+        }
+        assert_eq!(i, 4);
+    }
+
+    #[test]
+    fn strides_ptr_mut_2d_u32_writes_to_correct_elements() {
+        // Functional check: walk a contiguous row-major u32 buffer and write through each pointer.
+        // Element-unit strides are [cols, 1]; if the scaling were wrong the data would not match.
+        let rows = 3usize;
+        let cols = 4usize;
+        let mut data = vec![0u32; rows * cols];
+        let base = data.as_mut_ptr();
+        let ext = NdIterExtStridesPtrMut::new(&[cols, 1], base);
+        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let mut flat = 0u32;
+        for (_, ptr) in iter {
+            assert_eq!(ptr, unsafe { base.add(flat as usize) }, "flat index {flat}");
+            unsafe { *ptr = flat * 10 + 7 };
+            flat += 1;
+        }
+        assert_eq!(flat as usize, rows * cols);
+        let expected: Vec<u32> = (0..(rows * cols) as u32).map(|f| f * 10 + 7).collect();
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn strides_ptr_mut_non_contiguous_column_major_u32() {
+        // Column-major (Fortran-order) 2*3 layout of u32, mirroring the u8 test but with a
+        // non-byte element size: strides and offsets are counted in elements.
+        let rows = 2usize;
+        let cols = 3usize;
+        let mut data = vec![0u32; rows * cols];
+        let base = data.as_mut_ptr();
+        // dim 0 (row) stride = 1 element, dim 1 (col) stride = rows = 2 elements.
+        let ext = NdIterExtStridesPtrMut::new(&[1usize, rows], base);
+        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let expected_offsets: &[usize] = &[0, 2, 4, 1, 3, 5];
+        let mut i = 0usize;
+        for (_, ptr) in iter {
+            assert_eq!(ptr, unsafe { base.add(expected_offsets[i]) }, "step {i}");
+            i += 1;
+        }
+        assert_eq!(i, rows * cols);
+    }
+
+    #[test]
+    fn strides_ptr_mut_with_begin_offset_u32() {
+        // begin=[1,1], end=[3,3], strides=[4,1] in *element* units over a u32 buffer.
+        // Initial pointer = base + (1*4 + 1*1) elements = base+5.
+        let mut data = vec![0u32; 16];
+        let base = data.as_mut_ptr();
+        let start = unsafe { base.add(1 * 4 + 1 * 1) };
+        let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], start);
+        let iter = NdIter::new_with_begin(&[1u64, 1], &[3, 3], ext);
+        let expected: &[usize] = &[5, 6, 9, 10];
+        let mut i = 0;
+        for (_, ptr) in iter {
+            assert_eq!(ptr, unsafe { base.add(expected[i]) }, "step {i}");
+            i += 1;
+        }
+        assert_eq!(i, 4);
+    }
+
+    #[test]
+    fn strides_ptr_const_struct_element_scaling() {
+        // A struct element with a non-power-of-two size (3 * u16 = 6 bytes) exercises the scaling
+        // for arbitrary `Copy` element types, not just primitives.
+        #[derive(Clone, Copy)]
+        struct Px {
+            _r: u16,
+            _g: u16,
+            _b: u16,
+        }
+        let data = [Px {
+            _r: 0,
+            _g: 0,
+            _b: 0,
+        }; 5];
+        let base = data.as_ptr();
+        let base_byte = base as usize;
+        let ext = NdIterExtStridesPtr::new(&[1usize], base);
+        let iter = NdIter::new(&[5u64], ext);
+        let mut i = 0usize;
+        for (_, ptr) in iter {
+            assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
+            assert_eq!(
+                ptr as usize,
+                base_byte + i * size_of::<Px>(),
+                "byte offset step {i}"
+            );
+            i += 1;
+        }
+        assert_eq!(i, 5);
+    }
 }
