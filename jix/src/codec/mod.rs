@@ -40,7 +40,7 @@ pub enum Codec {
 pub(crate) struct EncoderParams {
     pub(crate) codec: Codec,
     pub(crate) level: u8,
-    pub(crate) filters: ArrayVec<Filter, 4>,
+    pub(crate) filters: ArrayVec<Filter, MAX_FILTERS>,
 }
 impl Default for EncoderParams {
     fn default() -> Self {
@@ -93,9 +93,9 @@ impl EncoderParams {
     /// Returns `InvalidArgument` if `filters` contains more than 4 elements.
     pub fn filters(&mut self, filters: &[Filter]) -> Result<&mut Self> {
         ensure!(
-            filters.len() <= 4,
+            filters.len() <= MAX_FILTERS,
             InvalidArgument,
-            "At most 4 filters are supported"
+            "At most {MAX_FILTERS} filters are supported"
         );
         self.filters = ArrayVec::from_slice(filters).unwrap();
         Ok(self)
@@ -104,7 +104,7 @@ impl EncoderParams {
 
 pub(crate) struct Encoder {
     pub(crate) dtype: Dtype,
-    pub(crate) filters: ArrayVec<Filter, 4>,
+    pub(crate) filters: ArrayVec<Filter, MAX_FILTERS>,
     pub(crate) compressor: Compressor,
     tmp_buf1: AlignedBytes,
     tmp_buf2: AlignedBytes,
@@ -217,6 +217,8 @@ pub(crate) struct DecoderParams {
     _phantom: PhantomData<()>,
 }
 
+pub(crate) const MAX_FILTERS: usize = 4;
+
 /// The codec configuration encoded alongside the array data, required to decode it.
 ///
 /// Every field in `DecoderCodecConfig` is fixed at write time and must match exactly what was
@@ -228,7 +230,7 @@ pub(crate) struct DecoderParams {
 #[derive(Clone, Debug)]
 pub(crate) struct DecoderCodecConfig {
     pub(crate) codec: Codec,
-    pub(crate) filters: ArrayVec<Filter, 4>,
+    pub(crate) filters: ArrayVec<Filter, MAX_FILTERS>,
     pub(crate) dtype: Dtype,
 }
 

@@ -29,7 +29,7 @@ macro_rules! define_op1_desc {
 
     (
         $core_op:ident,
-        extra_args = $extra_args_struct:ident $extra_args_group:tt,
+        extra_args = $extra_args_struct:ident as $args:ident $extra_args_group:tt,
         [$($ty:ty),*],
         $cast_kind:ident
     ) => {
@@ -38,7 +38,7 @@ macro_rules! define_op1_desc {
                 crate::ops::common::define_op1_desc!(
                     @inner_with_extra_args
                     $core_op,
-                    extra_args = $extra_args_struct $extra_args_group,
+                    extra_args = $extra_args_struct as $args $extra_args_group,
                     $ty,
                     $cast_kind
                 ),
@@ -48,12 +48,12 @@ macro_rules! define_op1_desc {
     (
         @inner_with_extra_args
         $core_op:ident,
-        extra_args = $extra_args_struct:ident { $($extra_arg:ident),* },
+        extra_args = $extra_args_struct:ident as $args:ident { $($accessor:expr),* $(,)? },
         $ty:ty,
         $cast_kind:ident
     ) => {
-        crate::ops::common::OpFnDescriptor::<1, $extra_args_struct>::new1_args::<$ty>(crate::ops::common::CastKind::$cast_kind, |a, extra_args_struct| {
-            let res = jix_core::ops::$core_op::new_array(a, $(extra_args_struct.$extra_arg),*)
+        crate::ops::common::OpFnDescriptor::<1, $extra_args_struct>::new1_args::<$ty>(crate::ops::common::CastKind::$cast_kind, |a, $args| {
+            let res = jix_core::ops::$core_op::new_array(a, $($accessor),*)
                 .map(|res| res.into_type_dyn().into_any());
             <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
         })

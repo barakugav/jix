@@ -571,7 +571,7 @@ impl Dtype {
     /// assert_eq!(Person::DTYPE, person_dtype);
     /// ```
     pub fn new_struct(
-        fields: Vec<(String, Itemsize, Dtype)>,
+        fields: impl IntoIterator<Item = (String, Itemsize, Dtype)>,
         shape: &[Itemsize],
         itemsize: Itemsize,
         alignment: Alignment,
@@ -601,10 +601,15 @@ impl Dtype {
         );
         let element_itemsize = itemsize / shape_prod;
 
+        let fields = fields
+            .into_iter()
+            .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
+            .collect::<Box<_>>();
+
         let is_aligned;
-        if Self::is_aligned_struct(&fields, element_itemsize, alignment) {
+        if Self::is_aligned_struct(&*fields, element_itemsize, alignment) {
             is_aligned = true;
-        } else if Self::is_packed_struct(&fields, element_itemsize, alignment) {
+        } else if Self::is_packed_struct(&*fields, element_itemsize, alignment) {
             is_aligned = false;
         } else {
             bail!(
@@ -612,11 +617,6 @@ impl Dtype {
                 "field offsets are not in a valid packed or aligned layout"
             );
         }
-
-        let fields = fields
-            .into_iter()
-            .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
-            .collect();
 
         Ok(Self(DtypeInner::StructOwned {
             fields,
@@ -644,7 +644,7 @@ impl Dtype {
     }
 
     fn is_aligned_struct(
-        fields: &[(String, Itemsize, Dtype)],
+        fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
         alignment: Alignment,
     ) -> bool {
@@ -681,7 +681,7 @@ impl Dtype {
     }
 
     fn is_packed_struct(
-        fields: &[(String, Itemsize, Dtype)],
+        fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
         alignment: Alignment,
     ) -> bool {

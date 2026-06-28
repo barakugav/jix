@@ -377,8 +377,8 @@ impl Array {
         let shape = self.arr.shape();
         let parsed = crate::ops::parse_basic_index(py, shape, index)?;
 
-        let mut ranges: DimArray<Range<u64>> = DimArray::new();
-        let mut out_shape: Vec<usize> = Vec::with_capacity(parsed.items.len());
+        let mut ranges = DimArray::new();
+        let mut out_shape = DimArray::new();
         for (axis, item) in parsed.items.iter().enumerate() {
             let start = item.start.unwrap() as u64;
             let end = item.end.unwrap() as u64;
@@ -388,9 +388,12 @@ impl Array {
             }
         }
 
-        let np_arr = self.to_numpy(py, &ranges, context)?;
-        let np_arr: Bound<'_, PyUntypedArray> =
-            np_arr.call_method1("reshape", (out_shape,))?.cast_into()?;
+        let mut np_arr = self.to_numpy(py, &ranges, context)?;
+        if np_arr.shape() != out_shape.as_slice() {
+            np_arr = np_arr
+                .call_method1("reshape", (out_shape.as_slice(),))?
+                .cast_into()?;
+        }
         Ok(np_arr)
     }
 

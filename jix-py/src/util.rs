@@ -77,15 +77,25 @@ pub(crate) fn normalize_axis_optional(axis: Option<i32>, ndim: usize) -> pyo3::P
     }
 }
 
-pub(crate) fn normalize_axes(axes: Vec<i32>, ndim: usize) -> pyo3::PyResult<Vec<usize>> {
-    axes.into_iter().map(|a| normalize_axis(a, ndim)).collect()
+pub(crate) fn normalize_axes(axes: &[i32], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
+    if ndim > NDIM_MAX {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
+        )));
+    }
+    axes.iter().map(|a| normalize_axis(*a, ndim)).collect()
 }
 pub(crate) fn normalize_axes_optional(
-    axes: Option<Vec<i32>>,
+    axes: Option<&[i32]>,
     ndim: usize,
-) -> pyo3::PyResult<Vec<usize>> {
+) -> pyo3::PyResult<DimArray<usize>> {
+    if ndim > NDIM_MAX {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
+        )));
+    }
     match axes {
-        Some(axes) => normalize_axes(axes, ndim),
+        Some(axes) => normalize_axes(&axes, ndim),
         None => Ok((0..ndim).collect()),
     }
 }
@@ -96,11 +106,35 @@ pub enum ItemOrSequence<T> {
     Sequence(Vec<T>),
 }
 impl<T> ItemOrSequence<T> {
-    pub fn into_vec(self) -> Vec<T> {
+    pub(crate) fn into_dim_array(self) -> PyResult<DimArray<T>> {
         match self {
-            ItemOrSequence::Item(item) => vec![item],
-            ItemOrSequence::Sequence(seq) => seq,
+            ItemOrSequence::Item(item) => {
+                let mut arr = DimArray::new();
+                arr.push(item);
+                Ok(arr)
+            }
+            ItemOrSequence::Sequence(seq) => {
+                if seq.len() > NDIM_MAX {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "Number of dimensions {} exceeds the maximum supported {}",
+                        seq.len(),
+                        NDIM_MAX
+                    )));
+                }
+                Ok(seq.into_iter().collect())
+            }
         }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            ItemOrSequence::Item(_) => 1,
+            ItemOrSequence::Sequence(seq) => seq.len(),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 impl<T> From<T> for ItemOrSequence<T> {

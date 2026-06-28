@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyBytes, PyDict};
 
 use crate::array::resolve_array_params;
 use crate::util::IntoPyResult;
@@ -327,7 +327,15 @@ impl Read for PyReader<'_> {
         if result.is_none() {
             return Ok(0); // EOF signalled by None
         }
-        let bytes: Vec<u8> = result.extract::<Vec<u8>>().map_err(py_to_io_err)?;
+
+        let bytes_vec;
+        let bytes = if let Ok(bytes) = result.cast::<PyBytes>() {
+            bytes.as_bytes()
+        } else {
+            bytes_vec = result.extract::<Vec<u8>>().map_err(py_to_io_err)?;
+            bytes_vec.as_slice()
+        };
+
         let n = bytes.len();
         buf[..n].copy_from_slice(&bytes);
         Ok(n)
