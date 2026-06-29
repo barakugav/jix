@@ -14,7 +14,6 @@ use pyo3::prelude::*;
 
 mod archive;
 mod array;
-mod codec;
 mod dtype;
 mod ops;
 mod util;
@@ -28,7 +27,7 @@ mod jix {
     pub const __version__: &str = env!("CARGO_PKG_VERSION");
 
     #[pymodule_export]
-    pub use crate::{array::Array, codec::ReadContext};
+    pub use crate::array::Array;
 
     #[pymodule_export]
     pub use crate::array::compact;

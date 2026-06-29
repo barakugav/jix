@@ -1,13 +1,13 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use jix_core::ArrayAny;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 use crate::array::resolve_array_params;
+use crate::ops::asarray;
 use crate::util::IntoPyResult;
-use crate::{Array, ReadContext};
+use crate::Array;
 
 /// Load a compressed array from a `.jix` file or a file-like object.
 ///
@@ -176,8 +176,6 @@ pub fn read_array(
 ///     params: Controls the block layout and codec for encoding. Unset fields are
 ///         inherited from the source array. Ignored when the source is already compact.
 ///         See [`jix.compact()`][jix.compact] for details.
-///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse when reading the source array.
-///         When omitted, a context is created internally. See [`jix.ReadContext`][jix.ReadContext] for details.
 ///
 /// Examples:
 ///     ```python
@@ -200,26 +198,24 @@ pub fn read_array(
 ///
 ///     # Streaming pipeline: read via mmap, apply a lazy op, write without materializing
 ///     src = jix.read_array("large.jix", mmap=True)
-///     ctx = jix.ReadContext()
 ///     view = src.exp() + 1.0
 ///     with open("modified.jix", "wb") as f:
-///         jix.write_array(view, f, context=ctx)
+///         jix.write_array(view, f)
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, path_or_writer, *, append=false, params=None, context=None))]
+#[pyo3(signature = (array, path_or_writer, *, append=false, params=None))]
 pub fn write_array(
-    array: &Bound<'_, Array>,
+    array: &Bound<'_, PyAny>,
     path_or_writer: &Bound<'_, PyAny>,
     append: bool,
     params: Option<Bound<'_, PyDict>>,
-    context: Option<&Bound<'_, ReadContext>>,
 ) -> PyResult<()> {
+    let array = asarray(array)?;
     let py = array.py();
+    let array = array.get();
     let path_or_writer = PathOrWriter::from_pyany(path_or_writer)?;
-    let array = &array.get().arr;
     let params = resolve_array_params(py, params)?;
-    let context = context.map(|ctx| ctx.get());
 
     match path_or_writer {
         PathOrWriter::Path(path) => {
@@ -240,36 +236,24 @@ pub fn write_array(
                     file
                 };
                 let writer = BufWriter::new(file);
-                write_array_impl(array, writer, params, context)
+                write_array_impl(&array, writer, params)
             })
         }
         PathOrWriter::PyWriter(writer) => {
             // cant detach the GIL here since the writer is a Python object
             let writer = BufWriter::new(writer);
-            write_array_impl(array, writer, params, context)
+            write_array_impl(&array, writer, params)
         }
     }
 }
-fn write_array_impl<W>(
-    array: &ArrayAny,
-    mut writer: W,
-    params: jix_core::ArrayParams,
-    context: Option<&ReadContext>,
-) -> PyResult<()>
+fn write_array_impl<W>(array: &Array, mut writer: W, params: jix_core::ArrayParams) -> PyResult<()>
 where
     W: Write + Seek,
 {
-    let context_guard;
-    let context = match context {
-        Some(ctx) => {
-            context_guard = ctx.lock();
-            &*context_guard
-        }
-        None => &array.read_ctx(),
-    };
-
+    let context = array.read_ctx()?;
     array
-        .write_to_with(&mut writer, params, context)
+        .arr
+        .write_to_with(&mut writer, params, context.as_ref())
         .into_py_result()?;
 
     writer.flush()?;

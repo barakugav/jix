@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use jix_core::{Array as CoreArray, ArrayAny};
+use jix_core::{Array as CoreArray, ArrayAny, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -11,7 +11,6 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pyme
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
 
-use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
 use crate::util::{dim_arr, numpy_empty, numpy_reshape, DimArray, IntoPyResult, ItemOrSequence};
 
@@ -58,14 +57,6 @@ use crate::util::{dim_arr, numpy_empty, numpy_reshape, DimArray, IntoPyResult, I
 /// a.numpy(slice(1,4)) # rows 1-3 (slice keeps the axis)
 /// a[0, 1:3]           # shorthand via __getitem__
 /// a[..., -1]          # last column of any-rank array
-/// ```
-///
-/// For tight loops that read many slices, pass an explicit [`jix.ReadContext`][jix.ReadContext]
-/// to amortize decompressor initialization:
-///
-/// ```python
-/// ctx = a.read_ctx()
-/// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
 /// ```
 ///
 /// # Operations
@@ -128,19 +119,43 @@ pub struct Array {
 }
 struct ArrayCache {
     numpy_dtype: Option<Py<PyArrayDescr>>,
+    context: Option<Box<ReadContext>>,
 }
 impl Array {
     #[inline]
     pub(crate) fn from_core(array: ArrayAny) -> Self {
         Self {
             arr: array,
-            cache: Mutex::new(ArrayCache { numpy_dtype: None }),
+            cache: Mutex::new(ArrayCache {
+                numpy_dtype: None,
+                context: None,
+            }),
         }
     }
 
     #[inline(always)]
     pub(crate) fn to_core(&self) -> ArrayAny {
         CoreArray::from_storage(self.arr.storage().clone())
+    }
+
+    /// Borrows the array's cached decoder context, lazily creating it on first use.
+    ///
+    /// The context is taken out of the cache for the lifetime of the returned guard and
+    /// returned to it on drop, so successive reads of the same array reuse the same
+    /// decompressor state instead of re-initializing it on every call.
+    pub(crate) fn read_ctx(&self) -> PyResult<ContextGuard<'_>> {
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
+        let context = cache
+            .context
+            .take()
+            .unwrap_or_else(|| Box::new(self.arr.read_ctx()));
+        Ok(ContextGuard {
+            array: self,
+            context: Some(context),
+        })
     }
 }
 
@@ -297,15 +312,6 @@ impl Array {
     ///         **Omitted trailing axes:** If the index covers fewer axes than the array has
     ///         dimensions, the remaining axes receive implicit full-range slices.
     ///
-    ///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse across multiple reads. When omitted,
-    ///         a context is created internally for each call. Pass one explicitly when calling
-    ///         `numpy()` many times in a loop to avoid repeated decompressor initialization:
-    ///
-    ///         ```python
-    ///         ctx = jix.ReadContext()
-    ///         rows = [a.numpy(i, context=ctx) for i in range(len(a))]
-    ///         ```
-    ///
     /// Returns:
     ///     A NumPy array with the same dtype as `self`, shape determined by the `index`
     ///         argument (or `self.shape` when no index is supplied), in C-contiguous (row-major)
@@ -317,13 +323,12 @@ impl Array {
     ///     ValueError: Slice step other than 1.
     ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
     ///         or tuple of these).
-    #[pyo3(signature = (index=None, *, context=None))]
+    #[pyo3(signature = (index=None))]
     #[inline]
     pub fn numpy<'py>(
         &self,
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
-        context: Option<&Bound<'py, ReadContext>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
         let shape = self.arr.shape();
         let parsed = crate::ops::parse_basic_index(shape, index)?;
@@ -365,17 +370,9 @@ impl Array {
             unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
 
         if np_arr_data_size > 0 {
-            let context = context.map(|ctx| ctx.get());
-
             py.detach(|| {
-                let context_guard;
-                let context = match context {
-                    Some(ctx) => {
-                        context_guard = ctx.lock();
-                        &*context_guard
-                    }
-                    None => &self.arr.read_ctx(),
-                };
+                let context = self.read_ctx()?;
+                let context = context.as_ref();
 
                 self.arr
                     .to_ndarray_buf(&index, np_arr_data, context)
@@ -409,41 +406,16 @@ impl Array {
         &self,
         index: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        self.numpy(index.py(), Some(index), None)
-    }
-
-    /// Creates a [`jix.ReadContext`][jix.ReadContext] with decoder parameters derived from this array's storage.
-    ///
-    /// The returned context inherits the decoder configuration stored alongside the array data,
-    /// ensuring that reads use the same settings the array was written with. Prefer this over
-    /// constructing [`jix.ReadContext`][jix.ReadContext] directly when reading a specific array.
-    ///
-    /// Pass the returned context to [`Array.numpy()`][jix.Array.numpy] or [`jix.compact()`][jix.compact] to amortize decompressor
-    /// initialization across many successive reads. See [`jix.ReadContext`][jix.ReadContext] for details.
-    ///
-    /// ```python
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact(np.arange(30, dtype=np.int32).reshape(10, 3))
-    /// ctx = a.read_ctx()
-    /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
-    /// ```
-    ///
-    /// Returns:
-    ///     A [`jix.ReadContext`][jix.ReadContext] configured for this array's codec settings.
-    pub fn read_ctx<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, ReadContext>> {
-        Bound::new(py, ReadContext::from_core(self.arr.read_ctx()))
+        self.numpy(index.py(), Some(index))
     }
 
     /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.compact()`][jix.compact].
-    #[pyo3(signature = (*, params=None, context=None))]
+    #[pyo3(signature = (*, params=None))]
     pub fn compact<'py>(
         slf: &Bound<'py, Self>,
         params: Option<Bound<'_, PyDict>>,
-        context: Option<&Bound<'_, ReadContext>>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::compact(slf, None, params, context)
+        crate::compact(slf, None, params)
     }
 
     /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
@@ -473,16 +445,15 @@ impl Array {
     // == archive I/O ==
 
     /// Write the array to a file or a file-like object. See [`jix.write_array()`][jix.write_array].
-    #[pyo3(signature = (path_or_writer, *, append=false, params=None, context=None))]
+    #[pyo3(signature = (path_or_writer, *, append=false, params=None))]
     #[inline]
     pub fn write_to(
         slf: &Bound<'_, Array>,
         path_or_writer: &Bound<'_, PyAny>,
         append: bool,
         params: Option<Bound<'_, PyDict>>,
-        context: Option<&Bound<'_, ReadContext>>,
     ) -> PyResult<()> {
-        crate::archive::write_array(slf, path_or_writer, append, params, context)
+        crate::archive::write_array(slf, path_or_writer, append, params)
     }
 
     // == arithmetic ops ==
@@ -1199,9 +1170,6 @@ impl Array {
 ///             Filters improve the compression ratio for typed numeric data: `"byte-shuffle"`
 ///             groups bytes by significance (e.g. all high bytes together, then all low bytes);
 ///             `"bit-shuffle"` groups bits across elements. Defaults to `["byte-shuffle"]`.
-///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse when decoding the source
-///         array. When omitted, a context is created internally. Unused if the source array is not
-///         a jix array.
 ///
 /// Returns:
 ///     A new compact [`jix.Array`][jix.Array] with all data compressed into blocks.
@@ -1235,36 +1203,29 @@ impl Array {
 ///     ```
 #[gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, *, dtype=None, params=None, context=None))]
+#[pyo3(signature = (array, *, dtype=None, params=None))]
 pub fn compact<'py>(
     array: &Bound<'py, PyAny>,
     dtype: Option<&Bound<'_, PyAny>>,
     params: Option<Bound<'_, PyDict>>,
-    context: Option<&Bound<'_, ReadContext>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let mut array = crate::asarray(array)?;
     let params = resolve_array_params(py, params)?;
-    let context = context.map(|ctx| ctx.get());
 
     if let Some(dtype) = dtype {
         array = crate::ops::astype(&array, dtype)?;
     }
-    let array = &array.get().arr;
-    let array = py.detach(|| {
-        let context_guard;
-        let context = match context {
-            Some(ctx) => {
-                context_guard = ctx.lock();
-                &*context_guard
-            }
-            None => &array.read_ctx(),
-        };
-
-        array.compact_with(params, context).into_py_result()
+    let array = array.get();
+    let compacted = py.detach(|| {
+        let context = array.read_ctx()?;
+        array
+            .arr
+            .compact_with(params, context.as_ref())
+            .into_py_result()
     })?;
 
-    Bound::new(py, Array::from_core(array.into_any()))
+    Bound::new(py, Array::from_core(compacted.into_any()))
 }
 pub(crate) fn resolve_array_params(
     py: Python<'_>,
@@ -1363,6 +1324,23 @@ pub(crate) fn resolve_array_params(
     }
 }
 
+pub(crate) struct ContextGuard<'a> {
+    array: &'a Array,
+    context: Option<Box<ReadContext>>,
+}
+impl Drop for ContextGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut cache) = self.array.cache.lock() {
+            cache.context = self.context.take();
+        }
+    }
+}
+impl ContextGuard<'_> {
+    pub(crate) fn as_ref(&self) -> &ReadContext {
+        self.context.as_ref().unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use jix_core::dtype::Dtyped;
@@ -1395,7 +1373,7 @@ mod tests {
         // ndarray::Array -> jix_core::Array -> jix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array().into_dimensionality().unwrap()
         })
@@ -1473,7 +1451,7 @@ mod tests {
                 .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.shape(), &[2usize, 3, 4]);
         });
     }
@@ -1484,7 +1462,7 @@ mod tests {
         let original = array![1.0f32, 2.0];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'f');
         });
@@ -1496,7 +1474,7 @@ mod tests {
         let original = array![1i32, 2, 3];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'i');
         });
@@ -1521,7 +1499,7 @@ mod tests {
     {
         Python::attach(|py| {
             py_arr
-                .numpy(py, None, None)
+                .numpy(py, None)
                 .unwrap()
                 .cast_into::<PyArrayDyn<T>>()
                 .unwrap()

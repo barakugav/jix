@@ -15,4 +15,3 @@
 - add MIT license
 - add overflow checks to all shape changing ops
 - ArrayParams stream syntax
-- cache ReadContext in py array
