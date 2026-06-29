@@ -12,3 +12,7 @@
 - use multiple threads for reads
 - instead of map2, have map_zip which takes a tuple of arrays
 - remove ::storage from public API, re-export everything from lib.rs
+- add MIT license
+- add overflow checks to all shape changing ops
+- ArrayParams stream syntax
+- cache ReadContext in py array

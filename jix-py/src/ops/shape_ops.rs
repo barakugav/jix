@@ -165,7 +165,7 @@ pub fn slice<'py>(
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
     let arr = py_arr.get().to_core();
-    let parsed = parse_basic_index(py_arr.py(), arr.shape(), Some(index))?;
+    let parsed = parse_basic_index(arr.shape(), Some(index))?;
 
     let spec = SliceSpec::new(parsed.items.as_slice());
     let sliced = jix_core::ops::Slice::new_array(arr, spec)
@@ -186,16 +186,16 @@ pub fn slice<'py>(
 /// Accepts an integer, a `slice`, `Ellipsis`, or a tuple of these. Slice steps other
 /// than 1 are rejected. Bounds are validated strictly (no numpy-style clamping).
 /// Returns one `SliceItem` per array dimension plus the list of integer-indexed axes.
+#[inline]
 pub(crate) fn parse_basic_index<'py>(
-    py: Python<'py>,
     shape: &[u64],
     index: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<ParsedBasicIndex> {
     let ndim = shape.len();
 
-    enum RawIdxItem {
+    enum RawIdxItem<'a> {
         Int(i64),
-        Slice(SliceItem),
+        Slice(&'a Bound<'a, PySlice>),
         Ellipsis,
     }
 
@@ -217,9 +217,6 @@ pub(crate) fn parse_basic_index<'py>(
         }
         None => DimArray::new(),
     };
-    let start_str = "start".into_pyobject(py)?;
-    let stop_str = "stop".into_pyobject(py)?;
-    let step_str = "step".into_pyobject(py)?;
     let raw = raw
         .into_iter()
         .map(|item| {
@@ -227,17 +224,7 @@ pub(crate) fn parse_basic_index<'py>(
                 return Ok(RawIdxItem::Ellipsis);
             }
             if let Ok(slice) = item.cast::<PySlice>() {
-                let start = slice.getattr(&start_str)?.extract::<Option<i64>>()?;
-                let stop = slice.getattr(&stop_str)?.extract::<Option<i64>>()?;
-                let step = slice
-                    .getattr(&step_str)?
-                    .extract::<Option<i64>>()?
-                    .unwrap_or(1);
-                return Ok(RawIdxItem::Slice(SliceItem {
-                    start,
-                    end: stop,
-                    step,
-                }));
+                return Ok(RawIdxItem::Slice(slice));
             }
             if let Ok(i) = item.extract::<i64>() {
                 return Ok(RawIdxItem::Int(i));
@@ -248,19 +235,16 @@ pub(crate) fn parse_basic_index<'py>(
         })
         .collect::<PyResult<DimArray<_>>>()?;
 
-    let mut ellipsis_count = 0usize;
-    let mut consumers = 0usize;
-    for r in &raw {
-        match r {
-            RawIdxItem::Ellipsis => ellipsis_count += 1,
-            RawIdxItem::Int(_) | RawIdxItem::Slice(_) => consumers += 1,
-        }
-    }
+    let ellipsis_count = raw
+        .iter()
+        .filter(|r| matches!(r, RawIdxItem::Ellipsis))
+        .count();
     if ellipsis_count > 1 {
         return Err(PyIndexError::new_err(
             "an index can only have a single ellipsis ('...')",
         ));
     }
+    let consumers = raw.len() - ellipsis_count;
     if consumers > ndim {
         return Err(PyIndexError::new_err(format!(
             "too many indices for array: array is {ndim}-dimensional, \
@@ -301,12 +285,13 @@ pub(crate) fn parse_basic_index<'py>(
                 axis_cursor += 1;
             }
             RawIdxItem::Slice(s) => {
+                let len = shape[axis_cursor] as i64;
+                let s = s.indices(len.try_into().unwrap())?;
                 if s.step != 1 {
                     return Err(PyValueError::new_err("slice step must be 1"));
                 }
-                let len = shape[axis_cursor] as i64;
-                let start = s.start.unwrap_or(0);
-                let stop = s.end.unwrap_or(len);
+                let start = s.start as i64;
+                let stop = s.stop as i64;
                 let start_norm = if start < 0 { start + len } else { start };
                 let stop_norm = if stop < 0 { stop + len } else { stop };
                 if start_norm < 0 || start_norm >= len {
