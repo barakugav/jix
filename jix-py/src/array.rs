@@ -10,11 +10,10 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pyme
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
-use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
-use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
+use crate::util::{dim_arr, numpy_empty, numpy_reshape, DimArray, IntoPyResult, ItemOrSequence};
 
 /// A multi-dimensional compressed array.
 ///
@@ -142,63 +141,6 @@ impl Array {
     #[inline(always)]
     pub(crate) fn to_core(&self) -> ArrayAny {
         CoreArray::from_storage(self.arr.storage().clone())
-    }
-
-    #[inline]
-    fn to_numpy<'py>(
-        &self,
-        py: Python<'py>,
-        index: &[Range<u64>],
-        context: Option<&Bound<'py, ReadContext>>,
-    ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let arr_shape = self.arr.shape();
-        let ndim = arr_shape.len();
-        if index.len() != ndim {
-            return Err(PyIndexError::new_err(format!(
-                "index has {} dimensions, but array has {ndim}",
-                index.len()
-            )));
-        }
-        for (dim, r) in index.iter().enumerate() {
-            if r.start > r.end || r.end > arr_shape[dim] {
-                return Err(PyIndexError::new_err(format!(
-                    "index {r:?} is out of bounds for axis {dim} with size {}",
-                    arr_shape[dim]
-                )));
-            }
-        }
-        let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let itemsize = self.arr.dtype().itemsize() as usize;
-
-        let np_arr = numpy_empty(self.dtype(py)?, &read_shape)?;
-        let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
-        let np_arr_data_size = itemsize * read_shape.iter().product::<u64>() as usize;
-        let np_arr_data =
-            unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
-
-        let context = context.map(|ctx| ctx.get());
-
-        if np_arr_data_size > 0 {
-            py.detach(|| {
-                let context_guard;
-                let context = match context {
-                    Some(ctx) => {
-                        context_guard = ctx.lock();
-                        &*context_guard
-                    }
-                    None => &self.arr.read_ctx(),
-                };
-
-                self.arr
-                    .to_ndarray_buf(index, np_arr_data, context)
-                    .into_py_result()
-            })?;
-        }
-
-        let np_arr: Bound<'_, PyUntypedArray> = np_arr
-            .call_method1("reshape", (read_shape.as_slice(),))?
-            .cast_into()?;
-        Ok(np_arr)
     }
 }
 
@@ -386,22 +328,69 @@ impl Array {
         let shape = self.arr.shape();
         let parsed = crate::ops::parse_basic_index(shape, index)?;
 
-        let mut ranges = DimArray::new();
+        let mut index = DimArray::new();
         let mut out_shape = DimArray::new();
         for (axis, item) in parsed.items.iter().enumerate() {
             let start = item.start.unwrap() as u64;
             let end = item.end.unwrap() as u64;
-            ranges.push(start..end);
+            index.push(start..end);
             if !parsed.drop_axes.contains(&axis) {
-                out_shape.push((end - start) as usize);
+                out_shape.push(end - start);
             }
         }
 
-        let mut np_arr = self.to_numpy(py, &ranges, context)?;
-        if np_arr.shape() != out_shape.as_slice() {
-            np_arr = np_arr
-                .call_method1("reshape", (out_shape.as_slice(),))?
-                .cast_into()?;
+        let arr_shape = self.arr.shape();
+        let ndim = arr_shape.len();
+        if index.len() != ndim {
+            return Err(PyIndexError::new_err(format!(
+                "index has {} dimensions, but array has {ndim}",
+                index.len()
+            )));
+        }
+        for (dim, r) in index.iter().enumerate() {
+            if r.start > r.end || r.end > arr_shape[dim] {
+                return Err(PyIndexError::new_err(format!(
+                    "index {r:?} is out of bounds for axis {dim} with size {}",
+                    arr_shape[dim]
+                )));
+            }
+        }
+        let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let itemsize = self.arr.dtype().itemsize() as usize;
+
+        let mut np_arr = numpy_empty(self.dtype(py)?, &read_shape)?;
+        let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
+        let np_arr_data_size = itemsize * read_shape.iter().product::<u64>() as usize;
+        let np_arr_data =
+            unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
+
+        if np_arr_data_size > 0 {
+            let context = context.map(|ctx| ctx.get());
+
+            py.detach(|| {
+                let context_guard;
+                let context = match context {
+                    Some(ctx) => {
+                        context_guard = ctx.lock();
+                        &*context_guard
+                    }
+                    None => &self.arr.read_ctx(),
+                };
+
+                self.arr
+                    .to_ndarray_buf(&index, np_arr_data, context)
+                    .into_py_result()
+            })?;
+        }
+
+        let arr_shape = np_arr.shape();
+        if arr_shape.len() != out_shape.len()
+            || arr_shape
+                .iter()
+                .zip(out_shape.iter())
+                .any(|(&a, &b)| a as u64 != b)
+        {
+            np_arr = numpy_reshape(np_arr, out_shape.as_slice())?;
         }
         Ok(np_arr)
     }

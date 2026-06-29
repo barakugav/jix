@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 
 use jix_core::NDIM_MAX;
 use numpy::npyffi::npy_intp;
-use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray};
+use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3_stub_gen::impl_stub_type;
 
@@ -51,7 +51,31 @@ pub(crate) fn numpy_empty<'py>(
             if is_fortran { -1 } else { 0 },
         )
     };
-    Ok(unsafe { Bound::from_owned_ptr(py, np_arr).cast_into_unchecked() })
+    unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
+}
+
+#[inline]
+pub(crate) fn numpy_reshape<'py>(
+    arr: Bound<'py, PyUntypedArray>,
+    shape: &[u64],
+) -> PyResult<Bound<'py, PyUntypedArray>> {
+    let py = arr.py();
+    let ndim = shape.len();
+    let shape = dim_arr(ndim, |dim| shape[dim] as npy_intp);
+    let mut shape = numpy::npyffi::PyArray_Dims {
+        ptr: shape.as_ptr().cast_mut(),
+        len: ndim as _,
+    };
+    let np_arr = unsafe {
+        numpy::PY_ARRAY_API.PyArray_Newshape(
+            py,
+            arr.as_array_ptr(),
+            &mut shape as *mut _,
+            numpy::npyffi::NPY_ORDER::NPY_ANYORDER,
+        )
+    };
+
+    unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
 }
 
 #[inline]
