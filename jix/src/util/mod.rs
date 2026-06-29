@@ -340,15 +340,16 @@ pub(crate) fn scale_read_shape(
     read_shape: &mut impl Dimension,
     total_read_shape: &[u64],
     array_shape: &[u64],
-    target_nitems: u64,
+    target_nitems: (u64, u64),
     scale_order: impl Iterator<Item = usize>,
 ) {
     let ndim = total_read_shape.len();
     assert_eq!(array_shape.len(), ndim);
+    let (min_nitems, max_nitems) = target_nitems;
 
     // Scale down
     {
-        let mut max_dim_size = (1u64 << 30).min(target_nitems.next_power_of_two());
+        let mut max_dim_size = (1u64 << 30).min(max_nitems.next_power_of_two());
         loop {
             for dim in 0..ndim {
                 read_shape[dim] = read_shape[dim]
@@ -357,7 +358,7 @@ pub(crate) fn scale_read_shape(
                     .max(1);
             }
             if let Some(read_size) = read_shape.as_slice().iter().copied().try_product()
-                && (read_size / 2 <= target_nitems || max_dim_size <= 1)
+                && (read_size / 2 <= max_nitems || max_dim_size <= 1)
             {
                 break;
             }
@@ -369,7 +370,7 @@ pub(crate) fn scale_read_shape(
     let mut current_volume = read_shape.as_slice().iter().product::<u64>();
     for dim in scale_order {
         let dim_len = total_read_shape[dim];
-        let mult_by_budget = target_nitems / current_volume.max(1);
+        let mult_by_budget = min_nitems / current_volume.max(1);
         let mult_by_range = dim_len.div_ceil(read_shape[dim]);
         let multiplier = mult_by_budget.min(mult_by_range).max(1);
         let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
@@ -495,7 +496,10 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
 
 #[cfg(test)]
 mod tests {
-    use super::{calc_block_end, default_strides, AlignedBytes, AlternatingBuffers};
+    use super::{
+        calc_block_end, default_strides, scale_read_shape, AlignedBytes, AlternatingBuffers,
+    };
+    use crate::DimDyn;
 
     #[test]
     fn calc_block_end_non_empty_ranges() {
@@ -636,6 +640,34 @@ mod tests {
             dst.clear();
             dst.push(src[0].wrapping_add(1));
         }
+    }
+
+    #[test]
+    fn scale_read_shape_uses_max_to_cap_and_min_to_grow() {
+        use crate::Dimension;
+        // 1-D: total range 1000 elems. Window items: min=16, max=256.
+        // Seed read_shape from a small block (8); scale-up should grow toward min (16+),
+        // and the volume must never exceed ~max (256).
+        let total = [1000u64];
+        let mut read_shape = DimDyn::from_fn(1, |_| 8);
+        scale_read_shape(&mut read_shape, &total, &total, (16, 256), (0..1).rev());
+        let v = read_shape[0];
+        assert!(v >= 16, "expected scale-up to reach the min floor, got {v}");
+        assert!(
+            v <= 256,
+            "expected scale-down to respect the max ceiling, got {v}"
+        );
+
+        // Large seed (full range) must be CAPPED by the `max` ceiling, not collapsed to `min`.
+        // If scale-down mistakenly used `min` (16), this would shrink to ~16 instead of ~max.
+        let mut read_shape = DimDyn::from_fn(1, |_| 1000);
+        scale_read_shape(&mut read_shape, &total, &total, (16, 256), (0..1).rev());
+        let v = read_shape[0];
+        assert!(v <= 256, "expected scale-down to cap at max, got {v}");
+        assert!(
+            v >= 128,
+            "expected the cap to stay near max, not collapse to min, got {v}"
+        );
     }
 }
 

@@ -2,6 +2,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //
 #![doc = include_str!("../docs/module.md")]
+//!
 //! # Disclaimer
 //!
 //! This project would not exist without the work of several upstream authors and communities.
@@ -25,6 +26,10 @@ mod jix {
     #[allow(non_upper_case_globals)]
     #[pymodule_export]
     pub const __version__: &str = env!("CARGO_PKG_VERSION");
+
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    pub const _build_profile: &str = env!("BUILD_PROFILE");
 
     #[pymodule_export]
     pub use crate::array::Array;

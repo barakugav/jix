@@ -822,9 +822,7 @@ mod tests {
             let result = za.approx_equal(zb, rtol, atol);
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
-                .map_collect(|&a, &b| {
-                    ref_approx_eq(a.to_f32(), b.to_f32(), rtol_f32, atol_f32)
-                });
+                .map_collect(|&a, &b| ref_approx_eq(a, b, rtol, atol));
             crate::util::assert_array_matches(&result, &expected);
         }
     }

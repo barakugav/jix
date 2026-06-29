@@ -102,6 +102,8 @@ def _carray_reduction(draw, dtype, element_st, shape_st=None):
     ndim = len(shape)
     np_a = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st))
     block_shape = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim))
+    # A block dim may not exceed its array dim (validation requires 1 <= block <= max(shape, 1)).
+    block_shape = [min(b, max(s, 1)) for b, s in zip(block_shape, shape)]
     za = jix.compact(np_a, params={"block_shape": block_shape})
     axis = draw(_axes_strategy(ndim))
     keepdims = draw(st.booleans())
@@ -115,6 +117,8 @@ def _carray_single_axis_reduction(draw, dtype, element_st):
     ndim = len(shape)
     np_a = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st))
     block_shape = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim))
+    # A block dim may not exceed its array dim (validation requires 1 <= block <= max(shape, 1)).
+    block_shape = [min(b, max(s, 1)) for b, s in zip(block_shape, shape)]
     za = jix.compact(np_a, params={"block_shape": block_shape})
     axis = draw(_single_axis_strategy(ndim))
     keepdims = draw(st.booleans())

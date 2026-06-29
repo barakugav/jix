@@ -222,7 +222,7 @@ where
         //     reduced part exactly matches one bulk's reduced range (one tile-along-reduced
         //     per bulk). Within a bulk the tile iterator sweeps the non-reduced output
         //     region. Each `(bulk, tile)` pair produces *one* `self.array.read_data` call,
-        //     sized to roughly fit the source's `read_size`.
+        //     sized to land within the source's `read_size` `(min, max)` window.
         //
         // `tile_shape` is chosen once per call by the source spec's
         // [`read_shape_heuristic_with_scale_order`], passing a custom scale order that

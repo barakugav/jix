@@ -543,9 +543,11 @@ where
         let block_size = Just(None)
             .boxed()
             .prop_union((1u64..100).prop_map(Some).boxed());
-        let read_size = Just(None)
-            .boxed()
-            .prop_union((1u64..600).prop_map(Some).boxed());
+        let read_size = Just(None).boxed().prop_union(
+            (1u64..600, 1u64..600)
+                .prop_map(|(a, b)| Some((a.min(b), a.max(b))))
+                .boxed(),
+        );
 
         (Just(arr), block_shape, block_size, read_size)
     })
@@ -677,7 +679,7 @@ fn assert_array_matches_with<S, T, D>(
         .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
     assert_eq!(spec.block_shape_tag().len(), ndim);
     assert!(spec.block_size() > 0);
-    assert!(spec.read_size() > 0);
+    assert!(spec.read_size().min() > 0);
 
     let expected = expected.view().into_dyn();
     let actual = actual.as_ref().into_typed::<T>().unwrap();

@@ -8,6 +8,40 @@ use crate::storage::block::BlockSize;
 use crate::util::{scale_read_shape, DimArray, Idx, IterExt, SendSyncPtr};
 use crate::{dim_arr, Array, ArrayStorage, DimDyn, Dimension};
 
+/// Target byte range for a single read region.
+///
+/// Stores a `(min, max)` range in bytes.
+/// Used as a per-spec tuning hint that controls how much data a single read pass
+/// pulls through memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReadSize {
+    min: u64,
+    max: u64,
+}
+
+impl ReadSize {
+    pub(crate) fn new(min: u64, max: u64) -> Self {
+        let min = min.max(1);
+        let max = max.max(min);
+        Self { min, max }
+    }
+
+    pub(crate) fn min(self) -> u64 {
+        self.min
+    }
+
+    pub(crate) fn max(self) -> u64 {
+        self.max
+    }
+
+    /// The range expressed in element counts for `itemsize`, each floored at 1.
+    pub(crate) fn nitems(self, itemsize: Itemsize) -> (u64, u64) {
+        debug_assert!(itemsize > 0, "itemsize must be non-zero");
+        let itemsize = itemsize as u64;
+        ((self.min / itemsize).max(1), (self.max / itemsize).max(1))
+    }
+}
+
 /// Parameters controlling the encoding/decoding configs of an [`Array`], and its block layout.
 ///
 /// `ArrayParams` groups two independent sets of configuration:
@@ -69,7 +103,7 @@ pub struct ArrayParams {
     pub(crate) block_shape: Option<DimArray<BlockSize>>,
     pub(crate) block_shape_tag: Option<DimArray<BlockShapeTag>>,
     pub(crate) block_size: Option<u64>,
-    pub(crate) read_size: Option<u64>,
+    pub(crate) read_size: Option<ReadSize>,
     pub(crate) encoder_params: Option<EncoderParams>,
     pub(crate) decoder_params: Option<DecoderParams>,
 }
@@ -121,11 +155,30 @@ impl ArrayParams {
         self
     }
 
-    /// Sets the target size in bytes for a single preferred read region.
+    /// Sets the target byte range for a single preferred read region as `(min, max)`.
     ///
-    /// Defaults to the L1 cache size when not set explicitly.
-    pub fn read_size(&mut self, size_hint: u64) -> &mut Self {
-        self.read_size = Some(size_hint);
+    /// A read region is the rectangular slab the engine pulls and decompresses in one pass
+    /// when materializing a lazy pipeline or a sub-region read. Its shape is derived by
+    /// scaling the storage block shape toward this byte budget. The two bounds steer that
+    /// scaling differently:
+    ///
+    /// - `max` is the *scale-down ceiling*: an oversized read shape is shrunk only until it
+    ///   fits within `max`. Keeping `max` large (the L2 cache size by default) lets reads
+    ///   stay big.
+    /// - `min` is the *scale-up floor*: an undersized read shape is grown only up to `min`
+    ///   (the L1 cache size by default). Reads already at or above `min` are left as the
+    ///   scale-down step produced them.
+    ///
+    /// The motivation is block-grid misalignment. When the source array's block shape differs
+    /// from the output's, a read that straddles source-block boundaries forces whole-block
+    /// decompression for a partial slice, and neighboring reads re-decompress the same block.
+    /// Larger read regions span more blocks per call and dilute that wasted work (no alignment
+    /// guarantee, but the waste shrinks as the region grows); the counter-pressure is cache
+    /// residency, which the `max` ceiling bounds.
+    ///
+    ///When unset, the range defaults to `(L1 data cache size, L2 cache size)`.
+    pub fn read_size(&mut self, size_hint: (u64, u64)) -> &mut Self {
+        self.read_size = Some(ReadSize::new(size_hint.0, size_hint.1));
         self
     }
 
@@ -208,10 +261,10 @@ impl ArrayParams {
         self.decoder_params
             .get_or_insert_with(|| spec.decoder_params().clone());
 
-        self.block_shape
-            .get_or_insert_with(|| spec.block_shape().clone());
-        self.block_shape_tag
-            .get_or_insert_with(|| spec.block_shape_tag().clone());
+        if self.block_shape.is_none() {
+            self.block_shape = Some(spec.block_shape().clone());
+            self.block_shape_tag = Some(spec.block_shape_tag().clone());
+        }
         self.block_size.get_or_insert(spec.block_size());
         self.read_size.get_or_insert(spec.read_size());
     }
@@ -320,8 +373,11 @@ impl ArrayParams {
                 block_shape.iter().map(|&b| b as u64).try_product().unwrap() * itemsize
             })
             .max(1);
-        // read_size default to L1 cache size
-        let read_size = self.read_size.unwrap_or(cache_sizes.l1_data as u64).max(1);
+        // read_size defaults to the (L1, L2) cache-size window.
+        let read_size = self.read_size.unwrap_or(ReadSize::new(
+            cache_sizes.l1_data as u64,
+            cache_sizes.l2 as u64,
+        ));
 
         self.block_shape = Some(block_shape);
         self.block_shape_tag = Some(block_shape_tag);
@@ -420,7 +476,7 @@ impl ArrayParams {
                 .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
             assert_eq!(spec.block_shape_tag().len(), ndim);
             assert!(spec.block_size() > 0);
-            assert!(spec.read_size() > 0);
+            assert!(spec.read_size().min() > 0);
         }
 
         Ok(spec)
@@ -480,7 +536,7 @@ pub(crate) struct ArraySpecOwned {
 #[derive(Clone)]
 pub(crate) struct ArraySpecShared {
     block_size: u64,
-    read_size: u64,
+    read_size: ReadSize,
     encoder_params: EncoderParams,
     decoder_params: DecoderParams,
 }
@@ -495,7 +551,7 @@ impl ArraySpecOwned {
         block_shape: DimArray<BlockSize>,
         block_shape_tag: DimArray<BlockShapeTag>,
         block_size: u64,
-        read_size: u64,
+        read_size: ReadSize,
         encoder_params: EncoderParams,
         decoder_params: DecoderParams,
     ) -> Self {
@@ -547,7 +603,7 @@ impl<'a> ArraySpec<'a> {
         self.shared().block_size
     }
     #[inline(always)]
-    pub(crate) fn read_size(&self) -> u64 {
+    pub(crate) fn read_size(&self) -> ReadSize {
         self.shared().read_size
     }
     #[inline(always)]
@@ -600,7 +656,7 @@ impl<'a> ArraySpec<'a> {
             &mut read_shape,
             total_read_shape,
             shape,
-            (self.read_size() / itemsize as u64).max(1),
+            self.read_size().nitems(itemsize),
             scale_order,
         );
         read_shape
@@ -655,7 +711,25 @@ impl ArraySpecPtr {
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::params::ReadSize;
     use crate::{Array, ArrayParams};
+
+    #[test]
+    fn read_size_normalizes_and_converts() {
+        // min floored at 1, max raised to at least min.
+        assert_eq!(ReadSize::new(0, 0), ReadSize::new(1, 1));
+        let rs = ReadSize::new(10, 4); // max < min -> max raised to min
+        assert_eq!((rs.min(), rs.max()), (10, 10));
+
+        let rs = ReadSize::new(32 * 1024, 256 * 1024);
+        assert_eq!((rs.min(), rs.max()), (32 * 1024, 256 * 1024));
+
+        // nitems divides by itemsize, flooring each at 1.
+        let (min_n, max_n) = ReadSize::new(32, 256).nitems(4u16);
+        assert_eq!((min_n, max_n), (8, 64));
+        let (min_n, max_n) = ReadSize::new(2, 256).nitems(4u16); // 2/4 -> floored to 1
+        assert_eq!((min_n, max_n), (1, 64));
+    }
 
     #[test]
     fn example() {
@@ -698,5 +772,28 @@ mod tests {
 
         // Validation still propagates from the internal encoder configuration.
         assert!(params.level(99).is_err());
+    }
+
+    #[test]
+    fn read_size_defaults_to_l1_l2() {
+        use crate::dtype::Dtyped;
+        use crate::util::cpu_cache::cache_sizes;
+        let mut params = ArrayParams::new();
+        params.block_shape(&[8]);
+        let spec = params.into_spec(&[8], &i32::DTYPE).unwrap();
+        let rs = spec.as_ref().read_size();
+        let cs = cache_sizes();
+        assert_eq!((rs.min(), rs.max()), (cs.l1_data as u64, cs.l2 as u64));
+    }
+
+    #[test]
+    fn read_size_setter_roundtrips_tuple() {
+        use crate::dtype::Dtyped;
+        let mut params = ArrayParams::new();
+        params.block_shape(&[8]);
+        params.read_size((4096, 65536));
+        let spec = params.into_spec(&[8], &i32::DTYPE).unwrap();
+        let rs = spec.as_ref().read_size();
+        assert_eq!((rs.min(), rs.max()), (4096, 65536));
     }
 }

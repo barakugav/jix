@@ -175,6 +175,8 @@ def carray_strategy(draw, dtype: np.dtype, element_st=None):
 
     np_a = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st), label="np_a")
     block_shape = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape")
+    # A block dim may not exceed its array dim (validation requires 1 <= block <= max(shape, 1)).
+    block_shape = [min(b, max(s, 1)) for b, s in zip(block_shape, shape)]
     za = jix.compact(np_a, params={"block_shape": block_shape})
     return np_a, za
 
@@ -252,6 +254,9 @@ def carrays2_mixed_strategy(draw, dtype_a: np.dtype, dtype_b: np.dtype, element_
 
     block_shape_a = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape_a")
     block_shape_b = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim), label="block_shape_b")
+    # A block dim may not exceed its array dim (validation requires 1 <= block <= max(shape, 1)).
+    block_shape_a = [min(b, max(s, 1)) for b, s in zip(block_shape_a, shape)]
+    block_shape_b = [min(b, max(s, 1)) for b, s in zip(block_shape_b, shape)]
 
     za = jix.compact(np_a, params={"block_shape": block_shape_a})
     zb = jix.compact(np_b, params={"block_shape": block_shape_b})

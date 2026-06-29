@@ -257,13 +257,15 @@ impl<'a> Decoder<'a> {
         let dst_len = dst.len();
         let dst_ptr = dst.as_mut_ptr();
 
-        let tmp_buf1 = unsafe { &mut *self.context.tmp_buf1.get() };
-        let tmp_buf2 = unsafe { &mut *self.context.tmp_buf2.get() };
-        let mut buffers = AlternatingBuffers::new(tmp_buf1, tmp_buf2);
+        let mut buffers = None;
         let decompress_out = if self.filters.is_empty() {
             dst
         } else {
-            let (_, tmp_buf) = buffers.edit();
+            let tmp_buf1 = unsafe { &mut *self.context.tmp_buf1.get() };
+            let tmp_buf2 = unsafe { &mut *self.context.tmp_buf2.get() };
+            buffers = Some(AlternatingBuffers::new(tmp_buf1, tmp_buf2));
+
+            let (_, tmp_buf) = buffers.as_mut().unwrap().edit();
             tmp_buf.clear();
             tmp_buf.reserve(dst.len());
             unsafe {
@@ -293,7 +295,7 @@ impl<'a> Decoder<'a> {
 
         // Apply filters in reverse order
         for (f_idx, filter) in self.filters.iter().enumerate().rev() {
-            let (data, buf) = buffers.edit();
+            let (data, buf) = buffers.as_mut().unwrap().edit();
             let buf = if f_idx > 0 {
                 buf.clear();
                 buf.reserve(data.len());

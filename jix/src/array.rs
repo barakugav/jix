@@ -796,7 +796,8 @@ impl<S: ArrayStorage> Array<S> {
 
         // Fast path for small reads
         let spec = self.storage.spec();
-        let small_read = nitems as u64 <= spec.read_size() * dtype.itemsize() as u64;
+        let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
+        let small_read = nitems as u64 <= min_nitems;
         if small_read {
             return self.storage.read_data(index, buf, context);
         }
@@ -1025,11 +1026,16 @@ impl<S: ArrayStorage> Array<S> {
         let mut chunk_shape_in_blocks = S::Dimension::from_fn(ndim, |dim| {
             (current_block_shape[dim] / block_shape[dim]).max(1) as u64
         });
+        let read_size = spec.read_size();
+        let (min_chunk, max_chunk) = (
+            (read_size.min() / block_size_bytes as u64).max(1),
+            (read_size.max() / block_size_bytes as u64).max(1),
+        );
         scale_read_shape(
             &mut chunk_shape_in_blocks,
             block_grid_shape.as_slice(),
             block_grid_shape.as_slice(),
-            (spec.read_size() / block_size_bytes as u64).max(1),
+            (min_chunk, max_chunk),
             (0..ndim).rev(),
         );
 

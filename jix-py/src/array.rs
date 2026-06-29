@@ -1160,8 +1160,30 @@ impl Array {
 ///         - `block_size`: Target block size in bytes, used when auto-computing or scaling the
 ///             block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
 ///             are `"fixed"`. Defaults to the L1 data cache size.
-///         - `read_size`: Target size in bytes for the preferred read region.
-///             Defaults to the L1 cache size.
+///         - `read_size`: The target byte range for a single preferred read region as
+///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
+///             `(min, max)` sequence of non-negative ints.
+///
+///             A read region is the rectangular slab the engine pulls and decompresses in one
+///             pass when materializing a lazy pipeline or a sub-region read. Its shape is derived
+///             by scaling the storage block shape toward this byte budget. The two bounds steer
+///             that scaling differently:
+///
+///             - `max` is the *scale-down ceiling*: an oversized read shape is shrunk only until
+///               it fits within `max`. Keeping `max` large (the L2 cache size by default) lets
+///               reads stay big.
+///             - `min` is the *scale-up floor*: an undersized read shape is grown only up to
+///               `min` (the L1 cache size by default). Reads already at or above `min` are left
+///               as the scale-down step produced them.
+///
+///             The motivation is block-grid misalignment. When the source array's block shape
+///             differs from the output's, a read that straddles source-block boundaries forces
+///             whole-block decompression for a partial slice, and neighboring reads re-decompress
+///             the same block. Larger read regions span more blocks per call and dilute that
+///             wasted work (no alignment guarantee, but the waste shrinks as the region grows);
+///             the counter-pressure is cache residency, which the `max` ceiling bounds.
+///
+///             When unset, the range defaults to `(L1 data cache size, L2 cache size)`.
 ///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
 ///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
 ///         - `compression_level`: Compression level passed to the codec. For Zstd the valid range
@@ -1227,6 +1249,7 @@ pub fn compact<'py>(
 
     Bound::new(py, Array::from_core(compacted.into_any()))
 }
+
 pub(crate) fn resolve_array_params(
     py: Python<'_>,
     params: Option<Bound<'_, PyDict>>,
@@ -1254,7 +1277,7 @@ pub(crate) fn resolve_array_params(
             let block_shape = extract_arg!("block_shape", Vec<u32>)?;
             let block_shape_tag = extract_arg!("block_shape_tag", Vec<String>)?;
             let block_size = extract_arg!("block_size", u64)?;
-            let read_size = extract_arg!("read_size", u64)?;
+            let read_size = extract_arg!("read_size", ItemOrSequence<u64>)?;
             let codec = extract_arg!("codec", String)?;
             let compression_level = extract_arg!("compression_level", u32)?;
             let filters = extract_arg!("filters", Vec<String>)?;
@@ -1287,7 +1310,25 @@ pub(crate) fn resolve_array_params(
                 params.block_size(block_size);
             }
             if let Some(read_size) = read_size {
-                params.read_size(read_size);
+                if read_size.len() > 2 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "read_size must be a scalar or a 2-element sequence, got {} elements",
+                        read_size.len()
+                    )));
+                }
+                let read_size = read_size.into_dim_array().unwrap();
+                let pair = match read_size.len() {
+                    1 => {
+                        let [read_size] = read_size.as_slice().try_into().unwrap();
+                        (read_size, read_size)
+                    }
+                    2 => {
+                        let [min, max] = read_size.as_slice().try_into().unwrap();
+                        (min, max)
+                    }
+                    _ => unreachable!(),
+                };
+                params.read_size(pair);
             }
 
             if let Some(codec) = codec {
