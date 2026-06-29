@@ -6,7 +6,7 @@ use crate::error::{check_dtype, check_get_buffer_size, check_get_range, check_nd
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, ArrayStorage, BlockShapeTag, ReadData, Ty};
 use crate::util::{cast_slice_mut, dim_arr};
-use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
+use crate::{ArrayParams, Dimension, ElementType, IntoDimension, OutBuf};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -93,10 +93,11 @@ where
     fn read_data(
         &self,
         index: &[Range<u64>],
-        buf: &mut [u8],
+        buf: &mut OutBuf,
         _context: &ReadContext,
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
+        let buf = buf.get_mut(index, &T::DTYPE);
         check_get_buffer_size(index, &T::DTYPE, buf)?;
         let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
         for item in buf.iter_mut() {

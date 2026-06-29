@@ -13,3 +13,6 @@
 - add MIT license
 - add overflow checks to all shape changing ops
 - ArrayParams stream syntax
+- of_scalar -> new_scalar
+- DtypeScalarKind -> DtypeScalar
+- as_usize -> usize

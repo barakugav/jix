@@ -1,7 +1,7 @@
 use crate::error::Result;
+use crate::ops::common::define_array_op2_method;
 use crate::ops::op2::define_op2;
-use crate::ops::Op2Kernel;
-use crate::ops::{common::define_array_op2_method, Op2};
+use crate::ops::{Op2, Op2Kernel};
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::ArrayStorageTyped;

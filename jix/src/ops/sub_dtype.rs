@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::ArraySpec;
-use crate::{Array, ArrayStorage, ElementType, Ty, TypeDyn};
+use crate::{Array, ArrayStorage, ElementType, OutBuf, Ty, TypeDyn};
 
 impl<S> Array<S>
 where
@@ -119,20 +119,23 @@ where
     type Dimension = S::Dimension;
 
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         check_get_range(self.shape(), index)?;
         let dst_dtype = self.dtype();
-        let nitems = check_get_buffer_size(index, dst_dtype, buf)?;
-        if nitems == 0 {
-            return Ok(());
-        }
         let (src_dtype, dst_dtype) = (self.array.dtype(), dst_dtype);
         let (src_itemsize, dst_itemsize) =
             (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
 
-        let mut tmp_buf = context.tmp_buf(nitems * src_itemsize, src_dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.read_data(index, tmp_buf, context)?;
+        let mut tmp_buf = OutBuf::new_lazy(context);
+        self.array.read_data(index, &mut tmp_buf, context)?;
+        let tmp_buf = tmp_buf.as_slice().unwrap();
+        let buf = buf.get_mut(index, dst_dtype);
+        check_get_buffer_size(index, dst_dtype, buf)?;
 
         let src_items = tmp_buf.chunks_exact(src_itemsize);
         let dst_items = buf.chunks_exact_mut(dst_itemsize);

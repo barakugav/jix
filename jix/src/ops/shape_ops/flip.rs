@@ -8,7 +8,7 @@ use crate::storage::ArraySpec;
 use crate::util::iter::strides::NdIterExtStridesPtr;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension, OutBuf};
 
 /// Reverses the order of elements along one or more axes, returned by
 /// [`Array::flip`](crate::Array::flip).
@@ -86,11 +86,16 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, self.dtype(), buf)?;
 
         if index.iter().any(|r| r.start >= r.end) {
+            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
             return Ok(());
         }
 
@@ -115,10 +120,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         });
 
         let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
-        let nitems = out_shape.iter().product::<u64>() as usize;
-        let mut tmp_buf = context.tmp_buf(nitems * itemsize, dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.read_data(&inner_index, tmp_buf, context)?;
+        let mut tmp_buf = OutBuf::new_lazy(context);
+        self.array.read_data(&inner_index, &mut tmp_buf, context)?;
+        let tmp_buf = tmp_buf.as_slice().unwrap();
+        let buf = buf.get_mut(index, dtype);
+        check_get_buffer_size(index, dtype, buf)?;
 
         // tmp_buf is C-contiguous over out_shape (sub_shape_in == out_shape).
         let strides = default_strides(&out_shape, itemsize as u64);
@@ -206,10 +212,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::{Array, IntoDimension, Ty};
-    use ndarray::array;
 
     // -----------------------------------------------------------------------
     // Helpers

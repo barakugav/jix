@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::ArraySpec;
 use crate::util::{default_strides, dim_arr, nd_copy};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension, OutBuf};
 
 /// Rolls elements along an axis, wrapping around at the boundary, returned by
 /// [`Array::roll`](crate::Array::roll).
@@ -74,9 +74,13 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, self.dtype(), buf)?;
 
         let k = self.axis;
         let shift = self.shift;
@@ -107,6 +111,8 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         //   Region 2 (output axis-k [len1, end)): input axis-k [0, e - shift),     length len2.
         let len1 = shift - s;
         let len2 = e - shift;
+        let buf = buf.get_mut(index, dtype);
+        check_get_buffer_size(index, dtype, buf)?;
         let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
         let dst_strides = default_strides(&out_shape, itemsize as u64);
 
@@ -117,7 +123,8 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             let region_size = region_shape.iter().product::<u64>() as usize * itemsize;
             let mut tmp = context.tmp_buf(region_size, dtype.alignment());
             let tmp = tmp.as_mut_slice();
-            self.array.read_data(inner_index, tmp, context)?;
+            self.array
+                .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
 
             let src_strides = default_strides(region_shape, itemsize as u64);
             let dst_byte_offset = (dst_axis_k_offset * dst_strides[k]) as usize;
@@ -193,10 +200,11 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
 
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::{Array, IntoDimension, Ty};
-    use ndarray::array;
 
     // -----------------------------------------------------------------------
     // Helpers

@@ -5,7 +5,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData, ReadDataExt};
 use crate::util::{cast_slice, cast_slice_mut};
-use crate::{Array, ArrayStorage};
+use crate::{Array, ArrayStorage, OutBuf};
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
 /// examples.
@@ -120,22 +120,25 @@ where
     type Dimension = SC::Dimension;
 
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         check_get_range(self.shape(), index)?;
         let dtype = self.dtype();
-        let nitems = check_get_buffer_size(index, dtype, buf)?;
 
-        let mut condition_buf =
-            context.tmp_buf(nitems * size_of::<bool>(), bool::DTYPE.alignment());
-        let condition_buf = condition_buf.as_mut_slice();
-        let mut y_buf = context.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
-        let y_buf = y_buf.as_mut_slice();
+        let mut condition_buf = OutBuf::new_lazy(context);
+        let mut y_buf = OutBuf::new_lazy(context);
+        self.condition
+            .read_data(index, &mut condition_buf, context)?;
+        self.x.read_data(index, buf, context)?; // read x directly into the output buffer
+        self.y.read_data(index, &mut y_buf, context)?;
 
-        self.condition.read_data(index, condition_buf, context)?;
-        self.x.read_data(index, buf, context)?; // read 'x' data directly into output buffer
-        self.y.read_data(index, y_buf, context)?;
-
-        let condition = unsafe { cast_slice::<_, bool>(condition_buf) };
+        let condition = unsafe { cast_slice::<_, bool>(condition_buf.as_slice().unwrap()) };
+        let y_buf = y_buf.as_slice().unwrap();
+        let buf = buf.as_mut_slice().unwrap();
 
         unsafe fn where_impl<T>(condition: &[bool], buf: &mut [u8], y_buf: &[u8])
         where

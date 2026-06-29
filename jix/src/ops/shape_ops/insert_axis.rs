@@ -7,7 +7,7 @@ use crate::ops::AxesArg;
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, ReadData};
 use crate::util::DimArray;
-use crate::{dim_arr, Array, ArrayStorage, Dimension};
+use crate::{dim_arr, Array, ArrayStorage, Dimension, OutBuf};
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
 /// returned by [`Array::insert_axis`](crate::Array::insert_axis). The inverse operation
@@ -178,10 +178,16 @@ where
     type Dimension = D;
 
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         if let Some(inner_index) = self.transform_index(index)? {
             self.array.read_data(&inner_index, buf, context)
         } else {
+            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
             Ok(())
         }
     }

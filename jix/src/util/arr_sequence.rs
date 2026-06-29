@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData};
-use crate::{ArrayExt, ArrayStorage, Dimension, ElementType};
+use crate::{ArrayExt, ArrayStorage, Dimension, ElementType, OutBuf};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).
@@ -64,7 +64,7 @@ pub(crate) trait ArraySequenceImpl {
         &self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut [u8],
+        buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()>;
     fn shape(&self, arr: usize) -> &[u64];
@@ -155,7 +155,7 @@ where
         &self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut [u8],
+        buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
         self[arr].storage.read_data(index, buf, context)
@@ -239,7 +239,7 @@ where
         &self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut [u8],
+        buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
         self[arr].storage.read_data(index, buf, context)
@@ -322,7 +322,7 @@ where
         &self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut [u8],
+        buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
         self[arr].storage.read_data(index, buf, context)
@@ -423,7 +423,7 @@ where
         &self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut [u8],
+        buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
         self[arr].storage.read_data(index, buf, context)
@@ -530,7 +530,7 @@ macro_rules! impl_array_sequence_for_tuple {
                 &self,
                 arr: usize,
                 index: &[Range<u64>],
-                buf: &mut [u8],
+                buf: &mut OutBuf,
                 context: &ReadContext,
             ) -> Result<()> {
                 match arr {

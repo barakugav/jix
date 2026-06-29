@@ -22,7 +22,7 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy, DimArray};
-use crate::{ArrayParams, ArrayStorage, Dimension};
+use crate::{ArrayParams, ArrayStorage, Dimension, OutBuf};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -130,7 +130,7 @@ macro_rules! impl_array_storage {
             fn read_data(
                 &self,
                 index: &[Range<u64>],
-                buf: &mut [u8],
+                buf: &mut crate::OutBuf,
                 context: &ReadContext,
             ) -> Result<()> {
                 self.0.read_data(index, buf, context)
@@ -283,13 +283,14 @@ where
     ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
     ///      respecting both strides.
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()>
+    fn read_data(&self, index: &[Range<u64>], buf: &mut OutBuf, context: &ReadContext) -> Result<()>
     where
         ET: ElementType,
         D: Dimension,
     {
         let shape = self.shape();
         check_get_range(shape, index)?;
+        let buf = buf.get_mut(index, self.blocks.dtype());
         let _nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
 
         let ndim = shape.len();

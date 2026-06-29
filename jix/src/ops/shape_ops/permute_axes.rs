@@ -6,7 +6,7 @@ use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, R
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::ArraySpec;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension, OutBuf};
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
 ///
@@ -116,10 +116,14 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     type Dimension = S::Dimension;
 
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        let nitems = check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.axes.len();
         let itemsize = dtype.itemsize() as usize;
@@ -134,9 +138,11 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let sub_shape_in = dim_arr(ndim, |d| {
             (input_index[d].end - input_index[d].start) as usize
         });
-        let mut tmp_buf = context.tmp_buf(nitems * itemsize, dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.read_data(&input_index, tmp_buf, context)?;
+        let mut tmp_buf = OutBuf::new_lazy(context);
+        self.array.read_data(&input_index, &mut tmp_buf, context)?;
+        let tmp_buf = tmp_buf.as_slice().unwrap();
+        let buf = buf.get_mut(index, dtype);
+        check_get_buffer_size(index, dtype, buf)?;
 
         // Strides in tmp_buf (C-contiguous over input dims).
         let src_strides_in = default_strides(&sub_shape_in, itemsize);

@@ -7,7 +7,7 @@ use crate::ops::AxesArg;
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, ReadData};
 use crate::util::DimArray;
-use crate::{dim_arr, Array, ArrayStorage, Dimension};
+use crate::{dim_arr, Array, ArrayStorage, Dimension, OutBuf};
 
 /// Removes length-1 dimensions from an array's shape,
 /// returned by [`Array::remove_axis`](crate::Array::remove_axis). The inverse operation
@@ -168,7 +168,12 @@ where
     type Dimension = D;
 
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         self.array
             .read_data(&self.transform_index(index)?, buf, context)
     }

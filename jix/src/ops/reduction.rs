@@ -16,7 +16,7 @@ use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray,
 };
-use crate::{Array, ArrayStorage, Dimension, Ty};
+use crate::{Array, ArrayStorage, Dimension, OutBuf, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
     kernel: K,
@@ -127,7 +127,12 @@ where
     type Dimension = D;
 
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         // this is a compile time check, the compiler knows the value of `LANES`
         let read_fn = match <S::Item as LanesInfo>::LANES {
             1 => Self::read_data_impl::<1>,
@@ -142,7 +147,9 @@ where
             512 => Self::read_data_impl::<512>,
             _ => Self::read_data_impl::<1024>,
         };
-        read_fn(self, index, buf, context)
+        let buf = buf.get_mut(index, self.dtype());
+        read_fn(self, index, buf, context)?;
+        Ok(())
     }
 
     #[inline(always)]
@@ -447,7 +454,8 @@ where
                         as usize,
                 );
                 let items_buf = items_buf.as_mut_slice();
-                self.array.read_data(&tile, items_buf, context)?;
+                self.array
+                    .read_data(&tile, &mut OutBuf::new(items_buf), context)?;
 
                 // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
                 // `tile_state_base` shifts `state_buf` to its first slot.
