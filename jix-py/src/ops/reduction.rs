@@ -23,6 +23,7 @@ fn keepdims_after_reduction(
     Ok(ret.into_any())
 }
 
+#[inline]
 fn keepdim_after_reduction(array: ArrayAny, original_reduced_axis: usize) -> PyResult<ArrayAny> {
     // keepdims=true: for a single-axis reduction, the result-space gap equals the
     // original axis index (only one axis removed, shift = 0).

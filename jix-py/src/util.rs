@@ -8,9 +8,11 @@ use pyo3_stub_gen::impl_stub_type;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
+#[inline(always)]
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
     (0..ndim).map(f).collect()
 }
+#[inline(always)]
 pub(crate) fn check_ndim(ndim: usize) -> PyResult<()> {
     if ndim > NDIM_MAX {
         Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -25,11 +27,13 @@ pub(crate) trait IntoPyResult<T> {
     fn into_py_result(self) -> PyResult<T>;
 }
 impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
+    #[inline(always)]
     fn into_py_result(self) -> PyResult<T> {
         self.map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))
     }
 }
 
+#[inline]
 pub(crate) fn numpy_empty<'py>(
     dtype: Bound<'py, PyArrayDescr>,
     shape: &[u64],
@@ -50,6 +54,7 @@ pub(crate) fn numpy_empty<'py>(
     Ok(unsafe { Bound::from_owned_ptr(py, np_arr).cast_into_unchecked() })
 }
 
+#[inline]
 pub(crate) fn normalize_axis(axis: i32, ndim: usize) -> pyo3::PyResult<usize> {
     let ndim = ndim as i32;
     if axis < -ndim || axis >= ndim {
@@ -63,6 +68,7 @@ pub(crate) fn normalize_axis(axis: i32, ndim: usize) -> pyo3::PyResult<usize> {
         axis as usize
     })
 }
+#[inline]
 pub(crate) fn normalize_axis_optional(axis: Option<i32>, ndim: usize) -> pyo3::PyResult<usize> {
     match axis {
         Some(axis) => normalize_axis(axis, ndim),
@@ -77,6 +83,7 @@ pub(crate) fn normalize_axis_optional(axis: Option<i32>, ndim: usize) -> pyo3::P
     }
 }
 
+#[inline]
 pub(crate) fn normalize_axes(axes: &[i32], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
     if ndim > NDIM_MAX {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -85,6 +92,7 @@ pub(crate) fn normalize_axes(axes: &[i32], ndim: usize) -> pyo3::PyResult<DimArr
     }
     axes.iter().map(|a| normalize_axis(*a, ndim)).collect()
 }
+#[inline]
 pub(crate) fn normalize_axes_optional(
     axes: Option<&[i32]>,
     ndim: usize,
@@ -106,6 +114,7 @@ pub enum ItemOrSequence<T> {
     Sequence(Vec<T>),
 }
 impl<T> ItemOrSequence<T> {
+    #[inline]
     pub(crate) fn into_dim_array(self) -> PyResult<DimArray<T>> {
         match self {
             ItemOrSequence::Item(item) => {
@@ -126,6 +135,7 @@ impl<T> ItemOrSequence<T> {
         }
     }
 
+    #[inline]
     pub(crate) fn len(&self) -> usize {
         match self {
             ItemOrSequence::Item(_) => 1,
@@ -133,21 +143,25 @@ impl<T> ItemOrSequence<T> {
         }
     }
 
+    #[inline]
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
 impl<T> From<T> for ItemOrSequence<T> {
+    #[inline]
     fn from(item: T) -> Self {
         ItemOrSequence::Item(item)
     }
 }
 impl<T> From<Vec<T>> for ItemOrSequence<T> {
+    #[inline]
     fn from(seq: Vec<T>) -> Self {
         ItemOrSequence::Sequence(seq)
     }
 }
 impl<T, const N: usize> From<[T; N]> for ItemOrSequence<T> {
+    #[inline]
     fn from(arr: [T; N]) -> Self {
         ItemOrSequence::Sequence(arr.into())
     }
@@ -161,16 +175,19 @@ pub(crate) struct UnsafeSend<T>(T);
 unsafe impl<T> Send for UnsafeSend<T> {}
 #[allow(unused)]
 impl<T> UnsafeSend<T> {
+    #[inline]
     pub(crate) unsafe fn new(value: T) -> Self {
         Self(value)
     }
 
+    #[inline]
     pub(crate) unsafe fn into_inner(self) -> T {
         self.0
     }
 }
 
 pub(crate) trait IterExt: Iterator {
+    #[inline]
     fn try_collect_array<T, E, const N: usize>(self) -> Result<Option<[T; N]>, E>
     where
         Self: Sized + Iterator<Item = Result<T, E>>,

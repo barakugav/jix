@@ -40,6 +40,7 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 #[pyclass(module = "jix", frozen)]
 pub struct ReadContext(Mutex<jix_core::ReadContext>);
 impl ReadContext {
+    #[inline]
     pub(crate) fn from_core(ctx: jix_core::ReadContext) -> Self {
         Self(Mutex::new(ctx))
     }

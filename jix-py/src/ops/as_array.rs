@@ -35,6 +35,7 @@ use crate::ops::common::Operand;
 ///         unchanged with no copy.
 #[gen_stub_pyfunction]
 #[pyfunction]
+#[inline]
 pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     if let Ok(array) = value.cast::<Array>() {
         return Ok(array.clone());
@@ -43,6 +44,7 @@ pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
     Bound::new(value.py(), Array::from_core(array))
 }
 
+#[inline]
 pub(crate) fn any_to_core_array<'py>(value: &Bound<'py, PyAny>) -> PyResult<ArrayAny> {
     Ok(asarray(value)?.get().to_core())
 }

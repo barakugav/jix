@@ -322,6 +322,7 @@ impl<'py> PyReader<'py> {
 }
 
 impl Read for PyReader<'_> {
+    #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let result = self.read_fn.call1((buf.len(),)).map_err(py_to_io_err)?;
         if result.is_none() {
@@ -343,6 +344,7 @@ impl Read for PyReader<'_> {
 }
 
 impl Seek for PyReader<'_> {
+    #[inline]
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         let (offset, whence): (i64, i32) = match pos {
             SeekFrom::Start(n) => (n as i64, 0),
@@ -357,6 +359,7 @@ impl Seek for PyReader<'_> {
         }
     }
 
+    #[inline]
     fn stream_position(&mut self) -> io::Result<u64> {
         self.tell_fn
             .call0()
@@ -415,6 +418,7 @@ impl<'py> PyWriter<'py> {
 }
 
 impl Write for PyWriter<'_> {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let py = self.write_fn.py();
 
@@ -454,6 +458,7 @@ impl Write for PyWriter<'_> {
         result.extract::<usize>().map_err(py_to_io_err)
     }
 
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         // flush() is optional on the Python side.
         if let Some(flush_fn) = &self.flush_fn {
@@ -464,6 +469,7 @@ impl Write for PyWriter<'_> {
 }
 
 impl Seek for PyWriter<'_> {
+    #[inline]
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         // Python's seek(offset, whence) where whence:
         //   0 = SEEK_SET, 1 = SEEK_CUR, 2 = SEEK_END
@@ -484,6 +490,7 @@ impl Seek for PyWriter<'_> {
         }
     }
 
+    #[inline]
     fn stream_position(&mut self) -> io::Result<u64> {
         // Python's tell() returns the current position.
         self.tell_fn

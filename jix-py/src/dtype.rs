@@ -184,6 +184,7 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<ji
     Ok(dtype)
 }
 
+#[inline]
 pub(crate) fn dtype_from_any(dtype: &Bound<PyAny>) -> PyResult<jixDtype> {
     dtype_from_numpy(&PyArrayDescr::new(dtype.py(), dtype)?)
 }

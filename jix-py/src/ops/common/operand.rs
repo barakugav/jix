@@ -22,6 +22,7 @@ pub(crate) enum Operand {
     },
 }
 impl Operand {
+    #[inline]
     pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
         Self::from_any_impl(value, false)
     }
@@ -280,6 +281,7 @@ pub(crate) enum Scalar {
     Complex(Complex<f64>),
 }
 impl Scalar {
+    #[inline]
     pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
         match Operand::from_any_impl(value, true)? {
             Operand::Scalar { value, .. } => Ok(value),
