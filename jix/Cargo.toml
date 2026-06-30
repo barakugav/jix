@@ -7,10 +7,10 @@ rust-version = "1.89.0"
 description = "Multi-dimensional array library with block-compressed storage and lazy-evaluated operations"
 readme = "README.md"
 repository = "https://github.com/barakugav/jix"
-license = "Apache-2.0"
+license = "MIT OR Apache-2.0"
 keywords = ["ndarray", "compression", "zstd"]
 categories = ["data-structures", "compression", "science"]
-include = ["Cargo.toml", "build.rs", "src/", "README.md", "LICENSE"]
+include = ["Cargo.toml", "build.rs", "src/", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
 
 [dependencies]
 jix-macros = { path = "../jix-macros", version = "0.0.3" }

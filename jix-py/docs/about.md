@@ -25,7 +25,9 @@ Full attribution and license text is in
 
 ## License
 
-Apache-2.0. See [`LICENSE`](https://github.com/barakugav/jix/blob/main/LICENSE).
+Licensed under either of Apache-2.0
+([`LICENSE-APACHE`](https://github.com/barakugav/jix/blob/main/LICENSE-APACHE)) or MIT
+([`LICENSE-MIT`](https://github.com/barakugav/jix/blob/main/LICENSE-MIT)), at your option.
 
 
 ## Author

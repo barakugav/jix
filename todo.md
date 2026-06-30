@@ -10,7 +10,6 @@
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
 - use multiple threads for reads
 - remove ::storage from public API, re-export everything from lib.rs
-- add MIT license
 - add overflow checks to all shape changing ops
 - ArrayParams stream syntax
 - of_scalar -> new_scalar
