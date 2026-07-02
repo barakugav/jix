@@ -4,9 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, BlockShapeTag, ElementType, Ty, TypeDyn};
+use crate::storage::{ArraySpec, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, SendSyncPtr};
-use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension, OutBuf};
+use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///

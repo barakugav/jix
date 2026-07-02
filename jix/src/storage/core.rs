@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::{ReadContext, TmpBuf};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
-use crate::storage::{ArraySpec, CompactBorrowed, ReadData};
+use crate::storage::{ArraySpec, CompactBorrowed, OutBuf, ReadData};
 use crate::util::assert_unchecked_eq;
 use crate::{Dimension, ElementType};
 
@@ -93,7 +93,7 @@ pub trait ArrayStorage {
     /// - `buf` - destination buffer. Either a caller-provided buffer or a lazily-allocated one.
     ///   If the buffer is provided by the caller, it must be aligned to `dtype.alignment()` and
     ///   has a length of exactly `index.iter().map(|r| r.len()).product() * dtype.itemsize()` bytes.
-    ///   See [`OutBuf`](crate::storage::OutBuf) for details.
+    ///   See [`OutBuf`](crate::OutBuf) for details.
     ///   On success the elements are written in row-major (C-contiguous) order.
     /// - `context` - read context carrying the decoder state.
     fn read_data(
@@ -214,70 +214,4 @@ pub trait ArrayStorage {
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>>
     where
         Self: Sized;
-}
-
-/// Destination for a [`read_data`](ArrayStorage::read_data) call.
-///
-/// Either a caller-provided byte buffer ([`OutBuf::new`]) or a lazily-allocated pooled buffer
-/// ([`OutBuf::new_lazy`]).
-/// After a successful `read_data` call, the buffer contents can be accessed via
-/// [`as_slice`](OutBuf::as_slice).
-pub struct OutBuf<'a>(OutBufInner<'a>);
-enum OutBufInner<'a> {
-    Lazy(&'a ReadContext),
-    Borrowed(&'a mut [u8]),
-    Tmp(TmpBuf<'a>),
-}
-impl<'a> OutBuf<'a> {
-    /// Write into a caller-provided buffer.
-    #[inline(always)]
-    pub fn new(buf: &'a mut [u8]) -> Self {
-        Self(OutBufInner::Borrowed(buf))
-    }
-
-    /// Defer allocation: the storage allocates a pooled buffer from `context` on the first demand
-    /// for a mutable slice.
-    #[inline(always)]
-    pub fn new_lazy(context: &'a ReadContext) -> Self {
-        Self(OutBufInner::Lazy(context))
-    }
-
-    #[inline]
-    pub(crate) fn get_mut(&mut self, index: &[Range<u64>], dtype: &Dtype) -> &mut [u8] {
-        if let OutBufInner::Lazy(context) = &self.0 {
-            let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-            let tmp = context.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
-            self.0 = OutBufInner::Tmp(tmp);
-        }
-        self.as_mut_slice().unwrap()
-    }
-
-    /// Returns the buffer contents, or `None` if this is a not-yet-materialized lazy `OutBuf`.
-    #[inline(always)]
-    pub fn as_slice(&self) -> Option<&[u8]> {
-        match &self.0 {
-            OutBufInner::Lazy(_) => None,
-            OutBufInner::Borrowed(buf) => Some(buf),
-            OutBufInner::Tmp(tmp) => Some(tmp.as_slice()),
-        }
-    }
-
-    /// Returns the mutable buffer contents, or `None` if this is a not-yet-materialized lazy `OutBuf`.
-    #[inline(always)]
-    pub fn as_mut_slice(&mut self) -> Option<&mut [u8]> {
-        match &mut self.0 {
-            OutBufInner::Lazy(_) => None,
-            OutBufInner::Borrowed(buf) => Some(buf),
-            OutBufInner::Tmp(tmp) => Some(tmp.as_mut_slice()),
-        }
-    }
-
-    #[track_caller]
-    #[inline(always)]
-    pub(crate) fn unwrap_tmp(self) -> TmpBuf<'a> {
-        match self.0 {
-            OutBufInner::Tmp(tmp) => tmp,
-            _ => unreachable!(),
-        }
-    }
 }

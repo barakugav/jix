@@ -4,12 +4,12 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::storage::{ArraySpec, BlockShapeTag, OutBuf};
 use crate::util::{
     default_strides, nd_copy, ArraySequence, ArraySequenceDimension, ArraySequenceElementType,
     DimArray,
 };
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///

@@ -5,10 +5,10 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::ArraySpec;
+use crate::storage::{ArraySpec, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///

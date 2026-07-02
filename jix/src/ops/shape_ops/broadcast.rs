@@ -4,9 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
 /// returned by [`Array::broadcast`](crate::Array::broadcast).

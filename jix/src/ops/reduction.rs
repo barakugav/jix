@@ -9,14 +9,14 @@ use crate::ops::LanesInfo;
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, ArrayStorageTyped};
+use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray,
 };
-use crate::{Array, ArrayStorage, Dimension, OutBuf, Ty};
+use crate::{Array, ArrayStorage, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
     kernel: K,

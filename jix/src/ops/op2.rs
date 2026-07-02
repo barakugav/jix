@@ -4,9 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::common::define_array_op2_method;
-use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData, ReadDataExt};
+use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, OutBuf, Ty};
+use crate::{Array, ArrayStorage, Ty};
 
 pub(crate) struct Op2<S1, S2, K> {
     a: S1,

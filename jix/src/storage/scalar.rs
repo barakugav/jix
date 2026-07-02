@@ -4,9 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_buffer_size, check_get_range, check_ndim, Result};
 use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, ArrayStorage, BlockShapeTag, ReadData, Ty};
+use crate::storage::{ArraySpec, ArrayStorage, BlockShapeTag, OutBuf, ReadData, Ty};
 use crate::util::{cast_slice_mut, dim_arr};
-use crate::{ArrayParams, Dimension, ElementType, IntoDimension, OutBuf};
+use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///

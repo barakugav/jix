@@ -4,9 +4,9 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtyped;
 use crate::error::Result;
-use crate::storage::ReadData;
+use crate::storage::{OutBuf, ReadData};
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind, OutBuf};
+use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 
 /// A lazy storage adapter that re-tags an array's dimension parameter without copying data.
 ///

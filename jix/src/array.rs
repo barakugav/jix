@@ -9,7 +9,7 @@ use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlockSize, Compact, Ref,
+    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlockSize, Compact, OutBuf, Ref,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
@@ -19,8 +19,7 @@ use crate::util::{
     dim_arr, nd_copy, scale_read_shape, AlignedBytes, IterExt,
 };
 use crate::{
-    ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, OutBuf, Ty,
-    TypeDyn,
+    ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.

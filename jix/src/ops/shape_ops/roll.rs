@@ -3,9 +3,9 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::ArraySpec;
+use crate::storage::{ArraySpec, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy};
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Rolls elements along an axis, wrapping around at the boundary, returned by
 /// [`Array::roll`](crate::Array::roll).

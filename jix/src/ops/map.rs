@@ -3,11 +3,11 @@ use std::ops::Range;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
-use crate::storage::{ArrayStorageTyped, ReadData, ReadDataExt};
+use crate::storage::{ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
 use crate::{
-    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, OutBuf,
-    ReadContext, ReadDataTuple, Ty,
+    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, ReadContext,
+    ReadDataTuple, Ty,
 };
 
 impl<S> Array<S>

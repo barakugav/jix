@@ -5,10 +5,10 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
-use crate::{ArrayStorage, Dimension, IntoDimension, OutBuf};
+use crate::{ArrayStorage, Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///

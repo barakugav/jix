@@ -5,9 +5,9 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag, ReadData};
+use crate::storage::{ArraySpec, BlockShapeTag, OutBuf, ReadData};
 use crate::util::DimArray;
-use crate::{dim_arr, Array, ArrayStorage, Dimension, OutBuf};
+use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
 /// returned by [`Array::insert_axis`](crate::Array::insert_axis). The inverse operation

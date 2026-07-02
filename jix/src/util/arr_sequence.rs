@@ -4,8 +4,8 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData};
-use crate::{ArrayExt, ArrayStorage, Dimension, ElementType, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf, ReadData};
+use crate::{ArrayExt, ArrayStorage, Dimension, ElementType};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).

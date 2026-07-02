@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::storage::params::ArraySpecPtr;
-use crate::storage::ArraySpec;
-use crate::{ArrayStorage, DimDyn, Dimension, ElementType, OutBuf, TypeDyn, NDIM_MAX};
+use crate::storage::{ArraySpec, OutBuf};
+use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
 /// A type-erased array storage backend that wraps any dynamically-typed storage via `Arc<dyn ArrayStorage>`.
 ///

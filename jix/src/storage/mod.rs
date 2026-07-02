@@ -72,6 +72,9 @@ pub use block::BlockSize;
 
 pub(crate) mod scalar;
 
+mod buf;
+pub use buf::*;
+
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
 ///
 /// `ArrayStorageTyped` is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. It exposes the
@@ -132,7 +135,7 @@ macro_rules! impl_array_storage_forward {
         fn read_data(
             &self,
             index: &[::core::ops::Range<u64>],
-            buf: &mut crate::OutBuf,
+            buf: &mut crate::storage::OutBuf,
             context: &crate::codec::ReadContext,
         ) -> crate::error::Result<()> {
             self.0.read_data(index, buf, context)

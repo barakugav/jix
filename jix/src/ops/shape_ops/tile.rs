@@ -6,9 +6,9 @@ use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
 };
 use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
+use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, DimDyn, Dimension, OutBuf, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).

@@ -17,12 +17,12 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, ElementType};
+use crate::storage::{ArraySpec, ElementType, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy, DimArray};
-use crate::{ArrayParams, ArrayStorage, Dimension, OutBuf};
+use crate::{ArrayParams, ArrayStorage, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -130,7 +130,7 @@ macro_rules! impl_array_storage {
             fn read_data(
                 &self,
                 index: &[Range<u64>],
-                buf: &mut crate::OutBuf,
+                buf: &mut crate::storage::OutBuf,
                 context: &ReadContext,
             ) -> Result<()> {
                 self.0.read_data(index, buf, context)
