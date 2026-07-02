@@ -411,9 +411,9 @@ mod tests {
 
     #[test]
     fn owned_1d_dtype_i32() {
-        use crate::dtype::DtypeScalarKind;
+        use crate::dtype::ScalarKind;
         let a = Array::plain_ndarray(array![0i32]).unwrap();
-        assert_eq!(a.dtype().try_to_scalar(), Some(DtypeScalarKind::I32));
+        assert_eq!(a.dtype().try_to_scalar(), Some(ScalarKind::I32));
     }
 
     #[test]

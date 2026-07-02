@@ -11,5 +11,4 @@
 - use multiple threads for reads
 - add overflow checks to all shape changing ops
 - ArrayParams stream syntax
-- DtypeScalarKind -> DtypeScalar
 - as_usize -> usize

@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
-use jix_core::dtype::{DtypeScalarKind, Dtyped};
+use jix_core::dtype::{ScalarKind, Dtyped};
 use jix_core::scalar::{f16, Complex};
 use jix_core::{Array as CoreArray, ArrayAny};
 
@@ -92,44 +92,44 @@ impl Operand {
             let item = array.call_method0("item")?;
 
             let (value, precision) = match scalar {
-                DtypeScalarKind::I8 => (
+                ScalarKind::I8 => (
                     Scalar::Int(item.extract::<i8>()? as i64),
                     Some(Precision::P1),
                 ),
-                DtypeScalarKind::I16 => (
+                ScalarKind::I16 => (
                     Scalar::Int(item.extract::<i16>()? as i64),
                     Some(Precision::P2),
                 ),
-                DtypeScalarKind::I32 => (
+                ScalarKind::I32 => (
                     Scalar::Int(item.extract::<i32>()? as i64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::I64 => (Scalar::Int(item.extract::<i64>()?), Some(Precision::P8)),
-                DtypeScalarKind::U8 => (
+                ScalarKind::I64 => (Scalar::Int(item.extract::<i64>()?), Some(Precision::P8)),
+                ScalarKind::U8 => (
                     Scalar::UInt(item.extract::<u8>()? as u64),
                     Some(Precision::P1),
                 ),
-                DtypeScalarKind::U16 => (
+                ScalarKind::U16 => (
                     Scalar::UInt(item.extract::<u16>()? as u64),
                     Some(Precision::P2),
                 ),
-                DtypeScalarKind::U32 => (
+                ScalarKind::U32 => (
                     Scalar::UInt(item.extract::<u32>()? as u64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::U64 => (Scalar::UInt(item.extract::<u64>()?), Some(Precision::P8)),
-                DtypeScalarKind::F16 => (
+                ScalarKind::U64 => (Scalar::UInt(item.extract::<u64>()?), Some(Precision::P8)),
+                ScalarKind::F16 => (
                     Scalar::Float(item.extract::<f32>()? as f64),
                     Some(Precision::P2),
                 ),
-                DtypeScalarKind::F32 => (
+                ScalarKind::F32 => (
                     Scalar::Float(item.extract::<f32>()? as f64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::F64 => {
+                ScalarKind::F64 => {
                     (Scalar::Float(item.extract::<f64>()?), Some(Precision::P8))
                 }
-                DtypeScalarKind::ComplexF32 => {
+                ScalarKind::ComplexF32 => {
                     let re = item.getattr("real")?.extract::<f32>()?;
                     let im = item.getattr("imag")?.extract::<f32>()?;
                     (
@@ -137,12 +137,12 @@ impl Operand {
                         Some(Precision::P4),
                     )
                 }
-                DtypeScalarKind::ComplexF64 => {
+                ScalarKind::ComplexF64 => {
                     let re = item.getattr("real")?.extract::<f64>()?;
                     let im = item.getattr("imag")?.extract::<f64>()?;
                     (Scalar::Complex(Complex::new(re, im)), Some(Precision::P8))
                 }
-                DtypeScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), None),
+                ScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), None),
             };
             return Ok(Self::Scalar {
                 value,
@@ -260,7 +260,7 @@ impl Operand {
     }
 }
 
-pub(crate) fn scalar_kind_to_rank_precision(kind: DtypeScalarKind) -> (Rank, Option<Precision>) {
+pub(crate) fn scalar_kind_to_rank_precision(kind: ScalarKind) -> (Rank, Option<Precision>) {
     let (rank, precision) = match kind {
         _ if kind.is_bool() => (Rank::Bool, 1),
         _ if kind.is_unsigned_integer() => (Rank::UInt, kind.itemsize()),

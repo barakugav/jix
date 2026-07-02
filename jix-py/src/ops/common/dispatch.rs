@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use jix_core::dtype::{Dtype, DtypeScalarKind, Dtyped};
+use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
 use jix_core::ops::IntoType;
 use jix_core::storage::ArrayStorageAny;
 use jix_core::{Array as CoreArray, ArrayAny, Ty};
@@ -28,7 +28,7 @@ pub(crate) struct OpFnDescriptor<const IN_N: usize, ExtraArgs> {
     input_desc: [OpFnInputDescriptor; IN_N],
 }
 pub(crate) struct OpFnInputDescriptor {
-    dtype: DtypeScalarKind,
+    dtype: ScalarKind,
     allowed_cast: CastKind,
 }
 

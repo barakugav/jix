@@ -18,7 +18,7 @@ Scalars carry a precision when the user passed a typed numpy scalar
 (``np.int64(5)``) and ``None`` when they passed an untyped Python value
 (``5``, ``5.0``, ``True``). An ``None`` precision matches any same-rank impl.
 
-This file exists in part to catch a regression where ``DtypeScalarKind::I64``
+This file exists in part to catch a regression where ``ScalarKind::I64``
 was tagged ``Precision::P4`` in ``operand.rs`` instead of ``P8``: an
 ``np.int64`` scalar combined with a smaller signed-int array dispatched to
 ``i32`` and silently truncated the scalar.
@@ -28,7 +28,6 @@ import numpy as np
 import pytest
 
 import jix
-
 
 # ---------------------------------------------------------------------------
 # Bug regression: np.int64 scalar must be tagged P8.
