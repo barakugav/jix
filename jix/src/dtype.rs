@@ -607,9 +607,9 @@ impl Dtype {
             .collect::<Box<_>>();
 
         let is_aligned;
-        if Self::is_aligned_struct(&*fields, element_itemsize, alignment) {
+        if Self::is_aligned_struct(&fields, element_itemsize, alignment) {
             is_aligned = true;
-        } else if Self::is_packed_struct(&*fields, element_itemsize, alignment) {
+        } else if Self::is_packed_struct(&fields, element_itemsize, alignment) {
             is_aligned = false;
         } else {
             bail!(

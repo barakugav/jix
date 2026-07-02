@@ -679,7 +679,7 @@ fn assert_array_matches_with<S, T, D>(
         .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
     assert_eq!(spec.block_shape_tag().len(), ndim);
     assert!(spec.block_size() > 0);
-    assert!(spec.read_size().min() > 0);
+    assert!(spec.read_size().min > 0);
 
     let expected = expected.view().into_dyn();
     let actual = actual.as_ref().into_typed::<T>().unwrap();

@@ -4,9 +4,30 @@ use jix_core::NDIM_MAX;
 use numpy::npyffi::npy_intp;
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
+use pyo3::types::{PySlice, PySliceIndices};
 use pyo3_stub_gen::impl_stub_type;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
+
+/// Resolves a Python `slice` against a sequence of length `length`, WITHOUT the
+/// numpy-style clamping performed by [`PySlice::indices`][pyo3::types::PySliceMethods::indices].
+#[inline]
+pub(crate) fn slice_unpack(slice: &Bound<'_, PySlice>, length: i64) -> PyResult<PySliceIndices> {
+    let mut start: pyo3::ffi::Py_ssize_t = 0;
+    let mut stop: pyo3::ffi::Py_ssize_t = 0;
+    let mut step: pyo3::ffi::Py_ssize_t = 0;
+    // SAFETY: `slice` is a live `PySlice` and the out-pointers are valid and non-null.
+    // `PySlice_Unpack` writes through them on success and sets a Python error on failure.
+    if unsafe { pyo3::ffi::PySlice_Unpack(slice.as_ptr(), &mut start, &mut stop, &mut step) } < 0 {
+        return Err(PyErr::fetch(slice.py()));
+    }
+    // An omitted forward `stop` unpacks to the max sentinel; substitute the axis length
+    // (its Python default) so it is not later mistaken for an out-of-range bound.
+    if stop == pyo3::ffi::Py_ssize_t::MAX {
+        stop = length as pyo3::ffi::Py_ssize_t;
+    }
+    Ok(PySliceIndices::new(start, stop, step))
+}
 
 #[inline(always)]
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
@@ -127,7 +148,7 @@ pub(crate) fn normalize_axes_optional(
         )));
     }
     match axes {
-        Some(axes) => normalize_axes(&axes, ndim),
+        Some(axes) => normalize_axes(axes, ndim),
         None => Ok((0..ndim).collect()),
     }
 }

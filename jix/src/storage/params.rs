@@ -15,8 +15,8 @@ use crate::{dim_arr, Array, ArrayStorage, DimDyn, Dimension};
 /// pulls through memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ReadSize {
-    min: u64,
-    max: u64,
+    pub(crate) min: u64,
+    pub(crate) max: u64,
 }
 
 impl ReadSize {
@@ -24,14 +24,6 @@ impl ReadSize {
         let min = min.max(1);
         let max = max.max(min);
         Self { min, max }
-    }
-
-    pub(crate) fn min(self) -> u64 {
-        self.min
-    }
-
-    pub(crate) fn max(self) -> u64 {
-        self.max
     }
 
     /// The range expressed in element counts for `itemsize`, each floored at 1.
@@ -476,7 +468,7 @@ impl ArrayParams {
                 .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
             assert_eq!(spec.block_shape_tag().len(), ndim);
             assert!(spec.block_size() > 0);
-            assert!(spec.read_size().min() > 0);
+            assert!(spec.read_size().min > 0);
         }
 
         Ok(spec)
@@ -719,10 +711,10 @@ mod tests {
         // min floored at 1, max raised to at least min.
         assert_eq!(ReadSize::new(0, 0), ReadSize::new(1, 1));
         let rs = ReadSize::new(10, 4); // max < min -> max raised to min
-        assert_eq!((rs.min(), rs.max()), (10, 10));
+        assert_eq!((rs.min, rs.max), (10, 10));
 
         let rs = ReadSize::new(32 * 1024, 256 * 1024);
-        assert_eq!((rs.min(), rs.max()), (32 * 1024, 256 * 1024));
+        assert_eq!((rs.min, rs.max), (32 * 1024, 256 * 1024));
 
         // nitems divides by itemsize, flooring each at 1.
         let (min_n, max_n) = ReadSize::new(32, 256).nitems(4u16);
@@ -783,7 +775,7 @@ mod tests {
         let spec = params.into_spec(&[8], &i32::DTYPE).unwrap();
         let rs = spec.as_ref().read_size();
         let cs = cache_sizes();
-        assert_eq!((rs.min(), rs.max()), (cs.l1_data as u64, cs.l2 as u64));
+        assert_eq!((rs.min, rs.max), (cs.l1_data as u64, cs.l2 as u64));
     }
 
     #[test]
@@ -794,6 +786,6 @@ mod tests {
         params.read_size((4096, 65536));
         let spec = params.into_spec(&[8], &i32::DTYPE).unwrap();
         let rs = spec.as_ref().read_size();
-        assert_eq!((rs.min(), rs.max()), (4096, 65536));
+        assert_eq!((rs.min, rs.max), (4096, 65536));
     }
 }

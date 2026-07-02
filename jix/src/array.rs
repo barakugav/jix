@@ -1033,8 +1033,8 @@ impl<S: ArrayStorage> Array<S> {
         });
         let read_size = spec.read_size();
         let (min_chunk, max_chunk) = (
-            (read_size.min() / block_size_bytes as u64).max(1),
-            (read_size.max() / block_size_bytes as u64).max(1),
+            (read_size.min / block_size_bytes as u64).max(1),
+            (read_size.max / block_size_bytes as u64).max(1),
         );
         scale_read_shape(
             &mut chunk_shape_in_blocks,

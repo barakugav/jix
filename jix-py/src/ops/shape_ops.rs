@@ -6,8 +6,8 @@ use pyo3::types::{PyEllipsis, PySlice, PyTuple};
 
 use crate::ops::{any_to_core_array, asarray};
 use crate::util::{
-    normalize_axes, normalize_axes_optional, normalize_axis, normalize_axis_optional, DimArray,
-    IntoPyResult, ItemOrSequence,
+    normalize_axes, normalize_axes_optional, normalize_axis, normalize_axis_optional, slice_unpack,
+    DimArray, IntoPyResult, ItemOrSequence,
 };
 use crate::Array;
 
@@ -286,7 +286,7 @@ pub(crate) fn parse_basic_index<'py>(
             }
             RawIdxItem::Slice(s) => {
                 let len = shape[axis_cursor] as i64;
-                let s = s.indices(len.try_into().unwrap())?;
+                let s = slice_unpack(s, len)?;
                 if s.step != 1 {
                     return Err(PyValueError::new_err("slice step must be 1"));
                 }
@@ -389,7 +389,6 @@ pub fn insert_axis<'py>(
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
     let array = py_arr.get().to_core();
-    // let requested = axis.into_vec();
     if axis.is_empty() {
         return Ok(py_arr); // no-op if no axes to insert
     }

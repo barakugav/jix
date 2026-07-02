@@ -236,13 +236,13 @@ pub fn write_array(
                     file
                 };
                 let writer = BufWriter::new(file);
-                write_array_impl(&array, writer, params)
+                write_array_impl(array, writer, params)
             })
         }
         PathOrWriter::PyWriter(writer) => {
             // cant detach the GIL here since the writer is a Python object
             let writer = BufWriter::new(writer);
-            write_array_impl(&array, writer, params)
+            write_array_impl(array, writer, params)
         }
     }
 }
@@ -322,7 +322,7 @@ impl Read for PyReader<'_> {
         };
 
         let n = bytes.len();
-        buf[..n].copy_from_slice(&bytes);
+        buf[..n].copy_from_slice(bytes);
         Ok(n)
     }
 }
