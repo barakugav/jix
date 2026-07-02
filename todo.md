@@ -12,6 +12,5 @@
 - remove ::storage from public API, re-export everything from lib.rs
 - add overflow checks to all shape changing ops
 - ArrayParams stream syntax
-- of_scalar -> new_scalar
 - DtypeScalarKind -> DtypeScalar
 - as_usize -> usize

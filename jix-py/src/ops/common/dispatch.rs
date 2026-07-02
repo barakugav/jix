@@ -203,7 +203,7 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                     .zip(op_fn.input_desc.iter())
                     .map(|(input, input_desc)| {
                         let input = input.into_array()?;
-                        astype_impl(input, &Dtype::of_scalar(input_desc.dtype))
+                        astype_impl(input, &Dtype::new_scalar(input_desc.dtype))
                     })
                     .try_collect_array()?
                     .unwrap();

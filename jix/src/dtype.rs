@@ -151,13 +151,13 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// | `ComplexF32` | 8 | 4 |
 /// | `ComplexF64` | 16 | 8 |
 ///
-/// Create a scalar dtype with [`Dtype::of_scalar`], or read it as a compile-time constant from
+/// Create a scalar dtype with [`Dtype::new_scalar`], or read it as a compile-time constant from
 /// the [`Dtyped::DTYPE`] implementation of a Rust primitive:
 ///
 /// ```rust
 /// use jix::dtype::{Dtype, DtypeScalarKind, Dtyped};
 ///
-/// let d = Dtype::of_scalar(DtypeScalarKind::F64);
+/// let d = Dtype::new_scalar(DtypeScalarKind::F64);
 /// assert_eq!(d, f64::DTYPE);
 /// assert_eq!(d.itemsize(), 8);
 /// assert_eq!(d.alignment().as_usize(), 8);
@@ -234,7 +234,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// | Method | Use when |
 /// |--------|----------|
 /// | `T::DTYPE` ([`Dtyped`] constant) | Rust type known at compile time |
-/// | [`Dtype::of_scalar`] | Building a scalar dtype from a [`DtypeScalarKind`] at runtime |
+/// | [`Dtype::new_scalar`] | Building a scalar dtype from a [`DtypeScalarKind`] at runtime |
 /// | [`Dtype::from_fields`] | Building a struct dtype from field definitions; auto-detects packed vs. aligned |
 /// | [`Dtype::new_struct`] | Building a struct dtype with full explicit control over itemsize and alignment |
 ///
@@ -352,21 +352,21 @@ impl Dtype {
     /// ```rust
     /// use jix::dtype::{Dtype, DtypeScalarKind, Dtyped};
     ///
-    /// let i32_dtype = Dtype::of_scalar(DtypeScalarKind::I32);
+    /// let i32_dtype = Dtype::new_scalar(DtypeScalarKind::I32);
     /// assert_eq!(i32_dtype.scalar_kind(), Some(DtypeScalarKind::I32));
     /// assert_eq!(i32_dtype.fields(), None);
     /// assert_eq!(i32_dtype.itemsize(), 4);
     /// assert_eq!(i32_dtype.alignment().as_usize(), 4);
     /// assert_eq!(i32_dtype.shape(), &[]);
     ///
-    /// let f64_dtype = Dtype::of_scalar(DtypeScalarKind::F64);
+    /// let f64_dtype = Dtype::new_scalar(DtypeScalarKind::F64);
     /// assert_eq!(f64_dtype.scalar_kind(), Some(DtypeScalarKind::F64));
     /// assert_eq!(f64_dtype.fields(), None);
     /// assert_eq!(f64_dtype.itemsize(), 8);
     /// assert_eq!(f64_dtype.alignment().as_usize(), 8);
     /// assert_eq!(f64_dtype.shape(), &[]);
     ///
-    /// let complex_f32_dtype = Dtype::of_scalar(DtypeScalarKind::ComplexF32);
+    /// let complex_f32_dtype = Dtype::new_scalar(DtypeScalarKind::ComplexF32);
     /// assert_eq!(
     ///     complex_f32_dtype.scalar_kind(),
     ///     Some(DtypeScalarKind::ComplexF32)
@@ -379,7 +379,7 @@ impl Dtype {
     /// assert_eq!(complex_f32_dtype, jix::scalar::Complex::<f32>::DTYPE);
     /// ```
     #[inline(always)]
-    pub const fn of_scalar(kind: DtypeScalarKind) -> Self {
+    pub const fn new_scalar(kind: DtypeScalarKind) -> Self {
         // assert!(Endianness::native() == Endianness::Little);
 
         const _: () = const {
@@ -813,7 +813,7 @@ impl Dtype {
     #[inline(always)]
     pub fn try_to_scalar(&self) -> Option<DtypeScalarKind> {
         let scalar = self.scalar_kind()?;
-        (Self::of_scalar(scalar) == *self).then_some(scalar)
+        (Self::new_scalar(scalar) == *self).then_some(scalar)
     }
 
     /// Set the shape of the dtype, updating the itemsize accordingly.
@@ -1091,7 +1091,7 @@ pub use jix_macros::Dtyped;
 macro_rules! impl_dtyped_scalar {
     ($ty:ty, $kind:ident) => {
         unsafe impl Dtyped for $ty {
-            const DTYPE: Dtype = Dtype::of_scalar(DtypeScalarKind::$kind);
+            const DTYPE: Dtype = Dtype::new_scalar(DtypeScalarKind::$kind);
         }
     };
 }
@@ -1151,7 +1151,7 @@ mod tests {
         ];
         for &(kind, expected_size, expected_align) in cases {
             let expected_align = Alignment::new(expected_align).unwrap();
-            let d = Dtype::of_scalar(kind);
+            let d = Dtype::new_scalar(kind);
             assert_eq!(d.itemsize(), expected_size, "{kind:?} itemsize");
             assert_eq!(d.alignment(), expected_align, "{kind:?} alignment");
             assert_eq!(d.shape(), &[] as &[Itemsize], "{kind:?} shape");

@@ -96,7 +96,7 @@ impl crate::dtype::Dtype {
                     scalar_kind.itemsize() as u64 * shape_size as u64
                 );
 
-                Self::of_scalar(scalar_kind)
+                Self::new_scalar(scalar_kind)
             }
             Some(schema::dtype::Kind::Struct(schema::DtypeStruct { fields })) => {
                 let fields = fields
@@ -410,7 +410,7 @@ mod tests {
             DtypeScalarKind::Bool,
         ];
         for &kind in cases {
-            let original = Dtype::of_scalar(kind);
+            let original = Dtype::new_scalar(kind);
             let roundtripped = Dtype::from_proto(&original.to_proto()).unwrap();
             assert_eq!(original, roundtripped, "{kind:?} failed roundtrip");
         }

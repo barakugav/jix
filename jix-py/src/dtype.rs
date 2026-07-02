@@ -1,6 +1,6 @@
 #![allow(clippy::assertions_on_constants)]
 
-use jix_core::dtype::{Alignment, Dtype as jixDtype, DtypeScalarKind, Itemsize, DTYPE_MAX_NDIM};
+use jix_core::dtype::{Alignment, Dtype, DtypeScalarKind, Itemsize, DTYPE_MAX_NDIM};
 use numpy::{PyArrayDescr, PyArrayDescrMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -10,7 +10,7 @@ use crate::util::DimArray;
 
 pub(crate) fn dtype_to_numpy<'py>(
     py: pyo3::Python<'py>,
-    dtype: &jixDtype,
+    dtype: &Dtype,
 ) -> PyResult<Bound<'py, PyArrayDescr>> {
     let itemsize = dtype.itemsize();
     let shape = dtype.shape();
@@ -86,7 +86,7 @@ pub(crate) fn dtype_to_numpy<'py>(
     Ok(numpy_dtype)
 }
 
-pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<jixDtype> {
+pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dtype> {
     let shape = numpy_dtype.shape();
     if shape.len() > DTYPE_MAX_NDIM {
         return Err(PyValueError::new_err(format!(
@@ -150,7 +150,7 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<ji
                 )));
             }
         }?;
-        let mut dtype = jixDtype::of_scalar(scalar_kind);
+        let mut dtype = Dtype::new_scalar(scalar_kind);
         dtype
             .set_shape(&shape)
             .map_err(|e| PyValueError::new_err(format!("Unsupported dtype shape: {e}")))?;
@@ -169,7 +169,7 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<ji
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        jixDtype::new_struct(fields, &shape, itemsize, alignment)
+        Dtype::new_struct(fields, &shape, itemsize, alignment)
             .map_err(|e| PyValueError::new_err(format!("Unsupported struct dtype: {e}")))?
     };
 
@@ -185,23 +185,23 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<ji
 }
 
 #[inline]
-pub(crate) fn dtype_from_any(dtype: &Bound<PyAny>) -> PyResult<jixDtype> {
+pub(crate) fn dtype_from_any(dtype: &Bound<PyAny>) -> PyResult<Dtype> {
     dtype_from_numpy(&PyArrayDescr::new(dtype.py(), dtype)?)
 }
 
 #[cfg(test)]
 mod tests {
-    use jix_core::dtype::{Dtype as jixDtype, DtypeScalarKind};
+    use jix_core::dtype::{Dtype, DtypeScalarKind};
     use numpy::PyArrayDescrMethods;
     use pyo3::Python;
 
     use super::*;
 
-    fn from_str(py: Python<'_>, s: &str) -> PyResult<jixDtype> {
+    fn from_str(py: Python<'_>, s: &str) -> PyResult<Dtype> {
         dtype_from_numpy(&PyArrayDescr::new(py, s)?)
     }
 
-    fn roundtrip(py: Python<'_>, dtype: &jixDtype) -> jixDtype {
+    fn roundtrip(py: Python<'_>, dtype: &Dtype) -> Dtype {
         let np = dtype_to_numpy(py, dtype).expect("dtype_to_numpy failed");
         dtype_from_numpy(&np).expect("dtype_from_numpy failed")
     }
@@ -212,7 +212,7 @@ mod tests {
     fn test_from_numpy_bool() {
         Python::attach(|py| {
             let dtype = from_str(py, "bool").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::Bool));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::Bool));
         });
     }
 
@@ -220,7 +220,7 @@ mod tests {
     fn test_from_numpy_i8() {
         Python::attach(|py| {
             let dtype = from_str(py, "<i1").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::I8));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::I8));
         });
     }
 
@@ -228,7 +228,7 @@ mod tests {
     fn test_from_numpy_i16() {
         Python::attach(|py| {
             let dtype = from_str(py, "<i2").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::I16));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::I16));
         });
     }
 
@@ -236,7 +236,7 @@ mod tests {
     fn test_from_numpy_i32() {
         Python::attach(|py| {
             let dtype = from_str(py, "<i4").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::I32));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::I32));
         });
     }
 
@@ -244,7 +244,7 @@ mod tests {
     fn test_from_numpy_i64() {
         Python::attach(|py| {
             let dtype = from_str(py, "<i8").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::I64));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::I64));
         });
     }
 
@@ -252,7 +252,7 @@ mod tests {
     fn test_from_numpy_u8() {
         Python::attach(|py| {
             let dtype = from_str(py, "<u1").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::U8));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::U8));
         });
     }
 
@@ -260,7 +260,7 @@ mod tests {
     fn test_from_numpy_u16() {
         Python::attach(|py| {
             let dtype = from_str(py, "<u2").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::U16));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::U16));
         });
     }
 
@@ -268,7 +268,7 @@ mod tests {
     fn test_from_numpy_u32() {
         Python::attach(|py| {
             let dtype = from_str(py, "<u4").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::U32));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::U32));
         });
     }
 
@@ -276,7 +276,7 @@ mod tests {
     fn test_from_numpy_u64() {
         Python::attach(|py| {
             let dtype = from_str(py, "<u8").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::U64));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::U64));
         });
     }
 
@@ -284,7 +284,7 @@ mod tests {
     fn test_from_numpy_f16() {
         Python::attach(|py| {
             let dtype = from_str(py, "<f2").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::F16));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::F16));
         });
     }
 
@@ -292,7 +292,7 @@ mod tests {
     fn test_from_numpy_f32() {
         Python::attach(|py| {
             let dtype = from_str(py, "<f4").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::F32));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::F32));
         });
     }
 
@@ -300,7 +300,7 @@ mod tests {
     fn test_from_numpy_f64() {
         Python::attach(|py| {
             let dtype = from_str(py, "<f8").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::F64));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::F64));
         });
     }
 
@@ -308,7 +308,7 @@ mod tests {
     fn test_from_numpy_complex_f32() {
         Python::attach(|py| {
             let dtype = from_str(py, "<c8").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::ComplexF32));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::ComplexF32));
         });
     }
 
@@ -316,7 +316,7 @@ mod tests {
     fn test_from_numpy_complex_f64() {
         Python::attach(|py| {
             let dtype = from_str(py, "<c16").unwrap();
-            assert_eq!(dtype, jixDtype::of_scalar(DtypeScalarKind::ComplexF64));
+            assert_eq!(dtype, Dtype::new_scalar(DtypeScalarKind::ComplexF64));
         });
     }
 
@@ -386,13 +386,13 @@ mod tests {
             assert_eq!(fields.len(), 3);
             assert_eq!(fields[0].0, "a");
             assert_eq!(fields[0].1, 0);
-            assert_eq!(fields[0].2, jixDtype::of_scalar(DtypeScalarKind::U8));
+            assert_eq!(fields[0].2, Dtype::new_scalar(DtypeScalarKind::U8));
             assert_eq!(fields[1].0, "b");
             assert_eq!(fields[1].1, 1);
-            assert_eq!(fields[1].2, jixDtype::of_scalar(DtypeScalarKind::U16));
+            assert_eq!(fields[1].2, Dtype::new_scalar(DtypeScalarKind::U16));
             assert_eq!(fields[2].0, "c");
             assert_eq!(fields[2].1, 3);
-            assert_eq!(fields[2].2, jixDtype::of_scalar(DtypeScalarKind::U32));
+            assert_eq!(fields[2].2, Dtype::new_scalar(DtypeScalarKind::U32));
         });
     }
 
@@ -537,7 +537,7 @@ mod tests {
     fn test_from_numpy_zero_dim_shape_errors() {
         // numpy doesn't normally create dtypes with shape containing 0,
         // but we can try to trigger the error path via set_shape
-        let mut dtype = jixDtype::of_scalar(DtypeScalarKind::F32);
+        let mut dtype = Dtype::new_scalar(DtypeScalarKind::F32);
         // set_shape rejects zero dimensions
         assert!(dtype.set_shape(&[0]).is_err());
         assert!(dtype.set_shape(&[3, 0, 2]).is_err());
@@ -565,7 +565,7 @@ mod tests {
                 (DtypeScalarKind::ComplexF64, 16, 8),
             ];
             for &(scalar, expected_itemsize, expected_alignment) in cases {
-                let dtype = jixDtype::of_scalar(scalar);
+                let dtype = Dtype::new_scalar(scalar);
                 let np = dtype_to_numpy(py, &dtype).unwrap();
                 assert_eq!(
                     np.itemsize(),
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn test_to_numpy_scalar_with_shape_1d() {
         Python::attach(|py| {
-            let mut dtype = jixDtype::of_scalar(DtypeScalarKind::F32);
+            let mut dtype = Dtype::new_scalar(DtypeScalarKind::F32);
             dtype.set_shape(&[4]).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 16);
@@ -598,7 +598,7 @@ mod tests {
     #[test]
     fn test_to_numpy_scalar_with_shape_2d() {
         Python::attach(|py| {
-            let mut dtype = jixDtype::of_scalar(DtypeScalarKind::I16);
+            let mut dtype = Dtype::new_scalar(DtypeScalarKind::I16);
             dtype.set_shape(&[3, 4]).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 24);
@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn test_to_numpy_scalar_with_shape_4d() {
         Python::attach(|py| {
-            let mut dtype = jixDtype::of_scalar(DtypeScalarKind::U8);
+            let mut dtype = Dtype::new_scalar(DtypeScalarKind::U8);
             dtype.set_shape(&[2, 3, 4, 5]).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 120);
@@ -626,20 +626,20 @@ mod tests {
                 (
                     "a".to_string(),
                     0u16,
-                    jixDtype::of_scalar(DtypeScalarKind::U8),
+                    Dtype::new_scalar(DtypeScalarKind::U8),
                 ),
                 (
                     "b".to_string(),
                     1u16,
-                    jixDtype::of_scalar(DtypeScalarKind::U16),
+                    Dtype::new_scalar(DtypeScalarKind::U16),
                 ),
                 (
                     "c".to_string(),
                     3u16,
-                    jixDtype::of_scalar(DtypeScalarKind::U32),
+                    Dtype::new_scalar(DtypeScalarKind::U32),
                 ),
             ];
-            let dtype = jixDtype::new_struct(fields, &[], 7, 1.try_into().unwrap()).unwrap();
+            let dtype = Dtype::new_struct(fields, &[], 7, 1.try_into().unwrap()).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 7);
             assert_eq!(np.alignment(), 1);
@@ -667,15 +667,15 @@ mod tests {
                 (
                     "x".to_string(),
                     0u16,
-                    jixDtype::of_scalar(DtypeScalarKind::U8),
+                    Dtype::new_scalar(DtypeScalarKind::U8),
                 ),
                 (
                     "y".to_string(),
                     4u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = jixDtype::new_struct(fields, &[], 8, 4.try_into().unwrap()).unwrap();
+            let dtype = Dtype::new_struct(fields, &[], 8, 4.try_into().unwrap()).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 8);
             assert_eq!(np.alignment(), 4);
@@ -696,15 +696,15 @@ mod tests {
                 (
                     "x".to_string(),
                     0u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
                 (
                     "y".to_string(),
                     4u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = jixDtype::new_struct(fields, &[3], 24, 4.try_into().unwrap()).unwrap();
+            let dtype = Dtype::new_struct(fields, &[3], 24, 4.try_into().unwrap()).unwrap();
             let np = dtype_to_numpy(py, &dtype).unwrap();
             assert_eq!(np.itemsize(), 24);
             assert_eq!(np.shape(), vec![3]);
@@ -732,7 +732,7 @@ mod tests {
                 DtypeScalarKind::ComplexF32,
                 DtypeScalarKind::ComplexF64,
             ] {
-                let dtype = jixDtype::of_scalar(scalar);
+                let dtype = Dtype::new_scalar(scalar);
                 assert_eq!(
                     roundtrip(py, &dtype),
                     dtype,
@@ -745,7 +745,7 @@ mod tests {
     #[test]
     fn test_roundtrip_scalar_with_shape() {
         Python::attach(|py| {
-            let mut dtype = jixDtype::of_scalar(DtypeScalarKind::F64);
+            let mut dtype = Dtype::new_scalar(DtypeScalarKind::F64);
             dtype.set_shape(&[2, 3]).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
@@ -758,20 +758,20 @@ mod tests {
                 (
                     "a".to_string(),
                     0u16,
-                    jixDtype::of_scalar(DtypeScalarKind::U8),
+                    Dtype::new_scalar(DtypeScalarKind::U8),
                 ),
                 (
                     "b".to_string(),
                     1u16,
-                    jixDtype::of_scalar(DtypeScalarKind::I16),
+                    Dtype::new_scalar(DtypeScalarKind::I16),
                 ),
                 (
                     "c".to_string(),
                     3u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = jixDtype::new_struct(fields, &[], 7, 1.try_into().unwrap()).unwrap();
+            let dtype = Dtype::new_struct(fields, &[], 7, 1.try_into().unwrap()).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }
@@ -783,15 +783,15 @@ mod tests {
                 (
                     "x".to_string(),
                     0u16,
-                    jixDtype::of_scalar(DtypeScalarKind::U8),
+                    Dtype::new_scalar(DtypeScalarKind::U8),
                 ),
                 (
                     "y".to_string(),
                     4u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = jixDtype::new_struct(fields, &[], 8, 4.try_into().unwrap()).unwrap();
+            let dtype = Dtype::new_struct(fields, &[], 8, 4.try_into().unwrap()).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }
@@ -803,20 +803,20 @@ mod tests {
                 (
                     "r".to_string(),
                     0u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
                 (
                     "g".to_string(),
                     4u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
                 (
                     "b".to_string(),
                     8u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = jixDtype::new_struct(fields, &[4], 48, 4.try_into().unwrap()).unwrap();
+            let dtype = Dtype::new_struct(fields, &[4], 48, 4.try_into().unwrap()).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }
@@ -828,24 +828,24 @@ mod tests {
                 (
                     "x".to_string(),
                     0u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
                 (
                     "y".to_string(),
                     4u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let inner = jixDtype::new_struct(inner_fields, &[], 8, 4.try_into().unwrap()).unwrap();
+            let inner = Dtype::new_struct(inner_fields, &[], 8, 4.try_into().unwrap()).unwrap();
             let outer_fields = vec![
                 ("pos".to_string(), 0u16, inner),
                 (
                     "w".to_string(),
                     8u16,
-                    jixDtype::of_scalar(DtypeScalarKind::F32),
+                    Dtype::new_scalar(DtypeScalarKind::F32),
                 ),
             ];
-            let dtype = jixDtype::new_struct(outer_fields, &[], 12, 4.try_into().unwrap()).unwrap();
+            let dtype = Dtype::new_struct(outer_fields, &[], 12, 4.try_into().unwrap()).unwrap();
             assert_eq!(roundtrip(py, &dtype), dtype);
         });
     }
