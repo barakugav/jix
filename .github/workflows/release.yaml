@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.publish-rs-macros }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -57,7 +57,7 @@ jobs:
           && inputs.publish-rs-core
           && (needs.rs-macros.result == 'success' || needs.rs-macros.result == 'skipped') }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -94,7 +94,7 @@ jobs:
           - runner: ubuntu-22.04
             target: ppc64le
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
@@ -126,7 +126,7 @@ jobs:
           - runner: ubuntu-22.04
             target: armv7
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
@@ -180,7 +180,7 @@ jobs:
             python-version: ["3.14t"]
             artifact-suffix: "-freethreaded"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ join(matrix.platform.python-version, fromJSON('"\n"')) }}
@@ -208,7 +208,7 @@ jobs:
           - runner: macos-latest
             target: aarch64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: |
@@ -234,7 +234,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.publish-py }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
@@ -251,7 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.publish-py }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         # Do not change this to uv, as the build of the bindings require CPython libraries to be available
         with:
