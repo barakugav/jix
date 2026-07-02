@@ -5,7 +5,9 @@ use crate::dtype::Dtype;
 use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::ArraySpec;
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
-use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
+use crate::{
+    Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension, OutBuf,
+};
 
 /// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
 ///
@@ -156,9 +158,15 @@ where
     /// Otherwise each sub-array is read into a temporary buffer and scattered into `buf` with
     /// `NdIter`, using the full output strides for dimensions before `concat_axis` and the
     /// sub-array strides for dimensions at and after it.
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
+        let buf = buf.get_mut(index, dtype);
         let nitems = check_get_buffer_size(index, dtype, buf)?;
         if nitems == 0 {
             return Ok(());
@@ -227,7 +235,8 @@ where
                 tmp_buf.set_len(sub_size_bytes);
                 tmp_buf.as_mut_slice()
             };
-            self.arrays.read_data(arr, &sub_index, read_buf, context)?;
+            self.arrays
+                .read_data(arr, &sub_index, &mut OutBuf::new(read_buf), context)?;
 
             if !in_place {
                 // Scatter from tmp_buf into buf.

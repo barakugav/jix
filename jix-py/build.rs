@@ -5,4 +5,9 @@ fn main() {
     if deny_warnings {
         println!("cargo:rustc-cfg=deny_warnings");
     }
+
+    println!(
+        "cargo:rustc-env=BUILD_PROFILE={}",
+        std::env::var("PROFILE").unwrap()
+    );
 }

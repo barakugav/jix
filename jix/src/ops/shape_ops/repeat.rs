@@ -8,7 +8,7 @@ use crate::error::{
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy};
-use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimDyn, Dimension, OutBuf, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
@@ -116,12 +116,17 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, self.dtype(), buf)?;
 
         // Empty output (any zero-length range, including repeats == 0) is a no-op.
         if index.iter().any(|r| r.start >= r.end) {
+            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
             return Ok(());
         }
 
@@ -146,10 +151,11 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         });
         let dtype = self.dtype();
         let itemsize = dtype.itemsize() as usize;
-        let inner_byte_len = inner_shape.iter().product::<usize>() * itemsize;
-        let mut tmp_buf = context.tmp_buf(inner_byte_len, dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.read_data(&inner_index, tmp_buf, context)?;
+        let mut tmp_buf = OutBuf::new_lazy(context);
+        self.array.read_data(&inner_index, &mut tmp_buf, context)?;
+        let tmp_buf = tmp_buf.as_slice().unwrap();
+        let buf = buf.get_mut(index, dtype);
+        check_get_buffer_size(index, dtype, buf)?;
 
         // Output shape over the requested sub-range, all `ndim` axes.
         let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
@@ -285,10 +291,11 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::{Array, ArrayStorage, IntoDimension, Ty, NDIM_MAX};
-    use ndarray::array;
 
     // -----------------------------------------------------------------------
     // Helpers

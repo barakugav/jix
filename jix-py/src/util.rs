@@ -2,15 +2,38 @@ use std::mem::MaybeUninit;
 
 use jix_core::NDIM_MAX;
 use numpy::npyffi::npy_intp;
-use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray};
+use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
+use pyo3::types::{PySlice, PySliceIndices};
 use pyo3_stub_gen::impl_stub_type;
 
 pub(crate) type DimArray<T> = arrayvec::ArrayVec<T, NDIM_MAX>;
 
+/// Resolves a Python `slice` against a sequence of length `length`, WITHOUT the
+/// numpy-style clamping performed by [`PySlice::indices`][pyo3::types::PySliceMethods::indices].
+#[inline]
+pub(crate) fn slice_unpack(slice: &Bound<'_, PySlice>, length: i64) -> PyResult<PySliceIndices> {
+    let mut start: pyo3::ffi::Py_ssize_t = 0;
+    let mut stop: pyo3::ffi::Py_ssize_t = 0;
+    let mut step: pyo3::ffi::Py_ssize_t = 0;
+    // SAFETY: `slice` is a live `PySlice` and the out-pointers are valid and non-null.
+    // `PySlice_Unpack` writes through them on success and sets a Python error on failure.
+    if unsafe { pyo3::ffi::PySlice_Unpack(slice.as_ptr(), &mut start, &mut stop, &mut step) } < 0 {
+        return Err(PyErr::fetch(slice.py()));
+    }
+    // An omitted forward `stop` unpacks to the max sentinel; substitute the axis length
+    // (its Python default) so it is not later mistaken for an out-of-range bound.
+    if stop == pyo3::ffi::Py_ssize_t::MAX {
+        stop = length as pyo3::ffi::Py_ssize_t;
+    }
+    Ok(PySliceIndices::new(start, stop, step))
+}
+
+#[inline(always)]
 pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
     (0..ndim).map(f).collect()
 }
+#[inline(always)]
 pub(crate) fn check_ndim(ndim: usize) -> PyResult<()> {
     if ndim > NDIM_MAX {
         Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -25,11 +48,13 @@ pub(crate) trait IntoPyResult<T> {
     fn into_py_result(self) -> PyResult<T>;
 }
 impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
+    #[inline(always)]
     fn into_py_result(self) -> PyResult<T> {
         self.map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))
     }
 }
 
+#[inline]
 pub(crate) fn numpy_empty<'py>(
     dtype: Bound<'py, PyArrayDescr>,
     shape: &[u64],
@@ -47,9 +72,34 @@ pub(crate) fn numpy_empty<'py>(
             if is_fortran { -1 } else { 0 },
         )
     };
-    Ok(unsafe { Bound::from_owned_ptr(py, np_arr).cast_into_unchecked() })
+    unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
 }
 
+#[inline]
+pub(crate) fn numpy_reshape<'py>(
+    arr: Bound<'py, PyUntypedArray>,
+    shape: &[u64],
+) -> PyResult<Bound<'py, PyUntypedArray>> {
+    let py = arr.py();
+    let ndim = shape.len();
+    let shape = dim_arr(ndim, |dim| shape[dim] as npy_intp);
+    let mut shape = numpy::npyffi::PyArray_Dims {
+        ptr: shape.as_ptr().cast_mut(),
+        len: ndim as _,
+    };
+    let np_arr = unsafe {
+        numpy::PY_ARRAY_API.PyArray_Newshape(
+            py,
+            arr.as_array_ptr(),
+            &mut shape as *mut _,
+            numpy::npyffi::NPY_ORDER::NPY_ANYORDER,
+        )
+    };
+
+    unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
+}
+
+#[inline]
 pub(crate) fn normalize_axis(axis: i32, ndim: usize) -> pyo3::PyResult<usize> {
     let ndim = ndim as i32;
     if axis < -ndim || axis >= ndim {
@@ -63,6 +113,7 @@ pub(crate) fn normalize_axis(axis: i32, ndim: usize) -> pyo3::PyResult<usize> {
         axis as usize
     })
 }
+#[inline]
 pub(crate) fn normalize_axis_optional(axis: Option<i32>, ndim: usize) -> pyo3::PyResult<usize> {
     match axis {
         Some(axis) => normalize_axis(axis, ndim),
@@ -77,13 +128,25 @@ pub(crate) fn normalize_axis_optional(axis: Option<i32>, ndim: usize) -> pyo3::P
     }
 }
 
-pub(crate) fn normalize_axes(axes: Vec<i32>, ndim: usize) -> pyo3::PyResult<Vec<usize>> {
-    axes.into_iter().map(|a| normalize_axis(a, ndim)).collect()
+#[inline]
+pub(crate) fn normalize_axes(axes: &[i32], ndim: usize) -> pyo3::PyResult<DimArray<usize>> {
+    if ndim > NDIM_MAX {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
+        )));
+    }
+    axes.iter().map(|a| normalize_axis(*a, ndim)).collect()
 }
+#[inline]
 pub(crate) fn normalize_axes_optional(
-    axes: Option<Vec<i32>>,
+    axes: Option<&[i32]>,
     ndim: usize,
-) -> pyo3::PyResult<Vec<usize>> {
+) -> pyo3::PyResult<DimArray<usize>> {
+    if ndim > NDIM_MAX {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Number of dimensions {ndim} exceeds the maximum supported {NDIM_MAX}"
+        )));
+    }
     match axes {
         Some(axes) => normalize_axes(axes, ndim),
         None => Ok((0..ndim).collect()),
@@ -96,24 +159,54 @@ pub enum ItemOrSequence<T> {
     Sequence(Vec<T>),
 }
 impl<T> ItemOrSequence<T> {
-    pub fn into_vec(self) -> Vec<T> {
+    #[inline]
+    pub(crate) fn into_dim_array(self) -> PyResult<DimArray<T>> {
         match self {
-            ItemOrSequence::Item(item) => vec![item],
-            ItemOrSequence::Sequence(seq) => seq,
+            ItemOrSequence::Item(item) => {
+                let mut arr = DimArray::new();
+                arr.push(item);
+                Ok(arr)
+            }
+            ItemOrSequence::Sequence(seq) => {
+                if seq.len() > NDIM_MAX {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "Number of dimensions {} exceeds the maximum supported {}",
+                        seq.len(),
+                        NDIM_MAX
+                    )));
+                }
+                Ok(seq.into_iter().collect())
+            }
         }
+    }
+
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            ItemOrSequence::Item(_) => 1,
+            ItemOrSequence::Sequence(seq) => seq.len(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 impl<T> From<T> for ItemOrSequence<T> {
+    #[inline]
     fn from(item: T) -> Self {
         ItemOrSequence::Item(item)
     }
 }
 impl<T> From<Vec<T>> for ItemOrSequence<T> {
+    #[inline]
     fn from(seq: Vec<T>) -> Self {
         ItemOrSequence::Sequence(seq)
     }
 }
 impl<T, const N: usize> From<[T; N]> for ItemOrSequence<T> {
+    #[inline]
     fn from(arr: [T; N]) -> Self {
         ItemOrSequence::Sequence(arr.into())
     }
@@ -127,16 +220,19 @@ pub(crate) struct UnsafeSend<T>(T);
 unsafe impl<T> Send for UnsafeSend<T> {}
 #[allow(unused)]
 impl<T> UnsafeSend<T> {
+    #[inline]
     pub(crate) unsafe fn new(value: T) -> Self {
         Self(value)
     }
 
+    #[inline]
     pub(crate) unsafe fn into_inner(self) -> T {
         self.0
     }
 }
 
 pub(crate) trait IterExt: Iterator {
+    #[inline]
     fn try_collect_array<T, E, const N: usize>(self) -> Result<Option<[T; N]>, E>
     where
         Self: Sized + Iterator<Item = Result<T, E>>,

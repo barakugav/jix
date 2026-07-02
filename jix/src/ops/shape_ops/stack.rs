@@ -9,7 +9,7 @@ use crate::util::{
     default_strides, nd_copy, ArraySequence, ArraySequenceDimension, ArraySequenceElementType,
     DimArray,
 };
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension, OutBuf};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///
@@ -137,10 +137,16 @@ where
     type ElementType = ArraysT::ElementType;
     type Dimension = <ArraysT::Dimension as crate::Dimension>::Larger;
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         let shape = self.shape();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
+        let buf = buf.get_mut(index, dtype);
         let nitems = check_get_buffer_size(index, dtype, buf)?;
         if nitems == 0 {
             return Ok(());
@@ -190,7 +196,8 @@ where
             };
 
             let arr = index[self.stack_axis].start as usize + arr_idx;
-            self.arrays.read_data(arr, &arr_range, arr_buf, context)?;
+            self.arrays
+                .read_data(arr, &arr_range, &mut OutBuf::new(arr_buf), context)?;
 
             // copy arr_buf into the correct position in buf, as both buffers have different strides
             if let Some((arr_strides, out_strides)) = &out_of_place_strides {

@@ -132,7 +132,7 @@ macro_rules! impl_array_storage_forward {
         fn read_data(
             &self,
             index: &[::core::ops::Range<u64>],
-            buf: &mut [u8],
+            buf: &mut crate::OutBuf,
             context: &crate::codec::ReadContext,
         ) -> crate::error::Result<()> {
             self.0.read_data(index, buf, context)

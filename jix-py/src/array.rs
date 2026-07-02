@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use jix_core::{Array as CoreArray, ArrayAny};
+use jix_core::{Array as CoreArray, ArrayAny, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -10,11 +10,9 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pyme
 
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
-use std::ops::Range;
 
-use crate::codec::ReadContext;
 use crate::dtype::dtype_to_numpy;
-use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
+use crate::util::{dim_arr, numpy_empty, numpy_reshape, DimArray, IntoPyResult, ItemOrSequence};
 
 /// A multi-dimensional compressed array.
 ///
@@ -59,14 +57,6 @@ use crate::util::{dim_arr, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
 /// a.numpy(slice(1,4)) # rows 1-3 (slice keeps the axis)
 /// a[0, 1:3]           # shorthand via __getitem__
 /// a[..., -1]          # last column of any-rank array
-/// ```
-///
-/// For tight loops that read many slices, pass an explicit [`jix.ReadContext`][jix.ReadContext]
-/// to amortize decompressor initialization:
-///
-/// ```python
-/// ctx = a.read_ctx()
-/// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
 /// ```
 ///
 /// # Operations
@@ -129,73 +119,43 @@ pub struct Array {
 }
 struct ArrayCache {
     numpy_dtype: Option<Py<PyArrayDescr>>,
+    context: Option<Box<ReadContext>>,
 }
 impl Array {
+    #[inline]
     pub(crate) fn from_core(array: ArrayAny) -> Self {
         Self {
             arr: array,
-            cache: Mutex::new(ArrayCache { numpy_dtype: None }),
+            cache: Mutex::new(ArrayCache {
+                numpy_dtype: None,
+                context: None,
+            }),
         }
     }
 
+    #[inline(always)]
     pub(crate) fn to_core(&self) -> ArrayAny {
         CoreArray::from_storage(self.arr.storage().clone())
     }
 
-    fn to_numpy<'py>(
-        &self,
-        py: Python<'py>,
-        index: &[Range<u64>],
-        context: Option<&Bound<'py, ReadContext>>,
-    ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let arr_shape = self.arr.shape();
-        let ndim = arr_shape.len();
-        if index.len() != ndim {
-            return Err(PyIndexError::new_err(format!(
-                "index has {} dimensions, but array has {ndim}",
-                index.len()
-            )));
-        }
-        for (dim, r) in index.iter().enumerate() {
-            if r.start > r.end || r.end > arr_shape[dim] {
-                return Err(PyIndexError::new_err(format!(
-                    "index {r:?} is out of bounds for axis {dim} with size {}",
-                    arr_shape[dim]
-                )));
-            }
-        }
-        let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let itemsize = self.arr.dtype().itemsize() as usize;
-
-        let np_arr = numpy_empty(self.dtype(py)?, &read_shape)?;
-        let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
-        let np_arr_data_size = itemsize * read_shape.iter().product::<u64>() as usize;
-        let np_arr_data =
-            unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
-
-        let context = context.map(|ctx| ctx.get());
-
-        if np_arr_data_size > 0 {
-            py.detach(|| {
-                let context_guard;
-                let context = match context {
-                    Some(ctx) => {
-                        context_guard = ctx.lock();
-                        &*context_guard
-                    }
-                    None => &self.arr.read_ctx(),
-                };
-
-                self.arr
-                    .to_ndarray_buf(index, np_arr_data, context)
-                    .into_py_result()
-            })?;
-        }
-
-        let np_arr: Bound<'_, PyUntypedArray> = np_arr
-            .call_method1("reshape", (read_shape.as_slice(),))?
-            .cast_into()?;
-        Ok(np_arr)
+    /// Borrows the array's cached decoder context, lazily creating it on first use.
+    ///
+    /// The context is taken out of the cache for the lifetime of the returned guard and
+    /// returned to it on drop, so successive reads of the same array reuse the same
+    /// decompressor state instead of re-initializing it on every call.
+    pub(crate) fn read_ctx(&self) -> PyResult<ContextGuard<'_>> {
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("Failed to acquire cache lock"))?;
+        let context = cache
+            .context
+            .take()
+            .unwrap_or_else(|| Box::new(self.arr.read_ctx()));
+        Ok(ContextGuard {
+            array: self,
+            context: Some(context),
+        })
     }
 }
 
@@ -217,6 +177,7 @@ impl Array {
     /// assert b.shape == (3, 2)
     /// ```
     #[getter]
+    #[inline]
     pub fn shape<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
         PyTuple::new(py, self.arr.shape().iter().copied())
     }
@@ -236,6 +197,7 @@ impl Array {
     /// assert b.ndim == 2
     /// ```
     #[getter]
+    #[inline]
     pub fn ndim(&self) -> usize {
         self.arr.shape().len()
     }
@@ -255,6 +217,7 @@ impl Array {
     /// assert b.size == 6
     /// ```
     #[getter]
+    #[inline]
     pub fn size(&self) -> PyResult<u64> {
         Ok(self.arr.shape().iter().product::<u64>())
     }
@@ -273,6 +236,7 @@ impl Array {
     /// b = jix.compact([[1, 2], [3, 4], [5, 6]])
     /// assert len(b) == 3
     /// ```
+    #[inline]
     pub fn __len__(&self) -> PyResult<usize> {
         let len = self
             .arr
@@ -298,6 +262,7 @@ impl Array {
     /// assert b.dtype == np.dtype('float64')
     /// ```
     #[getter]
+    #[inline]
     pub fn dtype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArrayDescr>> {
         let mut cache = self
             .cache
@@ -347,15 +312,6 @@ impl Array {
     ///         **Omitted trailing axes:** If the index covers fewer axes than the array has
     ///         dimensions, the remaining axes receive implicit full-range slices.
     ///
-    ///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse across multiple reads. When omitted,
-    ///         a context is created internally for each call. Pass one explicitly when calling
-    ///         `numpy()` many times in a loop to avoid repeated decompressor initialization:
-    ///
-    ///         ```python
-    ///         ctx = jix.ReadContext()
-    ///         rows = [a.numpy(i, context=ctx) for i in range(len(a))]
-    ///         ```
-    ///
     /// Returns:
     ///     A NumPy array with the same dtype as `self`, shape determined by the `index`
     ///         argument (or `self.shape` when no index is supplied), in C-contiguous (row-major)
@@ -367,30 +323,72 @@ impl Array {
     ///     ValueError: Slice step other than 1.
     ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
     ///         or tuple of these).
-    #[pyo3(signature = (index=None, *, context=None))]
+    #[pyo3(signature = (index=None))]
+    #[inline]
     pub fn numpy<'py>(
         &self,
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
-        context: Option<&Bound<'py, ReadContext>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
         let shape = self.arr.shape();
-        let parsed = crate::ops::parse_basic_index(py, shape, index)?;
+        let parsed = crate::ops::parse_basic_index(shape, index)?;
 
-        let mut ranges: DimArray<Range<u64>> = DimArray::new();
-        let mut out_shape: Vec<usize> = Vec::with_capacity(parsed.items.len());
+        let mut index = DimArray::new();
+        let mut out_shape = DimArray::new();
         for (axis, item) in parsed.items.iter().enumerate() {
             let start = item.start.unwrap() as u64;
             let end = item.end.unwrap() as u64;
-            ranges.push(start..end);
+            index.push(start..end);
             if !parsed.drop_axes.contains(&axis) {
-                out_shape.push((end - start) as usize);
+                out_shape.push(end - start);
             }
         }
 
-        let np_arr = self.to_numpy(py, &ranges, context)?;
-        let np_arr: Bound<'_, PyUntypedArray> =
-            np_arr.call_method1("reshape", (out_shape,))?.cast_into()?;
+        let arr_shape = self.arr.shape();
+        let ndim = arr_shape.len();
+        if index.len() != ndim {
+            return Err(PyIndexError::new_err(format!(
+                "index has {} dimensions, but array has {ndim}",
+                index.len()
+            )));
+        }
+        for (dim, r) in index.iter().enumerate() {
+            if r.start > r.end || r.end > arr_shape[dim] {
+                return Err(PyIndexError::new_err(format!(
+                    "index {r:?} is out of bounds for axis {dim} with size {}",
+                    arr_shape[dim]
+                )));
+            }
+        }
+        let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let itemsize = self.arr.dtype().itemsize() as usize;
+
+        let mut np_arr = numpy_empty(self.dtype(py)?, &read_shape)?;
+        let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
+        let np_arr_data_size = itemsize * read_shape.iter().product::<u64>() as usize;
+        let np_arr_data =
+            unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
+
+        if np_arr_data_size > 0 {
+            py.detach(|| {
+                let context = self.read_ctx()?;
+                let context = context.as_ref();
+
+                self.arr
+                    .to_ndarray_buf(&index, np_arr_data, context)
+                    .into_py_result()
+            })?;
+        }
+
+        let arr_shape = np_arr.shape();
+        if arr_shape.len() != out_shape.len()
+            || arr_shape
+                .iter()
+                .zip(out_shape.iter())
+                .any(|(&a, &b)| a as u64 != b)
+        {
+            np_arr = numpy_reshape(np_arr, out_shape.as_slice())?;
+        }
         Ok(np_arr)
     }
 
@@ -403,45 +401,21 @@ impl Array {
     ///
     /// Returns:
     ///     A NumPy array. See `numpy()` for details.
+    #[inline]
     pub fn __getitem__<'py>(
         &self,
         index: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        self.numpy(index.py(), Some(index), None)
-    }
-
-    /// Creates a [`jix.ReadContext`][jix.ReadContext] with decoder parameters derived from this array's storage.
-    ///
-    /// The returned context inherits the decoder configuration stored alongside the array data,
-    /// ensuring that reads use the same settings the array was written with. Prefer this over
-    /// constructing [`jix.ReadContext`][jix.ReadContext] directly when reading a specific array.
-    ///
-    /// Pass the returned context to [`Array.numpy()`][jix.Array.numpy] or [`jix.compact()`][jix.compact] to amortize decompressor
-    /// initialization across many successive reads. See [`jix.ReadContext`][jix.ReadContext] for details.
-    ///
-    /// ```python
-    /// import jix
-    /// import numpy as np
-    ///
-    /// a = jix.compact(np.arange(30, dtype=np.int32).reshape(10, 3))
-    /// ctx = a.read_ctx()
-    /// rows = [a.numpy(i, context=ctx) for i in range(len(a))]
-    /// ```
-    ///
-    /// Returns:
-    ///     A [`jix.ReadContext`][jix.ReadContext] configured for this array's codec settings.
-    pub fn read_ctx<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, ReadContext>> {
-        Bound::new(py, ReadContext::from_core(self.arr.read_ctx()))
+        self.numpy(index.py(), Some(index))
     }
 
     /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.compact()`][jix.compact].
-    #[pyo3(signature = (*, params=None, context=None))]
+    #[pyo3(signature = (*, params=None))]
     pub fn compact<'py>(
         slf: &Bound<'py, Self>,
         params: Option<Bound<'_, PyDict>>,
-        context: Option<&Bound<'_, ReadContext>>,
     ) -> PyResult<Bound<'py, Array>> {
-        crate::compact(slf, None, params, context)
+        crate::compact(slf, None, params)
     }
 
     /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
@@ -463,6 +437,7 @@ impl Array {
     ///
     /// Returns:
     ///     A string of the form `Array(shape=..., dtype=...)`.
+    #[inline]
     pub fn __repr__(&self) -> String {
         self.__str__()
     }
@@ -470,95 +445,111 @@ impl Array {
     // == archive I/O ==
 
     /// Write the array to a file or a file-like object. See [`jix.write_array()`][jix.write_array].
-    #[pyo3(signature = (path_or_writer, *, append=false, params=None, context=None))]
+    #[pyo3(signature = (path_or_writer, *, append=false, params=None))]
+    #[inline]
     pub fn write_to(
         slf: &Bound<'_, Array>,
         path_or_writer: &Bound<'_, PyAny>,
         append: bool,
         params: Option<Bound<'_, PyDict>>,
-        context: Option<&Bound<'_, ReadContext>>,
     ) -> PyResult<()> {
-        crate::archive::write_array(slf, path_or_writer, append, params, context)
+        crate::archive::write_array(slf, path_or_writer, append, params)
     }
 
     // == arithmetic ops ==
 
     /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
+    #[inline]
     pub fn add(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::add(slf, other)
     }
 
     /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
+    #[inline]
     pub fn __add__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::add(slf, other)
     }
 
     /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
+    #[inline]
     pub fn __radd__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::add(other, slf)
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
+    #[inline]
     pub fn subtract(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(slf, other)
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
+    #[inline]
     pub fn __sub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(slf, other)
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
+    #[inline]
     pub fn __rsub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(other, slf)
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
+    #[inline]
     pub fn multiply(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(slf, other)
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
+    #[inline]
     pub fn __mul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(slf, other)
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
+    #[inline]
     pub fn __rmul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(other, slf)
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
+    #[inline]
     pub fn divide(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::divide(slf, other)
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
+    #[inline]
     pub fn __truediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(slf, other)
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
+    #[inline]
     pub fn __rtruediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(other, slf)
     }
 
     /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
+    #[inline]
     pub fn __floordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::floor_divide(slf, other)
     }
 
     /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
+    #[inline]
     pub fn __rfloordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::floor_divide(other, slf)
     }
 
     /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
+    #[inline]
     pub fn pow(slf: &Bound<'_, Self>, exponent: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::power(slf, exponent)
     }
 
     /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
+    #[inline]
     pub fn __pow__<'py>(
         slf: &Bound<'py, Self>,
         exponent: &Bound<'py, PyAny>,
@@ -573,6 +564,7 @@ impl Array {
     }
 
     /// Element-wise exponentiation (`b ** a`). See [`jix.power()`][jix.power].
+    #[inline]
     pub fn __rpow__<'py>(
         slf: &Bound<'py, Self>,
         base: &Bound<'py, PyAny>,
@@ -587,51 +579,61 @@ impl Array {
     }
 
     /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
+    #[inline]
     pub fn negative(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::negative(slf)
     }
 
     /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
+    #[inline]
     pub fn __neg__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::negative(slf)
     }
 
     /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
+    #[inline]
     pub fn abs(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::absolute(slf)
     }
 
     /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
+    #[inline]
     pub fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::absolute(slf)
     }
 
     /// Computes the natural exponential (`e^x`) of each element. See [`jix.exp()`][jix.exp].
+    #[inline]
     pub fn exp(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::exp(slf)
     }
 
     /// Computes the square root of each element. See [`jix.sqrt()`][jix.sqrt].
+    #[inline]
     pub fn sqrt(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sqrt(slf)
     }
 
     /// Squares each element (`x * x`). See [`jix.square()`][jix.square].
+    #[inline]
     pub fn square(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::square(slf)
     }
 
     /// Rounds each element up to the nearest integer (towards +inf). See [`jix.ceil()`][jix.ceil].
+    #[inline]
     pub fn ceil(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::ceil(slf)
     }
 
     /// Rounds each element down to the nearest integer (towards -inf). See [`jix.floor()`][jix.floor].
+    #[inline]
     pub fn floor(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::floor(slf)
     }
 
     /// Rounds each element to the nearest integer. See [`jix.round()`][jix.round].
+    #[inline]
     pub fn round(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::round(slf)
     }
@@ -639,46 +641,55 @@ impl Array {
     // == bitwise ops ==
 
     /// Element-wise bitwise AND of two arrays. See [`jix.bitwise_and()`][jix.bitwise_and].
+    #[inline]
     pub fn __and__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_and(slf, other)
     }
 
     /// Element-wise bitwise AND of two arrays. See [`jix.bitwise_and()`][jix.bitwise_and].
+    #[inline]
     pub fn __rand__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_and(other, slf)
     }
 
     /// Element-wise bitwise OR of two arrays. See [`jix.bitwise_or()`][jix.bitwise_or].
+    #[inline]
     pub fn __or__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_or(slf, other)
     }
 
     /// Element-wise bitwise OR of two arrays. See [`jix.bitwise_or()`][jix.bitwise_or].
+    #[inline]
     pub fn __ror__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_or(other, slf)
     }
 
     /// Element-wise bitwise XOR of two arrays. See [`jix.bitwise_xor()`][jix.bitwise_xor].
+    #[inline]
     pub fn __xor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_xor(slf, other)
     }
 
     /// Element-wise bitwise XOR of two arrays. See [`jix.bitwise_xor()`][jix.bitwise_xor].
+    #[inline]
     pub fn __rxor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_xor(other, slf)
     }
 
     /// Element-wise bitwise NOT (one's complement). See [`jix.bitwise_not()`][jix.bitwise_not].
+    #[inline]
     pub fn __invert__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::bitwise_not(slf)
     }
 
     /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
+    #[inline]
     pub fn __lshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_left_shift(slf, other)
     }
 
     /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
+    #[inline]
     pub fn __rlshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_left_shift(other, slf)
     }
@@ -686,31 +697,37 @@ impl Array {
     // == comparison ops ==
 
     /// Element-wise less-than test (`a < b`). See [`jix.less()`][jix.less].
+    #[inline]
     pub fn __lt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::less(slf, other)
     }
 
     /// Element-wise less-than-or-equal test (`a <= b`). See [`jix.less_equal()`][jix.less_equal].
+    #[inline]
     pub fn __le__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::less_equal(slf, other)
     }
 
     /// Element-wise greater-than test (`a > b`). See [`jix.greater()`][jix.greater].
+    #[inline]
     pub fn __gt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::greater(slf, other)
     }
 
     /// Element-wise greater-than-or-equal test (`a >= b`). See [`jix.greater_equal()`][jix.greater_equal].
+    #[inline]
     pub fn __ge__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::greater_equal(slf, other)
     }
 
     /// Element-wise equality test (`a == b`). See [`jix.equal()`][jix.equal].
+    #[inline]
     pub fn __eq__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::equal(slf, other)
     }
 
     /// Element-wise inequality test (`a != b`). See [`jix.not_equal()`][jix.not_equal].
+    #[inline]
     pub fn __ne__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::not_equal(slf, other)
     }
@@ -719,6 +736,7 @@ impl Array {
 
     /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy. See [`jix.all()`][jix.all].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn all(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -729,6 +747,7 @@ impl Array {
 
     /// Reduces one or more axes with logical OR: returns `True` if any element is truthy. See [`jix.any()`][jix.any].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn any(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -739,6 +758,7 @@ impl Array {
 
     /// Reduces one or more axes by taking the maximum element. See [`jix.max()`][jix.max].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn max(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -749,6 +769,7 @@ impl Array {
 
     /// Reduces one or more axes by taking the minimum element. See [`jix.min()`][jix.min].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn min(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -759,18 +780,21 @@ impl Array {
 
     /// Returns the index of the maximum element along a single axis. See [`jix.argmax()`][jix.argmax].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn argmax(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
         crate::ops::argmax(slf, axis, keepdims)
     }
 
     /// Returns the index of the minimum element along a single axis. See [`jix.argmin()`][jix.argmin].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn argmin(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
         crate::ops::argmin(slf, axis, keepdims)
     }
 
     /// Reduces one or more axes by summing all elements. See [`jix.sum()`][jix.sum].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn sum(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -781,6 +805,7 @@ impl Array {
 
     /// Computes the arithmetic mean along one or more axes. See [`jix.mean()`][jix.mean].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn mean(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -791,6 +816,7 @@ impl Array {
 
     /// Reduces one or more axes by multiplying all elements. See [`jix.product()`][jix.product].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
+    #[inline]
     pub fn prod(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -801,6 +827,7 @@ impl Array {
 
     /// Computes the standard deviation along one or more axes. See [`jix.std()`][jix.std].
     #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
+    #[inline]
     pub fn std(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -812,6 +839,7 @@ impl Array {
 
     /// Computes the variance along one or more axes. See [`jix.var()`][jix.var].
     #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
+    #[inline]
     pub fn var(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -822,6 +850,7 @@ impl Array {
     }
 
     /// Casts each element of the array to a new dtype. See [`jix.astype()`][jix.astype].
+    #[inline]
     pub fn astype<'py>(
         slf: &Bound<'py, Self>,
         dtype: &Bound<'_, PyAny>,
@@ -832,6 +861,7 @@ impl Array {
     // == shape ops ==
 
     /// Reinterprets an array with a different shape. See [`jix.reshape()`][jix.reshape].
+    #[inline]
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
         shape: ItemOrSequence<i64>,
@@ -840,12 +870,14 @@ impl Array {
     }
 
     /// Collapses the array into a single dimension. See [`jix.flatten()`][jix.flatten].
+    #[inline]
     pub fn flatten<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::flatten(slf)
     }
 
     /// Reorders the axes of an array (generalized transpose). See [`jix.permute_axes()`][jix.permute_axes].
     #[pyo3(signature = (axes=None))]
+    #[inline]
     pub fn permute_axes<'py>(
         slf: &Bound<'py, Self>,
         axes: Option<Vec<usize>>,
@@ -856,12 +888,14 @@ impl Array {
     /// Reverses all axes; shorthand for `permute_axes()` with no arguments. See [`jix.permute_axes()`][jix.permute_axes].
     #[allow(non_snake_case)]
     #[getter]
+    #[inline]
     pub fn T<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
         crate::ops::permute_axes(slf, None)
     }
 
     /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See [`jix.broadcast()`][jix.broadcast].
     #[pyo3(signature = (shape))]
+    #[inline]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Array>,
         shape: ItemOrSequence<i64>,
@@ -870,6 +904,7 @@ impl Array {
     }
 
     /// Selects a sub-region of the array as a lazy view. See [`jix.slice()`][jix.slice].
+    #[inline]
     pub fn slice<'py>(
         slf: &Bound<'py, Array>,
         index: &Bound<'py, PyAny>,
@@ -879,6 +914,7 @@ impl Array {
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.squeeze()`][jix.squeeze].
     #[pyo3(signature = (axis=None))]
+    #[inline]
     pub fn squeeze<'py>(
         slf: &Bound<'py, Array>,
         axis: Option<ItemOrSequence<i32>>,
@@ -887,6 +923,7 @@ impl Array {
     }
 
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
+    #[inline]
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Array>,
         axis: ItemOrSequence<i32>,
@@ -895,6 +932,7 @@ impl Array {
     }
 
     /// Repeats each element along the given axis. See [`jix.repeat()`][jix.repeat].
+    #[inline]
     pub fn repeat<'py>(
         slf: &Bound<'py, Array>,
         repeats: u64,
@@ -905,6 +943,7 @@ impl Array {
 
     /// Reverses the order of elements along the given axis. See [`jix.flip()`][jix.flip].
     #[pyo3(signature = (axis=None))]
+    #[inline]
     pub fn flip<'py>(
         slf: &Bound<'py, Array>,
         axis: Option<ItemOrSequence<i32>>,
@@ -914,6 +953,7 @@ impl Array {
 
     /// Rolls elements along an axis, wrapping at the boundary. See [`jix.roll()`][jix.roll].
     #[pyo3(signature = (shift, axis=None))]
+    #[inline]
     pub fn roll<'py>(
         slf: &Bound<'py, Array>,
         shift: i64,
@@ -924,6 +964,7 @@ impl Array {
 
     /// Replicates the array along a single axis. See [`jix.tile()`][jix.tile].
     #[pyo3(signature = (repeats, axis=None))]
+    #[inline]
     pub fn tile<'py>(
         slf: &Bound<'py, Array>,
         repeats: u64,
@@ -936,12 +977,14 @@ impl Array {
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
     #[getter]
+    #[inline]
     pub fn real(slf: &Bound<'_, Array>) -> PyResult<Array> {
         crate::ops::real(slf)
     }
 
     /// Extracts the imaginary part of each complex element. See [`jix.imag()`][jix.imag].
     #[getter]
+    #[inline]
     pub fn imag(slf: &Bound<'_, Array>) -> PyResult<Array> {
         crate::ops::imag(slf)
     }
@@ -949,43 +992,51 @@ impl Array {
     // == trigonometric ops ==
 
     /// Computes the sine of each element (input in radians). See [`jix.sin()`][jix.sin].
+    #[inline]
     pub fn sin(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sin(slf)
     }
 
     /// Computes the cosine of each element (input in radians). See [`jix.cos()`][jix.cos].
+    #[inline]
     pub fn cos(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::cos(slf)
     }
 
     /// Computes the tangent of each element (input in radians). See [`jix.tan()`][jix.tan].
+    #[inline]
     pub fn tan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::tan(slf)
     }
 
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`. See [`jix.asin()`][jix.asin].
+    #[inline]
     pub fn asin(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::asin(slf)
     }
 
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`. See [`jix.acos()`][jix.acos].
+    #[inline]
     pub fn acos(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::acos(slf)
     }
 
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`. See [`jix.atan()`][jix.atan].
+    #[inline]
     pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::atan(slf)
     }
 
     /// Computes the logarithm of each element; defaults to the natural logarithm. See [`jix.log()`][jix.log].
     #[pyo3(signature = (base=None))]
+    #[inline]
     pub fn log(slf: &Bound<'_, Self>, base: Option<f64>) -> PyResult<Self> {
         crate::ops::log(slf, base)
     }
 
     /// Clamps each element to `[min, max]`. See [`jix.clamp()`][jix.clamp].
     #[pyo3(signature = (min=None, max=None))]
+    #[inline]
     pub fn clamp<'py>(
         slf: &Bound<'py, Self>,
         min: Option<&Bound<'py, PyAny>>,
@@ -995,6 +1046,7 @@ impl Array {
     }
 
     /// Returns the sign of each element as a floating-point value. See [`jix.sign()`][jix.sign].
+    #[inline]
     pub fn sign(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sign(slf)
     }
@@ -1002,16 +1054,19 @@ impl Array {
     // == float predicates ==
 
     /// Tests whether each element is finite. See [`jix.is_finite()`][jix.is_finite].
+    #[inline]
     pub fn is_finite(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::is_finite(slf)
     }
 
     /// Tests whether each element is infinite. See [`jix.is_infinite()`][jix.is_infinite].
+    #[inline]
     pub fn is_infinite(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::is_infinite(slf)
     }
 
     /// Tests whether each element is `NaN`. See [`jix.is_nan()`][jix.is_nan].
+    #[inline]
     pub fn is_nan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::is_nan(slf)
     }
@@ -1019,6 +1074,7 @@ impl Array {
     // == axis ops ==
 
     /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_axis()`][jix.insert_axis].
+    #[inline]
     pub fn insert_axis<'py>(
         slf: &Bound<'py, Array>,
         axis: ItemOrSequence<i32>,
@@ -1027,6 +1083,7 @@ impl Array {
     }
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.remove_axis()`][jix.remove_axis].
+    #[inline]
     pub fn remove_axis<'py>(
         slf: &Bound<'py, Array>,
         axis: ItemOrSequence<i32>,
@@ -1103,8 +1160,30 @@ impl Array {
 ///         - `block_size`: Target block size in bytes, used when auto-computing or scaling the
 ///             block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
 ///             are `"fixed"`. Defaults to the L1 data cache size.
-///         - `read_size`: Target size in bytes for the preferred read region.
-///             Defaults to the L1 cache size.
+///         - `read_size`: The target byte range for a single preferred read region as
+///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
+///             `(min, max)` sequence of non-negative ints.
+///
+///             A read region is the rectangular slab the engine pulls and decompresses in one
+///             pass when materializing a lazy pipeline or a sub-region read. Its shape is derived
+///             by scaling the storage block shape toward this byte budget. The two bounds steer
+///             that scaling differently:
+///
+///             - `max` is the *scale-down ceiling*: an oversized read shape is shrunk only until
+///               it fits within `max`. Keeping `max` large (the L2 cache size by default) lets
+///               reads stay big.
+///             - `min` is the *scale-up floor*: an undersized read shape is grown only up to
+///               `min` (the L1 cache size by default). Reads already at or above `min` are left
+///               as the scale-down step produced them.
+///
+///             The motivation is block-grid misalignment. When the source array's block shape
+///             differs from the output's, a read that straddles source-block boundaries forces
+///             whole-block decompression for a partial slice, and neighboring reads re-decompress
+///             the same block. Larger read regions span more blocks per call and dilute that
+///             wasted work (no alignment guarantee, but the waste shrinks as the region grows);
+///             the counter-pressure is cache residency, which the `max` ceiling bounds.
+///
+///             When unset, the range defaults to `(L1 data cache size, L2 cache size)`.
 ///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
 ///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
 ///         - `compression_level`: Compression level passed to the codec. For Zstd the valid range
@@ -1113,9 +1192,6 @@ impl Array {
 ///             Filters improve the compression ratio for typed numeric data: `"byte-shuffle"`
 ///             groups bytes by significance (e.g. all high bytes together, then all low bytes);
 ///             `"bit-shuffle"` groups bits across elements. Defaults to `["byte-shuffle"]`.
-///     context: An optional [`jix.ReadContext`][jix.ReadContext] to reuse when decoding the source
-///         array. When omitted, a context is created internally. Unused if the source array is not
-///         a jix array.
 ///
 /// Returns:
 ///     A new compact [`jix.Array`][jix.Array] with all data compressed into blocks.
@@ -1149,37 +1225,31 @@ impl Array {
 ///     ```
 #[gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (array, *, dtype=None, params=None, context=None))]
+#[pyo3(signature = (array, *, dtype=None, params=None))]
 pub fn compact<'py>(
     array: &Bound<'py, PyAny>,
     dtype: Option<&Bound<'_, PyAny>>,
     params: Option<Bound<'_, PyDict>>,
-    context: Option<&Bound<'_, ReadContext>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
     let mut array = crate::asarray(array)?;
     let params = resolve_array_params(py, params)?;
-    let context = context.map(|ctx| ctx.get());
 
     if let Some(dtype) = dtype {
         array = crate::ops::astype(&array, dtype)?;
     }
-    let array = &array.get().arr;
-    let array = py.detach(|| {
-        let context_guard;
-        let context = match context {
-            Some(ctx) => {
-                context_guard = ctx.lock();
-                &*context_guard
-            }
-            None => &array.read_ctx(),
-        };
-
-        array.compact_with(params, context).into_py_result()
+    let array = array.get();
+    let compacted = py.detach(|| {
+        let context = array.read_ctx()?;
+        array
+            .arr
+            .compact_with(params, context.as_ref())
+            .into_py_result()
     })?;
 
-    Bound::new(py, Array::from_core(array.into_any()))
+    Bound::new(py, Array::from_core(compacted.into_any()))
 }
+
 pub(crate) fn resolve_array_params(
     py: Python<'_>,
     params: Option<Bound<'_, PyDict>>,
@@ -1207,7 +1277,7 @@ pub(crate) fn resolve_array_params(
             let block_shape = extract_arg!("block_shape", Vec<u32>)?;
             let block_shape_tag = extract_arg!("block_shape_tag", Vec<String>)?;
             let block_size = extract_arg!("block_size", u64)?;
-            let read_size = extract_arg!("read_size", u64)?;
+            let read_size = extract_arg!("read_size", ItemOrSequence<u64>)?;
             let codec = extract_arg!("codec", String)?;
             let compression_level = extract_arg!("compression_level", u32)?;
             let filters = extract_arg!("filters", Vec<String>)?;
@@ -1240,7 +1310,25 @@ pub(crate) fn resolve_array_params(
                 params.block_size(block_size);
             }
             if let Some(read_size) = read_size {
-                params.read_size(read_size);
+                if read_size.len() > 2 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "read_size must be a scalar or a 2-element sequence, got {} elements",
+                        read_size.len()
+                    )));
+                }
+                let read_size = read_size.into_dim_array().unwrap();
+                let pair = match read_size.len() {
+                    1 => {
+                        let [read_size] = read_size.as_slice().try_into().unwrap();
+                        (read_size, read_size)
+                    }
+                    2 => {
+                        let [min, max] = read_size.as_slice().try_into().unwrap();
+                        (min, max)
+                    }
+                    _ => unreachable!(),
+                };
+                params.read_size(pair);
             }
 
             if let Some(codec) = codec {
@@ -1277,6 +1365,23 @@ pub(crate) fn resolve_array_params(
     }
 }
 
+pub(crate) struct ContextGuard<'a> {
+    array: &'a Array,
+    context: Option<Box<ReadContext>>,
+}
+impl Drop for ContextGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut cache) = self.array.cache.lock() {
+            cache.context = self.context.take();
+        }
+    }
+}
+impl ContextGuard<'_> {
+    pub(crate) fn as_ref(&self) -> &ReadContext {
+        self.context.as_ref().unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use jix_core::dtype::Dtyped;
@@ -1309,7 +1414,7 @@ mod tests {
         // ndarray::Array -> jix_core::Array -> jix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array().into_dimensionality().unwrap()
         })
@@ -1387,7 +1492,7 @@ mod tests {
                 .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.shape(), &[2usize, 3, 4]);
         });
     }
@@ -1398,7 +1503,7 @@ mod tests {
         let original = array![1.0f32, 2.0];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'f');
         });
@@ -1410,7 +1515,7 @@ mod tests {
         let original = array![1i32, 2, 3];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None, None).unwrap();
+            let np = py_arr.get().numpy(py, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'i');
         });
@@ -1435,7 +1540,7 @@ mod tests {
     {
         Python::attach(|py| {
             py_arr
-                .numpy(py, None, None)
+                .numpy(py, None)
                 .unwrap()
                 .cast_into::<PyArrayDyn<T>>()
                 .unwrap()

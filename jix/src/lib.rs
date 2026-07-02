@@ -388,7 +388,7 @@ pub mod dtype;
 pub mod scalar;
 
 pub mod storage;
-pub use storage::core::ArrayStorage;
+pub use storage::core::{ArrayStorage, OutBuf};
 pub use storage::params::ArrayParams;
 
 mod archive;

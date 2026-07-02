@@ -8,7 +8,7 @@ use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
-use crate::{ArrayStorage, Dimension, IntoDimension};
+use crate::{ArrayStorage, Dimension, IntoDimension, OutBuf};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///
@@ -169,7 +169,12 @@ where
     type ElementType = S::ElementType;
     type Dimension = D;
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         // -----------------------------------------------------------------------
         // Core concept
         // -----------------------------------------------------------------------
@@ -265,6 +270,7 @@ where
         // -----------------------------------------------------------------------
         check_get_range(self.shape(), index)?;
         let dtype = self.dtype();
+        let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
 
         let orig_shape = self.array.shape();
@@ -366,7 +372,8 @@ where
             });
 
             let tmp_buf = tmp_buf.as_mut_slice();
-            self.array.read_data(&read_range, tmp_buf, context)?;
+            self.array
+                .read_data(&read_range, &mut OutBuf::new(tmp_buf), context)?;
 
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&dim| same_logical_stride[dim].is_none())

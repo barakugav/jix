@@ -8,7 +8,7 @@ use crate::asarray;
 use crate::ops::common::{
     broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar,
 };
-use crate::util::IntoPyResult;
+use crate::util::{DimArray, IntoPyResult};
 
 define_op2!(
     /// Element-wise equality test (`a == b`).
@@ -442,7 +442,8 @@ pub fn clamp<'py>(
                         .transpose()
                 })
                 .into_iter()
-                .collect::<Result<Vec<_>, _>>()?
+                .collect::<Result<DimArray<_>, _>>()?
+                .as_slice()
                 .try_into()
                 .unwrap();
             Ok(match (min, max) {

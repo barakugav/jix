@@ -7,7 +7,7 @@ use crate::error::{check_dtype, Result};
 use crate::ops::common::define_array_op1_method;
 use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
-use crate::{ArrayStorage, Ty};
+use crate::{ArrayStorage, OutBuf, Ty};
 
 pub(crate) struct Op1<S, K> {
     array: S,
@@ -47,9 +47,14 @@ where
     type Dimension = S::Dimension;
 
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         self.read_data_typed::<K::Output>(index, context)?
-            .to_buf(buf)
+            .to_buf(buf.get_mut(index, self.dtype()))
     }
 
     #[inline(always)]

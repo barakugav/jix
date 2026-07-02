@@ -8,7 +8,7 @@ use crate::storage::params::ArrayBlockSpec;
 use crate::storage::ArraySpec;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension, OutBuf};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -129,7 +129,12 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         // # Read behaviour
         //
         // When all dimensions have `step == 1` (`no_steps` fast path), each read translates the
@@ -197,6 +202,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // already placing us at the right row/column; nd_copy takes care of the rest.
         // -----------------------------------------------------------------------
         let dtype = self.dtype();
+        let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
         let ndim = self.slice.len();
         let itemsize = dtype.itemsize() as u64;
@@ -236,7 +242,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 }
             });
             let tmp = tmp_buf.as_mut_slice();
-            self.array.read_data(&inner_index, tmp, context)?;
+            self.array
+                .read_data(&inner_index, &mut OutBuf::new(tmp), context)?;
 
             let dst_byte_offset = (0..ndim)
                 .filter(|&dim| !self.slice[dim].is_contiguous())

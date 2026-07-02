@@ -8,7 +8,7 @@ use crate::error::{
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimDyn, Dimension, OutBuf, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -117,11 +117,16 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, self.dtype(), buf)?;
 
         if index.iter().any(|r| r.start >= r.end) {
+            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
             return Ok(());
         }
 
@@ -150,6 +155,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             return self.array.read_data(&inner_index, buf, context);
         }
 
+        let buf = buf.get_mut(index, dtype);
+        check_get_buffer_size(index, dtype, buf)?;
         let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
         let dst_strides = default_strides(&out_shape, itemsize as u64);
 
@@ -167,7 +174,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 let region_size = region_shape.iter().product::<u64>() as usize * itemsize;
                 let mut tmp = context.tmp_buf(region_size, dtype.alignment());
                 let tmp = tmp.as_mut_slice();
-                self.array.read_data(inner_index, tmp, context)?;
+                self.array
+                    .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
                 let src_strides = default_strides(region_shape, itemsize as u64);
                 let dst_byte_offset = (dst_axis_k_offset * dst_strides[k]) as usize;
                 unsafe {
@@ -201,10 +209,9 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         //   tail:   tmp[0..tail_len]   -> buf[head_len + F*L..total)
         let inner_full = dim_arr(ndim, |d| if d == k { 0..l } else { index[d].clone() });
         let period_shape = dim_arr(ndim, |d| if d == k { l } else { out_shape[d] });
-        let period_size = period_shape.iter().product::<u64>() as usize * itemsize;
-        let mut tmp = context.tmp_buf(period_size, dtype.alignment());
-        let tmp = tmp.as_mut_slice();
-        self.array.read_data(&inner_full, tmp, context)?;
+        let mut tmp = OutBuf::new_lazy(context);
+        self.array.read_data(&inner_full, &mut tmp, context)?;
+        let tmp = tmp.as_slice().unwrap();
 
         let src_strides = default_strides(&period_shape, itemsize as u64);
 
@@ -332,10 +339,11 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
 #[cfg(test)]
 mod tests {
+    use ndarray::array;
+
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::{Array, ArrayStorage, IntoDimension, Ty, NDIM_MAX};
-    use ndarray::array;
 
     // -----------------------------------------------------------------------
     // Helpers

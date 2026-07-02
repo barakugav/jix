@@ -1,8 +1,10 @@
+use std::ops::Range;
+
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::Compact;
-use crate::{Array, ArrayParams, ArrayStorage};
+use crate::{Array, ArrayParams, ArrayStorage, Dimension, ElementType, OutBuf};
 
 /// Storage adaptor that guarantees the wrapped array is always in compact
 /// block-compressed form.
@@ -63,10 +65,10 @@ where
     #[inline]
     fn read_data(
         &self,
-        index: &[core::ops::Range<u64>],
-        buf: &mut [u8],
-        context: &crate::codec::ReadContext,
-    ) -> crate::error::Result<()> {
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         match &self.0 {
             ToCompactInner::Original(s) => s.read_data(index, buf, context),
             ToCompactInner::Compact(c) => c.read_data(index, buf, context),
@@ -103,22 +105,18 @@ where
         })
     }
 
-    type DimensionChange<NewD: crate::Dimension> = MaybeCompact<S::DimensionChange<NewD>>;
+    type DimensionChange<NewD: Dimension> = MaybeCompact<S::DimensionChange<NewD>>;
     #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+    fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
         Ok(MaybeCompact(match self.0 {
             ToCompactInner::Original(s) => ToCompactInner::Original(s.dimension_change()?),
             ToCompactInner::Compact(c) => ToCompactInner::Compact(c.dimension_change()?),
         }))
     }
 
-    type ElementTypeChange<NewET: crate::ElementType> = MaybeCompact<S::ElementTypeChange<NewET>>;
+    type ElementTypeChange<NewET: ElementType> = MaybeCompact<S::ElementTypeChange<NewET>>;
     #[inline]
-    fn element_type_change<NewET: crate::ElementType>(
-        self,
-    ) -> crate::error::Result<Self::ElementTypeChange<NewET>> {
+    fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>> {
         Ok(MaybeCompact(match self.0 {
             ToCompactInner::Original(s) => ToCompactInner::Original(s.element_type_change()?),
             ToCompactInner::Compact(c) => ToCompactInner::Compact(c.element_type_change()?),

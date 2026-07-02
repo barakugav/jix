@@ -6,7 +6,7 @@ use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, R
 use crate::storage::params::ArraySpecOwned;
 use crate::storage::{ArraySpec, BlockShapeTag, ElementType, Ty, TypeDyn};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, SendSyncPtr};
-use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
+use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension, OutBuf};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -318,12 +318,13 @@ where
     fn read_data(
         &self,
         index: &[Range<u64>],
-        buf: &mut [u8],
+        buf: &mut OutBuf,
         _context: &ReadContext,
     ) -> Result<()> {
         let dtype = self.dtype();
         let itemsize = dtype.itemsize() as usize;
         check_get_range(self.shape(), index)?;
+        let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.shape.ndim();

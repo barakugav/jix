@@ -6,7 +6,7 @@ use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ens
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension, OutBuf};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
 /// returned by [`Array::broadcast`](crate::Array::broadcast).
@@ -136,7 +136,12 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     type Dimension = S::Dimension;
 
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         // Fast path: no dimension was actually broadcast - forward directly.
         if self.is_identity {
             return self.array.read_data(index, buf, context);
@@ -144,7 +149,6 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.is_broadcast.len();
         let itemsize = dtype.itemsize() as usize;
@@ -161,10 +165,11 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         let inner_read_shape = dim_arr(ndim, |dim| {
             (inner_index[dim].end - inner_index[dim].start) as usize
         });
-        let n_bytes = inner_read_shape.iter().product::<usize>() * itemsize;
-        let mut tmp_buf = context.tmp_buf(n_bytes, dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-        self.array.read_data(&inner_index, tmp_buf, context)?;
+        let mut tmp_buf = OutBuf::new_lazy(context);
+        self.array.read_data(&inner_index, &mut tmp_buf, context)?;
+        let tmp_buf = tmp_buf.as_slice().unwrap();
+        let buf = buf.get_mut(index, dtype);
+        check_get_buffer_size(index, dtype, buf)?;
 
         // Source strides over tmp_buf, with broadcast dims set to 0.
         // A zero stride means advancing along that output axis always reads the same src byte,

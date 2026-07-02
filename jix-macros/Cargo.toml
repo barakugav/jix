@@ -7,7 +7,7 @@ rust-version = "1.89.0"
 description = "Macros for the jix library"
 readme = "README.md"
 repository = "https://github.com/barakugav/jix"
-license = "Apache-2.0"
+license = "MIT OR Apache-2.0"
 keywords = ["ndarray", "compression", "zstd"]
 categories = ["data-structures", "compression", "science"]
 

@@ -19,7 +19,8 @@ use crate::util::{
     dim_arr, nd_copy, scale_read_shape, AlignedBytes, IterExt,
 };
 use crate::{
-    ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
+    ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, OutBuf, Ty,
+    TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -447,9 +448,10 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             fn read_data(
                 &self,
                 index: &[Range<u64>],
-                buf: &mut [u8],
+                buf: &mut OutBuf,
                 _context: &ReadContext,
             ) -> Result<()> {
+                let buf = buf.get_mut(index, self.dtype());
                 let ndim = self.shape().len();
                 let read_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
                 let read_lstrides = default_logical_strides(read_shape.as_slice());
@@ -457,9 +459,9 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                     read_shape,
                     NdIterExtStridesPtrMut::new(&read_lstrides, buf.as_mut_ptr().cast::<T>()),
                 );
-                for (idx, out) in iter {
+                for (idx, dst) in iter {
                     let value = (self.f)(idx.to_index());
-                    unsafe { out.write(value) };
+                    unsafe { dst.write(value) };
                 }
                 Ok(())
             }
@@ -796,9 +798,12 @@ impl<S: ArrayStorage> Array<S> {
 
         // Fast path for small reads
         let spec = self.storage.spec();
-        let small_read = nitems as u64 <= spec.read_size() * dtype.itemsize() as u64;
+        let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
+        let small_read = nitems as u64 <= min_nitems;
         if small_read {
-            return self.storage.read_data(index, buf, context);
+            self.storage
+                .read_data(index, &mut OutBuf::new(buf), context)?;
+            return Ok(());
         }
 
         let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
@@ -838,7 +843,8 @@ impl<S: ArrayStorage> Array<S> {
                 tmp_buf.set_len(read_nitems as usize * itemsize);
                 tmp_buf.as_mut_slice()
             };
-            self.storage.read_data(&inner_index, tmp_buf, context)?;
+            self.storage
+                .read_data(&inner_index, &mut OutBuf::new(tmp_buf), context)?;
 
             let out_offset = (0..ndim)
                 .map(|dim| {
@@ -1025,11 +1031,16 @@ impl<S: ArrayStorage> Array<S> {
         let mut chunk_shape_in_blocks = S::Dimension::from_fn(ndim, |dim| {
             (current_block_shape[dim] / block_shape[dim]).max(1) as u64
         });
+        let read_size = spec.read_size();
+        let (min_chunk, max_chunk) = (
+            (read_size.min / block_size_bytes as u64).max(1),
+            (read_size.max / block_size_bytes as u64).max(1),
+        );
         scale_read_shape(
             &mut chunk_shape_in_blocks,
             block_grid_shape.as_slice(),
             block_grid_shape.as_slice(),
-            (spec.read_size() / block_size_bytes as u64).max(1),
+            (min_chunk, max_chunk),
             (0..ndim).rev(),
         );
 
@@ -1066,8 +1077,11 @@ impl<S: ArrayStorage> Array<S> {
             chunk_buf.clear();
             chunk_buf.reserve(chunk_bytes);
             unsafe { chunk_buf.set_len(chunk_bytes) };
-            self.storage
-                .read_data(&read_range, chunk_buf.as_mut_slice(), context)?;
+            self.storage.read_data(
+                &read_range,
+                &mut OutBuf::new(chunk_buf.as_mut_slice()),
+                context,
+            )?;
             let chunk_strides =
                 default_strides(&dim_arr(ndim, |dim| chunk_size[dim] as usize), itemsize);
             let chunk_offset_base = (0..ndim)

@@ -6,7 +6,7 @@ use crate::dtype::Dtyped;
 use crate::error::Result;
 use crate::storage::ReadData;
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
+use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind, OutBuf};
 
 /// A lazy storage adapter that re-tags an array's dimension parameter without copying data.
 ///
@@ -85,7 +85,12 @@ where
     type Dimension = D;
 
     #[inline(always)]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         if let Some(ndim) = D::NDIM {
             unsafe { assert_unchecked_eq!(ndim, self.inner.shape().len()) };
         }

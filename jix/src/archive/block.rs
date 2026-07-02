@@ -4,7 +4,7 @@ use std::mem::MaybeUninit;
 
 use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
-use crate::codec::{Codec, DecoderCodecConfig, Filter};
+use crate::codec::{Codec, DecoderCodecConfig, Filter, MAX_FILTERS};
 use crate::dtype::Dtype;
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
 use crate::storage::block::{
@@ -336,6 +336,11 @@ where
         let codec = match codec {
             schema::codec::Kind::Zstd(()) => Codec::Zstd,
         };
+        ensure!(
+            header.filters.len() <= MAX_FILTERS,
+            InvalidArchive,
+            "too many filters in header"
+        );
         let filters = header
             .filters
             .iter()
@@ -351,7 +356,7 @@ where
                     }
                 })
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<ArrayVec<_, MAX_FILTERS>>>()?;
 
         // Read body data sections
         let (block_data, blocks_loc) = match header.body_description {
@@ -413,9 +418,7 @@ where
 
         let decoder_config = DecoderCodecConfig {
             codec,
-            filters: ArrayVec::from_slice(filters.as_slice()).ok_or_else(|| {
-                Error::new(ErrorKind::InvalidArchive, "too many filters in header")
-            })?,
+            filters,
             dtype: Dtype::from_proto(header.dtype.as_ref().unwrap()).unwrap(),
         };
 
@@ -426,7 +429,7 @@ where
 impl BlockTableStorageRead for Owned {
     /// Read `section` into a heap-allocated `Vec<T>`.
     ///
-    /// Allocates uninitialised capacity, reads the raw bytes from `reader` directly into the
+    /// Allocates uninitialized capacity, reads the raw bytes from `reader` directly into the
     /// buffer, then transmutes `Vec<MaybeUninit<T>>` to `Vec<T>` after the read succeeds.
     fn read_section<T, R>(
         &self,

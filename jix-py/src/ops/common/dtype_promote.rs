@@ -20,6 +20,7 @@ pub(crate) enum Precision {
 }
 
 impl Precision {
+    #[inline(always)]
     pub(crate) fn from_itemsize(itemsize: Itemsize) -> Self {
         match itemsize {
             1 => Self::P1,
@@ -30,6 +31,7 @@ impl Precision {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn higher(self) -> Option<Self> {
         match self {
             Self::P1 => Some(Self::P2),

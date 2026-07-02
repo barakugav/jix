@@ -1,7 +1,7 @@
 use crate::error::Result;
+use crate::ops::common::define_array_op2_method;
 use crate::ops::op2::define_op2;
-use crate::ops::Op2Kernel;
-use crate::ops::{common::define_array_op2_method, Op2};
+use crate::ops::{Op2, Op2Kernel};
 #[allow(unused_imports)]
 use crate::scalar::{f16, Complex};
 use crate::storage::ArrayStorageTyped;
@@ -822,9 +822,7 @@ mod tests {
             let result = za.approx_equal(zb, rtol, atol);
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
-                .map_collect(|&a, &b| {
-                    ref_approx_eq(a.to_f32(), b.to_f32(), rtol_f32, atol_f32)
-                });
+                .map_collect(|&a, &b| ref_approx_eq(a, b, rtol, atol));
             crate::util::assert_array_matches(&result, &expected);
         }
     }

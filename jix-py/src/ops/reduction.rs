@@ -2,6 +2,8 @@ use jix_core::scalar::{f16, Complex};
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
 
+use crate::util::DimArray;
+
 fn keepdims_after_reduction(
     array: ArrayAny,
     original_reduced_axes: &[usize],
@@ -15,12 +17,13 @@ fn keepdims_after_reduction(
         .iter()
         .enumerate()
         .map(|(i, &ax)| ax - i)
-        .collect::<Vec<_>>();
-    let res = jix_core::ops::InsertAxis::new_array(array, &mapped_axes);
+        .collect::<DimArray<_>>();
+    let res = jix_core::ops::InsertAxis::new_array(array, mapped_axes.as_slice());
     let ret = <_ as crate::util::IntoPyResult<_>>::into_py_result(res)?;
     Ok(ret.into_any())
 }
 
+#[inline]
 fn keepdim_after_reduction(array: ArrayAny, original_reduced_axis: usize) -> PyResult<ArrayAny> {
     // keepdims=true: for a single-axis reduction, the result-space gap equals the
     // original axis index (only one axis removed, shift = 0).
@@ -53,7 +56,7 @@ macro_rules! define_reduction_op {
             $($($extra_arg: $extra_ty),+)?
         ) -> pyo3::PyResult<crate::Array> {
             struct DispatchArgs {
-                axes: Vec<usize>,
+                axes: DimArray<usize>,
                 $($($extra_arg: $extra_ty),*)?
             }
             static DISPATCH_TABLE: ::std::sync::LazyLock<crate::ops::common::OpDescriptor<1, DispatchArgs>> = ::std::sync::LazyLock::new(|| {
@@ -61,14 +64,16 @@ macro_rules! define_reduction_op {
                     stringify!($name),
                     crate::ops::common::define_op1_desc!(
                         $core_op,
-                        extra_args = DispatchArgs { axes $($(, $extra_arg)+)? },
+                        extra_args = DispatchArgs as args { args.axes.as_slice() $($(, args.$extra_arg)+)? },
                         $($dispatch)*
                     ),
                 )
             });
 
             let array = crate::ops::as_array::any_to_core_array(array)?;
-            let axes = crate::util::normalize_axes_optional(axis.map(|a| a.into_vec()), array.ndim())?;
+            let axis = axis.map(|a| a.into_dim_array()).transpose()?;
+            let axis = axis.as_ref().map(|a| a.as_slice());
+            let axes = crate::util::normalize_axes_optional(axis, array.ndim())?;
             let mut res = DISPATCH_TABLE.dispatch_args(
                 [crate::ops::common::Operand::Array(array)],
                 DispatchArgs { axes: axes.clone(), $($($extra_arg),+)? }
@@ -108,7 +113,7 @@ macro_rules! define_reduction_op {
                     stringify!($name),
                     crate::ops::common::define_op1_desc!(
                         $core_op,
-                        extra_args = DispatchArgs { axis },
+                        extra_args = DispatchArgs as args { args.axis },
                         $($dispatch)*
                     ),
                 )

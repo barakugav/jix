@@ -6,8 +6,8 @@ use crate::ops::{Op1, Op2};
 use crate::storage::{ArrayStorageTyped, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
 use crate::{
-    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, ReadContext,
-    ReadDataTuple, Ty,
+    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, OutBuf,
+    ReadContext, ReadDataTuple, Ty,
 };
 
 impl<S> Array<S>
@@ -279,8 +279,14 @@ where
     type ElementType = Ty<O>;
     type Dimension = ArraysT::Dimension;
 
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
-        self.read_data_typed::<O>(index, context)?.to_buf(buf)
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
+        self.read_data_typed::<O>(index, context)?
+            .to_buf(buf.get_mut(index, self.dtype()))
     }
 
     #[inline(always)]

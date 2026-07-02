@@ -6,7 +6,7 @@ use crate::dtype::Dtyped;
 use crate::error::{check_dtype, Result};
 use crate::storage::ReadData;
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, ElementType};
+use crate::{Array, ArrayStorage, ElementType, OutBuf};
 
 /// A lazy storage adapter that re-tags an array's element-type parameter without copying data.
 ///
@@ -84,7 +84,12 @@ where
     type Dimension = S::Dimension;
 
     #[inline(always)]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut [u8], context: &ReadContext) -> Result<()> {
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut OutBuf,
+        context: &ReadContext,
+    ) -> Result<()> {
         if let Some(dtype) = ET::DTYPE {
             unsafe { assert_unchecked_eq!(self.inner.dtype(), &dtype) };
         }

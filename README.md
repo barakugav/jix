@@ -4,7 +4,6 @@
 [![PyPI](https://img.shields.io/pypi/v/jix)](https://pypi.org/project/jix/)
 [![docs.rs](https://img.shields.io/docsrs/jix?label=docs.rs)](https://docs.rs/jix/latest/jix/)
 [![Read the Docs](https://img.shields.io/badge/readthedocs-passing-brightgreen)](https://jix.readthedocs.io/en/latest/)
-![License](https://img.shields.io/crates/l/jix)
 
 
 A multi-dimensional array library with block-compressed storage and lazy-evaluated operations - written in Rust, with Python bindings.
@@ -104,7 +103,11 @@ See the [`THANKS.md`](./THANKS.md) file for more details and attribution.
 
 ## License
 
-This project is licensed under the Apache License, Version 2.0 (the "License"); you may not use this project except in compliance with the
-License. A copy of the License is available in the LICENSE file at the root of this repository, or at http://www.apache.org/licenses/LICENSE-2.0.
+This project is licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](./LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([`LICENSE-MIT`](./LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
 
 Legal attribution and full license text for third-party components are in the [`NOTICE`](./NOTICE) file at the root of this repository.

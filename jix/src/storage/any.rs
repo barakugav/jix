@@ -6,7 +6,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::storage::params::ArraySpecPtr;
 use crate::storage::ArraySpec;
-use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
+use crate::{ArrayStorage, DimDyn, Dimension, ElementType, OutBuf, TypeDyn, NDIM_MAX};
 
 /// A type-erased array storage backend that wraps any dynamically-typed storage via `Arc<dyn ArrayStorage>`.
 ///
@@ -47,7 +47,7 @@ impl ArrayStorage for ArrayStorageAny {
     fn read_data(
         &self,
         index: &[Range<u64>],
-        buf: &mut [u8],
+        buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<(), crate::Error> {
         self.inner.read_data(index, buf, context)
