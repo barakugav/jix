@@ -93,7 +93,7 @@ pub trait ArrayStorage {
     /// - `buf` - destination buffer. Either a caller-provided buffer or a lazily-allocated one.
     ///   If the buffer is provided by the caller, it must be aligned to `dtype.alignment()` and
     ///   has a length of exactly `index.iter().map(|r| r.len()).product() * dtype.itemsize()` bytes.
-    ///   See [`OutBuf`](crate::OutBuf) for details.
+    ///   See [`OutBuf`](crate::storage::OutBuf) for details.
     ///   On success the elements are written in row-major (C-contiguous) order.
     /// - `context` - read context carrying the decoder state.
     fn read_data(

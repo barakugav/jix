@@ -4,7 +4,7 @@ use crate::codec::TmpBuf;
 use crate::dtype::Dtype;
 use crate::ReadContext;
 
-/// Destination for a [`read_data`](ArrayStorage::read_data) call.
+/// Destination for a [`read_data`](crate::ArrayStorage::read_data) call.
 ///
 /// Either a caller-provided byte buffer ([`OutBuf::new`]) or a lazily-allocated pooled buffer
 /// ([`OutBuf::new_lazy`]).

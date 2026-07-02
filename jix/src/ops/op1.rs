@@ -296,9 +296,11 @@ macro_rules! define_op1 {
 pub(crate) use define_op1;
 
 pub(crate) mod _traits {
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
     use crate::scalar::traits_util::define_op1_trait;
-    #[allow(unused_imports)]
-    use crate::scalar::{f16, Complex};
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
 
     define_op1_trait!(
         Abs,
@@ -344,6 +346,7 @@ pub(crate) mod _traits {
             <Self as num_traits::Float>::abs(self)
         }
     }
+    #[cfg(feature = "num-complex")]
     impl Abs for Complex<f32> {
         type Output = f32;
 
@@ -352,6 +355,7 @@ pub(crate) mod _traits {
             self.re.hypot(self.im)
         }
     }
+    #[cfg(feature = "num-complex")]
     impl Abs for Complex<f64> {
         type Output = f64;
 

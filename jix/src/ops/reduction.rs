@@ -6,8 +6,6 @@ use crate::dtype::{Alignment, Dtype, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::ops::LanesInfo;
-#[allow(unused_imports)]
-use crate::scalar::{f16, Complex};
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
@@ -744,8 +742,10 @@ macro_rules! define_reduction_op {
 /// Max/Min/argmax/argmin do **not** appear here - those ops are bounded directly by
 /// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`] / [`PartialOrd`].
 pub(crate) mod _traits {
-    #[allow(unused_imports)]
-    use crate::scalar::{f16, Complex};
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
 
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///

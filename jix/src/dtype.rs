@@ -29,7 +29,10 @@ use std::collections::HashSet;
 use std::hint::assert_unchecked;
 
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
-use crate::scalar::{f16, Complex};
+#[cfg(feature = "half")]
+use crate::scalar::f16;
+#[cfg(feature = "num-complex")]
+use crate::scalar::Complex;
 use crate::util::arrayvec::ArrayVec;
 use crate::util::{Idx, IterExt};
 
@@ -366,6 +369,7 @@ impl Dtype {
     /// assert_eq!(f64_dtype.alignment().as_usize(), 8);
     /// assert_eq!(f64_dtype.shape(), &[]);
     ///
+    /// # #[cfg(feature = "num-complex")] { use super::*;
     /// let complex_f32_dtype = Dtype::new_scalar(DtypeScalarKind::ComplexF32);
     /// assert_eq!(
     ///     complex_f32_dtype.scalar_kind(),
@@ -377,6 +381,7 @@ impl Dtype {
     /// assert_eq!(i32_dtype, i32::DTYPE);
     /// assert_eq!(f64_dtype, f64::DTYPE);
     /// assert_eq!(complex_f32_dtype, jix::scalar::Complex::<f32>::DTYPE);
+    /// # }
     /// ```
     #[inline(always)]
     pub const fn new_scalar(kind: DtypeScalarKind) -> Self {
@@ -1104,10 +1109,13 @@ impl_dtyped_scalar!(u8, U8);
 impl_dtyped_scalar!(u16, U16);
 impl_dtyped_scalar!(u32, U32);
 impl_dtyped_scalar!(u64, U64);
+#[cfg(feature = "half")]
 impl_dtyped_scalar!(f16, F16);
 impl_dtyped_scalar!(f32, F32);
 impl_dtyped_scalar!(f64, F64);
+#[cfg(feature = "num-complex")]
 impl_dtyped_scalar!(Complex<f32>, ComplexF32);
+#[cfg(feature = "num-complex")]
 impl_dtyped_scalar!(Complex<f64>, ComplexF64);
 impl_dtyped_scalar!(bool, Bool);
 
