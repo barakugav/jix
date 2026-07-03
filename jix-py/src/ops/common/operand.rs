@@ -194,7 +194,7 @@ impl Operand {
                     let array = jix_core::Array::from_storage(
                         jix_core::__private::Scalar::new(value, shape).into_py_result()?,
                     );
-                    Ok(array.into_type_dyn().into_any())
+                    Ok(array.into_any())
                 }
                 #[allow(clippy::unnecessary_cast)]
                 let array = match value {

@@ -1400,7 +1400,6 @@ mod tests {
         D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
     {
         let core = CoreArray::compact_ndarray(ndarray).unwrap();
-        let core = core.into_type_dyn().into_dim_dyn();
         Bound::new(py, Array::from_core(core.into_any())).unwrap()
     }
 

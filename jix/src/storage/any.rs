@@ -19,7 +19,7 @@ use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 /// existing array with [`Array::into_any`](crate::Array::into_any).
 #[derive(Clone)]
 pub struct ArrayStorageAny {
-    inner: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
+    inner: Arc<dyn ArrayStorage + Send + Sync>,
 
     // TODO: clone() doesnt need to clone these
     shape: DimDyn,
@@ -28,9 +28,7 @@ pub struct ArrayStorageAny {
 }
 impl ArrayStorageAny {
     /// Wrap an existing `Arc`-boxed storage as an `ArrayStorageAny`.
-    pub(crate) fn new(
-        storage: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
-    ) -> Self {
+    pub(crate) fn new(storage: Arc<dyn ArrayStorage + Send + Sync>) -> Self {
         Self {
             shape: DimDyn::from_slice(storage.shape()),
             element_type: TypeDyn::from_dtype(storage.dtype().clone()).unwrap(),

@@ -305,11 +305,11 @@ pub fn log<'py>(array: &Bound<'py, PyAny>, base: Option<f64>) -> pyo3::PyResult<
         OpFnDescriptor::new1_args::<T>(CastKind::Safe, |a, args: LogArgs| {
             let res = jix_core::ops::Ln::new_array(a).into_py_result()?;
             let Some(multiplier) = args.multiplier else {
-                return Ok(res.into_type_dyn().into_any());
+                return Ok(res.into_any());
             };
             let multiplier = <f64 as jix_core::scalar::Cast<T>>::cast(multiplier);
             let res = res.map(move |x| x * multiplier);
-            Ok(res.into_type_dyn().into_any())
+            Ok(res.into_any())
         })
     }
     static DISPATCH_TABLE: LazyLock<OpDescriptor<1, LogArgs>> = LazyLock::new(|| {

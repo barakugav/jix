@@ -1220,12 +1220,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the
     /// resulting array can be stored alongside arrays of other concrete storage types.
-    ///
-    /// Only arrays that are already dynamically typed (`TypeDyn`, `DimDyn`) can be erased this
-    /// way. Call [`Array::into_type_dyn`] and [`Array::into_dim_dyn`] first if needed.
     pub fn into_any(self) -> ArrayAny
     where
-        S: ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync + 'static,
+        S: ArrayStorage + Send + Sync + 'static,
     {
         Array::from_storage(ArrayStorageAny::new(Arc::new(self.into_storage())))
     }

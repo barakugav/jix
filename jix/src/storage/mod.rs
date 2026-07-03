@@ -84,7 +84,7 @@ pub use buf::*;
 ///
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
 /// [`Array::into_typed::<T>()`](crate::Array::into_typed).
-pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> {
+pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> + Sized {
     /// The concrete Rust element type stored in this array (e.g. `f32`, `i64`).
     type Item: Dtyped;
 }

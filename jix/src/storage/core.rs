@@ -62,7 +62,9 @@ pub trait ArrayStorage {
     /// `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
     /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
-    type ElementType: ElementType;
+    type ElementType: ElementType
+    where
+        Self: Sized;
 
     /// The compile-time dimension of arrays backed by this storage.
     ///
@@ -77,7 +79,9 @@ pub trait ArrayStorage {
     /// the input dimension's associated type (e.g. `S::Dimension::Smaller` or `S::Dimension::Larger`)
     /// or by accepting an explicit dimension argument from the caller
     /// (e.g. `reshape()` accept IntoDimension, `max()` accept `AxesArg`).
-    type Dimension: Dimension;
+    type Dimension: Dimension
+    where
+        Self: Sized;
 
     /// Read a sub-region of the array into a caller-supplied byte buffer.
     ///
@@ -176,7 +180,10 @@ pub trait ArrayStorage {
     /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]
     #[inline(always)]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
+    fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>>
+    where
+        Self: Sized,
+    {
         None
     }
 
