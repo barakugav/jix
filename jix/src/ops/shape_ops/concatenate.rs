@@ -2,7 +2,9 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{bail, check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{
+    bail, check_get_buffer_size, check_get_range, check_shape_overflow, ensure, Result,
+};
 use crate::storage::{ArraySpec, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
@@ -118,6 +120,7 @@ where
             shape[axis] += shape_i[axis];
             borders.push(shape[axis]);
         }
+        check_shape_overflow(&shape, dtype.itemsize() as _)?;
 
         let shape = ArraysT::Dimension::from_slice(&shape);
         Ok(Self {

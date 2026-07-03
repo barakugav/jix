@@ -2,7 +2,9 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{
+    bail, check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
+};
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
@@ -75,6 +77,7 @@ where
             "broadcast new_shape has {} dims but array has {ndim} dims",
             new_shape.len()
         );
+        check_shape_overflow(new_shape, array.dtype().itemsize() as _)?;
 
         let mut is_broadcast = DimArray::new();
         for dim in 0..ndim {

@@ -2,7 +2,9 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{
+    check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
+};
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, OutBuf};
 use crate::util::{
@@ -105,6 +107,7 @@ where
         check_ndim::<<Self as ArrayStorage>::Dimension>(shape0.len() + 1)?;
         let mut new_shape = DimArray::from_slice(shape0).unwrap();
         new_shape.insert(axis, narrays as u64);
+        check_shape_overflow(new_shape.as_slice(), dtype.itemsize() as _)?;
         let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
 
         let spec = arrays.spec(0);

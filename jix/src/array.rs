@@ -1311,6 +1311,28 @@ impl<S: ArrayStorage> Array<S> {
     /// Rarely needed to be used directly by users.
     #[inline(always)]
     pub fn from_storage(storage: S) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            use crate::NDIM_MAX;
+
+            let shape = storage.shape();
+            let ndim = shape.len();
+            debug_assert!(ndim <= NDIM_MAX);
+            debug_assert!(shape.iter().cloned().try_product().is_some());
+            let spec = storage.spec();
+            debug_assert_eq!(spec.block_shape().len(), ndim);
+            debug_assert!(spec.block_shape().iter().all(|&s| s > 0));
+            debug_assert!(spec
+                .block_shape()
+                .iter()
+                .zip(shape.iter())
+                .all(|(&b, &s)| b as u64 <= s.max(1)));
+            debug_assert_eq!(spec.block_shape_tag().len(), ndim);
+            debug_assert!(spec.block_size() > 0);
+            debug_assert!(spec.read_size().min > 0);
+            debug_assert!(spec.read_size().min <= spec.read_size().max);
+        }
+
         Self { storage }
     }
 

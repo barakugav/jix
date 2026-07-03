@@ -3,7 +3,8 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{
-    check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
+    check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Error,
+    ErrorKind, Result,
 };
 use crate::storage::params::ArrayBlockSpec;
 use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
@@ -72,6 +73,7 @@ impl<S: ArrayStorage> Repeat<S> {
 
         let new_shape =
             S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] });
+        check_shape_overflow(new_shape.as_slice(), array.dtype().itemsize() as _)?;
 
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
