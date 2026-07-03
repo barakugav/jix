@@ -886,7 +886,7 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
         .collect::<Result<Vec<_>, _>>()?;
     let arrays = py_arrays
         .iter()
-        .map(|arr| any_to_core_array(&arr))
+        .map(|arr| any_to_core_array(arr))
         .collect::<Result<Vec<_>, _>>()?;
     if arrays.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(

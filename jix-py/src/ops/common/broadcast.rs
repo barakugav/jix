@@ -67,7 +67,7 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_cor
         }
     };
 
-    let missing_dims = shape.len().checked_sub(array.ndim()).unwrap_or(0);
+    let missing_dims = shape.len().saturating_sub(array.ndim());
     let array = if missing_dims > 0 {
         Either::Left(array.insert_axis(&vec![0; missing_dims]))
     } else {
