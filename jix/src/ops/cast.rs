@@ -1,5 +1,5 @@
 use crate::dtype::Dtyped;
-use crate::storage::ArrayStorageTyped;
+use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
 use crate::{Array, ArrayStorage};
 
 pub(crate) mod _traits {
@@ -219,6 +219,10 @@ where
     type ElementType = crate::Ty<T>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Cast", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Cast<S::DimensionChange<NewD>, T>;
     #[inline]

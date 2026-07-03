@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{
     bail, check_get_buffer_size, check_get_range, check_shape_overflow, ensure, Result,
 };
-use crate::storage::{ArraySpec, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, ArraySequence, DimArray};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
 
@@ -280,6 +280,13 @@ where
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.arrays.spec(0).with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        let deps = (0..self.arrays.narrays())
+            .map(|i| self.arrays.as_array_storage(i))
+            .collect::<Vec<_>>();
+        ArrayStorageInfo::new_deps_dyn("Concatenate", deps)
     }
 
     crate::ops::impl_dimension_change_default!();

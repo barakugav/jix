@@ -4,7 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{ArraySpec, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn};
+use crate::storage::{
+    ArraySpec, ArrayStorageInfo, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn,
+};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, SendSyncPtr};
 use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
@@ -365,6 +367,11 @@ where
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.spec.as_ref()
+    }
+
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new("Plain")
     }
 
     type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;

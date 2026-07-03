@@ -7,7 +7,7 @@ use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ens
 use crate::ops::common::AxesArg;
 use crate::ops::LanesInfo;
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
@@ -166,6 +166,10 @@ where
             .spec()
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("ReductionOp", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
@@ -671,6 +675,10 @@ macro_rules! define_reduction_op {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
             crate::storage::impl_array_storage_forward!(<S>);
+            #[inline]
+            fn info(&self) -> ArrayStorageInfo<'_> {
+                ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
+            }
             crate::ops::impl_dimension_change_default!();
             crate::ops::impl_element_type_change_default!();
         }
@@ -720,6 +728,10 @@ macro_rules! define_reduction_op {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = D;
             crate::storage::impl_array_storage_forward!(<S, D>);
+            #[inline]
+            fn info(&self) -> ArrayStorageInfo<'_> {
+                ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
+            }
 
             type DimensionChange<NewD: crate::Dimension> = $Op<S, NewD>;
             #[inline]
@@ -1890,6 +1902,10 @@ where
     type ElementType = Ty<S::Item>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, F>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Reduce", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Reduce<S, NewD, F>;
     #[inline]
@@ -2058,6 +2074,10 @@ where
     type ElementType = Ty<B>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, B, F>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Fold", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Fold<S, NewD, B, F>;
     #[inline]

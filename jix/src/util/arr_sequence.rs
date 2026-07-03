@@ -70,6 +70,8 @@ pub(crate) trait ArraySequenceImpl {
     fn shape(&self, arr: usize) -> &[u64];
     fn dtype(&self, arr: usize) -> &Dtype;
     fn spec(&self, arr: usize) -> ArraySpec<'_>;
+
+    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage;
 }
 
 /// Subtrait of [`ArraySequence`] for sequences whose arrays all share the same element type.
@@ -175,6 +177,11 @@ where
     fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
     }
+
+    #[inline]
+    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+        &self[arr].storage
+    }
 }
 
 impl<S: ArrayStorage, const N: usize> ArraySequenceElementType for [Array<S>; N] {
@@ -262,6 +269,11 @@ where
     fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
     }
+
+    #[inline]
+    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+        &self[arr].storage
+    }
 }
 impl<S: ArrayStorage, const N: usize> ArraySequenceElementType for &[Array<S>; N] {
     type ElementType = S::ElementType;
@@ -347,6 +359,10 @@ where
     #[inline]
     fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
+    }
+    #[inline]
+    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+        &self[arr].storage
     }
 }
 impl<S: ArrayStorage> ArraySequenceElementType for Vec<Array<S>> {
@@ -451,6 +467,10 @@ where
     #[inline]
     fn spec(&self, arr: usize) -> ArraySpec<'_> {
         self[arr].storage.spec()
+    }
+    #[inline]
+    fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+        &self[arr].storage
     }
 }
 impl<S: ArrayStorage> ArraySequenceElementType for &[Array<S>] {
@@ -571,6 +591,14 @@ macro_rules! impl_array_sequence_for_tuple {
             fn spec(&self, arr: usize) -> ArraySpec<'_> {
                 match arr {
                     $($idx => self.$idx.storage.spec(),)+
+                    _ => out_of_bounds_array_index(arr),
+                }
+            }
+
+            #[inline]
+            fn as_array_storage(&self, arr: usize) -> &dyn ArrayStorage {
+                match arr {
+                    $($idx => &self.$idx.storage,)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }

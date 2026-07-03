@@ -150,6 +150,11 @@ macro_rules! impl_array_storage {
                 self.0.spec.as_ref()
             }
 
+            #[inline]
+            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+                crate::storage::ArrayStorageInfo::new("Compact")
+            }
+
             fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
                 Some(CompactBorrowed(ArrayBlockTableStorageBase {
                     blocks: self.0.blocks.as_ref(),

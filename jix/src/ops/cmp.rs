@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::ops::common::define_array_op2_method;
 use crate::ops::op2::define_op2;
 use crate::ops::{Op2, Op2Kernel};
-use crate::storage::ArrayStorageTyped;
+use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
 use crate::{Array, ArrayStorage, Ty};
 
 pub(crate) mod _traits {
@@ -609,6 +609,10 @@ where
     type ElementType = Ty<bool>;
     type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("ApproxEq", [&self.0.a, &self.0.b])
+    }
 
     type DimensionChange<NewD: crate::Dimension> =
         ApproxEq<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;

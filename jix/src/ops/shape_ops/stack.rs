@@ -6,7 +6,7 @@ use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
 };
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, BlockShapeTag, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf};
 use crate::util::{
     default_strides, nd_copy, ArraySequence, ArraySequenceDimension, ArraySequenceElementType,
     DimArray,
@@ -234,6 +234,13 @@ where
             .spec(0)
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        let deps = (0..self.arrays.narrays())
+            .map(|i| self.arrays.as_array_storage(i))
+            .collect::<Vec<_>>();
+        ArrayStorageInfo::new_deps_dyn("Stack", deps)
     }
 
     crate::ops::impl_dimension_change_default!();

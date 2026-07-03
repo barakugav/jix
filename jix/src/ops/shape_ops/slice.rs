@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
@@ -278,6 +278,10 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             .spec()
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Slice", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Slice<S::DimensionChange<NewD>>;

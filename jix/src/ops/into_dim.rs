@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtyped;
 use crate::error::Result;
-use crate::storage::{OutBuf, ReadData};
+use crate::storage::{ArrayStorageInfo, OutBuf, ReadData};
 use crate::util::assert_unchecked_eq;
 use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
 
@@ -127,6 +127,10 @@ where
     #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
         self.inner.spec()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("IntoDim", [&self.inner])
     }
 
     type DimensionChange<NewD: Dimension> = IntoDim<S, NewD>;

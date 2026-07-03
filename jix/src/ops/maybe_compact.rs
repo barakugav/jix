@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{Compact, OutBuf};
+use crate::storage::{ArrayStorageInfo, Compact, OutBuf};
 use crate::{Array, ArrayParams, ArrayStorage, Dimension, ElementType};
 
 /// Storage adaptor that guarantees the wrapped array is always in compact
@@ -95,6 +95,14 @@ where
             ToCompactInner::Original(s) => s.spec(),
             ToCompactInner::Compact(c) => c.spec(),
         }
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        let inner: &dyn ArrayStorage = match &self.0 {
+            ToCompactInner::Original(s) => s,
+            ToCompactInner::Compact(c) => c,
+        };
+        ArrayStorageInfo::new_deps("MaybeCompact", [inner])
     }
     fn as_compact(
         &self,

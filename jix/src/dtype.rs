@@ -859,7 +859,7 @@ impl Dtype {
 }
 impl std::fmt::Debug for Dtype {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Dtype::Scalar");
+        let mut f = f.debug_struct("Dtype");
         match &self.0 {
             DtypeInner::Scalar { kind, .. } => f.field("scalar", kind),
             DtypeInner::StructOwned { fields, .. } => f.field("fields", fields),

@@ -7,7 +7,7 @@ use crate::error::{
     ErrorKind, Result,
 };
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
@@ -308,6 +308,10 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             .spec()
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Tile", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Tile<S::DimensionChange<NewD>>;

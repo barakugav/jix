@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::sync::Mutex;
 
 use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
@@ -215,7 +216,7 @@ impl Array {
     /// The total number of elements in the array (the product of the axis lengths).
     ///
     /// Returns:
-    ///     The total element count as an integer.
+    ///     The total element n_printed as an integer.
     ///
     /// ```python
     /// import jix
@@ -416,25 +417,71 @@ impl Array {
         crate::compact(slf, None, params)
     }
 
-    /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
+    /// Return a string representation of the array as `Array(shape=..., dtype=..., storage=...)`.
     ///
     /// Returns:
-    ///     A string of the form `Array(shape=..., dtype=...)`.
+    ///     A string of the form `Array(shape=..., dtype=..., storage=...)`.
     pub fn __str__(&self) -> String {
         let arr = &self.arr;
         let shape_str = arr
             .shape()
             .iter()
-            .map(|d| d.to_string())
+            .map(|d| format!("{},", d))
             .collect::<DimArray<_>>()
-            .join(", ");
-        format!("Array(shape=({}), dtype={})", shape_str, arr.dtype())
+            .join(" ");
+
+        /// Stop expanding the storage tree once this many nodes have been printed.
+        const MAX_ITEMS: usize = 8;
+
+        fn format_storage(
+            storage: &dyn ArrayStorage,
+            f: &mut std::fmt::Formatter<'_>,
+            n_printed: &mut usize,
+        ) -> std::fmt::Result {
+            let info = storage.info();
+            let deps = info.dependencies();
+            if ["Ref", "Any", "IntoType", "IntoDim"].contains(&info.name()) && deps.len() == 1 {
+                return format_storage(deps[0], f, n_printed);
+            }
+            f.write_str(info.name())?;
+            *n_printed += 1;
+            if !deps.is_empty() {
+                f.write_char('<')?;
+                for (i, dep) in deps.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    if *n_printed >= MAX_ITEMS {
+                        f.write_str("...")?;
+                        break;
+                    }
+                    format_storage(*dep, f, n_printed)?;
+                }
+                f.write_char('>')?;
+            }
+            Ok(())
+        }
+
+        struct StorageFormatter<'a>(&'a dyn ArrayStorage);
+        impl std::fmt::Display for StorageFormatter<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let mut n_printed = 0;
+                format_storage(self.0, f, &mut n_printed)
+            }
+        }
+
+        format!(
+            "Array(shape=({}), dtype={}, storage={})",
+            shape_str,
+            arr.dtype(),
+            StorageFormatter(arr.storage())
+        )
     }
 
-    /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
+    /// Return a string representation of the array as `Array(shape=..., dtype=..., storage=...)`.
     ///
     /// Returns:
-    ///     A string of the form `Array(shape=..., dtype=...)`.
+    ///     A string of the form `Array(shape=..., dtype=..., storage=...)`.
     #[inline]
     pub fn __repr__(&self) -> String {
         self.__str__()

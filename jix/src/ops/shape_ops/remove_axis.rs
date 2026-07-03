@@ -5,7 +5,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, OutBuf, ReadData};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf, ReadData};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
@@ -205,6 +205,10 @@ where
             .spec()
             .with_dynamic_spec(&self.spec)
             .map_flags(|flags| flags.clear_compact())
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("RemoveAxis", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = RemoveAxis<S, NewD>;

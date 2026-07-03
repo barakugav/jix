@@ -5,12 +5,14 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::common::define_array_op1_method;
-use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
+use crate::storage::{
+    ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
+};
 use crate::util::assert_unchecked_eq;
 use crate::{ArrayStorage, Ty};
 
 pub(crate) struct Op1<S, K> {
-    array: S,
+    pub(crate) array: S,
     out_dtype_: Dtype,
     kernel: K,
 }
@@ -90,6 +92,11 @@ where
         self.array.spec().with_cleared_flags()
     }
 
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Op1", [&self.array])
+    }
+
     type DimensionChange<NewD: crate::Dimension> = Op1<S::DimensionChange<NewD>, K>;
     #[inline]
     fn dimension_change<NewD: crate::Dimension>(
@@ -161,6 +168,10 @@ macro_rules! define_op1 {
             type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!(<S>);
+            #[inline]
+            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+                crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
+            }
 
             type DimensionChange<NewD: crate::Dimension> = $Op<S::DimensionChange<NewD>>;
             #[inline]
@@ -256,6 +267,10 @@ macro_rules! define_op1 {
             type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!(<S>);
+            #[inline]
+            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+                crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
+            }
 
             type DimensionChange<NewD: crate::Dimension> = $Op<S::DimensionChange<NewD>>;
             #[inline]
@@ -938,6 +953,10 @@ where
     type ElementType = Ty<<S::Item as core::ops::Mul>::Output>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!(<S>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Square", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Square<S::DimensionChange<NewD>>;
     #[inline]

@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::{ReadContext, TmpBuf};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
-use crate::storage::{ArraySpec, CompactBorrowed, OutBuf, ReadData};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, OutBuf, ReadData};
 use crate::util::assert_unchecked_eq;
 use crate::{Dimension, ElementType};
 
@@ -176,6 +176,10 @@ pub trait ArrayStorage {
     /// Returns metadata about this storage backend.
     #[doc(hidden)]
     fn spec(&self) -> ArraySpec<'_>;
+
+    /// Returns info about this storage and its dependencies, for debugging and introspection.
+    #[doc(hidden)]
+    fn info(&self) -> ArrayStorageInfo<'_>;
 
     /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]

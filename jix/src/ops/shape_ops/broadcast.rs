@@ -6,7 +6,7 @@ use crate::error::{
     bail, check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
 };
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -215,6 +215,10 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             .spec()
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Broadcast", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Broadcast<S::DimensionChange<NewD>>;

@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
 use crate::{ArrayStorage, Dimension, IntoDimension};
@@ -409,6 +409,10 @@ where
             .spec()
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Reshape", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Reshape<S, NewD>;

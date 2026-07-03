@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
-use crate::storage::{ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
+use crate::storage::{ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
 use crate::{
     Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, ReadContext,
@@ -87,6 +87,10 @@ where
     type ElementType = Ty<O>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!(<S, O, F>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Map", [&self.0])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Map<S::DimensionChange<NewD>, F>;
     #[inline]
@@ -154,6 +158,10 @@ where
     type ElementType = Ty<O>;
     type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2, O, F>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Map2", [&self.0.a, &self.0.b])
+    }
 
     type DimensionChange<NewD: crate::Dimension> =
         Map2<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>, F>;
@@ -278,6 +286,14 @@ where
 {
     type ElementType = Ty<O>;
     type Dimension = ArraysT::Dimension;
+
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        let deps = (0..self.arrays.narrays())
+            .map(|i| self.arrays.as_array_storage(i))
+            .collect::<Vec<_>>();
+        ArrayStorageInfo::new_deps_dyn("MapMultiple", deps)
+    }
 
     #[inline]
     fn read_data(

@@ -75,6 +75,9 @@ pub(crate) mod scalar;
 mod buf;
 pub use buf::*;
 
+mod info;
+pub use info::*;
+
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
 ///
 /// `ArrayStorageTyped` is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. It exposes the
@@ -116,6 +119,10 @@ where
     type Dimension = S::Dimension;
 
     impl_array_storage_forward!('b, T, <S>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Ref", [self.0])
+    }
     crate::ops::impl_dimension_change_default!();
     crate::ops::impl_element_type_change_default!();
 }

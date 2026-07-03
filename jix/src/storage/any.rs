@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::storage::params::ArraySpecPtr;
-use crate::storage::{ArraySpec, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
 /// A type-erased array storage backend that wraps any dynamically-typed storage via `Arc<dyn ArrayStorage>`.
@@ -67,6 +67,11 @@ impl ArrayStorage for ArrayStorageAny {
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         unsafe { self.spec.as_ref(|| self.inner.spec()) }
+    }
+
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Any", [&*self.inner])
     }
 
     crate::ops::impl_dimension_change_default!();

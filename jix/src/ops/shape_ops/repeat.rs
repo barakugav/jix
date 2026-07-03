@@ -7,7 +7,7 @@ use crate::error::{
     ErrorKind, Result,
 };
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
@@ -260,6 +260,10 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             .spec()
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Repeat", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Repeat<S::DimensionChange<NewD>>;

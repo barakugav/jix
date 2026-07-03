@@ -1,6 +1,6 @@
 use crate::dtype::Dtyped;
 use crate::scalar::Complex;
-use crate::storage::ArrayStorageTyped;
+use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
 use crate::{Array, ArrayStorage};
 
 /// Extracts the real part of each complex element.
@@ -62,6 +62,10 @@ where
     type ElementType = crate::Ty<T>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Real", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Real<S::DimensionChange<NewD>, T>;
     #[inline]
@@ -133,6 +137,10 @@ where
     type ElementType = crate::Ty<T>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Imaginary", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Imaginary<S::DimensionChange<NewD>, T>;
     #[inline]

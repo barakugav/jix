@@ -9,7 +9,8 @@ use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlockSize, Compact, OutBuf, Ref,
+    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageInfo, ArrayStorageTyped, BlockSize,
+    Compact, OutBuf, Ref,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
@@ -478,6 +479,11 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             #[inline]
             fn spec(&self) -> crate::storage::ArraySpec<'_> {
                 self.spec.as_ref()
+            }
+
+            #[inline]
+            fn info(&self) -> ArrayStorageInfo<'_> {
+                ArrayStorageInfo::new("FnStorage")
             }
 
             crate::ops::impl_dimension_change_default!();
