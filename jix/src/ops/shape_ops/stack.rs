@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
 };
-use crate::storage::params::ArrayBlockSpec;
+use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, BlockShapeTag, OutBuf};
 use crate::util::{
     default_strides, nd_copy, ArraySequence, ArraySequenceDimension, ArraySequenceElementType,
@@ -67,7 +67,7 @@ where
     stack_axis: usize,
 
     shape: <ArraysT::Dimension as crate::Dimension>::Larger,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 impl<ArraysT> Stack<ArraysT>
 where
@@ -115,14 +115,14 @@ where
         let mut block_shape_tag = spec.block_shape_tag().clone();
         block_shape.insert(axis, 1);
         block_shape_tag.insert(axis, BlockShapeTag::Any);
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
 
         Ok(Self {
             shape: new_shape,
-            block_spec,
+            spec,
             arrays,
             stack_axis: axis,
         })
@@ -230,7 +230,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.arrays.spec(0).with_block_spec(&self.block_spec)
+        self.arrays.spec(0).with_dynamic_spec(&self.spec)
     }
 
     crate::ops::impl_dimension_change_default!();

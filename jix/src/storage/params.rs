@@ -503,14 +503,14 @@ pub enum BlockShapeTag {
 /// Internal specs of an array.
 pub struct ArraySpec<'a> {
     shared: Pin<&'a (ArraySpecShared, PhantomPinned)>,
-    block: &'a ArrayBlockSpec,
+    dynamic: &'a ArraySpecDynamic,
 }
 /// Owned version of [`ArraySpec`].
 ///
 /// The structs holds two sets of parameters:
 /// - "shared" parameters: these are parameters that an array allocated on the heap, and any views
 ///   derived from it hold a raw pointer to it, using [`ArraySpecPtr`].
-/// - "block" parameters: these are parameters that are stored directly in the array struct. With
+/// - "dynamic" parameters: these are parameters that are stored directly in the array struct. With
 ///   the intention that these parameters are more likely to be modified by view operations.
 ///
 /// The idea behind this structure is to let views modify some of the parameters without having to
@@ -522,7 +522,7 @@ pub struct ArraySpec<'a> {
 #[derive(Clone)]
 pub(crate) struct ArraySpecOwned {
     shared: Pin<Box<(ArraySpecShared, PhantomPinned)>>,
-    block: ArrayBlockSpec,
+    dynamic: ArraySpecDynamic,
 }
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
@@ -534,7 +534,7 @@ pub(crate) struct ArraySpecShared {
 }
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
-pub(crate) struct ArrayBlockSpec {
+pub(crate) struct ArraySpecDynamic {
     pub(crate) block_shape: DimArray<BlockSize>,
     pub(crate) block_shape_tag: DimArray<BlockShapeTag>,
 }
@@ -553,13 +553,13 @@ impl ArraySpecOwned {
             encoder_params,
             decoder_params,
         };
-        let block = ArrayBlockSpec {
+        let dynamic = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
         Self {
             shared: Box::pin((shared, PhantomPinned)),
-            block,
+            dynamic,
         }
     }
 
@@ -567,16 +567,16 @@ impl ArraySpecOwned {
     pub(crate) fn as_ref(&self) -> ArraySpec<'_> {
         ArraySpec {
             shared: self.shared.as_ref(),
-            block: &self.block,
+            dynamic: &self.dynamic,
         }
     }
 }
 impl<'a> ArraySpec<'a> {
     #[inline]
-    pub(crate) fn with_block_spec(&self, block: &'a ArrayBlockSpec) -> Self {
+    pub(crate) fn with_dynamic_spec(&self, dynamic: &'a ArraySpecDynamic) -> Self {
         Self {
             shared: self.shared,
-            block,
+            dynamic,
         }
     }
 
@@ -586,8 +586,8 @@ impl<'a> ArraySpec<'a> {
         unsafe { std::mem::transmute::<&ArraySpecShared, &'a ArraySpecShared>(inner) }
     }
     #[inline(always)]
-    fn block(&self) -> &'a ArrayBlockSpec {
-        self.block
+    fn dynamic(&self) -> &'a ArraySpecDynamic {
+        self.dynamic
     }
 
     #[inline(always)]
@@ -608,11 +608,11 @@ impl<'a> ArraySpec<'a> {
     }
     #[inline(always)]
     pub(crate) fn block_shape(&self) -> &'a DimArray<BlockSize> {
-        &self.block().block_shape
+        &self.dynamic().block_shape
     }
     #[inline(always)]
     pub(crate) fn block_shape_tag(&self) -> &'a DimArray<BlockShapeTag> {
-        &self.block().block_shape_tag
+        &self.dynamic().block_shape_tag
     }
 
     pub(crate) fn read_shape_heuristic<D>(
@@ -659,7 +659,7 @@ impl<'a> ArraySpec<'a> {
 #[derive(Clone)]
 pub(crate) struct ArraySpecPtr {
     shared: SendSyncPtr<(ArraySpecShared, PhantomPinned)>,
-    block: ArrayBlockSpec,
+    dynamic: ArraySpecDynamic,
 }
 impl ArraySpecPtr {
     pub(crate) fn new(spec: ArraySpec<'_>) -> Self {
@@ -667,7 +667,7 @@ impl ArraySpecPtr {
         let shared = unsafe { SendSyncPtr::new(shared) };
         Self {
             shared,
-            block: spec.block.clone(),
+            dynamic: spec.dynamic.clone(),
         }
     }
 
@@ -696,7 +696,7 @@ impl ArraySpecPtr {
 
         ArraySpec {
             shared: unsafe { Pin::new_unchecked(&*self.shared.as_ptr()) },
-            block: &self.block,
+            dynamic: &self.dynamic,
         }
     }
 }

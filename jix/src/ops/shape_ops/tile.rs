@@ -6,7 +6,7 @@ use crate::error::{
     check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Error,
     ErrorKind, Result,
 };
-use crate::storage::params::ArrayBlockSpec;
+use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
@@ -54,7 +54,7 @@ pub struct Tile<S: ArrayStorage> {
     axis: usize,
     repeats: u64,
     new_shape: S::Dimension,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 
 impl<S: ArrayStorage> Tile<S> {
@@ -95,7 +95,7 @@ impl<S: ArrayStorage> Tile<S> {
         // there is nothing smarter than reading the whole dimension at once
         block_shape[axis] = (new_len.min(BlockSize::MAX as u64) as BlockSize).max(1);
         block_shape_tag[axis] = BlockShapeTag::Any;
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
@@ -105,7 +105,7 @@ impl<S: ArrayStorage> Tile<S> {
             axis,
             repeats,
             new_shape,
-            block_spec,
+            spec,
         })
     }
 
@@ -304,7 +304,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = Tile<S::DimensionChange<NewD>>;
@@ -320,7 +320,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             axis: self.axis,
             repeats: self.repeats,
             new_shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -334,7 +334,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             axis: self.axis,
             repeats: self.repeats,
             new_shape: self.new_shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 }

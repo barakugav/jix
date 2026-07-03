@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::params::ArrayBlockSpec;
+use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, BlockShapeTag, OutBuf, ReadData};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
@@ -83,7 +83,7 @@ pub struct InsertAxis<S, D> {
     original_dims: DimArray<u8>,
 
     shape: D,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 
 impl<S, D> InsertAxis<S, D>
@@ -133,7 +133,7 @@ where
             .enumerate()
             .filter_map(|(dim, inserted)| (!inserted).then_some(dim as u8))
             .collect();
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
@@ -142,7 +142,7 @@ where
             array,
             original_dims,
             shape,
-            block_spec,
+            spec,
         })
     }
 
@@ -235,7 +235,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = InsertAxis<S, NewD>;
@@ -249,7 +249,7 @@ where
             array: self.array,
             original_dims: self.original_dims,
             shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -262,7 +262,7 @@ where
             array: self.array.element_type_change()?,
             original_dims: self.original_dims,
             shape: self.shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 }

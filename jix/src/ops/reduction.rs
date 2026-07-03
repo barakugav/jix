@@ -6,7 +6,7 @@ use crate::dtype::{Alignment, Dtype, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::ops::LanesInfo;
-use crate::storage::params::ArrayBlockSpec;
+use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
@@ -24,7 +24,7 @@ pub(crate) struct ReductionOp<S, K, D> {
 
     out_dtype_: Dtype,
     shape: D,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 pub(crate) trait ReductionOpKernel<T> {
     type Output;
@@ -95,7 +95,7 @@ impl<S, K, D> ReductionOp<S, K, D> {
         let shape = D::from_slice(&shape);
 
         let spec = array.spec();
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape: (0..input_ndim)
                 .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape()[dim]))
                 .collect(),
@@ -108,7 +108,7 @@ impl<S, K, D> ReductionOp<S, K, D> {
             kernel,
             out_dtype_: K::Output::DTYPE,
             shape,
-            block_spec,
+            spec,
             array,
             is_reduced,
         })
@@ -162,7 +162,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array.spec().with_dynamic_spec(&self.spec)
     }
 
     type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
@@ -180,7 +180,7 @@ where
             is_reduced: self.is_reduced,
             out_dtype_: self.out_dtype_,
             shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
