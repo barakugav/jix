@@ -220,6 +220,8 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                 inputs
                     .each_ref()
                     .map(|dtype| match dtype {
+                        Operand::PyArray(array) =>
+                            Cow::Owned(format!("{}", array.get().arr.dtype())),
                         Operand::Array(array) => Cow::Owned(format!("{}", array.dtype())),
                         Operand::Scalar {
                             value,

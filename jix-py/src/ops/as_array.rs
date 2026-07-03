@@ -37,11 +37,7 @@ use crate::ops::common::Operand;
 #[pyfunction]
 #[inline]
 pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
-    if let Ok(array) = value.cast::<Array>() {
-        return Ok(array.clone());
-    };
-    let array = Operand::from_any(value)?.into_array()?;
-    Bound::new(value.py(), Array::from_core(array))
+    Operand::from_any(value)?.into_py_array(value.py())
 }
 
 #[inline]

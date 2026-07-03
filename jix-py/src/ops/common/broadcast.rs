@@ -20,6 +20,7 @@ pub(crate) fn broadcast_operands_dyn(operands: Vec<Operand>) -> PyResult<Vec<Ope
 
     let shape = {
         let mut shapes = operands.iter().map(|operand| match operand {
+            Operand::PyArray(arr) => arr.get().arr.shape(),
             Operand::Array(arr) => arr.shape(),
             Operand::Scalar { shape, .. } => shape.as_slice(),
         });
@@ -43,6 +44,7 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_cor
     assert!(shape.len() <= NDIM_MAX);
 
     let array = match operand {
+        Operand::PyArray(arr) => arr.get().arr.clone(),
         Operand::Array(arr) => arr,
         Operand::Scalar {
             value,

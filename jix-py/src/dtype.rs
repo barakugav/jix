@@ -184,11 +184,6 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dt
     Ok(dtype)
 }
 
-#[inline]
-pub(crate) fn dtype_from_any(dtype: &Bound<PyAny>) -> PyResult<Dtype> {
-    dtype_from_numpy(&PyArrayDescr::new(dtype.py(), dtype)?)
-}
-
 #[cfg(test)]
 mod tests {
     use jix_core::dtype::{Dtype, ScalarKind};

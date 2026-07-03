@@ -10,6 +10,7 @@ mod cmp;
 pub use cmp::*;
 
 mod shape_ops;
+use numpy::PyArrayDescr;
 pub use shape_ops::*;
 
 mod where_op;
@@ -38,7 +39,7 @@ use jix_core::ArrayAny;
 use pyo3::prelude::*;
 
 use crate::array::Array;
-use crate::dtype::dtype_from_any;
+use crate::dtype::dtype_from_numpy;
 
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
@@ -89,9 +90,15 @@ pub fn astype<'py>(
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = crate::ops::asarray(array)?;
     let array = &py_arr.get().arr;
-    let dtype = dtype_from_any(dtype)?;
+    let np_dtype = &PyArrayDescr::new(dtype.py(), dtype)?;
+    let dtype = dtype_from_numpy(np_dtype)?;
+
     let array = astype_impl(array.clone(), &dtype)?;
-    Bound::new(py_arr.py(), Array::from_core(array))
+
+    Bound::new(
+        py_arr.py(),
+        Array::from_core_with_np_dtype(array, np_dtype.clone().unbind()),
+    )
 }
 #[inline(never)]
 pub(crate) fn astype_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {

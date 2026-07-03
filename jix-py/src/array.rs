@@ -126,10 +126,18 @@ struct ArrayCache {
 impl Array {
     #[inline]
     pub(crate) fn from_core(array: ArrayAny) -> Self {
+        Self::from_core_impl(array, None)
+    }
+    #[inline]
+    pub(crate) fn from_core_with_np_dtype(array: ArrayAny, numpy_dtype: Py<PyArrayDescr>) -> Self {
+        Self::from_core_impl(array, Some(numpy_dtype))
+    }
+    #[inline]
+    fn from_core_impl(array: ArrayAny, numpy_dtype: Option<Py<PyArrayDescr>>) -> Self {
         Self {
             arr: array,
             cache: Mutex::new(ArrayCache {
-                numpy_dtype: None,
+                numpy_dtype,
                 context: None,
             }),
         }
