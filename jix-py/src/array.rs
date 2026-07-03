@@ -1,18 +1,20 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use jix_core::{Array as CoreArray, ArrayAny, ReadContext};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
 
-use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
-use crate::util::{dim_arr, numpy_empty, numpy_reshape, DimArray, IntoPyResult, ItemOrSequence};
+use crate::util::{
+    dim_arr, maybe_detach, numpy_empty, numpy_reshape, DimArray, IntoPyResult, ItemOrSequence,
+};
 
 /// A multi-dimensional compressed array.
 ///
@@ -330,8 +332,8 @@ impl Array {
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let shape = self.arr.shape();
-        let parsed = crate::ops::parse_basic_index(shape, index)?;
+        let arr_shape = self.arr.shape();
+        let parsed = crate::ops::parse_basic_index(arr_shape, index)?;
 
         let mut index = DimArray::new();
         let mut out_shape = DimArray::new();
@@ -344,22 +346,7 @@ impl Array {
             }
         }
 
-        let arr_shape = self.arr.shape();
         let ndim = arr_shape.len();
-        if index.len() != ndim {
-            return Err(PyIndexError::new_err(format!(
-                "index has {} dimensions, but array has {ndim}",
-                index.len()
-            )));
-        }
-        for (dim, r) in index.iter().enumerate() {
-            if r.start > r.end || r.end > arr_shape[dim] {
-                return Err(PyIndexError::new_err(format!(
-                    "index {r:?} is out of bounds for axis {dim} with size {}",
-                    arr_shape[dim]
-                )));
-            }
-        }
         let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let itemsize = self.arr.dtype().itemsize() as usize;
 
@@ -370,7 +357,10 @@ impl Array {
             unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
 
         if np_arr_data_size > 0 {
-            py.detach(|| {
+            let should_detach =
+                !self.arr.storage().spec().flags().plain_read() || np_arr_data_size > 4096;
+
+            maybe_detach(py, should_detach, || {
                 let context = self.read_ctx()?;
                 let context = context.as_ref();
 
