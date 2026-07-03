@@ -44,5 +44,9 @@
         "seekable",
         "strided",
         "unsqueeze"
-    ]
+    ],
+    "rust-analyzer.runnables.extraEnv": {
+        "VIRTUAL_ENV": "${workspaceFolder}/.venv",
+        "PYTHONPATH": "${workspaceFolder}/.venv/lib/python3.13/site-packages"
+    }
 }
