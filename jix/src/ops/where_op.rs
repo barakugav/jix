@@ -202,7 +202,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.x.spec()
+        self.x.spec().with_cleared_flags()
     }
 
     type DimensionChange<NewD: crate::Dimension> =

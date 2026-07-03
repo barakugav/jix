@@ -230,7 +230,10 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.arrays.spec(0).with_dynamic_spec(&self.spec)
+        self.arrays
+            .spec(0)
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
 
     crate::ops::impl_dimension_change_default!();

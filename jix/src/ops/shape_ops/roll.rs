@@ -170,7 +170,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec()
+        self.array.spec().with_cleared_flags()
     }
 
     type DimensionChange<NewD: crate::Dimension> = Roll<S::DimensionChange<NewD>>;

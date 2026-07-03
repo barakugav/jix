@@ -157,7 +157,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec()
+        self.array.spec().with_cleared_flags()
     }
 
     type DimensionChange<NewD: crate::Dimension> = SubDtype<S::DimensionChange<NewD>, ET>;

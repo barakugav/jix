@@ -279,6 +279,7 @@ where
     type ElementType = Ty<O>;
     type Dimension = ArraysT::Dimension;
 
+    #[inline]
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -313,10 +314,12 @@ where
             O: Dtyped,
             D: ReadDataTuple<ArraysT>,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.data.len()
             }
 
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [O; N] {
                 let mut data_itr = self.data.read_bulk_as_iter::<N>(offset);
                 std::array::from_fn(|_| (self.f)(data_itr.next().unwrap()))
@@ -330,18 +333,21 @@ where
         .transmute_items::<T>()
     }
 
+    #[inline]
     fn shape(&self) -> &[u64] {
         self.arrays.shape(0)
     }
 
+    #[inline]
     fn dtype(&self) -> &Dtype {
         let dtype = &self.out_dtype_;
         unsafe { assert_unchecked_eq!(*dtype, O::DTYPE) };
         dtype
     }
 
+    #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
-        self.arrays.spec(0)
+        self.arrays.spec(0).with_cleared_flags()
     }
 
     crate::ops::impl_dimension_change_default!();

@@ -279,7 +279,7 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.arrays.spec(0)
+        self.arrays.spec(0).with_cleared_flags()
     }
 
     crate::ops::impl_dimension_change_default!();

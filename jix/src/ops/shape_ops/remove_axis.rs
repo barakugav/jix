@@ -201,7 +201,10 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_dynamic_spec(&self.spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .map_flags(|flags| flags.clear_compact())
     }
 
     type DimensionChange<NewD: crate::Dimension> = RemoveAxis<S, NewD>;

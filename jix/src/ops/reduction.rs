@@ -162,7 +162,10 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_dynamic_spec(&self.spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
 
     type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;

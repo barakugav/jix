@@ -7,7 +7,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
-use crate::storage::params::ArraySpecOwned;
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlockSize, Compact, OutBuf, Ref,
 };
@@ -488,7 +488,11 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
         let dtype = Ty::<T>::new();
 
         params.tune(shape.as_slice(), dtype.dtype())?;
-        let spec = params.clone().into_spec(shape.as_slice(), dtype.dtype())?;
+        let spec = params.clone().into_spec(
+            shape.as_slice(),
+            dtype.dtype(),
+            ArraySpecFlags::new().set_compact(),
+        )?;
         let array = Array::from_storage(FnStorage {
             dtype,
             shape,
@@ -798,7 +802,7 @@ impl<S: ArrayStorage> Array<S> {
         // Fast path for small reads
         let spec = self.storage.spec();
         let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
-        let small_read = nitems as u64 <= min_nitems;
+        let small_read = spec.flags().plain_read() || nitems as u64 <= min_nitems;
         if small_read {
             self.storage
                 .read_data(index, &mut OutBuf::new(buf), context)?;
