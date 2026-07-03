@@ -141,12 +141,14 @@ pub trait ArrayStorage {
         where
             T: Dtyped,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 let len = self.len_;
                 unsafe { assert_unchecked_eq!(self.buf.as_slice().len(), len * size_of::<T>()) };
                 len
             }
 
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N] {
                 let len = self.len();
                 assert!(offset + N <= len);

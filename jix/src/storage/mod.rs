@@ -267,6 +267,7 @@ pub(crate) trait ReadDataExt<T>: ReadData<T>
 where
     T: Copy + Send + Sync + Sized + 'static,
 {
+    #[inline(always)]
     fn map_items<U, F: FnMut(T) -> U>(self, f: F) -> impl ReadData<U>
     where
         Self: Sized,
@@ -297,6 +298,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn zip_items<U, R>(self, other: R) -> impl ReadData<(T, U)>
     where
         Self: Sized,
@@ -334,6 +336,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn transmute_items<U>(self) -> Result<impl ReadData<U>>
     where
         Self: Sized,
@@ -345,6 +348,7 @@ where
         Ok(unsafe { self.transmute_items_unsafe() })
     }
 
+    #[inline(always)]
     unsafe fn transmute_items_unsafe<U>(self) -> impl ReadData<U>
     where
         Self: Sized,

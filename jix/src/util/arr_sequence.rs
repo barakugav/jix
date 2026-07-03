@@ -187,6 +187,7 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for [Array<S>; N] 
     type ItemSequence<'a> = [S::Item; N];
 }
 impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
+    #[inline(always)]
     fn read_data_typed<'a>(
         &'a self,
         index: &[Range<u64>],
@@ -203,10 +204,12 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
             S: ArrayStorageTyped,
             D: ReadData<S::Item>,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.data.first().map_or(0, |d| d.len())
             }
 
+            #[inline(always)]
             fn read_bulk_as_iter<'a, const M: usize>(
                 &'a mut self,
                 offset: usize,
@@ -270,6 +273,7 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for &[Array<S>; N]
     type ItemSequence<'a> = [S::Item; N];
 }
 impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N] {
+    #[inline(always)]
     fn read_data_typed<'a>(
         &'a self,
         index: &[Range<u64>],
@@ -286,10 +290,12 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
             S: ArrayStorageTyped,
             D: ReadData<S::Item>,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.data.first().map_or(0, |d| d.len())
             }
 
+            #[inline(always)]
             fn read_bulk_as_iter<'a, const M: usize>(
                 &'a mut self,
                 offset: usize,
@@ -353,6 +359,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTyped for Vec<Array<S>> {
     type ItemSequence<'a> = &'a [S::Item];
 }
 impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
+    #[inline(always)]
     fn read_data_typed<'a>(
         &'a self,
         index: &[Range<u64>],
@@ -371,10 +378,12 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
             S: ArrayStorageTyped,
             D: ReadData<S::Item>,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.data.first().map_or(0, |d| d.len())
             }
 
+            #[inline(always)]
             fn read_bulk_as_iter<'a, const M: usize>(
                 &'a mut self,
                 offset: usize,
@@ -454,6 +463,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTyped for &[Array<S>] {
     type ItemSequence<'a> = &'a [S::Item];
 }
 impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
+    #[inline(always)]
     fn read_data_typed<'a>(
         &'a self,
         index: &[Range<u64>],
@@ -472,10 +482,12 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
             S: ArrayStorageTyped,
             D: ReadData<S::Item>,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.data.first().map_or(0, |d| d.len())
             }
 
+            #[inline(always)]
             fn read_bulk_as_iter<'a, const M: usize>(
                 &'a mut self,
                 offset: usize,
@@ -587,6 +599,7 @@ macro_rules! impl_array_sequence_for_tuple {
         where
             $($S: ArrayStorageTyped,)+
         {
+            #[inline(always)]
             fn read_data_typed<'a>(
                 &'a self,
                 index: &[Range<u64>],
@@ -598,10 +611,12 @@ macro_rules! impl_array_sequence_for_tuple {
                     $($S: ArrayStorageTyped,)+
                     $($D: ReadData<$S::Item>,)+
                 {
+                    #[inline(always)]
                     fn len(&self) -> usize {
                         self.0.len()
                     }
 
+                    #[inline(always)]
                     fn read_bulk_as_iter<'a, const N: usize>(&'a mut self, offset: usize) -> impl Iterator<Item = ($($S::Item,)+)> + 'a
                     where
                         Self: Sized,

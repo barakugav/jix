@@ -130,10 +130,12 @@ where
         where
             T2: Dtyped,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.len_
             }
 
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T2; N] {
                 let len = self.len();
                 assert!(offset + N <= len);

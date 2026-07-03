@@ -472,11 +472,13 @@ impl DimSlice {
         Ok(Self { start, end, step })
     }
 
+    #[inline]
     fn len(&self) -> u64 {
         debug_assert!(self.start <= self.end);
         (self.end - self.start).div_ceil(self.step)
     }
 
+    #[inline]
     fn is_contiguous(&self) -> bool {
         self.step == 1
     }

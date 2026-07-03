@@ -210,10 +210,12 @@ where
         where
             R: ReadData<T>,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.0.as_ref().map_or(0, |r| r.len())
             }
 
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N] {
                 if let Some(r) = &mut self.0 {
                     r.read_bulk(offset)
