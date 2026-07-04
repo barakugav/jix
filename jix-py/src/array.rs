@@ -1231,8 +1231,8 @@ impl Array {
 ///             When unset, the range defaults to `(L1 data cache size, L2 cache size)`.
 ///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
 ///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
-///         - `compression_level`: Compression level passed to the codec. For Zstd the valid range
-///             is 1-22; higher values compress more but are slower to encode. Defaults to 3.
+///         - `compression_level`: Compression level passed to the codec.
+///             Higher values compress more but are slower to encode. Defaults to 3.
 ///         - `filters`: List of filters applied to the raw block bytes *before* compression.
 ///             Filters improve the compression ratio for typed numeric data: `"byte-shuffle"`
 ///             groups bytes by significance (e.g. all high bytes together, then all low bytes);
@@ -1324,7 +1324,7 @@ pub(crate) fn resolve_array_params(
             let block_size = extract_arg!("block_size", u64)?;
             let read_size = extract_arg!("read_size", ItemOrSequence<u64>)?;
             let codec = extract_arg!("codec", String)?;
-            let compression_level = extract_arg!("compression_level", u32)?;
+            let compression_level = extract_arg!("compression_level", i32)?;
             let filters = extract_arg!("filters", Vec<String>)?;
             if !kwargs.is_empty() {
                 return Err(PyTypeError::new_err(format!(

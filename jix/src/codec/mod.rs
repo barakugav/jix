@@ -39,7 +39,7 @@ pub enum Codec {
 #[derive(Clone, Debug)]
 pub(crate) struct EncoderParams {
     pub(crate) codec: Codec,
-    pub(crate) level: u8,
+    pub(crate) level: i8,
     pub(crate) filters: ArrayVec<Filter, MAX_FILTERS>,
 }
 impl Default for EncoderParams {
@@ -58,19 +58,14 @@ impl EncoderParams {
         self
     }
 
-    /// Set the compression level (0-19).
+    /// Set the compression level.
     ///
     /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the default.
     ///
     /// # Errors
     ///
     /// Returns `InvalidArgument` if `level` is out of the valid range (0-19 for zstd).
-    pub fn level(&mut self, level: u32) -> Result<&mut Self> {
-        ensure!(
-            level <= 19,
-            InvalidArgument,
-            "Codec level must be between 0 and 19"
-        );
+    pub fn level(&mut self, level: i32) -> Result<&mut Self> {
         self.level = level.try_into().unwrap();
         Ok(self)
     }
@@ -129,7 +124,7 @@ impl Encoder {
             compressor: match params.codec {
                 Codec::Zstd => {
                     #[cfg(not(miri))]
-                    let inner = zstd::bulk::Compressor::new(params.level as _).map_err(|e| {
+                    let inner = zstd::bulk::Compressor::new(params.level as i32).map_err(|e| {
                         Error::new(
                             ErrorKind::CodecError,
                             format!("Failed to create Zstd compressor: {e}"),
