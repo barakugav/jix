@@ -9,9 +9,4 @@
 - delegate power to square/sqrt if exponent is 2/0.5
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
 - use multiple threads for reads
-- remove ::storage from public API, re-export everything from lib.rs
-- add overflow checks to all shape changing ops
 - ArrayParams stream syntax
-- of_scalar -> new_scalar
-- DtypeScalarKind -> DtypeScalar
-- as_usize -> usize

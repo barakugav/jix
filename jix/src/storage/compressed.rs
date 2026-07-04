@@ -16,13 +16,13 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
-use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, ElementType};
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
+use crate::storage::{ArraySpec, ElementType, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy, DimArray};
-use crate::{ArrayParams, ArrayStorage, Dimension, OutBuf};
+use crate::{ArrayParams, ArrayStorage, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -130,7 +130,7 @@ macro_rules! impl_array_storage {
             fn read_data(
                 &self,
                 index: &[Range<u64>],
-                buf: &mut crate::OutBuf,
+                buf: &mut crate::storage::OutBuf,
                 context: &ReadContext,
             ) -> Result<()> {
                 self.0.read_data(index, buf, context)
@@ -148,6 +148,11 @@ macro_rules! impl_array_storage {
             #[inline]
             fn spec(&self) -> ArraySpec<'_> {
                 self.0.spec.as_ref()
+            }
+
+            #[inline]
+            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+                crate::storage::ArrayStorageInfo::new("Compact")
             }
 
             fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
@@ -220,7 +225,11 @@ where
     {
         let shape_slice = shape.as_slice();
         let ndim = shape_slice.len();
-        let spec = params.into_spec(shape_slice, blocks.dtype())?;
+        let spec = params.into_spec(
+            shape_slice,
+            blocks.dtype(),
+            ArraySpecFlags::new().set_compact(),
+        )?;
         let block_shape = spec.as_ref().block_shape();
         let block_grid_shape = dim_arr(ndim, |dim| {
             shape_slice[dim].div_ceil(block_shape[dim] as u64)

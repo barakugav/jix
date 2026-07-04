@@ -46,25 +46,21 @@ impl crate::dtype::Dtype {
         let mut dtype = match dtype.kind.as_ref() {
             Some(schema::dtype::Kind::Scalar(scalar)) => {
                 let scalar_kind = match scalar.kind() {
-                    schema::DtypeScalarKind::I8 => crate::dtype::DtypeScalarKind::I8,
-                    schema::DtypeScalarKind::I16 => crate::dtype::DtypeScalarKind::I16,
-                    schema::DtypeScalarKind::I32 => crate::dtype::DtypeScalarKind::I32,
-                    schema::DtypeScalarKind::I64 => crate::dtype::DtypeScalarKind::I64,
-                    schema::DtypeScalarKind::U8 => crate::dtype::DtypeScalarKind::U8,
-                    schema::DtypeScalarKind::U16 => crate::dtype::DtypeScalarKind::U16,
-                    schema::DtypeScalarKind::U32 => crate::dtype::DtypeScalarKind::U32,
-                    schema::DtypeScalarKind::U64 => crate::dtype::DtypeScalarKind::U64,
-                    schema::DtypeScalarKind::F16 => crate::dtype::DtypeScalarKind::F16,
-                    schema::DtypeScalarKind::F32 => crate::dtype::DtypeScalarKind::F32,
-                    schema::DtypeScalarKind::F64 => crate::dtype::DtypeScalarKind::F64,
-                    schema::DtypeScalarKind::ComplexF32 => {
-                        crate::dtype::DtypeScalarKind::ComplexF32
-                    }
-                    schema::DtypeScalarKind::ComplexF64 => {
-                        crate::dtype::DtypeScalarKind::ComplexF64
-                    }
-                    schema::DtypeScalarKind::Bool => crate::dtype::DtypeScalarKind::Bool,
-                    schema::DtypeScalarKind::Unspecified => {
+                    schema::ScalarKind::I8 => crate::dtype::ScalarKind::I8,
+                    schema::ScalarKind::I16 => crate::dtype::ScalarKind::I16,
+                    schema::ScalarKind::I32 => crate::dtype::ScalarKind::I32,
+                    schema::ScalarKind::I64 => crate::dtype::ScalarKind::I64,
+                    schema::ScalarKind::U8 => crate::dtype::ScalarKind::U8,
+                    schema::ScalarKind::U16 => crate::dtype::ScalarKind::U16,
+                    schema::ScalarKind::U32 => crate::dtype::ScalarKind::U32,
+                    schema::ScalarKind::U64 => crate::dtype::ScalarKind::U64,
+                    schema::ScalarKind::F16 => crate::dtype::ScalarKind::F16,
+                    schema::ScalarKind::F32 => crate::dtype::ScalarKind::F32,
+                    schema::ScalarKind::F64 => crate::dtype::ScalarKind::F64,
+                    schema::ScalarKind::ComplexF32 => crate::dtype::ScalarKind::ComplexF32,
+                    schema::ScalarKind::ComplexF64 => crate::dtype::ScalarKind::ComplexF64,
+                    schema::ScalarKind::Bool => crate::dtype::ScalarKind::Bool,
+                    schema::ScalarKind::Unspecified => {
                         bail!(InvalidArchive, "unknown dtype scalar kind (unspecified)");
                     }
                 };
@@ -96,7 +92,7 @@ impl crate::dtype::Dtype {
                     scalar_kind.itemsize() as u64 * shape_size as u64
                 );
 
-                Self::of_scalar(scalar_kind)
+                Self::new_scalar(scalar_kind)
             }
             Some(schema::dtype::Kind::Struct(schema::DtypeStruct { fields })) => {
                 let fields = fields
@@ -145,24 +141,20 @@ impl crate::dtype::Dtype {
         let kind = if let Some(scalar) = self.scalar_kind() {
             schema::dtype::Kind::Scalar(schema::DtypeScalar {
                 kind: match scalar {
-                    crate::dtype::DtypeScalarKind::I8 => schema::DtypeScalarKind::I8,
-                    crate::dtype::DtypeScalarKind::I16 => schema::DtypeScalarKind::I16,
-                    crate::dtype::DtypeScalarKind::I32 => schema::DtypeScalarKind::I32,
-                    crate::dtype::DtypeScalarKind::I64 => schema::DtypeScalarKind::I64,
-                    crate::dtype::DtypeScalarKind::U8 => schema::DtypeScalarKind::U8,
-                    crate::dtype::DtypeScalarKind::U16 => schema::DtypeScalarKind::U16,
-                    crate::dtype::DtypeScalarKind::U32 => schema::DtypeScalarKind::U32,
-                    crate::dtype::DtypeScalarKind::U64 => schema::DtypeScalarKind::U64,
-                    crate::dtype::DtypeScalarKind::F16 => schema::DtypeScalarKind::F16,
-                    crate::dtype::DtypeScalarKind::F32 => schema::DtypeScalarKind::F32,
-                    crate::dtype::DtypeScalarKind::F64 => schema::DtypeScalarKind::F64,
-                    crate::dtype::DtypeScalarKind::ComplexF32 => {
-                        schema::DtypeScalarKind::ComplexF32
-                    }
-                    crate::dtype::DtypeScalarKind::ComplexF64 => {
-                        schema::DtypeScalarKind::ComplexF64
-                    }
-                    crate::dtype::DtypeScalarKind::Bool => schema::DtypeScalarKind::Bool,
+                    crate::dtype::ScalarKind::I8 => schema::ScalarKind::I8,
+                    crate::dtype::ScalarKind::I16 => schema::ScalarKind::I16,
+                    crate::dtype::ScalarKind::I32 => schema::ScalarKind::I32,
+                    crate::dtype::ScalarKind::I64 => schema::ScalarKind::I64,
+                    crate::dtype::ScalarKind::U8 => schema::ScalarKind::U8,
+                    crate::dtype::ScalarKind::U16 => schema::ScalarKind::U16,
+                    crate::dtype::ScalarKind::U32 => schema::ScalarKind::U32,
+                    crate::dtype::ScalarKind::U64 => schema::ScalarKind::U64,
+                    crate::dtype::ScalarKind::F16 => schema::ScalarKind::F16,
+                    crate::dtype::ScalarKind::F32 => schema::ScalarKind::F32,
+                    crate::dtype::ScalarKind::F64 => schema::ScalarKind::F64,
+                    crate::dtype::ScalarKind::ComplexF32 => schema::ScalarKind::ComplexF32,
+                    crate::dtype::ScalarKind::ComplexF64 => schema::ScalarKind::ComplexF64,
+                    crate::dtype::ScalarKind::Bool => schema::ScalarKind::Bool,
                 } as i32,
                 endianness: {
                     assert!(cfg!(target_endian = "little"));
@@ -194,10 +186,10 @@ impl crate::dtype::Dtype {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dtype::{Dtype, DtypeScalarKind, Dtyped};
+    use crate::dtype::{Dtype, Dtyped, ScalarKind};
 
     fn make_scalar_proto(
-        kind: schema::DtypeScalarKind,
+        kind: schema::ScalarKind,
         itemsize: u32,
         alignment: u32,
         shape: Vec<u32>,
@@ -270,7 +262,7 @@ mod tests {
 
     #[test]
     fn from_proto_big_endian_errors() {
-        let mut proto = make_scalar_proto(schema::DtypeScalarKind::I32, 4, 4, vec![]);
+        let mut proto = make_scalar_proto(schema::ScalarKind::I32, 4, 4, vec![]);
         if let Some(schema::dtype::Kind::Scalar(ref mut s)) = proto.kind {
             s.endianness = schema::Endianness::Big as i32;
         }
@@ -279,7 +271,7 @@ mod tests {
 
     #[test]
     fn from_proto_unspecified_endianness_errors() {
-        let mut proto = make_scalar_proto(schema::DtypeScalarKind::I32, 4, 4, vec![]);
+        let mut proto = make_scalar_proto(schema::ScalarKind::I32, 4, 4, vec![]);
         if let Some(schema::dtype::Kind::Scalar(ref mut s)) = proto.kind {
             s.endianness = schema::Endianness::Unspecified as i32;
         }
@@ -288,7 +280,7 @@ mod tests {
 
     #[test]
     fn from_proto_unspecified_scalar_kind_errors() {
-        let proto = make_scalar_proto(schema::DtypeScalarKind::Unspecified, 0, 1, vec![]);
+        let proto = make_scalar_proto(schema::ScalarKind::Unspecified, 0, 1, vec![]);
         assert!(Dtype::from_proto(&proto).is_err());
     }
 
@@ -306,21 +298,21 @@ mod tests {
     #[test]
     fn from_proto_wrong_alignment_errors() {
         // i32 expects alignment=4, give it 1
-        let proto = make_scalar_proto(schema::DtypeScalarKind::I32, 4, 1, vec![]);
+        let proto = make_scalar_proto(schema::ScalarKind::I32, 4, 1, vec![]);
         assert!(Dtype::from_proto(&proto).is_err());
     }
 
     #[test]
     fn from_proto_wrong_itemsize_errors() {
         // i32 expects itemsize=4, give it 8
-        let proto = make_scalar_proto(schema::DtypeScalarKind::I32, 8, 4, vec![]);
+        let proto = make_scalar_proto(schema::ScalarKind::I32, 8, 4, vec![]);
         assert!(Dtype::from_proto(&proto).is_err());
     }
 
     #[test]
     fn from_proto_too_many_shape_dims_errors() {
         let proto = make_scalar_proto(
-            schema::DtypeScalarKind::U8,
+            schema::ScalarKind::U8,
             1,
             1,
             vec![1, 1, 1, 1, 1], // 5 dims > DTYPE_MAX_NDIM=4
@@ -352,7 +344,7 @@ mod tests {
         let proto = i32::DTYPE.to_proto();
         match proto.kind.unwrap() {
             schema::dtype::Kind::Scalar(s) => {
-                assert_eq!(s.kind(), schema::DtypeScalarKind::I32);
+                assert_eq!(s.kind(), schema::ScalarKind::I32);
                 assert_eq!(s.endianness(), schema::Endianness::Little);
             }
             _ => panic!("expected scalar"),
@@ -393,24 +385,24 @@ mod tests {
 
     #[test]
     fn all_scalar_kinds_roundtrip() {
-        let cases: &[DtypeScalarKind] = &[
-            DtypeScalarKind::I8,
-            DtypeScalarKind::I16,
-            DtypeScalarKind::I32,
-            DtypeScalarKind::I64,
-            DtypeScalarKind::U8,
-            DtypeScalarKind::U16,
-            DtypeScalarKind::U32,
-            DtypeScalarKind::U64,
-            DtypeScalarKind::F16,
-            DtypeScalarKind::F32,
-            DtypeScalarKind::F64,
-            DtypeScalarKind::ComplexF32,
-            DtypeScalarKind::ComplexF64,
-            DtypeScalarKind::Bool,
+        let cases: &[ScalarKind] = &[
+            ScalarKind::I8,
+            ScalarKind::I16,
+            ScalarKind::I32,
+            ScalarKind::I64,
+            ScalarKind::U8,
+            ScalarKind::U16,
+            ScalarKind::U32,
+            ScalarKind::U64,
+            ScalarKind::F16,
+            ScalarKind::F32,
+            ScalarKind::F64,
+            ScalarKind::ComplexF32,
+            ScalarKind::ComplexF64,
+            ScalarKind::Bool,
         ];
         for &kind in cases {
-            let original = Dtype::of_scalar(kind);
+            let original = Dtype::new_scalar(kind);
             let roundtripped = Dtype::from_proto(&original.to_proto()).unwrap();
             assert_eq!(original, roundtripped, "{kind:?} failed roundtrip");
         }

@@ -2,14 +2,14 @@ use crate::error::Result;
 use crate::ops::common::define_array_op2_method;
 use crate::ops::op2::define_op2;
 use crate::ops::{Op2, Op2Kernel};
-#[allow(unused_imports)]
-use crate::scalar::{f16, Complex};
-use crate::storage::ArrayStorageTyped;
+use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
 use crate::{Array, ArrayStorage, Ty};
 
 pub(crate) mod _traits {
-    #[allow(unused_imports)]
-    use crate::scalar::{f16, Complex};
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
 
     /// Element-wise maximum with NaN-propagating semantics for floating-point types.
     ///
@@ -205,6 +205,7 @@ pub(crate) mod _traits {
     #[cfg(feature = "half")]
     impl_approx_eq!(f16);
 
+    #[cfg(feature = "num-complex")]
     impl<F> ApproxEq for Complex<F>
     where
         F: ApproxEq<AbsoluteTolerance = F, RelativeTolerance = F>,
@@ -608,6 +609,10 @@ where
     type ElementType = Ty<bool>;
     type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("ApproxEq", [&self.0.a, &self.0.b])
+    }
 
     type DimensionChange<NewD: crate::Dimension> =
         ApproxEq<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;

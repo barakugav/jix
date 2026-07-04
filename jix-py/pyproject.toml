@@ -20,7 +20,7 @@ dynamic = [
 
 
 [project.urls]
-documentation = "https://jix.readthedocs.io/en/latest/"
+documentation = "https://jix.readthedocs.io/en/stable/"
 homepage = "https://github.com/barakugav/jix"
 source = "https://github.com/barakugav/jix"
 releasenotes = "https://github.com/barakugav/jix/releases"

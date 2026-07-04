@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use jix_core::dtype::{Dtype, DtypeScalarKind, Dtyped};
+use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
 use jix_core::ops::IntoType;
 use jix_core::storage::ArrayStorageAny;
 use jix_core::{Array as CoreArray, ArrayAny, Ty};
@@ -28,7 +28,7 @@ pub(crate) struct OpFnDescriptor<const IN_N: usize, ExtraArgs> {
     input_desc: [OpFnInputDescriptor; IN_N],
 }
 pub(crate) struct OpFnInputDescriptor {
-    dtype: DtypeScalarKind,
+    dtype: ScalarKind,
     allowed_cast: CastKind,
 }
 
@@ -203,7 +203,7 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                     .zip(op_fn.input_desc.iter())
                     .map(|(input, input_desc)| {
                         let input = input.into_array()?;
-                        astype_impl(input, &Dtype::of_scalar(input_desc.dtype))
+                        astype_impl(input, &Dtype::new_scalar(input_desc.dtype))
                     })
                     .try_collect_array()?
                     .unwrap();
@@ -220,6 +220,8 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                 inputs
                     .each_ref()
                     .map(|dtype| match dtype {
+                        Operand::PyArray(array) =>
+                            Cow::Owned(format!("{}", array.get().arr.dtype())),
                         Operand::Array(array) => Cow::Owned(format!("{}", array.dtype())),
                         Operand::Scalar {
                             value,

@@ -4,11 +4,11 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::ArraySpec;
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::iter::strides::NdIterExtStridesPtr;
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Reverses the order of elements along one or more axes, returned by
 /// [`Array::flip`](crate::Array::flip).
@@ -184,7 +184,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec()
+        self.array.spec().with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Flip", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Flip<S::DimensionChange<NewD>>;

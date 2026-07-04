@@ -6,17 +6,15 @@ use crate::dtype::{Alignment, Dtype, Dtyped};
 use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::ops::LanesInfo;
-#[allow(unused_imports)]
-use crate::scalar::{f16, Complex};
-use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, ArrayStorageTyped};
+use crate::storage::params::ArraySpecDynamic;
+use crate::storage::{ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray,
 };
-use crate::{Array, ArrayStorage, Dimension, OutBuf, Ty};
+use crate::{Array, ArrayStorage, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
     kernel: K,
@@ -26,7 +24,7 @@ pub(crate) struct ReductionOp<S, K, D> {
 
     out_dtype_: Dtype,
     shape: D,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 pub(crate) trait ReductionOpKernel<T> {
     type Output;
@@ -97,7 +95,7 @@ impl<S, K, D> ReductionOp<S, K, D> {
         let shape = D::from_slice(&shape);
 
         let spec = array.spec();
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape: (0..input_ndim)
                 .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape()[dim]))
                 .collect(),
@@ -110,7 +108,7 @@ impl<S, K, D> ReductionOp<S, K, D> {
             kernel,
             out_dtype_: K::Output::DTYPE,
             shape,
-            block_spec,
+            spec,
             array,
             is_reduced,
         })
@@ -164,7 +162,14 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("ReductionOp", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
@@ -182,7 +187,7 @@ where
             is_reduced: self.is_reduced,
             out_dtype_: self.out_dtype_,
             shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -670,6 +675,10 @@ macro_rules! define_reduction_op {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
             crate::storage::impl_array_storage_forward!(<S>);
+            #[inline]
+            fn info(&self) -> ArrayStorageInfo<'_> {
+                ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
+            }
             crate::ops::impl_dimension_change_default!();
             crate::ops::impl_element_type_change_default!();
         }
@@ -719,6 +728,10 @@ macro_rules! define_reduction_op {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = D;
             crate::storage::impl_array_storage_forward!(<S, D>);
+            #[inline]
+            fn info(&self) -> ArrayStorageInfo<'_> {
+                ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
+            }
 
             type DimensionChange<NewD: crate::Dimension> = $Op<S, NewD>;
             #[inline]
@@ -744,8 +757,10 @@ macro_rules! define_reduction_op {
 /// Max/Min/argmax/argmin do **not** appear here - those ops are bounded directly by
 /// [`crate::scalar::Maximum`] / [`crate::scalar::Minimum`] / [`PartialOrd`].
 pub(crate) mod _traits {
-    #[allow(unused_imports)]
-    use crate::scalar::{f16, Complex};
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
 
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
@@ -1887,6 +1902,10 @@ where
     type ElementType = Ty<S::Item>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, F>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Reduce", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Reduce<S, NewD, F>;
     #[inline]
@@ -2055,6 +2074,10 @@ where
     type ElementType = Ty<B>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, B, F>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Fold", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Fold<S, NewD, B, F>;
     #[inline]

@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::{ReadContext, TmpBuf};
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
-use crate::storage::{ArraySpec, CompactBorrowed, ReadData};
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, OutBuf, ReadData};
 use crate::util::assert_unchecked_eq;
 use crate::{Dimension, ElementType};
 
@@ -62,7 +62,9 @@ pub trait ArrayStorage {
     /// `ArrayStorage<ElementType = Ty<T>>`. Arrays loaded from disk carry `TypeDyn`; call
     /// [`Array::into_typed::<T>()`](crate::Array::into_typed) to assert the expected element
     /// type and re-enable those operations.
-    type ElementType: ElementType;
+    type ElementType: ElementType
+    where
+        Self: Sized;
 
     /// The compile-time dimension of arrays backed by this storage.
     ///
@@ -77,7 +79,9 @@ pub trait ArrayStorage {
     /// the input dimension's associated type (e.g. `S::Dimension::Smaller` or `S::Dimension::Larger`)
     /// or by accepting an explicit dimension argument from the caller
     /// (e.g. `reshape()` accept IntoDimension, `max()` accept `AxesArg`).
-    type Dimension: Dimension;
+    type Dimension: Dimension
+    where
+        Self: Sized;
 
     /// Read a sub-region of the array into a caller-supplied byte buffer.
     ///
@@ -141,12 +145,14 @@ pub trait ArrayStorage {
         where
             T: Dtyped,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 let len = self.len_;
                 unsafe { assert_unchecked_eq!(self.buf.as_slice().len(), len * size_of::<T>()) };
                 len
             }
 
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N] {
                 let len = self.len();
                 assert!(offset + N <= len);
@@ -171,10 +177,17 @@ pub trait ArrayStorage {
     #[doc(hidden)]
     fn spec(&self) -> ArraySpec<'_>;
 
+    /// Returns info about this storage and its dependencies, for debugging and introspection.
+    #[doc(hidden)]
+    fn info(&self) -> ArrayStorageInfo<'_>;
+
     /// If this storage is a compact block-compressed backend, return a borrowed view of itself.
     #[doc(hidden)]
     #[inline(always)]
-    fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
+    fn as_compact(&self) -> Option<CompactBorrowed<'_, Self::ElementType, Self::Dimension>>
+    where
+        Self: Sized,
+    {
         None
     }
 
@@ -214,70 +227,4 @@ pub trait ArrayStorage {
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>>
     where
         Self: Sized;
-}
-
-/// Destination for a [`read_data`](ArrayStorage::read_data) call.
-///
-/// Either a caller-provided byte buffer ([`OutBuf::new`]) or a lazily-allocated pooled buffer
-/// ([`OutBuf::new_lazy`]).
-/// After a successful `read_data` call, the buffer contents can be accessed via
-/// [`as_slice`](OutBuf::as_slice).
-pub struct OutBuf<'a>(OutBufInner<'a>);
-enum OutBufInner<'a> {
-    Lazy(&'a ReadContext),
-    Borrowed(&'a mut [u8]),
-    Tmp(TmpBuf<'a>),
-}
-impl<'a> OutBuf<'a> {
-    /// Write into a caller-provided buffer.
-    #[inline(always)]
-    pub fn new(buf: &'a mut [u8]) -> Self {
-        Self(OutBufInner::Borrowed(buf))
-    }
-
-    /// Defer allocation: the storage allocates a pooled buffer from `context` on the first demand
-    /// for a mutable slice.
-    #[inline(always)]
-    pub fn new_lazy(context: &'a ReadContext) -> Self {
-        Self(OutBufInner::Lazy(context))
-    }
-
-    #[inline]
-    pub(crate) fn get_mut(&mut self, index: &[Range<u64>], dtype: &Dtype) -> &mut [u8] {
-        if let OutBufInner::Lazy(context) = &self.0 {
-            let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-            let tmp = context.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
-            self.0 = OutBufInner::Tmp(tmp);
-        }
-        self.as_mut_slice().unwrap()
-    }
-
-    /// Returns the buffer contents, or `None` if this is a not-yet-materialized lazy `OutBuf`.
-    #[inline(always)]
-    pub fn as_slice(&self) -> Option<&[u8]> {
-        match &self.0 {
-            OutBufInner::Lazy(_) => None,
-            OutBufInner::Borrowed(buf) => Some(buf),
-            OutBufInner::Tmp(tmp) => Some(tmp.as_slice()),
-        }
-    }
-
-    /// Returns the mutable buffer contents, or `None` if this is a not-yet-materialized lazy `OutBuf`.
-    #[inline(always)]
-    pub fn as_mut_slice(&mut self) -> Option<&mut [u8]> {
-        match &mut self.0 {
-            OutBufInner::Lazy(_) => None,
-            OutBufInner::Borrowed(buf) => Some(buf),
-            OutBufInner::Tmp(tmp) => Some(tmp.as_mut_slice()),
-        }
-    }
-
-    #[track_caller]
-    #[inline(always)]
-    pub(crate) fn unwrap_tmp(self) -> TmpBuf<'a> {
-        match self.0 {
-            OutBufInner::Tmp(tmp) => tmp,
-            _ => unreachable!(),
-        }
-    }
 }

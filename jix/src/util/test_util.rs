@@ -355,6 +355,7 @@ impl ScalarStrategy for bool {
     }
 }
 
+#[cfg(feature = "num-complex")]
 impl ScalarStrategy for crate::scalar::Complex<f32> {
     fn any_strategy() -> BoxedStrategy<Self> {
         (any::<f32>(), any::<f32>())
@@ -411,6 +412,7 @@ impl ScalarStrategy for crate::scalar::Complex<f32> {
     }
 }
 
+#[cfg(feature = "num-complex")]
 impl ScalarStrategy for crate::scalar::Complex<f64> {
     fn any_strategy() -> BoxedStrategy<Self> {
         <crate::scalar::Complex<f32>>::any_strategy()

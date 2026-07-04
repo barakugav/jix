@@ -1,8 +1,7 @@
-use std::mem::MaybeUninit;
-
 use jix_core::NDIM_MAX;
 use numpy::npyffi::npy_intp;
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
+use pyo3::marker::Ungil;
 use pyo3::prelude::*;
 use pyo3::types::{PySlice, PySliceIndices};
 use pyo3_stub_gen::impl_stub_type;
@@ -51,6 +50,19 @@ impl<T> IntoPyResult<T> for Result<T, jix_core::Error> {
     #[inline(always)]
     fn into_py_result(self) -> PyResult<T> {
         self.map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{e}")))
+    }
+}
+
+#[inline]
+pub(crate) fn maybe_detach<T, F>(py: Python<'_>, detach: bool, f: F) -> T
+where
+    F: Ungil + FnOnce() -> T,
+    T: Ungil,
+{
+    if detach {
+        py.detach(f)
+    } else {
+        f()
     }
 }
 
@@ -239,19 +251,16 @@ pub(crate) trait IterExt: Iterator {
         T: Sized,
     {
         let mut iter = self;
-        let mut res = unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() };
-        let mut res_iter = res.iter_mut();
+        let mut res = arrayvec::ArrayVec::<T, N>::new();
+        let mut res_iter = 0..N;
         loop {
             match (iter.next(), res_iter.next()) {
-                (Some(item), Some(res)) => {
-                    res.write(item?);
-                }
+                (Some(item), Some(_)) => res.push(item?),
                 (None, None) => break,
                 (_, _) => return Ok(None), // length mismatch
             }
         }
-        let res = unsafe { std::mem::transmute_copy::<[MaybeUninit<T>; N], [T; N]>(&res) };
-        Ok(Some(res))
+        Ok(Some(res.into_inner().unwrap_or_else(|_| unreachable!())))
     }
 }
 impl<I> IterExt for I where I: Iterator {}

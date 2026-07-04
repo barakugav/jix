@@ -445,7 +445,12 @@ impl ArrayParams {
         block_len.try_into().unwrap()
     }
 
-    pub(crate) fn into_spec(self, shape: &[u64], dtype: &Dtype) -> Result<ArraySpecOwned> {
+    pub(crate) fn into_spec(
+        self,
+        shape: &[u64],
+        dtype: &Dtype,
+        flags: ArraySpecFlags,
+    ) -> Result<ArraySpecOwned> {
         let mut params = self;
         params.tune(shape, dtype)?;
         let spec = ArraySpecOwned::new(
@@ -455,6 +460,7 @@ impl ArrayParams {
             params.read_size.unwrap(),
             params.encoder_params.unwrap_or_default(),
             params.decoder_params.unwrap_or_default(),
+            flags,
         );
 
         {
@@ -503,14 +509,15 @@ pub enum BlockShapeTag {
 /// Internal specs of an array.
 pub struct ArraySpec<'a> {
     shared: Pin<&'a (ArraySpecShared, PhantomPinned)>,
-    block: &'a ArrayBlockSpec,
+    dynamic: &'a ArraySpecDynamic,
+    flags: ArraySpecFlags,
 }
 /// Owned version of [`ArraySpec`].
 ///
 /// The structs holds two sets of parameters:
 /// - "shared" parameters: these are parameters that an array allocated on the heap, and any views
 ///   derived from it hold a raw pointer to it, using [`ArraySpecPtr`].
-/// - "block" parameters: these are parameters that are stored directly in the array struct. With
+/// - "dynamic" parameters: these are parameters that are stored directly in the array struct. With
 ///   the intention that these parameters are more likely to be modified by view operations.
 ///
 /// The idea behind this structure is to let views modify some of the parameters without having to
@@ -522,7 +529,8 @@ pub struct ArraySpec<'a> {
 #[derive(Clone)]
 pub(crate) struct ArraySpecOwned {
     shared: Pin<Box<(ArraySpecShared, PhantomPinned)>>,
-    block: ArrayBlockSpec,
+    dynamic: ArraySpecDynamic,
+    flags: ArraySpecFlags,
 }
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
@@ -534,7 +542,7 @@ pub(crate) struct ArraySpecShared {
 }
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
-pub(crate) struct ArrayBlockSpec {
+pub(crate) struct ArraySpecDynamic {
     pub(crate) block_shape: DimArray<BlockSize>,
     pub(crate) block_shape_tag: DimArray<BlockShapeTag>,
 }
@@ -546,6 +554,7 @@ impl ArraySpecOwned {
         read_size: ReadSize,
         encoder_params: EncoderParams,
         decoder_params: DecoderParams,
+        flags: ArraySpecFlags,
     ) -> Self {
         let shared = ArraySpecShared {
             block_size,
@@ -553,13 +562,14 @@ impl ArraySpecOwned {
             encoder_params,
             decoder_params,
         };
-        let block = ArrayBlockSpec {
+        let dynamic = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
         Self {
             shared: Box::pin((shared, PhantomPinned)),
-            block,
+            dynamic,
+            flags,
         }
     }
 
@@ -567,17 +577,33 @@ impl ArraySpecOwned {
     pub(crate) fn as_ref(&self) -> ArraySpec<'_> {
         ArraySpec {
             shared: self.shared.as_ref(),
-            block: &self.block,
+            dynamic: &self.dynamic,
+            flags: self.flags,
         }
     }
 }
 impl<'a> ArraySpec<'a> {
     #[inline]
-    pub(crate) fn with_block_spec(&self, block: &'a ArrayBlockSpec) -> Self {
+    pub(crate) fn with_dynamic_spec(self, dynamic: &'a ArraySpecDynamic) -> Self {
+        Self { dynamic, ..self }
+    }
+
+    // #[inline(always)]
+    // pub(crate) fn with_flags(self, flags: ArraySpecFlags) -> Self {
+    //     Self { flags, ..self }
+    // }
+
+    #[inline(always)]
+    pub(crate) fn map_flags(self, f: impl FnOnce(ArraySpecFlags) -> ArraySpecFlags) -> Self {
         Self {
-            shared: self.shared,
-            block,
+            flags: f(self.flags),
+            ..self
         }
+    }
+
+    pub(crate) fn with_cleared_flags(mut self) -> Self {
+        self.flags = ArraySpecFlags::default();
+        self
     }
 
     #[inline(always)]
@@ -586,8 +612,8 @@ impl<'a> ArraySpec<'a> {
         unsafe { std::mem::transmute::<&ArraySpecShared, &'a ArraySpecShared>(inner) }
     }
     #[inline(always)]
-    fn block(&self) -> &'a ArrayBlockSpec {
-        self.block
+    fn dynamic(&self) -> &'a ArraySpecDynamic {
+        self.dynamic
     }
 
     #[inline(always)]
@@ -608,11 +634,18 @@ impl<'a> ArraySpec<'a> {
     }
     #[inline(always)]
     pub(crate) fn block_shape(&self) -> &'a DimArray<BlockSize> {
-        &self.block().block_shape
+        &self.dynamic().block_shape
     }
     #[inline(always)]
     pub(crate) fn block_shape_tag(&self) -> &'a DimArray<BlockShapeTag> {
-        &self.block().block_shape_tag
+        &self.dynamic().block_shape_tag
+    }
+
+    // internal use only
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn flags(&self) -> ArraySpecFlags {
+        self.flags
     }
 
     pub(crate) fn read_shape_heuristic<D>(
@@ -659,7 +692,8 @@ impl<'a> ArraySpec<'a> {
 #[derive(Clone)]
 pub(crate) struct ArraySpecPtr {
     shared: SendSyncPtr<(ArraySpecShared, PhantomPinned)>,
-    block: ArrayBlockSpec,
+    dynamic: ArraySpecDynamic,
+    flags: ArraySpecFlags,
 }
 impl ArraySpecPtr {
     pub(crate) fn new(spec: ArraySpec<'_>) -> Self {
@@ -667,7 +701,8 @@ impl ArraySpecPtr {
         let shared = unsafe { SendSyncPtr::new(shared) };
         Self {
             shared,
-            block: spec.block.clone(),
+            dynamic: spec.dynamic.clone(),
+            flags: spec.flags,
         }
     }
 
@@ -696,14 +731,62 @@ impl ArraySpecPtr {
 
         ArraySpec {
             shared: unsafe { Pin::new_unchecked(&*self.shared.as_ptr()) },
-            block: &self.block,
+            dynamic: &self.dynamic,
+            flags: self.flags,
+        }
+    }
+}
+
+pub(crate) use flags::ArraySpecFlags;
+pub(crate) mod flags {
+    #[doc(hidden)]
+    #[derive(Clone, Copy, Default)]
+    pub struct ArraySpecFlags(u8);
+
+    /// The array is stored in a compact layout, divided into nd-blocks, each compressed independently.
+    const IS_COMPACT: u8 = 0b0000_0001;
+    /// The array read operation is a simple strided copy.
+    ///
+    /// This is a hint to the caller, useful for Plain, Scalar, insert_axis, remove_axis, etc.
+    const PLAIN_READ: u8 = 0b0000_0010;
+
+    #[allow(dead_code)]
+    impl ArraySpecFlags {
+        pub(crate) fn new() -> Self {
+            Self::default()
+        }
+
+        #[doc(hidden)]
+        pub fn is_compact(&self) -> bool {
+            self.0 & IS_COMPACT != 0
+        }
+        pub(crate) fn set_compact(mut self) -> Self {
+            self.0 |= IS_COMPACT;
+            self
+        }
+        pub(crate) fn clear_compact(mut self) -> Self {
+            self.0 &= !IS_COMPACT;
+            self
+        }
+
+        #[doc(hidden)]
+        pub fn plain_read(&self) -> bool {
+            self.0 & PLAIN_READ != 0
+        }
+        pub(crate) fn set_plain_read(mut self) -> Self {
+            self.0 |= PLAIN_READ;
+            self
+        }
+        pub(crate) fn clear_plain_read(mut self) -> Self {
+            self.0 &= !PLAIN_READ;
+            self
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::params::ReadSize;
+    use crate::storage::params::{ArraySpecFlags, ReadSize};
     use crate::{Array, ArrayParams};
 
     #[test]
@@ -772,7 +855,9 @@ mod tests {
         use crate::util::cpu_cache::cache_sizes;
         let mut params = ArrayParams::new();
         params.block_shape(&[8]);
-        let spec = params.into_spec(&[8], &i32::DTYPE).unwrap();
+        let spec = params
+            .into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default())
+            .unwrap();
         let rs = spec.as_ref().read_size();
         let cs = cache_sizes();
         assert_eq!((rs.min, rs.max), (cs.l1_data as u64, cs.l2 as u64));
@@ -784,7 +869,9 @@ mod tests {
         let mut params = ArrayParams::new();
         params.block_shape(&[8]);
         params.read_size((4096, 65536));
-        let spec = params.into_spec(&[8], &i32::DTYPE).unwrap();
+        let spec = params
+            .into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default())
+            .unwrap();
         let rs = spec.as_ref().read_size();
         assert_eq!((rs.min, rs.max), (4096, 65536));
     }

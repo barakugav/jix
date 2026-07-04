@@ -2,11 +2,13 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
+use crate::error::{
+    bail, check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
+};
+use crate::storage::params::ArraySpecDynamic;
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
 /// returned by [`Array::broadcast`](crate::Array::broadcast).
@@ -56,7 +58,7 @@ pub struct Broadcast<S: ArrayStorage> {
     is_identity: bool,
 
     new_shape: S::Dimension,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 
 impl<S> Broadcast<S>
@@ -75,6 +77,7 @@ where
             "broadcast new_shape has {} dims but array has {ndim} dims",
             new_shape.len()
         );
+        check_shape_overflow(new_shape, array.dtype().itemsize() as _)?;
 
         let mut is_broadcast = DimArray::new();
         for dim in 0..ndim {
@@ -111,7 +114,7 @@ where
                 inner_spec.block_shape_tag()[dim]
             }
         });
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
@@ -121,7 +124,7 @@ where
             is_broadcast,
             is_identity,
             new_shape,
-            block_spec,
+            spec,
         })
     }
 
@@ -208,7 +211,14 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Broadcast", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Broadcast<S::DimensionChange<NewD>>;
@@ -224,7 +234,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             is_broadcast: self.is_broadcast,
             is_identity: self.is_identity,
             new_shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -238,7 +248,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             is_broadcast: self.is_broadcast,
             is_identity: self.is_identity,
             new_shape: self.new_shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 }

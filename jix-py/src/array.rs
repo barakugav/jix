@@ -1,18 +1,21 @@
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::sync::Mutex;
 
-use jix_core::{Array as CoreArray, ArrayAny, ReadContext};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
 
-use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
-use crate::util::{dim_arr, numpy_empty, numpy_reshape, DimArray, IntoPyResult, ItemOrSequence};
+use crate::util::{
+    dim_arr, maybe_detach, numpy_empty, numpy_reshape, DimArray, IntoPyResult, ItemOrSequence,
+};
 
 /// A multi-dimensional compressed array.
 ///
@@ -124,10 +127,18 @@ struct ArrayCache {
 impl Array {
     #[inline]
     pub(crate) fn from_core(array: ArrayAny) -> Self {
+        Self::from_core_impl(array, None)
+    }
+    #[inline]
+    pub(crate) fn from_core_with_np_dtype(array: ArrayAny, numpy_dtype: Py<PyArrayDescr>) -> Self {
+        Self::from_core_impl(array, Some(numpy_dtype))
+    }
+    #[inline]
+    fn from_core_impl(array: ArrayAny, numpy_dtype: Option<Py<PyArrayDescr>>) -> Self {
         Self {
             arr: array,
             cache: Mutex::new(ArrayCache {
-                numpy_dtype: None,
+                numpy_dtype,
                 context: None,
             }),
         }
@@ -205,7 +216,7 @@ impl Array {
     /// The total number of elements in the array (the product of the axis lengths).
     ///
     /// Returns:
-    ///     The total element count as an integer.
+    ///     The total element n_printed as an integer.
     ///
     /// ```python
     /// import jix
@@ -330,8 +341,8 @@ impl Array {
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let shape = self.arr.shape();
-        let parsed = crate::ops::parse_basic_index(shape, index)?;
+        let arr_shape = self.arr.shape();
+        let parsed = crate::ops::parse_basic_index(arr_shape, index)?;
 
         let mut index = DimArray::new();
         let mut out_shape = DimArray::new();
@@ -344,22 +355,7 @@ impl Array {
             }
         }
 
-        let arr_shape = self.arr.shape();
         let ndim = arr_shape.len();
-        if index.len() != ndim {
-            return Err(PyIndexError::new_err(format!(
-                "index has {} dimensions, but array has {ndim}",
-                index.len()
-            )));
-        }
-        for (dim, r) in index.iter().enumerate() {
-            if r.start > r.end || r.end > arr_shape[dim] {
-                return Err(PyIndexError::new_err(format!(
-                    "index {r:?} is out of bounds for axis {dim} with size {}",
-                    arr_shape[dim]
-                )));
-            }
-        }
         let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let itemsize = self.arr.dtype().itemsize() as usize;
 
@@ -370,7 +366,10 @@ impl Array {
             unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
 
         if np_arr_data_size > 0 {
-            py.detach(|| {
+            let should_detach =
+                !self.arr.storage().spec().flags().plain_read() || np_arr_data_size > 4096;
+
+            maybe_detach(py, should_detach, || {
                 let context = self.read_ctx()?;
                 let context = context.as_ref();
 
@@ -418,25 +417,71 @@ impl Array {
         crate::compact(slf, None, params)
     }
 
-    /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
+    /// Return a string representation of the array as `Array(shape=..., dtype=..., storage=...)`.
     ///
     /// Returns:
-    ///     A string of the form `Array(shape=..., dtype=...)`.
+    ///     A string of the form `Array(shape=..., dtype=..., storage=...)`.
     pub fn __str__(&self) -> String {
         let arr = &self.arr;
         let shape_str = arr
             .shape()
             .iter()
-            .map(|d| d.to_string())
+            .map(|d| format!("{},", d))
             .collect::<DimArray<_>>()
-            .join(", ");
-        format!("Array(shape=({}), dtype={})", shape_str, arr.dtype())
+            .join(" ");
+
+        /// Stop expanding the storage tree once this many nodes have been printed.
+        const MAX_ITEMS: usize = 8;
+
+        fn format_storage(
+            storage: &dyn ArrayStorage,
+            f: &mut std::fmt::Formatter<'_>,
+            n_printed: &mut usize,
+        ) -> std::fmt::Result {
+            let info = storage.info();
+            let deps = info.dependencies();
+            if ["Ref", "Any", "IntoType", "IntoDim"].contains(&info.name()) && deps.len() == 1 {
+                return format_storage(deps[0], f, n_printed);
+            }
+            f.write_str(info.name())?;
+            *n_printed += 1;
+            if !deps.is_empty() {
+                f.write_char('<')?;
+                for (i, dep) in deps.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    if *n_printed >= MAX_ITEMS {
+                        f.write_str("...")?;
+                        break;
+                    }
+                    format_storage(*dep, f, n_printed)?;
+                }
+                f.write_char('>')?;
+            }
+            Ok(())
+        }
+
+        struct StorageFormatter<'a>(&'a dyn ArrayStorage);
+        impl std::fmt::Display for StorageFormatter<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let mut n_printed = 0;
+                format_storage(self.0, f, &mut n_printed)
+            }
+        }
+
+        format!(
+            "Array(shape=({}), dtype={}, storage={})",
+            shape_str,
+            arr.dtype(),
+            StorageFormatter(arr.storage())
+        )
     }
 
-    /// Return a string representation of the array as `Array(shape=..., dtype=...)`.
+    /// Return a string representation of the array as `Array(shape=..., dtype=..., storage=...)`.
     ///
     /// Returns:
-    ///     A string of the form `Array(shape=..., dtype=...)`.
+    ///     A string of the form `Array(shape=..., dtype=..., storage=...)`.
     #[inline]
     pub fn __repr__(&self) -> String {
         self.__str__()
@@ -1402,7 +1447,6 @@ mod tests {
         D: ndarray::Dimension + IntoDimension<Dimension: 'static>,
     {
         let core = CoreArray::compact_ndarray(ndarray).unwrap();
-        let core = core.into_type_dyn().into_dim_dyn();
         Bound::new(py, Array::from_core(core.into_any())).unwrap()
     }
 

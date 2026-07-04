@@ -7,9 +7,10 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, Result};
 use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
-use crate::storage::params::ArraySpecOwned;
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageTyped, BlockSize, Compact, Ref,
+    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageInfo, ArrayStorageTyped, BlockSize,
+    Compact, OutBuf, Ref,
 };
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
@@ -19,8 +20,7 @@ use crate::util::{
     dim_arr, nd_copy, scale_read_shape, AlignedBytes, IterExt,
 };
 use crate::{
-    ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, OutBuf, Ty,
-    TypeDyn,
+    ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -481,6 +481,11 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 self.spec.as_ref()
             }
 
+            #[inline]
+            fn info(&self) -> ArrayStorageInfo<'_> {
+                ArrayStorageInfo::new("FnStorage")
+            }
+
             crate::ops::impl_dimension_change_default!();
             crate::ops::impl_element_type_change_default!();
         }
@@ -489,7 +494,11 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
         let dtype = Ty::<T>::new();
 
         params.tune(shape.as_slice(), dtype.dtype())?;
-        let spec = params.clone().into_spec(shape.as_slice(), dtype.dtype())?;
+        let spec = params.clone().into_spec(
+            shape.as_slice(),
+            dtype.dtype(),
+            ArraySpecFlags::new().set_compact(),
+        )?;
         let array = Array::from_storage(FnStorage {
             dtype,
             shape,
@@ -799,7 +808,7 @@ impl<S: ArrayStorage> Array<S> {
         // Fast path for small reads
         let spec = self.storage.spec();
         let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
-        let small_read = nitems as u64 <= min_nitems;
+        let small_read = spec.flags().plain_read() || nitems as u64 <= min_nitems;
         if small_read {
             self.storage
                 .read_data(index, &mut OutBuf::new(buf), context)?;
@@ -1217,12 +1226,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the
     /// resulting array can be stored alongside arrays of other concrete storage types.
-    ///
-    /// Only arrays that are already dynamically typed (`TypeDyn`, `DimDyn`) can be erased this
-    /// way. Call [`Array::into_type_dyn`] and [`Array::into_dim_dyn`] first if needed.
     pub fn into_any(self) -> ArrayAny
     where
-        S: ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync + 'static,
+        S: ArrayStorage + Send + Sync + 'static,
     {
         Array::from_storage(ArrayStorageAny::new(Arc::new(self.into_storage())))
     }
@@ -1312,6 +1318,28 @@ impl<S: ArrayStorage> Array<S> {
     /// Rarely needed to be used directly by users.
     #[inline(always)]
     pub fn from_storage(storage: S) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            use crate::NDIM_MAX;
+
+            let shape = storage.shape();
+            let ndim = shape.len();
+            debug_assert!(ndim <= NDIM_MAX);
+            debug_assert!(shape.iter().cloned().try_product().is_some());
+            let spec = storage.spec();
+            debug_assert_eq!(spec.block_shape().len(), ndim);
+            debug_assert!(spec.block_shape().iter().all(|&s| s > 0));
+            debug_assert!(spec
+                .block_shape()
+                .iter()
+                .zip(shape.iter())
+                .all(|(&b, &s)| b as u64 <= s.max(1)));
+            debug_assert_eq!(spec.block_shape_tag().len(), ndim);
+            debug_assert!(spec.block_size() > 0);
+            debug_assert!(spec.read_size().min > 0);
+            debug_assert!(spec.read_size().min <= spec.read_size().max);
+        }
+
         Self { storage }
     }
 

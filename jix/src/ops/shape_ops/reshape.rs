@@ -4,11 +4,11 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
+use crate::storage::params::ArraySpecDynamic;
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
-use crate::{ArrayStorage, Dimension, IntoDimension, OutBuf};
+use crate::{ArrayStorage, Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///
@@ -72,7 +72,7 @@ pub struct Reshape<S, D> {
     array: S,
 
     new_shape: D,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 impl<S, D> Reshape<S, D> {
     /// Constructs a [`Reshape`] storage. See the struct docs for semantics and examples.
@@ -139,14 +139,14 @@ impl<S, D> Reshape<S, D> {
                 block_shape_tag.push(BlockShapeTag::Any);
             }
         }
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
 
         Ok(Self {
             new_shape: new_shape_raw,
-            block_spec,
+            spec,
             array,
         })
     }
@@ -405,7 +405,14 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Reshape", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Reshape<S, NewD>;
@@ -419,7 +426,7 @@ where
         Ok(Reshape {
             array: self.array,
             new_shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -431,7 +438,7 @@ where
         Ok(Reshape {
             array: self.array.element_type_change()?,
             new_shape: self.new_shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 }

@@ -3,10 +3,12 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_buffer_size, check_get_range, check_ndim, Result};
-use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, ArrayStorage, BlockShapeTag, ReadData, Ty};
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
+use crate::storage::{
+    ArraySpec, ArrayStorage, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData, Ty,
+};
 use crate::util::{cast_slice_mut, dim_arr};
-use crate::{ArrayParams, Dimension, ElementType, IntoDimension, OutBuf};
+use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -64,7 +66,11 @@ impl<T, D> Scalar<T, D> {
             encoder_params: None,
             decoder_params: None,
         };
-        let spec = params.into_spec(shape.as_slice(), &T::DTYPE)?;
+        let spec = params.into_spec(
+            shape.as_slice(),
+            &T::DTYPE,
+            ArraySpecFlags::new().set_plain_read(),
+        )?;
 
         Ok(Self {
             data,
@@ -126,10 +132,12 @@ where
         where
             T2: Dtyped,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.len_
             }
 
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T2; N] {
                 let len = self.len();
                 assert!(offset + N <= len);
@@ -157,6 +165,11 @@ where
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.spec.as_ref()
+    }
+
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new("Scalar")
     }
 
     type DimensionChange<NewD: Dimension> = Scalar<T, NewD>;

@@ -2,14 +2,16 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag};
+use crate::error::{
+    check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
+};
+use crate::storage::params::ArraySpecDynamic;
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf};
 use crate::util::{
     default_strides, nd_copy, ArraySequence, ArraySequenceDimension, ArraySequenceElementType,
     DimArray,
 };
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///
@@ -65,7 +67,7 @@ where
     stack_axis: usize,
 
     shape: <ArraysT::Dimension as crate::Dimension>::Larger,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 impl<ArraysT> Stack<ArraysT>
 where
@@ -105,6 +107,7 @@ where
         check_ndim::<<Self as ArrayStorage>::Dimension>(shape0.len() + 1)?;
         let mut new_shape = DimArray::from_slice(shape0).unwrap();
         new_shape.insert(axis, narrays as u64);
+        check_shape_overflow(new_shape.as_slice(), dtype.itemsize() as _)?;
         let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
 
         let spec = arrays.spec(0);
@@ -112,14 +115,14 @@ where
         let mut block_shape_tag = spec.block_shape_tag().clone();
         block_shape.insert(axis, 1);
         block_shape_tag.insert(axis, BlockShapeTag::Any);
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
 
         Ok(Self {
             shape: new_shape,
-            block_spec,
+            spec,
             arrays,
             stack_axis: axis,
         })
@@ -227,7 +230,17 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.arrays.spec(0).with_block_spec(&self.block_spec)
+        self.arrays
+            .spec(0)
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        let deps = (0..self.arrays.narrays())
+            .map(|i| self.arrays.as_array_storage(i))
+            .collect::<Vec<_>>();
+        ArrayStorageInfo::new_deps_dyn("Stack", deps)
     }
 
     crate::ops::impl_dimension_change_default!();

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::storage::params::ArraySpecPtr;
-use crate::storage::ArraySpec;
-use crate::{ArrayStorage, DimDyn, Dimension, ElementType, OutBuf, TypeDyn, NDIM_MAX};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
+use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
 /// A type-erased array storage backend that wraps any dynamically-typed storage via `Arc<dyn ArrayStorage>`.
 ///
@@ -19,7 +19,7 @@ use crate::{ArrayStorage, DimDyn, Dimension, ElementType, OutBuf, TypeDyn, NDIM_
 /// existing array with [`Array::into_any`](crate::Array::into_any).
 #[derive(Clone)]
 pub struct ArrayStorageAny {
-    inner: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
+    inner: Arc<dyn ArrayStorage + Send + Sync>,
 
     // TODO: clone() doesnt need to clone these
     shape: DimDyn,
@@ -28,9 +28,7 @@ pub struct ArrayStorageAny {
 }
 impl ArrayStorageAny {
     /// Wrap an existing `Arc`-boxed storage as an `ArrayStorageAny`.
-    pub(crate) fn new(
-        storage: Arc<dyn ArrayStorage<ElementType = TypeDyn, Dimension = DimDyn> + Send + Sync>,
-    ) -> Self {
+    pub(crate) fn new(storage: Arc<dyn ArrayStorage + Send + Sync>) -> Self {
         Self {
             shape: DimDyn::from_slice(storage.shape()),
             element_type: TypeDyn::from_dtype(storage.dtype().clone()).unwrap(),
@@ -69,6 +67,11 @@ impl ArrayStorage for ArrayStorageAny {
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         unsafe { self.spec.as_ref(|| self.inner.spec()) }
+    }
+
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Any", [&*self.inner])
     }
 
     crate::ops::impl_dimension_change_default!();

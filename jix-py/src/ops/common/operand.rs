@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
-use jix_core::dtype::{DtypeScalarKind, Dtyped};
+use jix_core::dtype::{Dtyped, ScalarKind};
 use jix_core::scalar::{f16, Complex};
 use jix_core::{Array as CoreArray, ArrayAny};
 
@@ -14,6 +14,7 @@ use crate::util::{check_ndim, DimArray, IntoPyResult};
 use crate::Array;
 
 pub(crate) enum Operand {
+    PyArray(Py<Array>),
     Array(ArrayAny),
     Scalar {
         value: Scalar,
@@ -29,7 +30,7 @@ impl Operand {
 
     fn from_any_impl(value: &Bound<'_, PyAny>, only_scalar: bool) -> PyResult<Self> {
         if !only_scalar && let Ok(array) = value.cast::<Array>() {
-            return Ok(Self::Array(array.get().arr.clone()));
+            return Ok(Self::PyArray(array.clone().unbind()));
         };
         let py = value.py();
 
@@ -92,44 +93,42 @@ impl Operand {
             let item = array.call_method0("item")?;
 
             let (value, precision) = match scalar {
-                DtypeScalarKind::I8 => (
+                ScalarKind::I8 => (
                     Scalar::Int(item.extract::<i8>()? as i64),
                     Some(Precision::P1),
                 ),
-                DtypeScalarKind::I16 => (
+                ScalarKind::I16 => (
                     Scalar::Int(item.extract::<i16>()? as i64),
                     Some(Precision::P2),
                 ),
-                DtypeScalarKind::I32 => (
+                ScalarKind::I32 => (
                     Scalar::Int(item.extract::<i32>()? as i64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::I64 => (Scalar::Int(item.extract::<i64>()?), Some(Precision::P8)),
-                DtypeScalarKind::U8 => (
+                ScalarKind::I64 => (Scalar::Int(item.extract::<i64>()?), Some(Precision::P8)),
+                ScalarKind::U8 => (
                     Scalar::UInt(item.extract::<u8>()? as u64),
                     Some(Precision::P1),
                 ),
-                DtypeScalarKind::U16 => (
+                ScalarKind::U16 => (
                     Scalar::UInt(item.extract::<u16>()? as u64),
                     Some(Precision::P2),
                 ),
-                DtypeScalarKind::U32 => (
+                ScalarKind::U32 => (
                     Scalar::UInt(item.extract::<u32>()? as u64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::U64 => (Scalar::UInt(item.extract::<u64>()?), Some(Precision::P8)),
-                DtypeScalarKind::F16 => (
+                ScalarKind::U64 => (Scalar::UInt(item.extract::<u64>()?), Some(Precision::P8)),
+                ScalarKind::F16 => (
                     Scalar::Float(item.extract::<f32>()? as f64),
                     Some(Precision::P2),
                 ),
-                DtypeScalarKind::F32 => (
+                ScalarKind::F32 => (
                     Scalar::Float(item.extract::<f32>()? as f64),
                     Some(Precision::P4),
                 ),
-                DtypeScalarKind::F64 => {
-                    (Scalar::Float(item.extract::<f64>()?), Some(Precision::P8))
-                }
-                DtypeScalarKind::ComplexF32 => {
+                ScalarKind::F64 => (Scalar::Float(item.extract::<f64>()?), Some(Precision::P8)),
+                ScalarKind::ComplexF32 => {
                     let re = item.getattr("real")?.extract::<f32>()?;
                     let im = item.getattr("imag")?.extract::<f32>()?;
                     (
@@ -137,12 +136,12 @@ impl Operand {
                         Some(Precision::P4),
                     )
                 }
-                DtypeScalarKind::ComplexF64 => {
+                ScalarKind::ComplexF64 => {
                     let re = item.getattr("real")?.extract::<f64>()?;
                     let im = item.getattr("imag")?.extract::<f64>()?;
                     (Scalar::Complex(Complex::new(re, im)), Some(Precision::P8))
                 }
-                DtypeScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), None),
+                ScalarKind::Bool => (Scalar::Bool(item.extract::<bool>()?), None),
             };
             return Ok(Self::Scalar {
                 value,
@@ -181,6 +180,7 @@ impl Operand {
 
     pub(crate) fn into_array(self) -> PyResult<ArrayAny> {
         match self {
+            Operand::PyArray(array) => Ok(array.get().arr.clone()),
             Operand::Array(array) => Ok(array),
             Operand::Scalar {
                 value,
@@ -194,7 +194,7 @@ impl Operand {
                     let array = jix_core::Array::from_storage(
                         jix_core::__private::Scalar::new(value, shape).into_py_result()?,
                     );
-                    Ok(array.into_type_dyn().into_any())
+                    Ok(array.into_any())
                 }
                 #[allow(clippy::unnecessary_cast)]
                 let array = match value {
@@ -236,8 +236,21 @@ impl Operand {
         }
     }
 
+    pub(crate) fn into_py_array<'py>(self, py: Python<'py>) -> PyResult<Bound<'py, Array>> {
+        match self {
+            Operand::PyArray(array) => Ok(array.into_bound(py)),
+            _ => Bound::new(py, Array::from_core(self.into_array()?)),
+        }
+    }
+
     pub(crate) fn rank_precision(&self) -> Option<(Rank, Option<Precision>)> {
         match self {
+            Operand::PyArray(arr) => arr
+                .get()
+                .arr
+                .dtype()
+                .try_to_scalar()
+                .map(scalar_kind_to_rank_precision),
             Operand::Array(arr) => arr
                 .dtype()
                 .try_to_scalar()
@@ -260,7 +273,7 @@ impl Operand {
     }
 }
 
-pub(crate) fn scalar_kind_to_rank_precision(kind: DtypeScalarKind) -> (Rank, Option<Precision>) {
+pub(crate) fn scalar_kind_to_rank_precision(kind: ScalarKind) -> (Rank, Option<Precision>) {
     let (rank, precision) = match kind {
         _ if kind.is_bool() => (Rank::Bool, 1),
         _ if kind.is_unsigned_integer() => (Rank::UInt, kind.itemsize()),
@@ -285,7 +298,9 @@ impl Scalar {
     pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
         match Operand::from_any_impl(value, true)? {
             Operand::Scalar { value, .. } => Ok(value),
-            Operand::Array(_) => Err(PyErr::new::<PyTypeError, _>("expected a scalar value")),
+            Operand::PyArray(_) | Operand::Array(_) => {
+                Err(PyErr::new::<PyTypeError, _>("expected a scalar value"))
+            }
         }
     }
 }

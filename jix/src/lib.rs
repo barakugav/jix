@@ -388,7 +388,7 @@ pub mod dtype;
 pub mod scalar;
 
 pub mod storage;
-pub use storage::core::{ArrayStorage, OutBuf};
+pub use storage::core::ArrayStorage;
 pub use storage::params::ArrayParams;
 
 mod archive;
@@ -419,5 +419,6 @@ pub type ArrayAny = Array<storage::ArrayStorageAny>;
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::storage::params::flags::ArraySpecFlags;
     pub use crate::storage::scalar::Scalar;
 }

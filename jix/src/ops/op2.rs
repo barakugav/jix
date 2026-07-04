@@ -4,13 +4,15 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::common::define_array_op2_method;
-use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData, ReadDataExt};
+use crate::storage::{
+    ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
+};
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, OutBuf, Ty};
+use crate::{Array, ArrayStorage, Ty};
 
 pub(crate) struct Op2<S1, S2, K> {
-    a: S1,
-    b: S2,
+    pub(crate) a: S1,
+    pub(crate) b: S2,
     out_dtype_: Dtype,
     kernel: K,
 }
@@ -88,6 +90,11 @@ where
             .transmute_items::<T>()
     }
 
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Op2", [&self.a, &self.b])
+    }
+
     #[inline(always)]
     fn shape(&self) -> &[u64] {
         let shape = self.a.shape();
@@ -104,7 +111,7 @@ where
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.a.spec()
+        self.a.spec().with_cleared_flags()
     }
 
     type DimensionChange<NewD: crate::Dimension> =
@@ -177,6 +184,10 @@ macro_rules! define_op2 {
             type ElementType = crate::Ty<<S1::Item as $($trait)::+<S2::Item>>::Output>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
+            #[inline]
+            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+                crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.a, &self.0.b])
+            }
 
             type DimensionChange<NewD: crate::Dimension> = $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
             #[inline]
@@ -235,6 +246,10 @@ macro_rules! define_op2 {
             type ElementType = crate::Ty<$output_type>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
+            #[inline]
+            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+                crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.a, &self.0.b])
+            }
 
             type DimensionChange<NewD: crate::Dimension> = $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
             #[inline]
@@ -375,6 +390,10 @@ macro_rules! define_op2_rhs_fixed {
             type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
+            #[inline]
+            fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+                crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.a, &self.0.b])
+            }
 
             type DimensionChange<NewD: crate::Dimension> = $Op<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>>;
             #[inline]

@@ -1,10 +1,12 @@
 use crate::dtype::Dtyped;
-use crate::storage::ArrayStorageTyped;
+use crate::storage::{ArrayStorageInfo, ArrayStorageTyped};
 use crate::{Array, ArrayStorage};
 
 pub(crate) mod _traits {
-    #[allow(unused_imports)]
-    use crate::scalar::{f16, Complex};
+    #[cfg(feature = "half")]
+    use crate::scalar::f16;
+    #[cfg(feature = "num-complex")]
+    use crate::scalar::Complex;
 
     /// Cast a scalar value to another scalar type.
     ///
@@ -69,9 +71,11 @@ pub(crate) mod _traits {
             impl_cast!($src_type => f32);
             impl_cast!($src_type => f64);
             impl_cast!($src_type => bool);
-            #[cfg(feature = "half")]
+            #[cfg(all(feature = "half", feature = "num-complex"))]
             impl_cast_num!(@impl_to_complex, $src_type, Complex<f16>);
+            #[cfg(feature = "num-complex")]
             impl_cast_num!(@impl_to_complex, $src_type, Complex<f32>);
+            #[cfg(feature = "num-complex")]
             impl_cast_num!(@impl_to_complex, $src_type, Complex<f64>);
         };
 
@@ -101,14 +105,7 @@ pub(crate) mod _traits {
     impl_cast_num!(f64);
     impl_cast_num!(bool);
 
-    #[cfg(not(feature = "half"))]
-    impl Cast<f16> for f16 {
-        #[inline(always)]
-        fn cast(self) -> f16 {
-            self
-        }
-    }
-
+    #[cfg(feature = "num-complex")]
     macro_rules! impl_cast_complex_to_complex {
         ($src_type:ident, $dst_type:ident) => {
             impl Cast<Complex<$dst_type>> for Complex<$src_type> {
@@ -122,6 +119,7 @@ pub(crate) mod _traits {
             }
         };
     }
+    #[cfg(feature = "num-complex")]
     macro_rules! impl_cast_complex {
         ($src_type:ident) => {
             #[cfg(feature = "half")]
@@ -137,9 +135,11 @@ pub(crate) mod _traits {
             }
         };
     }
-    #[cfg(feature = "half")]
+    #[cfg(all(feature = "half", feature = "num-complex"))]
     impl_cast_complex!(f16);
+    #[cfg(feature = "num-complex")]
     impl_cast_complex!(f32);
+    #[cfg(feature = "num-complex")]
     impl_cast_complex!(f64);
 }
 
@@ -219,6 +219,10 @@ where
     type ElementType = crate::Ty<T>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Cast", [&self.0.array])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Cast<S::DimensionChange<NewD>, T>;
     #[inline]
@@ -250,11 +254,14 @@ where
 #[cfg(test)]
 mod tests {
 
-    #[allow(unused_imports)]
+    #[cfg(feature = "half")]
     use crate::scalar::f16;
+    #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
+    #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;
+    #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
 
@@ -327,25 +334,26 @@ mod tests {
             }
         }
         macro_rules! impl_cast_from_f16 {
-        ($($dst:ty),+) => {
-            $(impl CastTo<$dst> for f16 {
-                fn cast_to(self) -> $dst { self.to_f32() as $dst }
-            })+
+            ($($dst:ty),+) => {
+                $(impl CastTo<$dst> for f16 {
+                    fn cast_to(self) -> $dst { self.to_f32() as $dst }
+                })+
+            }
         }
-    }
         impl_cast_from_f16!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
         impl CastTo<bool> for f16 {
             fn cast_to(self) -> bool {
                 self.to_f32() != 0.0
             }
         }
-    }
-    impl CastTo<f16> for f16 {
-        fn cast_to(self) -> f16 {
-            self
+        impl CastTo<f16> for f16 {
+            fn cast_to(self) -> f16 {
+                self
+            }
         }
     }
 
+    #[cfg(feature = "num-complex")]
     impl CastTo<Complex<f64>> for Complex<f32> {
         fn cast_to(self) -> Complex<f64> {
             Complex {
@@ -354,6 +362,7 @@ mod tests {
             }
         }
     }
+    #[cfg(feature = "num-complex")]
     impl CastTo<Complex<f32>> for Complex<f64> {
         fn cast_to(self) -> Complex<f32> {
             Complex {
@@ -362,11 +371,13 @@ mod tests {
             }
         }
     }
+    #[cfg(feature = "num-complex")]
     impl CastTo<Complex<f32>> for Complex<f32> {
         fn cast_to(self) -> Complex<f32> {
             self
         }
     }
+    #[cfg(feature = "num-complex")]
     impl CastTo<Complex<f64>> for Complex<f64> {
         fn cast_to(self) -> Complex<f64> {
             self
@@ -433,6 +444,7 @@ mod tests {
     #[cfg(feature = "half")]
     test_cast_pair!(f16, f16);
     // complex (feature-gated)
+    #[cfg(feature = "num-complex")]
     test_cast_pair!(complex_f32, complex_f64);
     #[cfg(feature = "num-complex")]
     test_cast_pair!(complex_f64, complex_f32);
@@ -440,18 +452,4 @@ mod tests {
     test_cast_pair!(complex_f32, complex_f32);
     #[cfg(feature = "num-complex")]
     test_cast_pair!(complex_f64, complex_f64);
-
-    #[cfg(not(feature = "half"))]
-    #[test]
-    fn cast_f16_to_f16() {
-        // must work even without the "half" feature, since it's a no-op cast
-
-        use ndarray::array;
-
-        use crate::util::arr_params;
-        use crate::Array;
-
-        let a = Array::compact_ndarray_with(&array![f16::from_bits(17)], arr_params(&[1])).unwrap();
-        let _ = a.cast::<f16>();
-    }
 }

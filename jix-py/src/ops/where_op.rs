@@ -1,6 +1,6 @@
 use crate::ops::any_to_core_array;
 use crate::util::IntoPyResult;
-use crate::Array;
+use crate::{asarray, Array};
 
 /// Selects elements element-wise from `x` or `y` based on `condition`.
 ///
@@ -46,11 +46,17 @@ pub fn r#where<'py>(
     x: &pyo3::Bound<'py, pyo3::PyAny>,
     y: &pyo3::Bound<'py, pyo3::PyAny>,
 ) -> pyo3::PyResult<Array> {
+    let py = condition.py();
     let condition = any_to_core_array(condition)?
         .into_typed::<bool>()
         .into_py_result()?;
-    let x = any_to_core_array(x)?;
+    let x_py = asarray(x)?;
+    let x = any_to_core_array(&x_py)?;
     let y = any_to_core_array(y)?;
     let ret = jix_core::ops::Where::new_array(condition, x, y).into_py_result()?;
-    Ok(Array::from_core(ret.into_any()))
+    let np_dtype = x_py.get().dtype(py)?;
+    Ok(Array::from_core_with_np_dtype(
+        ret.into_any(),
+        np_dtype.unbind(),
+    ))
 }

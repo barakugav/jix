@@ -72,6 +72,12 @@ pub use block::BlockSize;
 
 pub(crate) mod scalar;
 
+mod buf;
+pub use buf::*;
+
+mod info;
+pub use info::*;
+
 /// Supertrait for [`ArrayStorage`] implementations whose element type is statically known.
 ///
 /// `ArrayStorageTyped` is a shorthand for `ArrayStorage<ElementType = Ty<T>>`. It exposes the
@@ -81,7 +87,7 @@ pub(crate) mod scalar;
 ///
 /// To obtain `ArrayStorageTyped` from a `TypeDyn` array (e.g. after loading from disk), use
 /// [`Array::into_typed::<T>()`](crate::Array::into_typed).
-pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> {
+pub trait ArrayStorageTyped: ArrayStorage<ElementType = Ty<Self::Item>> + Sized {
     /// The concrete Rust element type stored in this array (e.g. `f32`, `i64`).
     type Item: Dtyped;
 }
@@ -113,6 +119,10 @@ where
     type Dimension = S::Dimension;
 
     impl_array_storage_forward!('b, T, <S>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Ref", [self.0])
+    }
     crate::ops::impl_dimension_change_default!();
     crate::ops::impl_element_type_change_default!();
 }
@@ -132,7 +142,7 @@ macro_rules! impl_array_storage_forward {
         fn read_data(
             &self,
             index: &[::core::ops::Range<u64>],
-            buf: &mut crate::OutBuf,
+            buf: &mut crate::storage::OutBuf,
             context: &crate::codec::ReadContext,
         ) -> crate::error::Result<()> {
             self.0.read_data(index, buf, context)
@@ -264,6 +274,7 @@ pub(crate) trait ReadDataExt<T>: ReadData<T>
 where
     T: Copy + Send + Sync + Sized + 'static,
 {
+    #[inline(always)]
     fn map_items<U, F: FnMut(T) -> U>(self, f: F) -> impl ReadData<U>
     where
         Self: Sized,
@@ -294,6 +305,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn zip_items<U, R>(self, other: R) -> impl ReadData<(T, U)>
     where
         Self: Sized,
@@ -331,6 +343,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn transmute_items<U>(self) -> Result<impl ReadData<U>>
     where
         Self: Sized,
@@ -342,6 +355,7 @@ where
         Ok(unsafe { self.transmute_items_unsafe() })
     }
 
+    #[inline(always)]
     unsafe fn transmute_items_unsafe<U>(self) -> impl ReadData<U>
     where
         Self: Sized,

@@ -173,9 +173,11 @@ impl AxesArg for &[usize] {
     type ReducedDimension<D: Dimension> = DimDyn;
     type ExpandedDimension<D: Dimension> = DimDyn;
 
+    #[inline(always)]
     fn len(&self) -> usize {
         <[_]>::len(self)
     }
+    #[inline(always)]
     fn get(&self, idx: usize) -> usize {
         self[idx]
     }

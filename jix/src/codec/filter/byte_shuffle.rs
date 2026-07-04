@@ -33,6 +33,7 @@ impl FilterImpl for ByteShuffleFilter {
 #[cfg(test)]
 mod tests {
     use super::ByteShuffleFilter;
+    #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
     use crate::util::ScalarStrategy;
 
@@ -61,7 +62,9 @@ mod tests {
     test_roundtrip!(crate::scalar::f16, f16_roundtrip);
     test_roundtrip!(f32, f32_roundtrip);
     test_roundtrip!(f64, f64_roundtrip);
+    #[cfg(feature = "num-complex")]
     test_roundtrip!(Complex<f32>, complex_f32_roundtrip);
+    #[cfg(feature = "num-complex")]
     test_roundtrip!(Complex<f64>, complex_f64_roundtrip);
     test_roundtrip!(bool, bool_roundtrip);
 }

@@ -3,11 +3,11 @@ use std::ops::Range;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
-use crate::storage::{ArrayStorageTyped, ReadData, ReadDataExt};
+use crate::storage::{ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
 use crate::util::assert_unchecked_eq;
 use crate::{
-    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, OutBuf,
-    ReadContext, ReadDataTuple, Ty,
+    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, ReadContext,
+    ReadDataTuple, Ty,
 };
 
 impl<S> Array<S>
@@ -87,6 +87,10 @@ where
     type ElementType = Ty<O>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!(<S, O, F>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Map", [&self.0])
+    }
 
     type DimensionChange<NewD: crate::Dimension> = Map<S::DimensionChange<NewD>, F>;
     #[inline]
@@ -154,6 +158,10 @@ where
     type ElementType = Ty<O>;
     type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2, O, F>);
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Map2", [&self.0.a, &self.0.b])
+    }
 
     type DimensionChange<NewD: crate::Dimension> =
         Map2<S1::DimensionChange<NewD>, S2::DimensionChange<NewD>, F>;
@@ -279,6 +287,15 @@ where
     type ElementType = Ty<O>;
     type Dimension = ArraysT::Dimension;
 
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        let deps = (0..self.arrays.narrays())
+            .map(|i| self.arrays.as_array_storage(i))
+            .collect::<Vec<_>>();
+        ArrayStorageInfo::new_deps_dyn("MapMultiple", deps)
+    }
+
+    #[inline]
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -313,10 +330,12 @@ where
             O: Dtyped,
             D: ReadDataTuple<ArraysT>,
         {
+            #[inline(always)]
             fn len(&self) -> usize {
                 self.data.len()
             }
 
+            #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [O; N] {
                 let mut data_itr = self.data.read_bulk_as_iter::<N>(offset);
                 std::array::from_fn(|_| (self.f)(data_itr.next().unwrap()))
@@ -330,18 +349,21 @@ where
         .transmute_items::<T>()
     }
 
+    #[inline]
     fn shape(&self) -> &[u64] {
         self.arrays.shape(0)
     }
 
+    #[inline]
     fn dtype(&self) -> &Dtype {
         let dtype = &self.out_dtype_;
         unsafe { assert_unchecked_eq!(*dtype, O::DTYPE) };
         dtype
     }
 
+    #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
-        self.arrays.spec(0)
+        self.arrays.spec(0).with_cleared_flags()
     }
 
     crate::ops::impl_dimension_change_default!();

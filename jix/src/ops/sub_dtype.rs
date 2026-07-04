@@ -3,8 +3,8 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
-use crate::storage::ArraySpec;
-use crate::{Array, ArrayStorage, ElementType, OutBuf, Ty, TypeDyn};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
+use crate::{Array, ArrayStorage, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
 where
@@ -157,7 +157,11 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec()
+        self.array.spec().with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("SubDtype", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = SubDtype<S::DimensionChange<NewD>, ET>;

@@ -1,8 +1,6 @@
 use crate::ops::common::{define_array_op1_method, define_array_op2_method};
 use crate::ops::op2::define_op2;
 use crate::ops::{define_op1, define_op2_rhs_fixed};
-#[allow(unused_imports)]
-use crate::scalar::{f16, Complex};
 use crate::{Array, ArrayStorage};
 
 define_op2!(

@@ -4,11 +4,11 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::storage::params::ArrayBlockSpec;
-use crate::storage::ArraySpec;
+use crate::storage::params::ArraySpecDynamic;
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -70,7 +70,7 @@ pub struct Slice<S: ArrayStorage> {
     no_steps: bool,
 
     shape: S::Dimension,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 
 impl<S: ArrayStorage> Slice<S> {
@@ -105,7 +105,7 @@ impl<S: ArrayStorage> Slice<S> {
                 // block_shape_tag is unchanged
             }
         }
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag: inner_spec.block_shape_tag().clone(),
         };
@@ -115,7 +115,7 @@ impl<S: ArrayStorage> Slice<S> {
             slice,
             no_steps,
             shape,
-            block_spec,
+            spec,
         })
     }
 
@@ -274,7 +274,14 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Slice", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Slice<S::DimensionChange<NewD>>;
@@ -289,7 +296,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             slice: self.slice,
             no_steps: self.no_steps,
             shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -303,7 +310,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             slice: self.slice,
             no_steps: self.no_steps,
             shape: self.shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 }
@@ -469,11 +476,13 @@ impl DimSlice {
         Ok(Self { start, end, step })
     }
 
+    #[inline]
     fn len(&self) -> u64 {
         debug_assert!(self.start <= self.end);
         (self.end - self.start).div_ceil(self.step)
     }
 
+    #[inline]
     fn is_contiguous(&self) -> bool {
         self.step == 1
     }

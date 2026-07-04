@@ -14,7 +14,7 @@ message Dtype {
 }
 
 message DtypeScalar {
-  DtypeScalarKind kind = 1;
+  ScalarKind kind = 1;
   Endianness endianness = 2;
 }
 
@@ -29,7 +29,7 @@ message DtypeStruct {
 }
 
 // The kind of a scalar dtype
-enum DtypeScalarKind {
+enum ScalarKind {
   DTYPE_SCALAR_KIND_UNSPECIFIED = 0;
   DTYPE_SCALAR_KIND_I8 = 1;
   DTYPE_SCALAR_KIND_I16 = 2;

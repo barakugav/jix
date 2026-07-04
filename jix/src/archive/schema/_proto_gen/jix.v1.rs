@@ -58,7 +58,7 @@ pub mod dtype {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DtypeScalar {
-    #[prost(enumeration = "DtypeScalarKind", tag = "1")]
+    #[prost(enumeration = "ScalarKind", tag = "1")]
     pub kind: i32,
     #[prost(enumeration = "Endianness", tag = "2")]
     pub endianness: i32,
@@ -84,7 +84,7 @@ pub mod dtype_struct {
 /// The kind of a scalar dtype
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
-pub enum DtypeScalarKind {
+pub enum ScalarKind {
     Unspecified = 0,
     I8 = 1,
     I16 = 2,
@@ -101,7 +101,7 @@ pub enum DtypeScalarKind {
     ComplexF64 = 13,
     Bool = 14,
 }
-impl DtypeScalarKind {
+impl ScalarKind {
     /// String value of the enum field names used in the ProtoBuf definition.
     ///
     /// The values are not transformed in any way and thus are considered stable

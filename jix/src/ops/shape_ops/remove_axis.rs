@@ -4,10 +4,10 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, ReadData};
+use crate::storage::params::ArraySpecDynamic;
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf, ReadData};
 use crate::util::DimArray;
-use crate::{dim_arr, Array, ArrayStorage, Dimension, OutBuf};
+use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Removes length-1 dimensions from an array's shape,
 /// returned by [`Array::remove_axis`](crate::Array::remove_axis). The inverse operation
@@ -66,7 +66,7 @@ pub struct RemoveAxis<S, D> {
     axes_mapping: DimArray<u8>,
 
     shape: D,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 
 impl<S, D> RemoveAxis<S, D>
@@ -125,7 +125,7 @@ where
         }
         let shape = D::from_slice(&shape);
 
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
@@ -134,7 +134,7 @@ where
             array,
             axes_mapping,
             shape,
-            block_spec,
+            spec,
         })
     }
 
@@ -201,7 +201,14 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .map_flags(|flags| flags.clear_compact())
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("RemoveAxis", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = RemoveAxis<S, NewD>;
@@ -215,7 +222,7 @@ where
             array: self.array,
             axes_mapping: self.axes_mapping,
             shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -228,7 +235,7 @@ where
             array: self.array.element_type_change()?,
             axes_mapping: self.axes_mapping,
             shape: self.shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 }

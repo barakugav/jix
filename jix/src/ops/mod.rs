@@ -131,7 +131,9 @@ pub use where_op::*;
 mod sub_dtype;
 pub use sub_dtype::*;
 
+#[cfg(feature = "num-complex")]
 mod complex;
+#[cfg(feature = "num-complex")]
 pub use complex::*;
 
 mod common;

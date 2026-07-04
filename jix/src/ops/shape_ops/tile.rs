@@ -3,12 +3,13 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{
-    check_get_buffer_size, check_get_range, check_ndim, ensure, Error, ErrorKind, Result,
+    check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Error,
+    ErrorKind, Result,
 };
-use crate::storage::params::ArrayBlockSpec;
-use crate::storage::{ArraySpec, BlockShapeTag, BlockSize};
+use crate::storage::params::ArraySpecDynamic;
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, DimDyn, Dimension, OutBuf, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -53,7 +54,7 @@ pub struct Tile<S: ArrayStorage> {
     axis: usize,
     repeats: u64,
     new_shape: S::Dimension,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 
 impl<S: ArrayStorage> Tile<S> {
@@ -86,6 +87,7 @@ impl<S: ArrayStorage> Tile<S> {
 
         let new_shape =
             S::Dimension::from_fn(ndim, |d| if d == axis { new_len } else { input_shape[d] });
+        check_shape_overflow(new_shape.as_slice(), array.dtype().itemsize() as _)?;
 
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
@@ -93,7 +95,7 @@ impl<S: ArrayStorage> Tile<S> {
         // there is nothing smarter than reading the whole dimension at once
         block_shape[axis] = (new_len.min(BlockSize::MAX as u64) as BlockSize).max(1);
         block_shape_tag[axis] = BlockShapeTag::Any;
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
@@ -103,7 +105,7 @@ impl<S: ArrayStorage> Tile<S> {
             axis,
             repeats,
             new_shape,
-            block_spec,
+            spec,
         })
     }
 
@@ -302,7 +304,14 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Tile", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = Tile<S::DimensionChange<NewD>>;
@@ -318,7 +327,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             axis: self.axis,
             repeats: self.repeats,
             new_shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -332,7 +341,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             axis: self.axis,
             repeats: self.repeats,
             new_shape: self.new_shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 }

@@ -63,6 +63,7 @@ pub fn broadcast<'py>(
     shape: ItemOrSequence<i64>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let array = &py_arr.get().arr;
     let old_shape = array.shape();
     let shape = shape.into_dim_array()?;
@@ -96,7 +97,11 @@ pub fn broadcast<'py>(
 
     let ret = jix_core::ops::Broadcast::new_array(array.clone(), new_shape.as_slice())
         .into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }
 
 /// Selects a sub-region of an array as a lazy view.
@@ -164,6 +169,7 @@ pub fn slice<'py>(
     index: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let arr = py_arr.get().to_core();
     let parsed = parse_basic_index(arr.shape(), Some(index))?;
 
@@ -178,7 +184,11 @@ pub fn slice<'py>(
             .into_py_result()?
             .into_any()
     };
-    Bound::new(py_arr.py(), Array::from_core(result))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(result, np_dtype.unbind()),
+    )
 }
 
 /// Parse a Python `__getitem__`-style index into a per-axis [`SliceItem`] list.
@@ -388,6 +398,7 @@ pub fn insert_axis<'py>(
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let array = py_arr.get().to_core();
     if axis.is_empty() {
         return Ok(py_arr); // no-op if no axes to insert
@@ -418,7 +429,11 @@ pub fn insert_axis<'py>(
         .map(|(i, &pos)| pos - i)
         .collect::<DimArray<_>>();
     let ret = jix_core::ops::InsertAxis::new_array(array, gaps.as_slice()).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }
 /// Inserts new length-1 dimensions at specified positions in an array's shape. Alias for [`jix.insert_axis()`][jix.insert_axis].
 ///
@@ -481,13 +496,18 @@ pub fn remove_axis<'py>(
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let array = py_arr.get().to_core();
     let axes = normalize_axes(&axis.into_dim_array()?, array.ndim())?;
     if axes.is_empty() {
         return Ok(py_arr); // no-op if no axes to remove
     }
     let ret = jix_core::ops::RemoveAxis::new_array(array, axes.as_slice()).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }
 
 /// Removes length-1 dimensions from an array's shape.
@@ -587,13 +607,18 @@ pub fn permute_axes<'py>(
     axes: Option<Vec<usize>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let array = py_arr.get().to_core();
     let axes = axes.unwrap_or_else(|| (0..array.ndim()).rev().collect());
     if axes.len() == array.ndim() && axes.iter().enumerate().all(|(i, &ax)| i == ax) {
         return Ok(py_arr); // no-op permutation
     }
     let ret = jix_core::ops::PermuteAxes::new_array(array, &axes).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }
 
 /// Reinterprets an array with a different shape.
@@ -645,6 +670,7 @@ pub fn reshape<'py>(
 ) -> PyResult<Bound<'py, Array>> {
     let new_shape = shape;
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let array = &py_arr.get().arr;
 
     // handle -1 in new_shape
@@ -691,7 +717,8 @@ pub fn reshape<'py>(
     let array = jix_core::ops::Reshape::new_array(array.clone(), new_shape.as_slice())
         .into_py_result()?
         .into_any();
-    Bound::new(py_arr.py(), Array::from_core(array))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(py, Array::from_core_with_np_dtype(array, np_dtype.unbind()))
 }
 
 /// Collapses an array into a single dimension.
@@ -785,6 +812,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
             "arrays must contain at least one array",
         ));
     }
+    let py = py_arrays.first().unwrap().py();
     let ndim = arrays[0].ndim();
     for arr in &arrays {
         if arr.ndim() != ndim {
@@ -795,15 +823,17 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
     }
     let axis = normalize_axis(axis, ndim)?;
 
-    let py = py_arrays.first().unwrap().py();
     if arrays.len() == 1 && axis < ndim {
         // no-op if only one array
         let [array] = py_arrays.try_into().unwrap();
-        Ok(array)
-    } else {
-        let ret = jix_core::ops::Concatenate::new_array(arrays, axis).into_py_result()?;
-        Bound::new(py, Array::from_core(ret.into_any()))
+        return Ok(array);
     }
+    let ret = jix_core::ops::Concatenate::new_array(arrays, axis).into_py_result()?;
+    let np_dtype = py_arrays.first().unwrap().get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }
 
 /// Joins a sequence of arrays along a **new** axis.
@@ -850,15 +880,20 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
     axis=0,
 ))]
 pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> {
-    let arrays = arrays
+    let py_arrays = arrays
         .into_iter()
-        .map(|arr| any_to_core_array(&arr))
+        .map(|arr| asarray(&arr))
+        .collect::<Result<Vec<_>, _>>()?;
+    let arrays = py_arrays
+        .iter()
+        .map(|arr| any_to_core_array(arr))
         .collect::<Result<Vec<_>, _>>()?;
     if arrays.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "arrays must contain at least one array",
         ));
     }
+    let py = py_arrays.first().unwrap().py();
     let ndim = arrays[0].ndim();
     for arr in &arrays {
         if arr.ndim() != ndim {
@@ -877,7 +912,8 @@ pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> 
         let ret = jix_core::ops::Stack::new_array(arrays, axis).into_py_result()?;
         ret.into_any()
     };
-    Ok(Array::from_core(res))
+    let np_dtype = py_arrays.first().unwrap().get().dtype(py)?;
+    Ok(Array::from_core_with_np_dtype(res, np_dtype.unbind()))
 }
 
 /// Repeats each element along the given axis.
@@ -937,13 +973,18 @@ pub fn repeat<'py>(
     axis: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let array = py_arr.get().to_core();
     let axis = normalize_axis_optional(axis, array.ndim())?;
     if repeats == 1 {
         return Ok(py_arr); // no-op
     }
     let ret = jix_core::ops::Repeat::new_array(array, repeats, axis).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }
 
 /// Reverses the order of elements along the given axis.
@@ -996,6 +1037,7 @@ pub fn flip<'py>(
     axis: Option<ItemOrSequence<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let array = py_arr.get().to_core();
     let ndim = array.ndim();
     let axis = axis.map(|a| a.into_dim_array()).transpose()?;
@@ -1005,7 +1047,11 @@ pub fn flip<'py>(
         return Ok(py_arr); // no-op if no axes to flip
     }
     let ret = jix_core::ops::Flip::new_array(array, axes.as_slice()).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }
 
 /// Rolls elements along an axis, wrapping around at the boundary.
@@ -1055,13 +1101,18 @@ pub fn roll<'py>(
     axis: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let core = py_arr.get().to_core();
     let axis = normalize_axis_optional(axis, core.ndim())?;
     if shift == 0 {
         return Ok(py_arr); // no-op if no shift
     }
     let ret = jix_core::ops::Roll::new_array(core, shift, axis).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }
 
 /// Replicates the array along a single axis.
@@ -1121,11 +1172,16 @@ pub fn tile<'py>(
     axis: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = asarray(array)?;
+    let py = py_arr.py();
     let core = py_arr.get().to_core();
     let axis = normalize_axis_optional(axis, core.ndim())?;
     if repeats == 1 {
         return Ok(py_arr); // no-op
     }
     let ret = jix_core::ops::Tile::new_array(core, repeats, axis).into_py_result()?;
-    Bound::new(py_arr.py(), Array::from_core(ret.into_any()))
+    let np_dtype = py_arr.get().dtype(py)?;
+    Bound::new(
+        py,
+        Array::from_core_with_np_dtype(ret.into_any(), np_dtype.unbind()),
+    )
 }

@@ -3,10 +3,10 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::ArrayBlockSpec;
-use crate::storage::ArraySpec;
+use crate::storage::params::ArraySpecDynamic;
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
-use crate::{Array, ArrayStorage, Dimension, OutBuf};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
 ///
@@ -52,7 +52,7 @@ pub struct PermuteAxes<S: ArrayStorage> {
     inv_axes: DimArray<u8>,
 
     shape: S::Dimension,
-    block_spec: ArrayBlockSpec,
+    spec: ArraySpecDynamic,
 }
 
 impl<S: ArrayStorage> PermuteAxes<S> {
@@ -92,13 +92,13 @@ impl<S: ArrayStorage> PermuteAxes<S> {
         let inner_spec = array.spec();
         let block_shape = dim_arr(ndim, |i| inner_spec.block_shape()[axes[i]]);
         let block_shape_tag = dim_arr(ndim, |i| inner_spec.block_shape_tag()[axes[i]]);
-        let block_spec = ArrayBlockSpec {
+        let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
         };
         Ok(Self {
             shape,
-            block_spec,
+            spec,
             array,
             axes: dim_arr(ndim, |i| axes[i] as u8),
             inv_axes: dim_arr(ndim, |i| inv_axes[i] as u8),
@@ -176,7 +176,14 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_block_spec(&self.block_spec)
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("PermuteAxes", [&self.array])
     }
 
     type DimensionChange<NewD: crate::Dimension> = PermuteAxes<S::DimensionChange<NewD>>;
@@ -192,7 +199,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
             array,
             axes: self.axes,
             inv_axes: self.inv_axes,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 
@@ -206,7 +213,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
             axes: self.axes,
             inv_axes: self.inv_axes,
             shape: self.shape,
-            block_spec: self.block_spec,
+            spec: self.spec,
         })
     }
 }

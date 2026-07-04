@@ -10,6 +10,7 @@ mod cmp;
 pub use cmp::*;
 
 mod shape_ops;
+use numpy::PyArrayDescr;
 pub use shape_ops::*;
 
 mod where_op;
@@ -33,12 +34,12 @@ pub use sub_dtype::*;
 mod complex;
 pub use complex::*;
 
-use jix_core::dtype::{Dtype, DtypeScalarKind};
+use jix_core::dtype::{Dtype, ScalarKind};
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
 
 use crate::array::Array;
-use crate::dtype::dtype_from_any;
+use crate::dtype::dtype_from_numpy;
 
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
@@ -89,9 +90,15 @@ pub fn astype<'py>(
 ) -> PyResult<Bound<'py, Array>> {
     let py_arr = crate::ops::asarray(array)?;
     let array = &py_arr.get().arr;
-    let dtype = dtype_from_any(dtype)?;
+    let np_dtype = &PyArrayDescr::new(dtype.py(), dtype)?;
+    let dtype = dtype_from_numpy(np_dtype)?;
+
     let array = astype_impl(array.clone(), &dtype)?;
-    Bound::new(py_arr.py(), Array::from_core(array))
+
+    Bound::new(
+        py_arr.py(),
+        Array::from_core_with_np_dtype(array, np_dtype.clone().unbind()),
+    )
 }
 #[inline(never)]
 pub(crate) fn astype_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> {
@@ -105,64 +112,64 @@ pub(crate) fn astype_impl(array: ArrayAny, dtype: &Dtype) -> PyResult<ArrayAny> 
             ($src_type:ty, $dst_type:ty) => {{
                 let array = array.into_typed::<$src_type>().unwrap();
                 let array = array.cast::<$dst_type>();
-                return Ok(array.into_type_dyn().into_any());
+                return Ok(array.into_any());
             }};
         }
         macro_rules! cast_num {
             ($src_type:ty) => {
                 match dst {
-                    DtypeScalarKind::I8 => cast_impl!($src_type, i8),
-                    DtypeScalarKind::I16 => cast_impl!($src_type, i16),
-                    DtypeScalarKind::I32 => cast_impl!($src_type, i32),
-                    DtypeScalarKind::I64 => cast_impl!($src_type, i64),
-                    DtypeScalarKind::U8 => cast_impl!($src_type, u8),
-                    DtypeScalarKind::U16 => cast_impl!($src_type, u16),
-                    DtypeScalarKind::U32 => cast_impl!($src_type, u32),
-                    DtypeScalarKind::U64 => cast_impl!($src_type, u64),
-                    DtypeScalarKind::F16 => cast_impl!($src_type, f16),
-                    DtypeScalarKind::F32 => cast_impl!($src_type, f32),
-                    DtypeScalarKind::F64 => cast_impl!($src_type, f64),
-                    DtypeScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
-                    DtypeScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
-                    DtypeScalarKind::Bool => cast_impl!($src_type, bool),
+                    ScalarKind::I8 => cast_impl!($src_type, i8),
+                    ScalarKind::I16 => cast_impl!($src_type, i16),
+                    ScalarKind::I32 => cast_impl!($src_type, i32),
+                    ScalarKind::I64 => cast_impl!($src_type, i64),
+                    ScalarKind::U8 => cast_impl!($src_type, u8),
+                    ScalarKind::U16 => cast_impl!($src_type, u16),
+                    ScalarKind::U32 => cast_impl!($src_type, u32),
+                    ScalarKind::U64 => cast_impl!($src_type, u64),
+                    ScalarKind::F16 => cast_impl!($src_type, f16),
+                    ScalarKind::F32 => cast_impl!($src_type, f32),
+                    ScalarKind::F64 => cast_impl!($src_type, f64),
+                    ScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
+                    ScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
+                    ScalarKind::Bool => cast_impl!($src_type, bool),
                 }
             };
         }
         macro_rules! cast_complex {
             ($src_type:ty) => {
                 match dst {
-                    DtypeScalarKind::I8 => {}
-                    DtypeScalarKind::I16 => {}
-                    DtypeScalarKind::I32 => {}
-                    DtypeScalarKind::I64 => {}
-                    DtypeScalarKind::U8 => {}
-                    DtypeScalarKind::U16 => {}
-                    DtypeScalarKind::U32 => {}
-                    DtypeScalarKind::U64 => {}
-                    DtypeScalarKind::F16 => {}
-                    DtypeScalarKind::F32 => {}
-                    DtypeScalarKind::F64 => {}
-                    DtypeScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
-                    DtypeScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
-                    DtypeScalarKind::Bool => cast_impl!($src_type, bool),
+                    ScalarKind::I8 => {}
+                    ScalarKind::I16 => {}
+                    ScalarKind::I32 => {}
+                    ScalarKind::I64 => {}
+                    ScalarKind::U8 => {}
+                    ScalarKind::U16 => {}
+                    ScalarKind::U32 => {}
+                    ScalarKind::U64 => {}
+                    ScalarKind::F16 => {}
+                    ScalarKind::F32 => {}
+                    ScalarKind::F64 => {}
+                    ScalarKind::ComplexF32 => cast_impl!($src_type, Complex<f32>),
+                    ScalarKind::ComplexF64 => cast_impl!($src_type, Complex<f64>),
+                    ScalarKind::Bool => cast_impl!($src_type, bool),
                 }
             };
         }
         match src {
-            DtypeScalarKind::I8 => cast_num!(i8),
-            DtypeScalarKind::I16 => cast_num!(i16),
-            DtypeScalarKind::I32 => cast_num!(i32),
-            DtypeScalarKind::I64 => cast_num!(i64),
-            DtypeScalarKind::U8 => cast_num!(u8),
-            DtypeScalarKind::U16 => cast_num!(u16),
-            DtypeScalarKind::U32 => cast_num!(u32),
-            DtypeScalarKind::U64 => cast_num!(u64),
-            DtypeScalarKind::F16 => cast_num!(f16),
-            DtypeScalarKind::F32 => cast_num!(f32),
-            DtypeScalarKind::F64 => cast_num!(f64),
-            DtypeScalarKind::ComplexF32 => cast_complex!(Complex<f32>),
-            DtypeScalarKind::ComplexF64 => cast_complex!(Complex<f64>),
-            DtypeScalarKind::Bool => cast_num!(bool),
+            ScalarKind::I8 => cast_num!(i8),
+            ScalarKind::I16 => cast_num!(i16),
+            ScalarKind::I32 => cast_num!(i32),
+            ScalarKind::I64 => cast_num!(i64),
+            ScalarKind::U8 => cast_num!(u8),
+            ScalarKind::U16 => cast_num!(u16),
+            ScalarKind::U32 => cast_num!(u32),
+            ScalarKind::U64 => cast_num!(u64),
+            ScalarKind::F16 => cast_num!(f16),
+            ScalarKind::F32 => cast_num!(f32),
+            ScalarKind::F64 => cast_num!(f64),
+            ScalarKind::ComplexF32 => cast_complex!(Complex<f32>),
+            ScalarKind::ComplexF64 => cast_complex!(Complex<f64>),
+            ScalarKind::Bool => cast_num!(bool),
         };
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(

@@ -20,7 +20,7 @@ macro_rules! define_op1_desc {
             $(
                 crate::ops::common::OpFnDescriptor::new1::<$ty>(crate::ops::common::CastKind::$cast_kind, |a| {
                     let res = jix_core::ops::$core_op::new_array(a)
-                        .map(|res| res.into_type_dyn().into_any());
+                        .map(|res| res.into_any());
                     <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
                 }),
             )*
@@ -54,7 +54,7 @@ macro_rules! define_op1_desc {
     ) => {
         crate::ops::common::OpFnDescriptor::<1, $extra_args_struct>::new1_args::<$ty>(crate::ops::common::CastKind::$cast_kind, |a, $args| {
             let res = jix_core::ops::$core_op::new_array(a, $($accessor),*)
-                .map(|res| res.into_type_dyn().into_any());
+                .map(|res| res.into_any());
             <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
         })
     };
@@ -132,7 +132,7 @@ macro_rules! define_op2_desc {
     ) => {
         crate::ops::common::OpFnDescriptor::new2::<$a_ty, $b_ty>([$(crate::ops::common::CastKind::$cast_kind),*], |a, b| {
             let res = jix_core::ops::$core_op::new_array(a, b)
-                .map(|res| res.into_type_dyn().into_any());
+                .map(|res| res.into_any());
             <_ as crate::util::IntoPyResult<_>>::into_py_result(res)
         })
     };

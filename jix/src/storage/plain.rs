@@ -3,10 +3,12 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::ArraySpecOwned;
-use crate::storage::{ArraySpec, BlockShapeTag, ElementType, Ty, TypeDyn};
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
+use crate::storage::{
+    ArraySpec, ArrayStorageInfo, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn,
+};
 use crate::util::{default_strides, dim_arr, nd_copy, DimArray, SendSyncPtr};
-use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension, OutBuf};
+use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -135,7 +137,11 @@ impl<A, D> Plain<A, TypeDyn, D> {
             encoder_params: None,
             decoder_params: None,
         };
-        let spec = params.into_spec(shape.as_slice(), &dtype)?;
+        let spec = params.into_spec(
+            shape.as_slice(),
+            &dtype,
+            ArraySpecFlags::new().set_plain_read(),
+        )?;
 
         let element_type = TypeDyn::from_dtype(dtype).unwrap();
 
@@ -363,6 +369,11 @@ where
         self.spec.as_ref()
     }
 
+    #[inline]
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new("Plain")
+    }
+
     type DimensionChange<NewD: Dimension> = Plain<A, ET, NewD>;
     #[inline]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
@@ -411,9 +422,9 @@ mod tests {
 
     #[test]
     fn owned_1d_dtype_i32() {
-        use crate::dtype::DtypeScalarKind;
+        use crate::dtype::ScalarKind;
         let a = Array::plain_ndarray(array![0i32]).unwrap();
-        assert_eq!(a.dtype().try_to_scalar(), Some(DtypeScalarKind::I32));
+        assert_eq!(a.dtype().try_to_scalar(), Some(ScalarKind::I32));
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use crate::dtype::Dtype;
-use crate::{Dimension, NDIM_MAX};
+use crate::{Dimension, IterExt, NDIM_MAX};
 
 /// Error type for all operations in this crate.
 ///
@@ -128,6 +128,21 @@ pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
         actual == expected,
         UnsupportedDtype,
         "expected dtype {expected} but got {actual}",
+    );
+    Ok(())
+}
+
+#[inline(always)]
+pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
+    ensure!(
+        shape
+            .iter()
+            .cloned()
+            .chain([itemsize])
+            .try_product()
+            .is_some(),
+        InvalidShapeOperation,
+        "shape has overflowed u64 product with itemsize {itemsize}: {shape:?}"
     );
     Ok(())
 }

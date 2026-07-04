@@ -447,18 +447,18 @@ pub fn clamp<'py>(
                 .try_into()
                 .unwrap();
             Ok(match (min, max) {
-                (None, None) => a.into_type_dyn().into_any(),
+                (None, None) => a.into_any(),
                 (Some(min), None) => {
                     let res =
                         jix_core::ops::Map::new_array(a, move |x| if x < min { min } else { x })
                             .into_py_result()?;
-                    res.into_type_dyn().into_any()
+                    res.into_any()
                 }
                 (None, Some(max)) => {
                     let res =
                         jix_core::ops::Map::new_array(a, move |x| if x > max { max } else { x })
                             .into_py_result()?;
-                    res.into_type_dyn().into_any()
+                    res.into_any()
                 }
                 (Some(min), Some(max)) => {
                     #[allow(clippy::neg_cmp_op_on_partial_ord)]
@@ -477,7 +477,7 @@ pub fn clamp<'py>(
                         }
                     })
                     .into_py_result()?;
-                    res.into_type_dyn().into_any()
+                    res.into_any()
                 }
             })
         })
@@ -619,7 +619,7 @@ pub fn isclose<'py>(
             let rtol = cast_tol::<T>(args.rtol)?;
             let atol = cast_tol::<T>(args.atol)?;
             let res = jix_core::ops::ApproxEq::new_array(a, b, rtol, atol).into_py_result()?;
-            Ok(res.into_type_dyn().into_any())
+            Ok(res.into_any())
         })
     }
 
@@ -646,7 +646,7 @@ pub fn isclose<'py>(
                 },
             };
             let res = jix_core::ops::ApproxEq::new_array(a, b, rtol, atol).into_py_result()?;
-            Ok(res.into_type_dyn().into_any())
+            Ok(res.into_any())
         })
     }
 

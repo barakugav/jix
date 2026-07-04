@@ -10,7 +10,7 @@
 //! | Type | Purpose |
 //! |------|---------|
 //! | [`Dtype`] | Runtime element-type descriptor (kind, itemsize, alignment, inner shape) |
-//! | [`DtypeScalarKind`] | Enum of every supported scalar primitive |
+//! | [`ScalarKind`] | Enum of every supported scalar primitive |
 //! | [`Dtyped`] | Trait (and derive macro) mapping a Rust type to its `Dtype` at compile time |
 //! | [`Alignment`] | Newtype for alignment values; guarantees power-of-two and non-zero |
 //! | [`Itemsize`] | Alias for `u16`, used for per-element byte sizes and field offsets |
@@ -29,7 +29,10 @@ use std::collections::HashSet;
 use std::hint::assert_unchecked;
 
 use crate::error::{bail, ensure, Error, ErrorKind, Result};
-use crate::scalar::{f16, Complex};
+#[cfg(feature = "half")]
+use crate::scalar::f16;
+#[cfg(feature = "num-complex")]
+use crate::scalar::Complex;
 use crate::util::arrayvec::ArrayVec;
 use crate::util::{Idx, IterExt};
 
@@ -140,7 +143,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// ## Scalar dtypes
 ///
 /// Cover all primitive numeric and boolean types built into the library. Each variant of
-/// [`DtypeScalarKind`] has a fixed itemsize and alignment:
+/// [`ScalarKind`] has a fixed itemsize and alignment:
 ///
 /// | Scalar kind | itemsize | alignment |
 /// |-------------|----------|-----------|
@@ -151,18 +154,18 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// | `ComplexF32` | 8 | 4 |
 /// | `ComplexF64` | 16 | 8 |
 ///
-/// Create a scalar dtype with [`Dtype::of_scalar`], or read it as a compile-time constant from
+/// Create a scalar dtype with [`Dtype::new_scalar`], or read it as a compile-time constant from
 /// the [`Dtyped::DTYPE`] implementation of a Rust primitive:
 ///
 /// ```rust
-/// use jix::dtype::{Dtype, DtypeScalarKind, Dtyped};
+/// use jix::dtype::{Dtype, ScalarKind, Dtyped};
 ///
-/// let d = Dtype::of_scalar(DtypeScalarKind::F64);
+/// let d = Dtype::new_scalar(ScalarKind::F64);
 /// assert_eq!(d, f64::DTYPE);
 /// assert_eq!(d.itemsize(), 8);
 /// assert_eq!(d.alignment().as_usize(), 8);
 /// assert_eq!(d.shape(), &[]);
-/// assert_eq!(d.scalar_kind(), Some(DtypeScalarKind::F64));
+/// assert_eq!(d.scalar_kind(), Some(ScalarKind::F64));
 /// assert_eq!(d.fields(), None);
 /// ```
 ///
@@ -234,7 +237,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// | Method | Use when |
 /// |--------|----------|
 /// | `T::DTYPE` ([`Dtyped`] constant) | Rust type known at compile time |
-/// | [`Dtype::of_scalar`] | Building a scalar dtype from a [`DtypeScalarKind`] at runtime |
+/// | [`Dtype::new_scalar`] | Building a scalar dtype from a [`ScalarKind`] at runtime |
 /// | [`Dtype::from_fields`] | Building a struct dtype from field definitions; auto-detects packed vs. aligned |
 /// | [`Dtype::new_struct`] | Building a struct dtype with full explicit control over itemsize and alignment |
 ///
@@ -278,7 +281,7 @@ enum DtypeInner {
         itemsize: Itemsize,
         alignment: Alignment,
         shape: DtypeShape,
-        kind: DtypeScalarKind,
+        kind: ScalarKind,
         // endianness: Endianness,
     },
     StructOwned {
@@ -304,7 +307,7 @@ const _: () = {
 
 /// The kind of a scalar dtype, representing all primitive scalar types supported by the library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DtypeScalarKind {
+pub enum ScalarKind {
     /// [`i8`] dtype.
     I8,
     /// [`i16`] dtype.
@@ -350,26 +353,27 @@ impl Dtype {
     /// The created dtype will use the native endianness.
     ///
     /// ```rust
-    /// use jix::dtype::{Dtype, DtypeScalarKind, Dtyped};
+    /// use jix::dtype::{Dtype, ScalarKind, Dtyped};
     ///
-    /// let i32_dtype = Dtype::of_scalar(DtypeScalarKind::I32);
-    /// assert_eq!(i32_dtype.scalar_kind(), Some(DtypeScalarKind::I32));
+    /// let i32_dtype = Dtype::new_scalar(ScalarKind::I32);
+    /// assert_eq!(i32_dtype.scalar_kind(), Some(ScalarKind::I32));
     /// assert_eq!(i32_dtype.fields(), None);
     /// assert_eq!(i32_dtype.itemsize(), 4);
     /// assert_eq!(i32_dtype.alignment().as_usize(), 4);
     /// assert_eq!(i32_dtype.shape(), &[]);
     ///
-    /// let f64_dtype = Dtype::of_scalar(DtypeScalarKind::F64);
-    /// assert_eq!(f64_dtype.scalar_kind(), Some(DtypeScalarKind::F64));
+    /// let f64_dtype = Dtype::new_scalar(ScalarKind::F64);
+    /// assert_eq!(f64_dtype.scalar_kind(), Some(ScalarKind::F64));
     /// assert_eq!(f64_dtype.fields(), None);
     /// assert_eq!(f64_dtype.itemsize(), 8);
     /// assert_eq!(f64_dtype.alignment().as_usize(), 8);
     /// assert_eq!(f64_dtype.shape(), &[]);
     ///
-    /// let complex_f32_dtype = Dtype::of_scalar(DtypeScalarKind::ComplexF32);
+    /// # #[cfg(feature = "num-complex")] { use super::*;
+    /// let complex_f32_dtype = Dtype::new_scalar(ScalarKind::ComplexF32);
     /// assert_eq!(
     ///     complex_f32_dtype.scalar_kind(),
-    ///     Some(DtypeScalarKind::ComplexF32)
+    ///     Some(ScalarKind::ComplexF32)
     /// );
     /// assert_eq!(complex_f32_dtype.itemsize(), 8);
     /// assert_eq!(complex_f32_dtype.alignment().as_usize(), 4);
@@ -377,9 +381,10 @@ impl Dtype {
     /// assert_eq!(i32_dtype, i32::DTYPE);
     /// assert_eq!(f64_dtype, f64::DTYPE);
     /// assert_eq!(complex_f32_dtype, jix::scalar::Complex::<f32>::DTYPE);
+    /// # }
     /// ```
     #[inline(always)]
-    pub const fn of_scalar(kind: DtypeScalarKind) -> Self {
+    pub const fn new_scalar(kind: ScalarKind) -> Self {
         // assert!(Endianness::native() == Endianness::Little);
 
         const _: () = const {
@@ -713,7 +718,7 @@ impl Dtype {
     /// Note that even if the function returns `Some`, the dtype may not be a plain scalar, it just
     /// means the type has no sub fields, but the dtype can still have non-empty shape.
     #[inline(always)]
-    pub const fn scalar_kind(&self) -> Option<DtypeScalarKind> {
+    pub const fn scalar_kind(&self) -> Option<ScalarKind> {
         match &self.0 {
             DtypeInner::Scalar { kind, .. } => Some(*kind),
             DtypeInner::StructOwned { .. } | DtypeInner::StructBorrowed { .. } => None,
@@ -772,7 +777,7 @@ impl Dtype {
 
     /// Get the alignment of the dtype.
     ///
-    /// For scalar dtypes, the alignment is the same as [`DtypeScalarKind::alignment()`].
+    /// For scalar dtypes, the alignment is the same as [`ScalarKind::alignment()`].
     /// For struct dtypes, the alignment is either `1` for packed dtypes, or the maximum alignment of the inner fields
     /// for aligned structs.
     #[inline(always)]
@@ -811,9 +816,9 @@ impl Dtype {
 
     /// Try to convert this dtype to a scalar dtype, if it matches the scalar dtype exactly.
     #[inline(always)]
-    pub fn try_to_scalar(&self) -> Option<DtypeScalarKind> {
+    pub fn try_to_scalar(&self) -> Option<ScalarKind> {
         let scalar = self.scalar_kind()?;
-        (Self::of_scalar(scalar) == *self).then_some(scalar)
+        (Self::new_scalar(scalar) == *self).then_some(scalar)
     }
 
     /// Set the shape of the dtype, updating the itemsize accordingly.
@@ -854,7 +859,7 @@ impl Dtype {
 }
 impl std::fmt::Debug for Dtype {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Dtype::Scalar");
+        let mut f = f.debug_struct("Dtype");
         match &self.0 {
             DtypeInner::Scalar { kind, .. } => f.field("scalar", kind),
             DtypeInner::StructOwned { fields, .. } => f.field("fields", fields),
@@ -870,20 +875,20 @@ impl std::fmt::Display for Dtype {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(scalar) = self.try_to_scalar() {
             match scalar {
-                DtypeScalarKind::I8 => f.write_str("i8"),
-                DtypeScalarKind::I16 => f.write_str("i16"),
-                DtypeScalarKind::I32 => f.write_str("i32"),
-                DtypeScalarKind::I64 => f.write_str("i64"),
-                DtypeScalarKind::U8 => f.write_str("u8"),
-                DtypeScalarKind::U16 => f.write_str("u16"),
-                DtypeScalarKind::U32 => f.write_str("u32"),
-                DtypeScalarKind::U64 => f.write_str("u64"),
-                DtypeScalarKind::F16 => f.write_str("f16"),
-                DtypeScalarKind::F32 => f.write_str("f32"),
-                DtypeScalarKind::F64 => f.write_str("f64"),
-                DtypeScalarKind::ComplexF32 => f.write_str("Complex<f32>"),
-                DtypeScalarKind::ComplexF64 => f.write_str("Complex<f64>"),
-                DtypeScalarKind::Bool => f.write_str("bool"),
+                ScalarKind::I8 => f.write_str("i8"),
+                ScalarKind::I16 => f.write_str("i16"),
+                ScalarKind::I32 => f.write_str("i32"),
+                ScalarKind::I64 => f.write_str("i64"),
+                ScalarKind::U8 => f.write_str("u8"),
+                ScalarKind::U16 => f.write_str("u16"),
+                ScalarKind::U32 => f.write_str("u32"),
+                ScalarKind::U64 => f.write_str("u64"),
+                ScalarKind::F16 => f.write_str("f16"),
+                ScalarKind::F32 => f.write_str("f32"),
+                ScalarKind::F64 => f.write_str("f64"),
+                ScalarKind::ComplexF32 => f.write_str("Complex<f32>"),
+                ScalarKind::ComplexF64 => f.write_str("Complex<f64>"),
+                ScalarKind::Bool => f.write_str("bool"),
             }
         } else {
             <_ as std::fmt::Debug>::fmt(self, f)
@@ -907,7 +912,7 @@ impl PartialEq for Dtype {
     }
 }
 
-impl DtypeScalarKind {
+impl ScalarKind {
     /// Get the size of the scalar in bytes.
     #[inline(always)]
     pub const fn itemsize(&self) -> Itemsize {
@@ -1091,7 +1096,7 @@ pub use jix_macros::Dtyped;
 macro_rules! impl_dtyped_scalar {
     ($ty:ty, $kind:ident) => {
         unsafe impl Dtyped for $ty {
-            const DTYPE: Dtype = Dtype::of_scalar(DtypeScalarKind::$kind);
+            const DTYPE: Dtype = Dtype::new_scalar(ScalarKind::$kind);
         }
     };
 }
@@ -1104,10 +1109,13 @@ impl_dtyped_scalar!(u8, U8);
 impl_dtyped_scalar!(u16, U16);
 impl_dtyped_scalar!(u32, U32);
 impl_dtyped_scalar!(u64, U64);
+#[cfg(feature = "half")]
 impl_dtyped_scalar!(f16, F16);
 impl_dtyped_scalar!(f32, F32);
 impl_dtyped_scalar!(f64, F64);
+#[cfg(feature = "num-complex")]
 impl_dtyped_scalar!(Complex<f32>, ComplexF32);
+#[cfg(feature = "num-complex")]
 impl_dtyped_scalar!(Complex<f64>, ComplexF64);
 impl_dtyped_scalar!(bool, Bool);
 
@@ -1133,25 +1141,25 @@ mod tests {
 
     #[test]
     fn scalar_itemsize_and_alignment() {
-        let cases: &[(DtypeScalarKind, Itemsize, /* alignment */ usize)] = &[
-            (DtypeScalarKind::I8, 1, 1),
-            (DtypeScalarKind::I16, 2, 2),
-            (DtypeScalarKind::I32, 4, 4),
-            (DtypeScalarKind::I64, 8, 8),
-            (DtypeScalarKind::U8, 1, 1),
-            (DtypeScalarKind::U16, 2, 2),
-            (DtypeScalarKind::U32, 4, 4),
-            (DtypeScalarKind::U64, 8, 8),
-            (DtypeScalarKind::F16, 2, 2),
-            (DtypeScalarKind::F32, 4, 4),
-            (DtypeScalarKind::F64, 8, 8),
-            (DtypeScalarKind::ComplexF32, 8, 4),
-            (DtypeScalarKind::ComplexF64, 16, 8),
-            (DtypeScalarKind::Bool, 1, 1),
+        let cases: &[(ScalarKind, Itemsize, /* alignment */ usize)] = &[
+            (ScalarKind::I8, 1, 1),
+            (ScalarKind::I16, 2, 2),
+            (ScalarKind::I32, 4, 4),
+            (ScalarKind::I64, 8, 8),
+            (ScalarKind::U8, 1, 1),
+            (ScalarKind::U16, 2, 2),
+            (ScalarKind::U32, 4, 4),
+            (ScalarKind::U64, 8, 8),
+            (ScalarKind::F16, 2, 2),
+            (ScalarKind::F32, 4, 4),
+            (ScalarKind::F64, 8, 8),
+            (ScalarKind::ComplexF32, 8, 4),
+            (ScalarKind::ComplexF64, 16, 8),
+            (ScalarKind::Bool, 1, 1),
         ];
         for &(kind, expected_size, expected_align) in cases {
             let expected_align = Alignment::new(expected_align).unwrap();
-            let d = Dtype::of_scalar(kind);
+            let d = Dtype::new_scalar(kind);
             assert_eq!(d.itemsize(), expected_size, "{kind:?} itemsize");
             assert_eq!(d.alignment(), expected_align, "{kind:?} alignment");
             assert_eq!(d.shape(), &[] as &[Itemsize], "{kind:?} shape");
@@ -1176,7 +1184,7 @@ mod tests {
         assert_eq!(d.shape(), &[77]);
         assert_eq!(d.itemsize(), 77 * 8);
         assert_eq!(d.alignment().as_usize(), 8);
-        assert_eq!(d.scalar_kind(), Some(DtypeScalarKind::F64));
+        assert_eq!(d.scalar_kind(), Some(ScalarKind::F64));
     }
 
     #[test]
@@ -1537,7 +1545,7 @@ mod tests {
         // The field dtype should carry the array shape.
         assert_eq!(fields[0].2.shape(), &[3]);
         assert_eq!(fields[0].2.itemsize(), 12);
-        assert_eq!(fields[0].2.scalar_kind(), Some(DtypeScalarKind::I32));
+        assert_eq!(fields[0].2.scalar_kind(), Some(ScalarKind::I32));
     }
 
     #[derive(Copy, Clone, Dtyped)]
@@ -1575,7 +1583,7 @@ mod tests {
         assert_eq!(d.shape(), &[3, 2]);
         assert_eq!(d.itemsize(), 4 * 3 * 2);
         assert_eq!(d.alignment().as_usize(), 4);
-        assert_eq!(d.scalar_kind(), Some(DtypeScalarKind::I32));
+        assert_eq!(d.scalar_kind(), Some(ScalarKind::I32));
     }
 
     #[test]

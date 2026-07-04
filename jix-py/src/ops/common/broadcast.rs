@@ -20,6 +20,7 @@ pub(crate) fn broadcast_operands_dyn(operands: Vec<Operand>) -> PyResult<Vec<Ope
 
     let shape = {
         let mut shapes = operands.iter().map(|operand| match operand {
+            Operand::PyArray(arr) => arr.get().arr.shape(),
             Operand::Array(arr) => arr.shape(),
             Operand::Scalar { shape, .. } => shape.as_slice(),
         });
@@ -40,9 +41,18 @@ pub(crate) fn broadcast_operands_dyn(operands: Vec<Operand>) -> PyResult<Vec<Ope
 }
 
 fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_core::Error> {
+    let op_shape = match &operand {
+        Operand::PyArray(py) => py.get().arr.shape(),
+        Operand::Array(array) => array.shape(),
+        Operand::Scalar { shape, .. } => shape.as_slice(),
+    };
+    if shape == op_shape {
+        return Ok(operand);
+    }
     assert!(shape.len() <= NDIM_MAX);
 
     let array = match operand {
+        Operand::PyArray(arr) => arr.get().arr.clone(),
         Operand::Array(arr) => arr,
         Operand::Scalar {
             value,
@@ -57,15 +67,28 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_cor
         }
     };
 
-    let array = if let Some(missing_dims) = shape.len().checked_sub(array.ndim()) {
+    let missing_dims = shape.len().saturating_sub(array.ndim());
+    let array = if missing_dims > 0 {
         Either::Left(array.insert_axis(&vec![0; missing_dims]))
     } else {
         Either::Right(array)
     };
 
     let array = match array {
-        Either::Left(arr) => Broadcast::new_array(arr, shape)?.into_any(),
-        Either::Right(arr) => Broadcast::new_array(arr, shape)?.into_any(),
+        Either::Left(arr) => {
+            if shape == arr.shape() {
+                arr.into_any()
+            } else {
+                Broadcast::new_array(arr, shape)?.into_any()
+            }
+        }
+        Either::Right(arr) => {
+            if shape == arr.shape() {
+                arr
+            } else {
+                Broadcast::new_array(arr, shape)?.into_any()
+            }
+        }
     };
 
     Ok(Operand::Array(array))
