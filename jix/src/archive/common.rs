@@ -189,6 +189,7 @@ impl<R> ArchiveReader<R> {
         unreachable!()
     }
 
+    #[inline(always)]
     fn read_byte(&mut self) -> std::io::Result<Option<u8>>
     where
         R: Read,
@@ -214,6 +215,7 @@ impl<R> ArchiveReader<R> {
         Ok(self.tmp_buf.as_slice())
     }
 
+    #[inline]
     pub(crate) fn reader_mut(&mut self) -> &mut impl Read
     where
         R: Read,

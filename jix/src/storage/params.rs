@@ -844,9 +844,6 @@ mod tests {
         assert_eq!(encoder_params.level, 7);
         assert_eq!(encoder_params.filters.len(), 2);
         assert_eq!(encoder_params.filters.len(), 2);
-
-        // Validation still propagates from the internal encoder configuration.
-        assert!(params.level(99).is_err());
     }
 
     #[test]

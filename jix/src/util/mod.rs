@@ -123,6 +123,7 @@ where
 }
 
 pub(crate) trait IterExt: Iterator {
+    #[inline]
     fn try_product(mut self) -> Option<Self::Item>
     where
         Self: Sized,
@@ -186,12 +187,12 @@ impl<Iter: Iterator> IterExt for Iter {}
 pub(crate) enum AlternatingBuffers<'a> {
     Init {
         original_data: &'a [u8],
-        tmp_buf1: &'a mut AlignedBytes,
-        tmp_buf2: &'a mut AlignedBytes,
+        tmp_buf1: &'a mut [u8],
+        tmp_buf2: &'a mut [u8],
     },
     Alternating {
-        main_buf: &'a mut AlignedBytes,
-        secondary_buf: &'a mut AlignedBytes,
+        main_buf: &'a mut [u8],
+        secondary_buf: &'a mut [u8],
     },
 }
 impl<'a> AlternatingBuffers<'a> {
@@ -199,10 +200,11 @@ impl<'a> AlternatingBuffers<'a> {
     ///
     /// `data` is the original source slice. `tmp_buf1` and `tmp_buf2` are the two
     /// scratch buffers that will be alternated between during transformation steps.
+    #[inline]
     pub(crate) fn with_const_src(
         data: &'a [u8],
-        tmp_buf1: &'a mut AlignedBytes,
-        tmp_buf2: &'a mut AlignedBytes,
+        tmp_buf1: &'a mut [u8],
+        tmp_buf2: &'a mut [u8],
     ) -> Self {
         Self::Init {
             original_data: data,
@@ -211,7 +213,8 @@ impl<'a> AlternatingBuffers<'a> {
         }
     }
 
-    pub(crate) fn new(main_buf: &'a mut AlignedBytes, secondary_buf: &'a mut AlignedBytes) -> Self {
+    #[inline]
+    pub(crate) fn new(main_buf: &'a mut [u8], secondary_buf: &'a mut [u8]) -> Self {
         Self::Alternating {
             main_buf,
             secondary_buf,
@@ -223,6 +226,7 @@ impl<'a> AlternatingBuffers<'a> {
     /// - In [`Init`](Self::Init): the original source slice (no transformation applied yet).
     /// - In [`Alternating`](Self::Alternating): the contents of `main_buf`, i.e. the output
     ///   of the most recently completed transformation step.
+    #[allow(dead_code)]
     pub(crate) fn data(&self) -> &[u8] {
         match self {
             Self::Init {
@@ -233,7 +237,22 @@ impl<'a> AlternatingBuffers<'a> {
             Self::Alternating {
                 main_buf,
                 secondary_buf: _,
-            } => main_buf.as_slice(),
+            } => main_buf,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn into_data(self) -> &'a [u8] {
+        match self {
+            Self::Init {
+                original_data,
+                tmp_buf1: _,
+                tmp_buf2: _,
+            } => original_data,
+            Self::Alternating {
+                main_buf,
+                secondary_buf: _,
+            } => main_buf,
         }
     }
 
@@ -247,7 +266,8 @@ impl<'a> AlternatingBuffers<'a> {
     ///   returns `(old_main_data, old_secondary_buf)`. The caller writes transformed output
     ///   into `dst` (which is the new `main_buf`), and [`data`](Self::data) will immediately
     ///   reflect the new contents.
-    pub(crate) fn edit(&mut self) -> (&[u8], &mut AlignedBytes) {
+    #[inline]
+    pub(crate) fn edit(&mut self) -> (&[u8], &mut [u8]) {
         match self {
             Self::Init {
                 original_data,
@@ -255,8 +275,8 @@ impl<'a> AlternatingBuffers<'a> {
                 tmp_buf2,
             } => {
                 let data = *original_data;
-                let main_buf = *tmp_buf1 as *mut AlignedBytes;
-                let secondary_buf = *tmp_buf2 as *mut AlignedBytes;
+                let main_buf = *tmp_buf1 as *mut [u8];
+                let secondary_buf = *tmp_buf2 as *mut [u8];
                 *self = Self::Alternating {
                     main_buf: unsafe { &mut *main_buf },
                     secondary_buf: unsafe { &mut *secondary_buf },
@@ -274,7 +294,7 @@ impl<'a> AlternatingBuffers<'a> {
                 std::mem::swap(main_buf, secondary_buf);
                 let prev_main_buf = secondary_buf;
                 let prev_secondary_buf = main_buf;
-                (prev_main_buf.as_slice(), prev_secondary_buf)
+                (prev_main_buf, prev_secondary_buf)
             }
         }
     }
@@ -392,6 +412,7 @@ pub(crate) struct SendSyncPtr<T>(*const T);
 unsafe impl<T> Send for SendSyncPtr<T> {}
 unsafe impl<T> Sync for SendSyncPtr<T> {}
 impl<T> SendSyncPtr<T> {
+    #[inline]
     pub unsafe fn new(ptr: *const T) -> Self {
         Self(ptr)
     }
@@ -428,6 +449,7 @@ where
 //     unsafe { *ptr }
 // }
 
+#[inline]
 pub(crate) unsafe fn value_from_io<T>(mut src: impl std::io::Read) -> std::io::Result<T>
 where
     T: Sized + Send + Sync + Copy + 'static,
@@ -465,6 +487,7 @@ macro_rules! or_else {
 // }
 pub(crate) use or_else;
 
+#[inline]
 pub(crate) fn calc_block_end(begin: u64, end: u64, block_size: u64) -> u64 {
     debug_assert!(begin <= end);
     // div_ceil always works for all cases, except for empty ranges where begin is not aligned with block_size
@@ -481,6 +504,7 @@ pub(crate) trait ArrayExt<T, const N: usize> {
         Self: Sized;
 }
 impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
+    #[inline]
     fn try_map_<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
     where
         Self: Sized,
@@ -496,9 +520,7 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        calc_block_end, default_strides, scale_read_shape, AlignedBytes, AlternatingBuffers,
-    };
+    use super::{calc_block_end, default_strides, scale_read_shape, AlternatingBuffers};
     use crate::DimDyn;
 
     #[test]
@@ -547,16 +569,12 @@ mod tests {
 
     // --- AlternatingBuffers ---
 
-    fn empty_buf() -> AlignedBytes {
-        AlignedBytes::new_exact(1)
-    }
-
     /// data() on a freshly created Init state returns the original slice.
     #[test]
     fn alternating_buffers_init_data() {
         let data = [1u8, 2, 3, 4];
-        let mut buf1 = empty_buf();
-        let mut buf2 = empty_buf();
+        let mut buf1 = [0u8; 4];
+        let mut buf2 = [0u8; 4];
         let ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
         assert_eq!(ab.data(), &[1u8, 2, 3, 4]);
     }
@@ -566,14 +584,14 @@ mod tests {
     #[test]
     fn alternating_buffers_first_edit_transitions() {
         let data = [1u8, 2, 3, 4];
-        let mut buf1 = empty_buf();
-        let mut buf2 = empty_buf();
+        let mut buf1 = [0u8; 4];
+        let mut buf2 = [0u8; 4];
         let mut ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
 
         {
             let (src, dst) = ab.edit();
             assert_eq!(src, &[1u8, 2, 3, 4]);
-            dst.extend_from_slice(&[10, 20, 30, 40]);
+            dst.copy_from_slice(&[10, 20, 30, 40]);
         }
 
         assert!(matches!(ab, AlternatingBuffers::Alternating { .. }));
@@ -584,15 +602,15 @@ mod tests {
     #[test]
     fn alternating_buffers_two_edits() {
         let data = [1u8, 2, 3];
-        let mut buf1 = empty_buf();
-        let mut buf2 = empty_buf();
+        let mut buf1 = [0u8; 3];
+        let mut buf2 = [0u8; 3];
         let mut ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
 
         {
             let (src, dst) = ab.edit();
             assert_eq!(src, &[1u8, 2, 3]);
-            for &b in src {
-                dst.push(b + 10);
+            for (d, &b) in dst.iter_mut().zip(src) {
+                *d = b + 10;
             }
         }
         assert_eq!(ab.data(), &[11u8, 12, 13]);
@@ -600,8 +618,8 @@ mod tests {
         {
             let (src, dst) = ab.edit();
             assert_eq!(src, &[11u8, 12, 13]);
-            for &b in src {
-                dst.push(b + 10);
+            for (d, &b) in dst.iter_mut().zip(src) {
+                *d = b + 10;
             }
         }
         assert_eq!(ab.data(), &[21u8, 22, 23]);
@@ -611,15 +629,14 @@ mod tests {
     #[test]
     fn alternating_buffers_pipeline() {
         let data = [0u8];
-        let mut buf1 = empty_buf();
-        let mut buf2 = empty_buf();
+        let mut buf1 = [0u8; 1];
+        let mut buf2 = [0u8; 1];
         let mut ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
 
         for step in 1u8..=5 {
             let (src, dst) = ab.edit();
             let prev = src[0];
-            dst.clear();
-            dst.push(prev + step);
+            dst[0] = prev + step;
         }
         // 0 + 1 + 2 + 3 + 4 + 5 = 15
         assert_eq!(ab.data(), &[15u8]);
@@ -629,16 +646,15 @@ mod tests {
     #[test]
     fn alternating_buffers_src_matches_previous_data() {
         let data = [42u8];
-        let mut buf1 = empty_buf();
-        let mut buf2 = empty_buf();
+        let mut buf1 = [0u8; 1];
+        let mut buf2 = [0u8; 1];
         let mut ab = AlternatingBuffers::with_const_src(&data, &mut buf1, &mut buf2);
 
         for _ in 0..4 {
             let current = ab.data().to_vec();
             let (src, dst) = ab.edit();
             assert_eq!(src, current.as_slice());
-            dst.clear();
-            dst.push(src[0].wrapping_add(1));
+            dst[0] = src[0].wrapping_add(1);
         }
     }
 

@@ -1215,7 +1215,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(c.to_ndarray()?[[1, 1]], 6.17 * (6.17 + 1.0));
     /// # Ok::<(), jix::Error>(())
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn as_ref(&self) -> Array<Ref<'_, S>> {
         Array {
             storage: Ref(self.storage()),
@@ -1226,6 +1226,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the
     /// resulting array can be stored alongside arrays of other concrete storage types.
+    #[inline]
     pub fn into_any(self) -> ArrayAny
     where
         S: ArrayStorage + Send + Sync + 'static,
@@ -1380,7 +1381,7 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `NewET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
-    #[inline(always)]
+    #[inline]
     pub fn into_type<NewET>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
     where
         NewET: ElementType,
@@ -1398,7 +1399,7 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `self.dtype() != T::DTYPE`.
-    #[inline(always)]
+    #[inline]
     pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<Ty<T>>>>
     where
         T: Dtyped,
@@ -1409,7 +1410,7 @@ where
     /// Re-tag this array's element type as [`TypeDyn`], erasing static element-type information.
     ///
     /// Infallible sugar for [`into_type::<TypeDyn>()`](Self::into_type).
-    #[inline(always)]
+    #[inline]
     pub fn into_type_dyn(self) -> Array<S::ElementTypeChange<TypeDyn>> {
         self.into_type().unwrap()
     }
@@ -1454,7 +1455,7 @@ where
     /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn into_dim<D>(self) -> Result<Array<S::DimensionChange<D>>>
     where
         D: Dimension,
@@ -1470,7 +1471,7 @@ where
     /// After calling `into_dim_dyn`, subsequent shape-changing operations will produce
     /// `DimDyn` results rather than `Dim<N>`. Call [`into_dim`](Self::into_dim) again to
     /// re-establish static tracking once the ndim is confirmed.
-    #[inline(always)]
+    #[inline]
     pub fn into_dim_dyn(self) -> Array<S::DimensionChange<DimDyn>> {
         self.into_dim().unwrap()
     }

@@ -213,6 +213,7 @@ pub(crate) mod _traits {
         type AbsoluteTolerance = Complex<F>;
         type RelativeTolerance = F;
 
+        #[inline(always)]
         fn approx_eq(
             &self,
             other: &Self,
@@ -565,6 +566,7 @@ struct ApproxEqKernel<T: crate::scalar::ApproxEq> {
 impl<T: crate::scalar::ApproxEq> Op2Kernel<T, T> for ApproxEqKernel<T> {
     type Output = bool;
 
+    #[inline(always)]
     fn apply(&self, a: T, b: T) -> Self::Output {
         a.approx_eq(&b, &self.rtol, &self.atol)
     }
