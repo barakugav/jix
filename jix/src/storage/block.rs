@@ -167,6 +167,7 @@ where
     ///
     /// Returns `InvalidBufferSize` if `buf` has the wrong length.
     /// Propagates any codec error.
+    #[inline]
     pub(crate) fn read_block(
         &self,
         block_idx: u64,
