@@ -131,10 +131,10 @@ pub trait ArrayStorage {
     {
         check_dtype(&T::DTYPE, self.dtype())?;
 
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
         let mut out = OutBuf::new_lazy(context);
         self.read_data(index, &mut out, context)?;
         let buf = out.unwrap_tmp();
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
 
         struct DefaultReadData<'a, T> {
             buf: TmpBuf<'a>,
