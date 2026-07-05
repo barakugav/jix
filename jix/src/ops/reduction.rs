@@ -199,7 +199,7 @@ where
     K: ReductionOpKernel<S::Item, Output: Dtyped>,
     D: Dimension,
 {
-    #[inline]
+    #[inline(always)] // weird to inline(always), but its only called from read_data
     fn read_data_impl<const LANES: usize>(
         &self,
         index: &[Range<u64>],
