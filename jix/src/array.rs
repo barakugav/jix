@@ -620,6 +620,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(nd[[1, 2]], (6.0 + 1.0) * 2.0 - 1.0);
     /// # Ok::<(), jix::Error>(())
     /// ```
+    #[inline]
     pub fn to_ndarray(
         &self,
     ) -> Result<ndarray::Array<S::Item, <S::Dimension as ndarray::IntoDimension>::Dim>>
@@ -731,6 +732,7 @@ impl<S: ArrayStorage> Array<S> {
     /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
+    #[inline]
     pub fn to_ndarray_sub(
         &self,
         index: &[Range<u64>],
@@ -791,6 +793,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(buf, vec![5, 6, 8, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
+    #[inline]
     pub fn to_ndarray_buf(
         &self,
         index: &[Range<u64>],
@@ -798,7 +801,6 @@ impl<S: ArrayStorage> Array<S> {
         context: &ReadContext,
     ) -> Result<()> {
         let shape = self.shape();
-        let ndim = shape.len();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
         let nitems = check_get_buffer_size(index, dtype, buf)?;
@@ -813,6 +815,22 @@ impl<S: ArrayStorage> Array<S> {
             return Ok(());
         }
 
+        self.to_ndarray_buf_slow_unchecked(index, buf, context)
+    }
+
+    // index range and buffer size are not checked
+    #[inline(never)]
+    fn to_ndarray_buf_slow_unchecked(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> Result<()> {
+        let shape = self.shape();
+        let ndim = shape.len();
+        let dtype = self.dtype();
+
+        let spec = self.storage.spec();
         let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let read_shape: S::Dimension =
             spec.read_shape_heuristic(&out_shape, shape, dtype.itemsize());

@@ -253,6 +253,7 @@ pub(crate) struct Decoder<'a> {
     filters: &'a [Filter],
 }
 impl<'a> Decoder<'a> {
+    #[inline]
     pub(crate) fn new(context: &'a ReadContext, config: &'a DecoderCodecConfig) -> Self {
         Self {
             #[cfg(not(miri))]
