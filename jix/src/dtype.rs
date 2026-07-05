@@ -906,7 +906,19 @@ impl PartialEq for Dtype {
         }
         match (self.scalar_kind(), other.scalar_kind()) {
             (Some(scalar1), Some(scalar2)) => scalar1 == scalar2,
-            (None, None) => self.fields() == other.fields(),
+            (None, None) => {
+                #[inline(never)]
+                fn fields_eq(a: &Dtype, b: &Dtype) -> bool {
+                    a.fields() == b.fields()
+                }
+                // Dtype::eq is a recursive function, because struct dtypes can contain other struct
+                // dtypes as fields. Recursive functions are not inlinable, so we add here an
+                // inline(never) function, making the eq inlinable.
+                // This is critical, as `eq` is in many places in which the arguments are known at
+                // compile time, inlining it make the equality check a compile-time constant, which
+                // enabled other optimizations.
+                fields_eq(self, other)
+            }
             _ => false,
         }
     }
