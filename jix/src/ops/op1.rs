@@ -8,12 +8,10 @@ use crate::ops::common::define_array_op1_method;
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
-use crate::util::assert_unchecked_eq;
 use crate::{ArrayStorage, Ty};
 
 pub(crate) struct Op1<S, K> {
     pub(crate) array: S,
-    out_dtype_: Dtype,
     kernel: K,
 }
 pub(crate) trait Op1Kernel<T> {
@@ -32,11 +30,7 @@ impl<S, K> Op1<S, K> {
         S: ArrayStorageTyped,
         K: Op1Kernel<S::Item, Output: Dtyped>,
     {
-        Ok(Self {
-            array,
-            out_dtype_: K::Output::DTYPE,
-            kernel,
-        })
+        Ok(Self { array, kernel })
     }
 }
 
@@ -82,9 +76,7 @@ where
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        let dtype = &self.out_dtype_;
-        unsafe { assert_unchecked_eq!(*dtype, K::Output::DTYPE) };
-        dtype
+        const { &K::Output::DTYPE }
     }
 
     #[inline]
@@ -104,7 +96,6 @@ where
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
         Ok(Op1 {
             array: self.array.dimension_change()?,
-            out_dtype_: self.out_dtype_,
             kernel: self.kernel,
         })
     }

@@ -4,7 +4,6 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
 use crate::storage::{ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
-use crate::util::assert_unchecked_eq;
 use crate::{
     Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, ReadContext,
     ReadDataTuple, Ty,
@@ -251,7 +250,6 @@ where
 pub struct MapMultiple<ArraysT, F> {
     arrays: ArraysT,
     map_fn: F,
-    out_dtype_: Dtype,
 }
 impl<ArraysT, F> MapMultiple<ArraysT, F> {
     /// Constructs a [`MapMultiple`] storage. See the struct docs for semantics and examples.
@@ -271,11 +269,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
             );
         }
-        Ok(Self {
-            arrays,
-            map_fn,
-            out_dtype_: O::DTYPE,
-        })
+        Ok(Self { arrays, map_fn })
     }
 }
 impl<ArraysT, O, F> ArrayStorage for MapMultiple<ArraysT, F>
@@ -356,9 +350,7 @@ where
 
     #[inline]
     fn dtype(&self) -> &Dtype {
-        let dtype = &self.out_dtype_;
-        unsafe { assert_unchecked_eq!(*dtype, O::DTYPE) };
-        dtype
+        const { &O::DTYPE }
     }
 
     #[inline]

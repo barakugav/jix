@@ -10,10 +10,17 @@ repository = "https://github.com/barakugav/jix"
 license = "MIT OR Apache-2.0"
 keywords = ["ndarray", "compression", "zstd"]
 categories = ["data-structures", "compression", "science"]
-include = ["Cargo.toml", "build.rs", "src/", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
+include = [
+    "Cargo.toml",
+    "build.rs",
+    "src/",
+    "README.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+]
 
 [dependencies]
-jix-macros = { path = "../jix-macros", version = "0.0.3" }
+jix-macros = { path = "../jix-macros", version = "=0.0.3" }
 ndarray = ">=0.16,<0.18"
 memmap2 = "0.9"
 num-traits = "0.2" # TODO make it optional

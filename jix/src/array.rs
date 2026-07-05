@@ -560,11 +560,9 @@ impl<S: ArrayStorage> Array<S> {
     /// ```
     #[inline(always)]
     pub fn dtype(&self) -> &Dtype {
-        let dtype = self.storage.dtype();
-        if let Some(compile_time_dtype) = S::ElementType::DTYPE {
-            unsafe { assert_unchecked_eq!(dtype, &compile_time_dtype) };
-        }
-        dtype
+        const { &S::ElementType::DTYPE }
+            .as_ref()
+            .unwrap_or_else(|| self.storage.dtype())
     }
 
     /// Decode the entire array into a fresh heap-allocated [`ndarray::Array`].
