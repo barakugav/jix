@@ -297,7 +297,7 @@ impl<'a> Decoder<'a> {
             let tmp_buf = tmp_buf.as_mut_slice();
 
             let dst_ptr = dst.as_mut_ptr();
-            let dst_buf_odd = self.filters.len() % 2 == 0;
+            let dst_buf_odd = self.filters.len().is_multiple_of(2);
             let (buf1, buf2) = if dst_buf_odd {
                 // we have 1 decompression + even number of filter, so we are going to write to a
                 // total of odd number of buffers. For the last buffer to be dst, he also need to
