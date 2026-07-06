@@ -263,16 +263,23 @@ where
     ///
     /// ## Algorithm
     ///
-    /// 1. For each dimension, compute the range of block indices that overlap `index`:
+    /// 1. For each dimension, compute the range of block indices that overlap `index`, and track
+    ///    two flags across all dimensions:
     ///    `b_begin[d] = index[d].start / block_shape[d]`,
-    ///    `b_end[d]   = ceil(index[d].end / block_shape[d])`.
+    ///    `b_end[d]   = ceil(index[d].end / block_shape[d])`;
+    ///    `is_single_block` - every dimension touches exactly one block (`b_begin[d] + 1 == b_end[d]`);
+    ///    `is_aligned` - `index[d]` starts and ends on block boundaries in every dimension.
     ///
-    /// 2. **Fast path** - if the index falls exactly on a single aligned block (start and end
-    ///    are both block-aligned, one block per dimension), compute the 1D block index via
-    ///    row-major flattening and call [`BlockTable::read_block`](crate::storage::block::BlockTable::read_block)
-    ///    directly into `buf`. No temporary buffer needed.
+    /// 2. **Fast path (aligned single block)** - if `is_single_block && is_aligned`, the requested
+    ///    region *is* one whole block, so compute the 1D block index via row-major flattening and
+    ///    call [`BlockTable::read_block`](crate::storage::block::BlockTable::read_block) directly
+    ///    into `buf`. No temporary buffer and no copy needed.
     ///
-    /// 3. **General path** - iterate over every nd-block in the touched range using `NdIter`,
+    /// 3. **Fast path (single block)** - if `is_single_block` but the region is not block-aligned,
+    ///    only one block is touched. Decompress it once into `tmp_buf`, then do a single strided
+    ///    `nd_copy` of the requested sub-region into `buf`, skipping the `NdIter` setup below.
+    ///
+    /// 4. **General path** - iterate over every nd-block in the touched range using `NdIter`,
     ///    extended with two side-cars:
     ///    - `nd_iter_ext_logical_global_index` - yields the 1D `BlockTable` index for each
     ///      block (row-major flattening of the nd block index within `block_grid_shape`).
@@ -304,36 +311,80 @@ where
 
         let ndim = shape.len();
         let block_shape = self.block_shape();
+        assert_eq!(ndim, block_shape.len());
 
         let mut b_range = DimArray::default();
-        let mut single_full_block = true; // TODO: use two flags: is_single_block, is_aligned
+        let mut is_single_block = true; // every dimension touches exactly one block.
+        let mut is_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
         for dim in 0..ndim {
             let b = block_shape[dim] as u64;
             let (i_start, i_end) = (index[dim].start, index[dim].end);
+            if i_start == i_end {
+                return Ok(()); // empty read
+            }
             let (b_begin, b_end) = (i_start / b, calc_block_end(i_start, i_end, b));
             b_range.push(b_begin..b_end);
-            single_full_block &=
-                b_begin + 1 == b_end && i_start.is_multiple_of(b) && i_end.is_multiple_of(b);
+            is_single_block &= b_begin + 1 == b_end;
+            is_aligned &= i_start.is_multiple_of(b) && i_end.is_multiple_of(b);
         }
 
-        // Fast path for aligned single-block read
-        if single_full_block {
-            let block_idx = (0..ndim).fold(0u64, |blk_idx, dim| {
+        // Row-major-flattened 1D block index
+        let single_block_idx = is_single_block.then(|| {
+            (0..ndim).fold(0u64, |blk_idx, dim| {
                 blk_idx * self.block_grid_shape[dim] + b_range[dim].start
-            });
-            return self.blocks.read_block(block_idx, buf, context);
+            })
+        });
+
+        // Fast path for aligned single-block read
+        if let Some(single_block_idx) = single_block_idx
+            && is_aligned
+        {
+            return self.blocks.read_block(single_block_idx, buf, context);
         }
 
         let dtype = self.blocks.dtype();
         let itemsize = dtype.itemsize() as usize;
         let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let out_strides = default_strides(&out_shape, itemsize);
-        let block_strides = default_strides(block_shape, itemsize as BlockSize); // TODO: precomute me
+        let block_strides = default_strides(block_shape, itemsize as BlockSize);
 
+        // Pre-allocate a buffer large enough for a full block.
+        let full_buf_len = block_shape.iter().map(|s| *s as usize).product::<usize>() * itemsize;
+        let mut tmp_buf = context.tmp_buf(full_buf_len, dtype.alignment());
+        let tmp_buf = tmp_buf.as_mut_slice();
+
+        // Fast path for (unaligned) single-block read
+        if let Some(single_block_idx) = single_block_idx {
+            self.blocks.read_block(single_block_idx, tmp_buf, context)?;
+
+            // Byte offset into `tmp_buf` of the requested region's first element.
+            let active_start = (0..ndim)
+                .map(|dim| {
+                    let inner_offset = index[dim].start % block_shape[dim] as u64;
+                    inner_offset as usize * block_strides[dim] as usize
+                })
+                .sum::<usize>();
+            let src_ptr = unsafe { tmp_buf.as_ptr().add(active_start) };
+
+            let copy_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
+            unsafe {
+                nd_copy(
+                    src_ptr,
+                    buf.as_mut_ptr(),
+                    copy_shape,
+                    &block_strides,
+                    &out_strides,
+                    itemsize,
+                )
+            };
+            return Ok(());
+        }
+
+        let block_shape_u64 = D::from_fn(ndim, |dim| block_shape[dim] as u64);
         // Block-space begin/end for NdIter.
-        let block_begin = D::from_fn(ndim, |dim| index[dim].start / block_shape[dim] as u64);
+        let block_begin = D::from_fn(ndim, |dim| index[dim].start / block_shape_u64[dim]);
         let block_end = D::from_fn(ndim, |dim| {
-            calc_block_end(index[dim].start, index[dim].end, block_shape[dim] as u64)
+            calc_block_end(index[dim].start, index[dim].end, block_shape_u64[dim])
         });
         // Element-space begin/end for NdIterExtBlockOffsetSize.
         let elem_begin = D::from_fn(ndim, |dim| index[dim].start);
@@ -346,19 +397,9 @@ where
             block_end,
             (
                 block_global_idx_ext,
-                NdIterExtBlockOffsetSize::new(
-                    elem_begin,
-                    elem_end,
-                    D::from_fn(ndim, |dim| block_shape[dim] as u64),
-                ),
+                NdIterExtBlockOffsetSize::new(elem_begin, elem_end, block_shape_u64.clone()),
             ),
         );
-
-        // Pre-allocate a buffer large enough for a full block.
-        let full_buf_len = block_shape.iter().map(|s| *s as usize).product::<usize>() * itemsize;
-        let mut tmp_buf = context.tmp_buf(full_buf_len, dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-
         for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
             self.blocks.read_block(block_global_id, tmp_buf, context)?;
 
@@ -371,8 +412,7 @@ where
             // Map the active region's start to its position in the output array.
             let out_start = (0..ndim)
                 .map(|dim| {
-                    let full_idx =
-                        block_idx[dim] * block_shape[dim] as u64 + block_inner_offset[dim];
+                    let full_idx = block_idx[dim] * block_shape_u64[dim] + block_inner_offset[dim];
                     let out_idx = full_idx - index[dim].start;
                     out_idx as usize * out_strides[dim]
                 })

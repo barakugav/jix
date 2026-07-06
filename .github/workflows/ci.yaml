@@ -143,6 +143,17 @@ jobs:
       #     pushd schema; cargo run; popd
       #     git diff --exit-code
       #   working-directory: jix
+      - name: Protobuf Buf linter
+        uses: bufbuild/buf-action@v1
+        with:
+          version: 1.71.0
+          input: jix/schema/proto
+          format: true
+          lint: true
+          breaking: false
+          push: false
+          archive: false
+          pr_comment: false
 
       ############ Tests ############
       - name: Test jix

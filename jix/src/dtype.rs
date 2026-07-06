@@ -896,7 +896,7 @@ impl std::fmt::Display for Dtype {
     }
 }
 impl PartialEq for Dtype {
-    #[inline(always)]
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         if !(self.itemsize() == other.itemsize()
             && self.alignment() == other.alignment()
@@ -906,7 +906,19 @@ impl PartialEq for Dtype {
         }
         match (self.scalar_kind(), other.scalar_kind()) {
             (Some(scalar1), Some(scalar2)) => scalar1 == scalar2,
-            (None, None) => self.fields() == other.fields(),
+            (None, None) => {
+                #[inline(never)]
+                fn fields_eq(a: &Dtype, b: &Dtype) -> bool {
+                    a.fields() == b.fields()
+                }
+                // Dtype::eq is a recursive function, because struct dtypes can contain other struct
+                // dtypes as fields. Recursive functions are not inlinable, so we add here an
+                // inline(never) function, making the eq inlinable.
+                // This is critical, as `eq` is in many places in which the arguments are known at
+                // compile time, inlining it make the equality check a compile-time constant, which
+                // enabled other optimizations.
+                fields_eq(self, other)
+            }
             _ => false,
         }
     }
@@ -959,7 +971,7 @@ impl ScalarKind {
     /// Check if this scalar is an integer type (signed or unsigned).
     ///
     /// Returns true for `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
-    #[inline(always)]
+    #[inline]
     pub fn is_integer(&self) -> bool {
         self.is_signed_integer() || self.is_unsigned_integer()
     }
@@ -967,7 +979,7 @@ impl ScalarKind {
     /// Check if this scalar is a signed integer type.
     ///
     /// Returns true for `i8`, `i16`, `i32`, `i64`.
-    #[inline(always)]
+    #[inline]
     pub fn is_signed_integer(&self) -> bool {
         matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
     }
@@ -975,7 +987,7 @@ impl ScalarKind {
     /// Check if this scalar is an unsigned integer type.
     ///
     /// Returns true for `u8`, `u16`, `u32`, `u64`.
-    #[inline(always)]
+    #[inline]
     pub fn is_unsigned_integer(&self) -> bool {
         matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
     }
@@ -983,7 +995,7 @@ impl ScalarKind {
     /// Check if this scalar is a floating point type.
     ///
     /// Returns true for `f16`, `f32`, `f64`.
-    #[inline(always)]
+    #[inline]
     pub fn is_float(&self) -> bool {
         matches!(self, Self::F16 | Self::F32 | Self::F64)
     }
@@ -991,7 +1003,7 @@ impl ScalarKind {
     /// Check if this scalar is a complex type.
     ///
     /// Returns true for `Complex<f32>` and `Complex<f64>`.
-    #[inline(always)]
+    #[inline]
     pub fn is_complex(&self) -> bool {
         matches!(self, Self::ComplexF32 | Self::ComplexF64)
     }
@@ -999,7 +1011,7 @@ impl ScalarKind {
     /// Check if this scalar is a boolean type.
     ///
     /// Returns true for `bool`.
-    #[inline(always)]
+    #[inline]
     pub fn is_bool(&self) -> bool {
         matches!(self, Self::Bool)
     }
@@ -1012,7 +1024,7 @@ impl ScalarKind {
     /// - `Some(I32)` for `I32` and `U32`
     /// - `Some(I64)` for `I64` and `U64`
     /// - `None` for others
-    #[inline(always)]
+    #[inline]
     pub fn to_signed_integer(&self) -> Option<Self> {
         Some(match self {
             Self::U8 | Self::I8 => Self::I8,
@@ -1031,7 +1043,7 @@ impl ScalarKind {
     /// - `Some(U32)` for `I32` and `U32`
     /// - `Some(U64)` for `I64` and `U64`
     /// - `None` for others
-    #[inline(always)]
+    #[inline]
     pub fn to_unsigned_integer(&self) -> Option<Self> {
         Some(match self {
             Self::I8 | Self::U8 => Self::U8,

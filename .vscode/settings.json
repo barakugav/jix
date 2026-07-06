@@ -24,6 +24,7 @@
         "Dtyped",
         "getattr",
         "getitem",
+        "inlinable",
         "Inplace",
         "isnan",
         "itemsize",

@@ -13,7 +13,6 @@ use crate::{Array, ArrayStorage, Ty};
 pub(crate) struct Op2<S1, S2, K> {
     pub(crate) a: S1,
     pub(crate) b: S2,
-    out_dtype_: Dtype,
     kernel: K,
 }
 pub(crate) trait Op2Kernel<T1, T2> {
@@ -44,12 +43,7 @@ impl<S1, S2, K> Op2<S1, S2, K> {
             a.shape(),
             b.shape()
         );
-        Ok(Self {
-            a,
-            b,
-            out_dtype_: K::Output::DTYPE,
-            kernel,
-        })
+        Ok(Self { a, b, kernel })
     }
 }
 
@@ -104,9 +98,7 @@ where
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        let dtype = &self.out_dtype_;
-        unsafe { assert_unchecked_eq!(*dtype, K::Output::DTYPE) };
-        dtype
+        const { &K::Output::DTYPE }
     }
 
     #[inline]
@@ -123,7 +115,6 @@ where
         Ok(Op2 {
             a: self.a.dimension_change()?,
             b: self.b.dimension_change()?,
-            out_dtype_: self.out_dtype_,
             kernel: self.kernel,
         })
     }

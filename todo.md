@@ -10,3 +10,4 @@
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
 - use multiple threads for reads
 - ArrayParams stream syntax
+- resolve TODOs across the repo

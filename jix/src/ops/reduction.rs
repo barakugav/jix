@@ -11,9 +11,7 @@ use crate::storage::{ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
-use crate::util::{
-    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray,
-};
+use crate::util::{calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
@@ -22,7 +20,6 @@ pub(crate) struct ReductionOp<S, K, D> {
     array: S,
     is_reduced: DimArray<bool>,
 
-    out_dtype_: Dtype,
     shape: D,
     spec: ArraySpecDynamic,
 }
@@ -106,7 +103,6 @@ impl<S, K, D> ReductionOp<S, K, D> {
 
         Ok(Self {
             kernel,
-            out_dtype_: K::Output::DTYPE,
             shape,
             spec,
             array,
@@ -156,9 +152,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        let dtype = &self.out_dtype_;
-        unsafe { assert_unchecked_eq!(dtype, &K::Output::DTYPE) };
-        dtype
+        const { &K::Output::DTYPE }
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
@@ -185,7 +179,6 @@ where
             kernel: self.kernel,
             array: self.array,
             is_reduced: self.is_reduced,
-            out_dtype_: self.out_dtype_,
             shape,
             spec: self.spec,
         })
@@ -199,7 +192,7 @@ where
     K: ReductionOpKernel<S::Item, Output: Dtyped>,
     D: Dimension,
 {
-    #[inline]
+    #[inline(always)] // weird to inline(always), but its only called from read_data
     fn read_data_impl<const LANES: usize>(
         &self,
         index: &[Range<u64>],

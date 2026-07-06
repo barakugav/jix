@@ -108,41 +108,41 @@ impl ScalarKind {
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            Self::Unspecified => "DTYPE_SCALAR_KIND_UNSPECIFIED",
-            Self::I8 => "DTYPE_SCALAR_KIND_I8",
-            Self::I16 => "DTYPE_SCALAR_KIND_I16",
-            Self::I32 => "DTYPE_SCALAR_KIND_I32",
-            Self::I64 => "DTYPE_SCALAR_KIND_I64",
-            Self::U8 => "DTYPE_SCALAR_KIND_U8",
-            Self::U16 => "DTYPE_SCALAR_KIND_U16",
-            Self::U32 => "DTYPE_SCALAR_KIND_U32",
-            Self::U64 => "DTYPE_SCALAR_KIND_U64",
-            Self::F16 => "DTYPE_SCALAR_KIND_F16",
-            Self::F32 => "DTYPE_SCALAR_KIND_F32",
-            Self::F64 => "DTYPE_SCALAR_KIND_F64",
-            Self::ComplexF32 => "DTYPE_SCALAR_KIND_COMPLEX_F32",
-            Self::ComplexF64 => "DTYPE_SCALAR_KIND_COMPLEX_F64",
-            Self::Bool => "DTYPE_SCALAR_KIND_BOOL",
+            Self::Unspecified => "SCALAR_KIND_UNSPECIFIED",
+            Self::I8 => "SCALAR_KIND_I8",
+            Self::I16 => "SCALAR_KIND_I16",
+            Self::I32 => "SCALAR_KIND_I32",
+            Self::I64 => "SCALAR_KIND_I64",
+            Self::U8 => "SCALAR_KIND_U8",
+            Self::U16 => "SCALAR_KIND_U16",
+            Self::U32 => "SCALAR_KIND_U32",
+            Self::U64 => "SCALAR_KIND_U64",
+            Self::F16 => "SCALAR_KIND_F16",
+            Self::F32 => "SCALAR_KIND_F32",
+            Self::F64 => "SCALAR_KIND_F64",
+            Self::ComplexF32 => "SCALAR_KIND_COMPLEX_F32",
+            Self::ComplexF64 => "SCALAR_KIND_COMPLEX_F64",
+            Self::Bool => "SCALAR_KIND_BOOL",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
-            "DTYPE_SCALAR_KIND_UNSPECIFIED" => Some(Self::Unspecified),
-            "DTYPE_SCALAR_KIND_I8" => Some(Self::I8),
-            "DTYPE_SCALAR_KIND_I16" => Some(Self::I16),
-            "DTYPE_SCALAR_KIND_I32" => Some(Self::I32),
-            "DTYPE_SCALAR_KIND_I64" => Some(Self::I64),
-            "DTYPE_SCALAR_KIND_U8" => Some(Self::U8),
-            "DTYPE_SCALAR_KIND_U16" => Some(Self::U16),
-            "DTYPE_SCALAR_KIND_U32" => Some(Self::U32),
-            "DTYPE_SCALAR_KIND_U64" => Some(Self::U64),
-            "DTYPE_SCALAR_KIND_F16" => Some(Self::F16),
-            "DTYPE_SCALAR_KIND_F32" => Some(Self::F32),
-            "DTYPE_SCALAR_KIND_F64" => Some(Self::F64),
-            "DTYPE_SCALAR_KIND_COMPLEX_F32" => Some(Self::ComplexF32),
-            "DTYPE_SCALAR_KIND_COMPLEX_F64" => Some(Self::ComplexF64),
-            "DTYPE_SCALAR_KIND_BOOL" => Some(Self::Bool),
+            "SCALAR_KIND_UNSPECIFIED" => Some(Self::Unspecified),
+            "SCALAR_KIND_I8" => Some(Self::I8),
+            "SCALAR_KIND_I16" => Some(Self::I16),
+            "SCALAR_KIND_I32" => Some(Self::I32),
+            "SCALAR_KIND_I64" => Some(Self::I64),
+            "SCALAR_KIND_U8" => Some(Self::U8),
+            "SCALAR_KIND_U16" => Some(Self::U16),
+            "SCALAR_KIND_U32" => Some(Self::U32),
+            "SCALAR_KIND_U64" => Some(Self::U64),
+            "SCALAR_KIND_F16" => Some(Self::F16),
+            "SCALAR_KIND_F32" => Some(Self::F32),
+            "SCALAR_KIND_F64" => Some(Self::F64),
+            "SCALAR_KIND_COMPLEX_F32" => Some(Self::ComplexF32),
+            "SCALAR_KIND_COMPLEX_F64" => Some(Self::ComplexF64),
+            "SCALAR_KIND_BOOL" => Some(Self::Bool),
             _ => None,
         }
     }
@@ -200,9 +200,9 @@ pub mod block_table_header {
         /// may appear in any order ("continuous" refers to the data buffer, not to block ordering).
         /// The body is two continuous sections: one for the block locations and one for the compressed
         /// block data. The locations section holds (nblocks + 1) / 2 entries, each packing two blocks'
-        /// (offset: u64, len: u32) locations into one 24-byte entry (avoiding the padding a lone
-        /// u64 + u32 would incur); block i occupies the `len` bytes of block_data starting at `offset`.
-        /// Blocks need not be contiguous or in order.
+        /// (offset: \[u64; 2\], len: \[u32; 2\]) locations into one 24-byte entry (avoiding the padding a
+        /// lone u64 + u32 would incur); block i occupies the `len` bytes of block_data starting at
+        /// `offset`. Blocks need not be contiguous or in order.
         /// A table with { offset: i64, size: u64 } (C struct) rows exists immediately after this message,
         /// with the first row describing the block locations section and the second row describing the
         /// compressed block data section.

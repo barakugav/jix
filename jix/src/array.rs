@@ -327,8 +327,10 @@ impl<D> Array<Compact<TypeDyn, D>> {
         Sh: IntoDimension<Dimension = D>,
         D: Dimension,
     {
-        let array = unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype)? };
-        params.tune(array.shape(), array.dtype())?;
+        let shape = shape.into_dimension()?;
+        params.tune(shape.as_slice(), &dtype)?;
+        let array =
+            unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype, params.clone())? };
         array.compact_with(params, &array.try_read_ctx()?)
     }
 }
@@ -560,11 +562,9 @@ impl<S: ArrayStorage> Array<S> {
     /// ```
     #[inline(always)]
     pub fn dtype(&self) -> &Dtype {
-        let dtype = self.storage.dtype();
-        if let Some(compile_time_dtype) = S::ElementType::DTYPE {
-            unsafe { assert_unchecked_eq!(dtype, &compile_time_dtype) };
-        }
-        dtype
+        const { &S::ElementType::DTYPE }
+            .as_ref()
+            .unwrap_or_else(|| self.storage.dtype())
     }
 
     /// Decode the entire array into a fresh heap-allocated [`ndarray::Array`].
@@ -622,6 +622,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(nd[[1, 2]], (6.0 + 1.0) * 2.0 - 1.0);
     /// # Ok::<(), jix::Error>(())
     /// ```
+    #[inline]
     pub fn to_ndarray(
         &self,
     ) -> Result<ndarray::Array<S::Item, <S::Dimension as ndarray::IntoDimension>::Dim>>
@@ -733,6 +734,7 @@ impl<S: ArrayStorage> Array<S> {
     /// );
     /// # Ok::<(), jix::Error>(())
     /// ```
+    #[inline]
     pub fn to_ndarray_sub(
         &self,
         index: &[Range<u64>],
@@ -793,6 +795,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(buf, vec![5, 6, 8, 9]);
     /// # Ok::<(), jix::Error>(())
     /// ```
+    #[inline]
     pub fn to_ndarray_buf(
         &self,
         index: &[Range<u64>],
@@ -800,7 +803,6 @@ impl<S: ArrayStorage> Array<S> {
         context: &ReadContext,
     ) -> Result<()> {
         let shape = self.shape();
-        let ndim = shape.len();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
         let nitems = check_get_buffer_size(index, dtype, buf)?;
@@ -815,6 +817,22 @@ impl<S: ArrayStorage> Array<S> {
             return Ok(());
         }
 
+        self.to_ndarray_buf_slow_unchecked(index, buf, context)
+    }
+
+    // index range and buffer size are not checked
+    #[inline(never)]
+    fn to_ndarray_buf_slow_unchecked(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut [u8],
+        context: &ReadContext,
+    ) -> Result<()> {
+        let shape = self.shape();
+        let ndim = shape.len();
+        let dtype = self.dtype();
+
+        let spec = self.storage.spec();
         let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let read_shape: S::Dimension =
             spec.read_shape_heuristic(&out_shape, shape, dtype.itemsize());
@@ -1215,7 +1233,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(c.to_ndarray()?[[1, 1]], 6.17 * (6.17 + 1.0));
     /// # Ok::<(), jix::Error>(())
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn as_ref(&self) -> Array<Ref<'_, S>> {
         Array {
             storage: Ref(self.storage()),
@@ -1226,6 +1244,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the
     /// resulting array can be stored alongside arrays of other concrete storage types.
+    #[inline]
     pub fn into_any(self) -> ArrayAny
     where
         S: ArrayStorage + Send + Sync + 'static,
@@ -1380,7 +1399,7 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `NewET = Ty<T>` and `self.dtype() != T::DTYPE`. Always succeeds for `NewET = TypeDyn`.
-    #[inline(always)]
+    #[inline]
     pub fn into_type<NewET>(self) -> Result<Array<S::ElementTypeChange<NewET>>>
     where
         NewET: ElementType,
@@ -1398,7 +1417,7 @@ where
     ///
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `self.dtype() != T::DTYPE`.
-    #[inline(always)]
+    #[inline]
     pub fn into_typed<T>(self) -> Result<Array<S::ElementTypeChange<Ty<T>>>>
     where
         T: Dtyped,
@@ -1409,7 +1428,7 @@ where
     /// Re-tag this array's element type as [`TypeDyn`], erasing static element-type information.
     ///
     /// Infallible sugar for [`into_type::<TypeDyn>()`](Self::into_type).
-    #[inline(always)]
+    #[inline]
     pub fn into_type_dyn(self) -> Array<S::ElementTypeChange<TypeDyn>> {
         self.into_type().unwrap()
     }
@@ -1454,7 +1473,7 @@ where
     /// assert_eq!(a4d.shape(), &[1, 2, 3, 4]);
     /// # Ok::<(), jix::Error>(())
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn into_dim<D>(self) -> Result<Array<S::DimensionChange<D>>>
     where
         D: Dimension,
@@ -1470,7 +1489,7 @@ where
     /// After calling `into_dim_dyn`, subsequent shape-changing operations will produce
     /// `DimDyn` results rather than `Dim<N>`. Call [`into_dim`](Self::into_dim) again to
     /// re-establish static tracking once the ndim is confirmed.
-    #[inline(always)]
+    #[inline]
     pub fn into_dim_dyn(self) -> Array<S::DimensionChange<DimDyn>> {
         self.into_dim().unwrap()
     }

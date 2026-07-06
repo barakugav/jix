@@ -6,7 +6,7 @@ use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
 use jix_core::dtype::{Dtyped, ScalarKind};
 use jix_core::scalar::{f16, Complex};
-use jix_core::{Array as CoreArray, ArrayAny};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayParams};
 
 use crate::dtype::dtype_from_numpy;
 use crate::ops::common::{Precision, Rank};
@@ -171,7 +171,14 @@ impl Operand {
         };
         let array = array.clone().unbind();
         let storage = unsafe {
-            jix_core::storage::Plain::new(array, data_ptr, shape.as_slice(), &strides, dtype)
+            jix_core::storage::Plain::new(
+                array,
+                data_ptr,
+                shape.as_slice(),
+                &strides,
+                dtype,
+                ArrayParams::default(),
+            )
         };
         let storage = storage.into_py_result()?;
 

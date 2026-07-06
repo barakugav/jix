@@ -117,11 +117,9 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &crate::dtype::Dtype {
-        let dtype = self.inner.dtype();
-        if let Some(expected_dtype) = ET::DTYPE {
-            unsafe { assert_unchecked_eq!(dtype, &expected_dtype) };
-        }
-        dtype
+        const { &ET::DTYPE }
+            .as_ref()
+            .unwrap_or_else(|| self.inner.dtype())
     }
     #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {

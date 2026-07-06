@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
-use crate::util::assert_unchecked_eq;
 
 /// Compile-time element-type tracking for [`ArrayStorage`](crate::ArrayStorage).
 ///
@@ -60,7 +59,7 @@ impl ElementType for TypeDyn {
 /// type casts. Arrays constructed from typed sources (e.g.
 /// [`Array::compact_ndarray`](crate::Array::compact_ndarray)) automatically carry `Ty<T>`.
 #[derive(Clone)]
-pub struct Ty<T>(Dtype, PhantomData<T>);
+pub struct Ty<T>(PhantomData<T>);
 impl<T> Ty<T> {
     /// Construct the element type marker.
     #[allow(clippy::new_without_default)]
@@ -69,7 +68,7 @@ impl<T> Ty<T> {
     where
         T: Dtyped,
     {
-        Self(T::DTYPE, PhantomData)
+        Self(PhantomData)
     }
 }
 impl<T> ElementType for Ty<T>
@@ -86,7 +85,6 @@ where
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        unsafe { assert_unchecked_eq!(self.0, T::DTYPE) };
-        &self.0
+        const { &T::DTYPE }
     }
 }

@@ -83,6 +83,12 @@ impl<A, D> Plain<A, TypeDyn, D> {
     ///   dimension. Must have the same length as `shape`.
     /// * `dtype` - element type descriptor; used for itemsize and alignment
     ///   checks.
+    /// * `params` - this arg never change how the plain buffer is stored - a `Plain` array is always an
+    ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
+    ///   storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
+    ///   codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    ///   [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
+    ///   though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
     ///
     /// # Errors
     ///
@@ -105,6 +111,7 @@ impl<A, D> Plain<A, TypeDyn, D> {
         shape: Sh,
         strides: &[usize], // in bytes
         dtype: Dtype,
+        mut params: ArrayParams,
     ) -> Result<Self>
     where
         D: Dimension,
@@ -129,14 +136,12 @@ impl<A, D> Plain<A, TypeDyn, D> {
             "Data pointer or strides are not aligned to required alignment {alignment}"
         );
 
-        let params = ArrayParams {
-            block_shape: Some(dim_arr(ndim, |_| 1)),
-            block_shape_tag: Some(dim_arr(ndim, |_| BlockShapeTag::Any)),
-            block_size: None,
-            read_size: None,
-            encoder_params: None,
-            decoder_params: None,
-        };
+        if params.block_shape_tag.is_none() {
+            params.block_shape_tag(&dim_arr(ndim, |_| BlockShapeTag::Any));
+            if params.block_shape.is_none() {
+                params.block_shape(&dim_arr(ndim, |_| 1));
+            }
+        }
         let spec = params.into_spec(
             shape.as_slice(),
             &dtype,
@@ -167,11 +172,39 @@ impl<T, D> Array<Plain<Vec<T>, Ty<T>, D>> {
     /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
     /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
     ///
+    /// Uses default [`ArrayParams`]. To pass explicit params - which affect arrays derived from the
+    /// result and read behavior, but never the plain storage itself - use
+    /// [`plain_ndarray_with`](Self::plain_ndarray_with).
+    ///
     /// # Errors
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
     /// maximum supported ndim.
     pub fn plain_ndarray<D2>(arr: ndarray::Array<T, D2>) -> Result<Self>
+    where
+        T: Dtyped,
+        D: Dimension,
+        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+    {
+        Self::plain_ndarray_with(arr, ArrayParams::default())
+    }
+
+    /// Create a [`Plain`] array that takes ownership of an `ndarray` array, with explicit params.
+    ///
+    /// Same as [`plain_ndarray`](Self::plain_ndarray) but takes an explicit [`ArrayParams`].
+    ///
+    /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
+    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
+    /// storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
+    /// codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
+    /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ndarray's number of dimensions exceeds the
+    /// maximum supported ndim.
+    pub fn plain_ndarray_with<D2>(arr: ndarray::Array<T, D2>, params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,
         D: Dimension,
@@ -192,7 +225,8 @@ impl<T, D> Array<Plain<Vec<T>, Ty<T>, D>> {
         }
         let data_ptr = data_ptr.cast::<u8>();
 
-        let storage = unsafe { Plain::new(allocation, data_ptr, shape, &strides, T::DTYPE) }?;
+        let storage =
+            unsafe { Plain::new(allocation, data_ptr, shape, &strides, T::DTYPE, params) }?;
         let array = Array::from_storage(storage);
         let array = array.into_type().unwrap();
         Ok(array)
@@ -208,7 +242,10 @@ impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
     ///
     /// The caller must ensure that the lifetime `'a` correctly reflects the lifetime of the
     /// borrowed *data* in `arr`.
-    unsafe fn plain_ndarray_ref_impl<S, D2>(arr: &ndarray::ArrayBase<S, D2>) -> Result<Self>
+    unsafe fn plain_ndarray_ref_impl<S, D2>(
+        arr: &ndarray::ArrayBase<S, D2>,
+        params: ArrayParams,
+    ) -> Result<Self>
     where
         S: ndarray::Data<Elem = T>,
         D: Dimension,
@@ -225,7 +262,7 @@ impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
 
         let data_ptr = arr.as_ptr().cast::<u8>();
 
-        unsafe { Self::plain_ndarray_ptr(data_ptr, shape, &strides, T::DTYPE) }
+        unsafe { Self::plain_ndarray_ptr(data_ptr, shape, &strides, T::DTYPE, params) }
     }
 
     /// Create a [`Plain`] array that borrows from an ndarray.
@@ -238,6 +275,10 @@ impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
     /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
     /// ndarrays as `Array`, for example to participate in math operations with compressed arrays.
     ///
+    /// Uses default [`ArrayParams`]. To pass explicit params - which affect arrays derived from the
+    /// result and read behavior, but never the plain storage itself - use
+    /// [`plain_ndarray_ref_with`](Self::plain_ndarray_ref_with).
+    ///
     /// # Errors
     ///
     /// Returns an error if the ndarray's number of dimensions exceeds the
@@ -249,22 +290,77 @@ impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
         D2: ndarray::Dimension + IntoDimension<Dimension = D>,
         T: Dtyped,
     {
+        Self::plain_ndarray_ref_with(arr, ArrayParams::default())
+    }
+
+    /// Create a [`Plain`] array that borrows from an ndarray, with explicit params.
+    ///
+    /// Same as [`plain_ndarray_ref`](Self::plain_ndarray_ref) but takes an explicit [`ArrayParams`].
+    ///
+    /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
+    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
+    /// storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
+    /// codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
+    /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ndarray's number of dimensions exceeds the
+    /// maximum supported ndim.
+    pub fn plain_ndarray_ref_with<S, D2>(
+        arr: &'a ndarray::ArrayBase<S, D2>,
+        params: ArrayParams,
+    ) -> Result<Self>
+    where
+        S: ndarray::Data<Elem = T>,
+        D: Dimension,
+        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        T: Dtyped,
+    {
         // SAFETY: `arr` is 'a, so the returned `Plain` will not outlive the data in `arr`.
-        unsafe { Self::plain_ndarray_ref_impl(arr) }
+        unsafe { Self::plain_ndarray_ref_impl(arr, params) }
     }
 
     /// Create a [`Plain`] array that borrows from an ndarray view.
     ///
     /// Similar to [`Self::plain_ndarray_ref`] but takes an `ArrayView` instead of an `ArrayBase`.
     /// See `plain_ndarray_ref` for more details.
+    ///
+    /// Uses default [`ArrayParams`]. To pass explicit params - which affect arrays derived from the
+    /// result and read behavior, but never the plain storage itself - use
+    /// [`plain_ndarray_view_with`](Self::plain_ndarray_view_with).
     pub fn plain_ndarray_view<D2>(arr: ndarray::ArrayView<'a, T, D2>) -> Result<Self>
     where
         D: Dimension,
         D2: ndarray::Dimension + IntoDimension<Dimension = D>,
         T: Dtyped,
     {
+        Self::plain_ndarray_view_with(arr, ArrayParams::default())
+    }
+
+    /// Create a [`Plain`] array that borrows from an ndarray view, with explicit params.
+    ///
+    /// Same as [`plain_ndarray_view`](Self::plain_ndarray_view) but takes an explicit
+    /// [`ArrayParams`].
+    ///
+    /// The `params` never change how the plain buffer is stored - a `Plain` array is always an
+    /// uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
+    /// storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
+    /// codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    /// [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
+    /// though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
+    pub fn plain_ndarray_view_with<D2>(
+        arr: ndarray::ArrayView<'a, T, D2>,
+        params: ArrayParams,
+    ) -> Result<Self>
+    where
+        D: Dimension,
+        D2: ndarray::Dimension + IntoDimension<Dimension = D>,
+        T: Dtyped,
+    {
         // SAFETY: `arr` *data* is 'a, so the returned `Plain` will not outlive the data in `arr`.
-        unsafe { Self::plain_ndarray_ref_impl(&arr) }
+        unsafe { Self::plain_ndarray_ref_impl(&arr, params) }
     }
 }
 impl<ET, D> Array<Plain<&(), ET, D>> {
@@ -284,6 +380,12 @@ impl<ET, D> Array<Plain<&(), ET, D>> {
     /// * `shape` - number of elements along each dimension.
     /// * `strides` - the array element strides in **bytes units**. Must have the same length as `shape`.
     /// * `dtype` - element type descriptor; used for itemsize and alignment checks.
+    /// * `params` - this arg never change how the plain buffer is stored - a `Plain` array is always an
+    ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
+    ///   storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
+    ///   codec used by [`Array::compact`]/[`Array::compact_with`]) and (b) steer read behavior such as
+    ///   [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
+    ///   though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
     ///
     /// # Safety
     ///
@@ -298,6 +400,7 @@ impl<ET, D> Array<Plain<&(), ET, D>> {
         shape: Sh,
         strides: &[usize],
         dtype: Dtype,
+        params: ArrayParams,
     ) -> Result<Self>
     where
         ET: ElementType,
@@ -305,7 +408,7 @@ impl<ET, D> Array<Plain<&(), ET, D>> {
         Sh: IntoDimension<Dimension = D>,
     {
         let allocation = &();
-        let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype) }?;
+        let storage = unsafe { Plain::new(allocation, data_ptr, shape, strides, dtype, params) }?;
         let array = Array::from_storage(storage);
         let array = array.into_type()?;
         Ok(array)

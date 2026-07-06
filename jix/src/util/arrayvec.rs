@@ -52,7 +52,9 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
 
     #[inline(always)]
     pub const fn len(&self) -> usize {
-        self.len as usize
+        let len = self.len as usize;
+        unsafe { std::hint::assert_unchecked(len <= CAP) };
+        len
     }
 
     #[inline]
@@ -431,12 +433,27 @@ impl<T, const CAP: usize> iter::FromIterator<T> for ArrayVec<T, CAP> {
     }
 }
 
-impl<T, const CAP: usize> Clone for ArrayVec<T, CAP>
+impl<T, const CAP: usize> ArrayVec<T, CAP>
 where
     T: Clone,
 {
-    fn clone(&self) -> Self {
+    #[inline]
+    pub fn clone_slow(&self) -> Self {
         self.iter().cloned().collect()
+    }
+}
+
+impl<T, const CAP: usize> Clone for ArrayVec<T, CAP>
+where
+    T: Copy,
+{
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        // self.iter().cloned().collect()
+        Self {
+            len: self.len,
+            data: self.data,
+        }
     }
 
     fn clone_from(&mut self, rhs: &Self) {

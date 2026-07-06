@@ -55,8 +55,8 @@ use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core;
 
-mod compressed;
-pub use compressed::*;
+mod compact;
+pub use compact::*;
 
 mod plain;
 pub use plain::*;
@@ -242,7 +242,7 @@ pub trait ReadData<T> {
             let mut offset = 0;
             while offset + LANES <= nitems {
                 let chunk = data.read_bulk::<LANES>(offset);
-                buf[offset..][..LANES].copy_from_slice(&chunk);
+                buf[offset..offset + LANES].copy_from_slice(&chunk);
                 offset += LANES;
             }
             while offset < nitems {
