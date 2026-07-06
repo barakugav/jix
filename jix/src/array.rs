@@ -817,12 +817,12 @@ impl<S: ArrayStorage> Array<S> {
             return Ok(());
         }
 
-        self.to_ndarray_buf_slow_unchecked(index, buf, context)
+        self.to_ndarray_buf_slow(index, buf, context)
     }
 
     // index range and buffer size are not checked
     #[inline(never)]
-    fn to_ndarray_buf_slow_unchecked(
+    fn to_ndarray_buf_slow(
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
@@ -859,37 +859,49 @@ impl<S: ArrayStorage> Array<S> {
         let out_strides = default_strides(&out_shape, itemsize as u64);
 
         let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
+        // If the read_shape spans the full output width in every dimension (other then the first)
+        // it lands as a single contiguous run in `buf`, decode straight into that destination slice,
+        // skipping the tmp_buf and nd_copy.
+        let read_to_out_buf = (1..ndim).all(|dim| read_shape[dim] >= out_shape[dim]);
         for (block_idx, (block_inner_offset, block_size)) in block_iter {
             let inner_index = dim_arr(ndim, |dim| {
                 let start = block_idx[dim] * read_shape[dim] + block_inner_offset[dim];
                 let end = start + block_size[dim];
                 start..end
             });
-            let tmp_buf = {
-                let read_nitems = block_size.as_slice().iter().product::<u64>();
-                tmp_buf.set_len(read_nitems as usize * itemsize);
-                tmp_buf.as_mut_slice()
-            };
-            self.storage
-                .read_data(&inner_index, &mut OutBuf::new(tmp_buf), context)?;
+            let read_nitems = block_size.as_slice().iter().product::<u64>() as usize;
 
             let out_offset = (0..ndim)
                 .map(|dim| {
                     (inner_index[dim].start - index[dim].start) as usize * out_strides[dim] as usize
                 })
                 .sum::<usize>();
-            let dst_ptr = unsafe { buf.as_mut_ptr().add(out_offset) };
 
-            unsafe {
-                nd_copy(
-                    tmp_buf.as_ptr(),
-                    dst_ptr,
-                    block_size.clone(),
-                    &default_strides(block_size.as_slice(), itemsize as _),
-                    &out_strides,
-                    itemsize,
-                )
+            let (tmp_buf, buf_ptr) = if read_to_out_buf {
+                debug_assert!((1..ndim).all(|dim| block_size[dim] == out_shape[dim]));
+                let buf = &mut buf[out_offset..out_offset + read_nitems * itemsize];
+                (buf, None)
+            } else {
+                tmp_buf.set_len(read_nitems * itemsize);
+                (tmp_buf.as_mut_slice(), Some(buf.as_mut_ptr()))
             };
+
+            self.storage
+                .read_data(&inner_index, &mut OutBuf::new(tmp_buf), context)?;
+
+            if !read_to_out_buf {
+                let dst_ptr = unsafe { buf_ptr.unwrap().add(out_offset) };
+                unsafe {
+                    nd_copy(
+                        tmp_buf.as_ptr(),
+                        dst_ptr,
+                        block_size.clone(),
+                        &default_strides(block_size.as_slice(), itemsize as _),
+                        &out_strides,
+                        itemsize,
+                    )
+                };
+            }
         }
         Ok(())
     }
