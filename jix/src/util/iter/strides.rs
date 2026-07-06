@@ -6,15 +6,12 @@ use crate::util::{default_logical_strides, DimArray, Idx};
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
 #[derive(Clone)]
-pub(crate) struct NdIterExtStridesPtr<T, S>(NdIterExtStridesPtrMut<T, S>);
+pub(crate) struct NdIterExtStridesPtr<T, S: Copy>(NdIterExtStridesPtrMut<T, S>);
 
-impl<T, S> NdIterExtStridesPtr<T, S> {
+impl<T, S: Copy> NdIterExtStridesPtr<T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
     #[inline(always)]
-    pub fn new(strides: &[S], initial_ptr: *const T) -> Self
-    where
-        S: Copy,
-    {
+    pub fn new(strides: &[S], initial_ptr: *const T) -> Self {
         Self(NdIterExtStridesPtrMut::new(strides, initial_ptr.cast_mut()))
     }
 }
@@ -49,18 +46,15 @@ where
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
 #[derive(Clone)]
-pub(crate) struct NdIterExtStridesPtrMut<T, S> {
+pub(crate) struct NdIterExtStridesPtrMut<T, S: Copy> {
     strides: DimArray<S>,
     current_ptr: *mut T,
 }
 
-impl<T, S> NdIterExtStridesPtrMut<T, S> {
+impl<T, S: Copy> NdIterExtStridesPtrMut<T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
     #[inline(always)]
-    pub fn new(strides: &[S], initial_ptr: *mut T) -> Self
-    where
-        S: Copy,
-    {
+    pub fn new(strides: &[S], initial_ptr: *mut T) -> Self {
         Self {
             strides: DimArray::from_slice(strides).unwrap(),
             current_ptr: initial_ptr,
