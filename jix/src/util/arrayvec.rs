@@ -52,7 +52,9 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
 
     #[inline(always)]
     pub const fn len(&self) -> usize {
-        self.len as usize
+        let len = self.len as usize;
+        unsafe { std::hint::assert_unchecked(len <= CAP) };
+        len
     }
 
     #[inline]
