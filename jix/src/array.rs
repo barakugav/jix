@@ -327,8 +327,10 @@ impl<D> Array<Compact<TypeDyn, D>> {
         Sh: IntoDimension<Dimension = D>,
         D: Dimension,
     {
-        let array = unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype)? };
-        params.tune(array.shape(), array.dtype())?;
+        let shape = shape.into_dimension()?;
+        params.tune(shape.as_slice(), &dtype)?;
+        let array =
+            unsafe { Array::plain_ndarray_ptr(ptr, shape, strides, dtype, params.clone())? };
         array.compact_with(params, &array.try_read_ctx()?)
     }
 }
