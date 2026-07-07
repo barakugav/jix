@@ -344,8 +344,8 @@ where
 
         let dtype = self.blocks.dtype();
         let itemsize = dtype.itemsize() as usize;
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_strides = default_strides(&out_shape, itemsize);
+        let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_strides = default_strides(out_shape.as_ref(), itemsize);
         let block_strides = default_strides(block_shape, itemsize as BlockSize);
 
         // Pre-allocate a buffer large enough for a full block.

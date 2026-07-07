@@ -7,7 +7,7 @@ use crate::storage::block::BlockSize;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, nd_copy, try_dim_arr, DimArray};
+use crate::util::{default_strides, nd_copy, try_dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
@@ -157,11 +157,11 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // -----------------------------------------------------------------------
         if self.no_steps {
             let ndim = self.slice.len();
-            let inner_index = dim_arr(ndim, |dim| {
+            let inner_index = S::Dimension::vec(ndim, |dim| {
                 let off = self.slice[dim].start;
                 (index[dim].start + off)..(index[dim].end + off)
             });
-            return self.array.read_data(&inner_index, buf, context);
+            return self.array.read_data(inner_index.as_ref(), buf, context);
         }
 
         // -----------------------------------------------------------------------
@@ -206,8 +206,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         check_get_buffer_size(index, dtype, buf)?;
         let ndim = self.slice.len();
         let itemsize = dtype.itemsize() as u64;
-        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(&out_shape, itemsize);
+        let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
+        let dst_strides = default_strides(out_shape.as_ref(), itemsize);
 
         // inner_read_shape: 1 for strided dims, full range for non-strided dims.
         let inner_read_shape = S::Dimension::from_fn(ndim, |dim| {
@@ -232,7 +232,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         });
         let iter = NdIter::new(iter_shape, ());
         for (idx, ()) in iter {
-            let inner_index = dim_arr(ndim, |dim| {
+            let inner_index = S::Dimension::vec(ndim, |dim| {
                 let ds = &self.slice[dim];
                 if ds.is_contiguous() {
                     (ds.start + index[dim].start)..(ds.start + index[dim].end)
@@ -243,7 +243,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             });
             let tmp = tmp_buf.as_mut_slice();
             self.array
-                .read_data(&inner_index, &mut OutBuf::new(tmp), context)?;
+                .read_data(inner_index.as_ref(), &mut OutBuf::new(tmp), context)?;
 
             let dst_byte_offset = (0..ndim)
                 .filter(|&dim| !self.slice[dim].is_contiguous())

@@ -7,7 +7,7 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn,
 };
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray, SendSyncPtr};
+use crate::util::{default_strides, nd_copy, DimArray, SendSyncPtr};
 use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
@@ -137,9 +137,9 @@ impl<A, D> Plain<A, TypeDyn, D> {
         );
 
         if params.block_shape_tag.is_none() {
-            params.block_shape_tag(&dim_arr(ndim, |_| BlockShapeTag::Any));
+            params.block_shape_tag(D::vec(ndim, |_| BlockShapeTag::Any).as_ref());
             if params.block_shape.is_none() {
-                params.block_shape(&dim_arr(ndim, |_| 1));
+                params.block_shape(D::vec(ndim, |_| 1).as_ref());
             }
         }
         let spec = params.into_spec(

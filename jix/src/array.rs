@@ -17,7 +17,7 @@ use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, calc_block_end, cast_slice_mut, default_logical_strides, default_strides,
-    dim_arr, nd_copy, scale_read_shape, AlignedBytes, IterExt,
+    nd_copy, scale_read_shape, AlignedBytes, IterExt,
 };
 use crate::{
     ArrayAny, ArrayParams, ArrayStorage, DimDyn, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
@@ -630,8 +630,8 @@ impl<S: ArrayStorage> Array<S> {
         S: ArrayStorageTyped,
     {
         let shape = self.shape();
-        let full_range = dim_arr(shape.len(), |dim| 0u64..shape[dim]);
-        self.to_ndarray_sub(&full_range, &self.read_ctx())
+        let full_range = S::Dimension::vec(shape.len(), |dim| 0u64..shape[dim]);
+        self.to_ndarray_sub(full_range.as_ref(), &self.read_ctx())
     }
 
     /// Decode a rectangular sub-region of the array into a fresh heap-allocated [`ndarray::Array`].
@@ -745,7 +745,7 @@ impl<S: ArrayStorage> Array<S> {
     {
         check_get_range(self.shape(), index)?;
         let ndim = self.ndim();
-        let out_shape = dim_arr(ndim, |dim| {
+        let out_shape = S::Dimension::vec(ndim, |dim| {
             let len = index[dim].end - index[dim].start;
             let len: usize = len.try_into().unwrap();
             len
@@ -833,9 +833,9 @@ impl<S: ArrayStorage> Array<S> {
         let dtype = self.dtype();
 
         let spec = self.storage.spec();
-        let out_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
         let read_shape: S::Dimension =
-            spec.read_shape_heuristic(&out_shape, shape, dtype.itemsize());
+            spec.read_shape_heuristic(out_shape.as_ref(), shape, dtype.itemsize());
         // Block-space begin/end for NdIter.
         let block_begin = S::Dimension::from_fn(ndim, |dim| index[dim].start / read_shape[dim]);
         let block_end = S::Dimension::from_fn(ndim, |dim| {
@@ -856,7 +856,7 @@ impl<S: ArrayStorage> Array<S> {
         );
 
         let itemsize = dtype.itemsize() as usize;
-        let out_strides = default_strides(&out_shape, itemsize as u64);
+        let out_strides = default_strides(out_shape.as_ref(), itemsize as u64);
 
         let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
         // If the read_shape spans the full output width in every dimension (other then the first)
@@ -864,7 +864,7 @@ impl<S: ArrayStorage> Array<S> {
         // skipping the tmp_buf and nd_copy.
         let read_to_out_buf = (1..ndim).all(|dim| read_shape[dim] >= out_shape[dim]);
         for (block_idx, (block_inner_offset, block_size)) in block_iter {
-            let inner_index = dim_arr(ndim, |dim| {
+            let inner_index = S::Dimension::vec(ndim, |dim| {
                 let start = block_idx[dim] * read_shape[dim] + block_inner_offset[dim];
                 let end = start + block_size[dim];
                 start..end
@@ -887,7 +887,7 @@ impl<S: ArrayStorage> Array<S> {
             };
 
             self.storage
-                .read_data(&inner_index, &mut OutBuf::new(tmp_buf), context)?;
+                .read_data(inner_index.as_ref(), &mut OutBuf::new(tmp_buf), context)?;
 
             if !read_to_out_buf {
                 let dst_ptr = unsafe { buf_ptr.unwrap().add(out_offset) };
@@ -1108,7 +1108,7 @@ impl<S: ArrayStorage> Array<S> {
         );
         for (chunk_idx, (chunk_inner_offset, chunk_size)) in chunk_iter {
             debug_assert!(chunk_inner_offset.as_slice().iter().all(|&off| off == 0));
-            let read_range = dim_arr(ndim, |dim| {
+            let read_range = S::Dimension::vec(ndim, |dim| {
                 let start = chunk_idx[dim] * chunk_shape[dim];
                 start..start + chunk_size[dim]
             });
@@ -1117,12 +1117,14 @@ impl<S: ArrayStorage> Array<S> {
             chunk_buf.reserve(chunk_bytes);
             unsafe { chunk_buf.set_len(chunk_bytes) };
             self.storage.read_data(
-                &read_range,
+                read_range.as_ref(),
                 &mut OutBuf::new(chunk_buf.as_mut_slice()),
                 context,
             )?;
-            let chunk_strides =
-                default_strides(&dim_arr(ndim, |dim| chunk_size[dim] as usize), itemsize);
+            let chunk_strides = default_strides(
+                S::Dimension::vec(ndim, |dim| chunk_size[dim] as usize).as_ref(),
+                itemsize,
+            );
             let chunk_offset_base = (0..ndim)
                 .map(|dim| chunk_idx[dim] * chunk_shape_in_blocks[dim] * block_grid_lstrides[dim])
                 .sum::<u64>();

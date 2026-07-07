@@ -312,7 +312,7 @@ where
 
         let inner_range_full = {
             let mut out_dim = 0;
-            dim_arr(inner_ndim, |dim| {
+            S::Dimension::vec(inner_ndim, |dim| {
                 if self.is_reduced[dim] {
                     0..inner_shape[dim]
                 } else {
@@ -335,9 +335,10 @@ where
             .filter(|&dim| self.is_reduced[dim])
             .chain((0..inner_ndim).rev().filter(|&dim| !self.is_reduced[dim]));
         let tile_shape: S::Dimension = self.array.spec().read_shape_heuristic_with_scale_order(
-            &dim_arr(inner_ndim, |dim| {
+            S::Dimension::vec(inner_ndim, |dim| {
                 inner_range_full[dim].end - inner_range_full[dim].start
-            }),
+            })
+            .as_ref(),
             self.array.shape(),
             size_of::<S::Item>() as _,
             tile_scale_order,
@@ -434,7 +435,7 @@ where
             );
 
             for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
-                let tile = dim_arr(inner_ndim, |dim| {
+                let tile = S::Dimension::vec(inner_ndim, |dim| {
                     let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
                     start..start + tile_size[dim]
                 });
@@ -453,7 +454,7 @@ where
                 );
                 let items_buf = items_buf.as_mut_slice();
                 self.array
-                    .read_data(&tile, &mut OutBuf::new(items_buf), context)?;
+                    .read_data(tile.as_ref(), &mut OutBuf::new(items_buf), context)?;
 
                 // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
                 // `tile_state_base` shifts `state_buf` to its first slot.

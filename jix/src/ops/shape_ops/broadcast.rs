@@ -158,18 +158,19 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 
         // Read from inner with broadcast dims collapsed to 0..1.
         // tmp_buf is C-contiguous over inner_read_shape.
-        let inner_index = dim_arr(ndim, |dim| {
+        let inner_index = S::Dimension::vec(ndim, |dim| {
             if self.is_broadcast[dim] {
                 0..1
             } else {
                 index[dim].clone()
             }
         });
-        let inner_read_shape = dim_arr(ndim, |dim| {
+        let inner_read_shape = S::Dimension::vec(ndim, |dim| {
             (inner_index[dim].end - inner_index[dim].start) as usize
         });
         let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array.read_data(&inner_index, &mut tmp_buf, context)?;
+        self.array
+            .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
@@ -177,7 +178,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         // Source strides over tmp_buf, with broadcast dims set to 0.
         // A zero stride means advancing along that output axis always reads the same src byte,
         // which is exactly the repeat-element semantics of broadcasting.
-        let mut src_strides = default_strides(&inner_read_shape, itemsize);
+        let mut src_strides = default_strides(inner_read_shape.as_ref(), itemsize);
         for dim in 0..ndim {
             if self.is_broadcast[dim] {
                 src_strides[dim] = 0;

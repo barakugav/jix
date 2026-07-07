@@ -7,7 +7,7 @@ use crate::ops::AxesArg;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::iter::strides::NdIterExtStridesPtr;
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::util::{default_strides, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Reverses the order of elements along one or more axes, returned by
@@ -53,7 +53,7 @@ impl<S: ArrayStorage> Flip<S> {
         let input_shape = array.shape();
         let ndim = input_shape.len();
 
-        let mut seen = dim_arr(ndim, |_| false);
+        let mut seen = S::Dimension::vec(ndim, |_| false);
         for i in 0..axis.len() {
             let ax = axis.get(i);
             ensure!(
@@ -104,14 +104,14 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let itemsize = dtype.itemsize() as usize;
         let shape = self.shape();
 
-        let mut is_flipped = dim_arr(ndim, |_| false);
+        let mut is_flipped = S::Dimension::vec(ndim, |_| false);
         for &ax in self.axes.iter() {
             is_flipped[ax] = true;
         }
 
         // For each flipped axis d with requested output range [s, e), the inner range is
         // [shape[d]-e, shape[d]-s) (same length, reversed position). Non-flipped axes pass through.
-        let inner_index = dim_arr(ndim, |d| {
+        let inner_index = S::Dimension::vec(ndim, |d| {
             if is_flipped[d] {
                 (shape[d] - index[d].end)..(shape[d] - index[d].start)
             } else {
@@ -119,15 +119,16 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             }
         });
 
-        let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
+        let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
         let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array.read_data(&inner_index, &mut tmp_buf, context)?;
+        self.array
+            .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
 
         // tmp_buf is C-contiguous over out_shape (sub_shape_in == out_shape).
-        let strides = default_strides(&out_shape, itemsize as u64);
+        let strides = default_strides(out_shape.as_ref(), itemsize as u64);
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the
         // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
@@ -138,7 +139,8 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         // src strides ext: forward strides on flipped axes; 0 elsewhere (non-flipped axes
         // are iter_shape=1 so they don't step regardless, but 0 keeps it explicit).
-        let src_ptr_strides = dim_arr(ndim, |d| if is_flipped[d] { strides[d] } else { 0 });
+        let src_ptr_strides =
+            S::Dimension::vec(ndim, |d| if is_flipped[d] { strides[d] } else { 0 });
 
         // dst pointer base = position where every flipped axis is at its MAX index.
         // As src advances forward by some byte offset along flipped axes, dst moves the
@@ -152,7 +154,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         let iter = NdIter::new(
             iter_shape,
-            NdIterExtStridesPtr::new(&src_ptr_strides, tmp_base),
+            NdIterExtStridesPtr::new(src_ptr_strides.as_ref(), tmp_base),
         );
         for (_idx, src_ptr) in iter {
             let off = unsafe { src_ptr.offset_from(tmp_base) } as usize;

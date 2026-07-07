@@ -8,7 +8,7 @@ use crate::error::{
 };
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::util::{default_strides, nd_copy, DimArray};
 use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
@@ -147,20 +147,20 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         // Case A - single read, no wrap: the requested output range maps to one contiguous
         // input range along axis k. Read directly into `buf` (no tmp_buf, no nd_copy).
         if s_in + total <= l {
-            let inner_index = dim_arr(ndim, |d| {
+            let inner_index = S::Dimension::vec(ndim, |d| {
                 if d == k {
                     s_in..s_in + total
                 } else {
                     index[d].clone()
                 }
             });
-            return self.array.read_data(&inner_index, buf, context);
+            return self.array.read_data(inner_index.as_ref(), buf, context);
         }
 
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
-        let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
-        let dst_strides = default_strides(&out_shape, itemsize as u64);
+        let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
+        let dst_strides = default_strides(out_shape.as_ref(), itemsize as u64);
 
         // Case B - two reads, single wrap (total <= L): split the request into two
         // contiguous input ranges along axis k and read each into a separate tmp_buf, then
@@ -193,13 +193,15 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 Ok(())
             };
 
-            let inner_r1 = dim_arr(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
-            let r1_shape = dim_arr(ndim, |d| if d == k { len1 } else { out_shape[d] });
-            read_region(&inner_r1, &r1_shape, 0)?;
+            let inner_r1 =
+                S::Dimension::vec(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
+            let r1_shape = S::Dimension::vec(ndim, |d| if d == k { len1 } else { out_shape[d] });
+            read_region(inner_r1.as_ref(), r1_shape.as_ref(), 0)?;
 
-            let inner_r2 = dim_arr(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-            let r2_shape = dim_arr(ndim, |d| if d == k { len2 } else { out_shape[d] });
-            read_region(&inner_r2, &r2_shape, len1)?;
+            let inner_r2 =
+                S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
+            let r2_shape = S::Dimension::vec(ndim, |d| if d == k { len2 } else { out_shape[d] });
+            read_region(inner_r2.as_ref(), r2_shape.as_ref(), len1)?;
 
             return Ok(());
         }
@@ -209,13 +211,14 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         //   head:   tmp[s_in..L]      -> buf[0..head_len)
         //   middle: tmp[0..L] x F      -> buf[head_len..head_len + F*L)   (F = num_full)
         //   tail:   tmp[0..tail_len]   -> buf[head_len + F*L..total)
-        let inner_full = dim_arr(ndim, |d| if d == k { 0..l } else { index[d].clone() });
-        let period_shape = dim_arr(ndim, |d| if d == k { l } else { out_shape[d] });
+        let inner_full = S::Dimension::vec(ndim, |d| if d == k { 0..l } else { index[d].clone() });
+        let period_shape = S::Dimension::vec(ndim, |d| if d == k { l } else { out_shape[d] });
         let mut tmp = OutBuf::new_lazy(context);
-        self.array.read_data(&inner_full, &mut tmp, context)?;
+        self.array
+            .read_data(inner_full.as_ref(), &mut tmp, context)?;
         let tmp = tmp.as_slice().unwrap();
 
-        let src_strides = default_strides(&period_shape, itemsize as u64);
+        let src_strides = default_strides(period_shape.as_ref(), itemsize as u64);
 
         let head_len = l - s_in; // 0 < head_len <= L
         let remaining = total - head_len; // > 0 since total > L

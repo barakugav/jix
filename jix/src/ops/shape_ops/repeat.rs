@@ -141,20 +141,21 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         let g_end = calc_block_end(s, e, n);
 
         // Read the inner sub-region with axis k collapsed to [g_start..g_end).
-        let inner_index = dim_arr(ndim, |d| {
+        let inner_index = S::Dimension::vec(ndim, |d| {
             if d == k {
                 g_start..g_end
             } else {
                 index[d].clone()
             }
         });
-        let inner_shape = dim_arr(ndim, |d| {
+        let inner_shape = S::Dimension::vec(ndim, |d| {
             (inner_index[d].end - inner_index[d].start) as usize
         });
         let dtype = self.dtype();
         let itemsize = dtype.itemsize() as usize;
         let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array.read_data(&inner_index, &mut tmp_buf, context)?;
+        self.array
+            .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
@@ -162,7 +163,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         // Output shape over the requested sub-range, all `ndim` axes.
         let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
         let dst_strides = default_strides(&out_shape, itemsize as u64);
-        let inner_strides_bytes = default_strides(&inner_shape, itemsize);
+        let inner_strides_bytes = default_strides(inner_shape.as_ref(), itemsize);
 
         // Issue one nd_copy for a (g_range, p_range) region.
         //   `g_range` indexes groups relative to the inner read (0..g_count).

@@ -7,7 +7,7 @@ use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, R
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
+use crate::util::{default_strides, nd_copy, DimArray, IterExt};
 use crate::{ArrayStorage, Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
@@ -303,7 +303,7 @@ where
             })
             .collect::<DimArray<_>>();
         let same_logical_stride_inv = {
-            let mut inv = dim_arr(orig_ndim, |_| None);
+            let mut inv = S::Dimension::vec(orig_ndim, |_| None);
             for (new_dim, &orig_dim) in same_logical_stride.iter().enumerate() {
                 if let Some(orig_dim) = orig_dim {
                     inv[orig_dim as usize] = Some(new_dim as u8);
@@ -317,6 +317,7 @@ where
                 .filter(|dim| dim.is_some())
                 .count(),
             same_logical_stride_inv
+                .as_ref()
                 .iter()
                 .filter(|dim| dim.is_some())
                 .count()
@@ -324,7 +325,7 @@ where
 
         // dims that have the same logical stride in the original and new shape can be read directly,
         // the rest we need to read one entry at a time and copy into the output buffer.
-        let orig_read_shape = dim_arr(orig_ndim, |dim| {
+        let orig_read_shape = S::Dimension::vec(orig_ndim, |dim| {
             if let Some(new_dim) = same_logical_stride_inv[dim] {
                 index[new_dim as usize].end - index[new_dim as usize].start
             } else {
@@ -340,12 +341,12 @@ where
         });
 
         let mut tmp_buf = context.tmp_buf(
-            orig_read_shape.iter().product::<u64>() as usize * dtype.itemsize() as usize,
+            orig_read_shape.as_ref().iter().product::<u64>() as usize * dtype.itemsize() as usize,
             dtype.alignment(),
         );
         let tmp_buf_strides = default_strides(new_read_shape.as_slice(), dtype.itemsize() as _);
-        let out_buf_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(&out_buf_shape, dtype.itemsize() as _);
+        let out_buf_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
+        let dst_strides = default_strides(out_buf_shape.as_ref(), dtype.itemsize() as _);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
         let iteration_shape = D::from_fn(ndim, |dim| {
@@ -357,7 +358,7 @@ where
         });
         let iter = NdIter::new(iteration_shape, ());
         for (idx, ()) in iter {
-            let read_range = dim_arr(orig_ndim, |dim| {
+            let read_range = S::Dimension::vec(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {
                     debug_assert_eq!(idx[new_dim as usize], 0);
                     index[new_dim as usize].clone()
@@ -373,7 +374,7 @@ where
 
             let tmp_buf = tmp_buf.as_mut_slice();
             self.array
-                .read_data(&read_range, &mut OutBuf::new(tmp_buf), context)?;
+                .read_data(read_range.as_ref(), &mut OutBuf::new(tmp_buf), context)?;
 
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&dim| same_logical_stride[dim].is_none())
