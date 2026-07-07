@@ -3,7 +3,6 @@
 - build wheels for wsam
 - compress offsets array
 - buf-break workflow
-- default_strides should return Dimension
 - consider block shape tag in scale_read_shape
 - optimize shuffle filter
 - delegate power to square/sqrt if exponent is 2/0.5

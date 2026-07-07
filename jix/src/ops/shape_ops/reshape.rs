@@ -8,7 +8,7 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, nd_copy, DimArray, IterExt};
-use crate::{ArrayStorage, Dimension, IntoDimension};
+use crate::{default_logical_strides, ArrayStorage, DimDyn, Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///
@@ -93,8 +93,8 @@ impl<S, D> Reshape<S, D> {
             "cannot reshape array of shape {orig_shape:?} into shape {new_shape:?}"
         );
 
-        let orig_logical_strides = default_strides(&orig_shape, 1);
-        let new_logical_strides = default_strides(&new_shape, 1);
+        let orig_logical_strides = default_logical_strides::<DimDyn, _>(&orig_shape);
+        let new_logical_strides = default_logical_strides::<DimDyn, _>(&new_shape);
         let same_logical_stride = (0..new_shape.len())
             .scan(0, |orig_dim_idx, new_dim_idx| {
                 Some(loop {
@@ -273,21 +273,22 @@ where
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
 
-        let orig_shape = self.array.shape();
+        let orig_shape = S::Dimension::from_slice(self.array.shape());
         let new_shape = self.new_shape.as_slice();
         let ndim = new_shape.len();
-        let orig_ndim = orig_shape.len();
+        let orig_ndim = orig_shape.ndim();
         if index.iter().any(|r| r.start >= r.end) {
             return Ok(());
         }
 
-        let orig_logical_strides = default_strides(orig_shape, 1);
-        let new_logical_strides = default_strides(new_shape, 1);
+        let orig_logical_strides =
+            default_logical_strides::<S::Dimension, _>(orig_shape.as_vec_u64());
+        let new_logical_strides = default_logical_strides::<D, _>(self.new_shape.as_vec_u64());
         let same_logical_stride = (0..new_shape.len())
             .scan(0, |orig_dim_idx, new_dim_idx| {
                 Some(loop {
-                    if *orig_dim_idx >= orig_shape.len() {
-                        break None; // cant really happen, last dims always match, unless orig_shape.len()==0
+                    if *orig_dim_idx >= orig_shape.ndim() {
+                        break None; // cant really happen, last dims always match, unless orig_shape.ndim()==0
                     }
                     if orig_logical_strides[*orig_dim_idx] == new_logical_strides[new_dim_idx]
                         && new_shape[new_dim_idx] >= 1
@@ -344,9 +345,10 @@ where
             orig_read_shape.as_ref().iter().product::<u64>() as usize * dtype.itemsize() as usize,
             dtype.alignment(),
         );
-        let tmp_buf_strides = default_strides(new_read_shape.as_slice(), dtype.itemsize() as _);
+        let tmp_buf_strides =
+            default_strides::<D, _>(new_read_shape.as_vec_u64(), dtype.itemsize() as _);
         let out_buf_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(out_buf_shape.as_ref(), dtype.itemsize() as _);
+        let dst_strides = default_strides::<D, _>(&out_buf_shape, dtype.itemsize() as _);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
         let iteration_shape = D::from_fn(ndim, |dim| {
@@ -386,8 +388,8 @@ where
                     tmp_buf.as_ptr(),
                     dst_ptr,
                     new_read_shape.clone(),
-                    &tmp_buf_strides,
-                    &dst_strides,
+                    tmp_buf_strides.as_ref(),
+                    dst_strides.as_ref(),
                     dtype.itemsize() as _,
                 )
             };

@@ -179,6 +179,9 @@ pub trait Dimension:
 
     /// Build a vec-like container with one value per axis, by applying `f` to each axis index.
     fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T>;
+
+    /// Borrow this dimension's axis lengths as its [`Vec`](Dimension::Vec) container.
+    fn as_vec_u64(&self) -> &Self::Vec<u64>;
 }
 
 /// A dynamically-dimensioned shape whose ndim is only known at runtime.
@@ -231,6 +234,11 @@ impl Dimension for DimDyn {
     #[inline(always)]
     fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T> {
         dim_arr(ndim, f)
+    }
+
+    #[inline(always)]
+    fn as_vec_u64(&self) -> &Self::Vec<u64> {
+        &self.0
     }
 }
 impl Index<usize> for DimDyn {
@@ -333,6 +341,11 @@ macro_rules! impl_dim {
                     $dim
                 );
                 std::array::from_fn(f)
+            }
+
+            #[inline(always)]
+            fn as_vec_u64(&self) -> &Self::Vec<u64> {
+                &self.0
             }
         }
         impl Index<usize> for Dim<$dim> {

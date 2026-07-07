@@ -312,6 +312,7 @@ where
         let ndim = shape.len();
         let block_shape = self.block_shape();
         assert_eq!(ndim, block_shape.len());
+        let block_shape = D::vec(ndim, |dim| block_shape[dim]);
 
         let mut b_range = DimArray::default();
         let mut is_single_block = true; // every dimension touches exactly one block.
@@ -345,11 +346,16 @@ where
         let dtype = self.blocks.dtype();
         let itemsize = dtype.itemsize() as usize;
         let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_strides = default_strides(out_shape.as_ref(), itemsize);
-        let block_strides = default_strides(block_shape, itemsize as BlockSize);
+        let out_strides = default_strides::<D, _>(&out_shape, itemsize);
+        let block_strides = default_strides::<D, _>(&block_shape, itemsize as BlockSize);
 
         // Pre-allocate a buffer large enough for a full block.
-        let full_buf_len = block_shape.iter().map(|s| *s as usize).product::<usize>() * itemsize;
+        let full_buf_len = block_shape
+            .as_ref()
+            .iter()
+            .map(|s| *s as usize)
+            .product::<usize>()
+            * itemsize;
         let mut tmp_buf = context.tmp_buf(full_buf_len, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
 
@@ -372,8 +378,8 @@ where
                     src_ptr,
                     buf.as_mut_ptr(),
                     copy_shape,
-                    &block_strides,
-                    &out_strides,
+                    block_strides.as_ref(),
+                    out_strides.as_ref(),
                     itemsize,
                 )
             };
@@ -424,8 +430,8 @@ where
                     src_ptr,
                     dst_ptr,
                     block_size.clone(),
-                    &block_strides,
-                    &out_strides,
+                    block_strides.as_ref(),
+                    out_strides.as_ref(),
                     itemsize,
                 )
             };

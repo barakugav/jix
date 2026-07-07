@@ -178,7 +178,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         // Source strides over tmp_buf, with broadcast dims set to 0.
         // A zero stride means advancing along that output axis always reads the same src byte,
         // which is exactly the repeat-element semantics of broadcasting.
-        let mut src_strides = default_strides(inner_read_shape.as_ref(), itemsize);
+        let mut src_strides = default_strides::<S::Dimension, _>(&inner_read_shape, itemsize);
         for dim in 0..ndim {
             if self.is_broadcast[dim] {
                 src_strides[dim] = 0;
@@ -187,15 +187,16 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 
         // Destination strides: C-contiguous over the requested output sub-shape.
         let out_shape = S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(out_shape.as_slice(), itemsize as u64);
+        let dst_strides =
+            default_strides::<S::Dimension, _>(out_shape.as_vec_u64(), itemsize as u64);
 
         unsafe {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
                 out_shape,
-                &src_strides,
-                &dst_strides,
+                src_strides.as_ref(),
+                dst_strides.as_ref(),
                 itemsize,
             )
         };

@@ -128,7 +128,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         check_get_buffer_size(index, dtype, buf)?;
 
         // tmp_buf is C-contiguous over out_shape (sub_shape_in == out_shape).
-        let strides = default_strides(out_shape.as_ref(), itemsize as u64);
+        let strides = default_strides::<S::Dimension, _>(&out_shape, itemsize as u64);
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the
         // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
@@ -165,8 +165,8 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
                     src_ptr,
                     dst_ptr,
                     slab_shape.clone(),
-                    &strides,
-                    &strides,
+                    strides.as_ref(),
+                    strides.as_ref(),
                     itemsize,
                 )
             };

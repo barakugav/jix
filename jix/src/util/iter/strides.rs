@@ -1,5 +1,6 @@
+use crate::default_logical_strides_slice;
 use crate::util::iter::NdIterExtension;
-use crate::util::{default_logical_strides, DimArray, Idx};
+use crate::util::{DimArray, Idx};
 
 /// An nd-iterator extension that tracks a `*const u8` pointer into a strided buffer.
 ///
@@ -136,7 +137,7 @@ pub(crate) fn nd_iter_ext_logical_global_index(
     shape: &[u64],
     begin: &[u64],
 ) -> NdIterExtStridesOffset {
-    let logical_strides = default_logical_strides(shape);
+    let logical_strides = default_logical_strides_slice(shape);
     let initial_offset = (0..shape.len())
         .map(|dim| begin[dim] * logical_strides[dim])
         .sum();

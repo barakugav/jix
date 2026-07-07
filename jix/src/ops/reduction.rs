@@ -393,7 +393,7 @@ where
             tmp_state_buf = context.tmp_buf_typed::<MaybeUninit<K::State>>(out_nitems);
             unsafe { cast_slice_mut::<_, MaybeUninit<K::State>>(tmp_state_buf.as_mut_slice()) }
         };
-        let state_lstrides = default_logical_strides(out_shape.as_slice());
+        let state_lstrides = default_logical_strides::<D, _>(out_shape.as_vec_u64());
         let mut state_initialized = false;
 
         let mut items_buf = context.tmp_buf(0, Alignment::of::<S::Item>());
@@ -458,8 +458,10 @@ where
 
                 // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
                 // `tile_state_base` shifts `state_buf` to its first slot.
-                let items_buf_lstrides = default_logical_strides(tile_size.as_slice());
+                let items_buf_lstrides =
+                    default_logical_strides::<S::Dimension, _>(tile_size.as_vec_u64());
                 let items_buf_lstrides_for_out_iter = items_buf_lstrides
+                    .as_ref()
                     .iter()
                     .zip(&self.is_reduced)
                     .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
@@ -484,7 +486,7 @@ where
                             &items_buf_lstrides_for_out_iter,
                             items_buf.as_ptr().cast::<S::Item>(),
                         ),
-                        NdIterExtStridesPtrMut::new(&state_lstrides, tile_state_base),
+                        NdIterExtStridesPtrMut::new(state_lstrides.as_ref(), tile_state_base),
                     ),
                 );
 
@@ -505,7 +507,7 @@ where
                 for (_idx, (src_base, state)) in out_iter {
                     let reduction_iter = NdIter::new(
                         reduction_shape.clone(),
-                        NdIterExtStridesPtr::new(&items_buf_lstrides, src_base),
+                        NdIterExtStridesPtr::new(items_buf_lstrides.as_ref(), src_base),
                     );
                     debug_assert_eq!(reduction_size, reduction_iter.len());
                     let mut reduction_iter =
@@ -576,14 +578,14 @@ where
         let state_ptr = state_buf.as_mut_ptr();
         // From here on the state/output buffers are touched only through `state_ptr` and
         // `out_ptr`. Dont use `state_buf`.
-        let out_lstrides = default_logical_strides(out_shape.as_slice());
+        let out_lstrides = default_logical_strides::<D, _>(out_shape.as_vec_u64());
         if state_initialized {
             let out_iter = NdIter::new(
                 out_shape,
                 (
                     // CAREFUL: state_ptr and out_ptr may alias
-                    NdIterExtStridesPtrMut::new(&state_lstrides, state_ptr),
-                    NdIterExtStridesPtrMut::new(&out_lstrides, out_ptr),
+                    NdIterExtStridesPtrMut::new(state_lstrides.as_ref(), state_ptr),
+                    NdIterExtStridesPtrMut::new(out_lstrides.as_ref(), out_ptr),
                 ),
             );
             for (_idx, (state, out_ptr)) in out_iter {
@@ -598,7 +600,7 @@ where
             // Empty reduction: write the empty-stream result to every output.
             let out_iter = NdIter::new(
                 out_shape,
-                NdIterExtStridesPtrMut::new(&out_lstrides, out_ptr),
+                NdIterExtStridesPtrMut::new(out_lstrides.as_ref(), out_ptr),
             );
             debug_assert_eq!(reduction_size_overall, 0);
             for (_idx, out_ptr) in out_iter {

@@ -82,7 +82,26 @@ impl_idx_for_primitive!(u32);
 impl_idx_for_primitive!(u64);
 
 #[inline(always)]
-pub(crate) fn default_strides<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<Ix> {
+pub(crate) fn default_strides<D: Dimension, Ix: Idx>(
+    shape: &D::Vec<Ix>,
+    itemsize: Ix,
+) -> D::Vec<Ix> {
+    let shape: &[Ix] = shape.as_ref();
+    let ndim = shape.len();
+    let mut strides = D::vec(ndim, |_| itemsize);
+    if ndim > 0 {
+        for dim in (0..ndim - 1).rev() {
+            strides[dim] = strides[dim + 1] * shape[dim + 1];
+        }
+    }
+    strides
+}
+#[inline(always)]
+pub(crate) fn default_logical_strides<D: Dimension, Ix: Idx>(shape: &D::Vec<Ix>) -> D::Vec<Ix> {
+    default_strides::<D, Ix>(shape, Ix::ONE)
+}
+#[inline(always)]
+pub(crate) fn default_strides_slice<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<Ix> {
     let ndim = shape.len();
     let mut strides = dim_arr(ndim, |_| itemsize);
     if ndim > 0 {
@@ -93,8 +112,8 @@ pub(crate) fn default_strides<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<I
     strides
 }
 #[inline(always)]
-pub(crate) fn default_logical_strides<Ix: Idx>(shape: &[Ix]) -> DimArray<Ix> {
-    default_strides(shape, Ix::ONE)
+pub(crate) fn default_logical_strides_slice<Ix: Idx>(shape: &[Ix]) -> DimArray<Ix> {
+    default_strides_slice(shape, Ix::ONE)
 }
 
 #[inline(always)]
@@ -520,7 +539,7 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
 
 #[cfg(test)]
 mod tests {
-    use super::{calc_block_end, default_strides, scale_read_shape, AlternatingBuffers};
+    use super::{calc_block_end, default_strides_slice, scale_read_shape, AlternatingBuffers};
     use crate::DimDyn;
 
     #[test]
@@ -559,7 +578,7 @@ mod tests {
 
     #[test]
     fn test_default_strides() {
-        let s = |shape, itemsize| default_strides(shape, itemsize).to_vec();
+        let s = |shape, itemsize| default_strides_slice(shape, itemsize).to_vec();
         assert_eq!(s(&[], 4), &[] as &[usize]); // scalar
         assert_eq!(s(&[5], 2), &[2]); // 1-d
         assert_eq!(s(&[3, 4], 4), &[16, 4]); // 2-d, itemsize 4

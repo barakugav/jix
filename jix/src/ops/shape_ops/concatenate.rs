@@ -178,7 +178,7 @@ where
         let output_shape = Self::Dimension::vec(index.len(), |dim| {
             (index[dim].end - index[dim].start) as usize
         });
-        let output_strides = default_strides(output_shape.as_ref(), itemsize);
+        let output_strides = default_strides::<Self::Dimension, _>(&output_shape, itemsize);
         let concat_stride = output_strides[self.concat_axis];
         // When all dims before concat_axis have size <=1 each array's data is contiguous in buf.
         let in_place = output_shape
@@ -248,7 +248,8 @@ where
                 // src: C-strides of sub_shape.
                 // dst: output_strides for dims before concat_axis (wider due to full output width),
                 //      sub_strides for dims at/after (sizes match the output there).
-                let sub_strides = default_strides(sub_shape.as_slice(), itemsize as u64);
+                let sub_strides =
+                    default_strides::<Self::Dimension, _>(sub_shape.as_vec_u64(), itemsize as u64);
                 let dst_strides = Self::Dimension::vec(index.len(), |dim| {
                     if dim < self.concat_axis {
                         output_strides[dim] as u64
@@ -262,7 +263,7 @@ where
                         read_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
                         sub_shape,
-                        &sub_strides,
+                        sub_strides.as_ref(),
                         dst_strides.as_ref(),
                         itemsize,
                     )
