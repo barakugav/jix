@@ -1,6 +1,6 @@
 use std::hint::unreachable_unchecked;
 
-use crate::{Dimension, IntoDimension};
+use crate::{DimVec, Dimension};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
 ///
@@ -8,10 +8,10 @@ use crate::{Dimension, IntoDimension};
 /// The iterator notifies the extension on each index change, allowing extensions to track derived
 /// state (e.g. a pointer into a strided buffer) without recomputing it from scratch.
 #[derive(Clone)]
-pub(crate) struct NdIter<D, E> {
-    begin: D,
-    end: D,
-    current_idx: D,
+pub(crate) struct NdIter<D: Dimension, E> {
+    begin: D::Vec<u64>,
+    end: D::Vec<u64>,
+    current_idx: D::Vec<u64>,
     status: IterStatus,
     pub(crate) extensions: E,
 }
@@ -68,41 +68,42 @@ where
 {
     /// Creates an iterator over `[0, shape)` in every dimension.
     #[inline(always)]
-    pub(crate) fn new(shape: impl IntoDimension<Dimension = D>, extensions: E) -> Self {
-        let shape = shape.into_dimension().unwrap();
-        let begin = D::from_fn(shape.ndim(), |_| 0);
+    pub(crate) fn new<V>(shape: V, extensions: E) -> Self
+    where
+        D: Dimension<Vec<u64> = V>,
+        V: DimVec<u64, Dimension = D>,
+    {
+        let begin = V::Dimension::vec(shape.as_ref().len(), |_| 0u64);
         Self::new_with_begin(begin, shape, extensions)
     }
 
     /// Creates an iterator over `[begin, end)` in every dimension.
     #[inline(always)]
-    pub(crate) fn new_with_begin(
-        begin: impl IntoDimension<Dimension = D>,
-        end: impl IntoDimension<Dimension = D>,
-        extensions: E,
-    ) -> Self {
-        let begin = begin.into_dimension().unwrap();
-        let end = end.into_dimension().unwrap();
-        let ndim = begin.ndim();
-        assert_eq!(begin.ndim(), ndim);
-        assert_eq!(end.ndim(), ndim);
+    pub(crate) fn new_with_begin<V>(begin: V, end: V, extensions: E) -> Self
+    where
+        D: Dimension<Vec<u64> = V>,
+        V: DimVec<u64, Dimension = D>,
+    {
+        let begin_slice = begin.as_ref();
+        let end_slice = end.as_ref();
+        let ndim = begin_slice.len();
+        assert_eq!(begin_slice.len(), ndim);
+        assert_eq!(end_slice.len(), ndim);
         extensions.assert_ndim(ndim);
-        assert!(begin
-            .as_slice()
+        assert!(begin_slice
             .iter()
-            .zip(end.as_slice().iter())
+            .zip(end_slice.iter())
             .all(|(&b, &e)| b <= e));
         let current_idx = begin.clone();
 
-        let nitems = begin
-            .as_slice()
+        let nitems = begin_slice
             .iter()
-            .zip(end.as_slice())
+            .zip(end_slice)
             .map(|(&b, &e)| e - b)
             .product::<u64>();
         let status = IterStatus::new(nitems);
 
-        Self {
+        NdIter {
             end,
             begin,
             current_idx,
@@ -112,7 +113,7 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn get_current_and_advance_status(&mut self) -> (D, E::Item) {
+    pub(crate) fn get_current_and_advance_status(&mut self) -> (D::Vec<u64>, E::Item) {
         self.status.advance();
         (self.current_idx.clone(), self.extensions.next())
     }
@@ -127,7 +128,7 @@ where
     D: Dimension,
     E: NdIterExtension,
 {
-    type Item = (D, E::Item);
+    type Item = (D::Vec<u64>, E::Item);
 
     /// Advances to the next index in row-major order and returns `(current_index, extension_item)`.
     ///
@@ -145,11 +146,11 @@ where
         }
 
         debug_assert!(self.status.is_in_progress());
-        let shape = self.end.as_slice();
-        let ndim = shape.len();
+        let end = self.end.as_ref();
+        let ndim = end.len();
         for dim in (0..ndim).rev() {
             let advanced_idx = self.current_idx[dim] + 1;
-            if advanced_idx < shape[dim] {
+            if advanced_idx < end[dim] {
                 self.extensions
                     .on_increase(dim, self.current_idx[dim], advanced_idx, 1);
                 self.current_idx[dim] = advanced_idx;
@@ -201,7 +202,7 @@ pub(crate) trait NdIterExtension {
 
 /// A plain index-only iterator; a thin wrapper around [`NdIter`] with a `()` extension.
 #[allow(unused)]
-pub(crate) struct IdxIter<D>(NdIter<D, ()>);
+pub(crate) struct IdxIter<D: Dimension>(NdIter<D, ()>);
 
 #[allow(unused)]
 impl<D> IdxIter<D>
@@ -209,13 +210,17 @@ where
     D: Dimension,
 {
     #[inline(always)]
-    pub(crate) fn new(shape: impl IntoDimension<Dimension = D>) -> Self {
+    pub(crate) fn new<V>(shape: V) -> Self
+    where
+        D: Dimension<Vec<u64> = V>,
+        V: DimVec<u64, Dimension = D>,
+    {
         Self(NdIter::new(shape, ()))
     }
 
     /// Returns the next multi-dimensional index, or `None` when exhausted.
     #[inline(always)]
-    pub(crate) fn next(&mut self) -> Option<D> {
+    pub(crate) fn next(&mut self) -> Option<D::Vec<u64>> {
         Some(self.0.next()?.0)
     }
 }
@@ -320,6 +325,14 @@ mod tests {
 
     use super::*;
     use crate::util::iter::strides::NdIterExtStridesPtrMut;
+    use crate::util::DimArray;
+    use crate::{Dim, DimDyn, SliceExt};
+
+    /// Build a [`DimArray`] (the `DimDyn` vec container) from a slice, for constructing test
+    /// extensions whose `new` now takes an owned `D::Vec<S>`.
+    fn dv<T: Copy>(s: &[T]) -> DimArray<T> {
+        s.to_dim_vec::<DimDyn>()
+    }
 
     // ---------------------------------------------------------------------------
     // Helpers
@@ -331,7 +344,7 @@ mod tests {
     {
         let mut out = Vec::new();
         while let Some(idx) = iter.next() {
-            out.push(idx.as_slice().to_vec());
+            out.push(idx.as_ref().to_vec());
         }
         out
     }
@@ -366,31 +379,31 @@ mod tests {
     #[test]
     fn idx_iter_0d_yields_one_empty_index() {
         // A 0-D iterator has no dimensions; it should yield exactly one empty index.
-        assert_eq!(collect_idx(IdxIter::new([])), vec![vec![]]);
+        assert_eq!(collect_idx(IdxIter::<Dim<0>>::new([])), vec![vec![]]);
     }
 
     #[test]
     fn idx_iter_1d() {
         assert_eq!(
-            collect_idx(IdxIter::new([4])),
+            collect_idx(IdxIter::<Dim<1>>::new([4u64])),
             vec![vec![0], vec![1], vec![2], vec![3]],
         );
     }
 
     #[test]
     fn idx_iter_1d_size_1() {
-        assert_eq!(collect_idx(IdxIter::new([1])), vec![vec![0]]);
+        assert_eq!(collect_idx(IdxIter::<Dim<1>>::new([1u64])), vec![vec![0]]);
     }
 
     #[test]
     fn idx_iter_1d_size_0() {
-        assert!(collect_idx(IdxIter::new([0])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<1>>::new([0u64])).is_empty());
     }
 
     #[test]
     fn idx_iter_2d_row_major_order() {
         assert_eq!(
-            collect_idx(IdxIter::new([2, 3])),
+            collect_idx(IdxIter::<Dim<2>>::new([2u64, 3])),
             vec![
                 vec![0, 0],
                 vec![0, 1],
@@ -404,7 +417,7 @@ mod tests {
 
     #[test]
     fn idx_iter_3d_row_major_order() {
-        let got = collect_idx(IdxIter::new([2, 3, 2]));
+        let got = collect_idx(IdxIter::<Dim<3>>::new([2u64, 3, 2]));
         let expected: Vec<Vec<u64>> = (0..2)
             .flat_map(|i| (0..3).flat_map(move |j| (0..2).map(move |k| vec![i, j, k])))
             .collect();
@@ -413,8 +426,11 @@ mod tests {
 
     #[test]
     fn idx_iter_total_count_equals_shape_product() {
-        let shape = [2, 3, 4, 5];
-        assert_eq!(collect_idx(IdxIter::new(shape)).len(), 2 * 3 * 4 * 5);
+        let shape: [u64; 4] = [2, 3, 4, 5];
+        assert_eq!(
+            collect_idx(IdxIter::<Dim<4>>::new(shape)).len(),
+            2 * 3 * 4 * 5
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -423,27 +439,27 @@ mod tests {
 
     #[test]
     fn idx_iter_zero_in_first_dim_is_empty() {
-        assert!(collect_idx(IdxIter::new([0, 3])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<2>>::new([0u64, 3])).is_empty());
     }
 
     #[test]
     fn idx_iter_zero_in_last_dim_is_empty() {
-        assert!(collect_idx(IdxIter::new([3, 0])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<2>>::new([3u64, 0])).is_empty());
     }
 
     #[test]
     fn idx_iter_zero_in_middle_dim_is_empty() {
-        assert!(collect_idx(IdxIter::new([3, 0, 4])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<3>>::new([3u64, 0, 4])).is_empty());
     }
 
     #[test]
     fn idx_iter_zero_1d_is_empty() {
-        assert!(collect_idx(IdxIter::new([0])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<1>>::new([0u64])).is_empty());
     }
 
     #[test]
     fn idx_iter_returns_none_repeatedly_after_exhaustion() {
-        let mut iter = IdxIter::new([2]);
+        let mut iter = IdxIter::<Dim<1>>::new([2u64]);
         iter.next();
         iter.next();
         assert!(iter.next().is_none());
@@ -458,7 +474,7 @@ mod tests {
     fn collect_indices<D: Dimension, E: NdIterExtension>(mut iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
         while let Some((idx, _)) = iter.next() {
-            out.push(idx.as_slice().to_vec());
+            out.push(idx.as_ref().to_vec());
         }
         out
     }
@@ -466,14 +482,18 @@ mod tests {
     #[test]
     fn new_with_begin_1d_offset() {
         assert_eq!(
-            collect_indices(NdIter::new_with_begin(&[2], &[5], ())),
+            collect_indices(NdIter::<Dim<1>, _>::new_with_begin([2u64], [5u64], ())),
             vec![vec![2], vec![3], vec![4]],
         );
     }
 
     #[test]
     fn new_with_begin_2d_offset() {
-        let got = collect_indices(NdIter::new_with_begin(&[1, 2], &[3, 4], ()));
+        let got = collect_indices(NdIter::<Dim<2>, _>::new_with_begin(
+            [1u64, 2],
+            [3u64, 4],
+            (),
+        ));
         let expected: Vec<Vec<u64>> = (1..3)
             .flat_map(|r| (2..4).map(move |c| vec![r, c]))
             .collect();
@@ -482,26 +502,58 @@ mod tests {
 
     #[test]
     fn new_with_begin_count_matches_range_product() {
-        let got = collect_indices(NdIter::new_with_begin(&[1, 2, 0], &[4, 5, 3], ()));
+        let got = collect_indices(NdIter::<Dim<3>, _>::new_with_begin(
+            [1u64, 2, 0],
+            [4u64, 5, 3],
+            (),
+        ));
         assert_eq!(got.len(), (4 - 1) * (5 - 2) * (3 - 0));
     }
 
     #[test]
     fn new_with_begin_empty_when_one_dim_degenerate() {
         // begin[0] == end[0] -> no elements even though other dims are non-empty
-        assert!(collect_indices(NdIter::new_with_begin(&[2, 0], &[2, 5], ())).is_empty());
+        assert!(collect_indices(NdIter::<Dim<2>, _>::new_with_begin(
+            [2u64, 0],
+            [2u64, 5],
+            ()
+        ))
+        .is_empty());
     }
 
     #[test]
     fn new_with_begin_empty_when_all_dims_degenerate() {
-        assert!(collect_indices(NdIter::new_with_begin(&[3], &[3], ())).is_empty());
+        assert!(
+            collect_indices(NdIter::<Dim<1>, _>::new_with_begin([3u64], [3u64], ())).is_empty()
+        );
     }
 
     #[test]
     fn new_with_begin_begin_equals_zero_matches_new() {
-        let via_new = collect_indices(NdIter::new(&[3, 4], ()));
-        let via_begin = collect_indices(NdIter::new_with_begin(&[0, 0], &[3, 4], ()));
+        let via_new = collect_indices(NdIter::<Dim<2>, _>::new([3u64, 4], ()));
+        let via_begin = collect_indices(NdIter::<Dim<2>, _>::new_with_begin(
+            [0u64, 0],
+            [3u64, 4],
+            (),
+        ));
         assert_eq!(via_new, via_begin);
+    }
+
+    #[test]
+    fn new_with_begin_1d_offset_dyn() {
+        assert_eq!(
+            collect_indices(NdIter::new_with_begin(dv(&[2u64]), dv(&[5u64]), ())),
+            vec![vec![2], vec![3], vec![4]],
+        );
+    }
+
+    #[test]
+    fn new_with_begin_2d_offset_dyn() {
+        let got = collect_indices(NdIter::new_with_begin(dv(&[1u64, 2]), dv(&[3u64, 4]), ()));
+        let expected: Vec<Vec<u64>> = (1..3)
+            .flat_map(|r| (2..4).map(move |c| vec![r, c]))
+            .collect();
+        assert_eq!(got, expected);
     }
 
     // ---------------------------------------------------------------------------
@@ -510,7 +562,7 @@ mod tests {
 
     #[test]
     fn on_change_not_called_on_first_step() {
-        let mut iter = NdIter::new(&[3, 4], ChangeLog::new());
+        let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ChangeLog::new());
         let (_, n_changes) = iter.next().unwrap();
         assert_eq!(n_changes, 0, "no changes on the very first step");
     }
@@ -518,7 +570,7 @@ mod tests {
     #[test]
     fn on_change_called_once_for_innermost_advance() {
         // [0,0] -> [0,1]: only dim 1 changes
-        let mut iter = NdIter::new(&[3, 4], ChangeLog::new());
+        let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ChangeLog::new());
         iter.next(); // emit [0,0] - no changes
         let before = iter.extensions.log.len();
         iter.next(); // emit [0,1]
@@ -529,7 +581,7 @@ mod tests {
     #[test]
     fn on_change_called_twice_on_row_wrap() {
         // At [0,3] -> [1,0]: dim 0 increments then dim 1 resets.
-        let mut iter = NdIter::new(&[3, 4], ChangeLog::new());
+        let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ChangeLog::new());
         for _ in 0..4 {
             iter.next();
         } // reach end of first row
@@ -542,7 +594,7 @@ mod tests {
     #[test]
     fn on_change_all_smaller_dims_reset_in_order() {
         // Shape [2,3,4]: when dim 0 increments, dims 1 and 2 both reset, in order.
-        let mut iter = NdIter::new(&[2, 3, 4], ChangeLog::new());
+        let mut iter = NdIter::<Dim<3>, _>::new([2u64, 3, 4], ChangeLog::new());
         for _ in 0..(3 * 4) {
             iter.next();
         } // reach [0,2,3]
@@ -555,7 +607,7 @@ mod tests {
     #[test]
     fn on_change_reset_targets_begin_not_zero() {
         // begin=[1,2], end=[3,5]: when dim 0 wraps, dim 1 should reset to 2 (begin), not 0.
-        let mut iter = NdIter::new_with_begin(&[1, 2], &[3, 5], ChangeLog::new());
+        let mut iter = NdIter::<Dim<2>, _>::new_with_begin([1u64, 2], [3u64, 5], ChangeLog::new());
         // advance to [1,4] - last element of first row
         for _ in 0..3 {
             iter.next();
@@ -576,8 +628,8 @@ mod tests {
         // More simply: each step after the first fires 1 change for a plain inner advance,
         // or 2 changes for a row-carry. There are (R-1) row-carries and (R*(C-1)) plain advances.
         // Total = (R-1)*2 + R*(C-1)*1.
-        let (r, c) = (4, 5);
-        let mut iter = NdIter::new(&[r, c], ChangeLog::new());
+        let (r, c): (u64, u64) = (4, 5);
+        let mut iter = NdIter::<Dim<2>, _>::new([r, c], ChangeLog::new());
         while iter.next().is_some() {}
         let expected = ((r - 1) * 2 + r * (c - 1)) as usize;
         assert_eq!(iter.extensions.log.len(), expected);
@@ -590,7 +642,7 @@ mod tests {
     #[test]
     fn tuple_1_extension_delegates() {
         let ext = ChangeLog::new();
-        let mut iter = NdIter::new(&[3, 3], (ext,));
+        let mut iter = NdIter::new(dv(&[3u64, 3]), (ext,));
         while iter.next().is_some() {}
         // Behaviour should be identical to a bare ChangeLog
         assert!(!iter.extensions.0.log.is_empty());
@@ -603,10 +655,10 @@ mod tests {
         let base_a = a.as_mut_ptr();
         let base_b = b.as_mut_ptr();
         let ext = (
-            NdIterExtStridesPtrMut::new(&[3usize, 1], base_a),
-            NdIterExtStridesPtrMut::new(&[6usize, 2], base_b),
+            NdIterExtStridesPtrMut::new(dv(&[3usize, 1]), base_a),
+            NdIterExtStridesPtrMut::new(dv(&[6usize, 2]), base_b),
         );
-        let mut iter = NdIter::new(&[2, 3], ext);
+        let mut iter = NdIter::new(dv(&[2u64, 3]), ext);
         let mut flat = 0usize;
         while let Some((_, (pa, pb))) = iter.next() {
             assert_eq!(pa, unsafe { base_a.add(flat) }, "a step {flat}");
@@ -621,10 +673,10 @@ mod tests {
         let mut data = [0u8; 4];
         let base = data.as_mut_ptr();
         let ext = (
-            NdIterExtStridesPtrMut::new(&[1usize], base),
+            NdIterExtStridesPtrMut::new(dv(&[1usize]), base),
             ChangeLog::new(),
         );
-        let mut iter = NdIter::new(&[4], ext);
+        let mut iter = NdIter::new(dv(&[4u64]), ext);
         let mut ptrs: Vec<*mut u8> = Vec::new();
         while let Some((_, (ptr, _))) = iter.next() {
             ptrs.push(ptr);
@@ -642,11 +694,11 @@ mod tests {
         let mut b = [0u8; 4];
         let mut c = [0u8; 4];
         let ext = (
-            NdIterExtStridesPtrMut::new(&[1usize], a.as_mut_ptr()),
-            NdIterExtStridesPtrMut::new(&[1usize], b.as_mut_ptr()),
-            NdIterExtStridesPtrMut::new(&[1usize], c.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(dv(&[1usize]), a.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(dv(&[1usize]), b.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(dv(&[1usize]), c.as_mut_ptr()),
         );
-        let mut iter = NdIter::new(&[4], ext);
+        let mut iter = NdIter::new(dv(&[4u64]), ext);
         let mut count = 0usize;
         while let Some((_, (pa, pb, pc))) = iter.next() {
             let off_a = unsafe { pa.offset_from(a.as_ptr()) };
@@ -665,7 +717,7 @@ mod tests {
 
     #[test]
     fn unit_extension_yields_unit_items() {
-        let mut iter = NdIter::new(&[2, 2], ());
+        let mut iter = NdIter::<Dim<2>, _>::new([2u64, 2], ());
         while let Some((_, item)) = iter.next() {
             let _: () = item;
         }

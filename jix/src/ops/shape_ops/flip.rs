@@ -128,12 +128,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         check_get_buffer_size(index, dtype, buf)?;
 
         // tmp_buf is C-contiguous over out_shape (sub_shape_in == out_shape).
-        let strides = default_strides::<S::Dimension, _>(&out_shape, itemsize as u64);
+        let strides = default_strides(&out_shape, itemsize as u64);
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the
         // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
-        let iter_shape =
-            S::Dimension::from_fn(ndim, |d| if is_flipped[d] { out_shape[d] } else { 1 });
+        let iter_shape = S::Dimension::vec(ndim, |d| if is_flipped[d] { out_shape[d] } else { 1 });
         let slab_shape =
             S::Dimension::from_fn(ndim, |d| if is_flipped[d] { 1 } else { out_shape[d] });
 
@@ -154,7 +153,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         let iter = NdIter::new(
             iter_shape,
-            NdIterExtStridesPtr::new(src_ptr_strides.as_ref(), tmp_base),
+            NdIterExtStridesPtr::new(src_ptr_strides, tmp_base),
         );
         for (_idx, src_ptr) in iter {
             let off = unsafe { src_ptr.offset_from(tmp_base) } as usize;

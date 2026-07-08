@@ -207,7 +207,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         let ndim = self.slice.len();
         let itemsize = dtype.itemsize() as u64;
         let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides::<S::Dimension, _>(&out_shape, itemsize);
+        let dst_strides = default_strides(&out_shape, itemsize);
 
         // inner_read_shape: 1 for strided dims, full range for non-strided dims.
         let inner_read_shape = S::Dimension::from_fn(ndim, |dim| {
@@ -217,14 +217,13 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 1
             }
         });
-        let src_strides =
-            default_strides::<S::Dimension, _>(inner_read_shape.as_vec_u64(), itemsize);
+        let src_strides = default_strides(inner_read_shape.as_vec_u64(), itemsize);
         let tmp_buf_bytes =
             (inner_read_shape.as_slice().iter().product::<u64>() * itemsize) as usize;
         let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, dtype.alignment());
 
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
-        let iter_shape = S::Dimension::from_fn(ndim, |dim| {
+        let iter_shape = S::Dimension::vec(ndim, |dim| {
             if self.slice[dim].is_contiguous() {
                 1
             } else {

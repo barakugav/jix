@@ -160,7 +160,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-        let dst_strides = default_strides::<S::Dimension, _>(&out_shape, itemsize as u64);
+        let dst_strides = default_strides(&out_shape, itemsize as u64);
 
         // Case B - two reads, single wrap (total <= L): split the request into two
         // contiguous input ranges along axis k and read each into a separate tmp_buf, then
@@ -179,8 +179,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 let tmp = tmp.as_mut_slice();
                 self.array
                     .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
-                let src_strides =
-                    default_strides::<S::Dimension, _>(region_shape.as_vec_u64(), itemsize as u64);
+                let src_strides = default_strides(region_shape.as_vec_u64(), itemsize as u64);
                 let dst_byte_offset = (dst_axis_k_offset * dst_strides[k]) as usize;
                 unsafe {
                     nd_copy(
@@ -222,7 +221,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             .read_data(inner_full.as_ref(), &mut tmp, context)?;
         let tmp = tmp.as_slice().unwrap();
 
-        let src_strides = default_strides::<S::Dimension, _>(&period_shape, itemsize as u64);
+        let src_strides = default_strides(&period_shape, itemsize as u64);
 
         let head_len = l - s_in; // 0 < head_len <= L
         let remaining = total - head_len; // > 0 since total > L

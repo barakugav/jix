@@ -175,10 +175,7 @@ where
             * itemsize;
         let n_stack = (index[self.stack_axis].end - index[self.stack_axis].start) as usize;
         let out_of_place_strides = in_place.not().then(|| {
-            let arr_strides = default_strides::<ArraysT::Dimension, _>(
-                arr_range_shape.as_vec_u64(),
-                itemsize as u64,
-            );
+            let arr_strides = default_strides(arr_range_shape.as_vec_u64(), itemsize as u64);
             // For dims before the stack axis the output stride is n_stack times wider;
             // for dims at or after it the stride is unchanged.
             let mut out_strides = ArraysT::Dimension::from_slice(arr_strides.as_ref());

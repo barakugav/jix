@@ -14,7 +14,7 @@ use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use iter::NdIter;
 
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray};
-use crate::{Dimension, IntoDimension};
+use crate::{DimDyn, DimVec, Dimension, IntoDimension};
 
 pub(crate) trait Idx:
     Clone
@@ -82,13 +82,13 @@ impl_idx_for_primitive!(u32);
 impl_idx_for_primitive!(u64);
 
 #[inline(always)]
-pub(crate) fn default_strides<D: Dimension, Ix: Idx>(
-    shape: &D::Vec<Ix>,
-    itemsize: Ix,
-) -> D::Vec<Ix> {
+pub(crate) fn default_strides<V, Ix: Idx>(shape: &V, itemsize: Ix) -> V
+where
+    V: DimVec<Ix>,
+{
     let shape: &[Ix] = shape.as_ref();
     let ndim = shape.len();
-    let mut strides = D::vec(ndim, |_| itemsize);
+    let mut strides = V::Dimension::vec(ndim, |_| itemsize);
     if ndim > 0 {
         for dim in (0..ndim - 1).rev() {
             strides[dim] = strides[dim + 1] * shape[dim + 1];
@@ -97,8 +97,11 @@ pub(crate) fn default_strides<D: Dimension, Ix: Idx>(
     strides
 }
 #[inline(always)]
-pub(crate) fn default_logical_strides<D: Dimension, Ix: Idx>(shape: &D::Vec<Ix>) -> D::Vec<Ix> {
-    default_strides::<D, Ix>(shape, Ix::ONE)
+pub(crate) fn default_logical_strides<V, Ix: Idx>(shape: &V) -> V
+where
+    V: DimVec<Ix>,
+{
+    default_strides(shape, Ix::ONE)
 }
 #[inline(always)]
 pub(crate) fn default_strides_slice<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<Ix> {
@@ -149,6 +152,17 @@ pub(crate) trait IterExt: Iterator {
         Self::Item: Idx,
     {
         self.try_fold(Self::Item::ONE, |acc, x| acc.checked_mul(x))
+    }
+
+    #[inline]
+    fn collect_dim_vec<D>(mut self, size: usize) -> D::Vec<Self::Item>
+    where
+        Self: Sized,
+        D: Dimension,
+    {
+        let v = D::vec(size, |_| self.next().unwrap());
+        assert!(self.next().is_none());
+        v
     }
 }
 impl<Iter: Iterator> IterExt for Iter {}
@@ -362,10 +376,10 @@ pub(crate) unsafe fn nd_copy<D, SrcS, DstS>(
     let dst_strides = &dst_strides[..ndim - n_continuous_dims];
 
     let iter = NdIter::new(
-        shape,
+        DimArray::from_slice(shape).unwrap(),
         (
-            NdIterExtStridesPtr::new(src_strides, src),
-            NdIterExtStridesPtrMut::new(dst_strides, dst),
+            NdIterExtStridesPtr::new(src_strides.to_dim_vec::<DimDyn>(), src),
+            NdIterExtStridesPtrMut::new(dst_strides.to_dim_vec::<DimDyn>(), dst),
         ),
     );
     for (_, (src_ptr, dst_ptr)) in iter {
@@ -376,7 +390,7 @@ pub(crate) unsafe fn nd_copy<D, SrcS, DstS>(
 }
 
 pub(crate) fn scale_read_shape(
-    read_shape: &mut impl Dimension,
+    read_shape: &mut impl Dimension, // TODO: Vec<u64>
     total_read_shape: &[u64],
     array_shape: &[u64],
     target_nitems: (u64, u64),
@@ -534,6 +548,23 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
         } else {
             Err(res.into_iter().filter_map(|r| r.err()).next().unwrap())
         }
+    }
+}
+
+pub(crate) trait SliceExt<T> {
+    fn to_dim_vec<D>(&self) -> D::Vec<T>
+    where
+        D: Dimension,
+        T: Clone;
+}
+impl<T> SliceExt<T> for [T] {
+    #[inline]
+    fn to_dim_vec<D>(&self) -> D::Vec<T>
+    where
+        D: Dimension,
+        T: Clone,
+    {
+        D::vec(self.len(), |i| self[i].clone())
     }
 }
 

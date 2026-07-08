@@ -162,8 +162,8 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
         // Output shape over the requested sub-range, all `ndim` axes.
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-        let dst_strides = default_strides::<S::Dimension, _>(&out_shape, itemsize as u64);
-        let inner_strides_bytes = default_strides::<S::Dimension, _>(&inner_shape, itemsize);
+        let dst_strides = default_strides(&out_shape, itemsize as u64);
+        let inner_strides_bytes = default_strides(&inner_shape, itemsize);
 
         // Issue one nd_copy for a (g_range, p_range) region.
         //   `g_range` indexes groups relative to the inner read (0..g_count).

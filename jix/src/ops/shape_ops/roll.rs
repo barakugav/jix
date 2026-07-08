@@ -114,7 +114,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-        let dst_strides = default_strides::<S::Dimension, _>(&out_shape, itemsize as u64);
+        let dst_strides = default_strides(&out_shape, itemsize as u64);
 
         let mut read_region = |inner_index: &[Range<u64>],
                                region_shape: &S::Dimension,
@@ -126,8 +126,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             self.array
                 .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
 
-            let src_strides =
-                default_strides::<S::Dimension, _>(region_shape.as_vec_u64(), itemsize as u64);
+            let src_strides = default_strides(region_shape.as_vec_u64(), itemsize as u64);
             let dst_byte_offset = (dst_axis_k_offset * dst_strides[k]) as usize;
             unsafe {
                 nd_copy(

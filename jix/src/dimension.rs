@@ -118,18 +118,10 @@ pub trait Dimension:
         Self: 'a;
 
     /// A vec-like container that can hold one value per axis for this dimension type.
-    type Vec<T>: Index<usize, Output = T>
-        + IndexMut<usize, Output = T>
-        + Index<Range<usize>, Output = [T]>
-        + IndexMut<Range<usize>, Output = [T]>
-        + Index<RangeFrom<usize>, Output = [T]>
-        + IndexMut<RangeFrom<usize>, Output = [T]>
-        + Index<RangeTo<usize>, Output = [T]>
-        + IndexMut<RangeTo<usize>, Output = [T]>
-        + Index<RangeFull, Output = [T]>
-        + IndexMut<RangeFull, Output = [T]>
-        + AsRef<[T]>
-        + AsMut<[T]>;
+    #[allow(private_bounds)]
+    type Vec<T>: AsRef<[T]> + AsMut<[T]> + DimVec<T, Dimension = Self>
+    where
+        Self: Sized;
 
     /// Construct a `Dimension` by calling `f(i)` for each axis index `i` in `0..ndim`.
     ///
@@ -182,6 +174,29 @@ pub trait Dimension:
 
     /// Borrow this dimension's axis lengths as its [`Vec`](Dimension::Vec) container.
     fn as_vec_u64(&self) -> &Self::Vec<u64>;
+}
+
+pub(crate) trait DimVec<T>:
+    Index<usize, Output = T>
+    + IndexMut<usize, Output = T>
+    + Index<Range<usize>, Output = [T]>
+    + IndexMut<Range<usize>, Output = [T]>
+    + Index<RangeFrom<usize>, Output = [T]>
+    + IndexMut<RangeFrom<usize>, Output = [T]>
+    + Index<RangeTo<usize>, Output = [T]>
+    + IndexMut<RangeTo<usize>, Output = [T]>
+    + Index<RangeFull, Output = [T]>
+    + IndexMut<RangeFull, Output = [T]>
+    + AsRef<[T]>
+    + AsMut<[T]>
+{
+    type Dimension: Dimension<Vec<T> = Self>
+    where
+        Self: Sized;
+
+    fn clone(&self) -> Self
+    where
+        T: Clone;
 }
 
 /// A dynamically-dimensioned shape whose ndim is only known at runtime.
@@ -271,6 +286,16 @@ impl ndarray::IntoDimension for DimDyn {
 impl Debug for DimDyn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         <_ as Debug>::fmt(self.as_slice(), f)
+    }
+}
+impl<T> DimVec<T> for DimArray<T> {
+    type Dimension = DimDyn;
+
+    fn clone(&self) -> Self
+    where
+        T: Clone,
+    {
+        <Self as Clone>::clone(self)
     }
 }
 
@@ -378,6 +403,16 @@ macro_rules! impl_dim {
         impl Debug for Dim<$dim> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 <_ as Debug>::fmt(&self.0, f)
+            }
+        }
+        impl<T> DimVec<T> for [T; $dim] {
+            type Dimension = Dim<$dim>;
+
+            fn clone(&self) -> Self
+            where
+                T: Clone,
+            {
+                <Self as Clone>::clone(self)
             }
         }
     };

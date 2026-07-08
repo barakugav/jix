@@ -438,7 +438,7 @@ where
 
         let ndim = self.shape.ndim();
         let out_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
-        let out_strides = default_strides::<D, _>(out_shape.as_vec_u64(), itemsize as u64);
+        let out_strides = default_strides(out_shape.as_vec_u64(), itemsize as u64);
 
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])

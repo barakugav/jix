@@ -1,23 +1,38 @@
-use crate::default_logical_strides_slice;
 use crate::util::iter::NdIterExtension;
-use crate::util::{DimArray, Idx};
+use crate::util::Idx;
+use crate::Dimension;
+use crate::{default_logical_strides_slice, DimVec};
 
 /// An nd-iterator extension that tracks a `*const u8` pointer into a strided buffer.
 ///
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
-#[derive(Clone)]
-pub(crate) struct NdIterExtStridesPtr<T, S: Copy>(NdIterExtStridesPtrMut<T, S>);
+pub(crate) struct NdIterExtStridesPtr<D: Dimension, T, S: Copy>(NdIterExtStridesPtrMut<D, T, S>);
 
-impl<T, S: Copy> NdIterExtStridesPtr<T, S> {
+impl<D: Dimension, T, S: Copy> Clone for NdIterExtStridesPtr<D, T, S>
+where
+    D::Vec<S>: Clone,
+{
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<D: Dimension, T, S: Copy> NdIterExtStridesPtr<D, T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
     #[inline(always)]
-    pub fn new(strides: &[S], initial_ptr: *const T) -> Self {
+    pub fn new<V>(strides: V, initial_ptr: *const T) -> Self
+    where
+        D: Dimension<Vec<S> = V>,
+        V: DimVec<S, Dimension = D>,
+    {
         Self(NdIterExtStridesPtrMut::new(strides, initial_ptr.cast_mut()))
     }
 }
-impl<T, S> NdIterExtension for NdIterExtStridesPtr<T, S>
+impl<D, T, S> NdIterExtension for NdIterExtStridesPtr<D, T, S>
 where
+    D: Dimension,
     S: Idx + 'static,
 {
     type Item = *const T;
@@ -33,12 +48,12 @@ where
 
     #[inline(always)]
     fn next(&self) -> *const T {
-        <NdIterExtStridesPtrMut<T, S> as NdIterExtension>::next(&self.0).cast_const()
+        <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::next(&self.0).cast_const()
     }
 
     #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
-        <NdIterExtStridesPtrMut<T, S> as NdIterExtension>::assert_ndim(&self.0, ndim);
+        <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::assert_ndim(&self.0, ndim);
     }
 }
 
@@ -46,24 +61,41 @@ where
 ///
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
-#[derive(Clone)]
-pub(crate) struct NdIterExtStridesPtrMut<T, S: Copy> {
-    strides: DimArray<S>,
+pub(crate) struct NdIterExtStridesPtrMut<D: Dimension, T, S: Copy> {
+    strides: D::Vec<S>,
     current_ptr: *mut T,
 }
 
-impl<T, S: Copy> NdIterExtStridesPtrMut<T, S> {
+impl<D: Dimension, T, S: Copy> Clone for NdIterExtStridesPtrMut<D, T, S>
+where
+    D::Vec<S>: Clone,
+{
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        Self {
+            strides: <_ as DimVec<_>>::clone(&self.strides),
+            current_ptr: self.current_ptr,
+        }
+    }
+}
+
+impl<D: Dimension, T, S: Copy> NdIterExtStridesPtrMut<D, T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
     #[inline(always)]
-    pub fn new(strides: &[S], initial_ptr: *mut T) -> Self {
+    pub fn new<V>(strides: V, initial_ptr: *mut T) -> Self
+    where
+        D: Dimension<Vec<S> = V>,
+        V: DimVec<S, Dimension = D>,
+    {
         Self {
-            strides: DimArray::from_slice(strides).unwrap(),
+            strides,
             current_ptr: initial_ptr,
         }
     }
 }
-impl<T, S> NdIterExtension for NdIterExtStridesPtrMut<T, S>
+impl<D, T, S> NdIterExtension for NdIterExtStridesPtrMut<D, T, S>
 where
+    D: Dimension,
     S: Idx + 'static,
 {
     type Item = *mut T;
@@ -88,7 +120,7 @@ where
 
     #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.strides.len(), ndim);
+        assert_eq!(self.strides.as_ref().len(), ndim);
     }
 }
 
@@ -96,20 +128,24 @@ where
 ///
 /// On each dimension change the offset is adjusted by the difference in element counts:
 /// `offset += (after - before) * stride[dim]`.
-pub(crate) struct NdIterExtStridesOffset {
-    strides: DimArray<u64>,
+pub(crate) struct NdIterExtStridesOffset<D: Dimension> {
+    strides: D::Vec<u64>,
     offset: u64,
 }
-impl NdIterExtStridesOffset {
+impl<D: Dimension> NdIterExtStridesOffset<D> {
     #[inline(always)]
-    pub fn new(strides: &[u64], initial_offset: u64) -> Self {
+    pub fn new<V>(strides: V, initial_offset: u64) -> Self
+    where
+        D: Dimension<Vec<u64> = V>,
+        V: DimVec<u64, Dimension = D>,
+    {
         Self {
-            strides: DimArray::from_slice(strides).unwrap(),
+            strides,
             offset: initial_offset,
         }
     }
 }
-impl NdIterExtension for NdIterExtStridesOffset {
+impl<D: Dimension> NdIterExtension for NdIterExtStridesOffset<D> {
     type Item = u64;
 
     #[inline(always)]
@@ -128,33 +164,44 @@ impl NdIterExtension for NdIterExtStridesOffset {
 
     #[inline(always)]
     fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.strides.len(), ndim);
+        assert_eq!(self.strides.as_ref().len(), ndim);
     }
 }
 
 #[inline(always)]
-pub(crate) fn nd_iter_ext_logical_global_index(
+pub(crate) fn nd_iter_ext_logical_global_index<D: Dimension>(
     shape: &[u64],
     begin: &[u64],
-) -> NdIterExtStridesOffset {
+) -> NdIterExtStridesOffset<D> {
     let logical_strides = default_logical_strides_slice(shape);
     let initial_offset = (0..shape.len())
         .map(|dim| begin[dim] * logical_strides[dim])
         .sum();
-    NdIterExtStridesOffset::new(&logical_strides, initial_offset)
+    NdIterExtStridesOffset::new(
+        D::vec(logical_strides.len(), |i| logical_strides[i]),
+        initial_offset,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::util::iter::NdIter;
+    use crate::util::DimArray;
+    use crate::{Dim, DimDyn, SliceExt};
+
+    /// Build a [`DimArray`] (the `DimDyn` vec container) from a slice, for constructing test
+    /// extensions whose `new` now takes an owned `D::Vec<S>`.
+    fn dv<T: Copy>(s: &[T]) -> DimArray<T> {
+        s.to_dim_vec::<DimDyn>()
+    }
 
     #[test]
     fn strides_ptr_mut_1d_stride_1() {
         let mut data = [0u8; 8];
         let base = data.as_mut_ptr();
-        let ext = NdIterExtStridesPtrMut::new(&[1usize], base);
-        let iter = NdIter::new(&[8u64], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[1usize]), base);
+        let iter = NdIter::new(dv(&[8u64]), ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
@@ -168,8 +215,8 @@ mod tests {
         let mut data = [0u8; 64];
         let base = data.as_mut_ptr();
         let stride = 8usize;
-        let ext = NdIterExtStridesPtrMut::new(&[stride], base);
-        let iter = NdIter::new(&[8u64], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[stride]), base);
+        let iter = NdIter::new(dv(&[8u64]), ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i * stride) }, "step {i}");
@@ -184,8 +231,8 @@ mod tests {
         let elem = 4usize; // e.g. f32
         let mut data = vec![0u8; rows * cols * elem];
         let base = data.as_mut_ptr();
-        let ext = NdIterExtStridesPtrMut::new(&[cols * elem, elem], base);
-        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[cols * elem, elem]), base);
+        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         let mut flat = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat * elem) }, "flat index {flat}");
@@ -203,8 +250,8 @@ mod tests {
         let mut data = vec![0u8; rows * cols];
         let base = data.as_mut_ptr();
         // Strides: dim 0 (row) = 1, dim 1 (col) = rows = 2
-        let ext = NdIterExtStridesPtrMut::new(&[1, rows], base);
-        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[1, rows]), base);
+        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         // Iteration order is row-major by *index*, but pointer jumps follow column-major layout:
         // [0,0]=0, [0,1]=2, [0,2]=4, [1,0]=1, [1,1]=3, [1,2]=5
         let expected_offsets: &[usize] = &[0, 2, 4, 1, 3, 5];
@@ -224,8 +271,8 @@ mod tests {
         let mut data = vec![0u8; 16];
         let base = data.as_mut_ptr();
         let start = unsafe { base.add(1 * 4 + 1 * 1) };
-        let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], start);
-        let iter = NdIter::new_with_begin(&[1u64, 1], &[3, 3], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[4usize, 1]), start);
+        let iter = NdIter::new_with_begin(dv(&[1u64, 1]), dv(&[3u64, 3]), ext);
         let expected: &[usize] = &[5, 6, 9, 10];
         let mut i = 0;
         for (_, ptr) in iter {
@@ -238,8 +285,8 @@ mod tests {
     #[test]
     fn strides_ptr_mut_empty_range_yields_no_pointers() {
         let mut data = [0u8; 16];
-        let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], data.as_mut_ptr());
-        let mut iter = NdIter::new_with_begin(&[2u64, 2], &[2, 5], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[4usize, 1]), data.as_mut_ptr());
+        let mut iter = NdIter::new_with_begin(dv(&[2u64, 2]), dv(&[2u64, 5]), ext);
         assert!(iter.next().is_none());
     }
 
@@ -247,8 +294,8 @@ mod tests {
     fn strides_ptr_const_1d_matches_mut() {
         let data = [0u8; 8];
         let base = data.as_ptr();
-        let ext = NdIterExtStridesPtr::new(&[1usize], base);
-        let iter = NdIter::new(&[8u64], ext);
+        let ext = NdIterExtStridesPtr::new(dv(&[1usize]), base);
+        let iter = NdIter::new(dv(&[8u64]), ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) });
@@ -263,8 +310,8 @@ mod tests {
         let cols = 4usize;
         let data = vec![0u8; rows * cols];
         let base = data.as_ptr();
-        let ext = NdIterExtStridesPtr::new(&[cols, 1], base);
-        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let ext = NdIterExtStridesPtr::new(dv(&[cols, 1]), base);
+        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         let mut flat = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat) });
@@ -284,8 +331,8 @@ mod tests {
         let data = [0u64; 4];
         let base = data.as_ptr();
         let base_byte = base as usize;
-        let ext = NdIterExtStridesPtr::new(&[1usize], base);
-        let iter = NdIter::new(&[4u64], ext);
+        let ext = NdIterExtStridesPtr::new(dv(&[1usize]), base);
+        let iter = NdIter::new(dv(&[4u64]), ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
@@ -307,8 +354,8 @@ mod tests {
         let cols = 4usize;
         let mut data = vec![0u32; rows * cols];
         let base = data.as_mut_ptr();
-        let ext = NdIterExtStridesPtrMut::new(&[cols, 1], base);
-        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[cols, 1]), base);
+        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         let mut flat = 0u32;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat as usize) }, "flat index {flat}");
@@ -329,8 +376,8 @@ mod tests {
         let mut data = vec![0u32; rows * cols];
         let base = data.as_mut_ptr();
         // dim 0 (row) stride = 1 element, dim 1 (col) stride = rows = 2 elements.
-        let ext = NdIterExtStridesPtrMut::new(&[1usize, rows], base);
-        let iter = NdIter::new(&[rows as u64, cols as u64], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[1usize, rows]), base);
+        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         let expected_offsets: &[usize] = &[0, 2, 4, 1, 3, 5];
         let mut i = 0usize;
         for (_, ptr) in iter {
@@ -347,8 +394,8 @@ mod tests {
         let mut data = vec![0u32; 16];
         let base = data.as_mut_ptr();
         let start = unsafe { base.add(1 * 4 + 1 * 1) };
-        let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], start);
-        let iter = NdIter::new_with_begin(&[1u64, 1], &[3, 3], ext);
+        let ext = NdIterExtStridesPtrMut::new(dv(&[4usize, 1]), start);
+        let iter = NdIter::new_with_begin(dv(&[1u64, 1]), dv(&[3u64, 3]), ext);
         let expected: &[usize] = &[5, 6, 9, 10];
         let mut i = 0;
         for (_, ptr) in iter {
@@ -375,8 +422,8 @@ mod tests {
         }; 5];
         let base = data.as_ptr();
         let base_byte = base as usize;
-        let ext = NdIterExtStridesPtr::new(&[1usize], base);
-        let iter = NdIter::new(&[5u64], ext);
+        let ext = NdIterExtStridesPtr::new(dv(&[1usize]), base);
+        let iter = NdIter::new(dv(&[5u64]), ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
@@ -388,5 +435,39 @@ mod tests {
             i += 1;
         }
         assert_eq!(i, 5);
+    }
+
+    // --- Static Dim<N> variants -----------------------------------------------------------
+    // These mirror key DimDyn tests using fixed-size Dim<N> to confirm both paths compile and work.
+
+    #[test]
+    fn strides_ptr_mut_dim1_static() {
+        let mut data = [0u8; 8];
+        let base = data.as_mut_ptr();
+        let ext = NdIterExtStridesPtrMut::new([1usize], base);
+        let iter = NdIter::<Dim<1>, _>::new([8u64], ext);
+        let mut i = 0usize;
+        for (_, ptr) in iter {
+            assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
+            i += 1;
+        }
+        assert_eq!(i, 8);
+    }
+
+    #[test]
+    fn strides_ptr_mut_dim2_static() {
+        let rows = 3usize;
+        let cols = 4usize;
+        let elem = 4usize;
+        let mut data = vec![0u8; rows * cols * elem];
+        let base = data.as_mut_ptr();
+        let ext = NdIterExtStridesPtrMut::new([cols * elem, elem], base);
+        let iter = NdIter::<Dim<2>, _>::new([rows as u64, cols as u64], ext);
+        let mut flat = 0usize;
+        for (_, ptr) in iter {
+            assert_eq!(ptr, unsafe { base.add(flat * elem) }, "flat index {flat}");
+            flat += 1;
+        }
+        assert_eq!(flat, rows * cols);
     }
 }
