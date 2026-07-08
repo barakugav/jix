@@ -402,7 +402,7 @@ impl<ET> BlockTable<Owned, ET> {
             codec: match &encoder.compressor {
                 Compressor::Zstd(_) => Codec::Zstd,
             },
-            filters: encoder.filters.clone_slow(),
+            filters: encoder.filters.clone(),
             dtype: dtype.clone(),
         };
         BlockTable::new(

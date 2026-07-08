@@ -36,20 +36,11 @@ pub enum Codec {
 /// [`EncoderParams::default()`] uses Zstd level 3 with [`Filter::ByteShuffle`], which is a
 /// good baseline for most numeric workloads: fast encoding, reasonable ratio, and effective
 /// at exploiting the byte-level regularity of uniform-dtype arrays.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct EncoderParams {
     pub(crate) codec: Codec,
     pub(crate) level: i8,
     pub(crate) filters: ArrayVec<Filter, MAX_FILTERS>,
-}
-impl Clone for EncoderParams {
-    fn clone(&self) -> Self {
-        Self {
-            codec: self.codec.clone(),
-            level: self.level,
-            filters: self.filters.clone_slow(),
-        }
-    }
 }
 impl Default for EncoderParams {
     fn default() -> Self {
@@ -126,7 +117,7 @@ impl Encoder {
         let filters_tmp_buf2 = filters_tmp_buf1.clone();
         Ok(Self {
             dtype,
-            filters: params.filters.clone_slow(),
+            filters: params.filters.clone(),
             filters_tmp_buf1,
             filters_tmp_buf2,
             tmp_buffers: TmpBufferPool::new(),
@@ -246,20 +237,11 @@ pub(crate) const MAX_FILTERS: usize = 4;
 /// This struct is populated from the stored array metadata and passed to [`Decoder`] internally.
 /// Users do not construct it directly; it is derived from the array's on-disk representation
 /// when a compressed array is read back from an archive.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DecoderCodecConfig {
     pub(crate) codec: Codec,
     pub(crate) filters: ArrayVec<Filter, MAX_FILTERS>,
     pub(crate) dtype: Dtype,
-}
-impl Clone for DecoderCodecConfig {
-    fn clone(&self) -> Self {
-        Self {
-            codec: self.codec.clone(),
-            filters: self.filters.clone_slow(),
-            dtype: self.dtype.clone(),
-        }
-    }
 }
 
 pub(crate) struct Decoder<'a> {
