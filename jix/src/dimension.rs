@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use std::hint::assert_unchecked;
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
 use crate::error::{check_ndim, Result};
 
@@ -117,6 +117,12 @@ pub trait Dimension:
     where
         Self: 'a;
 
+    /// A vec-like container that can hold one value per axis for this dimension type.
+    #[allow(private_bounds)]
+    type Vec<T>: AsRef<[T]> + AsMut<[T]> + DimVec<T, Dimension = Self>
+    where
+        Self: Sized;
+
     /// Construct a `Dimension` by calling `f(i)` for each axis index `i` in `0..ndim`.
     ///
     /// Panics if `ndim` does not match the statically expected ndim (for `Dim<N>`)
@@ -162,6 +168,35 @@ pub trait Dimension:
 
     /// Convert the dimension into its index pattern type.
     fn to_index(&self) -> Self::Index<'_>;
+
+    /// Build a vec-like container with one value per axis, by applying `f` to each axis index.
+    fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T>;
+
+    /// Borrow this dimension's axis lengths as its [`Vec`](Dimension::Vec) container.
+    fn as_vec_u64(&self) -> &Self::Vec<u64>;
+}
+
+pub(crate) trait DimVec<T>:
+    Index<usize, Output = T>
+    + IndexMut<usize, Output = T>
+    + Index<Range<usize>, Output = [T]>
+    + IndexMut<Range<usize>, Output = [T]>
+    + Index<RangeFrom<usize>, Output = [T]>
+    + IndexMut<RangeFrom<usize>, Output = [T]>
+    + Index<RangeTo<usize>, Output = [T]>
+    + IndexMut<RangeTo<usize>, Output = [T]>
+    + Index<RangeFull, Output = [T]>
+    + IndexMut<RangeFull, Output = [T]>
+    + AsRef<[T]>
+    + AsMut<[T]>
+{
+    type Dimension: Dimension<Vec<T> = Self>
+    where
+        Self: Sized;
+
+    fn clone(&self) -> Self
+    where
+        T: Clone;
 }
 
 /// A dynamically-dimensioned shape whose ndim is only known at runtime.
@@ -182,6 +217,7 @@ impl Dimension for DimDyn {
     type Smaller = Self;
     type Larger = Self;
     type Index<'a> = &'a [u64];
+    type Vec<T> = DimArray<T>;
 
     #[inline(always)]
     fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Self {
@@ -208,6 +244,16 @@ impl Dimension for DimDyn {
     #[inline(always)]
     fn to_index(&self) -> Self::Index<'_> {
         self.as_slice()
+    }
+
+    #[inline(always)]
+    fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T> {
+        dim_arr(ndim, f)
+    }
+
+    #[inline(always)]
+    fn as_vec_u64(&self) -> &Self::Vec<u64> {
+        &self.0
     }
 }
 impl Index<usize> for DimDyn {
@@ -240,6 +286,16 @@ impl ndarray::IntoDimension for DimDyn {
 impl Debug for DimDyn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         <_ as Debug>::fmt(self.as_slice(), f)
+    }
+}
+impl<T> DimVec<T> for DimArray<T> {
+    type Dimension = DimDyn;
+
+    fn clone(&self) -> Self
+    where
+        T: Clone,
+    {
+        <Self as Clone>::clone(self)
     }
 }
 
@@ -279,15 +335,11 @@ macro_rules! impl_dim {
             type Smaller = crate::util::or_else!($({ $smaller })? or { Dim<{ $dim - 1 }> });
             type Larger = crate::util::or_else!($({ $larger })? or { Dim<{ $dim + 1 }> });
             type Index<'a> = $index;
+            type Vec<T> = [T; $dim];
 
             #[inline(always)]
-            fn from_fn(ndim: usize, mut f: impl FnMut(usize) -> u64) -> Self {
-                assert_eq!(
-                    ndim, $dim,
-                    "cannot create Dim<{}> with ndim {ndim}",
-                    $dim
-                );
-                Self(std::array::from_fn(|i| f(i)))
+            fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Self {
+                Self(Self::vec(ndim, f))
             }
 
             #[inline(always)]
@@ -304,6 +356,21 @@ macro_rules! impl_dim {
                 #[allow(unused_variables)]
                 let $to_index_in = self.as_slice();
                 $to_index
+            }
+
+            #[inline(always)]
+            fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T> {
+                assert_eq!(
+                    ndim, $dim,
+                    "cannot create Dim<{}> with ndim {ndim}",
+                    $dim
+                );
+                std::array::from_fn(f)
+            }
+
+            #[inline(always)]
+            fn as_vec_u64(&self) -> &Self::Vec<u64> {
+                &self.0
             }
         }
         impl Index<usize> for Dim<$dim> {
@@ -336,6 +403,16 @@ macro_rules! impl_dim {
         impl Debug for Dim<$dim> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 <_ as Debug>::fmt(&self.0, f)
+            }
+        }
+        impl<T> DimVec<T> for [T; $dim] {
+            type Dimension = Dim<$dim>;
+
+            fn clone(&self) -> Self
+            where
+                T: Clone,
+            {
+                <Self as Clone>::clone(self)
             }
         }
     };

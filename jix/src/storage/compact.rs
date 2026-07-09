@@ -22,7 +22,7 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy, DimArray};
-use crate::{ArrayParams, ArrayStorage, Dimension};
+use crate::{ArrayParams, ArrayStorage, DimVec, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -160,7 +160,7 @@ macro_rules! impl_array_storage {
                     blocks: self.0.blocks.as_ref(),
                     shape: self.0.shape.clone(),
 
-                    block_grid_shape: self.0.block_grid_shape.clone(),
+                    block_grid_shape: <_ as Clone>::clone(&self.0.block_grid_shape),
 
                     spec: self.0.spec.clone(),
                 }))
@@ -312,6 +312,7 @@ where
         let ndim = shape.len();
         let block_shape = self.block_shape();
         assert_eq!(ndim, block_shape.len());
+        let block_shape = D::vec(ndim, |dim| block_shape[dim]);
 
         let mut b_range = DimArray::default();
         let mut is_single_block = true; // every dimension touches exactly one block.
@@ -344,12 +345,17 @@ where
 
         let dtype = self.blocks.dtype();
         let itemsize = dtype.itemsize() as usize;
-        let out_shape = dim_arr(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let out_strides = default_strides(&out_shape, itemsize);
-        let block_strides = default_strides(block_shape, itemsize as BlockSize);
+        let block_strides = default_strides(&block_shape, itemsize as BlockSize);
 
         // Pre-allocate a buffer large enough for a full block.
-        let full_buf_len = block_shape.iter().map(|s| *s as usize).product::<usize>() * itemsize;
+        let full_buf_len = block_shape
+            .as_ref()
+            .iter()
+            .map(|s| *s as usize)
+            .product::<usize>()
+            * itemsize;
         let mut tmp_buf = context.tmp_buf(full_buf_len, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
 
@@ -372,32 +378,33 @@ where
                     src_ptr,
                     buf.as_mut_ptr(),
                     copy_shape,
-                    &block_strides,
-                    &out_strides,
+                    block_strides.as_ref(),
+                    out_strides.as_ref(),
                     itemsize,
                 )
             };
             return Ok(());
         }
 
-        let block_shape_u64 = D::from_fn(ndim, |dim| block_shape[dim] as u64);
+        let block_shape_u64 = D::vec(ndim, |dim| block_shape[dim] as u64);
         // Block-space begin/end for NdIter.
-        let block_begin = D::from_fn(ndim, |dim| index[dim].start / block_shape_u64[dim]);
-        let block_end = D::from_fn(ndim, |dim| {
+        let block_begin = D::vec(ndim, |dim| index[dim].start / block_shape_u64[dim]);
+        let block_end = D::vec(ndim, |dim| {
             calc_block_end(index[dim].start, index[dim].end, block_shape_u64[dim])
         });
-        // Element-space begin/end for NdIterExtBlockOffsetSize.
-        let elem_begin = D::from_fn(ndim, |dim| index[dim].start);
-        let elem_end = D::from_fn(ndim, |dim| index[dim].end);
         let block_global_idx_ext =
-            nd_iter_ext_logical_global_index(&self.block_grid_shape, block_begin.as_slice());
+            nd_iter_ext_logical_global_index::<D>(&self.block_grid_shape, block_begin.as_ref());
 
         let block_iter = NdIter::new_with_begin(
             block_begin,
             block_end,
             (
                 block_global_idx_ext,
-                NdIterExtBlockOffsetSize::new(elem_begin, elem_end, block_shape_u64.clone()),
+                NdIterExtBlockOffsetSize::new(
+                    &D::vec(ndim, |dim| index[dim].start),
+                    &D::vec(ndim, |dim| index[dim].end),
+                    block_shape_u64.clone(),
+                ),
             ),
         );
         for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
@@ -423,9 +430,9 @@ where
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    block_size.clone(),
-                    &block_strides,
-                    &out_strides,
+                    D::from_fn(ndim, |dim| block_size[dim]),
+                    block_strides.as_ref(),
+                    out_strides.as_ref(),
                     itemsize,
                 )
             };

@@ -66,7 +66,7 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             axes.len()
         );
         let axes = DimArray::from_slice(axes).unwrap();
-        let mut seen = dim_arr(ndim, |_| false);
+        let mut seen = S::Dimension::vec(ndim, |_| false);
         for &ax in axes.iter() {
             ensure!(
                 ax < ndim,
@@ -81,7 +81,7 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             seen[ax] = true;
         }
 
-        let mut inv_axes = dim_arr(ndim, |_| 0);
+        let mut inv_axes = S::Dimension::vec(ndim, |_| 0);
         for (i, &ax) in axes.iter().enumerate() {
             inv_axes[ax] = i;
         }
@@ -131,15 +131,16 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         // Build the index into the underlying (un-permuted) storage.
         // Output dim i reads from input dim axes[i], so input dim d = inv_axes[output dim] needs
         // the range that was requested for output dim inv_axes[d].
-        let input_index = dim_arr(ndim, |d| index[self.inv_axes[d] as usize].clone());
+        let input_index = S::Dimension::vec(ndim, |d| index[self.inv_axes[d] as usize].clone());
 
         // Read the underlying data contiguously into tmp_buf.
         // tmp_buf is laid out C-contiguous over sub_shape_in (input dim order).
-        let sub_shape_in = dim_arr(ndim, |d| {
+        let sub_shape_in = S::Dimension::vec(ndim, |d| {
             (input_index[d].end - input_index[d].start) as usize
         });
         let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array.read_data(&input_index, &mut tmp_buf, context)?;
+        self.array
+            .read_data(input_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
@@ -147,19 +148,19 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         // Strides in tmp_buf (C-contiguous over input dims).
         let src_strides_in = default_strides(&sub_shape_in, itemsize);
         // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
-        let src_strides_out = dim_arr(ndim, |i| src_strides_in[self.axes[i] as usize]);
+        let src_strides_out = S::Dimension::vec(ndim, |i| src_strides_in[self.axes[i] as usize]);
 
         // The output buffer is C-contiguous over sub_shape_out (output dim order).
         let sub_shape_out = S::Dimension::from_fn(ndim, |i| index[i].end - index[i].start);
-        let dst_strides = default_strides(sub_shape_out.as_slice(), itemsize as u64);
+        let dst_strides = default_strides(sub_shape_out.as_vec_u64(), itemsize as u64);
 
         unsafe {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
                 sub_shape_out,
-                &src_strides_out,
-                &dst_strides,
+                src_strides_out.as_ref(),
+                dst_strides.as_ref(),
                 itemsize,
             )
         };

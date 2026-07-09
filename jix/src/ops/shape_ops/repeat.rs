@@ -8,8 +8,8 @@ use crate::error::{
 };
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
-use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy};
-use crate::{Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
+use crate::util::{calc_block_end, nd_copy};
+use crate::{default_strides, Array, ArrayStorage, Dimension, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
@@ -141,26 +141,27 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         let g_end = calc_block_end(s, e, n);
 
         // Read the inner sub-region with axis k collapsed to [g_start..g_end).
-        let inner_index = dim_arr(ndim, |d| {
+        let inner_index = S::Dimension::vec(ndim, |d| {
             if d == k {
                 g_start..g_end
             } else {
                 index[d].clone()
             }
         });
-        let inner_shape = dim_arr(ndim, |d| {
+        let inner_shape = S::Dimension::vec(ndim, |d| {
             (inner_index[d].end - inner_index[d].start) as usize
         });
         let dtype = self.dtype();
         let itemsize = dtype.itemsize() as usize;
         let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array.read_data(&inner_index, &mut tmp_buf, context)?;
+        self.array
+            .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
 
         // Output shape over the requested sub-range, all `ndim` axes.
-        let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
+        let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
         let dst_strides = default_strides(&out_shape, itemsize as u64);
         let inner_strides_bytes = default_strides(&inner_shape, itemsize);
 
@@ -176,19 +177,25 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
             // (ndim + 1)-D shape: original axes, but axis k is split into
             // (g_len, p_len) at positions k and k+1.
-            let mut copy_shape = out_shape.clone();
+            let mut copy_shape = <S::Dimension as Dimension>::Larger::from_fn(ndim + 1, |_| 0);
+            copy_shape.as_mut_slice()[..k].copy_from_slice(&out_shape[..k]);
             copy_shape[k] = g_len;
-            copy_shape.insert(k + 1, p_len);
+            copy_shape[k + 1] = p_len;
+            copy_shape.as_mut_slice()[k + 2..].copy_from_slice(&out_shape[k + 1..]);
 
             // src strides: itemsize-strides over inner_shape, with the within-group
             // (p) axis stride = 0 (the repeat trick).
-            let mut src_strides = inner_strides_bytes.clone();
-            src_strides.insert(k + 1, 0);
+            let mut src_strides = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+            src_strides[..k + 1].copy_from_slice(&inner_strides_bytes[..k + 1]);
+            src_strides[k + 1] = 0;
+            src_strides[k + 2..].copy_from_slice(&inner_strides_bytes[k + 1..]);
 
             // dst strides: from `dst_strides`, with axis k split into
             // (n * dst_strides[k], dst_strides[k]).
-            let mut dst_strides_split = dst_strides.clone();
-            dst_strides_split.insert(k, dst_strides[k] * n);
+            let mut dst_strides_split = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+            dst_strides_split[..k].copy_from_slice(&dst_strides[..k]);
+            dst_strides_split[k] = dst_strides[k] * n;
+            dst_strides_split[k + 1..].copy_from_slice(&dst_strides[k..]);
 
             // src ptr: tmp_buf offset to (g_range.start) along the inner k axis.
             let src_byte_offset = (g_range.start as usize) * inner_strides_bytes[k];
@@ -207,9 +214,9 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 nd_copy(
                     src_ptr,
                     dst_ptr,
-                    DimDyn::from_slice(&copy_shape),
-                    &src_strides,
-                    &dst_strides_split,
+                    copy_shape,
+                    src_strides.as_ref(),
+                    dst_strides_split.as_ref(),
                     itemsize,
                 )
             };

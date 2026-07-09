@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{default_strides, dim_arr, nd_copy};
+use crate::util::{default_strides, nd_copy};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Rolls elements along an axis, wrapping around at the boundary, returned by
@@ -96,14 +96,14 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         // range. The shape of that read is exactly `out_shape`, so we read straight into buf.
         if s >= shift || e <= shift {
             let j_start = if s >= shift { s - shift } else { s + l - shift };
-            let inner_index = dim_arr(ndim, |d| {
+            let inner_index = S::Dimension::vec(ndim, |d| {
                 if d == k {
                     j_start..(j_start + (e - s))
                 } else {
                     index[d].clone()
                 }
             });
-            return self.array.read_data(&inner_index, buf, context);
+            return self.array.read_data(inner_index.as_ref(), buf, context);
         }
 
         // Wrap: split the output along axis k into two regions and read each separately.
@@ -113,47 +113,48 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         let len2 = e - shift;
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
-        let out_shape = dim_arr(ndim, |d| index[d].end - index[d].start);
+        let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
         let dst_strides = default_strides(&out_shape, itemsize as u64);
 
         let mut read_region = |inner_index: &[Range<u64>],
-                               region_shape: &[u64],
+                               region_shape: &S::Dimension,
                                dst_axis_k_offset: u64|
          -> Result<()> {
-            let region_size = region_shape.iter().product::<u64>() as usize * itemsize;
+            let region_size = region_shape.as_slice().iter().product::<u64>() as usize * itemsize;
             let mut tmp = context.tmp_buf(region_size, dtype.alignment());
             let tmp = tmp.as_mut_slice();
             self.array
                 .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
 
-            let src_strides = default_strides(region_shape, itemsize as u64);
+            let src_strides = default_strides(region_shape.as_vec_u64(), itemsize as u64);
             let dst_byte_offset = (dst_axis_k_offset * dst_strides[k]) as usize;
             unsafe {
                 nd_copy(
                     tmp.as_ptr(),
                     buf.as_mut_ptr().add(dst_byte_offset),
-                    S::Dimension::from_slice(region_shape),
-                    &src_strides,
-                    &dst_strides,
+                    region_shape.clone(),
+                    src_strides.as_ref(),
+                    dst_strides.as_ref(),
                     itemsize,
                 )
             };
             Ok(())
         };
 
-        let inner_index_r1 = dim_arr(ndim, |d| {
+        let inner_index_r1 = S::Dimension::vec(ndim, |d| {
             if d == k {
                 (s + l - shift)..l
             } else {
                 index[d].clone()
             }
         });
-        let r1_shape = dim_arr(ndim, |d| if d == k { len1 } else { out_shape[d] });
-        read_region(&inner_index_r1, &r1_shape, 0)?;
+        let r1_shape = S::Dimension::from_fn(ndim, |d| if d == k { len1 } else { out_shape[d] });
+        read_region(inner_index_r1.as_ref(), &r1_shape, 0)?;
 
-        let inner_index_r2 = dim_arr(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-        let r2_shape = dim_arr(ndim, |d| if d == k { len2 } else { out_shape[d] });
-        read_region(&inner_index_r2, &r2_shape, len1)?;
+        let inner_index_r2 =
+            S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
+        let r2_shape = S::Dimension::from_fn(ndim, |d| if d == k { len2 } else { out_shape[d] });
+        read_region(inner_index_r2.as_ref(), &r2_shape, len1)?;
 
         Ok(())
     }

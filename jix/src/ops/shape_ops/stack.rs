@@ -8,10 +8,9 @@ use crate::error::{
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf};
 use crate::util::{
-    default_strides, nd_copy, ArraySequence, ArraySequenceDimension, ArraySequenceElementType,
-    DimArray,
+    nd_copy, ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray,
 };
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{default_strides, Array, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///
@@ -176,10 +175,10 @@ where
             * itemsize;
         let n_stack = (index[self.stack_axis].end - index[self.stack_axis].start) as usize;
         let out_of_place_strides = in_place.not().then(|| {
-            let arr_strides = default_strides(arr_range_shape.as_slice(), itemsize as u64);
+            let arr_strides = default_strides(arr_range_shape.as_vec_u64(), itemsize as u64);
             // For dims before the stack axis the output stride is n_stack times wider;
             // for dims at or after it the stride is unchanged.
-            let mut out_strides = arr_strides.clone();
+            let mut out_strides = ArraysT::Dimension::from_slice(arr_strides.as_ref());
             for dim in 0..self.stack_axis {
                 out_strides[dim] *= n_stack as u64;
             }
@@ -209,8 +208,8 @@ where
                         arr_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
                         arr_range_shape.clone(),
-                        arr_strides,
-                        out_strides,
+                        arr_strides.as_ref(),
+                        out_strides.as_slice(),
                         itemsize,
                     )
                 };

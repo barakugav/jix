@@ -7,8 +7,8 @@ use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, R
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray, IterExt};
-use crate::{ArrayStorage, Dimension, IntoDimension};
+use crate::util::{default_strides, nd_copy, DimArray, IterExt};
+use crate::{default_logical_strides, ArrayStorage, Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///
@@ -93,8 +93,8 @@ impl<S, D> Reshape<S, D> {
             "cannot reshape array of shape {orig_shape:?} into shape {new_shape:?}"
         );
 
-        let orig_logical_strides = default_strides(&orig_shape, 1);
-        let new_logical_strides = default_strides(&new_shape, 1);
+        let orig_logical_strides = default_logical_strides(&orig_shape);
+        let new_logical_strides = default_logical_strides(&new_shape);
         let same_logical_stride = (0..new_shape.len())
             .scan(0, |orig_dim_idx, new_dim_idx| {
                 Some(loop {
@@ -273,21 +273,21 @@ where
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
 
-        let orig_shape = self.array.shape();
+        let orig_shape = S::Dimension::from_slice(self.array.shape());
         let new_shape = self.new_shape.as_slice();
         let ndim = new_shape.len();
-        let orig_ndim = orig_shape.len();
+        let orig_ndim = orig_shape.ndim();
         if index.iter().any(|r| r.start >= r.end) {
             return Ok(());
         }
 
-        let orig_logical_strides = default_strides(orig_shape, 1);
-        let new_logical_strides = default_strides(new_shape, 1);
+        let orig_logical_strides = default_logical_strides(orig_shape.as_vec_u64());
+        let new_logical_strides = default_logical_strides(self.new_shape.as_vec_u64());
         let same_logical_stride = (0..new_shape.len())
             .scan(0, |orig_dim_idx, new_dim_idx| {
                 Some(loop {
-                    if *orig_dim_idx >= orig_shape.len() {
-                        break None; // cant really happen, last dims always match, unless orig_shape.len()==0
+                    if *orig_dim_idx >= orig_shape.ndim() {
+                        break None; // cant really happen, last dims always match, unless orig_shape.ndim()==0
                     }
                     if orig_logical_strides[*orig_dim_idx] == new_logical_strides[new_dim_idx]
                         && new_shape[new_dim_idx] >= 1
@@ -303,7 +303,7 @@ where
             })
             .collect::<DimArray<_>>();
         let same_logical_stride_inv = {
-            let mut inv = dim_arr(orig_ndim, |_| None);
+            let mut inv = S::Dimension::vec(orig_ndim, |_| None);
             for (new_dim, &orig_dim) in same_logical_stride.iter().enumerate() {
                 if let Some(orig_dim) = orig_dim {
                     inv[orig_dim as usize] = Some(new_dim as u8);
@@ -317,6 +317,7 @@ where
                 .filter(|dim| dim.is_some())
                 .count(),
             same_logical_stride_inv
+                .as_ref()
                 .iter()
                 .filter(|dim| dim.is_some())
                 .count()
@@ -324,7 +325,7 @@ where
 
         // dims that have the same logical stride in the original and new shape can be read directly,
         // the rest we need to read one entry at a time and copy into the output buffer.
-        let orig_read_shape = dim_arr(orig_ndim, |dim| {
+        let orig_read_shape = S::Dimension::vec(orig_ndim, |dim| {
             if let Some(new_dim) = same_logical_stride_inv[dim] {
                 index[new_dim as usize].end - index[new_dim as usize].start
             } else {
@@ -340,15 +341,15 @@ where
         });
 
         let mut tmp_buf = context.tmp_buf(
-            orig_read_shape.iter().product::<u64>() as usize * dtype.itemsize() as usize,
+            orig_read_shape.as_ref().iter().product::<u64>() as usize * dtype.itemsize() as usize,
             dtype.alignment(),
         );
-        let tmp_buf_strides = default_strides(new_read_shape.as_slice(), dtype.itemsize() as _);
-        let out_buf_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
+        let tmp_buf_strides = default_strides(new_read_shape.as_vec_u64(), dtype.itemsize() as _);
+        let out_buf_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
         let dst_strides = default_strides(&out_buf_shape, dtype.itemsize() as _);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
-        let iteration_shape = D::from_fn(ndim, |dim| {
+        let iteration_shape = D::vec(ndim, |dim| {
             if same_logical_stride[dim].is_some() {
                 1
             } else {
@@ -357,7 +358,7 @@ where
         });
         let iter = NdIter::new(iteration_shape, ());
         for (idx, ()) in iter {
-            let read_range = dim_arr(orig_ndim, |dim| {
+            let read_range = S::Dimension::vec(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {
                     debug_assert_eq!(idx[new_dim as usize], 0);
                     index[new_dim as usize].clone()
@@ -373,7 +374,7 @@ where
 
             let tmp_buf = tmp_buf.as_mut_slice();
             self.array
-                .read_data(&read_range, &mut OutBuf::new(tmp_buf), context)?;
+                .read_data(read_range.as_ref(), &mut OutBuf::new(tmp_buf), context)?;
 
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&dim| same_logical_stride[dim].is_none())
@@ -385,8 +386,8 @@ where
                     tmp_buf.as_ptr(),
                     dst_ptr,
                     new_read_shape.clone(),
-                    &tmp_buf_strides,
-                    &dst_strides,
+                    tmp_buf_strides.as_ref(),
+                    dst_strides.as_ref(),
                     dtype.itemsize() as _,
                 )
             };

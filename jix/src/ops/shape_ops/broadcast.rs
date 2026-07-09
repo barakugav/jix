@@ -158,18 +158,19 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 
         // Read from inner with broadcast dims collapsed to 0..1.
         // tmp_buf is C-contiguous over inner_read_shape.
-        let inner_index = dim_arr(ndim, |dim| {
+        let inner_index = S::Dimension::vec(ndim, |dim| {
             if self.is_broadcast[dim] {
                 0..1
             } else {
                 index[dim].clone()
             }
         });
-        let inner_read_shape = dim_arr(ndim, |dim| {
+        let inner_read_shape = S::Dimension::vec(ndim, |dim| {
             (inner_index[dim].end - inner_index[dim].start) as usize
         });
         let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array.read_data(&inner_index, &mut tmp_buf, context)?;
+        self.array
+            .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
@@ -186,15 +187,15 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
 
         // Destination strides: C-contiguous over the requested output sub-shape.
         let out_shape = S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(out_shape.as_slice(), itemsize as u64);
+        let dst_strides = default_strides(out_shape.as_vec_u64(), itemsize as u64);
 
         unsafe {
             nd_copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
                 out_shape,
-                &src_strides,
-                &dst_strides,
+                src_strides.as_ref(),
+                dst_strides.as_ref(),
                 itemsize,
             )
         };
