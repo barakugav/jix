@@ -611,7 +611,7 @@ where
     type ElementType = Ty<bool>;
     type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("ApproxEq", [&self.0.a, &self.0.b])
     }
@@ -642,7 +642,6 @@ where
     define_array_op2_method!(minimum: Minimum, crate::scalar::Minimum);
 
     /// Applies the [`ApproxEq`] operation, see the op struct docs for details.
-    #[inline]
     #[track_caller]
     pub fn approx_equal<S2>(
         self,

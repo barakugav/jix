@@ -54,7 +54,6 @@ where
     /// # Panics
     ///
     /// Panics if the total number of elements differs or the new ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
-    #[inline]
     #[track_caller]
     pub fn reshape<Sh>(self, shape: Sh) -> Array<Reshape<S, Sh::Dimension>>
     where
@@ -71,7 +70,6 @@ where
     /// # Panics
     ///
     /// Panics if the number of items != `self.ndim()` or any `step < 1`.
-    #[inline]
     #[track_caller]
     pub fn slice(self, slice: impl Into<SliceSpec>) -> Array<Slice<S>> {
         Slice::new_array(self, slice.into()).unwrap()
@@ -85,7 +83,6 @@ where
     /// # Panics
     ///
     /// Panics if `axes` is not a valid permutation of `0..ndim`.
-    #[inline]
     #[track_caller]
     pub fn permute_axes(self, axes: &[usize]) -> Array<PermuteAxes<S>> {
         PermuteAxes::new_array(self, axes).unwrap()
@@ -98,7 +95,6 @@ where
     ///
     /// Panics if `axis >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
     /// internal axis is required), or if `self.shape()[axis] * repeats` overflows `u64`.
-    #[inline]
     #[track_caller]
     pub fn repeat(self, repeats: u64, axis: usize) -> Array<Repeat<S>> {
         Repeat::new_array(self, repeats, axis).unwrap()
@@ -113,7 +109,6 @@ where
     /// # Panics
     ///
     /// Panics if any axis is out of bounds or duplicated.
-    #[inline]
     #[track_caller]
     pub fn flip(self, axis: impl AxesArg) -> Array<Flip<S>> {
         Flip::new_array(self, axis).unwrap()
@@ -129,7 +124,6 @@ where
     /// # Panics
     ///
     /// Panics if `axis >= self.ndim()`.
-    #[inline]
     #[track_caller]
     pub fn roll(self, shift: i64, axis: usize) -> Array<Roll<S>> {
         Roll::new_array(self, shift, axis).unwrap()
@@ -145,7 +139,6 @@ where
     ///
     /// Panics if `axis >= self.ndim()`, if `self.ndim() == NDIM_MAX` (one extra
     /// internal axis is required), or if `self.shape()[axis] * repeats` overflows `u64`.
-    #[inline]
     #[track_caller]
     pub fn tile(self, repeats: u64, axis: usize) -> Array<Tile<S>> {
         Tile::new_array(self, repeats, axis).unwrap()
@@ -157,7 +150,6 @@ where
     /// # Panics
     ///
     /// Panics if `shape.len() != self.ndim()` or any dimension with size > 1 is expanded.
-    #[inline]
     #[track_caller]
     pub fn broadcast(self, shape: &[u64]) -> Array<Broadcast<S>> {
         Broadcast::new_array(self, shape).unwrap()
@@ -171,7 +163,6 @@ where
     /// # Panics
     ///
     /// Panics if any axis is out of bounds, duplicated, or has length != 1.
-    #[inline]
     #[track_caller]
     pub fn remove_axis<Ax>(
         self,
@@ -192,7 +183,6 @@ where
     /// # Panics
     ///
     /// Panics if any value in `axis` is > `self.ndim()` or the resulting ndim exceeds [`NDIM_MAX`](crate::NDIM_MAX).
-    #[inline]
     #[track_caller]
     pub fn insert_axis<Ax>(
         self,

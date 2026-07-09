@@ -4,7 +4,6 @@ use crate::{DimDyn, Dimension};
 macro_rules! define_array_op1_method {
     ($method:ident : $Op:ident, $($trait:ident)::+) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-        #[inline]
         #[track_caller]
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
@@ -16,7 +15,6 @@ macro_rules! define_array_op1_method {
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-        #[inline]
         #[track_caller]
         pub fn $method(self) -> crate::Array<$Op<S>>
         where
@@ -30,7 +28,6 @@ macro_rules! define_array_op1_method {
 macro_rules! define_array_op2_method {
     ($method:ident : $Op:ident, $($trait:ident)::+) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-        #[inline]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
@@ -43,7 +40,6 @@ macro_rules! define_array_op2_method {
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_output_type = true) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-        #[inline]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where
@@ -56,7 +52,6 @@ macro_rules! define_array_op2_method {
     };
     ($method:ident : $Op:ident, $($trait:ident)::+, fixed_lhs_type = $lhs_type:ty) => {
         #[doc = concat!("Applies the [`", stringify!($Op), "`] operation, see the op struct docs for details.")]
-        #[inline]
         #[track_caller]
         pub fn $method<S2>(self, other: crate::Array<S2>) -> crate::Array<$Op<S, S2>>
         where

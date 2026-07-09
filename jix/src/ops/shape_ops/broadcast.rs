@@ -218,7 +218,6 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Broadcast", [&self.array])
     }

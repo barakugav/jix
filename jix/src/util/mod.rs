@@ -62,9 +62,11 @@ macro_rules! impl_idx_for_primitive {
             const ZERO: Self = 0;
             const ONE: Self = 1;
 
+            #[inline(always)]
             fn usize(self) -> usize {
                 self as usize
             }
+            #[inline(always)]
             fn from_usize(n: usize) -> Self {
                 n as $t
             }
@@ -302,7 +304,6 @@ impl<'a> AlternatingBuffers<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_data(self) -> &'a [u8] {
         match self {
             Self::Init {
@@ -327,7 +328,6 @@ impl<'a> AlternatingBuffers<'a> {
     ///   returns `(old_main_data, old_secondary_buf)`. The caller writes transformed output
     ///   into `dst` (which is the new `main_buf`), and [`data`](Self::data) will immediately
     ///   reflect the new contents.
-    #[inline]
     pub(crate) fn edit(&mut self) -> (&[u8], &mut [u8]) {
         match self {
             Self::Init {

@@ -484,7 +484,6 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 self.spec.as_ref()
             }
 
-            #[inline]
             fn info(&self) -> ArrayStorageInfo<'_> {
                 ArrayStorageInfo::new("FnStorage")
             }
@@ -1249,7 +1248,6 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// The storage is wrapped in an `Arc` and hidden behind [`ArrayStorageAny`], so the
     /// resulting array can be stored alongside arrays of other concrete storage types.
-    #[inline]
     pub fn into_any(self) -> ArrayAny
     where
         S: ArrayStorage + Send + Sync + 'static,

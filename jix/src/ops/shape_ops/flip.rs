@@ -193,7 +193,6 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     fn spec(&self) -> ArraySpec<'_> {
         self.array.spec().with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Flip", [&self.array])
     }

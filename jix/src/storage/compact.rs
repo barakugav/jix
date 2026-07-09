@@ -145,12 +145,11 @@ macro_rules! impl_array_storage {
                 self.0.blocks.dtype()
             }
 
-            #[inline]
+            #[inline(always)]
             fn spec(&self) -> ArraySpec<'_> {
                 self.0.spec.as_ref()
             }
 
-            #[inline]
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
                 crate::storage::ArrayStorageInfo::new("Compact")
             }

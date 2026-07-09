@@ -161,7 +161,6 @@ where
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("ReductionOp", [&self.array])
     }
@@ -678,7 +677,7 @@ macro_rules! define_reduction_op {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
             crate::storage::impl_array_storage_forward!(<S>);
-            #[inline]
+
             fn info(&self) -> ArrayStorageInfo<'_> {
                 ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
             }
@@ -731,7 +730,7 @@ macro_rules! define_reduction_op {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = D;
             crate::storage::impl_array_storage_forward!(<S, D>);
-            #[inline]
+
             fn info(&self) -> ArrayStorageInfo<'_> {
                 ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
             }
@@ -1905,7 +1904,7 @@ where
     type ElementType = Ty<S::Item>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, F>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Reduce", [&self.0.array])
     }
@@ -2077,7 +2076,7 @@ where
     type ElementType = Ty<B>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, B, F>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Fold", [&self.0.array])
     }

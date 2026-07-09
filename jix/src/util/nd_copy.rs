@@ -32,7 +32,7 @@ struct NdCopyArgs<'a, D: Dimension> {
     dtype: &'a Dtype,
 }
 impl<'a, D: Dimension> Clone for NdCopyArgs<'a, D> {
-    #[inline]
+    #[inline(always)]
     fn clone(&self) -> Self {
         Self {
             src: self.src,

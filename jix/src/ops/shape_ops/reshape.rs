@@ -8,7 +8,9 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{default_strides, DimArray, IterExt, NdCopier};
-use crate::{default_logical_strides, ArrayStorage, Dimension, IntoDimension};
+use crate::{
+    default_logical_strides, default_strides_from_iter, ArrayStorage, Dimension, IntoDimension,
+};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
 ///
@@ -281,8 +283,13 @@ where
             return Ok(());
         }
 
-        let orig_logical_strides = default_logical_strides(orig_shape.as_vec_u64());
-        let new_logical_strides = default_logical_strides(self.new_shape.as_vec_u64());
+        let orig_logical_strides = default_strides_from_iter::<S::Dimension, _>(
+            orig_ndim,
+            orig_shape.as_slice().iter().cloned(),
+            1,
+        );
+        let new_logical_strides =
+            default_strides_from_iter::<D, _>(ndim, new_shape.iter().cloned(), 1);
         let same_logical_stride = (0..new_shape.len())
             .scan(0, |orig_dim_idx, new_dim_idx| {
                 Some(loop {
@@ -413,7 +420,6 @@ where
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Reshape", [&self.array])
     }

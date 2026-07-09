@@ -119,7 +119,7 @@ where
     type Dimension = S::Dimension;
 
     impl_array_storage_forward!('b, T, <S>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Ref", [self.0])
     }
@@ -169,10 +169,11 @@ macro_rules! impl_array_storage_forward {
         fn dtype(&self) -> &crate::dtype::Dtype {
             self.0.dtype()
         }
-        #[inline]
+        #[inline(always)]
         fn spec(&self) -> crate::storage::ArraySpec<'_> {
             self.0.spec()
         }
+        #[inline]
         fn as_compact(
             &self,
         ) -> Option<crate::storage::CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
@@ -205,7 +206,7 @@ pub trait ReadData<T> {
     /// Read all items into the given buffer.
     ///
     /// The given buffer must have the exact size of `self.len() * size_of::<T>()` and be properly aligned for `T`.
-    #[inline]
+    #[inline(never)]
     fn to_buf(&mut self, buf: &mut [u8]) -> Result<()>
     where
         T: Dtyped,

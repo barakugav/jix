@@ -21,7 +21,7 @@ where
 
 impl<D: Dimension, T, S: Copy> NdIterExtStridesPtr<D, T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
-    #[inline(always)]
+    #[inline]
     pub fn new<V>(strides: V, initial_ptr: *const T) -> Self
     where
         D: Dimension<Vec<S> = V>,
@@ -81,7 +81,7 @@ where
 
 impl<D: Dimension, T, S: Copy> NdIterExtStridesPtrMut<D, T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
-    #[inline(always)]
+    #[inline]
     pub fn new<V>(strides: V, initial_ptr: *mut T) -> Self
     where
         D: Dimension<Vec<S> = V>,
@@ -133,7 +133,7 @@ pub(crate) struct NdIterExtStridesOffset<D: Dimension> {
     offset: u64,
 }
 impl<D: Dimension> NdIterExtStridesOffset<D> {
-    #[inline(always)]
+    #[inline]
     pub fn new<V>(strides: V, initial_offset: u64) -> Self
     where
         D: Dimension<Vec<u64> = V>,
@@ -168,7 +168,7 @@ impl<D: Dimension> NdIterExtension for NdIterExtStridesOffset<D> {
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn nd_iter_ext_logical_global_index<D: Dimension>(
     shape: &[u64],
     begin: &[u64],

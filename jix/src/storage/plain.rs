@@ -477,7 +477,6 @@ where
         self.spec.as_ref()
     }
 
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new("Plain")
     }

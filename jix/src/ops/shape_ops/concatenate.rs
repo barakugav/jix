@@ -286,7 +286,6 @@ where
     fn spec(&self) -> ArraySpec<'_> {
         self.arrays.spec(0).with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         let deps = (0..self.arrays.narrays())
             .map(|i| self.arrays.as_array_storage(i))

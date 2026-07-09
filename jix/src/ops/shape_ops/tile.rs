@@ -346,7 +346,6 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Tile", [&self.array])
     }

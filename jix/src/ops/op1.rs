@@ -84,7 +84,6 @@ where
         self.array.spec().with_cleared_flags()
     }
 
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Op1", [&self.array])
     }
@@ -159,7 +158,7 @@ macro_rules! define_op1 {
             type ElementType = crate::Ty<<S::Item as $($trait)::+>::Output>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!(<S>);
-            #[inline]
+
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
                 crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
             }
@@ -258,7 +257,7 @@ macro_rules! define_op1 {
             type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S::Dimension;
             crate::storage::impl_array_storage_forward!(<S>);
-            #[inline]
+
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
                 crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
             }
@@ -944,7 +943,7 @@ where
     type ElementType = Ty<<S::Item as core::ops::Mul>::Output>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!(<S>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Square", [&self.0.array])
     }

@@ -206,7 +206,6 @@ where
     fn spec(&self) -> ArraySpec<'_> {
         self.x.spec().with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Where", [&self.condition, &self.x, &self.y])
     }

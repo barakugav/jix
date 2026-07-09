@@ -128,7 +128,6 @@ where
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
         self.inner.spec()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("IntoDim", [&self.inner])
     }
