@@ -4,8 +4,8 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{default_strides, nd_copy};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::util::{default_strides, NdCopier};
+use crate::{default_strides_cast, Array, ArrayStorage, Dimension};
 
 /// Rolls elements along an axis, wrapping around at the boundary, returned by
 /// [`Array::roll`](crate::Array::roll).
@@ -114,28 +114,30 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-        let dst_strides = default_strides(&out_shape, itemsize as u64);
+        let dst_strides = default_strides_cast(&out_shape, itemsize);
+        let copier = NdCopier::<S::Dimension>::new(dtype);
 
         let mut read_region = |inner_index: &[Range<u64>],
                                region_shape: &S::Dimension,
                                dst_axis_k_offset: u64|
          -> Result<()> {
-            let region_size = region_shape.as_slice().iter().product::<u64>() as usize * itemsize;
+            let region_shape = S::Dimension::vec(ndim, |d| region_shape[d] as usize);
+            let region_size = region_shape.as_ref().iter().product::<usize>() * itemsize;
             let mut tmp = context.tmp_buf(region_size, dtype.alignment());
             let tmp = tmp.as_mut_slice();
             self.array
                 .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
 
-            let src_strides = default_strides(region_shape.as_vec_u64(), itemsize as u64);
-            let dst_byte_offset = (dst_axis_k_offset * dst_strides[k]) as usize;
+            let src_strides = default_strides(&region_shape, itemsize);
+            let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
             unsafe {
-                nd_copy(
+                copier.copy(
                     tmp.as_ptr(),
                     buf.as_mut_ptr().add(dst_byte_offset),
-                    region_shape.clone(),
-                    src_strides.as_ref(),
-                    dst_strides.as_ref(),
-                    itemsize,
+                    &region_shape,
+                    &src_strides,
+                    &dst_strides,
+                    dtype,
                 )
             };
             Ok(())

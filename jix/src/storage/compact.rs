@@ -21,8 +21,8 @@ use crate::storage::{ArraySpec, ElementType, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, default_strides, dim_arr, nd_copy, DimArray};
-use crate::{ArrayParams, ArrayStorage, DimVec, Dimension};
+use crate::util::{calc_block_end, default_strides, dim_arr, DimArray, NdCopier};
+use crate::{default_strides_cast, ArrayParams, ArrayStorage, DimVec, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -312,13 +312,13 @@ where
         let ndim = shape.len();
         let block_shape = self.block_shape();
         assert_eq!(ndim, block_shape.len());
-        let block_shape = D::vec(ndim, |dim| block_shape[dim]);
+        let block_shape_u64 = D::vec(ndim, |dim| block_shape[dim] as u64);
 
         let mut b_range = DimArray::default();
         let mut is_single_block = true; // every dimension touches exactly one block.
         let mut is_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
         for dim in 0..ndim {
-            let b = block_shape[dim] as u64;
+            let b = block_shape_u64[dim];
             let (i_start, i_end) = (index[dim].start, index[dim].end);
             if i_start == i_end {
                 return Ok(()); // empty read
@@ -347,15 +347,12 @@ where
         let itemsize = dtype.itemsize() as usize;
         let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let out_strides = default_strides(&out_shape, itemsize);
-        let block_strides = default_strides(&block_shape, itemsize as BlockSize);
+        let block_strides = default_strides_cast(&block_shape_u64, itemsize);
+        let copier = NdCopier::<D>::new(dtype);
 
         // Pre-allocate a buffer large enough for a full block.
-        let full_buf_len = block_shape
-            .as_ref()
-            .iter()
-            .map(|s| *s as usize)
-            .product::<usize>()
-            * itemsize;
+        let full_buf_len =
+            block_shape_u64.as_ref().iter().copied().product::<u64>() as usize * itemsize;
         let mut tmp_buf = context.tmp_buf(full_buf_len, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
 
@@ -366,27 +363,25 @@ where
             // Byte offset into `tmp_buf` of the requested region's first element.
             let active_start = (0..ndim)
                 .map(|dim| {
-                    let inner_offset = index[dim].start % block_shape[dim] as u64;
-                    inner_offset as usize * block_strides[dim] as usize
+                    let inner_offset = index[dim].start % block_shape_u64[dim];
+                    inner_offset as usize * block_strides[dim]
                 })
                 .sum::<usize>();
             let src_ptr = unsafe { tmp_buf.as_ptr().add(active_start) };
 
-            let copy_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
             unsafe {
-                nd_copy(
+                copier.copy(
                     src_ptr,
                     buf.as_mut_ptr(),
-                    copy_shape,
-                    block_strides.as_ref(),
-                    out_strides.as_ref(),
-                    itemsize,
+                    &out_shape,
+                    &block_strides,
+                    &out_strides,
+                    dtype,
                 )
             };
             return Ok(());
         }
 
-        let block_shape_u64 = D::vec(ndim, |dim| block_shape[dim] as u64);
         // Block-space begin/end for NdIter.
         let block_begin = D::vec(ndim, |dim| index[dim].start / block_shape_u64[dim]);
         let block_end = D::vec(ndim, |dim| {
@@ -412,7 +407,7 @@ where
 
             // Navigate to the active region within the block buffer (block-local strides).
             let active_start = (0..ndim)
-                .map(|dim| block_inner_offset[dim] as usize * block_strides[dim] as usize)
+                .map(|dim| block_inner_offset[dim] as usize * block_strides[dim])
                 .sum::<usize>();
             let src_ptr = unsafe { tmp_buf.as_ptr().add(active_start) };
 
@@ -427,13 +422,13 @@ where
             let dst_ptr = unsafe { buf.as_mut_ptr().add(out_start) };
 
             unsafe {
-                nd_copy(
+                copier.copy(
                     src_ptr,
                     dst_ptr,
-                    D::from_fn(ndim, |dim| block_size[dim]),
-                    block_strides.as_ref(),
-                    out_strides.as_ref(),
-                    itemsize,
+                    &D::vec(ndim, |dim| block_size[dim] as usize),
+                    &block_strides,
+                    &out_strides,
+                    dtype,
                 )
             };
         }

@@ -7,7 +7,7 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn,
 };
-use crate::util::{default_strides, nd_copy, DimArray, SendSyncPtr};
+use crate::util::{default_strides, DimArray, NdCopier, SendSyncPtr};
 use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
@@ -56,17 +56,17 @@ use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 /// assert_eq!(result, array![[11.0f32, 22.0], [33.0, 44.0]]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Plain<A, ET, D> {
+pub struct Plain<A, ET, D: Dimension> {
     #[allow(unused)]
     allocation: A,
 
     data: SendSyncPtr<u8>,
     shape: D,
-    strides: DimArray<usize>, // in bytes
+    strides: D::Vec<usize>, // in bytes
     element_type: ET,
     spec: ArraySpecOwned,
 }
-impl<A, D> Plain<A, TypeDyn, D> {
+impl<A, D: Dimension> Plain<A, TypeDyn, D> {
     /// Construct a `Plain` storage from a raw pointer, shape, and byte strides.
     ///
     /// `allocation` is any value that owns (or keeps alive) the memory pointed to
@@ -126,12 +126,15 @@ impl<A, D> Plain<A, TypeDyn, D> {
             "Strides length {} does not match number of dimensions {ndim}",
             strides.len()
         );
-        let strides = DimArray::from_slice(strides).unwrap();
+        let strides = D::vec(ndim, |d| strides[d]);
 
         let alignment = dtype.alignment().as_usize();
         ensure!(
             (data as usize).is_multiple_of(alignment)
-                && strides.iter().all(|&s| s.is_multiple_of(alignment)),
+                && strides
+                    .as_ref()
+                    .iter()
+                    .all(|&s| s.is_multiple_of(alignment)),
             InvalidArgument,
             "Data pointer or strides are not aligned to required alignment {alignment}"
         );
@@ -161,7 +164,7 @@ impl<A, D> Plain<A, TypeDyn, D> {
     }
 }
 
-impl<T, D> Array<Plain<Vec<T>, Ty<T>, D>> {
+impl<T, D: Dimension> Array<Plain<Vec<T>, Ty<T>, D>> {
     /// Create a [`Plain`] array that takes ownership of an `ndarray` array.
     ///
     /// The ndarray's allocation is moved into the returned `Array`; no element
@@ -233,7 +236,7 @@ impl<T, D> Array<Plain<Vec<T>, Ty<T>, D>> {
     }
 }
 
-impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
+impl<'a, T, D: Dimension> Array<Plain<&'a (), Ty<T>, D>> {
     /// Internal implementation for creating a `Plain` array that borrows from an ndarray view.
     ///
     /// Note this function does have any lifetime bounds on the input array.
@@ -363,7 +366,7 @@ impl<'a, T, D> Array<Plain<&'a (), Ty<T>, D>> {
         unsafe { Self::plain_ndarray_ref_impl(&arr, params) }
     }
 }
-impl<ET, D> Array<Plain<&(), ET, D>> {
+impl<ET, D: Dimension> Array<Plain<&(), ET, D>> {
     /// Create a [`Plain`] array from a raw pointer, shape, and byte strides, borrowing from an external
     /// allocation.
     ///
@@ -437,8 +440,9 @@ where
         check_get_buffer_size(index, dtype, buf)?;
 
         let ndim = self.shape.ndim();
-        let out_shape = D::from_fn(ndim, |dim| index[dim].end - index[dim].start);
-        let out_strides = default_strides(out_shape.as_vec_u64(), itemsize as u64);
+        let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_strides = default_strides(&out_shape, itemsize);
+        let src_strides = D::vec(ndim, |dim| self.strides[dim]);
 
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])
@@ -446,14 +450,15 @@ where
         let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
         let dst_ptr = buf.as_mut_ptr();
 
+        let copier = NdCopier::<D>::new(dtype);
         unsafe {
-            nd_copy(
+            copier.copy(
                 src_ptr,
                 dst_ptr,
-                out_shape,
-                &self.strides,
-                out_strides.as_ref(),
-                itemsize,
+                &out_shape,
+                &src_strides,
+                &out_strides,
+                dtype,
             )
         };
         Ok(())
@@ -482,11 +487,12 @@ where
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>> {
         check_ndim::<NewD>(self.shape().len())?;
         let shape = NewD::from_slice(self.shape());
+        let strides = NewD::vec(shape.ndim(), |d| self.strides[d]);
         Ok(Plain {
             allocation: self.allocation,
             data: self.data,
             shape,
-            strides: self.strides,
+            strides,
             element_type: self.element_type,
             spec: self.spec,
         })

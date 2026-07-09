@@ -6,7 +6,7 @@ use crate::error::{
     bail, check_get_buffer_size, check_get_range, check_shape_overflow, ensure, Result,
 };
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{default_strides, nd_copy, ArraySequence, DimArray};
+use crate::util::{default_strides, ArraySequence, DimArray, NdCopier};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
@@ -204,6 +204,7 @@ where
             self.borders.partition_point(|&b| b <= req_start)
         };
 
+        let copier = NdCopier::<Self::Dimension>::new(dtype);
         for arr in first_arr..self.borders.len() {
             let arr_start = if arr == 0 { 0 } else { self.borders[arr - 1] };
             let arr_end = self.borders[arr];
@@ -225,10 +226,10 @@ where
                     index[dim].clone()
                 }
             });
-            let sub_shape = Self::Dimension::from_fn(index.len(), |dim| {
-                sub_index[dim].end - sub_index[dim].start
+            let sub_shape = Self::Dimension::vec(index.len(), |dim| {
+                (sub_index[dim].end - sub_index[dim].start) as usize
             });
-            let sub_size_bytes = sub_shape.as_slice().iter().product::<u64>() as usize * itemsize;
+            let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
             let buf_offset = buf_concat_offset * concat_stride;
 
             let read_buf = if in_place {
@@ -248,23 +249,23 @@ where
                 // src: C-strides of sub_shape.
                 // dst: output_strides for dims before concat_axis (wider due to full output width),
                 //      sub_strides for dims at/after (sizes match the output there).
-                let sub_strides = default_strides(sub_shape.as_vec_u64(), itemsize as u64);
+                let sub_strides = default_strides(&sub_shape, itemsize);
                 let dst_strides = Self::Dimension::vec(index.len(), |dim| {
                     if dim < self.concat_axis {
-                        output_strides[dim] as u64
+                        output_strides[dim]
                     } else {
                         sub_strides[dim]
                     }
                 });
 
                 unsafe {
-                    nd_copy(
+                    copier.copy(
                         read_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
-                        sub_shape,
-                        sub_strides.as_ref(),
-                        dst_strides.as_ref(),
-                        itemsize,
+                        &sub_shape,
+                        &sub_strides,
+                        &dst_strides,
+                        dtype,
                     )
                 };
             }

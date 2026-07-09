@@ -7,7 +7,7 @@ use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, R
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, nd_copy, DimArray, IterExt};
+use crate::util::{default_strides, DimArray, IterExt, NdCopier};
 use crate::{default_logical_strides, ArrayStorage, Dimension, IntoDimension};
 
 /// Reinterprets an array with a different shape, returned by [`Array::reshape`].
@@ -332,9 +332,9 @@ where
                 1
             }
         });
-        let new_read_shape = D::from_fn(ndim, |dim| {
+        let new_read_shape = D::vec(ndim, |dim| {
             if same_logical_stride[dim].is_some() {
-                index[dim].end - index[dim].start
+                (index[dim].end - index[dim].start) as usize
             } else {
                 1
             }
@@ -344,9 +344,11 @@ where
             orig_read_shape.as_ref().iter().product::<u64>() as usize * dtype.itemsize() as usize,
             dtype.alignment(),
         );
-        let tmp_buf_strides = default_strides(new_read_shape.as_vec_u64(), dtype.itemsize() as _);
-        let out_buf_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(&out_buf_shape, dtype.itemsize() as _);
+        let itemsize = dtype.itemsize() as usize;
+        let tmp_buf_strides = default_strides(&new_read_shape, itemsize);
+        let out_buf_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let dst_strides = default_strides(&out_buf_shape, itemsize);
+        let copier = NdCopier::<D>::new(dtype);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
         let iteration_shape = D::vec(ndim, |dim| {
@@ -378,17 +380,17 @@ where
 
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&dim| same_logical_stride[dim].is_none())
-                .map(|dim| idx[dim] as usize * dst_strides[dim] as usize)
+                .map(|dim| idx[dim] as usize * dst_strides[dim])
                 .sum();
             let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
             unsafe {
-                nd_copy(
+                copier.copy(
                     tmp_buf.as_ptr(),
                     dst_ptr,
-                    new_read_shape.clone(),
-                    tmp_buf_strides.as_ref(),
-                    dst_strides.as_ref(),
-                    dtype.itemsize() as _,
+                    &new_read_shape,
+                    &tmp_buf_strides,
+                    &dst_strides,
+                    dtype,
                 )
             };
         }

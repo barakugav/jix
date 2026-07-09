@@ -278,7 +278,7 @@ impl ndarray::IntoDimension for DimDyn {
         let dim = self.as_slice();
         let mut nd_dim = Self::Dim::zeros(dim.len());
         for (i, &size) in dim.iter().enumerate() {
-            nd_dim[i] = size as usize;
+            nd_dim[i] = size.try_into().unwrap();
         }
         nd_dim
     }
@@ -395,7 +395,7 @@ macro_rules! impl_dim {
                 let dim = self.as_slice();
                 let mut nd_dim = <Self::Dim as ndarray::Dimension>::zeros(dim.len());
                 for (i, &size) in dim.iter().enumerate() {
-                    nd_dim[i] = size as usize;
+                    nd_dim[i] = size.try_into().unwrap();
                 }
                 nd_dim
             }

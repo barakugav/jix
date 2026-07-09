@@ -8,8 +8,8 @@ use crate::error::{
 };
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
-use crate::util::{calc_block_end, nd_copy};
-use crate::{default_strides, Array, ArrayStorage, Dimension, NDIM_MAX};
+use crate::util::calc_block_end;
+use crate::{default_strides, Array, ArrayStorage, Dimension, NdCopier, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
@@ -161,9 +161,10 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         check_get_buffer_size(index, dtype, buf)?;
 
         // Output shape over the requested sub-range, all `ndim` axes.
-        let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-        let dst_strides = default_strides(&out_shape, itemsize as u64);
+        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+        let dst_strides = default_strides(&out_shape, itemsize);
         let inner_strides_bytes = default_strides(&inner_shape, itemsize);
+        let copier = NdCopier::<<S::Dimension as Dimension>::Larger>::new(dtype);
 
         // Issue one nd_copy for a (g_range, p_range) region.
         //   `g_range` indexes groups relative to the inner read (0..g_count).
@@ -177,11 +178,11 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
             // (ndim + 1)-D shape: original axes, but axis k is split into
             // (g_len, p_len) at positions k and k+1.
-            let mut copy_shape = <S::Dimension as Dimension>::Larger::from_fn(ndim + 1, |_| 0);
-            copy_shape.as_mut_slice()[..k].copy_from_slice(&out_shape[..k]);
-            copy_shape[k] = g_len;
-            copy_shape[k + 1] = p_len;
-            copy_shape.as_mut_slice()[k + 2..].copy_from_slice(&out_shape[k + 1..]);
+            let mut copy_shape = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+            copy_shape[..k].copy_from_slice(&out_shape[..k]);
+            copy_shape[k] = g_len as usize;
+            copy_shape[k + 1] = p_len as usize;
+            copy_shape[k + 2..].copy_from_slice(&out_shape[k + 1..]);
 
             // src strides: itemsize-strides over inner_shape, with the within-group
             // (p) axis stride = 0 (the repeat trick).
@@ -194,7 +195,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             // (n * dst_strides[k], dst_strides[k]).
             let mut dst_strides_split = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
             dst_strides_split[..k].copy_from_slice(&dst_strides[..k]);
-            dst_strides_split[k] = dst_strides[k] * n;
+            dst_strides_split[k] = dst_strides[k] * n as usize;
             dst_strides_split[k + 1..].copy_from_slice(&dst_strides[k..]);
 
             // src ptr: tmp_buf offset to (g_range.start) along the inner k axis.
@@ -207,17 +208,17 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             let first_out_k = g_start * n + g_range.start * n + p_range.start;
             debug_assert!(first_out_k >= s);
             let dst_k_offset_units = first_out_k - s;
-            let dst_byte_offset = (dst_k_offset_units as usize) * (dst_strides[k] as usize);
+            let dst_byte_offset = (dst_k_offset_units as usize) * dst_strides[k];
             let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
 
             unsafe {
-                nd_copy(
+                copier.copy(
                     src_ptr,
                     dst_ptr,
-                    copy_shape,
-                    src_strides.as_ref(),
-                    dst_strides_split.as_ref(),
-                    itemsize,
+                    &copy_shape,
+                    &src_strides,
+                    &dst_strides_split,
+                    dtype,
                 )
             };
         };

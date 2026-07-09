@@ -16,12 +16,12 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
-    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_strides, nd_copy,
-    scale_read_shape, AlignedBytes, IterExt,
+    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_strides, scale_read_shape,
+    AlignedBytes, IterExt, NdCopier,
 };
 use crate::{
-    default_logical_strides, ArrayAny, ArrayParams, ArrayStorage, DimDyn, DimVec, Dimension,
-    ElementType, IntoDimension, Ty, TypeDyn,
+    default_logical_strides, default_strides_cast, ArrayAny, ArrayParams, ArrayStorage, DimDyn,
+    DimVec, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -631,7 +631,7 @@ impl<S: ArrayStorage> Array<S> {
         S: ArrayStorageTyped,
     {
         let shape = self.shape();
-        let full_range = S::Dimension::vec(shape.len(), |dim| 0u64..shape[dim]);
+        let full_range = S::Dimension::vec(shape.len(), |dim| 0..shape[dim]);
         self.to_ndarray_sub(full_range.as_ref(), &self.read_ctx())
     }
 
@@ -746,15 +746,9 @@ impl<S: ArrayStorage> Array<S> {
     {
         check_get_range(self.shape(), index)?;
         let ndim = self.ndim();
-        let out_shape = S::Dimension::vec(ndim, |dim| {
-            let len = index[dim].end - index[dim].start;
-            let len: usize = len.try_into().unwrap();
-            len
-        });
-        let array = ndarray::ArrayD::uninit(&out_shape[..]);
-        let mut array = array
-            .into_dimensionality::<<S::Dimension as ndarray::IntoDimension>::Dim>()
-            .unwrap();
+        let out_shape = S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start);
+        let out_shape = <S::Dimension as ndarray::IntoDimension>::into_dimension(out_shape);
+        let mut array = ndarray::Array::uninit(out_shape);
         self.to_ndarray_buf(
             index,
             unsafe { cast_slice_mut::<MaybeUninit<S::Item>, u8>(array.as_slice_mut().unwrap()) },
@@ -854,7 +848,8 @@ impl<S: ArrayStorage> Array<S> {
         );
 
         let itemsize = dtype.itemsize() as usize;
-        let out_strides = default_strides(&out_shape, itemsize as u64);
+        let out_strides = default_strides_cast(&out_shape, itemsize);
+        let copier = NdCopier::<S::Dimension>::new(dtype);
 
         let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
         // If the read_shape spans the full output width in every dimension (other then the first)
@@ -870,9 +865,7 @@ impl<S: ArrayStorage> Array<S> {
             let read_nitems = block_size.as_ref().iter().product::<u64>() as usize;
 
             let out_offset = (0..ndim)
-                .map(|dim| {
-                    (inner_index[dim].start - index[dim].start) as usize * out_strides[dim] as usize
-                })
+                .map(|dim| (inner_index[dim].start - index[dim].start) as usize * out_strides[dim])
                 .sum::<usize>();
 
             let (tmp_buf, buf_ptr) = if read_to_out_buf {
@@ -889,14 +882,16 @@ impl<S: ArrayStorage> Array<S> {
 
             if !read_to_out_buf {
                 let dst_ptr = unsafe { buf_ptr.unwrap().add(out_offset) };
+                let copy_shape = S::Dimension::vec(ndim, |dim| block_size[dim] as usize);
+                let copy_strides = default_strides(&copy_shape, itemsize);
                 unsafe {
-                    nd_copy(
+                    copier.copy(
                         tmp_buf.as_ptr(),
                         dst_ptr,
-                        block_size.as_ref(),
-                        default_strides(&block_size, itemsize as _).as_ref(),
-                        out_strides.as_ref(),
-                        itemsize,
+                        &copy_shape,
+                        &copy_strides,
+                        &out_strides,
+                        dtype,
                     )
                 };
             }
@@ -1061,8 +1056,9 @@ impl<S: ArrayStorage> Array<S> {
         let itemsize = encoder.dtype.itemsize() as usize;
         let alignment = encoder.dtype.alignment().as_usize();
         let block_size_bytes = block_size as usize * itemsize;
-        let block_strides = default_strides(&block_shape, itemsize as _);
+        let block_strides = default_strides_cast(&block_shape, itemsize);
         let block_compressed_bound = encoder.encode_bound(block_size_bytes);
+        let copier = NdCopier::<S::Dimension>::new(dtype);
 
         let spec = self.storage.spec();
         let current_block_shape = spec.block_shape();
@@ -1119,10 +1115,7 @@ impl<S: ArrayStorage> Array<S> {
                 &mut OutBuf::new(chunk_buf.as_mut_slice()),
                 context,
             )?;
-            let chunk_strides = default_strides(
-                &S::Dimension::vec(ndim, |dim| chunk_size[dim] as usize),
-                itemsize,
-            );
+            let chunk_strides = default_strides_cast(&chunk_size, itemsize);
             let chunk_offset_base = (0..ndim)
                 .map(|dim| chunk_idx[dim] * chunk_shape_in_blocks[dim] * block_grid_lstrides[dim])
                 .sum::<u64>();
@@ -1166,13 +1159,13 @@ impl<S: ArrayStorage> Array<S> {
                 // TODO: this nd_copy may be redundant if the chunk and block strides are identical.
                 // In that case, we can compress directly from the chunk buffer
                 unsafe {
-                    nd_copy(
+                    copier.copy(
                         chunk_buf.as_ptr().add(src_byte_offset),
                         tmp_block_plain.as_mut_ptr(),
-                        block_active_size.as_ref(),
-                        chunk_strides.as_ref(),
-                        block_strides.as_ref(),
-                        itemsize,
+                        &S::Dimension::vec(ndim, |dim| block_active_size[dim] as usize),
+                        &chunk_strides,
+                        &block_strides,
+                        dtype,
                     )
                 };
                 let plain_data = tmp_block_plain.as_slice();

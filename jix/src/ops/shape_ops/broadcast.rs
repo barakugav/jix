@@ -7,7 +7,7 @@ use crate::error::{
 };
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::util::{default_strides, dim_arr, DimArray, NdCopier};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
@@ -186,17 +186,18 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         }
 
         // Destination strides: C-contiguous over the requested output sub-shape.
-        let out_shape = S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(out_shape.as_vec_u64(), itemsize as u64);
+        let out_shape = S::Dimension::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let dst_strides = default_strides(&out_shape, itemsize);
 
+        let copier = NdCopier::<S::Dimension>::new(dtype);
         unsafe {
-            nd_copy(
+            copier.copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                out_shape,
-                src_strides.as_ref(),
-                dst_strides.as_ref(),
-                itemsize,
+                &out_shape,
+                &src_strides,
+                &dst_strides,
+                dtype,
             )
         };
         Ok(())

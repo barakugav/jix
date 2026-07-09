@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{default_strides, dim_arr, nd_copy, DimArray};
+use crate::util::{default_strides, dim_arr, DimArray, NdCopier};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
@@ -151,17 +151,18 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let src_strides_out = S::Dimension::vec(ndim, |i| src_strides_in[self.axes[i] as usize]);
 
         // The output buffer is C-contiguous over sub_shape_out (output dim order).
-        let sub_shape_out = S::Dimension::from_fn(ndim, |i| index[i].end - index[i].start);
-        let dst_strides = default_strides(sub_shape_out.as_vec_u64(), itemsize as u64);
+        let sub_shape_out = S::Dimension::vec(ndim, |i| (index[i].end - index[i].start) as usize);
+        let dst_strides = default_strides(&sub_shape_out, itemsize);
 
+        let copier = NdCopier::<S::Dimension>::new(dtype);
         unsafe {
-            nd_copy(
+            copier.copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                sub_shape_out,
-                src_strides_out.as_ref(),
-                dst_strides.as_ref(),
-                itemsize,
+                &sub_shape_out,
+                &src_strides_out,
+                &dst_strides,
+                dtype,
             )
         };
         Ok(())
