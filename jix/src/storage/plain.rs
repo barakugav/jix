@@ -450,14 +450,14 @@ where
         let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
         let dst_ptr = buf.as_mut_ptr();
 
-        let copier = NdCopier::<D>::new(dtype);
+        let copier = NdCopier::new(dtype);
         unsafe {
             copier.copy(
                 src_ptr,
                 dst_ptr,
-                &out_shape,
-                &src_strides,
-                &out_strides,
+                out_shape.as_ref(),
+                src_strides.as_ref(),
+                out_strides.as_ref(),
                 dtype,
             )
         };

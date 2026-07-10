@@ -848,7 +848,7 @@ impl<S: ArrayStorage> Array<S> {
 
         let itemsize = dtype.itemsize() as usize;
         let out_strides = default_strides_cast(&out_shape, itemsize);
-        let copier = NdCopier::<S::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
         // If the read_shape spans the full output width in every dimension (other then the first)
@@ -887,9 +887,9 @@ impl<S: ArrayStorage> Array<S> {
                     copier.copy(
                         tmp_buf.as_ptr(),
                         dst_ptr,
-                        &copy_shape,
-                        &copy_strides,
-                        &out_strides,
+                        copy_shape.as_ref(),
+                        copy_strides.as_ref(),
+                        out_strides.as_ref(),
                         dtype,
                     )
                 };
@@ -1057,7 +1057,7 @@ impl<S: ArrayStorage> Array<S> {
         let block_size_bytes = block_size as usize * itemsize;
         let block_strides = default_strides_cast(&block_shape, itemsize);
         let block_compressed_bound = encoder.encode_bound(block_size_bytes);
-        let copier = NdCopier::<S::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         let spec = self.storage.spec();
         let current_block_shape = spec.block_shape();
@@ -1161,9 +1161,9 @@ impl<S: ArrayStorage> Array<S> {
                     copier.copy(
                         chunk_buf.as_ptr().add(src_byte_offset),
                         tmp_block_plain.as_mut_ptr(),
-                        &S::Dimension::vec(ndim, |dim| block_active_size[dim] as usize),
-                        &chunk_strides,
-                        &block_strides,
+                        S::Dimension::vec(ndim, |dim| block_active_size[dim] as usize).as_ref(),
+                        chunk_strides.as_ref(),
+                        block_strides.as_ref(),
                         dtype,
                     )
                 };

@@ -164,7 +164,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
         let dst_strides = default_strides(&out_shape, itemsize);
         let inner_strides_bytes = default_strides(&inner_shape, itemsize);
-        let copier = NdCopier::<<S::Dimension as Dimension>::Larger>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         // Issue one nd_copy for a (g_range, p_range) region.
         //   `g_range` indexes groups relative to the inner read (0..g_count).
@@ -215,9 +215,9 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 copier.copy(
                     src_ptr,
                     dst_ptr,
-                    &copy_shape,
-                    &src_strides,
-                    &dst_strides_split,
+                    copy_shape.as_ref(),
+                    src_strides.as_ref(),
+                    dst_strides_split.as_ref(),
                     dtype,
                 )
             };

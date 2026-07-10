@@ -355,7 +355,7 @@ where
         let tmp_buf_strides = default_strides(&new_read_shape, itemsize);
         let out_buf_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let dst_strides = default_strides(&out_buf_shape, itemsize);
-        let copier = NdCopier::<D>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
         let iteration_shape = D::vec(ndim, |dim| {
@@ -394,9 +394,9 @@ where
                 copier.copy(
                     tmp_buf.as_ptr(),
                     dst_ptr,
-                    &new_read_shape,
-                    &tmp_buf_strides,
-                    &dst_strides,
+                    new_read_shape.as_ref(),
+                    tmp_buf_strides.as_ref(),
+                    dst_strides.as_ref(),
                     dtype,
                 )
             };

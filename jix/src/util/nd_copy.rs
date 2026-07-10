@@ -12,27 +12,26 @@ use crate::{Dim, Dimension, SliceExt};
 /// field-by-field copy for structs that decompose into at most four scalar fields, or a generic
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
 /// walking `shape` with an [`NdIter`] and copying the appropriate number of bytes at each element.
-pub(crate) struct NdCopier<'a, D: Dimension>(NdCopierInner<'a, D>);
-// TODO: remove the D generic
-enum NdCopierInner<'a, D: Dimension> {
-    Simple(NdCopyFn<D>),
-    Struct(NdCopierStruct<'a, D>),
+pub(crate) struct NdCopier<'a>(NdCopierInner<'a>);
+enum NdCopierInner<'a> {
+    Simple(NdCopyFn),
+    Struct(NdCopierStruct<'a>),
 }
-type NdCopyFn<D> = fn(NdCopyArgs<D>);
-struct NdCopierStruct<'a, D: Dimension> {
-    scalar_fns: ArrayVec<NdCopyFn<D>, 4>,
+type NdCopyFn = fn(NdCopyArgs);
+struct NdCopierStruct<'a> {
+    scalar_fns: ArrayVec<NdCopyFn, 4>,
     offsets: ArrayVec<Itemsize, 4>,
     dtypes: ArrayVec<&'a Dtype, 4>,
 }
-struct NdCopyArgs<'a, D: Dimension> {
+struct NdCopyArgs<'a> {
     src: *const u8,
     dst: *mut u8,
-    shape: &'a D::Vec<usize>,
-    src_strides: &'a D::Vec<usize>,
-    dst_strides: &'a D::Vec<usize>,
+    shape: &'a [usize],
+    src_strides: &'a [usize],
+    dst_strides: &'a [usize],
     dtype: &'a Dtype,
 }
-impl<'a, D: Dimension> Clone for NdCopyArgs<'a, D> {
+impl Clone for NdCopyArgs<'_> {
     #[inline(always)]
     fn clone(&self) -> Self {
         Self {
@@ -46,7 +45,7 @@ impl<'a, D: Dimension> Clone for NdCopyArgs<'a, D> {
     }
 }
 
-impl<'a, D: Dimension> NdCopier<'a, D> {
+impl<'a> NdCopier<'a> {
     #[inline(always)]
     pub(crate) fn new(dtype: &'a Dtype) -> Self {
         match Self::create_scalar_fn(dtype) {
@@ -57,11 +56,11 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
 
     fn new_slow(dtype: &'a Dtype) -> Self {
         #[inline]
-        fn collect_struct_fields<'a, D: Dimension>(
-            mut copier: NdCopierStruct<'a, D>,
+        fn collect_struct_fields<'a>(
+            mut copier: NdCopierStruct<'a>,
             offset: Itemsize,
             dtype: &'a Dtype,
-        ) -> Option<NdCopierStruct<'a, D>> {
+        ) -> Option<NdCopierStruct<'a>> {
             if dtype.try_to_scalar().is_some() {
                 if copier.scalar_fns.is_full() {
                     return None;
@@ -75,11 +74,11 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
                 None
             } else if let Some(fields) = dtype.fields() {
                 #[inline(never)] // make collect_struct_fields inlinable
-                fn collect_struct_fields_inner<'a, D: Dimension>(
-                    copier: NdCopierStruct<'a, D>,
+                fn collect_struct_fields_inner<'a>(
+                    copier: NdCopierStruct<'a>,
                     offset: Itemsize,
                     dtype: &'a Dtype,
-                ) -> Option<NdCopierStruct<'a, D>> {
+                ) -> Option<NdCopierStruct<'a>> {
                     collect_struct_fields(copier, offset, dtype)
                 }
 
@@ -112,12 +111,12 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
         &self,
         src: *const u8,
         dst: *mut u8,
-        shape: &D::Vec<usize>,
-        src_strides: &D::Vec<usize>,
-        dst_strides: &D::Vec<usize>,
+        shape: &[usize],
+        src_strides: &[usize],
+        dst_strides: &[usize],
         dtype: &Dtype,
     ) {
-        if shape.as_ref().contains(&0) {
+        if shape.contains(&0) {
             return;
         }
         let args = NdCopyArgs {
@@ -135,7 +134,7 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
     }
 
     #[inline]
-    const fn create_scalar_fn(dtype: &Dtype) -> Option<fn(NdCopyArgs<D>)> {
+    const fn create_scalar_fn(dtype: &Dtype) -> Option<fn(NdCopyArgs)> {
         Some(match (dtype.itemsize(), dtype.alignment().as_usize()) {
             (1, 1) => Self::scalar_fn::<u8>,
             (2, 2) => Self::scalar_fn::<u16>,
@@ -147,22 +146,19 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
         })
     }
 
-    fn scalar_fn<T: Copy + 'static>(args: NdCopyArgs<D>) {
+    fn scalar_fn<T: Copy + 'static>(args: NdCopyArgs) {
         let NdCopyArgs {
             src,
             dst,
-            shape,
-            src_strides, // TODO accept Option<>,
-            dst_strides,
+            mut shape,
+            mut src_strides, // TODO accept Option<>,
+            mut dst_strides,
             dtype,
         } = args;
         debug_assert_eq!(size_of::<T>(), dtype.itemsize() as usize);
         debug_assert_eq!(align_of::<T>(), dtype.alignment().as_usize());
 
-        let mut shape = shape.as_ref();
         let ndim = shape.len();
-        let mut src_strides = src_strides.as_ref();
-        let mut dst_strides = dst_strides.as_ref();
         assert!(ndim == src_strides.len() && ndim == dst_strides.len());
         let mut n_continuous_items = 1;
 
@@ -530,7 +526,7 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
     }
 
     #[inline(never)]
-    fn copy_struct(struct_copier: &NdCopierStruct<D>, args: NdCopyArgs<D>) {
+    fn copy_struct(struct_copier: &NdCopierStruct, args: NdCopyArgs) {
         for ((f, &offset), field_dtype) in struct_copier
             .scalar_fns
             .iter()
@@ -547,20 +543,17 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
         }
     }
 
-    fn copy_dynamic(args: NdCopyArgs<D>) {
+    fn copy_dynamic(args: NdCopyArgs) {
         let NdCopyArgs {
             src,
             dst,
-            shape,
-            src_strides,
-            dst_strides,
+            mut shape,
+            mut src_strides,
+            mut dst_strides,
             dtype,
         } = args;
 
-        let mut shape = shape.as_ref();
         let ndim = shape.len();
-        let mut src_strides = src_strides.as_ref();
-        let mut dst_strides = dst_strides.as_ref();
         assert!(ndim == src_strides.len() && ndim == dst_strides.len());
         let mut n_continuous_bytes = dtype.itemsize() as usize;
 
@@ -688,7 +681,6 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
 mod tests {
     use super::*;
     use crate::dtype::Dtyped;
-    use crate::{Dim, DimDyn};
 
     // A struct dtype with no padding (itemsize 12, alignment 4). It misses every
     // specialized (itemsize, alignment) case in `create_scalar_fn`, so `NdCopier`
@@ -802,10 +794,10 @@ mod tests {
         (0..ndim).map(|d| if d == ax { 2 } else { 1 }).collect()
     }
 
-    // Run a single copy through `NdCopier<D>` for element type `T` at a chosen base alignment
+    // Run a single copy through `NdCopier` for element type `T` at a chosen base alignment
     // (`misalign == 0` aligned, `misalign == 1` deliberately misaligned) and assert it byte-matches
     // the independent reference.
-    fn check<T: Dtyped, D: Dimension>(
+    fn check<T: Dtyped>(
         shape: &[usize],
         src_strides: &[usize],
         dst_strides: &[usize],
@@ -839,12 +831,9 @@ mod tests {
         let src = unsafe { std::slice::from_raw_parts(src_ptr, src_len) };
         let expected = reference_copy(src, dst_len, shape, src_strides, dst_strides, itemsize);
 
-        let copier = NdCopier::<D>::new(&dtype);
-        let shape_v = D::vec(shape.len(), |i| shape[i]);
-        let src_v = D::vec(shape.len(), |i| src_strides[i]);
-        let dst_v = D::vec(shape.len(), |i| dst_strides[i]);
+        let copier = NdCopier::new(&dtype);
         unsafe {
-            copier.copy(src_ptr, dst_ptr, &shape_v, &src_v, &dst_v, &dtype);
+            copier.copy(src_ptr, dst_ptr, shape, src_strides, dst_strides, &dtype);
         }
 
         let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };
@@ -856,14 +845,14 @@ mod tests {
         );
     }
 
-    // For a fixed (element type, dimension type, shape), exercise a representative set of source/dst
-    // layouts, each aligned and deliberately misaligned:
+    // For a fixed (element type, shape), exercise a representative set of source/dst layouts, each
+    // aligned and deliberately misaligned:
     //   - contiguous/contiguous: fully coalesces into a single run;
     //   - strided-outer/contiguous: inner axes coalesce, driving the 1D fast path;
     //   - strided-inner/strided-inner: nothing coalesces, driving the general strided nd iterator.
     // Gaps stay on a single axis, so buffers never exceed twice the contiguous size - small enough
     // to run the whole matrix under Miri.
-    fn check_rank<T: Dtyped, D: Dimension>(shape: &[usize]) {
+    fn check_rank<T: Dtyped>(shape: &[usize]) {
         let itemsize = T::DTYPE.itemsize() as usize;
         let ndim = shape.len();
         let cont = strided_strides(shape, &vec![1; ndim], itemsize);
@@ -871,33 +860,28 @@ mod tests {
         let inner = strided_strides(shape, &strided_axis(ndim, ndim.wrapping_sub(1)), itemsize);
         for (src, dst) in [(&cont, &cont), (&outer, &cont), (&inner, &inner)] {
             for misalign in [0, 1] {
-                check::<T, D>(shape, src, dst, misalign);
+                check::<T>(shape, src, dst, misalign);
             }
         }
     }
 
-    // Ranks 0 through 8 (the maximum) for one element type, mostly with runtime `DimDyn` dims plus a
-    // few static `Dim<N>` to exercise those containers. The trailing `[3, k]` shapes put a contiguous
-    // inner run of length k behind a strided outer axis, so the run coalesces to `n_continuous == k`
-    // and drives each specialized `copy_1d` arm (k in 1/2/4/8/16/32/64, subject to the size guards)
-    // plus the `_` fallback (k = 3).
+    // Ranks 0 through 8 (the maximum) for one element type. The trailing `[3, k]` shapes put a
+    // contiguous inner run of length k behind a strided outer axis, so the run coalesces to
+    // `n_continuous == k` and drives each specialized `copy_1d` arm (k in 1/2/4/8/16/32/64, subject
+    // to the size guards) plus the `_` fallback (k = 3).
     fn check_all_dims<T: Dtyped>() {
-        check_rank::<T, DimDyn>(&[]);
-        check_rank::<T, DimDyn>(&[7]);
-        check_rank::<T, DimDyn>(&[3, 4]);
-        check_rank::<T, DimDyn>(&[2, 3, 4]);
-        check_rank::<T, DimDyn>(&[2, 2, 3, 3]);
-        check_rank::<T, DimDyn>(&[2, 2, 2, 3, 3]);
-        check_rank::<T, DimDyn>(&[2, 2, 2, 2, 3, 3]);
-        check_rank::<T, DimDyn>(&[2, 2, 2, 2, 2, 2, 3]);
-        check_rank::<T, DimDyn>(&[2, 2, 2, 2, 2, 2, 2, 2]);
-
-        check_rank::<T, Dim<0>>(&[]);
-        check_rank::<T, Dim<4>>(&[2, 2, 3, 3]);
-        check_rank::<T, Dim<8>>(&[2, 2, 2, 2, 2, 2, 2, 2]);
+        check_rank::<T>(&[]);
+        check_rank::<T>(&[7]);
+        check_rank::<T>(&[3, 4]);
+        check_rank::<T>(&[2, 3, 4]);
+        check_rank::<T>(&[2, 2, 3, 3]);
+        check_rank::<T>(&[2, 2, 2, 3, 3]);
+        check_rank::<T>(&[2, 2, 2, 2, 3, 3]);
+        check_rank::<T>(&[2, 2, 2, 2, 2, 2, 3]);
+        check_rank::<T>(&[2, 2, 2, 2, 2, 2, 2, 2]);
 
         for k in [1, 2, 3, 4, 8, 16, 32, 64] {
-            check_rank::<T, Dim<2>>(&[3, k]);
+            check_rank::<T>(&[3, k]);
         }
     }
 
@@ -908,7 +892,7 @@ mod tests {
         for shape in [vec![0usize], vec![3, 0], vec![2, 0, 4]] {
             let strides = strided_strides(&shape, &vec![1; shape.len()], itemsize);
             for misalign in [0, 1] {
-                check::<T, DimDyn>(&shape, &strides, &strides, misalign);
+                check::<T>(&shape, &strides, &strides, misalign);
             }
         }
     }
@@ -932,7 +916,7 @@ mod tests {
                 continue;
             }
             let misalign = rng.usize(0..=1);
-            check::<T, DimDyn>(&shape, &src_strides, &dst_strides, misalign);
+            check::<T>(&shape, &src_strides, &dst_strides, misalign);
         }
     }
 
@@ -968,13 +952,13 @@ mod tests {
         let is = T::DTYPE.itemsize() as usize;
         for unit in [0, 5 * is] {
             // interior unit axis: contiguous both sides (full coalesce), then a strided outer axis
-            check::<T, DimDyn>(&[4, 1, 8], &[8 * is, unit, is], &[8 * is, unit, is], 0);
-            check::<T, DimDyn>(&[4, 1, 8], &[16 * is, unit, is], &[16 * is, unit, is], 0);
+            check::<T>(&[4, 1, 8], &[8 * is, unit, is], &[8 * is, unit, is], 0);
+            check::<T>(&[4, 1, 8], &[16 * is, unit, is], &[16 * is, unit, is], 0);
         }
         // leading and trailing unit axes, contiguous elsewhere
-        check::<T, DimDyn>(&[1, 4, 8], &[7 * is, 8 * is, is], &[7 * is, 8 * is, is], 0);
-        check::<T, DimDyn>(&[4, 8, 1], &[8 * is, is, 3 * is], &[8 * is, is, 3 * is], 0);
-        check::<T, DimDyn>(&[4, 1, 8], &[8 * is, 0, is], &[8 * is, 0, is], 1); // misaligned base
+        check::<T>(&[1, 4, 8], &[7 * is, 8 * is, is], &[7 * is, 8 * is, is], 0);
+        check::<T>(&[4, 8, 1], &[8 * is, is, 3 * is], &[8 * is, is, 3 * is], 0);
+        check::<T>(&[4, 1, 8], &[8 * is, 0, is], &[8 * is, 0, is], 1); // misaligned base
     }
     #[test]
     fn copy_unit_axis() {
@@ -1001,9 +985,9 @@ mod tests {
             (&strided, &cont),
             (&strided, &strided),
         ] {
-            check::<T, DimDyn>(&[4, inner], src, dst, 0);
+            check::<T>(&[4, inner], src, dst, 0);
         }
-        check::<T, DimDyn>(&[4, inner], &cont, &strided, 1);
+        check::<T>(&[4, inner], &cont, &strided, 1);
     }
     #[test]
     fn copy_1d_sides() {

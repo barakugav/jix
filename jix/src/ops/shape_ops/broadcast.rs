@@ -189,14 +189,14 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         let out_shape = S::Dimension::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let dst_strides = default_strides(&out_shape, itemsize);
 
-        let copier = NdCopier::<S::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
         unsafe {
             copier.copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                &out_shape,
-                &src_strides,
-                &dst_strides,
+                out_shape.as_ref(),
+                src_strides.as_ref(),
+                dst_strides.as_ref(),
                 dtype,
             )
         };

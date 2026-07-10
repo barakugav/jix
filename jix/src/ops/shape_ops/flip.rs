@@ -160,7 +160,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             iter_shape,
             NdIterExtStridesPtr::new(src_ptr_strides, tmp_base),
         );
-        let nd_copy = NdCopier::<S::Dimension>::new(self.dtype());
+        let nd_copy = NdCopier::new(self.dtype());
         for (_idx, src_ptr) in iter {
             let off = unsafe { src_ptr.offset_from(tmp_base) } as usize;
             let dst_ptr = unsafe { dst_base.sub(off) };
@@ -169,9 +169,9 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
                 nd_copy.copy(
                     src_ptr,
                     dst_ptr,
-                    &slab_shape,
-                    &strides,
-                    &strides,
+                    slab_shape.as_ref(),
+                    strides.as_ref(),
+                    strides.as_ref(),
                     self.dtype(),
                 )
             };

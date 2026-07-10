@@ -347,7 +347,7 @@ where
         let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let out_strides = default_strides(&out_shape, itemsize);
         let block_strides = default_strides_cast(&block_shape_u64, itemsize);
-        let copier = NdCopier::<D>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         // Pre-allocate a buffer large enough for a full block.
         let full_buf_len =
@@ -372,9 +372,9 @@ where
                 copier.copy(
                     src_ptr,
                     buf.as_mut_ptr(),
-                    &out_shape,
-                    &block_strides,
-                    &out_strides,
+                    out_shape.as_ref(),
+                    block_strides.as_ref(),
+                    out_strides.as_ref(),
                     dtype,
                 )
             };
@@ -424,9 +424,9 @@ where
                 copier.copy(
                     src_ptr,
                     dst_ptr,
-                    &D::vec(ndim, |dim| block_size[dim] as usize),
-                    &block_strides,
-                    &out_strides,
+                    D::vec(ndim, |dim| block_size[dim] as usize).as_ref(),
+                    block_strides.as_ref(),
+                    out_strides.as_ref(),
                     dtype,
                 )
             };

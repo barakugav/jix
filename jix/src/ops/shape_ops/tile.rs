@@ -162,7 +162,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         check_get_buffer_size(index, dtype, buf)?;
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
         let dst_strides = default_strides_cast(&out_shape, itemsize);
-        let copier = NdCopier::<S::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         // Case B - two reads, single wrap (total <= L): split the request into two
         // contiguous input ranges along axis k and read each into a separate tmp_buf, then
@@ -187,9 +187,9 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                     copier.copy(
                         tmp.as_ptr(),
                         buf.as_mut_ptr().add(dst_byte_offset),
-                        &region_shape,
-                        &src_strides,
-                        &dst_strides,
+                        region_shape.as_ref(),
+                        src_strides.as_ref(),
+                        dst_strides.as_ref(),
                         dtype,
                     )
                 };
@@ -250,9 +250,9 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 copier.copy(
                     tmp.as_ptr().add(src_off),
                     buf.as_mut_ptr(),
-                    &copy_shape,
-                    &src_strides,
-                    &dst_strides,
+                    copy_shape.as_ref(),
+                    src_strides.as_ref(),
+                    dst_strides.as_ref(),
                     dtype,
                 )
             };
@@ -291,14 +291,14 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                     Ordering::Greater => dst_strides[src_axis(i)],
                 });
             let dst_off = head_len as usize * dst_strides[k];
-            let copier = NdCopier::<<S::Dimension as Dimension>::Larger>::new(dtype);
+            let copier = NdCopier::new(dtype);
             unsafe {
                 copier.copy(
                     tmp.as_ptr(),
                     buf.as_mut_ptr().add(dst_off),
-                    &copy_shape,
-                    &src_strides_split,
-                    &dst_strides_split,
+                    copy_shape.as_ref(),
+                    src_strides_split.as_ref(),
+                    dst_strides_split.as_ref(),
                     dtype,
                 )
             };
@@ -318,9 +318,9 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 copier.copy(
                     tmp.as_ptr(),
                     buf.as_mut_ptr().add(dst_off),
-                    &copy_shape,
-                    &src_strides,
-                    &dst_strides,
+                    copy_shape.as_ref(),
+                    src_strides.as_ref(),
+                    dst_strides.as_ref(),
                     dtype,
                 )
             };

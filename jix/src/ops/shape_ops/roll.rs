@@ -115,7 +115,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         check_get_buffer_size(index, dtype, buf)?;
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
         let dst_strides = default_strides_cast(&out_shape, itemsize);
-        let copier = NdCopier::<S::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         let mut read_region = |inner_index: &[Range<u64>],
                                region_shape: &S::Dimension,
@@ -134,9 +134,9 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
                 copier.copy(
                     tmp.as_ptr(),
                     buf.as_mut_ptr().add(dst_byte_offset),
-                    &region_shape,
-                    &src_strides,
-                    &dst_strides,
+                    region_shape.as_ref(),
+                    src_strides.as_ref(),
+                    dst_strides.as_ref(),
                     dtype,
                 )
             };

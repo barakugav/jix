@@ -204,7 +204,7 @@ where
             self.borders.partition_point(|&b| b <= req_start)
         };
 
-        let copier = NdCopier::<Self::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
         for arr in first_arr..self.borders.len() {
             let arr_start = if arr == 0 { 0 } else { self.borders[arr - 1] };
             let arr_end = self.borders[arr];
@@ -262,9 +262,9 @@ where
                     copier.copy(
                         read_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
-                        &sub_shape,
-                        &sub_strides,
-                        &dst_strides,
+                        sub_shape.as_ref(),
+                        sub_strides.as_ref(),
+                        dst_strides.as_ref(),
                         dtype,
                     )
                 };

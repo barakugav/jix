@@ -185,7 +185,7 @@ where
             });
             (arr_strides, out_strides)
         });
-        let copier = NdCopier::<ArraysT::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         for arr_idx in 0..n_stack {
             // In-place: each array occupies a contiguous chunk in buf.
@@ -209,9 +209,9 @@ where
                     copier.copy(
                         arr_buf.as_ptr(),
                         buf.as_mut_ptr().add(buf_offset),
-                        &arr_range_shape,
-                        arr_strides,
-                        out_strides,
+                        arr_range_shape.as_ref(),
+                        arr_strides.as_ref(),
+                        out_strides.as_ref(),
                         dtype,
                     )
                 };

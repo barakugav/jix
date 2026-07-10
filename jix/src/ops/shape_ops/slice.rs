@@ -220,7 +220,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         let src_strides = default_strides(&inner_read_shape, itemsize);
         let tmp_buf_bytes = inner_read_shape.as_ref().iter().product::<usize>() * itemsize;
         let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, dtype.alignment());
-        let copier = NdCopier::<S::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
 
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
         let iter_shape = S::Dimension::vec(ndim, |dim| {
@@ -254,9 +254,9 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 copier.copy(
                     tmp.as_ptr(),
                     dst_ptr,
-                    &inner_read_shape,
-                    &src_strides,
-                    &dst_strides,
+                    inner_read_shape.as_ref(),
+                    src_strides.as_ref(),
+                    dst_strides.as_ref(),
                     dtype,
                 )
             };

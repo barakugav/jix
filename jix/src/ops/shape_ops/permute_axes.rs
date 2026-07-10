@@ -154,14 +154,14 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let sub_shape_out = S::Dimension::vec(ndim, |i| (index[i].end - index[i].start) as usize);
         let dst_strides = default_strides(&sub_shape_out, itemsize);
 
-        let copier = NdCopier::<S::Dimension>::new(dtype);
+        let copier = NdCopier::new(dtype);
         unsafe {
             copier.copy(
                 tmp_buf.as_ptr(),
                 buf.as_mut_ptr(),
-                &sub_shape_out,
-                &src_strides_out,
-                &dst_strides,
+                sub_shape_out.as_ref(),
+                src_strides_out.as_ref(),
+                dst_strides.as_ref(),
                 dtype,
             )
         };
