@@ -764,16 +764,11 @@ mod tests {
         dst
     }
 
-    // Owns a source/destination byte buffer for one copy and hands out a byte pointer into it.
-    //
-    // The aligned variant (`misalign == 0`) is a `Vec<T>`, whose allocation is aligned to
-    // `align_of::<T>()` - exactly the alignment the aligned copy path requires, since for every
-    // specialized `(itemsize, alignment)` case the read-type's alignment equals the dtype's and
-    // struct fields are read at no stricter alignment. The unaligned variant (`misalign == 1`) is a
-    // `Vec<u8>` positioned one byte past an aligned offset (a plain `Vec<u8>` has no useful
-    // alignment of its own, so we align within it first), forcing the unaligned path for every dtype
-    // whose alignment exceeds 1. Both are only ever touched as raw bytes, so no `T` value is needed
-    // and, since the `Vec<T>` stays `len == 0`, nothing is dropped.
+    // Owns a source/destination byte buffer and hands out a byte pointer into it. The aligned
+    // variant (`misalign == 0`) is a `Vec<T>`, naturally aligned to `align_of::<T>()` - exactly what
+    // the aligned copy path needs. The unaligned variant is a `Vec<u8>` shifted one byte past an
+    // aligned offset, forcing the unaligned path for any dtype with alignment > 1. Both are only ever
+    // touched as raw bytes, so no `T` is constructed and the `Vec<T>` (len 0) drops nothing.
     enum TestBuf<T> {
         Aligned(Vec<T>),
         Unaligned(Vec<u8>),
@@ -861,13 +856,13 @@ mod tests {
         );
     }
 
-    // For a fixed (element type, dimension type, shape), exercise a small but representative set of
-    // source/destination layouts, each at an aligned and a deliberately misaligned base:
+    // For a fixed (element type, dimension type, shape), exercise a representative set of source/dst
+    // layouts, each aligned and deliberately misaligned:
     //   - contiguous/contiguous: fully coalesces into a single run;
     //   - strided-outer/contiguous: inner axes coalesce, driving the 1D fast path;
-    //   - strided-inner/strided-inner: nothing coalesces, driving the byte-wise `copy_nd` iterator.
+    //   - strided-inner/strided-inner: nothing coalesces, driving the general strided nd iterator.
     // Gaps stay on a single axis, so buffers never exceed twice the contiguous size - small enough
-    // to run the whole matrix under Miri with no special-casing.
+    // to run the whole matrix under Miri.
     fn check_rank<T: Dtyped, D: Dimension>(shape: &[usize]) {
         let itemsize = T::DTYPE.itemsize() as usize;
         let ndim = shape.len();
@@ -881,12 +876,11 @@ mod tests {
         }
     }
 
-    // Ranks 0 through 8 (the maximum supported) for one element type. Every rank runs with runtime
-    // `DimDyn` dims, which drives each `copy_nd` rank arm; a few ranks also run with static `Dim<N>`
-    // dims to exercise those containers. Then a contiguous inner run of length K behind a strided
-    // outer axis (which coalesces to `n_continuous == K`) drives each specialized `copy_1d` arm
-    // (K in 1/2/4/8/16/32/64, subject to the size guards) plus the `_` fallback (K = 3) - the exact
-    // shape that regressed when `N_CONTINUOUS` was misused as an outer-loop unroll factor.
+    // Ranks 0 through 8 (the maximum) for one element type, mostly with runtime `DimDyn` dims plus a
+    // few static `Dim<N>` to exercise those containers. The trailing `[3, k]` shapes put a contiguous
+    // inner run of length k behind a strided outer axis, so the run coalesces to `n_continuous == k`
+    // and drives each specialized `copy_1d` arm (k in 1/2/4/8/16/32/64, subject to the size guards)
+    // plus the `_` fallback (k = 3).
     fn check_all_dims<T: Dtyped>() {
         check_rank::<T, DimDyn>(&[]);
         check_rank::<T, DimDyn>(&[7]);
@@ -965,85 +959,58 @@ mod tests {
         #[cfg(feature = "num-complex")] complex_f64: crate::scalar::Complex<f64>, // (16, 8) -> [u64; 2]
     }
 
-    // Unit (size-1) axes: iterated once at index 0, so their stride never contributes an offset.
-    // The coalescing scan treats them as contiguous regardless of the stride stored for them, so an
-    // axis carrying a broadcast-style `0` or an otherwise non-matching stride no longer stops
-    // neighboring axes from merging. Each layout below gives a unit axis a stride that would halt
-    // the pre-change scan (`0` and an arbitrary `5*is`/`7*is`/`3*is`, none equal to the contiguous
-    // value), and asserts the copy still matches the layout-agnostic reference - both when the
-    // surrounding axes fully coalesce to the 1D fast path and when the outer axis stays strided.
+    // A unit (size-1) axis is iterated once at index 0, so its stride never contributes an offset;
+    // the coalescing scan treats it as contiguous whatever stride it carries and never lets it block
+    // neighboring axes from merging. Each layout gives a unit axis a stride that would otherwise halt
+    // the scan (a broadcast `0` and an arbitrary multiple), with contiguous axes around it, covering
+    // both the scalar (`scalar_fn`) and byte-wise (`copy_dynamic`) coalescing routes.
+    fn check_unit_axis<T: Dtyped>() {
+        let is = T::DTYPE.itemsize() as usize;
+        for unit in [0, 5 * is] {
+            // interior unit axis: contiguous both sides (full coalesce), then a strided outer axis
+            check::<T, DimDyn>(&[4, 1, 8], &[8 * is, unit, is], &[8 * is, unit, is], 0);
+            check::<T, DimDyn>(&[4, 1, 8], &[16 * is, unit, is], &[16 * is, unit, is], 0);
+        }
+        // leading and trailing unit axes, contiguous elsewhere
+        check::<T, DimDyn>(&[1, 4, 8], &[7 * is, 8 * is, is], &[7 * is, 8 * is, is], 0);
+        check::<T, DimDyn>(&[4, 8, 1], &[8 * is, is, 3 * is], &[8 * is, is, 3 * is], 0);
+        check::<T, DimDyn>(&[4, 1, 8], &[8 * is, 0, is], &[8 * is, 0, is], 1); // misaligned base
+    }
     #[test]
     fn copy_unit_axis() {
-        let is = size_of::<u32>();
-        for unit_stride in [0, 5 * is] {
-            // Contiguous either side of the interior unit axis -> one 32-element run (fast path).
-            check::<u32, DimDyn>(
-                &[4, 1, 8],
-                &[8 * is, unit_stride, is],
-                &[8 * is, unit_stride, is],
-                0,
-            );
-            // Strided outer axis (2x gap) -> unit axis folds out, leaving the 1D strided path.
-            check::<u32, DimDyn>(
-                &[4, 1, 8],
-                &[16 * is, unit_stride, is],
-                &[16 * is, unit_stride, is],
-                0,
-            );
+        check_unit_axis::<u32>(); // scalar route
+        check_unit_axis::<u64>();
+        check_unit_axis::<[i32; 3]>(); // byte-wise copy_dynamic route
+        check_unit_axis::<[u8; 3]>();
+    }
+
+    // The 1D copy splits on per-side contiguity: an outer axis that survives coalescing with its byte
+    // stride still equal to the inner run's length is contiguous and is copied as whole blocks (a
+    // single `copy_nonoverlapping` when both sides are, a per-side loop when one is, the general loop
+    // otherwise). Folding needs *both* strides to match, so at most one side reaches this path
+    // contiguous with `len > 1`. An inner run of `inner` behind a strided outer axis pins each arm; a
+    // power-of-two `inner` routes through the const-generic `copy_1d`, others through
+    // `copy_1d_unsized`. `misalign = 1` adds the unaligned arm.
+    fn check_1d_sides<T: Dtyped>(inner: usize) {
+        let is = T::DTYPE.itemsize() as usize;
+        let cont = [inner * is, is]; // outer stride == inner run -> that side contiguous
+        let strided = [2 * inner * is, is]; // outer 2x gap -> that side strided
+        for (src, dst) in [
+            (&cont, &cont),
+            (&cont, &strided),
+            (&strided, &cont),
+            (&strided, &strided),
+        ] {
+            check::<T, DimDyn>(&[4, inner], src, dst, 0);
         }
-        // Leading and trailing unit axes with arbitrary strides, contiguous elsewhere.
-        check::<u32, DimDyn>(&[1, 4, 8], &[7 * is, 8 * is, is], &[7 * is, 8 * is, is], 0);
-        check::<u32, DimDyn>(&[4, 8, 1], &[8 * is, is, 3 * is], &[8 * is, is, 3 * is], 0);
-        // A misaligned base drives the unaligned path; `u64` covers a wider specialization.
-        check::<u32, DimDyn>(&[4, 1, 8], &[8 * is, 0, is], &[8 * is, 0, is], 1);
-        let js = size_of::<u64>();
-        check::<u64, DimDyn>(&[4, 1, 8], &[8 * js, 0, js], &[8 * js, 0, js], 0);
+        check::<T, DimDyn>(&[4, inner], &cont, &strided, 1);
     }
-
-    // The aligned 1D copy special-cases per-side contiguity: an outer axis that survives coalescing
-    // with its byte stride still equal to the inner run's length is "contiguous" and gets indexed as
-    // consecutive `[T; N]` blocks - a single `copy_nonoverlapping` when both sides are, a simplified
-    // loop when only one is, the fully general loop otherwise. Coalescing folds an axis only when
-    // *both* strides match, so at most one side can reach this path contiguous with `len > 1` (a
-    // both-contiguous outer axis would already have been folded away, collapsing to `len == 1`).
-    // These 2-D layouts fold the inner 8-run and give the outer 4-axis a contiguous or 2x-strided
-    // byte stride independently per side, pinning each of the four arms.
     #[test]
-    fn copy_1d_aligned_sides() {
-        let is = size_of::<u32>();
-        let cont = [8 * is, is]; // outer stride == inner run length -> that side is contiguous
-        let strided = [16 * is, is]; // outer 2x gap -> that side is strided
-        check::<u32, DimDyn>(&[4, 8], &cont, &cont, 0); // both contiguous (copy_nonoverlapping)
-        check::<u32, DimDyn>(&[4, 8], &cont, &strided, 0); // src contiguous, dst strided
-        check::<u32, DimDyn>(&[4, 8], &strided, &cont, 0); // src strided, dst contiguous
-        check::<u32, DimDyn>(&[4, 8], &strided, &strided, 0); // both strided (general loop)
-
-        // A wider element type exercises a different `[T; N]` block copy.
-        let js = size_of::<u64>();
-        check::<u64, DimDyn>(&[4, 8], &[8 * js, js], &[16 * js, js], 0);
-    }
-
-    // The unsized 1D fallback (`copy_1d_unsized`, taken when the coalesced run length is not one of
-    // the power-of-two `copy_1d` arms) mirrors the same per-side contiguity split, but copies a
-    // runtime count of elements: one `copy_nonoverlapping` of `len * n` when both sides are
-    // contiguous, a per-row `copy_nonoverlapping` of `n` when one side is, the general strided loop
-    // otherwise, and a byte-wise loop when unaligned. A contiguous inner run of 3 gives `n = 3` (not
-    // a power of two, so the fallback), and the outer 4-axis gets a contiguous or 2x-strided byte
-    // stride independently per side to pin each aligned arm; `misalign = 1` drives the unaligned arm.
-    #[test]
-    fn copy_1d_unsized_sides() {
-        let is = size_of::<u32>();
-        let cont = [3 * is, is]; // outer stride == inner run (3) -> that side is contiguous
-        let strided = [6 * is, is]; // outer 2x gap -> that side is strided
-        check::<u32, DimDyn>(&[4, 3], &cont, &cont, 0); // both contiguous (single bulk copy)
-        check::<u32, DimDyn>(&[4, 3], &cont, &strided, 0); // src contiguous, dst strided
-        check::<u32, DimDyn>(&[4, 3], &strided, &cont, 0); // src strided, dst contiguous
-        check::<u32, DimDyn>(&[4, 3], &strided, &strided, 0); // both strided (general loop)
-        check::<u32, DimDyn>(&[4, 3], &cont, &strided, 1); // unaligned byte-wise arm
-
-        // A wider element type exercises `copy_nonoverlapping::<T>` for a larger T.
-        let js = size_of::<u64>();
-        check::<u64, DimDyn>(&[4, 3], &[3 * js, js], &[6 * js, js], 0);
+    fn copy_1d_sides() {
+        check_1d_sides::<u32>(8); // power-of-two run -> const-generic copy_1d arms
+        check_1d_sides::<u32>(3); // other run length -> copy_1d_unsized
+        check_1d_sides::<u64>(8); // wider element type
+        check_1d_sides::<u64>(3);
     }
 
     // Struct dtype (the `copy_struct` field-by-field route) and non-scalar array dtypes (the
@@ -1061,30 +1028,6 @@ mod tests {
     #[test]
     fn copy_dynamic_odd_itemsize() {
         check_all_dims::<[u8; 3]>();
-    }
-
-    // The byte-wise `copy_dynamic` fallback coalesces unit (size-1) axes too: iterated once at index
-    // 0, a unit axis contributes no offset, so its stride is irrelevant and must not stop neighboring
-    // axes from merging. These layouts give a unit axis a broadcast-style `0` or an arbitrary
-    // non-matching stride with contiguous axes on either side, over the two dtypes that route here
-    // (`[i32; 3]` itemsize 12, `[u8; 3]` odd itemsize 3), and confirm the coalesced run still copies
-    // the correct byte count against the reference.
-    #[test]
-    fn copy_dynamic_unit_axis() {
-        fn go<T: Dtyped>() {
-            let is = T::DTYPE.itemsize() as usize;
-            for unit in [0, 5 * is] {
-                // interior unit axis, contiguous either side -> full coalesce, one bulk byte copy
-                check::<T, DimDyn>(&[4, 1, 8], &[8 * is, unit, is], &[8 * is, unit, is], 0);
-                // strided outer axis -> unit axis folds out, remaining rank dispatched to Dim<1>
-                check::<T, DimDyn>(&[4, 1, 8], &[16 * is, unit, is], &[16 * is, unit, is], 0);
-            }
-            // leading and trailing unit axes, contiguous elsewhere
-            check::<T, DimDyn>(&[1, 4, 8], &[7 * is, 8 * is, is], &[7 * is, 8 * is, is], 0);
-            check::<T, DimDyn>(&[4, 8, 1], &[8 * is, is, 3 * is], &[8 * is, is, 3 * is], 0);
-        }
-        go::<[i32; 3]>();
-        go::<[u8; 3]>();
     }
 
     // Zero-length dimensions across the scalar, struct and dynamic dispatch routes.
