@@ -181,7 +181,7 @@ impl<'a> NdCopier<'a> {
             src_strides = &src_strides[..n_strided_dims];
             dst_strides = &dst_strides[..n_strided_dims];
         }
-        if shape.len() == 0 {
+        if shape.is_empty() {
             shape = &[1];
             src_strides = &[0];
             dst_strides = &[0];
@@ -230,58 +230,6 @@ impl<'a> NdCopier<'a> {
                     n_continuous_items,
                     aligned,
                 ),
-            }
-        }
-    }
-
-    #[inline(never)]
-    unsafe fn copy_1d_unsized<T: Copy>(
-        src: *const u8,
-        dst: *mut u8,
-        len: usize,
-        src_stride: usize,
-        dst_stride: usize,
-        n_continuous_items: usize,
-        aligned: bool,
-    ) {
-        unsafe {
-            if aligned {
-                let src_continuous = len <= 1 || src_stride == size_of::<T>() * n_continuous_items;
-                let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * n_continuous_items;
-                if src_continuous && dst_continuous {
-                    std::ptr::copy_nonoverlapping::<T>(
-                        src.cast::<T>(),
-                        dst.cast::<T>(),
-                        len * n_continuous_items,
-                    );
-                } else if src_continuous {
-                    let src = src.cast::<T>();
-                    for i in 0..len {
-                        let src = src.add(i * n_continuous_items);
-                        let dst = dst.add(i * dst_stride).cast::<T>();
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
-                    }
-                } else if dst_continuous {
-                    let dst = dst.cast::<T>();
-                    for i in 0..len {
-                        let src = src.add(i * src_stride).cast::<T>();
-                        let dst = dst.add(i * n_continuous_items);
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
-                    }
-                } else {
-                    for i in 0..len {
-                        let src = src.add(i * src_stride).cast::<T>();
-                        let dst = dst.add(i * dst_stride).cast::<T>();
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
-                    }
-                }
-            } else {
-                let n_continuous_bytes = size_of::<T>() * n_continuous_items;
-                for i in 0..len {
-                    let src = src.add(i * src_stride);
-                    let dst = dst.add(i * dst_stride);
-                    std::ptr::copy_nonoverlapping::<u8>(src, dst, n_continuous_bytes);
-                }
             }
         }
     }
@@ -401,6 +349,58 @@ impl<'a> NdCopier<'a> {
     }
 
     #[inline(never)]
+    unsafe fn copy_1d_unsized<T: Copy>(
+        src: *const u8,
+        dst: *mut u8,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        n_continuous_items: usize,
+        aligned: bool,
+    ) {
+        unsafe {
+            if aligned {
+                let src_continuous = len <= 1 || src_stride == size_of::<T>() * n_continuous_items;
+                let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * n_continuous_items;
+                if src_continuous && dst_continuous {
+                    std::ptr::copy_nonoverlapping::<T>(
+                        src.cast::<T>(),
+                        dst.cast::<T>(),
+                        len * n_continuous_items,
+                    );
+                } else if src_continuous {
+                    let src = src.cast::<T>();
+                    for i in 0..len {
+                        let src = src.add(i * n_continuous_items);
+                        let dst = dst.add(i * dst_stride).cast::<T>();
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                    }
+                } else if dst_continuous {
+                    let dst = dst.cast::<T>();
+                    for i in 0..len {
+                        let src = src.add(i * src_stride).cast::<T>();
+                        let dst = dst.add(i * n_continuous_items);
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                    }
+                } else {
+                    for i in 0..len {
+                        let src = src.add(i * src_stride).cast::<T>();
+                        let dst = dst.add(i * dst_stride).cast::<T>();
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                    }
+                }
+            } else {
+                let n_continuous_bytes = size_of::<T>() * n_continuous_items;
+                for i in 0..len {
+                    let src = src.add(i * src_stride);
+                    let dst = dst.add(i * dst_stride);
+                    std::ptr::copy_nonoverlapping::<u8>(src, dst, n_continuous_bytes);
+                }
+            }
+        }
+    }
+
+    #[inline(never)]
     unsafe fn copy_nd<T: Copy>(
         shape: &[usize],
         src_strides: &[usize],
@@ -410,19 +410,19 @@ impl<'a> NdCopier<'a> {
         n_continuous_items: usize,
     ) {
         unsafe fn copy_nd_inner<T: Copy, D: Dimension>(
-            shape: D::Vec<u64>,
-            src_strides: D::Vec<usize>,
-            dst_strides: D::Vec<usize>,
+            shape: &[usize],
+            src_strides: &[usize],
+            dst_strides: &[usize],
             src: *const u8,
             dst: *mut u8,
             n_continuous_items: usize,
             aligned: bool,
         ) {
             let iter = NdIter::new(
-                shape,
+                D::vec(shape.len(), |i| shape[i] as u64),
                 (
-                    NdIterExtStridesPtr::new(src_strides, src),
-                    NdIterExtStridesPtrMut::new(dst_strides, dst),
+                    NdIterExtStridesPtr::new(src_strides.to_dim_vec::<D>(), src),
+                    NdIterExtStridesPtrMut::new(dst_strides.to_dim_vec::<D>(), dst),
                 ),
             );
             if aligned {
@@ -454,74 +454,27 @@ impl<'a> NdCopier<'a> {
                     .iter()
                     .all(|s| s.is_multiple_of(align_of::<T>())));
 
+        let copy_nd_fn = match shape.len() {
+            0 | 1 => unreachable!(),
+            2 => copy_nd_inner::<T, Dim<2>>,
+            3 => copy_nd_inner::<T, Dim<3>>,
+            4 => copy_nd_inner::<T, Dim<4>>,
+            5 => copy_nd_inner::<T, Dim<5>>,
+            6 => copy_nd_inner::<T, Dim<6>>,
+            7 => copy_nd_inner::<T, Dim<7>>,
+            8 => copy_nd_inner::<T, Dim<8>>,
+            _ => unimplemented!(),
+        };
         unsafe {
-            match shape.len() {
-                0 | 1 => unreachable!(),
-                2 => copy_nd_inner::<T, Dim<2>>(
-                    Dim::<2>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<2>>(),
-                    dst_strides.to_dim_vec::<Dim<2>>(),
-                    src,
-                    dst,
-                    n_continuous_items,
-                    aligned,
-                ),
-                3 => copy_nd_inner::<T, Dim<3>>(
-                    Dim::<3>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<3>>(),
-                    dst_strides.to_dim_vec::<Dim<3>>(),
-                    src,
-                    dst,
-                    n_continuous_items,
-                    aligned,
-                ),
-                4 => copy_nd_inner::<T, Dim<4>>(
-                    Dim::<4>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<4>>(),
-                    dst_strides.to_dim_vec::<Dim<4>>(),
-                    src,
-                    dst,
-                    n_continuous_items,
-                    aligned,
-                ),
-                5 => copy_nd_inner::<T, Dim<5>>(
-                    Dim::<5>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<5>>(),
-                    dst_strides.to_dim_vec::<Dim<5>>(),
-                    src,
-                    dst,
-                    n_continuous_items,
-                    aligned,
-                ),
-                6 => copy_nd_inner::<T, Dim<6>>(
-                    Dim::<6>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<6>>(),
-                    dst_strides.to_dim_vec::<Dim<6>>(),
-                    src,
-                    dst,
-                    n_continuous_items,
-                    aligned,
-                ),
-                7 => copy_nd_inner::<T, Dim<7>>(
-                    Dim::<7>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<7>>(),
-                    dst_strides.to_dim_vec::<Dim<7>>(),
-                    src,
-                    dst,
-                    n_continuous_items,
-                    aligned,
-                ),
-                8 => copy_nd_inner::<T, Dim<8>>(
-                    Dim::<8>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<8>>(),
-                    dst_strides.to_dim_vec::<Dim<8>>(),
-                    src,
-                    dst,
-                    n_continuous_items,
-                    aligned,
-                ),
-                _ => unimplemented!(),
-            }
+            copy_nd_fn(
+                shape,
+                src_strides,
+                dst_strides,
+                src,
+                dst,
+                n_continuous_items,
+                aligned,
+            )
         }
     }
 
@@ -576,25 +529,25 @@ impl<'a> NdCopier<'a> {
             src_strides = &src_strides[..n_strided_dims];
             dst_strides = &dst_strides[..n_strided_dims];
         }
-        if shape.len() == 0 {
+        if shape.is_empty() {
             shape = &[1];
             src_strides = &[0];
             dst_strides = &[0];
         }
 
         unsafe fn copy_dynamic_inner<D: Dimension>(
-            shape: D::Vec<u64>,
-            src_strides: D::Vec<usize>,
-            dst_strides: D::Vec<usize>,
+            shape: &[usize],
+            src_strides: &[usize],
+            dst_strides: &[usize],
             src: *const u8,
             dst: *mut u8,
             n_continuous_bytes: usize,
         ) {
             let iter = NdIter::new(
-                shape,
+                D::vec(shape.len(), |i| shape[i] as u64),
                 (
-                    NdIterExtStridesPtr::new(src_strides, src),
-                    NdIterExtStridesPtrMut::new(dst_strides, dst),
+                    NdIterExtStridesPtr::new(src_strides.to_dim_vec::<D>(), src),
+                    NdIterExtStridesPtrMut::new(dst_strides.to_dim_vec::<D>(), dst),
                 ),
             );
             for (_, (src_ptr, dst_ptr)) in iter {
@@ -604,75 +557,27 @@ impl<'a> NdCopier<'a> {
             }
         }
 
+        let copy_fn = match shape.len() {
+            0 => unreachable!(),
+            1 => copy_dynamic_inner::<Dim<1>>,
+            2 => copy_dynamic_inner::<Dim<2>>,
+            3 => copy_dynamic_inner::<Dim<3>>,
+            4 => copy_dynamic_inner::<Dim<4>>,
+            5 => copy_dynamic_inner::<Dim<5>>,
+            6 => copy_dynamic_inner::<Dim<6>>,
+            7 => copy_dynamic_inner::<Dim<7>>,
+            8 => copy_dynamic_inner::<Dim<8>>,
+            _ => unimplemented!(),
+        };
         unsafe {
-            match shape.len() {
-                0 => unreachable!(),
-                1 => copy_dynamic_inner::<Dim<1>>(
-                    Dim::<1>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<1>>(),
-                    dst_strides.to_dim_vec::<Dim<1>>(),
-                    src,
-                    dst,
-                    n_continuous_bytes,
-                ),
-                2 => copy_dynamic_inner::<Dim<2>>(
-                    Dim::<2>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<2>>(),
-                    dst_strides.to_dim_vec::<Dim<2>>(),
-                    src,
-                    dst,
-                    n_continuous_bytes,
-                ),
-                3 => copy_dynamic_inner::<Dim<3>>(
-                    Dim::<3>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<3>>(),
-                    dst_strides.to_dim_vec::<Dim<3>>(),
-                    src,
-                    dst,
-                    n_continuous_bytes,
-                ),
-                4 => copy_dynamic_inner::<Dim<4>>(
-                    Dim::<4>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<4>>(),
-                    dst_strides.to_dim_vec::<Dim<4>>(),
-                    src,
-                    dst,
-                    n_continuous_bytes,
-                ),
-                5 => copy_dynamic_inner::<Dim<5>>(
-                    Dim::<5>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<5>>(),
-                    dst_strides.to_dim_vec::<Dim<5>>(),
-                    src,
-                    dst,
-                    n_continuous_bytes,
-                ),
-                6 => copy_dynamic_inner::<Dim<6>>(
-                    Dim::<6>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<6>>(),
-                    dst_strides.to_dim_vec::<Dim<6>>(),
-                    src,
-                    dst,
-                    n_continuous_bytes,
-                ),
-                7 => copy_dynamic_inner::<Dim<7>>(
-                    Dim::<7>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<7>>(),
-                    dst_strides.to_dim_vec::<Dim<7>>(),
-                    src,
-                    dst,
-                    n_continuous_bytes,
-                ),
-                8 => copy_dynamic_inner::<Dim<8>>(
-                    Dim::<8>::vec(shape.len(), |i| shape[i] as u64),
-                    src_strides.to_dim_vec::<Dim<8>>(),
-                    dst_strides.to_dim_vec::<Dim<8>>(),
-                    src,
-                    dst,
-                    n_continuous_bytes,
-                ),
-                _ => unimplemented!(),
-            }
+            copy_fn(
+                shape,
+                src_strides,
+                dst_strides,
+                src,
+                dst,
+                n_continuous_bytes,
+            )
         }
     }
 }
@@ -897,27 +802,47 @@ mod tests {
         }
     }
 
-    // Randomized coverage via `fastrand`: deterministic per element type (seeded from the itemsize),
+    // Randomized coverage via `proptest`: deterministic per element type (seeded from the itemsize),
     // exploring random ranks, extents, per-axis strides and base alignment against the reference.
     // Buffers are bounded so every draw stays cheap enough to also run under Miri.
     fn fuzz<T: Dtyped>() {
+        use proptest::prelude::*;
+        use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+
         let itemsize = T::DTYPE.itemsize() as usize;
-        let mut rng = fastrand::Rng::with_seed(0xC0FF_EE12_3456_789A ^ itemsize as u64);
-        for _ in 0..64 {
-            let ndim = rng.usize(0..=6);
-            let shape: Vec<usize> = (0..ndim).map(|_| rng.usize(1..=3)).collect();
-            let src_mult: Vec<usize> = (0..ndim).map(|_| rng.usize(1..=3)).collect();
-            let dst_mult: Vec<usize> = (0..ndim).map(|_| rng.usize(1..=3)).collect();
-            let src_strides = strided_strides(&shape, &src_mult, itemsize);
-            let dst_strides = strided_strides(&shape, &dst_mult, itemsize);
-            if buf_len(&shape, &src_strides, itemsize).max(buf_len(&shape, &dst_strides, itemsize))
-                > 8 * 1024
-            {
-                continue;
-            }
-            let misalign = rng.usize(0..=1);
-            check::<T>(&shape, &src_strides, &dst_strides, misalign);
-        }
+        let strategy = (0usize..=6).prop_flat_map(|ndim| {
+            (
+                prop::collection::vec(1usize..=3, ndim),
+                prop::collection::vec(1usize..=3, ndim),
+                prop::collection::vec(1usize..=3, ndim),
+                0usize..=1,
+            )
+        });
+        let mut seed = [0u8; 32];
+        seed[..8].copy_from_slice(&(0xC0FF_EE12_3456_789A_u64 ^ itemsize as u64).to_le_bytes());
+        let mut runner = TestRunner::new_with_rng(
+            Config {
+                cases: 64,
+                ..Config::default()
+            },
+            TestRng::from_seed(RngAlgorithm::ChaCha, &seed),
+        );
+        runner
+            .run(&strategy, |(shape, src_mult, dst_mult, misalign)| {
+                let src_strides = strided_strides(&shape, &src_mult, itemsize);
+                let dst_strides = strided_strides(&shape, &dst_mult, itemsize);
+                if buf_len(&shape, &src_strides, itemsize).max(buf_len(
+                    &shape,
+                    &dst_strides,
+                    itemsize,
+                )) > 8 * 1024
+                {
+                    return Ok(());
+                }
+                check::<T>(&shape, &src_strides, &dst_strides, misalign);
+                Ok(())
+            })
+            .unwrap();
     }
 
     // Generates one `copy_<name>` test per dtype, each running the full rank/layout/alignment

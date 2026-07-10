@@ -243,9 +243,7 @@ pub trait ReadData<T> {
             let mut offset = 0;
             while offset + LANES <= nitems {
                 let chunk = data.read_bulk::<LANES>(offset);
-                for i in 0..LANES {
-                    buf[offset + i] = chunk[i];
-                }
+                buf[offset..LANES + offset].copy_from_slice(&chunk);
                 offset += LANES;
             }
             while offset < nitems {

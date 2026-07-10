@@ -27,6 +27,7 @@ impl ReadSize {
     }
 
     /// The range expressed in element counts for `itemsize`, each floored at 1.
+    #[inline]
     pub(crate) fn nitems(self, itemsize: Itemsize) -> (u64, u64) {
         debug_assert!(itemsize > 0, "itemsize must be non-zero");
         let itemsize = itemsize as u64;

@@ -127,10 +127,10 @@ pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
     if actual != expected {
         #[inline(never)]
         fn fail_check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
-            return Err(crate::Error::new(
+            Err(crate::Error::new(
                 crate::ErrorKind::UnsupportedDtype,
                 format!("expected dtype {expected} but got {actual}"),
-            ));
+            ))
         }
         return fail_check_dtype(actual, expected);
     }
