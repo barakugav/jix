@@ -1,4 +1,5 @@
 use super::byte_shuffle::ByteShuffleFilter;
+use crate::array_from_fn_inline;
 use crate::codec::filter::FilterImpl;
 use crate::codec::TmpBufferPool;
 use crate::dtype::Dtype;
@@ -213,7 +214,7 @@ fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     for b in 0..typesize {
         for g in 0..n_per_plane {
             let src_off = b * n_full + g * 8;
-            let group: [u8; 8] = std::array::from_fn(|k| src[src_off + k]);
+            let group: [u8; 8] = array_from_fn_inline(|k| src[src_off + k]);
 
             // Bit-matrix transpose of the 8 bytes viewed as an 8*8 bit square.
             let transposed = transpose8x8(group);
@@ -287,7 +288,7 @@ fn untrans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) 
         for g in 0..n_per_plane {
             // Gather: one byte from each of 8 bit-plane regions.
             let transposed: [u8; 8] =
-                std::array::from_fn(|k| src[k * bit_row_skip + b * n_per_plane + g]);
+                array_from_fn_inline(|k| src[k * bit_row_skip + b * n_per_plane + g]);
 
             // Self-inverse bit transpose: applying it a second time recovers
             // the original element-major 8-byte group.

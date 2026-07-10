@@ -51,7 +51,7 @@ use crate::dtype::Dtyped;
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
-use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
+use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core;
 
@@ -243,7 +243,9 @@ pub trait ReadData<T> {
             let mut offset = 0;
             while offset + LANES <= nitems {
                 let chunk = data.read_bulk::<LANES>(offset);
-                buf[offset..offset + LANES].copy_from_slice(&chunk);
+                for i in 0..LANES {
+                    buf[offset + i] = chunk[i];
+                }
                 offset += LANES;
             }
             while offset < nitems {
@@ -292,7 +294,7 @@ where
         {
             #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [U; N] {
-                self.inner.read_bulk::<N>(offset).map(&mut self.f)
+                self.inner.read_bulk::<N>(offset).map_inline(&mut self.f)
             }
             #[inline(always)]
             fn len(&self) -> usize {
@@ -329,7 +331,7 @@ where
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [(T, U); N] {
                 let left = self.left.read_bulk::<N>(offset);
                 let right = self.right.read_bulk::<N>(offset);
-                std::array::from_fn(|i| (left[i], right[i]))
+                array_from_fn_inline(|i| (left[i], right[i]))
             }
             #[inline(always)]
             fn len(&self) -> usize {

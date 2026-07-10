@@ -5,8 +5,8 @@ use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
 use crate::storage::{ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
 use crate::{
-    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, ReadContext,
-    ReadDataTuple, Ty,
+    array_from_fn_inline, Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped,
+    ArrayStorage, ReadContext, ReadDataTuple, Ty,
 };
 
 impl<S> Array<S>
@@ -324,7 +324,7 @@ where
             #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [O; N] {
                 let mut data_itr = self.data.read_bulk_as_iter::<N>(offset);
-                std::array::from_fn(|_| (self.f)(data_itr.next().unwrap()))
+                array_from_fn_inline(|_| (self.f)(data_itr.next().unwrap()))
             }
         }
         ReadDataImpl {

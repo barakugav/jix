@@ -9,6 +9,9 @@ pub(crate) mod cpu_cache;
 
 pub(crate) mod iter;
 
+mod arr_ext;
+pub(crate) use arr_ext::*;
+
 mod nd_copy;
 pub(crate) use nd_copy::*;
 
@@ -500,26 +503,6 @@ pub(crate) fn calc_block_end(begin: u64, end: u64, block_size: u64) -> u64 {
         end / block_size
     } else {
         end.div_ceil(block_size)
-    }
-}
-
-pub(crate) trait ArrayExt<T, const N: usize> {
-    fn try_map_<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
-    where
-        Self: Sized;
-}
-impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
-    #[inline]
-    fn try_map_<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
-    where
-        Self: Sized,
-    {
-        let res = self.map(f);
-        if res.iter().all(|r| r.is_ok()) {
-            Ok(res.map(|items| unsafe { items.unwrap_unchecked() }))
-        } else {
-            Err(res.into_iter().filter_map(|r| r.err()).next().unwrap())
-        }
     }
 }
 

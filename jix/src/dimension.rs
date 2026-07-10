@@ -352,12 +352,13 @@ macro_rules! impl_dim {
 
             #[inline(always)]
             fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T> {
+                // TODO
                 assert_eq!(
                     ndim, $dim,
                     "cannot create Dim<{}> with ndim {ndim}",
                     $dim
                 );
-                std::array::from_fn(f)
+                crate::array_from_fn_inline(f)
             }
         }
         impl Index<usize> for Dim<$dim> {
@@ -557,12 +558,7 @@ macro_rules! impl_into_dimension_ndarray {
 
             #[inline(always)]
             fn into_dimension(self) -> Result<Self::Dimension> {
-                let mut arr = [0u64; $n];
-                #[allow(clippy::reversed_empty_ranges)]
-                for i in 0..$n {
-                    arr[i] = self[i] as u64;
-                }
-                Ok(Dim::from_array(arr))
+                Ok(Dim::from_fn($n, |i| self[i] as u64))
             }
         }
     };

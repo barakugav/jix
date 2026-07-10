@@ -23,7 +23,7 @@ pub(crate) trait Op2Kernel<T1, T2> {
     // #[inline(always)]
     // fn apply_bulk<const N: usize>(&self, a: [T1; N], b: [T2; N]) -> [Self::Output; N] {
     //     let mut iter = a.into_iter().zip(b);
-    //     std::array::from_fn(|_| {
+    //     array_from_fn_inline(|_| {
     //         let (a, b) = iter.next().unwrap();
     //         self.apply(a, b)
     //     })
