@@ -170,8 +170,9 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
         let n_continuous_dims = (0..ndim)
             .rev()
             .scan(size_of::<T>(), |expected_stride, dim| {
-                let is_contiguous =
-                    src_strides[dim] == *expected_stride && dst_strides[dim] == *expected_stride;
+                let is_contiguous = shape[dim] <= 1
+                    || (src_strides[dim] == *expected_stride
+                        && dst_strides[dim] == *expected_stride);
                 *expected_stride *= shape[dim];
                 Some(is_contiguous)
             })
@@ -764,6 +765,41 @@ mod tests {
         #[cfg(feature = "half")] f16: crate::scalar::f16,              // (2, 2) -> u16
         #[cfg(feature = "num-complex")] complex_f32: crate::scalar::Complex<f32>, // (8, 4) -> [u32; 2]
         #[cfg(feature = "num-complex")] complex_f64: crate::scalar::Complex<f64>, // (16, 8) -> [u64; 2]
+    }
+
+    // Unit (size-1) axes: iterated once at index 0, so their stride never contributes an offset.
+    // The coalescing scan treats them as contiguous regardless of the stride stored for them, so an
+    // axis carrying a broadcast-style `0` or an otherwise non-matching stride no longer stops
+    // neighboring axes from merging. Each layout below gives a unit axis a stride that would halt
+    // the pre-change scan (`0` and an arbitrary `5*is`/`7*is`/`3*is`, none equal to the contiguous
+    // value), and asserts the copy still matches the layout-agnostic reference - both when the
+    // surrounding axes fully coalesce to the 1D fast path and when the outer axis stays strided.
+    #[test]
+    fn copy_unit_axis() {
+        let is = size_of::<u32>();
+        for unit_stride in [0, 5 * is] {
+            // Contiguous either side of the interior unit axis -> one 32-element run (fast path).
+            check::<u32, DimDyn>(
+                &[4, 1, 8],
+                &[8 * is, unit_stride, is],
+                &[8 * is, unit_stride, is],
+                0,
+            );
+            // Strided outer axis (2x gap) -> unit axis folds out, leaving the 1D strided path.
+            check::<u32, DimDyn>(
+                &[4, 1, 8],
+                &[16 * is, unit_stride, is],
+                &[16 * is, unit_stride, is],
+                0,
+            );
+        }
+        // Leading and trailing unit axes with arbitrary strides, contiguous elsewhere.
+        check::<u32, DimDyn>(&[1, 4, 8], &[7 * is, 8 * is, is], &[7 * is, 8 * is, is], 0);
+        check::<u32, DimDyn>(&[4, 8, 1], &[8 * is, is, 3 * is], &[8 * is, is, 3 * is], 0);
+        // A misaligned base drives the unaligned path; `u64` covers a wider specialization.
+        check::<u32, DimDyn>(&[4, 1, 8], &[8 * is, 0, is], &[8 * is, 0, is], 1);
+        let js = size_of::<u64>();
+        check::<u64, DimDyn>(&[4, 1, 8], &[8 * js, 0, js], &[8 * js, 0, js], 0);
     }
 
     // Struct dtype (the `copy_struct` field-by-field route) and non-scalar array dtypes (the
