@@ -225,21 +225,66 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
                 64 if size_of::<T>() <= 4 => {
                     Self::copy_1d::<T, 64>(src, dst, len, src_stride, dst_stride, aligned)
                 }
-                _ => {
-                    if aligned {
-                        for i in 0..len {
-                            let src = src.add(i * src_stride).cast::<T>();
-                            let dst = dst.add(i * dst_stride).cast::<T>();
-                            std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
-                        }
-                    } else {
-                        let n_continuous_bytes = size_of::<T>() * n_continuous_items;
-                        for i in 0..len {
-                            let src = src.add(i * src_stride);
-                            let dst = dst.add(i * dst_stride);
-                            std::ptr::copy_nonoverlapping::<u8>(src, dst, n_continuous_bytes);
-                        }
+                _ => Self::copy_1d_unsized::<T>(
+                    src,
+                    dst,
+                    len,
+                    src_stride,
+                    dst_stride,
+                    n_continuous_items,
+                    aligned,
+                ),
+            }
+        }
+    }
+
+    #[inline(never)]
+    unsafe fn copy_1d_unsized<T: Copy>(
+        src: *const u8,
+        dst: *mut u8,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        n_continuous_items: usize,
+        aligned: bool,
+    ) {
+        unsafe {
+            if aligned {
+                let src_continuous = len <= 1 || src_stride == size_of::<T>() * n_continuous_items;
+                let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * n_continuous_items;
+                if src_continuous && dst_continuous {
+                    std::ptr::copy_nonoverlapping::<T>(
+                        src.cast::<T>(),
+                        dst.cast::<T>(),
+                        len * n_continuous_items,
+                    );
+                } else if src_continuous {
+                    let src = src.cast::<T>();
+                    for i in 0..len {
+                        let src = src.add(i * n_continuous_items);
+                        let dst = dst.add(i * dst_stride).cast::<T>();
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
                     }
+                } else if dst_continuous {
+                    let dst = dst.cast::<T>();
+                    for i in 0..len {
+                        let src = src.add(i * src_stride).cast::<T>();
+                        let dst = dst.add(i * n_continuous_items);
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                    }
+                } else {
+                    for i in 0..len {
+                        let src = src.add(i * src_stride).cast::<T>();
+                        let dst = dst.add(i * dst_stride).cast::<T>();
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                    }
+                }
+            } else {
+                let n_continuous_bytes = size_of::<T>() * n_continuous_items;
+                for i in 0..len {
+                    let src = src.add(i * src_stride);
+                    let dst = dst.add(i * dst_stride);
+                    std::ptr::copy_nonoverlapping::<u8>(src, dst, n_continuous_bytes);
                 }
             }
         }
@@ -272,11 +317,41 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
         src_stride: usize,
         dst_stride: usize,
     ) {
-        for i in 0..len {
+        let src_continuous = len <= 1 || src_stride == size_of::<T>() * N_CONTINUOUS;
+        let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * N_CONTINUOUS;
+        if src_continuous && dst_continuous {
             unsafe {
-                let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
-                let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
-                dst.write(src.read());
+                std::ptr::copy_nonoverlapping::<[T; N_CONTINUOUS]>(
+                    src.cast::<[T; N_CONTINUOUS]>(),
+                    dst.cast::<[T; N_CONTINUOUS]>(),
+                    len,
+                )
+            };
+        } else if src_continuous {
+            let src = src.cast::<[T; N_CONTINUOUS]>();
+            for i in 0..len {
+                unsafe {
+                    let src = src.add(i);
+                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                    dst.write(src.read());
+                }
+            }
+        } else if dst_continuous {
+            let dst = dst.cast::<[T; N_CONTINUOUS]>();
+            for i in 0..len {
+                unsafe {
+                    let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
+                    let dst = dst.add(i);
+                    dst.write(src.read());
+                }
+            }
+        } else {
+            for i in 0..len {
+                unsafe {
+                    let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
+                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                    dst.write(src.read());
+                }
             }
         }
     }
@@ -288,11 +363,43 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
         src_stride: usize,
         dst_stride: usize,
     ) {
-        for i in 0..len {
-            unsafe {
-                let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
-                let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
-                dst.write_unaligned(src.read_unaligned());
+        let src_continuous = len <= 1 || src_stride == size_of::<T>() * N_CONTINUOUS;
+        let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * N_CONTINUOUS;
+        if src_continuous && dst_continuous {
+            let src = src.cast::<[T; N_CONTINUOUS]>();
+            let dst = dst.cast::<[T; N_CONTINUOUS]>();
+            for i in 0..len {
+                unsafe {
+                    let src = src.add(i);
+                    let dst = dst.add(i);
+                    dst.write_unaligned(src.read_unaligned());
+                }
+            }
+        } else if src_continuous {
+            let src = src.cast::<[T; N_CONTINUOUS]>();
+            for i in 0..len {
+                unsafe {
+                    let src = src.add(i);
+                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                    dst.write_unaligned(src.read_unaligned());
+                }
+            }
+        } else if dst_continuous {
+            let dst = dst.cast::<[T; N_CONTINUOUS]>();
+            for i in 0..len {
+                unsafe {
+                    let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
+                    let dst = dst.add(i);
+                    dst.write_unaligned(src.read_unaligned());
+                }
+            }
+        } else {
+            for i in 0..len {
+                unsafe {
+                    let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
+                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                    dst.write_unaligned(src.read_unaligned());
+                }
             }
         }
     }
@@ -800,6 +907,52 @@ mod tests {
         check::<u32, DimDyn>(&[4, 1, 8], &[8 * is, 0, is], &[8 * is, 0, is], 1);
         let js = size_of::<u64>();
         check::<u64, DimDyn>(&[4, 1, 8], &[8 * js, 0, js], &[8 * js, 0, js], 0);
+    }
+
+    // The aligned 1D copy special-cases per-side contiguity: an outer axis that survives coalescing
+    // with its byte stride still equal to the inner run's length is "contiguous" and gets indexed as
+    // consecutive `[T; N]` blocks - a single `copy_nonoverlapping` when both sides are, a simplified
+    // loop when only one is, the fully general loop otherwise. Coalescing folds an axis only when
+    // *both* strides match, so at most one side can reach this path contiguous with `len > 1` (a
+    // both-contiguous outer axis would already have been folded away, collapsing to `len == 1`).
+    // These 2-D layouts fold the inner 8-run and give the outer 4-axis a contiguous or 2x-strided
+    // byte stride independently per side, pinning each of the four arms.
+    #[test]
+    fn copy_1d_aligned_sides() {
+        let is = size_of::<u32>();
+        let cont = [8 * is, is]; // outer stride == inner run length -> that side is contiguous
+        let strided = [16 * is, is]; // outer 2x gap -> that side is strided
+        check::<u32, DimDyn>(&[4, 8], &cont, &cont, 0); // both contiguous (copy_nonoverlapping)
+        check::<u32, DimDyn>(&[4, 8], &cont, &strided, 0); // src contiguous, dst strided
+        check::<u32, DimDyn>(&[4, 8], &strided, &cont, 0); // src strided, dst contiguous
+        check::<u32, DimDyn>(&[4, 8], &strided, &strided, 0); // both strided (general loop)
+
+        // A wider element type exercises a different `[T; N]` block copy.
+        let js = size_of::<u64>();
+        check::<u64, DimDyn>(&[4, 8], &[8 * js, js], &[16 * js, js], 0);
+    }
+
+    // The unsized 1D fallback (`copy_1d_unsized`, taken when the coalesced run length is not one of
+    // the power-of-two `copy_1d` arms) mirrors the same per-side contiguity split, but copies a
+    // runtime count of elements: one `copy_nonoverlapping` of `len * n` when both sides are
+    // contiguous, a per-row `copy_nonoverlapping` of `n` when one side is, the general strided loop
+    // otherwise, and a byte-wise loop when unaligned. A contiguous inner run of 3 gives `n = 3` (not
+    // a power of two, so the fallback), and the outer 4-axis gets a contiguous or 2x-strided byte
+    // stride independently per side to pin each aligned arm; `misalign = 1` drives the unaligned arm.
+    #[test]
+    fn copy_1d_unsized_sides() {
+        let is = size_of::<u32>();
+        let cont = [3 * is, is]; // outer stride == inner run (3) -> that side is contiguous
+        let strided = [6 * is, is]; // outer 2x gap -> that side is strided
+        check::<u32, DimDyn>(&[4, 3], &cont, &cont, 0); // both contiguous (single bulk copy)
+        check::<u32, DimDyn>(&[4, 3], &cont, &strided, 0); // src contiguous, dst strided
+        check::<u32, DimDyn>(&[4, 3], &strided, &cont, 0); // src strided, dst contiguous
+        check::<u32, DimDyn>(&[4, 3], &strided, &strided, 0); // both strided (general loop)
+        check::<u32, DimDyn>(&[4, 3], &cont, &strided, 1); // unaligned byte-wise arm
+
+        // A wider element type exercises `copy_nonoverlapping::<T>` for a larger T.
+        let js = size_of::<u64>();
+        check::<u64, DimDyn>(&[4, 3], &[3 * js, js], &[6 * js, js], 0);
     }
 
     // Struct dtype (the `copy_struct` field-by-field route) and non-scalar array dtypes (the
