@@ -2,7 +2,7 @@ use crate::arrayvec::ArrayVec;
 use crate::dtype::{Dtype, Itemsize};
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::iter::NdIter;
-use crate::{DimArray, DimDyn, Dimension, SliceExt};
+use crate::{Dim, DimArray, DimDyn, Dimension, SliceExt};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// raw byte buffers under independent source and destination strides.
@@ -13,6 +13,7 @@ use crate::{DimArray, DimDyn, Dimension, SliceExt};
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
 /// walking `shape` with an [`NdIter`] and copying the appropriate number of bytes at each element.
 pub(crate) struct NdCopier<'a, D: Dimension>(NdCopierInner<'a, D>);
+// TODO: remove the D generic
 enum NdCopierInner<'a, D: Dimension> {
     Simple(NdCopyFn<D>),
     Struct(NdCopierStruct<'a, D>),
@@ -116,6 +117,9 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
         dst_strides: &D::Vec<usize>,
         dtype: &Dtype,
     ) {
+        if shape.as_ref().contains(&0) {
+            return;
+        }
         let args = NdCopyArgs {
             src,
             dst,
@@ -131,7 +135,7 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
     }
 
     #[inline]
-    fn create_scalar_fn(dtype: &Dtype) -> Option<fn(NdCopyArgs<D>)> {
+    const fn create_scalar_fn(dtype: &Dtype) -> Option<fn(NdCopyArgs<D>)> {
         Some(match (dtype.itemsize(), dtype.alignment().as_usize()) {
             (1, 1) => Self::scalar_fn::<u8>,
             (2, 2) => Self::scalar_fn::<u16>,
@@ -143,22 +147,24 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
         })
     }
 
-    fn scalar_fn<T: 'static>(args: NdCopyArgs<D>) {
+    fn scalar_fn<T: Copy + 'static>(args: NdCopyArgs<D>) {
         let NdCopyArgs {
             src,
             dst,
             shape,
-            src_strides,
+            src_strides, // TODO accept Option<>,
             dst_strides,
             dtype,
         } = args;
         debug_assert_eq!(size_of::<T>(), dtype.itemsize() as usize);
         debug_assert_eq!(align_of::<T>(), dtype.alignment().as_usize());
 
-        let shape = shape.as_ref();
+        let mut shape = shape.as_ref();
         let ndim = shape.len();
-        assert_eq!(ndim, src_strides.as_ref().len());
-        assert_eq!(ndim, dst_strides.as_ref().len());
+        let mut src_strides = src_strides.as_ref();
+        let mut dst_strides = dst_strides.as_ref();
+        assert!(ndim == src_strides.len() && ndim == dst_strides.len());
+        let mut n_continuous_items = 1;
 
         // copy more then itemsize if the last dim(s) is contiguous
         let n_continuous_dims = (0..ndim)
@@ -171,21 +177,246 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
             })
             .take_while(|&is_contiguous| is_contiguous)
             .count();
-        let itemsize = size_of::<T>() * shape[ndim - n_continuous_dims..].iter().product::<usize>();
-        let shape = &shape[..ndim - n_continuous_dims];
-        let src_strides = &src_strides[..ndim - n_continuous_dims];
-        let dst_strides = &dst_strides[..ndim - n_continuous_dims];
+        if n_continuous_dims > 0 {
+            let n_strided_dims = ndim - n_continuous_dims;
+            n_continuous_items = shape[n_strided_dims..].iter().product::<usize>();
+            shape = &shape[..n_strided_dims];
+            src_strides = &src_strides[..n_strided_dims];
+            dst_strides = &dst_strides[..n_strided_dims];
+        }
+        if shape.len() == 0 {
+            shape = &[1];
+            src_strides = &[0];
+            dst_strides = &[0];
+        }
 
-        let iter = NdIter::new(
-            shape.iter().map(|&s| s as u64).collect::<DimArray<_>>(),
-            (
-                NdIterExtStridesPtr::new(src_strides.to_dim_vec::<DimDyn>(), src),
-                NdIterExtStridesPtrMut::new(dst_strides.to_dim_vec::<DimDyn>(), dst),
-            ),
-        );
-        for (_, (src_ptr, dst_ptr)) in iter {
+        if shape.len() > 1 {
+            return unsafe {
+                Self::copy_nd::<T>(
+                    shape,
+                    src_strides,
+                    dst_strides,
+                    src,
+                    dst,
+                    n_continuous_items,
+                )
+            };
+        }
+        // 1D copy
+
+        let len = shape[0];
+        let src_stride = src_strides[0];
+        let dst_stride = dst_strides[0];
+
+        let aligned = (src.cast::<T>().is_aligned() && src_stride.is_multiple_of(align_of::<T>()))
+            && (dst.cast::<T>().is_aligned() && dst_stride.is_multiple_of(align_of::<T>()));
+
+        unsafe {
+            match n_continuous_items {
+                1 => Self::copy_1d::<T, 1>(src, dst, len, src_stride, dst_stride, aligned),
+                2 => Self::copy_1d::<T, 2>(src, dst, len, src_stride, dst_stride, aligned),
+                4 => Self::copy_1d::<T, 4>(src, dst, len, src_stride, dst_stride, aligned),
+                8 => Self::copy_1d::<T, 8>(src, dst, len, src_stride, dst_stride, aligned),
+                16 => Self::copy_1d::<T, 16>(src, dst, len, src_stride, dst_stride, aligned),
+                32 if size_of::<T>() <= 8 => {
+                    Self::copy_1d::<T, 32>(src, dst, len, src_stride, dst_stride, aligned)
+                }
+                64 if size_of::<T>() <= 4 => {
+                    Self::copy_1d::<T, 64>(src, dst, len, src_stride, dst_stride, aligned)
+                }
+                _ => {
+                    if aligned {
+                        for i in 0..len {
+                            let src = src.add(i * src_stride).cast::<T>();
+                            let dst = dst.add(i * dst_stride).cast::<T>();
+                            std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                        }
+                    } else {
+                        let n_continuous_bytes = size_of::<T>() * n_continuous_items;
+                        for i in 0..len {
+                            let src = src.add(i * src_stride);
+                            let dst = dst.add(i * dst_stride);
+                            std::ptr::copy_nonoverlapping::<u8>(src, dst, n_continuous_bytes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn copy_1d<T: Copy, const N_CONTINUOUS: usize>(
+        src: *const u8,
+        dst: *mut u8,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        aligned: bool,
+    ) {
+        if aligned {
             unsafe {
-                std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize);
+                Self::copy_1d_aligned::<T, N_CONTINUOUS>(src, dst, len, src_stride, dst_stride)
+            }
+        } else {
+            unsafe {
+                Self::copy_1d_unaligned::<T, N_CONTINUOUS>(src, dst, len, src_stride, dst_stride)
+            }
+        }
+    }
+    #[inline]
+    unsafe fn copy_1d_aligned<T: Copy, const N_CONTINUOUS: usize>(
+        src: *const u8,
+        dst: *mut u8,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+    ) {
+        for i in 0..len {
+            unsafe {
+                let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
+                let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                dst.write(src.read());
+            }
+        }
+    }
+    #[inline(never)]
+    unsafe fn copy_1d_unaligned<T: Copy, const N_CONTINUOUS: usize>(
+        src: *const u8,
+        dst: *mut u8,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+    ) {
+        for i in 0..len {
+            unsafe {
+                let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
+                let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                dst.write_unaligned(src.read_unaligned());
+            }
+        }
+    }
+
+    #[inline(never)]
+    unsafe fn copy_nd<T: Copy>(
+        shape: &[usize],
+        src_strides: &[usize],
+        dst_strides: &[usize],
+        src: *const u8,
+        dst: *mut u8,
+        n_continuous_items: usize,
+    ) {
+        unsafe fn copy_nd_inner<T: Copy, D: Dimension>(
+            shape: D::Vec<u64>,
+            src_strides: D::Vec<usize>,
+            dst_strides: D::Vec<usize>,
+            src: *const u8,
+            dst: *mut u8,
+            n_continuous_items: usize,
+            aligned: bool,
+        ) {
+            let iter = NdIter::new(
+                shape,
+                (
+                    NdIterExtStridesPtr::new(src_strides, src),
+                    NdIterExtStridesPtrMut::new(dst_strides, dst),
+                ),
+            );
+            if aligned {
+                for (_, (src_ptr, dst_ptr)) in iter {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping::<T>(
+                            src_ptr.cast::<T>(),
+                            dst_ptr.cast::<T>(),
+                            n_continuous_items,
+                        );
+                    }
+                }
+            } else {
+                let n_continuous_bytes = size_of::<T>() * n_continuous_items;
+                for (_, (src_ptr, dst_ptr)) in iter {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping::<u8>(src_ptr, dst_ptr, n_continuous_bytes);
+                    }
+                }
+            }
+        }
+
+        let aligned = (src.cast::<T>().is_aligned()
+            && src_strides
+                .iter()
+                .all(|s| s.is_multiple_of(align_of::<T>())))
+            && (dst.cast::<T>().is_aligned()
+                && dst_strides
+                    .iter()
+                    .all(|s| s.is_multiple_of(align_of::<T>())));
+
+        unsafe {
+            match shape.len() {
+                0 | 1 => unreachable!(),
+                2 => copy_nd_inner::<T, Dim<2>>(
+                    Dim::<2>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<2>>(),
+                    dst_strides.to_dim_vec::<Dim<2>>(),
+                    src,
+                    dst,
+                    n_continuous_items,
+                    aligned,
+                ),
+                3 => copy_nd_inner::<T, Dim<3>>(
+                    Dim::<3>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<3>>(),
+                    dst_strides.to_dim_vec::<Dim<3>>(),
+                    src,
+                    dst,
+                    n_continuous_items,
+                    aligned,
+                ),
+                4 => copy_nd_inner::<T, Dim<4>>(
+                    Dim::<4>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<4>>(),
+                    dst_strides.to_dim_vec::<Dim<4>>(),
+                    src,
+                    dst,
+                    n_continuous_items,
+                    aligned,
+                ),
+                5 => copy_nd_inner::<T, Dim<5>>(
+                    Dim::<5>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<5>>(),
+                    dst_strides.to_dim_vec::<Dim<5>>(),
+                    src,
+                    dst,
+                    n_continuous_items,
+                    aligned,
+                ),
+                6 => copy_nd_inner::<T, Dim<6>>(
+                    Dim::<6>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<6>>(),
+                    dst_strides.to_dim_vec::<Dim<6>>(),
+                    src,
+                    dst,
+                    n_continuous_items,
+                    aligned,
+                ),
+                7 => copy_nd_inner::<T, Dim<7>>(
+                    Dim::<7>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<7>>(),
+                    dst_strides.to_dim_vec::<Dim<7>>(),
+                    src,
+                    dst,
+                    n_continuous_items,
+                    aligned,
+                ),
+                8 => copy_nd_inner::<T, Dim<8>>(
+                    Dim::<8>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<8>>(),
+                    dst_strides.to_dim_vec::<Dim<8>>(),
+                    src,
+                    dst,
+                    n_continuous_items,
+                    aligned,
+                ),
+                _ => unimplemented!(),
             }
         }
     }
@@ -220,8 +451,7 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
 
         let shape = shape.as_ref();
         let ndim = shape.len();
-        assert_eq!(ndim, src_strides.as_ref().len());
-        assert_eq!(ndim, dst_strides.as_ref().len());
+        assert!(ndim == src_strides.as_ref().len() && ndim == dst_strides.as_ref().len());
         let itemsize = dtype.itemsize() as usize;
 
         // copy more then itemsize if the last dim(s) is contiguous
@@ -335,12 +565,57 @@ mod tests {
         dst
     }
 
-    // Run a single copy through `NdCopier<D>` for element type `T` and assert it
-    // byte-matches the independent reference.
+    // Owns a source/destination byte buffer for one copy and hands out a byte pointer into it.
+    //
+    // The aligned variant (`misalign == 0`) is a `Vec<T>`, whose allocation is aligned to
+    // `align_of::<T>()` - exactly the alignment the aligned copy path requires, since for every
+    // specialized `(itemsize, alignment)` case the read-type's alignment equals the dtype's and
+    // struct fields are read at no stricter alignment. The unaligned variant (`misalign == 1`) is a
+    // `Vec<u8>` positioned one byte past an aligned offset (a plain `Vec<u8>` has no useful
+    // alignment of its own, so we align within it first), forcing the unaligned path for every dtype
+    // whose alignment exceeds 1. Both are only ever touched as raw bytes, so no `T` value is needed
+    // and, since the `Vec<T>` stays `len == 0`, nothing is dropped.
+    enum TestBuf<T> {
+        Aligned(Vec<T>),
+        Unaligned(Vec<u8>),
+    }
+    impl<T> TestBuf<T> {
+        fn new(len: usize, misalign: usize) -> Self {
+            if misalign == 0 {
+                Self::Aligned(Vec::with_capacity(len.div_ceil(size_of::<T>()) + 1))
+            } else {
+                Self::Unaligned(vec![0u8; len + align_of::<T>() + 1])
+            }
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            match self {
+                Self::Aligned(v) => v.as_mut_ptr().cast::<u8>(),
+                Self::Unaligned(v) => {
+                    let base = v.as_mut_ptr();
+                    let pad = base.align_offset(align_of::<T>());
+                    assert_ne!(pad, usize::MAX, "cannot align within the buffer");
+                    // SAFETY: `pad < align_of::<T>()` and the buffer was sized with that much
+                    // headroom plus one byte for the misalignment shift, so this stays in bounds.
+                    unsafe { base.add(pad + 1) }
+                }
+            }
+        }
+    }
+
+    // A `strided_strides` multiplier vector that leaves a one-element gap only along axis `ax`
+    // (all ones - fully contiguous - when `ax` is out of range, e.g. for a 0-D shape).
+    fn strided_axis(ndim: usize, ax: usize) -> Vec<usize> {
+        (0..ndim).map(|d| if d == ax { 2 } else { 1 }).collect()
+    }
+
+    // Run a single copy through `NdCopier<D>` for element type `T` at a chosen base alignment
+    // (`misalign == 0` aligned, `misalign == 1` deliberately misaligned) and assert it byte-matches
+    // the independent reference.
     fn check<T: Dtyped, D: Dimension>(
         shape: &[usize],
         src_strides: &[usize],
         dst_strides: &[usize],
+        misalign: usize,
     ) {
         let dtype = T::DTYPE;
         let itemsize = dtype.itemsize() as usize;
@@ -350,145 +625,155 @@ mod tests {
         let src_len = buf_len(shape, src_strides, itemsize);
         let dst_len = buf_len(shape, dst_strides, itemsize);
 
-        let mut src = vec![0u8; src_len];
-        for (i, b) in src.iter_mut().enumerate() {
-            *b = (i as u8).wrapping_mul(37).wrapping_add(11);
+        let mut src_buf = TestBuf::<T>::new(src_len, misalign);
+        let mut dst_buf = TestBuf::<T>::new(dst_len, misalign);
+        let src_ptr = src_buf.ptr();
+        let dst_ptr = dst_buf.ptr();
+
+        // Fill the source with a deterministic byte pattern; zero the destination so that gaps the
+        // copy never writes match the reference's zero-filled gaps. Both go through raw bytes, so
+        // the aligned `Vec<T>`'s uninitialized capacity is only ever accessed as bytes, never `T`.
+        for i in 0..src_len {
+            unsafe {
+                src_ptr
+                    .add(i)
+                    .write((i as u8).wrapping_mul(37).wrapping_add(11))
+            };
         }
+        unsafe { dst_ptr.write_bytes(0, dst_len) };
 
-        let expected = reference_copy(&src, dst_len, shape, src_strides, dst_strides, itemsize);
+        let src = unsafe { std::slice::from_raw_parts(src_ptr, src_len) };
+        let expected = reference_copy(src, dst_len, shape, src_strides, dst_strides, itemsize);
 
-        let mut actual = vec![0u8; dst_len];
         let copier = NdCopier::<D>::new(&dtype);
         let shape_v = D::vec(shape.len(), |i| shape[i]);
         let src_v = D::vec(shape.len(), |i| src_strides[i]);
         let dst_v = D::vec(shape.len(), |i| dst_strides[i]);
         unsafe {
-            copier.copy(
-                src.as_ptr(),
-                actual.as_mut_ptr(),
-                &shape_v,
-                &src_v,
-                &dst_v,
-                &dtype,
-            );
+            copier.copy(src_ptr, dst_ptr, &shape_v, &src_v, &dst_v, &dtype);
         }
 
+        let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };
         assert_eq!(
-            actual, expected,
-            "itemsize={itemsize} shape={shape:?} src_strides={src_strides:?} dst_strides={dst_strides:?}"
+            actual,
+            expected.as_slice(),
+            "itemsize={itemsize} misalign={misalign} shape={shape:?} \
+             src_strides={src_strides:?} dst_strides={dst_strides:?}"
         );
     }
 
-    // For a fixed (element type, dimension type, shape), exercise the four
-    // contiguous/strided combinations of source and destination.
-    fn check_layouts<T: Dtyped, D: Dimension>(shape: &[usize]) {
+    // For a fixed (element type, dimension type, shape), exercise a small but representative set of
+    // source/destination layouts, each at an aligned and a deliberately misaligned base:
+    //   - contiguous/contiguous: fully coalesces into a single run;
+    //   - strided-outer/contiguous: inner axes coalesce, driving the 1D fast path;
+    //   - strided-inner/strided-inner: nothing coalesces, driving the byte-wise `copy_nd` iterator.
+    // Gaps stay on a single axis, so buffers never exceed twice the contiguous size - small enough
+    // to run the whole matrix under Miri with no special-casing.
+    fn check_rank<T: Dtyped, D: Dimension>(shape: &[usize]) {
         let itemsize = T::DTYPE.itemsize() as usize;
         let ndim = shape.len();
-        let ones = vec![1usize; ndim];
-        let mult_a: Vec<usize> = (0..ndim).map(|d| if d % 2 == 0 { 2 } else { 1 }).collect();
-        let mult_b: Vec<usize> = (0..ndim).map(|d| d + 2).collect();
-        let cont = strided_strides(shape, &ones, itemsize);
-        let src_strided = strided_strides(shape, &mult_a, itemsize);
-        let dst_strided = strided_strides(shape, &mult_b, itemsize);
-
-        check::<T, D>(shape, &cont, &cont); // contiguous src + dst (fully coalesced)
-        check::<T, D>(shape, &src_strided, &cont); // strided src, contiguous dst
-        check::<T, D>(shape, &cont, &dst_strided); // contiguous src, strided dst
-        check::<T, D>(shape, &src_strided, &dst_strided); // strided src + dst
+        let cont = strided_strides(shape, &vec![1; ndim], itemsize);
+        let outer = strided_strides(shape, &strided_axis(ndim, 0), itemsize);
+        let inner = strided_strides(shape, &strided_axis(ndim, ndim.wrapping_sub(1)), itemsize);
+        for (src, dst) in [(&cont, &cont), (&outer, &cont), (&inner, &inner)] {
+            for misalign in [0, 1] {
+                check::<T, D>(shape, src, dst, misalign);
+            }
+        }
     }
 
-    // The full dimensionality matrix (0D, 1D, 2D, 3D, 4D, and the same shapes as
-    // `DimDyn`) for one element type, each with contiguous and strided layouts.
+    // Ranks 0 through 8 (the maximum supported) for one element type. Every rank runs with runtime
+    // `DimDyn` dims, which drives each `copy_nd` rank arm; a few ranks also run with static `Dim<N>`
+    // dims to exercise those containers. Then a contiguous inner run of length K behind a strided
+    // outer axis (which coalesces to `n_continuous == K`) drives each specialized `copy_1d` arm
+    // (K in 1/2/4/8/16/32/64, subject to the size guards) plus the `_` fallback (K = 3) - the exact
+    // shape that regressed when `N_CONTINUOUS` was misused as an outer-loop unroll factor.
     fn check_all_dims<T: Dtyped>() {
-        check_layouts::<T, Dim<0>>(&[]);
-        check_layouts::<T, DimDyn>(&[]);
+        check_rank::<T, DimDyn>(&[]);
+        check_rank::<T, DimDyn>(&[7]);
+        check_rank::<T, DimDyn>(&[3, 4]);
+        check_rank::<T, DimDyn>(&[2, 3, 4]);
+        check_rank::<T, DimDyn>(&[2, 2, 3, 3]);
+        check_rank::<T, DimDyn>(&[2, 2, 2, 3, 3]);
+        check_rank::<T, DimDyn>(&[2, 2, 2, 2, 3, 3]);
+        check_rank::<T, DimDyn>(&[2, 2, 2, 2, 2, 2, 3]);
+        check_rank::<T, DimDyn>(&[2, 2, 2, 2, 2, 2, 2, 2]);
 
-        check_layouts::<T, Dim<1>>(&[7]);
-        check_layouts::<T, DimDyn>(&[7]);
+        check_rank::<T, Dim<0>>(&[]);
+        check_rank::<T, Dim<4>>(&[2, 2, 3, 3]);
+        check_rank::<T, Dim<8>>(&[2, 2, 2, 2, 2, 2, 2, 2]);
 
-        check_layouts::<T, Dim<2>>(&[3, 4]);
-        check_layouts::<T, DimDyn>(&[3, 4]);
-
-        check_layouts::<T, Dim<3>>(&[2, 3, 4]);
-        check_layouts::<T, DimDyn>(&[2, 3, 4]);
-
-        check_layouts::<T, Dim<4>>(&[2, 2, 3, 3]);
-        check_layouts::<T, DimDyn>(&[2, 2, 3, 3]);
-    }
-
-    // ---- Scalar element types (the specialized `scalar_fn` paths) ----
-    // (1, 1) -> u8: i8, u8, bool. (2, 2) -> u16: i16, u16, f16.
-    // (4, 4) -> u32: i32, u32, f32. (8, 8) -> u64: i64, u64, f64.
-
-    #[test]
-    fn copy_i8() {
-        check_all_dims::<i8>();
-    }
-    #[test]
-    fn copy_u8() {
-        check_all_dims::<u8>();
-    }
-    #[test]
-    fn copy_bool() {
-        check_all_dims::<bool>();
-    }
-    #[test]
-    fn copy_i16() {
-        check_all_dims::<i16>();
-    }
-    #[test]
-    fn copy_u16() {
-        check_all_dims::<u16>();
-    }
-    #[test]
-    fn copy_i32() {
-        check_all_dims::<i32>();
-    }
-    #[test]
-    fn copy_u32() {
-        check_all_dims::<u32>();
-    }
-    #[test]
-    fn copy_f32() {
-        check_all_dims::<f32>();
-    }
-    #[test]
-    fn copy_i64() {
-        check_all_dims::<i64>();
-    }
-    #[test]
-    fn copy_u64() {
-        check_all_dims::<u64>();
-    }
-    #[test]
-    fn copy_f64() {
-        check_all_dims::<f64>();
+        for k in [1, 2, 3, 4, 8, 16, 32, 64] {
+            check_rank::<T, Dim<2>>(&[3, k]);
+        }
     }
 
-    #[cfg(feature = "half")]
-    #[test]
-    fn copy_f16() {
-        check_all_dims::<crate::scalar::f16>();
+    // Zero-length dimensions: the copy is a no-op (the empty-region guard in `copy` fires before
+    // any element or struct-field pointer is computed), so the zeroed destination must stay zeroed.
+    fn check_zero_extent<T: Dtyped>() {
+        let itemsize = T::DTYPE.itemsize() as usize;
+        for shape in [vec![0usize], vec![3, 0], vec![2, 0, 4]] {
+            let strides = strided_strides(&shape, &vec![1; shape.len()], itemsize);
+            for misalign in [0, 1] {
+                check::<T, DimDyn>(&shape, &strides, &strides, misalign);
+            }
+        }
     }
 
-    // Complex hits the two (itemsize, alignment) cases no other scalar reaches:
-    // Complex<f32> -> (8, 4) via [u32; 2]; Complex<f64> -> (16, 8) via [u64; 2].
-    #[cfg(feature = "num-complex")]
-    #[test]
-    fn copy_complex_f32() {
-        check_all_dims::<crate::scalar::Complex<f32>>();
-    }
-    #[cfg(feature = "num-complex")]
-    #[test]
-    fn copy_complex_f64() {
-        check_all_dims::<crate::scalar::Complex<f64>>();
+    // Randomized coverage via `fastrand`: deterministic per element type (seeded from the itemsize),
+    // exploring random ranks, extents, per-axis strides and base alignment against the reference.
+    // Buffers are bounded so every draw stays cheap enough to also run under Miri.
+    fn fuzz<T: Dtyped>() {
+        let itemsize = T::DTYPE.itemsize() as usize;
+        let mut rng = fastrand::Rng::with_seed(0xC0FF_EE12_3456_789A ^ itemsize as u64);
+        for _ in 0..64 {
+            let ndim = rng.usize(0..=6);
+            let shape: Vec<usize> = (0..ndim).map(|_| rng.usize(1..=3)).collect();
+            let src_mult: Vec<usize> = (0..ndim).map(|_| rng.usize(1..=3)).collect();
+            let dst_mult: Vec<usize> = (0..ndim).map(|_| rng.usize(1..=3)).collect();
+            let src_strides = strided_strides(&shape, &src_mult, itemsize);
+            let dst_strides = strided_strides(&shape, &dst_mult, itemsize);
+            if buf_len(&shape, &src_strides, itemsize).max(buf_len(&shape, &dst_strides, itemsize))
+                > 8 * 1024
+            {
+                continue;
+            }
+            let misalign = rng.usize(0..=1);
+            check::<T, DimDyn>(&shape, &src_strides, &dst_strides, misalign);
+        }
     }
 
-    // ---- Non-scalar dtypes: the `copy_dynamic` fallback ----
-    // Array-of-scalar dtypes carry an inner shape, so they miss every specialized
-    // (itemsize, alignment) case and are not decomposed as structs either. `[i32; 3]`
-    // gives itemsize 12; `[u8; 3]` gives an odd itemsize (3) with no power-of-two run.
+    // Generates one `copy_<name>` test per dtype, each running the full rank/layout/alignment
+    // matrix. One dtype is tested per distinct `scalar_fn` specialization - dtypes that share a
+    // byte layout (e.g. `i32`/`f32` both hit the `u32` path) would exercise identical copy code.
+    macro_rules! copy_tests {
+        ( $( $(#[$m:meta])* $name:ident : $ty:ty ),* $(,)? ) => {
+            $( paste::paste! {
+                $(#[$m])*
+                #[test]
+                fn [<copy_ $name>]() { check_all_dims::<$ty>(); }
+            } )*
+        };
+    }
 
+    copy_tests! {
+        u8: u8,                                                        // (1, 1) -> u8
+        u16: u16,                                                      // (2, 2) -> u16
+        u32: u32,                                                      // (4, 4) -> u32
+        u64: u64,                                                      // (8, 8) -> u64
+        #[cfg(feature = "half")] f16: crate::scalar::f16,              // (2, 2) -> u16
+        #[cfg(feature = "num-complex")] complex_f32: crate::scalar::Complex<f32>, // (8, 4) -> [u32; 2]
+        #[cfg(feature = "num-complex")] complex_f64: crate::scalar::Complex<f64>, // (16, 8) -> [u64; 2]
+    }
+
+    // Struct dtype (the `copy_struct` field-by-field route) and non-scalar array dtypes (the
+    // `copy_dynamic` byte-wise fallback): array-of-scalar dtypes carry an inner shape, so they miss
+    // every specialized `(itemsize, alignment)` case and are not decomposed as structs - `[i32; 3]`
+    // gives itemsize 12, `[u8; 3]` an odd itemsize (3) with no power-of-two run.
+    #[test]
+    fn copy_struct() {
+        check_all_dims::<StructNoPad>();
+    }
     #[test]
     fn copy_dynamic_itemsize_12() {
         check_all_dims::<[i32; 3]>();
@@ -498,10 +783,25 @@ mod tests {
         check_all_dims::<[u8; 3]>();
     }
 
-    // ---- Struct dtype: the `copy_struct` path ----
-
+    // Zero-length dimensions across the scalar, struct and dynamic dispatch routes.
     #[test]
-    fn copy_struct() {
-        check_all_dims::<StructNoPad>();
+    fn copy_zero_extent() {
+        check_zero_extent::<u8>();
+        check_zero_extent::<u64>();
+        #[cfg(feature = "num-complex")]
+        check_zero_extent::<crate::scalar::Complex<f64>>();
+        check_zero_extent::<StructNoPad>();
+        check_zero_extent::<[u8; 3]>();
+    }
+
+    // Randomized fuzzing over one dtype per dispatch route (scalar, struct, byte-wise fallback).
+    #[test]
+    fn fuzz_random() {
+        fuzz::<u32>();
+        fuzz::<u64>();
+        #[cfg(feature = "num-complex")]
+        fuzz::<crate::scalar::Complex<f64>>();
+        fuzz::<StructNoPad>();
+        fuzz::<[u8; 3]>();
     }
 }
