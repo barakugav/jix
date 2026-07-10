@@ -2,7 +2,7 @@ use crate::arrayvec::ArrayVec;
 use crate::dtype::{Dtype, Itemsize};
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::iter::NdIter;
-use crate::{Dim, DimArray, DimDyn, Dimension, SliceExt};
+use crate::{Dim, Dimension, SliceExt};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// raw byte buffers under independent source and destination strides.
@@ -557,37 +557,128 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
             dtype,
         } = args;
 
-        let shape = shape.as_ref();
+        let mut shape = shape.as_ref();
         let ndim = shape.len();
-        assert!(ndim == src_strides.as_ref().len() && ndim == dst_strides.as_ref().len());
-        let itemsize = dtype.itemsize() as usize;
+        let mut src_strides = src_strides.as_ref();
+        let mut dst_strides = dst_strides.as_ref();
+        assert!(ndim == src_strides.len() && ndim == dst_strides.len());
+        let mut n_continuous_bytes = dtype.itemsize() as usize;
 
         // copy more then itemsize if the last dim(s) is contiguous
         let n_continuous_dims = (0..ndim)
             .rev()
-            .scan(itemsize, |expected_stride, dim| {
-                let is_contiguous =
-                    src_strides[dim] == *expected_stride && dst_strides[dim] == *expected_stride;
+            .scan(dtype.itemsize() as usize, |expected_stride, dim| {
+                let is_contiguous = shape[dim] <= 1
+                    || (src_strides[dim] == *expected_stride
+                        && dst_strides[dim] == *expected_stride);
                 *expected_stride *= shape[dim];
                 Some(is_contiguous)
             })
             .take_while(|&is_contiguous| is_contiguous)
             .count();
-        let itemsize = itemsize * shape[ndim - n_continuous_dims..].iter().product::<usize>();
-        let shape = &shape[..ndim - n_continuous_dims];
-        let src_strides = &src_strides[..ndim - n_continuous_dims];
-        let dst_strides = &dst_strides[..ndim - n_continuous_dims];
+        if n_continuous_dims > 0 {
+            let n_strided_dims = ndim - n_continuous_dims;
+            n_continuous_bytes *= shape[n_strided_dims..].iter().product::<usize>();
+            shape = &shape[..n_strided_dims];
+            src_strides = &src_strides[..n_strided_dims];
+            dst_strides = &dst_strides[..n_strided_dims];
+        }
+        if shape.len() == 0 {
+            shape = &[1];
+            src_strides = &[0];
+            dst_strides = &[0];
+        }
 
-        let iter = NdIter::new(
-            shape.iter().map(|&s| s as u64).collect::<DimArray<_>>(),
-            (
-                NdIterExtStridesPtr::new(src_strides.to_dim_vec::<DimDyn>(), src),
-                NdIterExtStridesPtrMut::new(dst_strides.to_dim_vec::<DimDyn>(), dst),
-            ),
-        );
-        for (_, (src_ptr, dst_ptr)) in iter {
-            unsafe {
-                std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize);
+        unsafe fn copy_dynamic_inner<D: Dimension>(
+            shape: D::Vec<u64>,
+            src_strides: D::Vec<usize>,
+            dst_strides: D::Vec<usize>,
+            src: *const u8,
+            dst: *mut u8,
+            n_continuous_bytes: usize,
+        ) {
+            let iter = NdIter::new(
+                shape,
+                (
+                    NdIterExtStridesPtr::new(src_strides, src),
+                    NdIterExtStridesPtrMut::new(dst_strides, dst),
+                ),
+            );
+            for (_, (src_ptr, dst_ptr)) in iter {
+                unsafe {
+                    std::ptr::copy_nonoverlapping::<u8>(src_ptr, dst_ptr, n_continuous_bytes);
+                }
+            }
+        }
+
+        unsafe {
+            match shape.len() {
+                0 => unreachable!(),
+                1 => copy_dynamic_inner::<Dim<1>>(
+                    Dim::<1>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<1>>(),
+                    dst_strides.to_dim_vec::<Dim<1>>(),
+                    src,
+                    dst,
+                    n_continuous_bytes,
+                ),
+                2 => copy_dynamic_inner::<Dim<2>>(
+                    Dim::<2>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<2>>(),
+                    dst_strides.to_dim_vec::<Dim<2>>(),
+                    src,
+                    dst,
+                    n_continuous_bytes,
+                ),
+                3 => copy_dynamic_inner::<Dim<3>>(
+                    Dim::<3>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<3>>(),
+                    dst_strides.to_dim_vec::<Dim<3>>(),
+                    src,
+                    dst,
+                    n_continuous_bytes,
+                ),
+                4 => copy_dynamic_inner::<Dim<4>>(
+                    Dim::<4>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<4>>(),
+                    dst_strides.to_dim_vec::<Dim<4>>(),
+                    src,
+                    dst,
+                    n_continuous_bytes,
+                ),
+                5 => copy_dynamic_inner::<Dim<5>>(
+                    Dim::<5>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<5>>(),
+                    dst_strides.to_dim_vec::<Dim<5>>(),
+                    src,
+                    dst,
+                    n_continuous_bytes,
+                ),
+                6 => copy_dynamic_inner::<Dim<6>>(
+                    Dim::<6>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<6>>(),
+                    dst_strides.to_dim_vec::<Dim<6>>(),
+                    src,
+                    dst,
+                    n_continuous_bytes,
+                ),
+                7 => copy_dynamic_inner::<Dim<7>>(
+                    Dim::<7>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<7>>(),
+                    dst_strides.to_dim_vec::<Dim<7>>(),
+                    src,
+                    dst,
+                    n_continuous_bytes,
+                ),
+                8 => copy_dynamic_inner::<Dim<8>>(
+                    Dim::<8>::vec(shape.len(), |i| shape[i] as u64),
+                    src_strides.to_dim_vec::<Dim<8>>(),
+                    dst_strides.to_dim_vec::<Dim<8>>(),
+                    src,
+                    dst,
+                    n_continuous_bytes,
+                ),
+                _ => unimplemented!(),
             }
         }
     }
@@ -597,7 +688,7 @@ impl<'a, D: Dimension> NdCopier<'a, D> {
 mod tests {
     use super::*;
     use crate::dtype::Dtyped;
-    use crate::Dim;
+    use crate::{Dim, DimDyn};
 
     // A struct dtype with no padding (itemsize 12, alignment 4). It misses every
     // specialized (itemsize, alignment) case in `create_scalar_fn`, so `NdCopier`
@@ -970,6 +1061,30 @@ mod tests {
     #[test]
     fn copy_dynamic_odd_itemsize() {
         check_all_dims::<[u8; 3]>();
+    }
+
+    // The byte-wise `copy_dynamic` fallback coalesces unit (size-1) axes too: iterated once at index
+    // 0, a unit axis contributes no offset, so its stride is irrelevant and must not stop neighboring
+    // axes from merging. These layouts give a unit axis a broadcast-style `0` or an arbitrary
+    // non-matching stride with contiguous axes on either side, over the two dtypes that route here
+    // (`[i32; 3]` itemsize 12, `[u8; 3]` odd itemsize 3), and confirm the coalesced run still copies
+    // the correct byte count against the reference.
+    #[test]
+    fn copy_dynamic_unit_axis() {
+        fn go<T: Dtyped>() {
+            let is = T::DTYPE.itemsize() as usize;
+            for unit in [0, 5 * is] {
+                // interior unit axis, contiguous either side -> full coalesce, one bulk byte copy
+                check::<T, DimDyn>(&[4, 1, 8], &[8 * is, unit, is], &[8 * is, unit, is], 0);
+                // strided outer axis -> unit axis folds out, remaining rank dispatched to Dim<1>
+                check::<T, DimDyn>(&[4, 1, 8], &[16 * is, unit, is], &[16 * is, unit, is], 0);
+            }
+            // leading and trailing unit axes, contiguous elsewhere
+            check::<T, DimDyn>(&[1, 4, 8], &[7 * is, 8 * is, is], &[7 * is, 8 * is, is], 0);
+            check::<T, DimDyn>(&[4, 8, 1], &[8 * is, is, 3 * is], &[8 * is, is, 3 * is], 0);
+        }
+        go::<[i32; 3]>();
+        go::<[u8; 3]>();
     }
 
     // Zero-length dimensions across the scalar, struct and dynamic dispatch routes.
