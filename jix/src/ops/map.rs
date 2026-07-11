@@ -288,8 +288,9 @@ where
         buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
-        self.read_data_typed::<O>(index, context)?
-            .to_buf(buf.get_mut(index, self.dtype()))
+        let mut data = self.read_data_typed::<O>(index, context)?;
+        let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+        buf.edit(|buf| data.to_buf(buf))
     }
 
     #[inline(always)]

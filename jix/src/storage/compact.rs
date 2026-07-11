@@ -305,43 +305,45 @@ where
     {
         let shape = self.shape();
         check_get_range(shape, index)?;
-        let buf = buf.get_mut(index, self.blocks.dtype());
-        let nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
-        if nitems == 0 {
-            return Ok(());
-        }
+        let mut buf = buf.get_continuous_mut(index, self.blocks.dtype(), context);
+        buf.edit(|buf| {
+            let nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
+            if nitems == 0 {
+                return Ok(());
+            }
 
-        let ndim = shape.len();
-        let block_shape = self.block_shape();
-        assert_eq!(ndim, block_shape.len());
+            let ndim = shape.len();
+            let block_shape = self.block_shape();
+            assert_eq!(ndim, block_shape.len());
 
-        let mut b_range = D::vec(ndim, |_| 0..0);
-        let mut is_single_block = true; // every dimension touches exactly one block.
-        let mut is_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
-        for dim in 0..ndim {
-            let b = block_shape[dim] as u64;
-            let (i_start, i_end) = (index[dim].start, index[dim].end);
-            let (b_begin, b_end) = (i_start / b, calc_block_end(i_start, i_end, b));
-            b_range[dim] = b_begin..b_end;
-            is_single_block &= b_begin + 1 == b_end;
-            is_aligned &= i_start.is_multiple_of(b) && i_end.is_multiple_of(b);
-        }
+            let mut b_range = D::vec(ndim, |_| 0..0);
+            let mut is_single_block = true; // every dimension touches exactly one block.
+            let mut is_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
+            for dim in 0..ndim {
+                let b = block_shape[dim] as u64;
+                let (i_start, i_end) = (index[dim].start, index[dim].end);
+                let (b_begin, b_end) = (i_start / b, calc_block_end(i_start, i_end, b));
+                b_range[dim] = b_begin..b_end;
+                is_single_block &= b_begin + 1 == b_end;
+                is_aligned &= i_start.is_multiple_of(b) && i_end.is_multiple_of(b);
+            }
 
-        // Row-major-flattened 1D block index
-        let single_block_idx = is_single_block.then(|| {
-            (0..ndim).fold(0u64, |blk_idx, dim| {
-                blk_idx * self.block_grid_shape[dim] + b_range[dim].start
-            })
-        });
+            // Row-major-flattened 1D block index
+            let single_block_idx = is_single_block.then(|| {
+                (0..ndim).fold(0u64, |blk_idx, dim| {
+                    blk_idx * self.block_grid_shape[dim] + b_range[dim].start
+                })
+            });
 
-        // Fast path for aligned single-block read
-        if let Some(single_block_idx) = single_block_idx
-            && is_aligned
-        {
-            return self.blocks.read_block(single_block_idx, buf, context);
-        }
+            // Fast path for aligned single-block read
+            if let Some(single_block_idx) = single_block_idx
+                && is_aligned
+            {
+                return self.blocks.read_block(single_block_idx, buf, context);
+            }
 
-        self.read_data_slow(index, buf, context, single_block_idx)
+            self.read_data_slow(index, buf, context, single_block_idx)
+        })
     }
 
     fn read_data_slow(

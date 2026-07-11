@@ -452,21 +452,23 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 &self,
                 index: &[Range<u64>],
                 buf: &mut OutBuf,
-                _context: &ReadContext,
+                context: &ReadContext,
             ) -> Result<()> {
-                let buf = buf.get_mut(index, self.dtype());
-                let ndim = self.shape().len();
-                let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
-                let read_lstrides = default_logical_strides(&read_shape);
-                let iter = NdIter::new(
-                    read_shape,
-                    NdIterExtStridesPtrMut::new(read_lstrides, buf.as_mut_ptr().cast::<T>()),
-                );
-                for (idx, dst) in iter {
-                    let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
-                    unsafe { dst.write(value) };
-                }
-                Ok(())
+                let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+                buf.edit(|buf| {
+                    let ndim = self.shape().len();
+                    let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
+                    let read_lstrides = default_logical_strides(&read_shape);
+                    let iter = NdIter::new(
+                        read_shape,
+                        NdIterExtStridesPtrMut::new(read_lstrides, buf.as_mut_ptr().cast::<T>()),
+                    );
+                    for (idx, dst) in iter {
+                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
+                        unsafe { dst.write(value) };
+                    }
+                    Ok(())
+                })
             }
 
             #[inline(always)]

@@ -187,8 +187,9 @@ where
         if let Some(inner_index) = self.transform_index(index)? {
             self.array.read_data(&inner_index, buf, context)
         } else {
-            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
-            Ok(())
+            // ensure buffer is allocated for empty read
+            let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+            buf.edit(|_| Ok(()))
         }
     }
 

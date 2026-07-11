@@ -431,37 +431,39 @@ where
         &self,
         index: &[Range<u64>],
         buf: &mut OutBuf,
-        _context: &ReadContext,
+        context: &ReadContext,
     ) -> Result<()> {
         let dtype = self.dtype();
         let itemsize = dtype.itemsize() as usize;
         check_get_range(self.shape(), index)?;
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
+        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        buf.edit(|buf| {
+            check_get_buffer_size(index, dtype, buf)?;
 
-        let ndim = self.shape.ndim();
-        let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_strides = default_strides(&out_shape, itemsize);
-        let src_strides = D::vec(ndim, |dim| self.strides[dim]);
+            let ndim = self.shape.ndim();
+            let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+            let out_strides = default_strides(&out_shape, itemsize);
+            let src_strides = D::vec(ndim, |dim| self.strides[dim]);
 
-        let in_offset = (0..ndim)
-            .map(|dim| index[dim].start as usize * self.strides[dim])
-            .sum::<usize>();
-        let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
-        let dst_ptr = buf.as_mut_ptr();
+            let in_offset = (0..ndim)
+                .map(|dim| index[dim].start as usize * self.strides[dim])
+                .sum::<usize>();
+            let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
+            let dst_ptr = buf.as_mut_ptr();
 
-        let copier = NdCopier::new(dtype);
-        unsafe {
-            copier.copy(
-                src_ptr,
-                dst_ptr,
-                out_shape.as_ref(),
-                src_strides.as_ref(),
-                out_strides.as_ref(),
-                dtype,
-            )
-        };
-        Ok(())
+            let copier = NdCopier::new(dtype);
+            unsafe {
+                copier.copy(
+                    src_ptr,
+                    dst_ptr,
+                    out_shape.as_ref(),
+                    src_strides.as_ref(),
+                    out_strides.as_ref(),
+                    dtype,
+                )
+            };
+            Ok(())
+        })
     }
 
     #[inline(always)]

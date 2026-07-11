@@ -128,8 +128,9 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
         // Empty output (any zero-length range, including repeats == 0) is a no-op.
         if index.iter().any(|r| r.start >= r.end) {
-            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
-            return Ok(());
+            // ensure buffer is allocated for empty read
+            let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+            return buf.edit(|_| Ok(()));
         }
 
         let ndim = self.new_shape.ndim();
@@ -157,99 +158,102 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         self.array
             .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
+        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        buf.edit(|buf| {
+            check_get_buffer_size(index, dtype, buf)?;
 
-        // Output shape over the requested sub-range, all `ndim` axes.
-        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
-        let dst_strides = default_strides(&out_shape, itemsize);
-        let inner_strides_bytes = default_strides(&inner_shape, itemsize);
-        let copier = NdCopier::new(dtype);
+            // Output shape over the requested sub-range, all `ndim` axes.
+            let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+            let dst_strides = default_strides(&out_shape, itemsize);
+            let inner_strides_bytes = default_strides(&inner_shape, itemsize);
+            let copier = NdCopier::new(dtype);
 
-        // Issue one nd_copy for a (g_range, p_range) region.
-        //   `g_range` indexes groups relative to the inner read (0..g_count).
-        //   `p_range` is the within-group output range [0..n).
-        let mut copy_region = |g_range: Range<u64>, p_range: Range<u64>| {
-            let g_len = g_range.end - g_range.start;
-            let p_len = p_range.end - p_range.start;
-            if g_len == 0 || p_len == 0 {
-                return;
-            }
+            // Issue one nd_copy for a (g_range, p_range) region.
+            //   `g_range` indexes groups relative to the inner read (0..g_count).
+            //   `p_range` is the within-group output range [0..n).
+            let mut copy_region = |g_range: Range<u64>, p_range: Range<u64>| {
+                let g_len = g_range.end - g_range.start;
+                let p_len = p_range.end - p_range.start;
+                if g_len == 0 || p_len == 0 {
+                    return;
+                }
 
-            // (ndim + 1)-D shape: original axes, but axis k is split into
-            // (g_len, p_len) at positions k and k+1.
-            let mut copy_shape = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
-            copy_shape[..k].copy_from_slice(&out_shape[..k]);
-            copy_shape[k] = g_len as usize;
-            copy_shape[k + 1] = p_len as usize;
-            copy_shape[k + 2..].copy_from_slice(&out_shape[k + 1..]);
+                // (ndim + 1)-D shape: original axes, but axis k is split into
+                // (g_len, p_len) at positions k and k+1.
+                let mut copy_shape = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+                copy_shape[..k].copy_from_slice(&out_shape[..k]);
+                copy_shape[k] = g_len as usize;
+                copy_shape[k + 1] = p_len as usize;
+                copy_shape[k + 2..].copy_from_slice(&out_shape[k + 1..]);
 
-            // src strides: itemsize-strides over inner_shape, with the within-group
-            // (p) axis stride = 0 (the repeat trick).
-            let mut src_strides = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
-            src_strides[..k + 1].copy_from_slice(&inner_strides_bytes[..k + 1]);
-            src_strides[k + 1] = 0;
-            src_strides[k + 2..].copy_from_slice(&inner_strides_bytes[k + 1..]);
+                // src strides: itemsize-strides over inner_shape, with the within-group
+                // (p) axis stride = 0 (the repeat trick).
+                let mut src_strides = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+                src_strides[..k + 1].copy_from_slice(&inner_strides_bytes[..k + 1]);
+                src_strides[k + 1] = 0;
+                src_strides[k + 2..].copy_from_slice(&inner_strides_bytes[k + 1..]);
 
-            // dst strides: from `dst_strides`, with axis k split into
-            // (n * dst_strides[k], dst_strides[k]).
-            let mut dst_strides_split = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
-            dst_strides_split[..k].copy_from_slice(&dst_strides[..k]);
-            dst_strides_split[k] = dst_strides[k] * n as usize;
-            dst_strides_split[k + 1..].copy_from_slice(&dst_strides[k..]);
+                // dst strides: from `dst_strides`, with axis k split into
+                // (n * dst_strides[k], dst_strides[k]).
+                let mut dst_strides_split =
+                    <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
+                dst_strides_split[..k].copy_from_slice(&dst_strides[..k]);
+                dst_strides_split[k] = dst_strides[k] * n as usize;
+                dst_strides_split[k + 1..].copy_from_slice(&dst_strides[k..]);
 
-            // src ptr: tmp_buf offset to (g_range.start) along the inner k axis.
-            let src_byte_offset = (g_range.start as usize) * inner_strides_bytes[k];
-            let src_ptr = unsafe { tmp_buf.as_ptr().add(src_byte_offset) };
+                // src ptr: tmp_buf offset to (g_range.start) along the inner k axis.
+                let src_byte_offset = (g_range.start as usize) * inner_strides_bytes[k];
+                let src_ptr = unsafe { tmp_buf.as_ptr().add(src_byte_offset) };
 
-            // dst ptr: buf offset to the first output position of this region.
-            // First output k-position = g_start*n + g_range.start*n + p_range.start.
-            // Output-relative k-position = that minus s.
-            let first_out_k = g_start * n + g_range.start * n + p_range.start;
-            debug_assert!(first_out_k >= s);
-            let dst_k_offset_units = first_out_k - s;
-            let dst_byte_offset = (dst_k_offset_units as usize) * dst_strides[k];
-            let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
+                // dst ptr: buf offset to the first output position of this region.
+                // First output k-position = g_start*n + g_range.start*n + p_range.start.
+                // Output-relative k-position = that minus s.
+                let first_out_k = g_start * n + g_range.start * n + p_range.start;
+                debug_assert!(first_out_k >= s);
+                let dst_k_offset_units = first_out_k - s;
+                let dst_byte_offset = (dst_k_offset_units as usize) * dst_strides[k];
+                let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
 
-            unsafe {
-                copier.copy(
-                    src_ptr,
-                    dst_ptr,
-                    copy_shape.as_ref(),
-                    src_strides.as_ref(),
-                    dst_strides_split.as_ref(),
-                    dtype,
-                )
+                unsafe {
+                    copier.copy(
+                        src_ptr,
+                        dst_ptr,
+                        copy_shape.as_ref(),
+                        src_strides.as_ref(),
+                        dst_strides_split.as_ref(),
+                        dtype,
+                    )
+                };
             };
-        };
 
-        let g_count = g_end - g_start;
-        let p_start = s - g_start * n; // = s mod n, in 0..n
-        let p_end_tail = e - (g_end - 1) * n; // = ((e-1) mod n) + 1, in 1..=n
+            let g_count = g_end - g_start;
+            let p_start = s - g_start * n; // = s mod n, in 0..n
+            let p_end_tail = e - (g_end - 1) * n; // = ((e-1) mod n) + 1, in 1..=n
 
-        if g_count == 1 {
-            // Single group: head and tail merge into one region.
-            copy_region(0..1, p_start..p_end_tail);
-        } else {
-            // Head: partial first group (omit if p_start == 0; that case folds into middle).
-            if p_start > 0 {
-                copy_region(0..1, p_start..n);
+            if g_count == 1 {
+                // Single group: head and tail merge into one region.
+                copy_region(0..1, p_start..p_end_tail);
+            } else {
+                // Head: partial first group (omit if p_start == 0; that case folds into middle).
+                if p_start > 0 {
+                    copy_region(0..1, p_start..n);
+                }
+
+                // Middle: full groups between any head and any tail.
+                let middle_start: u64 = if p_start > 0 { 1 } else { 0 };
+                let middle_end: u64 = if p_end_tail < n { g_count - 1 } else { g_count };
+                if middle_end > middle_start {
+                    copy_region(middle_start..middle_end, 0..n);
+                }
+
+                // Tail: partial last group (omit if p_end_tail == n; folded into middle).
+                if p_end_tail < n {
+                    copy_region((g_count - 1)..g_count, 0..p_end_tail);
+                }
             }
 
-            // Middle: full groups between any head and any tail.
-            let middle_start: u64 = if p_start > 0 { 1 } else { 0 };
-            let middle_end: u64 = if p_end_tail < n { g_count - 1 } else { g_count };
-            if middle_end > middle_start {
-                copy_region(middle_start..middle_end, 0..n);
-            }
-
-            // Tail: partial last group (omit if p_end_tail == n; folded into middle).
-            if p_end_tail < n {
-                copy_region((g_count - 1)..g_count, 0..p_end_tail);
-            }
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 
     #[inline(always)]

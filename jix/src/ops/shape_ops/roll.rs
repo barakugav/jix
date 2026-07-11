@@ -111,54 +111,58 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         //   Region 2 (output axis-k [len1, end)): input axis-k [0, e - shift),     length len2.
         let len1 = shift - s;
         let len2 = e - shift;
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
-        let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-        let dst_strides = default_strides_cast(&out_shape, itemsize);
-        let copier = NdCopier::new(dtype);
+        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        buf.edit(|buf| {
+            check_get_buffer_size(index, dtype, buf)?;
+            let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
+            let dst_strides = default_strides_cast(&out_shape, itemsize);
+            let copier = NdCopier::new(dtype);
 
-        let mut read_region = |inner_index: &[Range<u64>],
-                               region_shape: &S::Dimension,
-                               dst_axis_k_offset: u64|
-         -> Result<()> {
-            let region_shape = S::Dimension::vec(ndim, |d| region_shape[d] as usize);
-            let region_size = region_shape.as_ref().iter().product::<usize>() * itemsize;
-            let mut tmp = context.tmp_buf(region_size, dtype.alignment());
-            let tmp = tmp.as_mut_slice();
-            self.array
-                .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
+            let mut read_region = |inner_index: &[Range<u64>],
+                                   region_shape: &S::Dimension,
+                                   dst_axis_k_offset: u64|
+             -> Result<()> {
+                let region_shape = S::Dimension::vec(ndim, |d| region_shape[d] as usize);
+                let region_size = region_shape.as_ref().iter().product::<usize>() * itemsize;
+                let mut tmp = context.tmp_buf(region_size, dtype.alignment());
+                let tmp = tmp.as_mut_slice();
+                self.array
+                    .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
 
-            let src_strides = default_strides(&region_shape, itemsize);
-            let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
-            unsafe {
-                copier.copy(
-                    tmp.as_ptr(),
-                    buf.as_mut_ptr().add(dst_byte_offset),
-                    region_shape.as_ref(),
-                    src_strides.as_ref(),
-                    dst_strides.as_ref(),
-                    dtype,
-                )
+                let src_strides = default_strides(&region_shape, itemsize);
+                let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
+                unsafe {
+                    copier.copy(
+                        tmp.as_ptr(),
+                        buf.as_mut_ptr().add(dst_byte_offset),
+                        region_shape.as_ref(),
+                        src_strides.as_ref(),
+                        dst_strides.as_ref(),
+                        dtype,
+                    )
+                };
+                Ok(())
             };
+
+            let inner_index_r1 = S::Dimension::vec(ndim, |d| {
+                if d == k {
+                    (s + l - shift)..l
+                } else {
+                    index[d].clone()
+                }
+            });
+            let r1_shape =
+                S::Dimension::from_fn(ndim, |d| if d == k { len1 } else { out_shape[d] });
+            read_region(inner_index_r1.as_ref(), &r1_shape, 0)?;
+
+            let inner_index_r2 =
+                S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
+            let r2_shape =
+                S::Dimension::from_fn(ndim, |d| if d == k { len2 } else { out_shape[d] });
+            read_region(inner_index_r2.as_ref(), &r2_shape, len1)?;
+
             Ok(())
-        };
-
-        let inner_index_r1 = S::Dimension::vec(ndim, |d| {
-            if d == k {
-                (s + l - shift)..l
-            } else {
-                index[d].clone()
-            }
-        });
-        let r1_shape = S::Dimension::from_fn(ndim, |d| if d == k { len1 } else { out_shape[d] });
-        read_region(inner_index_r1.as_ref(), &r1_shape, 0)?;
-
-        let inner_index_r2 =
-            S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-        let r2_shape = S::Dimension::from_fn(ndim, |d| if d == k { len2 } else { out_shape[d] });
-        read_region(inner_index_r2.as_ref(), &r2_shape, len1)?;
-
-        Ok(())
+        })
     }
 
     #[inline(always)]

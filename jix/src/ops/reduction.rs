@@ -141,9 +141,8 @@ where
             512 => Self::read_data_impl::<512>,
             _ => Self::read_data_impl::<1024>,
         };
-        let buf = buf.get_mut(index, self.dtype());
-        read_fn(self, index, buf, context)?;
-        Ok(())
+        let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+        buf.edit(|buf| read_fn(self, index, buf, context))
     }
 
     #[inline(always)]

@@ -222,7 +222,7 @@ pub trait ReadData<T> {
                 "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
             );
         ensure!(
-            (buf.as_ptr() as usize).is_multiple_of(align_of::<T>()),
+            buf.as_ptr().cast::<T>().is_aligned(),
             InvalidArgument,
             "Buffer pointer is not aligned to required alignment {} for dtype {dtype}",
             align_of::<T>(),

@@ -100,16 +100,19 @@ where
         &self,
         index: &[Range<u64>],
         buf: &mut OutBuf,
-        _context: &ReadContext,
+        context: &ReadContext,
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        let buf = buf.get_mut(index, &T::DTYPE);
-        check_get_buffer_size(index, &T::DTYPE, buf)?;
-        let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
-        for item in buf.iter_mut() {
-            *item = self.data;
-        }
-        Ok(())
+        let dtype = T::DTYPE;
+        let mut buf = buf.get_continuous_mut(index, &dtype, context);
+        buf.edit(|buf| {
+            check_get_buffer_size(index, &T::DTYPE, buf)?;
+            let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
+            for item in buf.iter_mut() {
+                *item = self.data;
+            }
+            Ok(())
+        })
     }
 
     #[inline(always)]

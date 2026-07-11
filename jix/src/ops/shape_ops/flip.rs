@@ -95,8 +95,9 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         check_get_range(self.shape(), index)?;
 
         if index.iter().any(|r| r.start >= r.end) {
-            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
-            return Ok(());
+            // ensure buffer is allocated for empty read
+            let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+            return buf.edit(|_| Ok(()));
         }
 
         let ndim = index.len();
@@ -124,59 +125,62 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         self.array
             .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
+        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        buf.edit(|buf| {
+            check_get_buffer_size(index, dtype, buf)?;
 
-        // tmp_buf is C-contiguous over out_shape (sub_shape_in == out_shape).
-        let strides = default_strides_cast(&out_shape, itemsize);
+            // tmp_buf is C-contiguous over out_shape (sub_shape_in == out_shape).
+            let strides = default_strides_cast(&out_shape, itemsize);
 
-        // Iterate one slab at a time. Each slab is a single combination of indices on the
-        // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
-        let iter_shape = S::Dimension::vec(ndim, |d| {
-            if is_flipped[d] {
-                out_shape[d] as u64
-            } else {
-                1
+            // Iterate one slab at a time. Each slab is a single combination of indices on the
+            // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
+            let iter_shape = S::Dimension::vec(ndim, |d| {
+                if is_flipped[d] {
+                    out_shape[d] as u64
+                } else {
+                    1
+                }
+            });
+            let slab_shape =
+                S::Dimension::vec(ndim, |d| if is_flipped[d] { 1 } else { out_shape[d] });
+
+            // src strides ext: forward strides on flipped axes; 0 elsewhere (non-flipped axes
+            // are iter_shape=1 so they don't step regardless, but 0 keeps it explicit).
+            let src_ptr_strides =
+                S::Dimension::vec(ndim, |d| if is_flipped[d] { strides[d] } else { 0 });
+
+            // dst pointer base = position where every flipped axis is at its MAX index.
+            // As src advances forward by some byte offset along flipped axes, dst moves the
+            // same offset BACKWARD from this base (since dst_idx = L-1 - src_idx on flipped axes).
+            let dst_base_offset = (0..ndim)
+                .filter(|&d| is_flipped[d])
+                .map(|d| (out_shape[d] - 1) * strides[d])
+                .sum::<usize>();
+            let tmp_base = tmp_buf.as_ptr();
+            let dst_base = unsafe { buf.as_mut_ptr().add(dst_base_offset) };
+
+            let iter = NdIter::new(
+                iter_shape,
+                NdIterExtStridesPtr::new(src_ptr_strides, tmp_base),
+            );
+            let nd_copy = NdCopier::new(self.dtype());
+            for (_idx, src_ptr) in iter {
+                let off = unsafe { src_ptr.offset_from(tmp_base) } as usize;
+                let dst_ptr = unsafe { dst_base.sub(off) };
+
+                unsafe {
+                    nd_copy.copy(
+                        src_ptr,
+                        dst_ptr,
+                        slab_shape.as_ref(),
+                        strides.as_ref(),
+                        strides.as_ref(),
+                        self.dtype(),
+                    )
+                };
             }
-        });
-        let slab_shape = S::Dimension::vec(ndim, |d| if is_flipped[d] { 1 } else { out_shape[d] });
-
-        // src strides ext: forward strides on flipped axes; 0 elsewhere (non-flipped axes
-        // are iter_shape=1 so they don't step regardless, but 0 keeps it explicit).
-        let src_ptr_strides =
-            S::Dimension::vec(ndim, |d| if is_flipped[d] { strides[d] } else { 0 });
-
-        // dst pointer base = position where every flipped axis is at its MAX index.
-        // As src advances forward by some byte offset along flipped axes, dst moves the
-        // same offset BACKWARD from this base (since dst_idx = L-1 - src_idx on flipped axes).
-        let dst_base_offset = (0..ndim)
-            .filter(|&d| is_flipped[d])
-            .map(|d| (out_shape[d] - 1) * strides[d])
-            .sum::<usize>();
-        let tmp_base = tmp_buf.as_ptr();
-        let dst_base = unsafe { buf.as_mut_ptr().add(dst_base_offset) };
-
-        let iter = NdIter::new(
-            iter_shape,
-            NdIterExtStridesPtr::new(src_ptr_strides, tmp_base),
-        );
-        let nd_copy = NdCopier::new(self.dtype());
-        for (_idx, src_ptr) in iter {
-            let off = unsafe { src_ptr.offset_from(tmp_base) } as usize;
-            let dst_ptr = unsafe { dst_base.sub(off) };
-
-            unsafe {
-                nd_copy.copy(
-                    src_ptr,
-                    dst_ptr,
-                    slab_shape.as_ref(),
-                    strides.as_ref(),
-                    strides.as_ref(),
-                    self.dtype(),
-                )
-            };
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     #[inline(always)]

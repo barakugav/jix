@@ -142,30 +142,34 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         self.array
             .read_data(input_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
+        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        buf.edit(|buf| {
+            check_get_buffer_size(index, dtype, buf)?;
 
-        // Strides in tmp_buf (C-contiguous over input dims).
-        let src_strides_in = default_strides(&sub_shape_in, itemsize);
-        // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
-        let src_strides_out = S::Dimension::vec(ndim, |i| src_strides_in[self.axes[i] as usize]);
+            // Strides in tmp_buf (C-contiguous over input dims).
+            let src_strides_in = default_strides(&sub_shape_in, itemsize);
+            // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
+            let src_strides_out =
+                S::Dimension::vec(ndim, |i| src_strides_in[self.axes[i] as usize]);
 
-        // The output buffer is C-contiguous over sub_shape_out (output dim order).
-        let sub_shape_out = S::Dimension::vec(ndim, |i| (index[i].end - index[i].start) as usize);
-        let dst_strides = default_strides(&sub_shape_out, itemsize);
+            // The output buffer is C-contiguous over sub_shape_out (output dim order).
+            let sub_shape_out =
+                S::Dimension::vec(ndim, |i| (index[i].end - index[i].start) as usize);
+            let dst_strides = default_strides(&sub_shape_out, itemsize);
 
-        let copier = NdCopier::new(dtype);
-        unsafe {
-            copier.copy(
-                tmp_buf.as_ptr(),
-                buf.as_mut_ptr(),
-                sub_shape_out.as_ref(),
-                src_strides_out.as_ref(),
-                dst_strides.as_ref(),
-                dtype,
-            )
-        };
-        Ok(())
+            let copier = NdCopier::new(dtype);
+            unsafe {
+                copier.copy(
+                    tmp_buf.as_ptr(),
+                    buf.as_mut_ptr(),
+                    sub_shape_out.as_ref(),
+                    src_strides_out.as_ref(),
+                    dst_strides.as_ref(),
+                    dtype,
+                )
+            };
+            Ok(())
+        })
     }
 
     #[inline(always)]

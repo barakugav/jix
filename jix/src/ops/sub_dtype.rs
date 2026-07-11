@@ -134,17 +134,19 @@ where
         let mut tmp_buf = OutBuf::new_lazy(context);
         self.array.read_data(index, &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let buf = buf.get_mut(index, dst_dtype);
-        check_get_buffer_size(index, dst_dtype, buf)?;
+        let mut buf = buf.get_continuous_mut(index, dst_dtype, context);
+        buf.edit(|buf| {
+            check_get_buffer_size(index, dst_dtype, buf)?;
 
-        let src_items = tmp_buf.chunks_exact(src_itemsize);
-        let dst_items = buf.chunks_exact_mut(dst_itemsize);
-        let sub_field_offset = self.sub_field_offset as usize;
-        for (src, dst) in src_items.zip(dst_items) {
-            let src_field = &src[sub_field_offset..sub_field_offset + dst_itemsize];
-            dst.copy_from_slice(src_field);
-        }
-        Ok(())
+            let src_items = tmp_buf.chunks_exact(src_itemsize);
+            let dst_items = buf.chunks_exact_mut(dst_itemsize);
+            let sub_field_offset = self.sub_field_offset as usize;
+            for (src, dst) in src_items.zip(dst_items) {
+                let src_field = &src[sub_field_offset..sub_field_offset + dst_itemsize];
+                dst.copy_from_slice(src_field);
+            }
+            Ok(())
+        })
     }
 
     #[inline(always)]

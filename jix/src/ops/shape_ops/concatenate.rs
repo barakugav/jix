@@ -167,111 +167,117 @@ where
     ) -> Result<()> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        let buf = buf.get_mut(index, dtype);
-        let nitems = check_get_buffer_size(index, dtype, buf)?;
-        if nitems == 0 {
-            return Ok(());
-        }
-
-        let itemsize = dtype.itemsize() as usize;
-
-        let output_shape = Self::Dimension::vec(index.len(), |dim| {
-            (index[dim].end - index[dim].start) as usize
-        });
-        let output_strides = default_strides(&output_shape, itemsize);
-        let concat_stride = output_strides[self.concat_axis];
-        // When all dims before concat_axis have size <=1 each array's data is contiguous in buf.
-        let in_place = output_shape
-            .as_ref()
-            .iter()
-            .take(self.concat_axis)
-            .all(|&s| s <= 1);
-        let mut tmp_buf = in_place
-            .not()
-            .then(|| context.tmp_buf(0, dtype.alignment()));
-
-        let req_start = index[self.concat_axis].start;
-        let req_end = index[self.concat_axis].end;
-
-        // Find the first sub-array whose end exceeds req_start (i.e. the first that may overlap).
-        const BINARY_SEARCH_THRESHOLD: usize = 32;
-        let first_arr = if self.borders.len() < BINARY_SEARCH_THRESHOLD {
-            self.borders
-                .iter()
-                .position(|&b| b > req_start)
-                .unwrap_or(self.borders.len())
-        } else {
-            self.borders.partition_point(|&b| b <= req_start)
-        };
-
-        let copier = NdCopier::new(dtype);
-        for arr in first_arr..self.borders.len() {
-            let arr_start = if arr == 0 { 0 } else { self.borders[arr - 1] };
-            let arr_end = self.borders[arr];
-            if arr_start >= req_end {
-                break;
+        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        buf.edit(|buf| {
+            let nitems = check_get_buffer_size(index, dtype, buf)?;
+            if nitems == 0 {
+                return Ok(());
             }
 
-            let overlap_start = req_start.max(arr_start);
-            let overlap_end = req_end.min(arr_end);
-            let local_start = overlap_start - arr_start;
-            let local_end = overlap_end - arr_start;
-            let buf_concat_offset = (overlap_start - req_start) as usize;
+            let itemsize = dtype.itemsize() as usize;
 
-            // Sub-index into array `arr`: same as `index` but concat axis uses local coords.
-            let sub_index = Self::Dimension::vec(index.len(), |dim| {
-                if dim == self.concat_axis {
-                    local_start..local_end
-                } else {
-                    index[dim].clone()
-                }
+            let output_shape = Self::Dimension::vec(index.len(), |dim| {
+                (index[dim].end - index[dim].start) as usize
             });
-            let sub_shape = Self::Dimension::vec(index.len(), |dim| {
-                (sub_index[dim].end - sub_index[dim].start) as usize
-            });
-            let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
-            let buf_offset = buf_concat_offset * concat_stride;
+            let output_strides = default_strides(&output_shape, itemsize);
+            let concat_stride = output_strides[self.concat_axis];
+            // When all dims before concat_axis have size <=1 each array's data is contiguous in buf.
+            let in_place = output_shape
+                .as_ref()
+                .iter()
+                .take(self.concat_axis)
+                .all(|&s| s <= 1);
+            let mut tmp_buf = in_place
+                .not()
+                .then(|| context.tmp_buf(0, dtype.alignment()));
 
-            let read_buf = if in_place {
-                // Data lands contiguously at the right offset - read directly into buf.
-                &mut buf[buf_offset..buf_offset + sub_size_bytes]
+            let req_start = index[self.concat_axis].start;
+            let req_end = index[self.concat_axis].end;
+
+            // Find the first sub-array whose end exceeds req_start (i.e. the first that may overlap).
+            const BINARY_SEARCH_THRESHOLD: usize = 32;
+            let first_arr = if self.borders.len() < BINARY_SEARCH_THRESHOLD {
+                self.borders
+                    .iter()
+                    .position(|&b| b > req_start)
+                    .unwrap_or(self.borders.len())
             } else {
-                // Read into tmp_buf then scatter into buf using strided copy.
-                let tmp_buf = tmp_buf.as_mut().unwrap();
-                tmp_buf.set_len(sub_size_bytes);
-                tmp_buf.as_mut_slice()
+                self.borders.partition_point(|&b| b <= req_start)
             };
-            self.arrays
-                .read_data(arr, sub_index.as_ref(), &mut OutBuf::new(read_buf), context)?;
 
-            if !in_place {
-                // Scatter from tmp_buf into buf.
-                // src: C-strides of sub_shape.
-                // dst: output_strides for dims before concat_axis (wider due to full output width),
-                //      sub_strides for dims at/after (sizes match the output there).
-                let sub_strides = default_strides(&sub_shape, itemsize);
-                let dst_strides = Self::Dimension::vec(index.len(), |dim| {
-                    if dim < self.concat_axis {
-                        output_strides[dim]
+            let copier = NdCopier::new(dtype);
+            for arr in first_arr..self.borders.len() {
+                let arr_start = if arr == 0 { 0 } else { self.borders[arr - 1] };
+                let arr_end = self.borders[arr];
+                if arr_start >= req_end {
+                    break;
+                }
+
+                let overlap_start = req_start.max(arr_start);
+                let overlap_end = req_end.min(arr_end);
+                let local_start = overlap_start - arr_start;
+                let local_end = overlap_end - arr_start;
+                let buf_concat_offset = (overlap_start - req_start) as usize;
+
+                // Sub-index into array `arr`: same as `index` but concat axis uses local coords.
+                let sub_index = Self::Dimension::vec(index.len(), |dim| {
+                    if dim == self.concat_axis {
+                        local_start..local_end
                     } else {
-                        sub_strides[dim]
+                        index[dim].clone()
                     }
                 });
+                let sub_shape = Self::Dimension::vec(index.len(), |dim| {
+                    (sub_index[dim].end - sub_index[dim].start) as usize
+                });
+                let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
+                let buf_offset = buf_concat_offset * concat_stride;
 
-                unsafe {
-                    copier.copy(
-                        read_buf.as_ptr(),
-                        buf.as_mut_ptr().add(buf_offset),
-                        sub_shape.as_ref(),
-                        sub_strides.as_ref(),
-                        dst_strides.as_ref(),
-                        dtype,
-                    )
+                let read_buf = if in_place {
+                    // Data lands contiguously at the right offset - read directly into buf.
+                    &mut buf[buf_offset..buf_offset + sub_size_bytes]
+                } else {
+                    // Read into tmp_buf then scatter into buf using strided copy.
+                    let tmp_buf = tmp_buf.as_mut().unwrap();
+                    tmp_buf.set_len(sub_size_bytes);
+                    tmp_buf.as_mut_slice()
                 };
-            }
-        }
+                self.arrays.read_data(
+                    arr,
+                    sub_index.as_ref(),
+                    &mut OutBuf::new(read_buf),
+                    context,
+                )?;
 
-        Ok(())
+                if !in_place {
+                    // Scatter from tmp_buf into buf.
+                    // src: C-strides of sub_shape.
+                    // dst: output_strides for dims before concat_axis (wider due to full output
+                    //      width), sub_strides for dims at/after (sizes match the output there).
+                    let sub_strides = default_strides(&sub_shape, itemsize);
+                    let dst_strides = Self::Dimension::vec(index.len(), |dim| {
+                        if dim < self.concat_axis {
+                            output_strides[dim]
+                        } else {
+                            sub_strides[dim]
+                        }
+                    });
+
+                    unsafe {
+                        copier.copy(
+                            read_buf.as_ptr(),
+                            buf.as_mut_ptr().add(buf_offset),
+                            sub_shape.as_ref(),
+                            sub_strides.as_ref(),
+                            dst_strides.as_ref(),
+                            dtype,
+                        )
+                    };
+                }
+            }
+
+            Ok(())
+        })
     }
 
     #[inline(always)]
