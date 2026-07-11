@@ -96,7 +96,6 @@ where
             ToCompactInner::Compact(c) => c.spec(),
         }
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         let inner: &dyn ArrayStorage = match &self.0 {
             ToCompactInner::Original(s) => s,

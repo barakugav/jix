@@ -104,7 +104,7 @@ macro_rules! ensure {
 }
 pub(crate) use {bail, ensure};
 
-#[inline(always)]
+#[inline]
 pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
     if let Some(expected) = D::NDIM {
         ensure!(
@@ -124,15 +124,20 @@ pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
 
 #[inline(always)]
 pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
-    ensure!(
-        actual == expected,
-        UnsupportedDtype,
-        "expected dtype {expected} but got {actual}",
-    );
+    if actual != expected {
+        #[inline(never)]
+        fn fail_check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
+            Err(crate::Error::new(
+                crate::ErrorKind::UnsupportedDtype,
+                format!("expected dtype {expected} but got {actual}"),
+            ))
+        }
+        return fail_check_dtype(actual, expected);
+    }
     Ok(())
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
     ensure!(
         shape
@@ -147,7 +152,7 @@ pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
     Ok(())
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
     ensure!(
         shape.len() == index.len(),
@@ -171,7 +176,7 @@ pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()>
     Ok(())
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn check_get_buffer_size(
     index: &[Range<u64>],
     dtype: &Dtype,

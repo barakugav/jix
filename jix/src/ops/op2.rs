@@ -23,7 +23,7 @@ pub(crate) trait Op2Kernel<T1, T2> {
     // #[inline(always)]
     // fn apply_bulk<const N: usize>(&self, a: [T1; N], b: [T2; N]) -> [Self::Output; N] {
     //     let mut iter = a.into_iter().zip(b);
-    //     std::array::from_fn(|_| {
+    //     array_from_fn_inline(|_| {
     //         let (a, b) = iter.next().unwrap();
     //         self.apply(a, b)
     //     })
@@ -83,12 +83,6 @@ where
         data.map_items(|(a, b)| self.kernel.apply(a, b))
             .transmute_items::<T>()
     }
-
-    #[inline]
-    fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("Op2", [&self.a, &self.b])
-    }
-
     #[inline(always)]
     fn shape(&self) -> &[u64] {
         let shape = self.a.shape();
@@ -104,6 +98,10 @@ where
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
         self.a.spec().with_cleared_flags()
+    }
+
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("Op2", [&self.a, &self.b])
     }
 
     type DimensionChange<NewD: crate::Dimension> =
@@ -175,7 +173,7 @@ macro_rules! define_op2 {
             type ElementType = crate::Ty<<S1::Item as $($trait)::+<S2::Item>>::Output>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
-            #[inline]
+
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
                 crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.a, &self.0.b])
             }
@@ -237,7 +235,7 @@ macro_rules! define_op2 {
             type ElementType = crate::Ty<$output_type>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
-            #[inline]
+
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
                 crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.a, &self.0.b])
             }
@@ -381,7 +379,7 @@ macro_rules! define_op2_rhs_fixed {
             type ElementType = crate::Ty<$output_type_s>;
             type Dimension = S1::Dimension;
             crate::storage::impl_array_storage_forward!(<S1, S2>);
-            #[inline]
+
             fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
                 crate::storage::ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.a, &self.0.b])
             }

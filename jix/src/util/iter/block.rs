@@ -41,7 +41,7 @@ impl<D> NdIterExtBlockOffsetSize<D>
 where
     D: Dimension,
 {
-    #[inline(always)]
+    #[inline]
     pub(crate) fn new<V>(begin: &V, end: &V, block_shape: V) -> Self
     where
         D: Dimension<Vec<u64> = V>,

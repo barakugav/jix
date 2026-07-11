@@ -8,13 +8,17 @@ pub(crate) mod arrayvec;
 pub(crate) mod cpu_cache;
 
 pub(crate) mod iter;
+
+mod arr_ext;
+pub(crate) use arr_ext::*;
+
+mod nd_copy;
+pub(crate) use nd_copy::*;
+
 use std::mem::MaybeUninit;
 
-use iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
-use iter::NdIter;
-
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray};
-use crate::{DimDyn, DimVec, Dimension, IntoDimension};
+use crate::{DimVec, Dimension};
 
 pub(crate) trait Idx:
     Clone
@@ -38,6 +42,7 @@ pub(crate) trait Idx:
     const ONE: Self;
 
     fn usize(self) -> usize;
+    fn from_usize(n: usize) -> Self;
 
     fn div_ceil(self, rhs: Self) -> Self;
     fn checked_mul(self, rhs: Self) -> Option<Self>;
@@ -60,8 +65,13 @@ macro_rules! impl_idx_for_primitive {
             const ZERO: Self = 0;
             const ONE: Self = 1;
 
+            #[inline(always)]
             fn usize(self) -> usize {
                 self as usize
+            }
+            #[inline(always)]
+            fn from_usize(n: usize) -> Self {
+                n as $t
             }
 
             #[inline(always)]
@@ -86,12 +96,35 @@ pub(crate) fn default_strides<V, Ix: Idx>(shape: &V, itemsize: Ix) -> V
 where
     V: DimVec<Ix>,
 {
-    let shape: &[Ix] = shape.as_ref();
-    let ndim = shape.len();
-    let mut strides = V::Dimension::vec(ndim, |_| itemsize);
-    if ndim > 0 {
-        for dim in (0..ndim - 1).rev() {
-            strides[dim] = strides[dim + 1] * shape[dim + 1];
+    let shape = shape.as_ref();
+    default_strides_from_iter::<V::Dimension, Ix>(shape.len(), shape.iter().copied(), itemsize)
+}
+#[inline(always)]
+pub(crate) fn default_strides_cast<V, IxIn: Idx, IxOut: Idx>(
+    shape: &V,
+    itemsize: IxOut,
+) -> <V::Dimension as Dimension>::Vec<IxOut>
+where
+    V: DimVec<IxIn>,
+{
+    let shape = shape.as_ref();
+    default_strides_from_iter::<V::Dimension, IxOut>(
+        shape.len(),
+        shape.iter().copied().map(|s| IxOut::from_usize(s.usize())),
+        itemsize,
+    )
+}
+#[inline(always)]
+pub(crate) fn default_strides_from_iter<D: Dimension, Ix: Idx>(
+    ndim: usize,
+    shape: impl DoubleEndedIterator<Item = Ix>,
+    itemsize: Ix,
+) -> D::Vec<Ix> {
+    let mut strides = D::vec(ndim, |_| itemsize);
+    if ndim > 1 {
+        for (i, s) in shape.rev().take(ndim - 1).enumerate() {
+            let dim = ndim - i - 1;
+            strides[dim - 1] = strides[dim] * s;
         }
     }
     strides
@@ -274,7 +307,6 @@ impl<'a> AlternatingBuffers<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_data(self) -> &'a [u8] {
         match self {
             Self::Init {
@@ -299,7 +331,6 @@ impl<'a> AlternatingBuffers<'a> {
     ///   returns `(old_main_data, old_secondary_buf)`. The caller writes transformed output
     ///   into `dst` (which is the new `main_buf`), and [`data`](Self::data) will immediately
     ///   reflect the new contents.
-    #[inline]
     pub(crate) fn edit(&mut self) -> (&[u8], &mut [u8]) {
         match self {
             Self::Init {
@@ -329,62 +360,6 @@ impl<'a> AlternatingBuffers<'a> {
                 let prev_secondary_buf = main_buf;
                 (prev_main_buf, prev_secondary_buf)
             }
-        }
-    }
-}
-
-pub(crate) unsafe fn nd_copy<D, SrcS, DstS>(
-    src: *const u8,
-    dst: *mut u8,
-    shape: impl IntoDimension<Dimension = D>,
-    src_strides: &[SrcS],
-    dst_strides: &[DstS],
-    itemsize: usize,
-) where
-    D: Dimension,
-    SrcS: Idx + 'static,
-    DstS: Idx + 'static,
-{
-    let shape = shape.into_dimension().unwrap();
-    let shape = shape.as_slice();
-    let ndim = shape.len();
-    assert_eq!(ndim, src_strides.len());
-    assert_eq!(ndim, dst_strides.len());
-
-    // copy more then itemsize if the last dim(s) is contiguous
-    let n_continuous_dims = (0..ndim)
-        .rev()
-        .scan(itemsize, |expected_stride, dim| {
-            let src_stride = src_strides[dim].usize();
-            let dst_stride = dst_strides[dim].usize();
-            let is_contiguous = src_stride == *expected_stride && dst_stride == *expected_stride;
-            *expected_stride *= shape[dim] as usize;
-            Some(is_contiguous)
-        })
-        .take_while(|&is_contiguous| is_contiguous)
-        .count();
-    let itemsize = itemsize
-        * shape[ndim - n_continuous_dims..]
-            .iter()
-            .map(|&d_len| {
-                let d_len: usize = d_len.try_into().unwrap();
-                d_len
-            })
-            .product::<usize>();
-    let shape = &shape[..ndim - n_continuous_dims];
-    let src_strides = &src_strides[..ndim - n_continuous_dims];
-    let dst_strides = &dst_strides[..ndim - n_continuous_dims];
-
-    let iter = NdIter::new(
-        DimArray::from_slice(shape).unwrap(),
-        (
-            NdIterExtStridesPtr::new(src_strides.to_dim_vec::<DimDyn>(), src),
-            NdIterExtStridesPtrMut::new(dst_strides.to_dim_vec::<DimDyn>(), dst),
-        ),
-    );
-    for (_, (src_ptr, dst_ptr)) in iter {
-        unsafe {
-            std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, itemsize);
         }
     }
 }
@@ -528,26 +503,6 @@ pub(crate) fn calc_block_end(begin: u64, end: u64, block_size: u64) -> u64 {
         end / block_size
     } else {
         end.div_ceil(block_size)
-    }
-}
-
-pub(crate) trait ArrayExt<T, const N: usize> {
-    fn try_map_<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
-    where
-        Self: Sized;
-}
-impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
-    #[inline]
-    fn try_map_<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
-    where
-        Self: Sized,
-    {
-        let res = self.map(f);
-        if res.iter().all(|r| r.is_ok()) {
-            Ok(res.map(|items| unsafe { items.unwrap_unchecked() }))
-        } else {
-            Err(res.into_iter().filter_map(|r| r.err()).next().unwrap())
-        }
     }
 }
 

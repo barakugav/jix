@@ -67,7 +67,7 @@ where
     E: NdIterExtension,
 {
     /// Creates an iterator over `[0, shape)` in every dimension.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn new<V>(shape: V, extensions: E) -> Self
     where
         D: Dimension<Vec<u64> = V>,
@@ -78,7 +78,7 @@ where
     }
 
     /// Creates an iterator over `[begin, end)` in every dimension.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn new_with_begin<V>(begin: V, end: V, extensions: E) -> Self
     where
         D: Dimension<Vec<u64> = V>,
@@ -113,7 +113,7 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn get_current_and_advance_status(&mut self) -> (D::Vec<u64>, E::Item) {
+    fn get_current_and_advance_status(&mut self) -> (D::Vec<u64>, E::Item) {
         self.status.advance();
         (self.current_idx.clone(), self.extensions.next())
     }
@@ -209,7 +209,7 @@ impl<D> IdxIter<D>
 where
     D: Dimension,
 {
-    #[inline(always)]
+    #[inline]
     pub(crate) fn new<V>(shape: V) -> Self
     where
         D: Dimension<Vec<u64> = V>,

@@ -228,7 +228,6 @@ impl Array {
     /// assert b.size == 6
     /// ```
     #[getter]
-    #[inline]
     pub fn size(&self) -> PyResult<u64> {
         Ok(self.arr.shape().iter().product::<u64>())
     }
@@ -482,7 +481,6 @@ impl Array {
     ///
     /// Returns:
     ///     A string of the form `Array(shape=..., dtype=..., storage=...)`.
-    #[inline]
     pub fn __repr__(&self) -> String {
         self.__str__()
     }
@@ -491,7 +489,6 @@ impl Array {
 
     /// Write the array to a file or a file-like object. See [`jix.write_array()`][jix.write_array].
     #[pyo3(signature = (path_or_writer, *, append=false, params=None))]
-    #[inline]
     pub fn write_to(
         slf: &Bound<'_, Array>,
         path_or_writer: &Bound<'_, PyAny>,
@@ -504,97 +501,81 @@ impl Array {
     // == arithmetic ops ==
 
     /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
-    #[inline]
     pub fn add(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::add(slf, other)
     }
 
     /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
-    #[inline]
     pub fn __add__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::add(slf, other)
     }
 
     /// Element-wise addition of two arrays. See [`jix.add()`][jix.add].
-    #[inline]
     pub fn __radd__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::add(other, slf)
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
-    #[inline]
     pub fn subtract(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(slf, other)
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
-    #[inline]
     pub fn __sub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(slf, other)
     }
 
     /// Element-wise subtraction of two arrays. See [`jix.subtract()`][jix.subtract].
-    #[inline]
     pub fn __rsub__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::subtract(other, slf)
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
-    #[inline]
     pub fn multiply(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(slf, other)
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
-    #[inline]
     pub fn __mul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(slf, other)
     }
 
     /// Element-wise multiplication of two arrays. See [`jix.multiply()`][jix.multiply].
-    #[inline]
     pub fn __rmul__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::multiply(other, slf)
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
-    #[inline]
     pub fn divide(slf: &Bound<'_, Self>, other: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::divide(slf, other)
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
-    #[inline]
     pub fn __truediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(slf, other)
     }
 
     /// Element-wise division of two arrays. See [`jix.divide()`][jix.divide].
-    #[inline]
     pub fn __rtruediv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::divide(other, slf)
     }
 
     /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
-    #[inline]
     pub fn __floordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::floor_divide(slf, other)
     }
 
     /// Element-wise floor division of two arrays. See [`jix.floor_divide()`][jix.floor_divide].
-    #[inline]
     pub fn __rfloordiv__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::floor_divide(other, slf)
     }
 
     /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
-    #[inline]
     pub fn pow(slf: &Bound<'_, Self>, exponent: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::ops::power(slf, exponent)
     }
 
     /// Element-wise exponentiation (`a ** b`). See [`jix.power()`][jix.power].
-    #[inline]
     pub fn __pow__<'py>(
         slf: &Bound<'py, Self>,
         exponent: &Bound<'py, PyAny>,
@@ -609,7 +590,6 @@ impl Array {
     }
 
     /// Element-wise exponentiation (`b ** a`). See [`jix.power()`][jix.power].
-    #[inline]
     pub fn __rpow__<'py>(
         slf: &Bound<'py, Self>,
         base: &Bound<'py, PyAny>,
@@ -624,61 +604,51 @@ impl Array {
     }
 
     /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
-    #[inline]
     pub fn negative(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::negative(slf)
     }
 
     /// Arithmetic negation applied element-wise. See [`jix.negative()`][jix.negative].
-    #[inline]
     pub fn __neg__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::negative(slf)
     }
 
     /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
-    #[inline]
     pub fn abs(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::absolute(slf)
     }
 
     /// Computes the absolute value of each element. See [`jix.absolute()`][jix.absolute].
-    #[inline]
     pub fn __abs__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::absolute(slf)
     }
 
     /// Computes the natural exponential (`e^x`) of each element. See [`jix.exp()`][jix.exp].
-    #[inline]
     pub fn exp(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::exp(slf)
     }
 
     /// Computes the square root of each element. See [`jix.sqrt()`][jix.sqrt].
-    #[inline]
     pub fn sqrt(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sqrt(slf)
     }
 
     /// Squares each element (`x * x`). See [`jix.square()`][jix.square].
-    #[inline]
     pub fn square(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::square(slf)
     }
 
     /// Rounds each element up to the nearest integer (towards +inf). See [`jix.ceil()`][jix.ceil].
-    #[inline]
     pub fn ceil(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::ceil(slf)
     }
 
     /// Rounds each element down to the nearest integer (towards -inf). See [`jix.floor()`][jix.floor].
-    #[inline]
     pub fn floor(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::floor(slf)
     }
 
     /// Rounds each element to the nearest integer. See [`jix.round()`][jix.round].
-    #[inline]
     pub fn round(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::round(slf)
     }
@@ -686,55 +656,46 @@ impl Array {
     // == bitwise ops ==
 
     /// Element-wise bitwise AND of two arrays. See [`jix.bitwise_and()`][jix.bitwise_and].
-    #[inline]
     pub fn __and__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_and(slf, other)
     }
 
     /// Element-wise bitwise AND of two arrays. See [`jix.bitwise_and()`][jix.bitwise_and].
-    #[inline]
     pub fn __rand__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_and(other, slf)
     }
 
     /// Element-wise bitwise OR of two arrays. See [`jix.bitwise_or()`][jix.bitwise_or].
-    #[inline]
     pub fn __or__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_or(slf, other)
     }
 
     /// Element-wise bitwise OR of two arrays. See [`jix.bitwise_or()`][jix.bitwise_or].
-    #[inline]
     pub fn __ror__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_or(other, slf)
     }
 
     /// Element-wise bitwise XOR of two arrays. See [`jix.bitwise_xor()`][jix.bitwise_xor].
-    #[inline]
     pub fn __xor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_xor(slf, other)
     }
 
     /// Element-wise bitwise XOR of two arrays. See [`jix.bitwise_xor()`][jix.bitwise_xor].
-    #[inline]
     pub fn __rxor__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_xor(other, slf)
     }
 
     /// Element-wise bitwise NOT (one's complement). See [`jix.bitwise_not()`][jix.bitwise_not].
-    #[inline]
     pub fn __invert__<'py>(slf: &Bound<'py, Self>) -> PyResult<Self> {
         crate::ops::bitwise_not(slf)
     }
 
     /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
-    #[inline]
     pub fn __lshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_left_shift(slf, other)
     }
 
     /// Element-wise left shift (`a << b`). See [`jix.bitwise_left_shift()`][jix.bitwise_left_shift].
-    #[inline]
     pub fn __rlshift__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::bitwise_left_shift(other, slf)
     }
@@ -742,37 +703,31 @@ impl Array {
     // == comparison ops ==
 
     /// Element-wise less-than test (`a < b`). See [`jix.less()`][jix.less].
-    #[inline]
     pub fn __lt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::less(slf, other)
     }
 
     /// Element-wise less-than-or-equal test (`a <= b`). See [`jix.less_equal()`][jix.less_equal].
-    #[inline]
     pub fn __le__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::less_equal(slf, other)
     }
 
     /// Element-wise greater-than test (`a > b`). See [`jix.greater()`][jix.greater].
-    #[inline]
     pub fn __gt__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::greater(slf, other)
     }
 
     /// Element-wise greater-than-or-equal test (`a >= b`). See [`jix.greater_equal()`][jix.greater_equal].
-    #[inline]
     pub fn __ge__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::greater_equal(slf, other)
     }
 
     /// Element-wise equality test (`a == b`). See [`jix.equal()`][jix.equal].
-    #[inline]
     pub fn __eq__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::equal(slf, other)
     }
 
     /// Element-wise inequality test (`a != b`). See [`jix.not_equal()`][jix.not_equal].
-    #[inline]
     pub fn __ne__<'py>(slf: &Bound<'py, Self>, other: &Bound<'py, PyAny>) -> PyResult<Self> {
         crate::ops::not_equal(slf, other)
     }
@@ -781,7 +736,6 @@ impl Array {
 
     /// Reduces one or more axes with logical AND: returns `True` if all elements are truthy. See [`jix.all()`][jix.all].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn all(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -792,7 +746,6 @@ impl Array {
 
     /// Reduces one or more axes with logical OR: returns `True` if any element is truthy. See [`jix.any()`][jix.any].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn any(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -803,7 +756,6 @@ impl Array {
 
     /// Reduces one or more axes by taking the maximum element. See [`jix.max()`][jix.max].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn max(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -814,7 +766,6 @@ impl Array {
 
     /// Reduces one or more axes by taking the minimum element. See [`jix.min()`][jix.min].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn min(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -825,21 +776,18 @@ impl Array {
 
     /// Returns the index of the maximum element along a single axis. See [`jix.argmax()`][jix.argmax].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn argmax(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
         crate::ops::argmax(slf, axis, keepdims)
     }
 
     /// Returns the index of the minimum element along a single axis. See [`jix.argmin()`][jix.argmin].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn argmin(slf: &Bound<'_, Self>, axis: Option<i32>, keepdims: bool) -> PyResult<Self> {
         crate::ops::argmin(slf, axis, keepdims)
     }
 
     /// Reduces one or more axes by summing all elements. See [`jix.sum()`][jix.sum].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn sum(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -850,7 +798,6 @@ impl Array {
 
     /// Computes the arithmetic mean along one or more axes. See [`jix.mean()`][jix.mean].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn mean(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -861,7 +808,6 @@ impl Array {
 
     /// Reduces one or more axes by multiplying all elements. See [`jix.product()`][jix.product].
     #[pyo3(signature = (axis=None, *, keepdims=false))]
-    #[inline]
     pub fn prod(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -872,7 +818,6 @@ impl Array {
 
     /// Computes the standard deviation along one or more axes. See [`jix.std()`][jix.std].
     #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
-    #[inline]
     pub fn std(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -884,7 +829,6 @@ impl Array {
 
     /// Computes the variance along one or more axes. See [`jix.var()`][jix.var].
     #[pyo3(signature = (axis=None, *, keepdims=false, ddof=0.0))]
-    #[inline]
     pub fn var(
         slf: &Bound<'_, Self>,
         axis: Option<ItemOrSequence<i32>>,
@@ -895,7 +839,6 @@ impl Array {
     }
 
     /// Casts each element of the array to a new dtype. See [`jix.astype()`][jix.astype].
-    #[inline]
     pub fn astype<'py>(
         slf: &Bound<'py, Self>,
         dtype: &Bound<'_, PyAny>,
@@ -906,7 +849,6 @@ impl Array {
     // == shape ops ==
 
     /// Reinterprets an array with a different shape. See [`jix.reshape()`][jix.reshape].
-    #[inline]
     pub fn reshape<'py>(
         slf: &Bound<'py, Self>,
         shape: ItemOrSequence<i64>,
@@ -915,14 +857,12 @@ impl Array {
     }
 
     /// Collapses the array into a single dimension. See [`jix.flatten()`][jix.flatten].
-    #[inline]
     pub fn flatten<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         crate::ops::flatten(slf)
     }
 
     /// Reorders the axes of an array (generalized transpose). See [`jix.permute_axes()`][jix.permute_axes].
     #[pyo3(signature = (axes=None))]
-    #[inline]
     pub fn permute_axes<'py>(
         slf: &Bound<'py, Self>,
         axes: Option<Vec<usize>>,
@@ -933,14 +873,12 @@ impl Array {
     /// Reverses all axes; shorthand for `permute_axes()` with no arguments. See [`jix.permute_axes()`][jix.permute_axes].
     #[allow(non_snake_case)]
     #[getter]
-    #[inline]
     pub fn T<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, Array>> {
         crate::ops::permute_axes(slf, None)
     }
 
     /// Expands the array to a larger shape by repeating elements along length-1 dimensions. See [`jix.broadcast()`][jix.broadcast].
     #[pyo3(signature = (shape))]
-    #[inline]
     pub fn broadcast<'py>(
         slf: &Bound<'py, Array>,
         shape: ItemOrSequence<i64>,
@@ -949,7 +887,6 @@ impl Array {
     }
 
     /// Selects a sub-region of the array as a lazy view. See [`jix.slice()`][jix.slice].
-    #[inline]
     pub fn slice<'py>(
         slf: &Bound<'py, Array>,
         index: &Bound<'py, PyAny>,
@@ -959,7 +896,6 @@ impl Array {
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.squeeze()`][jix.squeeze].
     #[pyo3(signature = (axis=None))]
-    #[inline]
     pub fn squeeze<'py>(
         slf: &Bound<'py, Array>,
         axis: Option<ItemOrSequence<i32>>,
@@ -968,7 +904,6 @@ impl Array {
     }
 
     /// Inserts new length-1 dimensions at specified positions in the array's shape. See [`jix.unsqueeze()`][jix.unsqueeze].
-    #[inline]
     pub fn unsqueeze<'py>(
         slf: &Bound<'py, Array>,
         axis: ItemOrSequence<i32>,
@@ -977,7 +912,6 @@ impl Array {
     }
 
     /// Repeats each element along the given axis. See [`jix.repeat()`][jix.repeat].
-    #[inline]
     pub fn repeat<'py>(
         slf: &Bound<'py, Array>,
         repeats: u64,
@@ -988,7 +922,6 @@ impl Array {
 
     /// Reverses the order of elements along the given axis. See [`jix.flip()`][jix.flip].
     #[pyo3(signature = (axis=None))]
-    #[inline]
     pub fn flip<'py>(
         slf: &Bound<'py, Array>,
         axis: Option<ItemOrSequence<i32>>,
@@ -998,7 +931,6 @@ impl Array {
 
     /// Rolls elements along an axis, wrapping at the boundary. See [`jix.roll()`][jix.roll].
     #[pyo3(signature = (shift, axis=None))]
-    #[inline]
     pub fn roll<'py>(
         slf: &Bound<'py, Array>,
         shift: i64,
@@ -1009,7 +941,6 @@ impl Array {
 
     /// Replicates the array along a single axis. See [`jix.tile()`][jix.tile].
     #[pyo3(signature = (repeats, axis=None))]
-    #[inline]
     pub fn tile<'py>(
         slf: &Bound<'py, Array>,
         repeats: u64,
@@ -1022,14 +953,12 @@ impl Array {
 
     /// Extracts the real part of each complex element. See [`jix.real()`][jix.real].
     #[getter]
-    #[inline]
     pub fn real(slf: &Bound<'_, Array>) -> PyResult<Array> {
         crate::ops::real(slf)
     }
 
     /// Extracts the imaginary part of each complex element. See [`jix.imag()`][jix.imag].
     #[getter]
-    #[inline]
     pub fn imag(slf: &Bound<'_, Array>) -> PyResult<Array> {
         crate::ops::imag(slf)
     }
@@ -1037,51 +966,43 @@ impl Array {
     // == trigonometric ops ==
 
     /// Computes the sine of each element (input in radians). See [`jix.sin()`][jix.sin].
-    #[inline]
     pub fn sin(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sin(slf)
     }
 
     /// Computes the cosine of each element (input in radians). See [`jix.cos()`][jix.cos].
-    #[inline]
     pub fn cos(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::cos(slf)
     }
 
     /// Computes the tangent of each element (input in radians). See [`jix.tan()`][jix.tan].
-    #[inline]
     pub fn tan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::tan(slf)
     }
 
     /// Computes the arcsine of each element; output is in radians in `[-pi/2, pi/2]`. See [`jix.asin()`][jix.asin].
-    #[inline]
     pub fn asin(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::asin(slf)
     }
 
     /// Computes the arccosine of each element; output is in radians in `[0, pi]`. See [`jix.acos()`][jix.acos].
-    #[inline]
     pub fn acos(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::acos(slf)
     }
 
     /// Computes the arctangent of each element; output is in radians in `(-pi/2, pi/2)`. See [`jix.atan()`][jix.atan].
-    #[inline]
     pub fn atan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::atan(slf)
     }
 
     /// Computes the logarithm of each element; defaults to the natural logarithm. See [`jix.log()`][jix.log].
     #[pyo3(signature = (base=None))]
-    #[inline]
     pub fn log(slf: &Bound<'_, Self>, base: Option<f64>) -> PyResult<Self> {
         crate::ops::log(slf, base)
     }
 
     /// Clamps each element to `[min, max]`. See [`jix.clamp()`][jix.clamp].
     #[pyo3(signature = (min=None, max=None))]
-    #[inline]
     pub fn clamp<'py>(
         slf: &Bound<'py, Self>,
         min: Option<&Bound<'py, PyAny>>,
@@ -1091,7 +1012,6 @@ impl Array {
     }
 
     /// Returns the sign of each element as a floating-point value. See [`jix.sign()`][jix.sign].
-    #[inline]
     pub fn sign(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::sign(slf)
     }
@@ -1099,19 +1019,16 @@ impl Array {
     // == float predicates ==
 
     /// Tests whether each element is finite. See [`jix.is_finite()`][jix.is_finite].
-    #[inline]
     pub fn is_finite(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::is_finite(slf)
     }
 
     /// Tests whether each element is infinite. See [`jix.is_infinite()`][jix.is_infinite].
-    #[inline]
     pub fn is_infinite(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::is_infinite(slf)
     }
 
     /// Tests whether each element is `NaN`. See [`jix.is_nan()`][jix.is_nan].
-    #[inline]
     pub fn is_nan(slf: &Bound<'_, Self>) -> PyResult<Self> {
         crate::ops::is_nan(slf)
     }
@@ -1119,7 +1036,6 @@ impl Array {
     // == axis ops ==
 
     /// Inserts new length-1 dimensions at specified positions. See [`jix.insert_axis()`][jix.insert_axis].
-    #[inline]
     pub fn insert_axis<'py>(
         slf: &Bound<'py, Array>,
         axis: ItemOrSequence<i32>,
@@ -1128,7 +1044,6 @@ impl Array {
     }
 
     /// Removes length-1 dimensions from the array's shape. See [`jix.remove_axis()`][jix.remove_axis].
-    #[inline]
     pub fn remove_axis<'py>(
         slf: &Bound<'py, Array>,
         axis: ItemOrSequence<i32>,

@@ -7,8 +7,8 @@ use crate::storage::block::BlockSize;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, nd_copy, try_dim_arr, DimArray};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::util::{default_strides, try_dim_arr, DimArray, NdCopier};
+use crate::{default_strides_cast, Array, ArrayStorage, Dimension};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -205,22 +205,22 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         let buf = buf.get_mut(index, dtype);
         check_get_buffer_size(index, dtype, buf)?;
         let ndim = self.slice.len();
-        let itemsize = dtype.itemsize() as u64;
+        let itemsize = dtype.itemsize() as usize;
         let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides(&out_shape, itemsize);
+        let dst_strides = default_strides_cast(&out_shape, itemsize);
 
         // inner_read_shape: 1 for strided dims, full range for non-strided dims.
-        let inner_read_shape = S::Dimension::from_fn(ndim, |dim| {
+        let inner_read_shape = S::Dimension::vec(ndim, |dim| {
             if self.slice[dim].is_contiguous() {
-                out_shape[dim]
+                out_shape[dim] as usize
             } else {
                 1
             }
         });
-        let src_strides = default_strides(inner_read_shape.as_vec_u64(), itemsize);
-        let tmp_buf_bytes =
-            (inner_read_shape.as_slice().iter().product::<u64>() * itemsize) as usize;
+        let src_strides = default_strides(&inner_read_shape, itemsize);
+        let tmp_buf_bytes = inner_read_shape.as_ref().iter().product::<usize>() * itemsize;
         let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, dtype.alignment());
+        let copier = NdCopier::new(dtype);
 
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
         let iter_shape = S::Dimension::vec(ndim, |dim| {
@@ -247,17 +247,17 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
 
             let dst_byte_offset = (0..ndim)
                 .filter(|&dim| !self.slice[dim].is_contiguous())
-                .map(|dim| idx[dim] * dst_strides[dim])
-                .sum::<u64>() as usize;
+                .map(|dim| idx[dim] as usize * dst_strides[dim])
+                .sum::<usize>();
             let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
             unsafe {
-                nd_copy(
+                copier.copy(
                     tmp.as_ptr(),
                     dst_ptr,
-                    inner_read_shape.clone(),
+                    inner_read_shape.as_ref(),
                     src_strides.as_ref(),
                     dst_strides.as_ref(),
-                    itemsize as usize,
+                    dtype,
                 )
             };
         }
@@ -279,7 +279,6 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Slice", [&self.array])
     }

@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf, ReadData};
-use crate::{ArrayExt, ArrayStorage, Dimension, ElementType};
+use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, Dimension, ElementType};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
 /// and [`concatenate`](crate::ops::concatenate).
@@ -202,7 +202,7 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
     ) -> Result<impl ReadDataTuple<Self> + use<'a, S, N>> {
         let data = self
             .each_ref()
-            .try_map_(|arr| arr.storage.read_data_typed::<S::Item>(index, context))?;
+            .try_map_inline(|arr| arr.storage.read_data_typed::<S::Item>(index, context))?;
         struct ReadDataTupleImpl<D, const N: usize> {
             data: [D; N],
         }
@@ -224,9 +224,12 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>;
             where
                 Self: Sized,
             {
-                let items = self.data.each_mut().map(|data| data.read_bulk::<M>(offset));
+                let items = self
+                    .data
+                    .each_mut()
+                    .map_inline(|data| data.read_bulk::<M>(offset));
                 (0..M).map(move |item_idx| {
-                    std::array::from_fn::<_, N, _>(|arr_idx| items[arr_idx][item_idx])
+                    array_from_fn_inline::<_, N>(|arr_idx| items[arr_idx][item_idx])
                 })
             }
         }
@@ -293,7 +296,7 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
     ) -> Result<impl ReadDataTuple<Self> + use<'a, 'b, S, N>> {
         let data = self
             .each_ref()
-            .try_map_(|arr| arr.storage.read_data_typed::<S::Item>(index, context))?;
+            .try_map_inline(|arr| arr.storage.read_data_typed::<S::Item>(index, context))?;
         struct ReadDataTupleImpl<D, const N: usize> {
             data: [D; N],
         }
@@ -315,9 +318,12 @@ impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [A
             where
                 Self: Sized,
             {
-                let items = self.data.each_mut().map(|data| data.read_bulk::<M>(offset));
+                let items = self
+                    .data
+                    .each_mut()
+                    .map_inline(|data| data.read_bulk::<M>(offset));
                 (0..M).map(move |item_idx| {
-                    std::array::from_fn::<_, N, _>(|arr_idx| items[arr_idx][item_idx])
+                    array_from_fn_inline::<_, N>(|arr_idx| items[arr_idx][item_idx])
                 })
             }
         }
@@ -422,7 +428,7 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
                     }
                 }
 
-                std::array::from_fn::<_, M, _>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
+                array_from_fn_inline::<_, M>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
                     .into_iter()
             }
         }
@@ -530,7 +536,7 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
                     }
                 }
 
-                std::array::from_fn::<_, M, _>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
+                array_from_fn_inline::<_, M>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
                     .into_iter()
             }
         }

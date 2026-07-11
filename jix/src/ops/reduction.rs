@@ -12,7 +12,7 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray};
-use crate::{Array, ArrayStorage, DimVec, Dimension, IterExt, Ty};
+use crate::{array_from_fn_inline, Array, ArrayStorage, DimVec, Dimension, IterExt, Ty};
 
 pub(crate) struct ReductionOp<S, K, D> {
     kernel: K,
@@ -161,7 +161,6 @@ where
             .with_dynamic_spec(&self.spec)
             .with_cleared_flags()
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("ReductionOp", [&self.array])
     }
@@ -544,7 +543,7 @@ where
                     // Fold all LANES blocks
                     let item_idx_end_lanes = item_idx_end.saturating_sub(LANES as u64);
                     while item_idx < item_idx_end_lanes {
-                        let items: [_; LANES] = std::array::from_fn(|_| unsafe {
+                        let items: [_; LANES] = array_from_fn_inline(|_| unsafe {
                             reduction_iter.next().unwrap_unchecked()
                         });
                         for (i, item) in items.into_iter().enumerate() {
@@ -678,7 +677,7 @@ macro_rules! define_reduction_op {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = <S::Dimension as crate::Dimension>::Smaller;
             crate::storage::impl_array_storage_forward!(<S>);
-            #[inline]
+
             fn info(&self) -> ArrayStorageInfo<'_> {
                 ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
             }
@@ -731,7 +730,7 @@ macro_rules! define_reduction_op {
             type ElementType = crate::Ty<$output_ty>;
             type Dimension = D;
             crate::storage::impl_array_storage_forward!(<S, D>);
-            #[inline]
+
             fn info(&self) -> ArrayStorageInfo<'_> {
                 ArrayStorageInfo::new_deps(stringify!($Op), [&self.0.array])
             }
@@ -1905,7 +1904,7 @@ where
     type ElementType = Ty<S::Item>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, F>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Reduce", [&self.0.array])
     }
@@ -2077,7 +2076,7 @@ where
     type ElementType = Ty<B>;
     type Dimension = D;
     crate::storage::impl_array_storage_forward!(<S, D, B, F>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Fold", [&self.0.array])
     }

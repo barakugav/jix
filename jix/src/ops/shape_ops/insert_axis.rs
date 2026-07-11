@@ -242,7 +242,6 @@ where
             .with_dynamic_spec(&self.spec)
             .map_flags(|flags| flags.clear_compact())
     }
-    #[inline]
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("InsertAxis", [&self.array])
     }

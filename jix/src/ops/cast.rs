@@ -219,7 +219,7 @@ where
     type ElementType = crate::Ty<T>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!('a, T2, <S, T>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Cast", [&self.0.array])
     }

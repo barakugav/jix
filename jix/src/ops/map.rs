@@ -5,8 +5,8 @@ use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
 use crate::storage::{ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
 use crate::{
-    Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped, ArrayStorage, ReadContext,
-    ReadDataTuple, Ty,
+    array_from_fn_inline, Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped,
+    ArrayStorage, ReadContext, ReadDataTuple, Ty,
 };
 
 impl<S> Array<S>
@@ -86,7 +86,7 @@ where
     type ElementType = Ty<O>;
     type Dimension = S::Dimension;
     crate::storage::impl_array_storage_forward!(<S, O, F>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Map", [&self.0])
     }
@@ -157,7 +157,7 @@ where
     type ElementType = Ty<O>;
     type Dimension = S1::Dimension;
     crate::storage::impl_array_storage_forward!(<S1, S2, O, F>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Map2", [&self.0.a, &self.0.b])
     }
@@ -282,14 +282,6 @@ where
     type Dimension = ArraysT::Dimension;
 
     #[inline]
-    fn info(&self) -> ArrayStorageInfo<'_> {
-        let deps = (0..self.arrays.narrays())
-            .map(|i| self.arrays.as_array_storage(i))
-            .collect::<Vec<_>>();
-        ArrayStorageInfo::new_deps_dyn("MapMultiple", deps)
-    }
-
-    #[inline]
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -332,7 +324,7 @@ where
             #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [O; N] {
                 let mut data_itr = self.data.read_bulk_as_iter::<N>(offset);
-                std::array::from_fn(|_| (self.f)(data_itr.next().unwrap()))
+                array_from_fn_inline(|_| (self.f)(data_itr.next().unwrap()))
             }
         }
         ReadDataImpl {
@@ -343,12 +335,12 @@ where
         .transmute_items::<T>()
     }
 
-    #[inline]
+    #[inline(always)]
     fn shape(&self) -> &[u64] {
         self.arrays.shape(0)
     }
 
-    #[inline]
+    #[inline(always)]
     fn dtype(&self) -> &Dtype {
         const { &O::DTYPE }
     }
@@ -356,6 +348,13 @@ where
     #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
         self.arrays.spec(0).with_cleared_flags()
+    }
+
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        let deps = (0..self.arrays.narrays())
+            .map(|i| self.arrays.as_array_storage(i))
+            .collect::<Vec<_>>();
+        ArrayStorageInfo::new_deps_dyn("MapMultiple", deps)
     }
 
     crate::ops::impl_dimension_change_default!();

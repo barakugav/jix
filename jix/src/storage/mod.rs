@@ -51,7 +51,7 @@ use crate::dtype::Dtyped;
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
-use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
+use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core;
 
@@ -119,7 +119,7 @@ where
     type Dimension = S::Dimension;
 
     impl_array_storage_forward!('b, T, <S>);
-    #[inline]
+
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Ref", [self.0])
     }
@@ -169,10 +169,11 @@ macro_rules! impl_array_storage_forward {
         fn dtype(&self) -> &crate::dtype::Dtype {
             self.0.dtype()
         }
-        #[inline]
+        #[inline(always)]
         fn spec(&self) -> crate::storage::ArraySpec<'_> {
             self.0.spec()
         }
+        #[inline]
         fn as_compact(
             &self,
         ) -> Option<crate::storage::CompactBorrowed<'_, Self::ElementType, Self::Dimension>> {
@@ -205,7 +206,7 @@ pub trait ReadData<T> {
     /// Read all items into the given buffer.
     ///
     /// The given buffer must have the exact size of `self.len() * size_of::<T>()` and be properly aligned for `T`.
-    #[inline]
+    #[inline(never)]
     fn to_buf(&mut self, buf: &mut [u8]) -> Result<()>
     where
         T: Dtyped,
@@ -242,7 +243,7 @@ pub trait ReadData<T> {
             let mut offset = 0;
             while offset + LANES <= nitems {
                 let chunk = data.read_bulk::<LANES>(offset);
-                buf[offset..offset + LANES].copy_from_slice(&chunk);
+                buf[offset..LANES + offset].copy_from_slice(&chunk);
                 offset += LANES;
             }
             while offset < nitems {
@@ -291,7 +292,7 @@ where
         {
             #[inline(always)]
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [U; N] {
-                self.inner.read_bulk::<N>(offset).map(&mut self.f)
+                self.inner.read_bulk::<N>(offset).map_inline(&mut self.f)
             }
             #[inline(always)]
             fn len(&self) -> usize {
@@ -328,7 +329,7 @@ where
             fn read_bulk<const N: usize>(&mut self, offset: usize) -> [(T, U); N] {
                 let left = self.left.read_bulk::<N>(offset);
                 let right = self.right.read_bulk::<N>(offset);
-                std::array::from_fn(|i| (left[i], right[i]))
+                array_from_fn_inline(|i| (left[i], right[i]))
             }
             #[inline(always)]
             fn len(&self) -> usize {

@@ -171,9 +171,6 @@ pub trait Dimension:
 
     /// Build a vec-like container with one value per axis, by applying `f` to each axis index.
     fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T>;
-
-    /// Borrow this dimension's axis lengths as its [`Vec`](Dimension::Vec) container.
-    fn as_vec_u64(&self) -> &Self::Vec<u64>;
 }
 
 pub(crate) trait DimVec<T>:
@@ -250,11 +247,6 @@ impl Dimension for DimDyn {
     fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T> {
         dim_arr(ndim, f)
     }
-
-    #[inline(always)]
-    fn as_vec_u64(&self) -> &Self::Vec<u64> {
-        &self.0
-    }
 }
 impl Index<usize> for DimDyn {
     type Output = u64;
@@ -278,7 +270,7 @@ impl ndarray::IntoDimension for DimDyn {
         let dim = self.as_slice();
         let mut nd_dim = Self::Dim::zeros(dim.len());
         for (i, &size) in dim.iter().enumerate() {
-            nd_dim[i] = size as usize;
+            nd_dim[i] = size.try_into().unwrap();
         }
         nd_dim
     }
@@ -360,17 +352,13 @@ macro_rules! impl_dim {
 
             #[inline(always)]
             fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T> {
+                // TODO
                 assert_eq!(
                     ndim, $dim,
                     "cannot create Dim<{}> with ndim {ndim}",
                     $dim
                 );
-                std::array::from_fn(f)
-            }
-
-            #[inline(always)]
-            fn as_vec_u64(&self) -> &Self::Vec<u64> {
-                &self.0
+                crate::array_from_fn_inline(f)
             }
         }
         impl Index<usize> for Dim<$dim> {
@@ -395,7 +383,7 @@ macro_rules! impl_dim {
                 let dim = self.as_slice();
                 let mut nd_dim = <Self::Dim as ndarray::Dimension>::zeros(dim.len());
                 for (i, &size) in dim.iter().enumerate() {
-                    nd_dim[i] = size as usize;
+                    nd_dim[i] = size.try_into().unwrap();
                 }
                 nd_dim
             }
@@ -570,12 +558,7 @@ macro_rules! impl_into_dimension_ndarray {
 
             #[inline(always)]
             fn into_dimension(self) -> Result<Self::Dimension> {
-                let mut arr = [0u64; $n];
-                #[allow(clippy::reversed_empty_ranges)]
-                for i in 0..$n {
-                    arr[i] = self[i] as u64;
-                }
-                Ok(Dim::from_array(arr))
+                Ok(Dim::from_fn($n, |i| self[i] as u64))
             }
         }
     };
