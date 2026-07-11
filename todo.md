@@ -12,4 +12,3 @@
 - resolve TODOs across the repo
 - hold D::Vec in ops
 - union asserts
-- monomorphize Compact into scalars and dimension in py lib
