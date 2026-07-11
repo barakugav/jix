@@ -436,7 +436,7 @@ where
         let dtype = self.dtype();
         let itemsize = dtype.itemsize() as usize;
         check_get_range(self.shape(), index)?;
-        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        let mut buf = buf.get_contiguous_mut(index, dtype, context);
         buf.edit(|buf| {
             check_get_buffer_size(index, dtype, buf)?;
 

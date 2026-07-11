@@ -153,10 +153,10 @@ impl<'a> NdCopier<'a> {
 
         let ndim = shape.len();
         assert!(ndim == src_strides.len() && ndim == dst_strides.len());
-        let mut n_continuous_items = 1;
+        let mut n_contiguous_items = 1;
 
         // copy more then itemsize if the last dim(s) is contiguous
-        let n_continuous_dims = (0..ndim)
+        let n_contiguous_dims = (0..ndim)
             .rev()
             .scan(size_of::<T>(), |expected_stride, dim| {
                 let is_contiguous = shape[dim] <= 1
@@ -167,9 +167,9 @@ impl<'a> NdCopier<'a> {
             })
             .take_while(|&is_contiguous| is_contiguous)
             .count();
-        if n_continuous_dims > 0 {
-            let n_strided_dims = ndim - n_continuous_dims;
-            n_continuous_items = shape[n_strided_dims..].iter().product::<usize>();
+        if n_contiguous_dims > 0 {
+            let n_strided_dims = ndim - n_contiguous_dims;
+            n_contiguous_items = shape[n_strided_dims..].iter().product::<usize>();
             shape = &shape[..n_strided_dims];
             src_strides = &src_strides[..n_strided_dims];
             dst_strides = &dst_strides[..n_strided_dims];
@@ -188,7 +188,7 @@ impl<'a> NdCopier<'a> {
                     dst_strides,
                     src,
                     dst,
-                    n_continuous_items,
+                    n_contiguous_items,
                 )
             };
         }
@@ -204,7 +204,7 @@ impl<'a> NdCopier<'a> {
                 && dst_stride.is_multiple_of(align_of::<T>()));
 
         unsafe {
-            match n_continuous_items {
+            match n_contiguous_items {
                 1 => Self::copy_1d::<T, 1>(src, dst, len, src_stride, dst_stride, aligned),
                 2 => Self::copy_1d::<T, 2>(src, dst, len, src_stride, dst_stride, aligned),
                 4 => Self::copy_1d::<T, 4>(src, dst, len, src_stride, dst_stride, aligned),
@@ -222,7 +222,7 @@ impl<'a> NdCopier<'a> {
                     len,
                     src_stride,
                     dst_stride,
-                    n_continuous_items,
+                    n_contiguous_items,
                     aligned,
                 ),
             }
@@ -230,7 +230,7 @@ impl<'a> NdCopier<'a> {
     }
 
     #[inline(always)]
-    unsafe fn copy_1d<T: Copy, const N_CONTINUOUS: usize>(
+    unsafe fn copy_1d<T: Copy, const N_CONTIGUOUS: usize>(
         src: &[u8],
         dst: &mut [u8],
         len: usize,
@@ -240,16 +240,16 @@ impl<'a> NdCopier<'a> {
     ) {
         if aligned {
             unsafe {
-                Self::copy_1d_aligned::<T, N_CONTINUOUS>(src, dst, len, src_stride, dst_stride)
+                Self::copy_1d_aligned::<T, N_CONTIGUOUS>(src, dst, len, src_stride, dst_stride)
             }
         } else {
             unsafe {
-                Self::copy_1d_unaligned::<T, N_CONTINUOUS>(src, dst, len, src_stride, dst_stride)
+                Self::copy_1d_unaligned::<T, N_CONTIGUOUS>(src, dst, len, src_stride, dst_stride)
             }
         }
     }
     #[inline]
-    unsafe fn copy_1d_aligned<T: Copy, const N_CONTINUOUS: usize>(
+    unsafe fn copy_1d_aligned<T: Copy, const N_CONTIGUOUS: usize>(
         src: &[u8],
         dst: &mut [u8],
         len: usize,
@@ -258,30 +258,30 @@ impl<'a> NdCopier<'a> {
     ) {
         let src = src.as_ptr();
         let dst = dst.as_mut_ptr();
-        let src_continuous = len <= 1 || src_stride == size_of::<T>() * N_CONTINUOUS;
-        let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * N_CONTINUOUS;
-        if src_continuous && dst_continuous {
+        let src_contiguous = len <= 1 || src_stride == size_of::<T>() * N_CONTIGUOUS;
+        let dst_contiguous = len <= 1 || dst_stride == size_of::<T>() * N_CONTIGUOUS;
+        if src_contiguous && dst_contiguous {
             unsafe {
-                std::ptr::copy_nonoverlapping::<[T; N_CONTINUOUS]>(
-                    src.cast::<[T; N_CONTINUOUS]>(),
-                    dst.cast::<[T; N_CONTINUOUS]>(),
+                std::ptr::copy_nonoverlapping::<[T; N_CONTIGUOUS]>(
+                    src.cast::<[T; N_CONTIGUOUS]>(),
+                    dst.cast::<[T; N_CONTIGUOUS]>(),
                     len,
                 )
             };
-        } else if src_continuous {
-            let src = src.cast::<[T; N_CONTINUOUS]>();
+        } else if src_contiguous {
+            let src = src.cast::<[T; N_CONTIGUOUS]>();
             for i in 0..len {
                 unsafe {
                     let src = src.add(i);
-                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTIGUOUS]>();
                     dst.write(src.read());
                 }
             }
-        } else if dst_continuous {
-            let dst = dst.cast::<[T; N_CONTINUOUS]>();
+        } else if dst_contiguous {
+            let dst = dst.cast::<[T; N_CONTIGUOUS]>();
             for i in 0..len {
                 unsafe {
-                    let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
+                    let src = src.add(i * src_stride).cast::<[T; N_CONTIGUOUS]>();
                     let dst = dst.add(i);
                     dst.write(src.read());
                 }
@@ -289,15 +289,15 @@ impl<'a> NdCopier<'a> {
         } else {
             for i in 0..len {
                 unsafe {
-                    let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
-                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                    let src = src.add(i * src_stride).cast::<[T; N_CONTIGUOUS]>();
+                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTIGUOUS]>();
                     dst.write(src.read());
                 }
             }
         }
     }
     #[inline(never)]
-    unsafe fn copy_1d_unaligned<T: Copy, const N_CONTINUOUS: usize>(
+    unsafe fn copy_1d_unaligned<T: Copy, const N_CONTIGUOUS: usize>(
         src: &[u8],
         dst: &mut [u8],
         len: usize,
@@ -306,11 +306,11 @@ impl<'a> NdCopier<'a> {
     ) {
         let src = src.as_ptr();
         let dst = dst.as_mut_ptr();
-        let src_continuous = len <= 1 || src_stride == size_of::<T>() * N_CONTINUOUS;
-        let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * N_CONTINUOUS;
-        if src_continuous && dst_continuous {
-            let src = src.cast::<[T; N_CONTINUOUS]>();
-            let dst = dst.cast::<[T; N_CONTINUOUS]>();
+        let src_contiguous = len <= 1 || src_stride == size_of::<T>() * N_CONTIGUOUS;
+        let dst_contiguous = len <= 1 || dst_stride == size_of::<T>() * N_CONTIGUOUS;
+        if src_contiguous && dst_contiguous {
+            let src = src.cast::<[T; N_CONTIGUOUS]>();
+            let dst = dst.cast::<[T; N_CONTIGUOUS]>();
             for i in 0..len {
                 unsafe {
                     let src = src.add(i);
@@ -318,20 +318,20 @@ impl<'a> NdCopier<'a> {
                     dst.write_unaligned(src.read_unaligned());
                 }
             }
-        } else if src_continuous {
-            let src = src.cast::<[T; N_CONTINUOUS]>();
+        } else if src_contiguous {
+            let src = src.cast::<[T; N_CONTIGUOUS]>();
             for i in 0..len {
                 unsafe {
                     let src = src.add(i);
-                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTIGUOUS]>();
                     dst.write_unaligned(src.read_unaligned());
                 }
             }
-        } else if dst_continuous {
-            let dst = dst.cast::<[T; N_CONTINUOUS]>();
+        } else if dst_contiguous {
+            let dst = dst.cast::<[T; N_CONTIGUOUS]>();
             for i in 0..len {
                 unsafe {
-                    let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
+                    let src = src.add(i * src_stride).cast::<[T; N_CONTIGUOUS]>();
                     let dst = dst.add(i);
                     dst.write_unaligned(src.read_unaligned());
                 }
@@ -339,8 +339,8 @@ impl<'a> NdCopier<'a> {
         } else {
             for i in 0..len {
                 unsafe {
-                    let src = src.add(i * src_stride).cast::<[T; N_CONTINUOUS]>();
-                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTINUOUS]>();
+                    let src = src.add(i * src_stride).cast::<[T; N_CONTIGUOUS]>();
+                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTIGUOUS]>();
                     dst.write_unaligned(src.read_unaligned());
                 }
             }
@@ -354,48 +354,48 @@ impl<'a> NdCopier<'a> {
         len: usize,
         src_stride: usize,
         dst_stride: usize,
-        n_continuous_items: usize,
+        n_contiguous_items: usize,
         aligned: bool,
     ) {
         let src = src.as_ptr();
         let dst = dst.as_mut_ptr();
         unsafe {
             if aligned {
-                let src_continuous = len <= 1 || src_stride == size_of::<T>() * n_continuous_items;
-                let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * n_continuous_items;
-                if src_continuous && dst_continuous {
+                let src_contiguous = len <= 1 || src_stride == size_of::<T>() * n_contiguous_items;
+                let dst_contiguous = len <= 1 || dst_stride == size_of::<T>() * n_contiguous_items;
+                if src_contiguous && dst_contiguous {
                     std::ptr::copy_nonoverlapping::<T>(
                         src.cast::<T>(),
                         dst.cast::<T>(),
-                        len * n_continuous_items,
+                        len * n_contiguous_items,
                     );
-                } else if src_continuous {
+                } else if src_contiguous {
                     let src = src.cast::<T>();
                     for i in 0..len {
-                        let src = src.add(i * n_continuous_items);
+                        let src = src.add(i * n_contiguous_items);
                         let dst = dst.add(i * dst_stride).cast::<T>();
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
                     }
-                } else if dst_continuous {
+                } else if dst_contiguous {
                     let dst = dst.cast::<T>();
                     for i in 0..len {
                         let src = src.add(i * src_stride).cast::<T>();
-                        let dst = dst.add(i * n_continuous_items);
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                        let dst = dst.add(i * n_contiguous_items);
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
                     }
                 } else {
                     for i in 0..len {
                         let src = src.add(i * src_stride).cast::<T>();
                         let dst = dst.add(i * dst_stride).cast::<T>();
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_continuous_items);
+                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
                     }
                 }
             } else {
-                let n_continuous_bytes = size_of::<T>() * n_continuous_items;
+                let n_contiguous_bytes = size_of::<T>() * n_contiguous_items;
                 for i in 0..len {
                     let src = src.add(i * src_stride);
                     let dst = dst.add(i * dst_stride);
-                    std::ptr::copy_nonoverlapping::<u8>(src, dst, n_continuous_bytes);
+                    std::ptr::copy_nonoverlapping::<u8>(src, dst, n_contiguous_bytes);
                 }
             }
         }
@@ -408,7 +408,7 @@ impl<'a> NdCopier<'a> {
         dst_strides: &[usize],
         src: &[u8],
         dst: &mut [u8],
-        n_continuous_items: usize,
+        n_contiguous_items: usize,
     ) {
         unsafe fn copy_nd_inner<T: Copy, D: Dimension>(
             shape: &[usize],
@@ -416,7 +416,7 @@ impl<'a> NdCopier<'a> {
             dst_strides: &[usize],
             src: &[u8],
             dst: &mut [u8],
-            n_continuous_items: usize,
+            n_contiguous_items: usize,
             aligned: bool,
         ) {
             let src = src.as_ptr();
@@ -434,15 +434,15 @@ impl<'a> NdCopier<'a> {
                         std::ptr::copy_nonoverlapping::<T>(
                             src_ptr.cast::<T>(),
                             dst_ptr.cast::<T>(),
-                            n_continuous_items,
+                            n_contiguous_items,
                         );
                     }
                 }
             } else {
-                let n_continuous_bytes = size_of::<T>() * n_continuous_items;
+                let n_contiguous_bytes = size_of::<T>() * n_contiguous_items;
                 for (_, (src_ptr, dst_ptr)) in iter {
                     unsafe {
-                        std::ptr::copy_nonoverlapping::<u8>(src_ptr, dst_ptr, n_continuous_bytes);
+                        std::ptr::copy_nonoverlapping::<u8>(src_ptr, dst_ptr, n_contiguous_bytes);
                     }
                 }
             }
@@ -475,7 +475,7 @@ impl<'a> NdCopier<'a> {
                 dst_strides,
                 src,
                 dst,
-                n_continuous_items,
+                n_contiguous_items,
                 aligned,
             )
         }
@@ -526,10 +526,10 @@ impl<'a> NdCopier<'a> {
 
         let ndim = shape.len();
         assert!(ndim == src_strides.len() && ndim == dst_strides.len());
-        let mut n_continuous_bytes = dtype.itemsize() as usize;
+        let mut n_contiguous_bytes = dtype.itemsize() as usize;
 
         // copy more then itemsize if the last dim(s) is contiguous
-        let n_continuous_dims = (0..ndim)
+        let n_contiguous_dims = (0..ndim)
             .rev()
             .scan(dtype.itemsize() as usize, |expected_stride, dim| {
                 let is_contiguous = shape[dim] <= 1
@@ -540,9 +540,9 @@ impl<'a> NdCopier<'a> {
             })
             .take_while(|&is_contiguous| is_contiguous)
             .count();
-        if n_continuous_dims > 0 {
-            let n_strided_dims = ndim - n_continuous_dims;
-            n_continuous_bytes *= shape[n_strided_dims..].iter().product::<usize>();
+        if n_contiguous_dims > 0 {
+            let n_strided_dims = ndim - n_contiguous_dims;
+            n_contiguous_bytes *= shape[n_strided_dims..].iter().product::<usize>();
             shape = &shape[..n_strided_dims];
             src_strides = &src_strides[..n_strided_dims];
             dst_strides = &dst_strides[..n_strided_dims];
@@ -559,7 +559,7 @@ impl<'a> NdCopier<'a> {
             dst_strides: &[usize],
             src: &[u8],
             dst: &mut [u8],
-            n_continuous_bytes: usize,
+            n_contiguous_bytes: usize,
         ) {
             let src = src.as_ptr();
             let dst = dst.as_mut_ptr();
@@ -572,7 +572,7 @@ impl<'a> NdCopier<'a> {
             );
             for (_, (src_ptr, dst_ptr)) in iter {
                 unsafe {
-                    std::ptr::copy_nonoverlapping::<u8>(src_ptr, dst_ptr, n_continuous_bytes);
+                    std::ptr::copy_nonoverlapping::<u8>(src_ptr, dst_ptr, n_contiguous_bytes);
                 }
             }
         }
@@ -596,7 +596,7 @@ impl<'a> NdCopier<'a> {
                 dst_strides,
                 src,
                 dst,
-                n_continuous_bytes,
+                n_contiguous_bytes,
             )
         }
     }
@@ -792,7 +792,7 @@ mod tests {
 
     // Ranks 0 through 8 (the maximum) for one element type. The trailing `[3, k]` shapes put a
     // contiguous inner run of length k behind a strided outer axis, so the run coalesces to
-    // `n_continuous == k` and drives each specialized `copy_1d` arm (k in 1/2/4/8/16/32/64, subject
+    // `n_contiguous == k` and drives each specialized `copy_1d` arm (k in 1/2/4/8/16/32/64, subject
     // to the size guards) plus the `_` fallback (k = 3).
     fn check_all_dims<T: Dtyped>() {
         check_rank::<T>(&[]);

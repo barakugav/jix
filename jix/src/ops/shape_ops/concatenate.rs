@@ -1,4 +1,4 @@
-use std::ops::{Not, Range};
+use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
@@ -6,7 +6,7 @@ use crate::error::{
     bail, check_get_buffer_size, check_get_range, check_shape_overflow, ensure, Result,
 };
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{default_strides, ArraySequence, DimArray, NdCopier};
+use crate::util::{default_strides, ArraySequence, DimArray};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
@@ -167,7 +167,7 @@ where
     ) -> Result<()> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        let mut buf = buf.get_contiguous_mut(index, dtype, context);
         buf.edit(|buf| {
             let nitems = check_get_buffer_size(index, dtype, buf)?;
             if nitems == 0 {
@@ -187,10 +187,6 @@ where
                 .iter()
                 .take(self.concat_axis)
                 .all(|&s| s <= 1);
-            let mut tmp_buf = in_place
-                .not()
-                .then(|| context.tmp_buf(0, dtype.alignment()));
-
             let req_start = index[self.concat_axis].start;
             let req_end = index[self.concat_axis].end;
 
@@ -205,7 +201,6 @@ where
                 self.borders.partition_point(|&b| b <= req_start)
             };
 
-            let copier = NdCopier::new(dtype);
             for arr in first_arr..self.borders.len() {
                 let arr_start = if arr == 0 { 0 } else { self.borders[arr - 1] };
                 let arr_end = self.borders[arr];
@@ -233,47 +228,14 @@ where
                 let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
                 let buf_offset = buf_concat_offset * concat_stride;
 
-                let read_buf = if in_place {
+                let mut out = if in_place {
                     // Data lands contiguously at the right offset - read directly into buf.
-                    &mut buf[buf_offset..buf_offset + sub_size_bytes]
+                    OutBuf::new(&mut buf[buf_offset..buf_offset + sub_size_bytes])
                 } else {
-                    // Read into tmp_buf then scatter into buf using strided copy.
-                    let tmp_buf = tmp_buf.as_mut().unwrap();
-                    tmp_buf.set_len(sub_size_bytes);
-                    tmp_buf.as_mut_slice()
+                    unsafe { OutBuf::new_strided(&mut buf[buf_offset..], output_strides.as_ref()) }
                 };
-                self.arrays.read_data(
-                    arr,
-                    sub_index.as_ref(),
-                    &mut OutBuf::new(read_buf),
-                    context,
-                )?;
-
-                if !in_place {
-                    // Scatter from tmp_buf into buf.
-                    // src: C-strides of sub_shape.
-                    // dst: output_strides for dims before concat_axis (wider due to full output
-                    //      width), sub_strides for dims at/after (sizes match the output there).
-                    let sub_strides = default_strides(&sub_shape, itemsize);
-                    let dst_strides = Self::Dimension::vec(index.len(), |dim| {
-                        if dim < self.concat_axis {
-                            output_strides[dim]
-                        } else {
-                            sub_strides[dim]
-                        }
-                    });
-
-                    unsafe {
-                        copier.copy(
-                            read_buf.as_ptr(),
-                            buf.as_mut_ptr().add(buf_offset),
-                            sub_shape.as_ref(),
-                            sub_strides.as_ref(),
-                            dst_strides.as_ref(),
-                            dtype,
-                        )
-                    };
-                }
+                self.arrays
+                    .read_data(arr, sub_index.as_ref(), &mut out, context)?;
             }
 
             Ok(())

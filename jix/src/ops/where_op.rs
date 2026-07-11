@@ -135,45 +135,48 @@ where
         let mut y_buf = OutBuf::new_lazy(context);
         self.condition
             .read_data(index, &mut condition_buf, context)?;
-        self.x.read_data(index, buf, context)?; // read x directly into the output buffer
-        self.y.read_data(index, &mut y_buf, context)?;
 
-        let condition = unsafe { cast_slice::<_, bool>(condition_buf.as_slice().unwrap()) };
-        let y_buf = y_buf.as_slice().unwrap();
-        let buf = buf.as_mut_slice().unwrap();
+        let mut buf = buf.get_contiguous_mut(index, dtype, context);
+        buf.edit(|buf| {
+            // read x directly into the output buffer
+            self.x
+                .read_data(index, &mut OutBuf::new(&mut *buf), context)?;
+            self.y.read_data(index, &mut y_buf, context)?;
 
-        unsafe fn where_impl<T>(condition: &[bool], buf: &mut [u8], y_buf: &[u8])
-        where
-            T: Copy,
-        {
-            let x = unsafe { cast_slice_mut::<_, T>(buf) };
-            let y = unsafe { cast_slice::<_, T>(y_buf) };
-            for (cond, (x, y)) in condition.iter().zip(x.iter_mut().zip(y)) {
-                if !cond {
-                    *x = *y;
+            let condition = unsafe { cast_slice::<_, bool>(condition_buf.as_slice().unwrap()) };
+            let y_buf = y_buf.as_slice().unwrap();
+
+            unsafe fn where_impl<T>(condition: &[bool], buf: &mut [u8], y_buf: &[u8])
+            where
+                T: Copy,
+            {
+                let x = unsafe { cast_slice_mut::<_, T>(buf) };
+                let y = unsafe { cast_slice::<_, T>(y_buf) };
+                for (cond, (x, y)) in condition.iter().zip(x.iter_mut().zip(y)) {
+                    *x = if *cond { *x } else { *y };
                 }
             }
-        }
 
-        match (dtype.itemsize(), dtype.alignment().as_usize()) {
-            (1, 1) => unsafe { where_impl::<u8>(condition, buf, y_buf) },
-            (2, 2) => unsafe { where_impl::<u16>(condition, buf, y_buf) },
-            (4, 2) => unsafe { where_impl::<[u16; 2]>(condition, buf, y_buf) },
-            (4, 4) => unsafe { where_impl::<u32>(condition, buf, y_buf) },
-            (8, 4) => unsafe { where_impl::<[u32; 2]>(condition, buf, y_buf) },
-            (8, 8) => unsafe { where_impl::<u64>(condition, buf, y_buf) },
-            (16, 8 | 16) => unsafe { where_impl::<[u64; 2]>(condition, buf, y_buf) },
-            (itemsize, _) => {
-                let x = buf.chunks_exact_mut(itemsize as usize);
-                let y = y_buf.chunks_exact(itemsize as usize);
-                for (cond, (x, y)) in condition.iter().zip(x.zip(y)) {
-                    if !cond {
-                        x.copy_from_slice(y);
+            match (dtype.itemsize(), dtype.alignment().as_usize()) {
+                (1, 1) => unsafe { where_impl::<u8>(condition, buf, y_buf) },
+                (2, 2) => unsafe { where_impl::<u16>(condition, buf, y_buf) },
+                (4, 2) => unsafe { where_impl::<[u16; 2]>(condition, buf, y_buf) },
+                (4, 4) => unsafe { where_impl::<u32>(condition, buf, y_buf) },
+                (8, 4) => unsafe { where_impl::<[u32; 2]>(condition, buf, y_buf) },
+                (8, 8) => unsafe { where_impl::<u64>(condition, buf, y_buf) },
+                (16, 8 | 16) => unsafe { where_impl::<[u64; 2]>(condition, buf, y_buf) },
+                (itemsize, _) => {
+                    let x = buf.chunks_exact_mut(itemsize as usize);
+                    let y = y_buf.chunks_exact(itemsize as usize);
+                    for (cond, (x, y)) in condition.iter().zip(x.zip(y)) {
+                        if !cond {
+                            x.copy_from_slice(y);
+                        }
                     }
                 }
-            }
-        };
-        Ok(())
+            };
+            Ok(())
+        })
     }
 
     #[inline(always)]

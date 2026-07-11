@@ -8,7 +8,7 @@ use crate::error::{
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf};
 use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray};
-use crate::{default_strides, Array, ArrayStorage, Dimension, NdCopier};
+use crate::{default_strides, Array, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///
@@ -146,7 +146,7 @@ where
         let shape = self.shape();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
-        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        let mut buf = buf.get_contiguous_mut(index, dtype, context);
         buf.edit(|buf| {
             let nitems = check_get_buffer_size(index, dtype, buf)?;
             if nitems == 0 {
@@ -164,9 +164,6 @@ where
             });
             let itemsize = dtype.itemsize() as usize;
             let arr_size_bytes = arr_range_shape.as_ref().iter().product::<usize>() * itemsize;
-            let mut tmp_buf = in_place
-                .not()
-                .then(|| context.tmp_buf(arr_size_bytes, dtype.alignment()));
             // Stride of the stack axis in the output buffer (= size of one sub-array slice).
             let stack_axis_stride = arr_range_shape.as_ref()[self.stack_axis..]
                 .iter()
@@ -177,46 +174,28 @@ where
                 let arr_strides = default_strides(&arr_range_shape, itemsize);
                 // For dims before the stack axis the output stride is n_stack times wider;
                 // for dims at or after it the stride is unchanged.
-                let out_strides = ArraysT::Dimension::vec(arr_range_shape.as_ref().len(), |dim| {
+                ArraysT::Dimension::vec(arr_range_shape.as_ref().len(), |dim| {
                     if dim < self.stack_axis {
                         arr_strides[dim] * n_stack
                     } else {
                         arr_strides[dim]
                     }
-                });
-                (arr_strides, out_strides)
+                })
             });
-            let copier = NdCopier::new(dtype);
 
             for arr_idx in 0..n_stack {
                 // In-place: each array occupies a contiguous chunk in buf.
                 // Out-of-place: each array starts at its column offset within buf.
                 let buf_offset = arr_idx * stack_axis_stride;
-                let arr_buf = if in_place {
-                    &mut buf[buf_offset..buf_offset + arr_size_bytes]
-                } else {
-                    let tmp_buf = tmp_buf.as_mut().unwrap();
-                    tmp_buf.set_len(arr_size_bytes);
-                    tmp_buf.as_mut_slice()
-                };
-
                 let arr = index[self.stack_axis].start as usize + arr_idx;
-                self.arrays
-                    .read_data(arr, &arr_range, &mut OutBuf::new(arr_buf), context)?;
-
-                // copy arr_buf into the correct position in buf, as both buffers have different strides
-                if let Some((arr_strides, out_strides)) = &out_of_place_strides {
-                    unsafe {
-                        copier.copy(
-                            arr_buf.as_ptr(),
-                            buf.as_mut_ptr().add(buf_offset),
-                            arr_range_shape.as_ref(),
-                            arr_strides.as_ref(),
-                            out_strides.as_ref(),
-                            dtype,
-                        )
-                    };
-                }
+                let mut out = if in_place {
+                    let dst = &mut buf[buf_offset..buf_offset + arr_size_bytes];
+                    OutBuf::new(dst)
+                } else {
+                    let strides = out_of_place_strides.as_ref().unwrap().as_ref();
+                    unsafe { OutBuf::new_strided(&mut buf[buf_offset..], strides) }
+                };
+                self.arrays.read_data(arr, &arr_range, &mut out, context)?;
             }
 
             Ok(())

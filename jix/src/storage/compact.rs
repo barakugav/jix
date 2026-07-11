@@ -305,7 +305,7 @@ where
     {
         let shape = self.shape();
         check_get_range(shape, index)?;
-        let mut buf = buf.get_continuous_mut(index, self.blocks.dtype(), context);
+        let mut buf = buf.get_contiguous_mut(index, self.blocks.dtype(), context);
         buf.edit(|buf| {
             let nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
             if nitems == 0 {

@@ -196,9 +196,9 @@ pub struct BlockTableHeader {
 pub mod block_table_header {
     #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum BodyDescription {
-        /// The compressed block data is stored in a single continuous buffer, but the blocks within it
-        /// may appear in any order ("continuous" refers to the data buffer, not to block ordering).
-        /// The body is two continuous sections: one for the block locations and one for the compressed
+        /// The compressed block data is stored in a single contiguous buffer, but the blocks within it
+        /// may appear in any order ("contiguous" refers to the data buffer, not to block ordering).
+        /// The body is two contiguous sections: one for the block locations and one for the compressed
         /// block data. The locations section holds (nblocks + 1) / 2 entries, each packing two blocks'
         /// (offset: \[u64; 2\], len: \[u32; 2\]) locations into one 24-byte entry (avoiding the padding a
         /// lone u64 + u32 would incur); block i occupies the `len` bytes of block_data starting at
@@ -209,7 +209,7 @@ pub mod block_table_header {
         /// The TOC is encoded in this way instead of repeated protobuf messages so it will have a fixed
         /// size and we can override it in-place after writing the file body.
         #[prost(message, tag = "7")]
-        ContinuousV1(()),
+        ContiguousV1(()),
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]

@@ -172,7 +172,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         self.array
             .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        let mut buf = buf.get_contiguous_mut(index, dtype, context);
         buf.edit(|buf| {
             check_get_buffer_size(index, dtype, buf)?;
 

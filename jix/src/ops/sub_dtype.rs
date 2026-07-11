@@ -134,7 +134,7 @@ where
         let mut tmp_buf = OutBuf::new_lazy(context);
         self.array.read_data(index, &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let mut buf = buf.get_continuous_mut(index, dst_dtype, context);
+        let mut buf = buf.get_contiguous_mut(index, dst_dtype, context);
         buf.edit(|buf| {
             check_get_buffer_size(index, dst_dtype, buf)?;
 

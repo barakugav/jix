@@ -50,7 +50,7 @@ where
         context: &ReadContext,
     ) -> Result<()> {
         let mut data = self.read_data_typed::<K::Output>(index, context)?;
-        let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+        let mut buf = buf.get_contiguous_mut(index, self.dtype(), context);
         buf.edit(|buf| data.to_buf(buf))
     }
 

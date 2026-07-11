@@ -130,7 +130,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
         if index.iter().any(|r| r.start >= r.end) {
             // ensure buffer is allocated for empty read
-            let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+            let mut buf = buf.get_contiguous_mut(index, self.dtype(), context);
             return buf.edit(|_| Ok(()));
         }
 
@@ -159,7 +159,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             return self.array.read_data(inner_index.as_ref(), buf, context);
         }
 
-        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        let mut buf = buf.get_contiguous_mut(index, dtype, context);
         buf.edit(|buf| {
             check_get_buffer_size(index, dtype, buf)?;
             let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
@@ -173,42 +173,22 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 let len1 = l - s_in;
                 let len2 = total - len1;
 
-                let mut read_region = |inner_index: &[Range<u64>],
-                                       region_shape: &S::Dimension,
-                                       dst_axis_k_offset: u64|
-                 -> Result<()> {
-                    let region_shape = S::Dimension::vec(ndim, |d| region_shape[d] as usize);
-                    let region_size = region_shape.as_ref().iter().product::<usize>() * itemsize;
-                    let mut tmp = context.tmp_buf(region_size, dtype.alignment());
-                    let tmp = tmp.as_mut_slice();
-                    self.array
-                        .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
-                    let src_strides = default_strides(&region_shape, itemsize);
-                    let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
-                    unsafe {
-                        copier.copy(
-                            tmp.as_ptr(),
-                            buf.as_mut_ptr().add(dst_byte_offset),
-                            region_shape.as_ref(),
-                            src_strides.as_ref(),
-                            dst_strides.as_ref(),
-                            dtype,
-                        )
+                let mut read_region =
+                    |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
+                        let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
+                        let mut out = unsafe {
+                            OutBuf::new_strided(&mut buf[dst_byte_offset..], dst_strides.as_ref())
+                        };
+                        self.array.read_data(inner_index, &mut out, context)
                     };
-                    Ok(())
-                };
 
                 let inner_r1 =
                     S::Dimension::vec(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
-                let r1_shape =
-                    S::Dimension::from_fn(ndim, |d| if d == k { len1 } else { out_shape[d] });
-                read_region(inner_r1.as_ref(), &r1_shape, 0)?;
+                read_region(inner_r1.as_ref(), 0)?;
 
                 let inner_r2 =
                     S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-                let r2_shape =
-                    S::Dimension::from_fn(ndim, |d| if d == k { len2 } else { out_shape[d] });
-                read_region(inner_r2.as_ref(), &r2_shape, len1)?;
+                read_region(inner_r2.as_ref(), len1)?;
 
                 return Ok(());
             }

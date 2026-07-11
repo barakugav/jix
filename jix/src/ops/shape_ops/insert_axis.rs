@@ -184,13 +184,25 @@ where
         buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
-        if let Some(inner_index) = self.transform_index(index)? {
-            self.array.read_data(&inner_index, buf, context)
-        } else {
-            // ensure buffer is allocated for empty read
-            let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
-            buf.edit(|_| Ok(()))
-        }
+        let Some(inner_index) = self.transform_index(index)? else {
+            // Empty read (some requested range is empty): just ensure a lazy buffer is materialized.
+            buf.materialize(index, self.dtype());
+            return Ok(());
+        };
+        let dtype = self.dtype();
+        let itemsize = dtype.itemsize() as usize;
+        let out_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
+        let out_strides = buf.strides_or_default::<D>(&out_shape, itemsize);
+        // Inserting a length-1 axis is a pure stride remap: inner dim d maps to output dim
+        // `original_dims[d]` (the inserted axes just drop out; the byte layout is unchanged). Forward
+        // `buf` to the inner read with the gathered strides.
+        let inner_strides = S::Dimension::vec(self.original_dims.len(), |d| {
+            out_strides[self.original_dims[d] as usize]
+        });
+        // SAFETY: `inner_strides` gathers a subset of `buf`'s output strides, addressing bytes `buf`
+        // already spans.
+        let mut inner_buf = unsafe { buf.with_strides(index, dtype, inner_strides.as_ref()) };
+        self.array.read_data(&inner_index, &mut inner_buf, context)
     }
 
     #[inline(always)]

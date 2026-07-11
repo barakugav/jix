@@ -2,10 +2,10 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{default_strides, dim_arr, DimArray, NdCopier};
+use crate::util::{dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
@@ -133,43 +133,14 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         // the range that was requested for output dim inv_axes[d].
         let input_index = S::Dimension::vec(ndim, |d| index[self.inv_axes[d] as usize].clone());
 
-        // Read the underlying data contiguously into tmp_buf.
-        // tmp_buf is laid out C-contiguous over sub_shape_in (input dim order).
-        let sub_shape_in = S::Dimension::vec(ndim, |d| {
-            (input_index[d].end - input_index[d].start) as usize
-        });
-        let mut tmp_buf = OutBuf::new_lazy(context);
+        let out_shape = S::Dimension::vec(ndim, |i| index[i].end - index[i].start);
+        let out_strides = buf.strides_or_default::<S::Dimension>(&out_shape, itemsize);
+        let inner_strides = S::Dimension::vec(ndim, |d| out_strides[self.inv_axes[d] as usize]);
+        // SAFETY: `inner_strides` is a permutation of `buf`'s output strides, so it addresses exactly
+        // the bytes `buf` already spans - just visited in input-axis order.
+        let mut inner_buf = unsafe { buf.with_strides(index, dtype, inner_strides.as_ref()) };
         self.array
-            .read_data(input_index.as_ref(), &mut tmp_buf, context)?;
-        let tmp_buf = tmp_buf.as_slice().unwrap();
-        let mut buf = buf.get_continuous_mut(index, dtype, context);
-        buf.edit(|buf| {
-            check_get_buffer_size(index, dtype, buf)?;
-
-            // Strides in tmp_buf (C-contiguous over input dims).
-            let src_strides_in = default_strides(&sub_shape_in, itemsize);
-            // When we advance along output dim i, we're advancing along input dim axes[i] in tmp_buf.
-            let src_strides_out =
-                S::Dimension::vec(ndim, |i| src_strides_in[self.axes[i] as usize]);
-
-            // The output buffer is C-contiguous over sub_shape_out (output dim order).
-            let sub_shape_out =
-                S::Dimension::vec(ndim, |i| (index[i].end - index[i].start) as usize);
-            let dst_strides = default_strides(&sub_shape_out, itemsize);
-
-            let copier = NdCopier::new(dtype);
-            unsafe {
-                copier.copy(
-                    tmp_buf.as_ptr(),
-                    buf.as_mut_ptr(),
-                    sub_shape_out.as_ref(),
-                    src_strides_out.as_ref(),
-                    dst_strides.as_ref(),
-                    dtype,
-                )
-            };
-            Ok(())
-        })
+            .read_data(input_index.as_ref(), &mut inner_buf, context)
     }
 
     #[inline(always)]

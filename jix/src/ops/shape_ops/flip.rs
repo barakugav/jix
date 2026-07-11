@@ -96,7 +96,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         if index.iter().any(|r| r.start >= r.end) {
             // ensure buffer is allocated for empty read
-            let mut buf = buf.get_continuous_mut(index, self.dtype(), context);
+            let mut buf = buf.get_contiguous_mut(index, self.dtype(), context);
             return buf.edit(|_| Ok(()));
         }
 
@@ -125,7 +125,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         self.array
             .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let mut buf = buf.get_continuous_mut(index, dtype, context);
+        let mut buf = buf.get_contiguous_mut(index, dtype, context);
         buf.edit(|buf| {
             check_get_buffer_size(index, dtype, buf)?;
 

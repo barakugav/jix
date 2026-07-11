@@ -174,8 +174,20 @@ where
         buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
-        self.array
-            .read_data(&self.transform_index(index)?, buf, context)
+        let inner_index = self.transform_index(index)?;
+        let dtype = self.dtype();
+        let itemsize = dtype.itemsize() as usize;
+        let out_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
+        let out_strides = buf.strides_or_default::<D>(&out_shape, itemsize);
+        // Inner dim `axes_mapping[i]` gets output dim i's stride; removed inner dims keep a dummy 0.
+        let mut inner_strides = S::Dimension::vec(inner_index.len(), |_| 0usize);
+        for (i, &axis) in self.axes_mapping.iter().enumerate() {
+            inner_strides[axis as usize] = out_strides[i];
+        }
+        // SAFETY: `inner_strides` reindexes `buf`'s output strides onto the kept inner axes (removed
+        // axes have extent 1 and are never stepped), addressing bytes `buf` already spans.
+        let mut inner_buf = unsafe { buf.with_strides(index, dtype, inner_strides.as_ref()) };
+        self.array.read_data(&inner_index, &mut inner_buf, context)
     }
 
     #[inline(always)]
