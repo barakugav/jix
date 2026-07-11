@@ -24,25 +24,12 @@ struct NdCopierStruct<'a> {
     dtypes: ArrayVec<&'a Dtype, 4>,
 }
 struct NdCopyArgs<'a> {
-    src: *const u8,
-    dst: *mut u8,
+    src: &'a [u8],
+    dst: &'a mut [u8],
     shape: &'a [usize],
     src_strides: &'a [usize],
     dst_strides: &'a [usize],
     dtype: &'a Dtype,
-}
-impl Clone for NdCopyArgs<'_> {
-    #[inline(always)]
-    fn clone(&self) -> Self {
-        Self {
-            src: self.src,
-            dst: self.dst,
-            shape: self.shape,
-            src_strides: self.src_strides,
-            dst_strides: self.dst_strides,
-            dtype: self.dtype,
-        }
-    }
 }
 
 impl<'a> NdCopier<'a> {
@@ -119,9 +106,15 @@ impl<'a> NdCopier<'a> {
         if shape.contains(&0) {
             return;
         }
+        // The internal pipeline works over slices (so the reference-derived pointers carry
+        // `noalias`), but the public API is raw pointers. Carry each pointer as a zero-length
+        // slice beginning at it: the length is never read (callers pass an explicit `shape`),
+        // the pointer is recovered via `as_ptr`/`as_mut_ptr`, and a zero-length `u8` slice is
+        // always well-aligned. SAFETY: `copy`'s contract already requires `src`/`dst` to be
+        // valid, non-overlapping regions for the described `shape`/strides.
         let args = NdCopyArgs {
-            src,
-            dst,
+            src: unsafe { std::slice::from_raw_parts(src, 0) },
+            dst: unsafe { std::slice::from_raw_parts_mut(dst, 0) },
             shape,
             src_strides,
             dst_strides,
@@ -205,8 +198,10 @@ impl<'a> NdCopier<'a> {
         let src_stride = src_strides[0];
         let dst_stride = dst_strides[0];
 
-        let aligned = (src.cast::<T>().is_aligned() && src_stride.is_multiple_of(align_of::<T>()))
-            && (dst.cast::<T>().is_aligned() && dst_stride.is_multiple_of(align_of::<T>()));
+        let aligned = (src.as_ptr().cast::<T>().is_aligned()
+            && src_stride.is_multiple_of(align_of::<T>()))
+            && (dst.as_ptr().cast::<T>().is_aligned()
+                && dst_stride.is_multiple_of(align_of::<T>()));
 
         unsafe {
             match n_continuous_items {
@@ -236,8 +231,8 @@ impl<'a> NdCopier<'a> {
 
     #[inline(always)]
     unsafe fn copy_1d<T: Copy, const N_CONTINUOUS: usize>(
-        src: *const u8,
-        dst: *mut u8,
+        src: &[u8],
+        dst: &mut [u8],
         len: usize,
         src_stride: usize,
         dst_stride: usize,
@@ -255,12 +250,14 @@ impl<'a> NdCopier<'a> {
     }
     #[inline]
     unsafe fn copy_1d_aligned<T: Copy, const N_CONTINUOUS: usize>(
-        src: *const u8,
-        dst: *mut u8,
+        src: &[u8],
+        dst: &mut [u8],
         len: usize,
         src_stride: usize,
         dst_stride: usize,
     ) {
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
         let src_continuous = len <= 1 || src_stride == size_of::<T>() * N_CONTINUOUS;
         let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * N_CONTINUOUS;
         if src_continuous && dst_continuous {
@@ -301,12 +298,14 @@ impl<'a> NdCopier<'a> {
     }
     #[inline(never)]
     unsafe fn copy_1d_unaligned<T: Copy, const N_CONTINUOUS: usize>(
-        src: *const u8,
-        dst: *mut u8,
+        src: &[u8],
+        dst: &mut [u8],
         len: usize,
         src_stride: usize,
         dst_stride: usize,
     ) {
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
         let src_continuous = len <= 1 || src_stride == size_of::<T>() * N_CONTINUOUS;
         let dst_continuous = len <= 1 || dst_stride == size_of::<T>() * N_CONTINUOUS;
         if src_continuous && dst_continuous {
@@ -350,14 +349,16 @@ impl<'a> NdCopier<'a> {
 
     #[inline(never)]
     unsafe fn copy_1d_unsized<T: Copy>(
-        src: *const u8,
-        dst: *mut u8,
+        src: &[u8],
+        dst: &mut [u8],
         len: usize,
         src_stride: usize,
         dst_stride: usize,
         n_continuous_items: usize,
         aligned: bool,
     ) {
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
         unsafe {
             if aligned {
                 let src_continuous = len <= 1 || src_stride == size_of::<T>() * n_continuous_items;
@@ -405,19 +406,21 @@ impl<'a> NdCopier<'a> {
         shape: &[usize],
         src_strides: &[usize],
         dst_strides: &[usize],
-        src: *const u8,
-        dst: *mut u8,
+        src: &[u8],
+        dst: &mut [u8],
         n_continuous_items: usize,
     ) {
         unsafe fn copy_nd_inner<T: Copy, D: Dimension>(
             shape: &[usize],
             src_strides: &[usize],
             dst_strides: &[usize],
-            src: *const u8,
-            dst: *mut u8,
+            src: &[u8],
+            dst: &mut [u8],
             n_continuous_items: usize,
             aligned: bool,
         ) {
+            let src = src.as_ptr();
+            let dst = dst.as_mut_ptr();
             let iter = NdIter::new(
                 D::vec(shape.len(), |i| shape[i] as u64),
                 (
@@ -445,11 +448,11 @@ impl<'a> NdCopier<'a> {
             }
         }
 
-        let aligned = (src.cast::<T>().is_aligned()
+        let aligned = (src.as_ptr().cast::<T>().is_aligned()
             && src_strides
                 .iter()
                 .all(|s| s.is_multiple_of(align_of::<T>())))
-            && (dst.cast::<T>().is_aligned()
+            && (dst.as_ptr().cast::<T>().is_aligned()
                 && dst_strides
                     .iter()
                     .all(|s| s.is_multiple_of(align_of::<T>())));
@@ -480,17 +483,32 @@ impl<'a> NdCopier<'a> {
 
     #[inline(never)]
     fn copy_struct(struct_copier: &NdCopierStruct, args: NdCopyArgs) {
+        let NdCopyArgs {
+            src,
+            dst,
+            shape,
+            src_strides,
+            dst_strides,
+            dtype: _,
+        } = args;
+        let src_ptr = src.as_ptr();
+        let dst_ptr = dst.as_mut_ptr();
         for ((f, &offset), field_dtype) in struct_copier
             .scalar_fns
             .iter()
             .zip(struct_copier.offsets.iter())
             .zip(struct_copier.dtypes.iter())
         {
+            // Rebuild the per-field zero-length slices from the base pointers. SAFETY: the field
+            // at `offset` lies within the element; distinct fields do not overlap; the lengths are
+            // unused and a zero-length u8 slice is always aligned.
             let field_args = NdCopyArgs {
-                src: unsafe { args.src.add(offset as usize) },
-                dst: unsafe { args.dst.add(offset as usize) },
+                src: unsafe { std::slice::from_raw_parts(src_ptr.add(offset as usize), 0) },
+                dst: unsafe { std::slice::from_raw_parts_mut(dst_ptr.add(offset as usize), 0) },
+                shape,
+                src_strides,
+                dst_strides,
                 dtype: field_dtype,
-                ..args.clone()
             };
             f(field_args)
         }
@@ -539,10 +557,12 @@ impl<'a> NdCopier<'a> {
             shape: &[usize],
             src_strides: &[usize],
             dst_strides: &[usize],
-            src: *const u8,
-            dst: *mut u8,
+            src: &[u8],
+            dst: &mut [u8],
             n_continuous_bytes: usize,
         ) {
+            let src = src.as_ptr();
+            let dst = dst.as_mut_ptr();
             let iter = NdIter::new(
                 D::vec(shape.len(), |i| shape[i] as u64),
                 (
