@@ -2,9 +2,9 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_range, ensure, Result};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::{default_strides_cast, Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Rolls elements along an axis, wrapping around at the boundary, returned by
 /// [`Array::roll`](crate::Array::roll).
@@ -86,7 +86,6 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
 
         let ndim = index.len();
         let dtype = self.dtype();
-        let itemsize = dtype.itemsize() as usize;
         let l = self.shape()[k];
         let s = index[k].start;
         let e = index[k].end;
@@ -110,39 +109,36 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         //   Region 2 (output axis-k [len1, end)): input axis-k [0, e - shift),     length len2.
         let len1 = shift - s;
         let len2 = e - shift;
-        let mut buf = buf.get_contiguous_mut(index, dtype, context);
-        buf.edit(|buf| {
-            let nitems = check_get_buffer_size(index, dtype, buf)?;
-            if nitems == 0 {
-                return Ok(());
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
+        if nitems == 0 {
+            buf.materialize(index, dtype);
+            return Ok(());
+        }
+        // Forward the (possibly strided) destination's own strides so each region scatters directly
+        // into `buf`
+        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
+
+        let mut read_region = |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
+            let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
+            let mut out =
+                unsafe { OutBuf::new_strided(&mut dst[dst_byte_offset..], dst_strides.as_ref()) };
+            self.array.read_data(inner_index, &mut out, context)
+        };
+
+        let inner_index_r1 = S::Dimension::vec(ndim, |d| {
+            if d == k {
+                (s + l - shift)..l
+            } else {
+                index[d].clone()
             }
-            let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-            let dst_strides = default_strides_cast(&out_shape, itemsize);
+        });
+        read_region(inner_index_r1.as_ref(), 0)?;
 
-            let mut read_region =
-                |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
-                    let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
-                    let mut out = unsafe {
-                        OutBuf::new_strided(&mut buf[dst_byte_offset..], dst_strides.as_ref())
-                    };
-                    self.array.read_data(inner_index, &mut out, context)
-                };
+        let inner_index_r2 =
+            S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
+        read_region(inner_index_r2.as_ref(), len1)?;
 
-            let inner_index_r1 = S::Dimension::vec(ndim, |d| {
-                if d == k {
-                    (s + l - shift)..l
-                } else {
-                    index[d].clone()
-                }
-            });
-            read_region(inner_index_r1.as_ref(), 0)?;
-
-            let inner_index_r2 =
-                S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-            read_region(inner_index_r2.as_ref(), len1)?;
-
-            Ok(())
-        })
+        Ok(())
     }
 
     #[inline(always)]

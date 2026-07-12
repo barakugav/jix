@@ -4,13 +4,12 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{
-    check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Error,
-    ErrorKind, Result,
+    check_get_range, check_ndim, check_shape_overflow, ensure, Error, ErrorKind, Result,
 };
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, NdCopier};
-use crate::{default_strides_cast, Array, ArrayStorage, Dimension, NDIM_MAX};
+use crate::{Array, ArrayStorage, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -130,8 +129,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
         if index.iter().any(|r| r.start >= r.end) {
             // ensure buffer is allocated for empty read
-            let mut buf = buf.get_contiguous_mut(index, self.dtype(), context);
-            return buf.edit(|_| Ok(()));
+            buf.materialize(index, self.dtype());
+            return Ok(());
         }
 
         let ndim = index.len();
@@ -159,158 +158,154 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             return self.array.read_data(inner_index.as_ref(), buf, context);
         }
 
-        let mut buf = buf.get_contiguous_mut(index, dtype, context);
-        buf.edit(|buf| {
-            check_get_buffer_size(index, dtype, buf)?;
-            let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-            let dst_strides = default_strides_cast(&out_shape, itemsize);
-            let copier = NdCopier::new(dtype);
+        // Write straight into the (possibly strided) destination, using its own strides - each copy
+        // scatters directly into `buf`.
+        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
+        let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
+        let copier = NdCopier::new(dtype);
 
-            // Case B - two reads, single wrap (total <= L): split the request into two
-            // contiguous input ranges along axis k and read each into a separate tmp_buf, then
-            // place them at the right axis-k offset in `buf`.
-            if total <= l {
-                let len1 = l - s_in;
-                let len2 = total - len1;
+        // Case B - two reads, single wrap (total <= L): split the request into two
+        // contiguous input ranges along axis k and read each into a separate tmp_buf, then
+        // place them at the right axis-k offset in `buf`.
+        if total <= l {
+            let len1 = l - s_in;
+            let len2 = total - len1;
 
-                let mut read_region =
-                    |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
-                        let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
-                        let mut out = unsafe {
-                            OutBuf::new_strided(&mut buf[dst_byte_offset..], dst_strides.as_ref())
-                        };
-                        self.array.read_data(inner_index, &mut out, context)
+            let mut read_region =
+                |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
+                    let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
+                    let mut out = unsafe {
+                        OutBuf::new_strided(&mut dst[dst_byte_offset..], dst_strides.as_ref())
                     };
+                    self.array.read_data(inner_index, &mut out, context)
+                };
+            let inner_r1 =
+                S::Dimension::vec(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
+            read_region(inner_r1.as_ref(), 0)?;
 
-                let inner_r1 =
-                    S::Dimension::vec(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
-                read_region(inner_r1.as_ref(), 0)?;
+            let inner_r2 =
+                S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
+            read_region(inner_r2.as_ref(), len1)?;
 
-                let inner_r2 =
-                    S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-                read_region(inner_r2.as_ref(), len1)?;
+            return Ok(());
+        }
 
-                return Ok(());
+        // Case C - span > L: read the full period [0, L) along axis k into tmp_buf once,
+        // then memcpy chunks into `buf`. Layout along axis k:
+        //   head:   tmp[s_in..L]      -> buf[0..head_len)
+        //   middle: tmp[0..L] x F      -> buf[head_len..head_len + F*L)   (F = num_full)
+        //   tail:   tmp[0..tail_len]   -> buf[head_len + F*L..total)
+        let inner_full = S::Dimension::vec(ndim, |d| if d == k { 0..l } else { index[d].clone() });
+        let period_shape = S::Dimension::vec(ndim, |d| {
+            if d == k {
+                l as usize
+            } else {
+                out_shape[d] as usize
             }
+        });
+        let mut tmp = OutBuf::new_lazy(context);
+        self.array
+            .read_data(inner_full.as_ref(), &mut tmp, context)?;
+        let tmp = tmp.as_slice().unwrap();
 
-            // Case C - span > L: read the full period [0, L) along axis k into tmp_buf once,
-            // then memcpy chunks into `buf`. Layout along axis k:
-            //   head:   tmp[s_in..L]      -> buf[0..head_len)
-            //   middle: tmp[0..L] x F      -> buf[head_len..head_len + F*L)   (F = num_full)
-            //   tail:   tmp[0..tail_len]   -> buf[head_len + F*L..total)
-            let inner_full =
-                S::Dimension::vec(ndim, |d| if d == k { 0..l } else { index[d].clone() });
-            let period_shape = S::Dimension::vec(ndim, |d| {
+        let src_strides = default_strides(&period_shape, itemsize);
+
+        let head_len = l - s_in; // 0 < head_len <= L
+        let remaining = total - head_len; // > 0 since total > L
+        let num_full = remaining / l;
+        let tail_len = remaining % l;
+
+        // Head: tmp[s_in..L] -> buf[0..head_len)
+        {
+            let copy_shape = S::Dimension::vec(ndim, |d| {
                 if d == k {
-                    l as usize
+                    head_len as usize
                 } else {
                     out_shape[d] as usize
                 }
             });
-            let mut tmp = OutBuf::new_lazy(context);
-            self.array
-                .read_data(inner_full.as_ref(), &mut tmp, context)?;
-            let tmp = tmp.as_slice().unwrap();
+            let src_off = s_in as usize * src_strides[k];
+            unsafe {
+                copier.copy(
+                    tmp.as_ptr().add(src_off),
+                    dst.as_mut_ptr(),
+                    copy_shape.as_ref(),
+                    src_strides.as_ref(),
+                    dst_strides.as_ref(),
+                    dtype,
+                )
+            };
+        }
 
-            let src_strides = default_strides(&period_shape, itemsize);
-
-            let head_len = l - s_in; // 0 < head_len <= L
-            let remaining = total - head_len; // > 0 since total > L
-            let num_full = remaining / l;
-            let tail_len = remaining % l;
-
-            // Head: tmp[s_in..L] -> buf[0..head_len)
-            {
-                let copy_shape = S::Dimension::vec(ndim, |d| {
-                    if d == k {
-                        head_len as usize
-                    } else {
-                        out_shape[d] as usize
-                    }
-                });
-                let src_off = s_in as usize * src_strides[k];
-                unsafe {
-                    copier.copy(
-                        tmp.as_ptr().add(src_off),
-                        buf.as_mut_ptr(),
-                        copy_shape.as_ref(),
-                        src_strides.as_ref(),
-                        dst_strides.as_ref(),
-                        dtype,
-                    )
+        // Middle: replicate tmp[0..L] num_full times using the stride-0 trick on a
+        // synthesized tile axis inserted at position k.
+        if num_full > 0 {
+            // The synthesized tile axis makes this copy (ndim + 1)-dimensional: axis k is split
+            // into (num_full, L) at positions k and k+1.
+            // `src_axis` maps an output axis back to its pre-split source axis.
+            let src_axis = |i: usize| if i < k { i } else { i - 1 };
+            let copy_shape = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| {
+                let s = if i < k {
+                    out_shape[src_axis(i)]
+                } else if i == k {
+                    num_full
+                } else if i == k + 1 {
+                    l
+                } else {
+                    out_shape[src_axis(i)]
                 };
-            }
-
-            // Middle: replicate tmp[0..L] num_full times using the stride-0 trick on a
-            // synthesized tile axis inserted at position k.
-            if num_full > 0 {
-                // The synthesized tile axis makes this copy (ndim + 1)-dimensional: axis k is split
-                // into (num_full, L) at positions k and k+1.
-                // `src_axis` maps an output axis back to its pre-split source axis.
-                let src_axis = |i: usize| if i < k { i } else { i - 1 };
-                let copy_shape = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| {
-                    let s = if i < k {
-                        out_shape[src_axis(i)]
-                    } else if i == k {
-                        num_full
-                    } else if i == k + 1 {
-                        l
-                    } else {
-                        out_shape[src_axis(i)]
-                    };
-                    s as usize
+                s as usize
+            });
+            // Stride 0 on the synthesized axis (position k) replicates the period `num_full` times.
+            let src_strides_split =
+                <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| match i.cmp(&k) {
+                    Ordering::Less => src_strides[src_axis(i)],
+                    Ordering::Equal => 0,
+                    Ordering::Greater => src_strides[src_axis(i)],
                 });
-                // Stride 0 on the synthesized axis (position k) replicates the period `num_full` times.
-                let src_strides_split =
-                    <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| match i.cmp(&k) {
-                        Ordering::Less => src_strides[src_axis(i)],
-                        Ordering::Equal => 0,
-                        Ordering::Greater => src_strides[src_axis(i)],
-                    });
-                let dst_strides_split =
-                    <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| match i.cmp(&k) {
-                        Ordering::Less => dst_strides[src_axis(i)],
-                        Ordering::Equal => l as usize * dst_strides[k],
-                        Ordering::Greater => dst_strides[src_axis(i)],
-                    });
-                let dst_off = head_len as usize * dst_strides[k];
-                let copier = NdCopier::new(dtype);
-                unsafe {
-                    copier.copy(
-                        tmp.as_ptr(),
-                        buf.as_mut_ptr().add(dst_off),
-                        copy_shape.as_ref(),
-                        src_strides_split.as_ref(),
-                        dst_strides_split.as_ref(),
-                        dtype,
-                    )
-                };
-            }
-
-            // Tail: tmp[0..tail_len] -> buf[head_len + num_full * L..total)
-            if tail_len > 0 {
-                let copy_shape = S::Dimension::vec(ndim, |d| {
-                    if d == k {
-                        tail_len as usize
-                    } else {
-                        out_shape[d] as usize
-                    }
+            let dst_strides_split =
+                <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| match i.cmp(&k) {
+                    Ordering::Less => dst_strides[src_axis(i)],
+                    Ordering::Equal => l as usize * dst_strides[k],
+                    Ordering::Greater => dst_strides[src_axis(i)],
                 });
-                let dst_off = (head_len + num_full * l) as usize * dst_strides[k];
-                unsafe {
-                    copier.copy(
-                        tmp.as_ptr(),
-                        buf.as_mut_ptr().add(dst_off),
-                        copy_shape.as_ref(),
-                        src_strides.as_ref(),
-                        dst_strides.as_ref(),
-                        dtype,
-                    )
-                };
-            }
+            let dst_off = head_len as usize * dst_strides[k];
+            let copier = NdCopier::new(dtype);
+            unsafe {
+                copier.copy(
+                    tmp.as_ptr(),
+                    dst.as_mut_ptr().add(dst_off),
+                    copy_shape.as_ref(),
+                    src_strides_split.as_ref(),
+                    dst_strides_split.as_ref(),
+                    dtype,
+                )
+            };
+        }
 
-            Ok(())
-        })
+        // Tail: tmp[0..tail_len] -> buf[head_len + num_full * L..total)
+        if tail_len > 0 {
+            let copy_shape = S::Dimension::vec(ndim, |d| {
+                if d == k {
+                    tail_len as usize
+                } else {
+                    out_shape[d] as usize
+                }
+            });
+            let dst_off = (head_len + num_full * l) as usize * dst_strides[k];
+            unsafe {
+                copier.copy(
+                    tmp.as_ptr(),
+                    dst.as_mut_ptr().add(dst_off),
+                    copy_shape.as_ref(),
+                    src_strides.as_ref(),
+                    dst_strides.as_ref(),
+                    dtype,
+                )
+            };
+        }
+
+        Ok(())
     }
 
     #[inline(always)]

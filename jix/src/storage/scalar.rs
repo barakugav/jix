@@ -2,11 +2,13 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, check_get_buffer_size, check_get_range, check_ndim, Result};
+use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArraySpec, ArrayStorage, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData, Ty,
 };
+use crate::util::iter::strides::NdIterExtStridesPtrMut;
+use crate::util::iter::NdIter;
 use crate::util::{cast_slice_mut, dim_arr};
 use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 
@@ -100,19 +102,33 @@ where
         &self,
         index: &[Range<u64>],
         buf: &mut OutBuf,
-        context: &ReadContext,
+        _context: &ReadContext,
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
         let dtype = T::DTYPE;
-        let mut buf = buf.get_contiguous_mut(index, &dtype, context);
-        buf.edit(|buf| {
-            check_get_buffer_size(index, &T::DTYPE, buf)?;
-            let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
-            for item in buf.iter_mut() {
-                *item = self.data;
+        let (buf, strides) = buf.get_mut(index, &dtype);
+        match strides {
+            // Contiguous: fill the whole buffer in one tight loop.
+            None => {
+                let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
+                for item in buf.iter_mut() {
+                    *item = self.data;
+                }
             }
-            Ok(())
-        })
+            // Strided: write the scalar to each strided output position.
+            Some(strides) => {
+                let strides = D::vec(index.len(), |d| strides[d]);
+                let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
+                let iter = NdIter::new(
+                    read_shape,
+                    NdIterExtStridesPtrMut::new(strides, buf.as_mut_ptr()),
+                );
+                for (_, dst) in iter {
+                    unsafe { dst.cast::<T>().write(self.data) };
+                }
+            }
+        }
+        Ok(())
     }
 
     #[inline(always)]

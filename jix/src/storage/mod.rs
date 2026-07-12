@@ -47,11 +47,15 @@
 //! - [`Compact`] - the main block-compressed storage backend.
 //! - [`Plain`] - adapter for non-compressed data.
 
+use std::ops::Range;
+
 use crate::dtype::Dtyped;
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
-use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, ElementType, Ty, TypeDyn};
+use crate::util::iter::strides::NdIterExtStridesPtrMut;
+use crate::util::iter::NdIter;
+use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core;
 
@@ -202,79 +206,124 @@ pub trait ReadData<T> {
     ///
     /// Panics if `offset + N > self.len()`.
     fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N];
-
-    /// Read all items into the given buffer.
-    ///
-    /// The given buffer must have the exact size of `self.len() * size_of::<T>()` and be properly aligned for `T`.
-    #[inline(never)]
-    fn to_buf(&mut self, buf: &mut [u8]) -> Result<()>
-    where
-        T: Dtyped,
-        Self: Sized,
-    {
-        let dtype = T::DTYPE;
-        let nitems = self.len();
-        let required_size = nitems * size_of::<T>();
-        let buf_len = buf.len();
-        ensure!(
-                buf_len == required_size,
-                InvalidBufferSize,
-                "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
-            );
-        ensure!(
-            buf.as_ptr().cast::<T>().is_aligned(),
-            InvalidArgument,
-            "Buffer pointer is not aligned to required alignment {} for dtype {dtype}",
-            align_of::<T>(),
-        );
-        let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
-        assert_eq!(buf.len(), nitems);
-
-        #[inline(always)]
-        unsafe fn read_to_buf_impl<T, const LANES: usize>(
-            data: &mut impl ReadData<T>,
-            buf: &mut [T],
-        ) -> Result<()>
-        where
-            T: Dtyped,
-        {
-            let nitems = data.len();
-            assert_eq!(buf.len(), nitems);
-            let mut offset = 0;
-            while offset + LANES <= nitems {
-                let chunk = data.read_bulk::<LANES>(offset);
-                buf[offset..LANES + offset].copy_from_slice(&chunk);
-                offset += LANES;
-            }
-            while offset < nitems {
-                let item = data.read_bulk::<1>(offset)[0];
-                buf[offset] = item;
-                offset += 1;
-            }
-            Ok(())
-        }
-
-        // this is a compile time check, the compiler knows the value of LANES
-        let read_fn = match <T as LanesInfo>::LANES {
-            1 => read_to_buf_impl::<T, 1>,
-            2 => read_to_buf_impl::<T, 2>,
-            4 => read_to_buf_impl::<T, 4>,
-            8 => read_to_buf_impl::<T, 8>,
-            16 => read_to_buf_impl::<T, 16>,
-            32 => read_to_buf_impl::<T, 32>,
-            64 => read_to_buf_impl::<T, 64>,
-            128 => read_to_buf_impl::<T, 128>,
-            256 => read_to_buf_impl::<T, 256>,
-            512 => read_to_buf_impl::<T, 512>,
-            _ => read_to_buf_impl::<T, 1024>,
-        };
-        unsafe { read_fn(self, buf) }
-    }
 }
 pub(crate) trait ReadDataExt<T>: ReadData<T>
 where
     T: Copy + Send + Sync + Sized + 'static,
 {
+    /// Read all items into the given buffer.
+    ///
+    /// The given buffer must have the exact size of `self.len() * size_of::<T>()` and be properly aligned for `T`.
+    #[inline(never)]
+    fn to_buf<D: Dimension>(&mut self, buf: &mut OutBuf, index: &[Range<u64>]) -> Result<()>
+    where
+        T: Dtyped,
+        Self: Sized,
+    {
+        let dtype = T::DTYPE;
+        let (out, strides) = buf.get_mut(index, &dtype);
+
+        match strides {
+            None => {
+                #[inline(always)]
+                unsafe fn read_to_buf_impl<T, const LANES: usize>(
+                    data: &mut impl ReadData<T>,
+                    buf: &mut [u8],
+                ) -> Result<()>
+                where
+                    T: Dtyped,
+                {
+                    let nitems = data.len();
+                    let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
+                    assert_eq!(buf.len(), nitems);
+                    let mut offset = 0;
+                    while offset + LANES <= nitems {
+                        let chunk = data.read_bulk::<LANES>(offset);
+                        buf[offset..LANES + offset].copy_from_slice(&chunk);
+                        offset += LANES;
+                    }
+                    while offset < nitems {
+                        let item = data.read_bulk::<1>(offset)[0];
+                        buf[offset] = item;
+                        offset += 1;
+                    }
+                    Ok(())
+                }
+
+                let nitems = self.len();
+                let required_size = nitems * size_of::<T>();
+                let buf_len = out.len();
+                ensure!(
+                    buf_len == required_size,
+                    InvalidBufferSize,
+                    "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
+                );
+                ensure!(
+                    out.as_ptr().cast::<T>().is_aligned(),
+                    InvalidArgument,
+                    "Buffer pointer is not aligned to required alignment {} for dtype {dtype}",
+                    align_of::<T>(),
+                );
+
+                // this is a compile time check, the compiler knows the value of LANES
+                let read_fn = match <T as LanesInfo>::LANES {
+                    1 => read_to_buf_impl::<T, 1>,
+                    2 => read_to_buf_impl::<T, 2>,
+                    4 => read_to_buf_impl::<T, 4>,
+                    8 => read_to_buf_impl::<T, 8>,
+                    16 => read_to_buf_impl::<T, 16>,
+                    32 => read_to_buf_impl::<T, 32>,
+                    64 => read_to_buf_impl::<T, 64>,
+                    128 => read_to_buf_impl::<T, 128>,
+                    256 => read_to_buf_impl::<T, 256>,
+                    512 => read_to_buf_impl::<T, 512>,
+                    _ => read_to_buf_impl::<T, 1024>,
+                };
+                unsafe { read_fn(self, out) }
+            }
+            Some(strides) => {
+                #[inline(always)]
+                unsafe fn read_to_buf_impl_strided<T, D: Dimension, const LANES: usize>(
+                    data: &mut impl ReadData<T>,
+                    buf: &mut [u8],
+                    read_shape: D::Vec<u64>,
+                    strides: D::Vec<usize>,
+                ) -> Result<()>
+                where
+                    T: Dtyped,
+                {
+                    let iter = NdIter::new(
+                        read_shape,
+                        NdIterExtStridesPtrMut::new(strides, buf.as_mut_ptr()),
+                    );
+                    for (offset, (_, dst)) in iter.enumerate() {
+                        let item = data.read_bulk::<1>(offset)[0];
+                        unsafe { dst.cast::<T>().write(item) };
+                    }
+                    Ok(())
+                }
+
+                let strides = D::vec(index.len(), |d| strides[d]);
+                let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
+                // this is a compile time check, the compiler knows the value of LANES
+                let read_fn = match <T as LanesInfo>::LANES {
+                    1 => read_to_buf_impl_strided::<T, D, 1>,
+                    2 => read_to_buf_impl_strided::<T, D, 2>,
+                    4 => read_to_buf_impl_strided::<T, D, 4>,
+                    8 => read_to_buf_impl_strided::<T, D, 8>,
+                    16 => read_to_buf_impl_strided::<T, D, 16>,
+                    32 => read_to_buf_impl_strided::<T, D, 32>,
+                    64 => read_to_buf_impl_strided::<T, D, 64>,
+                    128 => read_to_buf_impl_strided::<T, D, 128>,
+                    256 => read_to_buf_impl_strided::<T, D, 256>,
+                    512 => read_to_buf_impl_strided::<T, D, 512>,
+                    _ => read_to_buf_impl_strided::<T, D, 1024>,
+                };
+                unsafe { read_fn(self, out, read_shape, strides) }
+            }
+        }
+    }
+
     #[inline(always)]
     fn map_items<U, F: FnMut(T) -> U>(self, f: F) -> impl ReadData<U>
     where

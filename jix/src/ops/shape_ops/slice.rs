@@ -2,13 +2,13 @@ use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, Rang
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{try_dim_arr, DimArray};
-use crate::{default_strides_cast, Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -202,48 +202,45 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // already placing us at the right row/column; nd_copy takes care of the rest.
         // -----------------------------------------------------------------------
         let dtype = self.dtype();
-        let mut buf = buf.get_contiguous_mut(index, dtype, context);
-        buf.edit(|buf| {
-            let nitems = check_get_buffer_size(index, dtype, buf)?;
-            if nitems == 0 {
-                return Ok(());
-            }
-            let ndim = self.slice.len();
-            let itemsize = dtype.itemsize() as usize;
-            let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
-            let dst_strides = default_strides_cast(&out_shape, itemsize);
+        let ndim = self.slice.len();
+        let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
+        if out_shape.as_ref().contains(&0) {
+            buf.materialize(index, dtype);
+            return Ok(());
+        }
+        // Forward the (possibly strided) destination's own strides so each inner read scatters
+        // directly into `buf`.
+        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
 
-            // iter_shape: out_shape for strided dims, 1 for non-strided dims.
-            let iter_shape = S::Dimension::vec(ndim, |dim| {
-                if self.slice[dim].is_contiguous() {
-                    1
+        // iter_shape: out_shape for strided dims, 1 for non-strided dims.
+        let iter_shape = S::Dimension::vec(ndim, |dim| {
+            if self.slice[dim].is_contiguous() {
+                1
+            } else {
+                out_shape[dim]
+            }
+        });
+        let iter = NdIter::new(iter_shape, ());
+        for (idx, ()) in iter {
+            let inner_index = S::Dimension::vec(ndim, |dim| {
+                let ds = &self.slice[dim];
+                if ds.is_contiguous() {
+                    (ds.start + index[dim].start)..(ds.start + index[dim].end)
                 } else {
-                    out_shape[dim]
+                    let pos = ds.start + (index[dim].start + idx[dim]) * ds.step;
+                    pos..(pos + 1)
                 }
             });
-            let iter = NdIter::new(iter_shape, ());
-            for (idx, ()) in iter {
-                let inner_index = S::Dimension::vec(ndim, |dim| {
-                    let ds = &self.slice[dim];
-                    if ds.is_contiguous() {
-                        (ds.start + index[dim].start)..(ds.start + index[dim].end)
-                    } else {
-                        let pos = ds.start + (index[dim].start + idx[dim]) * ds.step;
-                        pos..(pos + 1)
-                    }
-                });
-                let dst_byte_offset = (0..ndim)
-                    .filter(|&dim| !self.slice[dim].is_contiguous())
-                    .map(|dim| idx[dim] as usize * dst_strides[dim])
-                    .sum::<usize>();
-                let mut out = unsafe {
-                    OutBuf::new_strided(&mut buf[dst_byte_offset..], dst_strides.as_ref())
-                };
-                self.array
-                    .read_data(inner_index.as_ref(), &mut out, context)?;
-            }
-            Ok(())
-        })
+            let dst_byte_offset = (0..ndim)
+                .filter(|&dim| !self.slice[dim].is_contiguous())
+                .map(|dim| idx[dim] as usize * dst_strides[dim])
+                .sum::<usize>();
+            let mut out =
+                unsafe { OutBuf::new_strided(&mut dst[dst_byte_offset..], dst_strides.as_ref()) };
+            self.array
+                .read_data(inner_index.as_ref(), &mut out, context)?;
+        }
+        Ok(())
     }
 
     #[inline(always)]

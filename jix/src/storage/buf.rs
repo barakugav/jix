@@ -4,7 +4,7 @@ use crate::codec::TmpBuf;
 use crate::dtype::Dtype;
 use crate::error::Result;
 use crate::util::{default_strides_cast, default_strides_slice, dim_arr, DimArray, NdCopier};
-use crate::{Dimension, ReadContext};
+use crate::{default_strides_from_iter, Dimension, ReadContext, SliceExt};
 
 /// Destination for a [`read_data`](crate::ArrayStorage::read_data) call.
 ///
@@ -121,6 +121,38 @@ impl<'a> OutBuf<'a> {
         }
     }
 
+    #[inline]
+    pub(crate) fn get_mut<'b>(
+        &'b mut self,
+        index: &[Range<u64>],
+        dtype: &Dtype,
+    ) -> (&'b mut [u8], Option<&'b [usize]>) {
+        self.materialize(index, dtype);
+        match &mut self.0 {
+            OutBufInner::Borrowed(buf) => (buf, None),
+            OutBufInner::BorrowedStrided { dst, strides } => (dst, Some(strides)),
+            OutBufInner::Tmp(tmp) => (tmp.as_mut_slice(), None),
+            OutBufInner::Lazy(_) => unreachable!(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn get_strided_mut<'b, D: Dimension>(
+        &'b mut self,
+        index: &[Range<u64>],
+        dtype: &Dtype,
+    ) -> (&'b mut [u8], D::Vec<usize>) {
+        let (buf, strides) = self.get_mut(index, dtype);
+        let strides = match strides {
+            Some(strides) => strides.to_dim_vec::<D>(),
+            None => {
+                let shape = index.iter().map(|r| (r.end - r.start) as usize);
+                default_strides_from_iter::<D, _>(index.len(), shape, dtype.itemsize() as usize)
+            }
+        };
+        (buf, strides)
+    }
+
     /// Returns the buffer contents, or `None` for a not-yet-materialized lazy `OutBuf` or a strided
     /// `OutBuf` (neither has a single contiguous view).
     #[inline(always)]
@@ -170,7 +202,7 @@ impl<'a> OutBuf<'a> {
         itemsize: usize,
     ) -> D::Vec<usize> {
         match self.strides() {
-            Some(strides) => D::vec(strides.len(), |d| strides[d]),
+            Some(strides) => strides.to_dim_vec::<D>(),
             None => default_strides_cast(out_shape, itemsize),
         }
     }

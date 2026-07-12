@@ -3,11 +3,11 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, DimArray, IterExt};
+use crate::util::{DimArray, IterExt};
 use crate::{
     default_logical_strides, default_strides_from_iter, ArrayStorage, Dimension, IntoDimension,
 };
@@ -272,118 +272,113 @@ where
         // -----------------------------------------------------------------------
         check_get_range(self.shape(), index)?;
         let dtype = self.dtype();
-        let mut buf = buf.get_contiguous_mut(index, dtype, context);
-        buf.edit(|buf| {
-            check_get_buffer_size(index, dtype, buf)?;
+        if index.iter().any(|r| r.start >= r.end) {
+            buf.materialize(index, dtype);
+            return Ok(());
+        }
+        // Write straight into the (possibly strided) destination, using its own strides: each inner
+        // read scatters directly into `buf` at the unmatched dims' byte offset.
+        let (dst, dst_strides) = buf.get_strided_mut::<D>(index, dtype);
 
-            let orig_shape = S::Dimension::from_slice(self.array.shape());
-            let new_shape = self.new_shape.as_slice();
-            let ndim = new_shape.len();
-            let orig_ndim = orig_shape.ndim();
-            if index.iter().any(|r| r.start >= r.end) {
-                return Ok(());
-            }
+        let orig_shape = S::Dimension::from_slice(self.array.shape());
+        let new_shape = self.new_shape.as_slice();
+        let ndim = new_shape.len();
+        let orig_ndim = orig_shape.ndim();
 
-            let orig_logical_strides = default_strides_from_iter::<S::Dimension, _>(
-                orig_ndim,
-                orig_shape.as_slice().iter().cloned(),
-                1,
-            );
-            let new_logical_strides =
-                default_strides_from_iter::<D, _>(ndim, new_shape.iter().cloned(), 1);
-            let same_logical_stride = (0..new_shape.len())
-                .scan(0, |orig_dim_idx, new_dim_idx| {
-                    Some(loop {
-                        if *orig_dim_idx >= orig_shape.ndim() {
-                            break None; // cant really happen, last dims always match, unless orig_shape.ndim()==0
-                        }
-                        if orig_logical_strides[*orig_dim_idx] == new_logical_strides[new_dim_idx]
-                            && new_shape[new_dim_idx] >= 1
-                            && orig_shape[*orig_dim_idx] >= new_shape[new_dim_idx]
-                        // TODO: its possible to remove the dim length conditions
-                        {
-                            let matched = *orig_dim_idx as u8;
-                            *orig_dim_idx += 1;
-                            break Some(matched);
-                        }
-                        *orig_dim_idx += 1;
-                    })
-                })
-                .collect::<DimArray<_>>();
-            let same_logical_stride_inv = {
-                let mut inv = S::Dimension::vec(orig_ndim, |_| None);
-                for (new_dim, &orig_dim) in same_logical_stride.iter().enumerate() {
-                    if let Some(orig_dim) = orig_dim {
-                        inv[orig_dim as usize] = Some(new_dim as u8);
+        let orig_logical_strides = default_strides_from_iter::<S::Dimension, _>(
+            orig_ndim,
+            orig_shape.as_slice().iter().cloned(),
+            1,
+        );
+        let new_logical_strides =
+            default_strides_from_iter::<D, _>(ndim, new_shape.iter().cloned(), 1);
+        let same_logical_stride = (0..new_shape.len())
+            .scan(0, |orig_dim_idx, new_dim_idx| {
+                Some(loop {
+                    if *orig_dim_idx >= orig_shape.ndim() {
+                        break None; // cant really happen, last dims always match, unless orig_shape.ndim()==0
                     }
+                    if orig_logical_strides[*orig_dim_idx] == new_logical_strides[new_dim_idx]
+                        && new_shape[new_dim_idx] >= 1
+                        && orig_shape[*orig_dim_idx] >= new_shape[new_dim_idx]
+                    // TODO: its possible to remove the dim length conditions
+                    {
+                        let matched = *orig_dim_idx as u8;
+                        *orig_dim_idx += 1;
+                        break Some(matched);
+                    }
+                    *orig_dim_idx += 1;
+                })
+            })
+            .collect::<DimArray<_>>();
+        let same_logical_stride_inv = {
+            let mut inv = S::Dimension::vec(orig_ndim, |_| None);
+            for (new_dim, &orig_dim) in same_logical_stride.iter().enumerate() {
+                if let Some(orig_dim) = orig_dim {
+                    inv[orig_dim as usize] = Some(new_dim as u8);
                 }
-                inv
-            };
-            debug_assert_eq!(
-                same_logical_stride
-                    .iter()
-                    .filter(|dim| dim.is_some())
-                    .count(),
-                same_logical_stride_inv
-                    .as_ref()
-                    .iter()
-                    .filter(|dim| dim.is_some())
-                    .count()
-            );
+            }
+            inv
+        };
+        debug_assert_eq!(
+            same_logical_stride
+                .iter()
+                .filter(|dim| dim.is_some())
+                .count(),
+            same_logical_stride_inv
+                .as_ref()
+                .iter()
+                .filter(|dim| dim.is_some())
+                .count()
+        );
 
-            // dims that have the same logical stride in the original and new shape can be read
-            // directly; the rest we read one entry at a time and place into the output buffer.
-            let itemsize = dtype.itemsize() as usize;
-            let out_buf_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-            let dst_strides = default_strides(&out_buf_shape, itemsize);
-            // Byte-strides for the inner read, in *original* axis order (so they match the read's
-            // shape): a matched orig dim reuses its new dim's output stride; an unmatched orig dim has
-            // extent 1 and is never stepped, so its stride is a dummy 0.
-            let orig_strides =
-                S::Dimension::vec(orig_ndim, |dim| match same_logical_stride_inv[dim] {
-                    Some(new_dim) => dst_strides[new_dim as usize],
-                    None => 0,
-                });
+        // dims that have the same logical stride in the original and new shape can be read
+        // directly; the rest we read one entry at a time and place into the output buffer.
+        // Byte-strides for the inner read, in *original* axis order (so they match the read's
+        // shape): a matched orig dim reuses its new dim's output stride; an unmatched orig dim has
+        // extent 1 and is never stepped, so its stride is a dummy 0.
+        let orig_strides = S::Dimension::vec(orig_ndim, |dim| match same_logical_stride_inv[dim] {
+            Some(new_dim) => dst_strides[new_dim as usize],
+            None => 0,
+        });
 
-            // We use an nd-iter over the dims that DO NOT match any original dim.
-            let iteration_shape = D::vec(ndim, |dim| {
-                if same_logical_stride[dim].is_some() {
-                    1
+        // We use an nd-iter over the dims that DO NOT match any original dim.
+        let iteration_shape = D::vec(ndim, |dim| {
+            if same_logical_stride[dim].is_some() {
+                1
+            } else {
+                index[dim].end - index[dim].start
+            }
+        });
+        let iter = NdIter::new(iteration_shape, ());
+        for (idx, ()) in iter {
+            let read_range = S::Dimension::vec(orig_ndim, |dim| {
+                if let Some(new_dim) = same_logical_stride_inv[dim] {
+                    debug_assert_eq!(idx[new_dim as usize], 0);
+                    index[new_dim as usize].clone()
                 } else {
-                    index[dim].end - index[dim].start
+                    let flat: u64 = (0..ndim)
+                        .filter(|&dim| same_logical_stride[dim].is_none())
+                        .map(|dim| (index[dim].start + idx[dim]) * new_logical_strides[dim])
+                        .sum();
+                    let orig_coord = (flat / orig_logical_strides[dim]) % orig_shape[dim];
+                    orig_coord..(orig_coord + 1)
                 }
             });
-            let iter = NdIter::new(iteration_shape, ());
-            for (idx, ()) in iter {
-                let read_range = S::Dimension::vec(orig_ndim, |dim| {
-                    if let Some(new_dim) = same_logical_stride_inv[dim] {
-                        debug_assert_eq!(idx[new_dim as usize], 0);
-                        index[new_dim as usize].clone()
-                    } else {
-                        let flat: u64 = (0..ndim)
-                            .filter(|&dim| same_logical_stride[dim].is_none())
-                            .map(|dim| (index[dim].start + idx[dim]) * new_logical_strides[dim])
-                            .sum();
-                        let orig_coord = (flat / orig_logical_strides[dim]) % orig_shape[dim];
-                        orig_coord..(orig_coord + 1)
-                    }
-                });
 
-                // Place this matched-dims block into `buf` at the unmatched dims' byte offset; the
-                // strided OutBuf scatters the contiguous inner read into `buf` on success.
-                let dst_byte_offset: usize = (0..ndim)
-                    .filter(|&dim| same_logical_stride[dim].is_none())
-                    .map(|dim| idx[dim] as usize * dst_strides[dim])
-                    .sum();
-                let mut out = unsafe {
-                    OutBuf::new_strided(&mut buf[dst_byte_offset..], orig_strides.as_ref())
-                };
-                self.array
-                    .read_data(read_range.as_ref(), &mut out, context)?;
-            }
+            // Place this matched-dims block into `buf` at the unmatched dims' byte offset; the
+            // strided OutBuf scatters the contiguous inner read into `buf` on success.
+            let dst_byte_offset: usize = (0..ndim)
+                .filter(|&dim| same_logical_stride[dim].is_none())
+                .map(|dim| idx[dim] as usize * dst_strides[dim])
+                .sum();
+            let mut out =
+                unsafe { OutBuf::new_strided(&mut dst[dst_byte_offset..], orig_strides.as_ref()) };
+            self.array
+                .read_data(read_range.as_ref(), &mut out, context)?;
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 
     #[inline(always)]

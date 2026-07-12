@@ -2,12 +2,12 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn,
 };
-use crate::util::{default_strides, DimArray, NdCopier, SendSyncPtr};
+use crate::util::{DimArray, NdCopier, SendSyncPtr};
 use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
@@ -431,39 +431,34 @@ where
         &self,
         index: &[Range<u64>],
         buf: &mut OutBuf,
-        context: &ReadContext,
+        _context: &ReadContext,
     ) -> Result<()> {
         let dtype = self.dtype();
-        let itemsize = dtype.itemsize() as usize;
         check_get_range(self.shape(), index)?;
-        let mut buf = buf.get_contiguous_mut(index, dtype, context);
-        buf.edit(|buf| {
-            check_get_buffer_size(index, dtype, buf)?;
 
-            let ndim = self.shape.ndim();
-            let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-            let out_strides = default_strides(&out_shape, itemsize);
-            let src_strides = D::vec(ndim, |dim| self.strides[dim]);
+        let ndim = self.shape.ndim();
+        let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let src_strides = D::vec(ndim, |dim| self.strides[dim]);
 
-            let in_offset = (0..ndim)
-                .map(|dim| index[dim].start as usize * self.strides[dim])
-                .sum::<usize>();
-            let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
-            let dst_ptr = buf.as_mut_ptr();
+        let in_offset = (0..ndim)
+            .map(|dim| index[dim].start as usize * self.strides[dim])
+            .sum::<usize>();
+        let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
 
-            let copier = NdCopier::new(dtype);
-            unsafe {
-                copier.copy(
-                    src_ptr,
-                    dst_ptr,
-                    out_shape.as_ref(),
-                    src_strides.as_ref(),
-                    out_strides.as_ref(),
-                    dtype,
-                )
-            };
-            Ok(())
-        })
+        let (dst, dst_strides) = buf.get_strided_mut::<D>(index, dtype);
+
+        let copier = NdCopier::new(dtype);
+        unsafe {
+            copier.copy(
+                src_ptr,
+                dst.as_mut_ptr(),
+                out_shape.as_ref(),
+                src_strides.as_ref(),
+                dst_strides.as_ref(),
+                dtype,
+            )
+        };
+        Ok(())
     }
 
     #[inline(always)]
