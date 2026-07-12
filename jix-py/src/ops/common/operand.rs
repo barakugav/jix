@@ -20,15 +20,20 @@ pub(crate) enum Operand {
         value: Scalar,
         shape: DimArray<u64>,
         precision: Option<Precision>,
+        params: ArrayParams,
     },
 }
 impl Operand {
     #[inline]
     pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
-        Self::from_any_impl(value, false)
+        Self::from_any_with_params(value, ArrayParams::default(), false)
     }
 
-    fn from_any_impl(value: &Bound<'_, PyAny>, only_scalar: bool) -> PyResult<Self> {
+    pub(crate) fn from_any_with_params(
+        value: &Bound<'_, PyAny>,
+        params: ArrayParams,
+        only_scalar: bool,
+    ) -> PyResult<Self> {
         if !only_scalar && let Ok(array) = value.cast::<Array>() {
             return Ok(Self::PyArray(array.clone().unbind()));
         };
@@ -78,6 +83,7 @@ impl Operand {
                     value: scalar,
                     precision: None,
                     shape: DimArray::new(),
+                    params,
                 });
             }
         }
@@ -147,6 +153,7 @@ impl Operand {
                 value,
                 precision,
                 shape: DimArray::new(),
+                params,
             });
         }
 
@@ -177,7 +184,7 @@ impl Operand {
                 shape.as_slice(),
                 &strides,
                 dtype,
-                ArrayParams::default(),
+                params,
             )
         };
         let storage = storage.into_py_result()?;
@@ -193,47 +200,59 @@ impl Operand {
                 value,
                 precision,
                 shape,
+                params,
             } => {
-                fn create_scalar_array<T>(value: T, shape: &[u64]) -> PyResult<ArrayAny>
+                fn create_scalar_array<T>(
+                    value: T,
+                    shape: &[u64],
+                    params: ArrayParams,
+                ) -> PyResult<ArrayAny>
                 where
                     T: Dtyped,
                 {
                     let array = jix_core::Array::from_storage(
-                        jix_core::__private::Scalar::new(value, shape).into_py_result()?,
+                        jix_core::__private::Scalar::new(value, shape, params).into_py_result()?,
                     );
                     Ok(array.into_any())
                 }
                 #[allow(clippy::unnecessary_cast)]
                 let array = match value {
                     Scalar::Bool(value) => match precision {
-                        None | Some(Precision::P1) => create_scalar_array(value, &shape),
+                        None | Some(Precision::P1) => create_scalar_array(value, &shape, params),
                         Some(_) => unreachable!(),
                     },
                     Scalar::UInt(value) => match precision {
-                        None | Some(Precision::P8) => create_scalar_array(value as u64, &shape),
-                        Some(Precision::P4) => create_scalar_array(value as u32, &shape),
-                        Some(Precision::P2) => create_scalar_array(value as u16, &shape),
-                        Some(Precision::P1) => create_scalar_array(value as u8, &shape),
+                        None | Some(Precision::P8) => {
+                            create_scalar_array(value as u64, &shape, params)
+                        }
+                        Some(Precision::P4) => create_scalar_array(value as u32, &shape, params),
+                        Some(Precision::P2) => create_scalar_array(value as u16, &shape, params),
+                        Some(Precision::P1) => create_scalar_array(value as u8, &shape, params),
                     },
                     Scalar::Int(value) => match precision {
-                        None | Some(Precision::P8) => create_scalar_array(value as i64, &shape),
-                        Some(Precision::P4) => create_scalar_array(value as i32, &shape),
-                        Some(Precision::P2) => create_scalar_array(value as i16, &shape),
-                        Some(Precision::P1) => create_scalar_array(value as i8, &shape),
+                        None | Some(Precision::P8) => {
+                            create_scalar_array(value as i64, &shape, params)
+                        }
+                        Some(Precision::P4) => create_scalar_array(value as i32, &shape, params),
+                        Some(Precision::P2) => create_scalar_array(value as i16, &shape, params),
+                        Some(Precision::P1) => create_scalar_array(value as i8, &shape, params),
                     },
                     Scalar::Float(value) => match precision {
-                        None | Some(Precision::P8) => create_scalar_array(value as f64, &shape),
-                        Some(Precision::P4) => create_scalar_array(value as f32, &shape),
+                        None | Some(Precision::P8) => {
+                            create_scalar_array(value as f64, &shape, params)
+                        }
+                        Some(Precision::P4) => create_scalar_array(value as f32, &shape, params),
                         Some(Precision::P2) => {
-                            create_scalar_array(f16::from_f32(value as f32), &shape)
+                            create_scalar_array(f16::from_f32(value as f32), &shape, params)
                         }
                         Some(_) => unreachable!(),
                     },
                     Scalar::Complex(value) => match precision {
-                        None | Some(Precision::P8) => create_scalar_array(value, &shape),
+                        None | Some(Precision::P8) => create_scalar_array(value, &shape, params),
                         Some(Precision::P4) => create_scalar_array::<Complex<f32>>(
                             <_ as jix_core::scalar::Cast<_>>::cast(value),
                             &shape,
+                            params,
                         ),
                         Some(_) => unreachable!(),
                     },
@@ -266,6 +285,7 @@ impl Operand {
                 value,
                 precision,
                 shape: _,
+                params: _,
             } => {
                 let kind = match value {
                     Scalar::Bool(_) => Rank::Bool,
@@ -303,7 +323,7 @@ pub(crate) enum Scalar {
 impl Scalar {
     #[inline]
     pub(crate) fn from_any(value: &Bound<'_, PyAny>) -> PyResult<Self> {
-        match Operand::from_any_impl(value, true)? {
+        match Operand::from_any_with_params(value, ArrayParams::default(), true)? {
             Operand::Scalar { value, .. } => Ok(value),
             Operand::PyArray(_) | Operand::Array(_) => {
                 Err(PyErr::new::<PyTypeError, _>("expected a scalar value"))

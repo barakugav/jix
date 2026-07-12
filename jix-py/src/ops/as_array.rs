@@ -1,8 +1,9 @@
 use jix_core::ArrayAny;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
-use crate::array::Array;
+use crate::array::{resolve_array_params, Array};
 use crate::ops::common::Operand;
 
 /// Convert any array-like object to a [`jix.Array`][jix.Array].
@@ -18,6 +19,11 @@ use crate::ops::common::Operand;
 /// Args:
 ///     value: The array-like to convert. Accepts Python scalars, lists, tuples, NumPy arrays,
 ///         or any object accepted by `numpy.asarray`.
+///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
+///         details. The returned array is never compressed, so these mostly affect only arrays
+///         later created from it (e.g. via `compact()` or `write_array()`), which inherit them.
+///         Only relevant when `value` is not already a jix array; an existing jix array is
+///         returned as-is.
 ///
 /// Note:
 ///     - If `value` is already an `Array`, it is returned as-is with no copy.
@@ -35,14 +41,19 @@ use crate::ops::common::Operand;
 ///         unchanged with no copy.
 #[gen_stub_pyfunction]
 #[pyfunction]
+#[pyo3(signature = (value, *, params=None))]
 #[inline]
-pub fn asarray<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
-    Operand::from_any(value)?.into_py_array(value.py())
+pub fn asarray<'py>(
+    value: &Bound<'py, PyAny>,
+    params: Option<Bound<'_, PyDict>>,
+) -> PyResult<Bound<'py, Array>> {
+    let params = resolve_array_params(value.py(), params)?;
+    Operand::from_any_with_params(value, params, false)?.into_py_array(value.py())
 }
 
 #[inline]
 pub(crate) fn any_to_core_array<'py>(value: &Bound<'py, PyAny>) -> PyResult<ArrayAny> {
-    Ok(asarray(value)?.get().to_core())
+    Ok(asarray(value, None)?.get().to_core())
 }
 
 #[cfg(test)]
@@ -57,7 +68,7 @@ mod tests {
 
     /// Call `asarray` and read back the data as an ndarray.
     fn collect<T: Dtyped>(val: &Bound<'_, PyAny>) -> ArrayD<T> {
-        asarray(val)
+        asarray(val, None)
             .unwrap()
             .get()
             .arr
@@ -253,7 +264,7 @@ mod tests {
         Python::attach(|py| {
             let orig =
                 ArrayD::from_shape_vec(vec![2, 3, 4], (0..24).map(|x| x as f32).collect()).unwrap();
-            let arr = asarray(&npd(py, orig)).unwrap();
+            let arr = asarray(&npd(py, orig), None).unwrap();
             assert_eq!(arr.get().arr.shape(), &[2u64, 3, 4]);
         });
     }
@@ -264,9 +275,9 @@ mod tests {
     fn test_passthrough() {
         Python::attach(|py| {
             let orig = array![1.0f32, 2.0];
-            let arr1 = asarray(&npd(py, orig)).unwrap();
+            let arr1 = asarray(&npd(py, orig), None).unwrap();
             let ptr1 = arr1.as_ptr();
-            let arr2 = asarray(arr1.as_any()).unwrap();
+            let arr2 = asarray(arr1.as_any(), None).unwrap();
             assert_eq!(arr2.as_ptr(), ptr1);
         });
     }
@@ -279,7 +290,7 @@ mod tests {
             let val = py
                 .eval(cr#"__import__('numpy').array([1, 2, 3])[::-1]"#, None, None)
                 .unwrap();
-            assert!(asarray(&val)
+            assert!(asarray(&val, None)
                 .unwrap_err()
                 .is_instance_of::<pyo3::exceptions::PyOverflowError>(py));
         });

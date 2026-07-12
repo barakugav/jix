@@ -50,7 +50,7 @@ pub fn r#where<'py>(
     let condition = any_to_core_array(condition)?
         .into_typed::<bool>()
         .into_py_result()?;
-    let x_py = asarray(x)?;
+    let x_py = asarray(x, None)?;
     let x = any_to_core_array(&x_py)?;
     let y = any_to_core_array(y)?;
     let ret = jix_core::ops::Where::new_array(condition, x, y).into_py_result()?;

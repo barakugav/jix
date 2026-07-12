@@ -227,6 +227,7 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                             value,
                             shape: _,
                             precision,
+                            params: _,
                         } => Cow::Borrowed(match (value, precision) {
                             (Scalar::Bool(_), _) => "bool",
                             (Scalar::UInt(_), None) => "uint",
