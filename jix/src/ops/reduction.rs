@@ -142,7 +142,10 @@ where
             _ => Self::read_data_impl::<1024>,
         };
         let mut buf = buf.get_contiguous_mut(index, self.dtype(), context);
-        buf.edit(|buf| read_fn(self, index, buf, context))
+        read_fn(self, index, buf.as_mut_slice(), context)?;
+        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        buf.finalize(out_shape.as_ref(), self.dtype());
+        Ok(())
     }
 
     #[inline(always)]

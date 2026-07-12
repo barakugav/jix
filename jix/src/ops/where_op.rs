@@ -6,7 +6,7 @@ use crate::error::{check_get_range, ensure, Result};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
-use crate::util::{cast_slice, cast_slice_mut};
+use crate::util::{cast_slice, cast_slice_mut, dim_arr};
 use crate::{Array, ArrayStorage};
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
@@ -136,47 +136,48 @@ where
         self.condition
             .read_data(index, &mut condition_buf, context)?;
 
-        let mut buf = buf.get_contiguous_mut(index, dtype, context);
-        buf.edit(|buf| {
-            // read x directly into the output buffer
-            self.x
-                .read_data(index, &mut OutBuf::new(&mut *buf), context)?;
-            self.y.read_data(index, &mut y_buf, context)?;
+        let mut cbuf = buf.get_contiguous_mut(index, dtype, context);
+        let buf = cbuf.as_mut_slice();
+        // read x directly into the output buffer
+        self.x
+            .read_data(index, &mut OutBuf::new(&mut *buf), context)?;
+        self.y.read_data(index, &mut y_buf, context)?;
 
-            let condition = unsafe { cast_slice::<_, bool>(condition_buf.as_slice().unwrap()) };
-            let y_buf = y_buf.as_slice().unwrap();
+        let condition = unsafe { cast_slice::<_, bool>(condition_buf.as_slice().unwrap()) };
+        let y_buf = y_buf.as_slice().unwrap();
 
-            unsafe fn where_impl<T>(condition: &[bool], buf: &mut [u8], y_buf: &[u8])
-            where
-                T: Copy,
-            {
-                let x = unsafe { cast_slice_mut::<_, T>(buf) };
-                let y = unsafe { cast_slice::<_, T>(y_buf) };
-                for (cond, (x, y)) in condition.iter().zip(x.iter_mut().zip(y)) {
-                    *x = if *cond { *x } else { *y };
-                }
+        unsafe fn where_impl<T>(condition: &[bool], buf: &mut [u8], y_buf: &[u8])
+        where
+            T: Copy,
+        {
+            let x = unsafe { cast_slice_mut::<_, T>(buf) };
+            let y = unsafe { cast_slice::<_, T>(y_buf) };
+            for (cond, (x, y)) in condition.iter().zip(x.iter_mut().zip(y)) {
+                *x = if *cond { *x } else { *y };
             }
+        }
 
-            match (dtype.itemsize(), dtype.alignment().as_usize()) {
-                (1, 1) => unsafe { where_impl::<u8>(condition, buf, y_buf) },
-                (2, 2) => unsafe { where_impl::<u16>(condition, buf, y_buf) },
-                (4, 2) => unsafe { where_impl::<[u16; 2]>(condition, buf, y_buf) },
-                (4, 4) => unsafe { where_impl::<u32>(condition, buf, y_buf) },
-                (8, 4) => unsafe { where_impl::<[u32; 2]>(condition, buf, y_buf) },
-                (8, 8) => unsafe { where_impl::<u64>(condition, buf, y_buf) },
-                (16, 8 | 16) => unsafe { where_impl::<[u64; 2]>(condition, buf, y_buf) },
-                (itemsize, _) => {
-                    let x = buf.chunks_exact_mut(itemsize as usize);
-                    let y = y_buf.chunks_exact(itemsize as usize);
-                    for (cond, (x, y)) in condition.iter().zip(x.zip(y)) {
-                        if !cond {
-                            x.copy_from_slice(y);
-                        }
+        match (dtype.itemsize(), dtype.alignment().as_usize()) {
+            (1, 1) => unsafe { where_impl::<u8>(condition, buf, y_buf) },
+            (2, 2) => unsafe { where_impl::<u16>(condition, buf, y_buf) },
+            (4, 2) => unsafe { where_impl::<[u16; 2]>(condition, buf, y_buf) },
+            (4, 4) => unsafe { where_impl::<u32>(condition, buf, y_buf) },
+            (8, 4) => unsafe { where_impl::<[u32; 2]>(condition, buf, y_buf) },
+            (8, 8) => unsafe { where_impl::<u64>(condition, buf, y_buf) },
+            (16, 8 | 16) => unsafe { where_impl::<[u64; 2]>(condition, buf, y_buf) },
+            (itemsize, _) => {
+                let x = buf.chunks_exact_mut(itemsize as usize);
+                let y = y_buf.chunks_exact(itemsize as usize);
+                for (cond, (x, y)) in condition.iter().zip(x.zip(y)) {
+                    if !cond {
+                        x.copy_from_slice(y);
                     }
                 }
-            };
-            Ok(())
-        })
+            }
+        };
+        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        cbuf.finalize(out_shape.as_ref(), dtype);
+        Ok(())
     }
 
     #[inline(always)]

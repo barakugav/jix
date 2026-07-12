@@ -2,8 +2,7 @@ use std::ops::Range;
 
 use crate::codec::TmpBuf;
 use crate::dtype::Dtype;
-use crate::error::Result;
-use crate::util::{default_strides_cast, default_strides_slice, dim_arr, DimArray, NdCopier};
+use crate::util::{default_strides_cast, default_strides_slice, NdCopier};
 use crate::{default_strides_from_iter, Dimension, ReadContext, SliceExt};
 
 /// Destination for a [`read_data`](crate::ArrayStorage::read_data) call.
@@ -67,12 +66,14 @@ impl<'a> OutBuf<'a> {
 
     /// Obtain a contiguous, writable buffer for a `read_data` of the given `index`/`dtype`.
     ///
-    /// The returned [`OutBufContiguousBuf`] guard hands out a contiguous `&mut [u8]` of exactly
-    /// `nitems * dtype.itemsize()` bytes via [`edit`](OutBufContiguousBuf::edit). For the contiguous
-    /// and lazy variants that slice is the real destination. For the strided variant the guard
-    /// allocates a temporary contiguous scratch buffer (from `context`) inside `edit` and scatters it
-    /// into the real destination - but only if the `edit` closure returns `Ok`, so a failed read
-    /// never performs the strided copy.
+    /// The returned [`OutBufContiguousBuf`] exposes a contiguous `&mut [u8]` of exactly
+    /// `nitems * dtype.itemsize()` bytes via [`as_mut_slice`](OutBufContiguousBuf::as_mut_slice).
+    /// For the contiguous and lazy variants that slice IS the real destination and
+    /// [`finalize`](OutBufContiguousBuf::finalize) is a no-op. For the strided
+    /// variant the slice is a temporary contiguous scratch buffer, allocated here from `context`; the
+    /// caller fills it and then calls `finalize` to scatter it into the real strided
+    /// destination. Skipping that final call (e.g. by returning early on error) leaves the
+    /// destination untouched.
     ///
     /// `context` is used only to allocate scratch for the strided variant; the lazy variant keeps
     /// using its own stored context.
@@ -80,7 +81,7 @@ impl<'a> OutBuf<'a> {
     pub(crate) fn get_contiguous_mut<'b>(
         &'b mut self,
         index: &[Range<u64>],
-        dtype: &'b Dtype,
+        dtype: &Dtype,
         context: &'b ReadContext,
     ) -> OutBufContiguousBuf<'b> {
         // Lazy: materialize into an owned `Tmp` in place, so a later `unwrap_tmp`/`as_slice` sees it.
@@ -95,20 +96,20 @@ impl<'a> OutBuf<'a> {
             self.0 = OutBufInner::Tmp(tmp);
         }
 
-        // Strided: take the destination out (leaving a harmless empty placeholder). The scratch
-        // buffer is allocated and scattered into `dst` inside `edit`.
+        // Strided: take the destination out (leaving a harmless empty placeholder) and allocate a
+        // contiguous scratch buffer to fill; `finalize` scatters it into `strided_buf`.
         if matches!(self.0, OutBufInner::BorrowedStrided { .. }) {
             let taken = std::mem::replace(&mut self.0, OutBufInner::Borrowed(&mut []));
             let OutBufInner::BorrowedStrided { dst, strides } = taken else {
                 unreachable!()
             };
-            let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+            let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+            let contiguous_buf =
+                context.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
             return OutBufContiguousBuf::Strided {
-                dst,
-                dst_strides: strides,
-                shape,
-                dtype,
-                context,
+                strided_buf: dst,
+                strides,
+                contiguous_buf,
             };
         }
 
@@ -252,62 +253,63 @@ impl<'a> OutBuf<'a> {
 
 /// A contiguous, writable view obtained from [`OutBuf::get_contiguous_mut`].
 ///
-/// Call [`edit`](Self::edit) with a closure that fills the contiguous slice. For a strided
-/// destination the slice is a temporary scratch buffer that is scattered into the real destination
-/// when - and only when - the closure returns `Ok`; a closure that returns `Err`, or a
-/// non-strided `OutBuf`, performs no scatter.
+/// Fill the contiguous `&mut [u8]` from [`as_mut_slice`](Self::as_mut_slice), then call
+/// [`finalize`](Self::finalize) to finalize. For a [`Direct`](Self::Direct)
+/// destination the slice IS the destination and `finalize` is a no-op. For a
+/// [`Strided`](Self::Strided) destination the slice is a temporary scratch buffer that
+/// `finalize` scatters into the real destination; skipping that call (e.g. by returning
+/// early on error) leaves the destination untouched.
 pub(crate) enum OutBufContiguousBuf<'b> {
-    /// The contiguous slice is the real destination; nothing to do after the write.
+    /// The contiguous slice is the real destination; `finalize` does nothing.
     Direct(&'b mut [u8]),
-    /// The write is staged in a scratch buffer (allocated from `context` in `edit`) and, on success,
-    /// scattered into `dst` using `dst_strides`.
+    /// The write is staged in `contiguous_buf` and scattered into `strided_buf` (using `strides`) by
+    /// `finalize`.
     Strided {
-        dst: &'b mut [u8],
-        dst_strides: &'b [usize],
-        shape: DimArray<usize>,
-        dtype: &'b Dtype,
-        context: &'b ReadContext,
+        strided_buf: &'b mut [u8],
+        strides: &'b [usize],
+        contiguous_buf: TmpBuf<'b>,
     },
 }
 impl OutBufContiguousBuf<'_> {
-    /// Fill the contiguous buffer via `f`. For a strided destination the staged scratch buffer is
-    /// scattered into the real destination iff `f` returns `Ok`, so a failed read leaves the
-    /// destination untouched.
+    /// The contiguous, writable buffer to fill: the real destination for [`Direct`](Self::Direct),
+    /// or the scratch buffer for [`Strided`](Self::Strided).
     #[inline]
-    pub(crate) fn edit(&mut self, f: impl FnOnce(&mut [u8]) -> Result<()>) -> Result<()> {
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
         match self {
-            OutBufContiguousBuf::Direct(buf) => f(buf),
-            OutBufContiguousBuf::Strided {
-                context,
-                dst,
-                dst_strides,
+            OutBufContiguousBuf::Direct(buf) => buf,
+            OutBufContiguousBuf::Strided { contiguous_buf, .. } => contiguous_buf.as_mut_slice(),
+        }
+    }
+
+    /// Finalize the write. For a [`Strided`](Self::Strided) destination, scatter the filled scratch
+    /// buffer into the real destination; `shape` is the row-major output shape the scratch holds. For
+    /// [`Direct`](Self::Direct), a no-op. Not calling this leaves a strided destination untouched, so
+    /// an early return on error never performs a partial scatter.
+    #[inline]
+    pub(crate) fn finalize(self, shape: &[usize], dtype: &Dtype) {
+        let OutBufContiguousBuf::Strided {
+            strided_buf,
+            strides,
+            contiguous_buf,
+        } = self
+        else {
+            return;
+        };
+        let itemsize = dtype.itemsize() as usize;
+        let src_strides = default_strides_slice(shape, itemsize);
+        let copier = NdCopier::new(dtype);
+        // SAFETY: `contiguous_buf` is a fresh, disjoint allocation holding `shape` in row-major
+        // order; `strided_buf`/`strides` describe the same-shaped region inside the caller's buffer,
+        // which `OutBuf::new_strided`'s (unsafe) contract requires to be valid for these writes.
+        unsafe {
+            copier.copy(
+                contiguous_buf.as_slice().as_ptr(),
+                strided_buf.as_mut_ptr(),
                 shape,
+                src_strides.as_ref(),
+                strides,
                 dtype,
-            } => {
-                let itemsize = dtype.itemsize() as usize;
-                let nitems = shape.as_ref().iter().product::<usize>();
-                let mut tmp = context.tmp_buf(nitems * itemsize, dtype.alignment());
-                f(tmp.as_mut_slice())?;
-                // Scatter the contiguous scratch buffer into the strided destination. Only reached on
-                // success, so a failed read never touches `dst`.
-                let src_strides = default_strides_slice(shape.as_ref(), itemsize);
-                let copier = NdCopier::new(dtype);
-                // SAFETY: `tmp` is a fresh, disjoint allocation holding `shape` in row-major order;
-                // `dst`/`dst_strides` describe the same-shaped region inside the caller's buffer,
-                // which `OutBuf::new_strided`'s (unsafe) contract requires to be valid for these
-                // writes.
-                unsafe {
-                    copier.copy(
-                        tmp.as_slice().as_ptr(),
-                        dst.as_mut_ptr(),
-                        shape.as_ref(),
-                        src_strides.as_ref(),
-                        dst_strides.as_ref(),
-                        dtype,
-                    );
-                }
-                Ok(())
-            }
+            );
         }
     }
 }
