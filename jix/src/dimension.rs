@@ -219,7 +219,7 @@ impl Dimension for DimDyn {
     #[inline(always)]
     fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Self {
         assert_dim::<Self>(ndim);
-        Self(dim_arr(ndim, f))
+        Self(Self::vec(ndim, f))
     }
 
     #[inline(always)]
@@ -573,8 +573,7 @@ impl IntoDimension for ndarray::IxDyn {
         let dim = <Self as ndarray::Dimension>::as_array_view(&self);
         let dim = dim.as_slice().unwrap();
         check_ndim::<DimDyn>(dim.len())?;
-        let dim = dim_arr(dim.len(), |i| dim[i] as u64);
-        Ok(DimDyn::from_slice(&dim))
+        Ok(DimDyn::from_fn(dim.len(), |i| dim[i] as u64))
     }
 }
 

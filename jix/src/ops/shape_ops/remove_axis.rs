@@ -61,9 +61,9 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// assert_eq!(a.remove_axis(axes.as_slice()).shape(), &[3]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct RemoveAxis<S, D> {
+pub struct RemoveAxis<S, D: Dimension> {
     array: S,
-    axes_mapping: DimArray<u8>,
+    axes_mapping: D::Vec<u8>,
 
     shape: D,
     spec: ArraySpecDynamic,
@@ -124,6 +124,7 @@ where
             }
         }
         let shape = D::from_slice(&shape);
+        let axes_mapping = D::vec(axes_mapping.len(), |d| axes_mapping[d]);
 
         let spec = ArraySpecDynamic {
             block_shape,
@@ -147,12 +148,15 @@ where
     }
 
     #[inline(always)]
-    fn transform_index(&self, index: &[Range<u64>]) -> Result<DimArray<Range<u64>>> {
+    fn transform_index(
+        &self,
+        index: &[Range<u64>],
+    ) -> Result<<S::Dimension as Dimension>::Vec<Range<u64>>> {
         check_get_range(self.shape(), index)?;
 
         let inner_ndim = self.array.shape().len();
-        let mut inner_index = dim_arr(inner_ndim, |_| 0..1);
-        for (index, &axis) in index.iter().zip(&self.axes_mapping) {
+        let mut inner_index = S::Dimension::vec(inner_ndim, |_| 0..1);
+        for (index, &axis) in index.iter().zip(self.axes_mapping.as_ref()) {
             inner_index[axis as usize] = index.clone();
         }
         Ok(inner_index)
@@ -180,15 +184,16 @@ where
         let out_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
         let out_strides = buf.strides_or_default::<D>(&out_shape, itemsize);
         // Inner dim `axes_mapping[i]` gets output dim i's stride; removed inner dims keep a dummy 0.
-        let mut inner_strides = S::Dimension::vec(inner_index.len(), |_| 0usize);
-        for (i, &axis) in self.axes_mapping.iter().enumerate() {
+        let mut inner_strides = S::Dimension::vec(inner_index.as_ref().len(), |_| 0usize);
+        for (i, &axis) in self.axes_mapping.as_ref().iter().enumerate() {
             inner_strides[axis as usize] = out_strides[i];
         }
         let nitems = out_shape.as_ref().iter().product::<u64>() as usize;
         // SAFETY: `inner_strides` reindexes `buf`'s output strides onto the kept inner axes (removed
         // axes have extent 1 and are never stepped), addressing bytes `buf` already spans.
         let mut inner_buf = unsafe { buf.with_strides(nitems, dtype, inner_strides.as_ref()) };
-        self.array.read_data(&inner_index, &mut inner_buf, context)
+        self.array
+            .read_data(inner_index.as_ref(), &mut inner_buf, context)
     }
 
     #[inline(always)]
@@ -201,7 +206,7 @@ where
         T: Dtyped,
     {
         self.array
-            .read_data_typed(&self.transform_index(index)?, context)
+            .read_data_typed(self.transform_index(index)?.as_ref(), context)
     }
 
     #[inline(always)]
@@ -228,11 +233,13 @@ where
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
+        let ndim = self.shape().len();
+        check_ndim::<NewD>(ndim)?;
         let shape = NewD::from_slice(self.shape());
+        let axes_mapping = NewD::vec(ndim, |d| self.axes_mapping[d]);
         Ok(RemoveAxis {
             array: self.array,
-            axes_mapping: self.axes_mapping,
+            axes_mapping,
             shape,
             spec: self.spec,
         })

@@ -11,14 +11,14 @@ use crate::storage::{ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf};
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, cast_slice_mut, default_logical_strides, dim_arr, DimArray};
+use crate::util::{calc_block_end, cast_slice_mut, default_logical_strides, DimArray};
 use crate::{array_from_fn_inline, Array, ArrayStorage, DimVec, Dimension, IterExt, Ty};
 
-pub(crate) struct ReductionOp<S, K, D> {
+pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
     kernel: K,
 
     array: S,
-    is_reduced: DimArray<bool>,
+    is_reduced: <S::Dimension as Dimension>::Vec<bool>,
 
     shape: D,
     spec: ArraySpecDynamic,
@@ -48,7 +48,7 @@ pub(crate) trait ReductionOpKernel<T> {
     fn supports_empty(&self) -> bool;
 }
 
-impl<S, K, D> ReductionOp<S, K, D> {
+impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
     pub(crate) fn new<Ax>(array: S, kernel: K, axes: Ax) -> Result<Self>
     where
         S: ArrayStorageTyped,
@@ -57,7 +57,7 @@ impl<S, K, D> ReductionOp<S, K, D> {
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
         let input_ndim = array.shape().len();
-        let mut is_reduced = dim_arr(input_ndim, |_| false);
+        let mut is_reduced = S::Dimension::vec(input_ndim, |_| false);
         for i in 0..axes.len() {
             let ax = axes.get(i);
             ensure!(
@@ -74,7 +74,7 @@ impl<S, K, D> ReductionOp<S, K, D> {
             && array
                 .shape()
                 .iter()
-                .zip(&is_reduced)
+                .zip(is_reduced.as_ref())
                 .any(|(&s, &reduced)| reduced && s == 0)
         {
             bail!(
@@ -146,7 +146,7 @@ where
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
         let mut buf = buf.get_contiguous_mut(nitems, self.dtype(), context)?;
         read_fn(self, index, buf.as_mut_slice(), context)?;
-        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = D::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
         buf.finalize(out_shape.as_ref(), self.dtype());
         Ok(())
     }
@@ -469,7 +469,7 @@ where
                 let items_buf_lstrides_for_out_iter = items_buf_lstrides
                     .as_ref()
                     .iter()
-                    .zip(&self.is_reduced)
+                    .zip(self.is_reduced.as_ref())
                     .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
                     .collect_dim_vec::<D>(out_ndim);
 
@@ -701,7 +701,7 @@ macro_rules! define_reduction_op {
         struct $Kernel { $($($extra_arg: $extra_ty),+)? }
 
         $(#[$meta])*
-        pub struct $Op<S, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
+        pub struct $Op<S: crate::ArrayStorage, D>(crate::ops::reduction::ReductionOp<S, $Kernel, D>);
 
         impl<S, D> $Op<S, D>
         where
@@ -1850,14 +1850,14 @@ impl ReductionOpKernel<bool> for AnyKernel {
 /// assert_eq!(total[[]], 21);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Reduce<S, D, F>(ReductionOp<S, VanillaReduceKernel<F>, D>);
-impl<S, D, F> Reduce<S, D, F> {
+pub struct Reduce<S: ArrayStorage, D, F>(ReductionOp<S, VanillaReduceKernel<F>, D>);
+impl<S: ArrayStorage, D, F> Reduce<S, D, F> {
     /// Constructs a [`Reduce`] storage. See the struct docs for semantics and examples.
     pub fn new<Ax>(array: S, axes: Ax, f: F) -> Result<Self>
     where
         S: ArrayStorageTyped,
-        F: Fn(S::Item, S::Item) -> S::Item,
         D: Dimension,
+        F: Fn(S::Item, S::Item) -> S::Item,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
         Ok(Self(ReductionOp::new(array, VanillaReduceKernel(f), axes)?))
@@ -1867,8 +1867,8 @@ impl<S, D, F> Reduce<S, D, F> {
     pub fn new_array<Ax>(array: Array<S>, axes: Ax, f: F) -> Result<Array<Reduce<S, D, F>>>
     where
         S: ArrayStorageTyped,
-        F: Fn(S::Item, S::Item) -> S::Item,
         D: Dimension,
+        F: Fn(S::Item, S::Item) -> S::Item,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
         Self::new(array.into_storage(), axes, f).map(Array::from_storage)
@@ -1999,15 +1999,15 @@ where
 /// assert_eq!(counts.as_slice().unwrap(), &[2, 2]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct Fold<S, D, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>, D>);
-impl<S, D, B, F> Fold<S, D, B, F> {
+pub struct Fold<S: ArrayStorage, D, B, F>(ReductionOp<S, VanillaFoldKernel<B, F>, D>);
+impl<S: ArrayStorage, D, B, F> Fold<S, D, B, F> {
     /// Constructs a [`Fold`] storage. See the struct docs for semantics and examples.
     pub fn new<Ax>(array: S, axes: Ax, init: B, f: F) -> Result<Self>
     where
         S: ArrayStorageTyped,
+        D: Dimension,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        D: Dimension,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
         Ok(Self(ReductionOp::new(
@@ -2026,9 +2026,9 @@ impl<S, D, B, F> Fold<S, D, B, F> {
     ) -> Result<Array<Fold<S, D, B, F>>>
     where
         S: ArrayStorageTyped,
+        D: Dimension,
         B: Dtyped,
         F: Fn(B, S::Item) -> B,
-        D: Dimension,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
         Self::new(array.into_storage(), axes, init, f).map(Array::from_storage)

@@ -11,7 +11,7 @@ use crate::codec::ReadContext;
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
-use crate::util::{dim_arr, DimArray, Idx, IterExt};
+use crate::util::{dim_arr, Idx, IterExt};
 use crate::{ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, TypeDyn};
 
 impl Array<Compact<TypeDyn, DimDyn>> {
@@ -454,7 +454,7 @@ where
             .map_err(Error::io)?;
         let ndim = header.shape.len();
         check_ndim::<DimDyn>(ndim)?;
-        let shape = DimArray::from_slice(header.shape.as_slice()).unwrap();
+        let shape = DimDyn::from_slice(header.shape.as_slice());
         ensure!(
             header.block_shape.len() == ndim,
             InvalidArchive,
@@ -465,7 +465,7 @@ where
         ensure!(
             block_shape
                 .iter()
-                .zip(&shape)
+                .zip(shape.as_slice())
                 .all(|(&b, &s)| b > 0 && b as u64 <= s.max(1)),
             InvalidArchive,
             "invalid block shape {:?} for array shape {:?}",
@@ -498,7 +498,7 @@ where
         })?;
         let expected_nblocks = block_shape
             .iter()
-            .zip(shape.iter())
+            .zip(shape.as_slice().iter())
             .map(|(&b, &s)| s.div_ceil(b as u64))
             .product::<u64>();
 
@@ -527,7 +527,6 @@ where
 
         params.block_shape = Some(block_shape);
 
-        let shape = DimDyn::from_slice(&shape);
         Self::new(blocks, shape, params)
     }
 }

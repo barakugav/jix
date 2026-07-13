@@ -24,13 +24,13 @@ use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 /// # Examples
 ///
 /// ```
-/// use jix::Array;
+/// use jix::{Array, ArrayParams};
 /// # use jix::__private::Scalar;
 /// use ndarray::array;
 ///
 /// let arr = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
-/// let scalar_arr = Array::from_storage(Scalar::new(5.0f32, &[2, 2])?);
+/// let scalar_arr = Array::from_storage(Scalar::new(5.0f32, &[2, 2], ArrayParams::default())?);
 /// let result = (arr * scalar_arr).to_ndarray()?;
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]]);
 /// # Ok::<(), jix::Error>(())

@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{dim_arr, DimArray};
+use crate::util::dim_arr;
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
@@ -47,9 +47,9 @@ use crate::{Array, ArrayStorage, Dimension};
 pub struct PermuteAxes<S: ArrayStorage> {
     array: S,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.
-    axes: DimArray<u8>,
+    axes: <S::Dimension as Dimension>::Vec<u8>,
     /// `inv_axes[d]` = index of the output dimension that maps from input dimension `d`.
-    inv_axes: DimArray<u8>,
+    inv_axes: <S::Dimension as Dimension>::Vec<u8>,
 
     shape: S::Dimension,
     spec: ArraySpecDynamic,
@@ -65,9 +65,8 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             "axes length {} does not match array ndim {ndim}",
             axes.len()
         );
-        let axes = DimArray::from_slice(axes).unwrap();
         let mut seen = S::Dimension::vec(ndim, |_| false);
-        for &ax in axes.iter() {
+        for &ax in axes.as_ref().iter() {
             ensure!(
                 ax < ndim,
                 InvalidShapeOperation,
@@ -80,10 +79,9 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             );
             seen[ax] = true;
         }
-
-        let mut inv_axes = S::Dimension::vec(ndim, |_| 0);
-        for (i, &ax) in axes.iter().enumerate() {
-            inv_axes[ax] = i;
+        let mut inv_axes = S::Dimension::vec(ndim, |_| 0u8);
+        for (i, &ax) in axes.as_ref().iter().enumerate() {
+            inv_axes[ax] = i as u8;
         }
 
         let input_shape = array.shape();
@@ -96,12 +94,13 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             block_shape,
             block_shape_tag,
         };
+        let axes = S::Dimension::vec(ndim, |i| axes[i] as u8);
         Ok(Self {
             shape,
             spec,
             array,
-            axes: dim_arr(ndim, |i| axes[i] as u8),
-            inv_axes: dim_arr(ndim, |i| inv_axes[i] as u8),
+            axes,
+            inv_axes,
         })
     }
 
@@ -125,7 +124,7 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
 
-        let ndim = self.axes.len();
+        let ndim = self.axes.as_ref().len();
         let itemsize = dtype.itemsize() as usize;
 
         // Build the index into the underlying (un-permuted) storage.
@@ -168,14 +167,17 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
+        let ndim = self.shape().len();
+        check_ndim::<NewD>(ndim)?;
         let shape = NewD::from_slice(self.shape());
+        let axes = NewD::vec(ndim, |i| self.axes[i]);
+        let inv_axes = NewD::vec(ndim, |i| self.inv_axes[i]);
         let array = self.array.dimension_change::<NewD>()?;
         Ok(PermuteAxes {
             shape,
             array,
-            axes: self.axes,
-            inv_axes: self.inv_axes,
+            axes,
+            inv_axes,
             spec: self.spec,
         })
     }

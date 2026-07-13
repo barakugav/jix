@@ -9,4 +9,3 @@
 - use multiple threads for reads
 - ArrayParams stream syntax
 - resolve TODOs across the repo
-- hold D::Vec in ops

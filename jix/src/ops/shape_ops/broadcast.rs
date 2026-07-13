@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
-use crate::util::{default_strides, dim_arr, DimArray, NdCopier};
+use crate::util::{default_strides, dim_arr, NdCopier};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
@@ -50,7 +50,7 @@ use crate::{Array, ArrayStorage, Dimension};
 pub struct Broadcast<S: ArrayStorage> {
     array: S,
     /// `is_broadcast[d]` is `true` when output dim `d` was expanded from length 1.
-    is_broadcast: DimArray<bool>,
+    is_broadcast: <S::Dimension as Dimension>::Vec<bool>,
     /// `true` when `new_shape == input_shape` - no dimension was actually broadcast.
     /// In this case `read_data` forwards directly to the inner storage with no extra work.
     is_identity: bool,
@@ -77,12 +77,12 @@ where
         );
         check_shape_overflow(new_shape, array.dtype().itemsize() as _)?;
 
-        let mut is_broadcast = DimArray::new();
+        let mut is_broadcast = S::Dimension::vec(ndim, |_| false);
         for dim in 0..ndim {
             if new_shape[dim] == input_shape[dim] {
-                is_broadcast.push(false);
+                is_broadcast[dim] = false;
             } else if input_shape[dim] == 1 {
-                is_broadcast.push(true);
+                is_broadcast[dim] = true;
             } else {
                 bail!(
                     InvalidShapeOperation,
@@ -92,7 +92,7 @@ where
                 );
             }
         }
-        let is_identity = is_broadcast.iter().all(|&b| !b);
+        let is_identity = is_broadcast.as_ref().iter().all(|&b| !b);
 
         let new_shape = S::Dimension::from_slice(new_shape);
 
@@ -151,7 +151,7 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
 
-        let ndim = self.is_broadcast.len();
+        let ndim = self.is_broadcast.as_ref().len();
         let itemsize = dtype.itemsize() as usize;
 
         // Read from inner with broadcast dims collapsed to 0..1.
@@ -222,12 +222,14 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
+        let ndim = self.shape().len();
+        check_ndim::<NewD>(ndim)?;
         let new_shape = NewD::from_slice(self.shape());
+        let is_broadcast = NewD::vec(ndim, |dim| self.is_broadcast[dim]);
 
         Ok(Broadcast {
             array: self.array.dimension_change()?,
-            is_broadcast: self.is_broadcast,
+            is_broadcast,
             is_identity: self.is_identity,
             new_shape,
             spec: self.spec,
