@@ -52,8 +52,8 @@ where
     }
 
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::assert_ndim(&self.0, ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::check_ndim(&self.0, ndim)
     }
 }
 
@@ -119,8 +119,8 @@ where
     }
 
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.strides.as_ref().len(), ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.strides.as_ref().len() == ndim
     }
 }
 
@@ -163,8 +163,8 @@ impl<D: Dimension> NdIterExtension for NdIterExtStridesOffset<D> {
     }
 
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.strides.as_ref().len(), ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.strides.as_ref().len() == ndim
     }
 }
 

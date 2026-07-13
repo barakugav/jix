@@ -6,6 +6,7 @@ use crate::dtype::Dtype;
 pub(in crate::codec::filter) struct ByteShuffleFilter;
 impl FilterImpl for ByteShuffleFilter {
     fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &TmpBufferPool) {
+        assert_eq!(src.len(), dst.len());
         let itemsize = dtype.itemsize() as usize;
         debug_assert!(src.len().is_multiple_of(itemsize));
 
@@ -67,6 +68,7 @@ impl FilterImpl for ByteShuffleFilter {
     }
 
     fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &TmpBufferPool) {
+        assert_eq!(src.len(), dst.len());
         let itemsize = dtype.itemsize() as usize;
         debug_assert!(src.len().is_multiple_of(itemsize));
 

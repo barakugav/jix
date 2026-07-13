@@ -50,12 +50,15 @@
 use std::ops::Range;
 
 use crate::dtype::Dtyped;
-use crate::error::{check_dtype, ensure, Result};
+use crate::error::{check_buffer_aligned, check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
-use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
+use crate::{
+    array_from_fn_inline, assert_unchecked_eq, ArrayExt, ArrayStorage, Dimension, ElementType, Ty,
+    TypeDyn,
+};
 
 pub(crate) mod core;
 
@@ -260,12 +263,7 @@ where
                     InvalidBufferSize,
                     "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
                 );
-                ensure!(
-                    out.as_ptr().cast::<T>().is_aligned(),
-                    InvalidArgument,
-                    "Buffer pointer is not aligned to required alignment {} for dtype {dtype}",
-                    align_of::<T>(),
-                );
+                check_buffer_aligned(out.as_ptr(), &dtype)?;
 
                 // this is a compile time check, the compiler knows the value of LANES
                 let read_fn = match <T as LanesInfo>::LANES {
@@ -364,6 +362,8 @@ where
         R: ReadData<U>,
         U: Copy + Send + Sync + Sized + 'static,
     {
+        assert_eq!(self.len(), other.len());
+
         struct Zip<T, U, R1, R2> {
             left: R1,
             right: R2,
@@ -384,7 +384,7 @@ where
             }
             #[inline(always)]
             fn len(&self) -> usize {
-                assert_eq!(self.left.len(), self.right.len());
+                unsafe { assert_unchecked_eq!(self.left.len(), self.right.len()) };
                 self.left.len()
             }
         }

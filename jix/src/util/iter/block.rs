@@ -48,8 +48,7 @@ where
         V: DimVec<u64, Dimension = D>,
     {
         let ndim = begin.as_ref().len();
-        assert_eq!(ndim, end.as_ref().len());
-        assert_eq!(ndim, block_shape.as_ref().len());
+        assert!(ndim == end.as_ref().len() && ndim == block_shape.as_ref().len());
 
         let borders = D::vec(ndim, |dim| {
             assert!(begin[dim] <= end[dim]);
@@ -126,11 +125,11 @@ where
     }
 
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.block_shape.as_ref().len(), ndim);
-        assert_eq!(self.borders.as_ref().len(), ndim);
-        assert_eq!(self.inner_offset.as_ref().len(), ndim);
-        assert_eq!(self.current_block_size.as_ref().len(), ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.block_shape.as_ref().len() == ndim
+            && self.borders.as_ref().len() == ndim
+            && self.inner_offset.as_ref().len() == ndim
+            && self.current_block_size.as_ref().len() == ndim
     }
 }
 

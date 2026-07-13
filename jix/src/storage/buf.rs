@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::TmpBuf;
 use crate::dtype::Dtype;
-use crate::error::{ensure, Result};
+use crate::error::{bail, check_buffer_aligned, Result};
 use crate::util::{default_strides_cast, default_strides_slice, NdCopier};
 use crate::{default_strides_from_iter, Dimension, ReadContext, SliceExt};
 
@@ -116,19 +116,17 @@ impl<'a> OutBuf<'a> {
             }
             OutBufInner::ContiguousLazy(_) | OutBufInner::Strided { .. } => unreachable!(),
         };
-        ensure!(
-            buf.as_mut_slice().len() == nitems * dtype.itemsize() as usize,
-            InvalidBufferSize,
-            "Unexpected buffer size {} requested for {nitems} items with dtype {dtype}",
-            buf.as_mut_slice().len()
-        );
-        ensure!(
-            (buf.as_mut_slice().as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize()),
-            InvalidArgument,
-            "Buffer pointer {:p} is not aligned to dtype {dtype} alignment {}",
-            buf.as_mut_slice().as_ptr(),
-            dtype.alignment().as_usize()
-        );
+        if buf.as_mut_slice().len() != nitems * dtype.itemsize() as usize {
+            #[inline(never)]
+            fn buffer_size_fail(buf_len: usize, nitems: usize, dtype: &Dtype) -> Result<()> {
+                bail!(
+                    InvalidBufferSize,
+                    "Unexpected buffer size {buf_len} requested for {nitems} items with dtype {dtype}"
+                );
+            }
+            buffer_size_fail(buf.as_mut_slice().len(), nitems, dtype)?;
+        }
+        check_buffer_aligned(buf.as_mut_slice().as_ptr(), dtype)?;
         Ok(buf)
     }
 

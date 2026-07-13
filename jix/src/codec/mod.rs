@@ -307,7 +307,6 @@ impl<'a> Decoder<'a> {
         // Apply filters in reverse order
         for filter in self.filters.iter().rev() {
             let (data, buf) = buffers.as_mut().unwrap().edit();
-            assert_eq!(data.len(), buf.len());
             filter.decode(data, buf, self.dtype, &self.context.tmp_buffers);
         }
 

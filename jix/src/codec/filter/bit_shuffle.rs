@@ -112,6 +112,7 @@ impl FilterImpl for BitShuffleFilter {
     /// After pass 3 the final output is in `dst`; `tmp` is scratch and is
     /// discarded on return.
     fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &TmpBufferPool) {
+        assert_eq!(src.len(), dst.len());
         let typesize = dtype.itemsize() as usize;
         let n = src.len() / typesize;
         let n_full = (n / 8) * 8;
@@ -155,6 +156,7 @@ impl FilterImpl for BitShuffleFilter {
     /// | 2    | [`untrans_bit_byte`]       | `dst` | `tmp` | encode pass 2  |
     /// | 3    | [`ByteShuffleFilter::decode`] (SoA->AoS) | `tmp` | `dst` | encode pass 1 |
     fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &TmpBufferPool) {
+        assert_eq!(src.len(), dst.len());
         let typesize = dtype.itemsize() as usize;
         let n = src.len() / typesize;
         let n_full = (n / 8) * 8;

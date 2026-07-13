@@ -87,13 +87,15 @@ where
         let begin_slice = begin.as_ref();
         let end_slice = end.as_ref();
         let ndim = begin_slice.len();
-        assert_eq!(begin_slice.len(), ndim);
-        assert_eq!(end_slice.len(), ndim);
-        extensions.assert_ndim(ndim);
-        assert!(begin_slice
-            .iter()
-            .zip(end_slice.iter())
-            .all(|(&b, &e)| b <= e));
+        assert!(
+            begin_slice.len() == ndim
+                && end_slice.len() == ndim
+                && extensions.check_ndim(ndim)
+                && begin_slice
+                    .iter()
+                    .zip(end_slice.iter())
+                    .all(|(&b, &e)| b <= e)
+        );
         let current_idx = begin.clone();
 
         let nitems = begin_slice
@@ -197,7 +199,7 @@ pub(crate) trait NdIterExtension {
     /// Returns the current derived value after all index changes have been applied.
     fn next(&self) -> Self::Item;
 
-    fn assert_ndim(&self, ndim: usize);
+    fn check_ndim(&self, ndim: usize) -> bool;
 }
 
 /// A plain index-only iterator; a thin wrapper around [`NdIter`] with a `()` extension.
@@ -239,7 +241,9 @@ impl NdIterExtension for () {
     #[inline(always)]
     fn next(&self) {}
     #[inline(always)]
-    fn assert_ndim(&self, _ndim: usize) {}
+    fn check_ndim(&self, _ndim: usize) -> bool {
+        true
+    }
 }
 impl<T1> NdIterExtension for (T1,)
 where
@@ -259,8 +263,8 @@ where
         (self.0.next(),)
     }
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        self.0.assert_ndim(ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.0.check_ndim(ndim)
     }
 }
 impl<T1, T2> NdIterExtension for (T1, T2)
@@ -284,9 +288,8 @@ where
         (self.0.next(), self.1.next())
     }
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        self.0.assert_ndim(ndim);
-        self.1.assert_ndim(ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.0.check_ndim(ndim) && self.1.check_ndim(ndim)
     }
 }
 impl<T1, T2, T3> NdIterExtension for (T1, T2, T3)
@@ -313,10 +316,8 @@ where
         (self.0.next(), self.1.next(), self.2.next())
     }
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        self.0.assert_ndim(ndim);
-        self.1.assert_ndim(ndim);
-        self.2.assert_ndim(ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.0.check_ndim(ndim) && self.1.check_ndim(ndim) && self.2.check_ndim(ndim)
     }
 }
 
@@ -369,7 +370,9 @@ mod tests {
         fn next(&self) -> usize {
             self.log.len()
         }
-        fn assert_ndim(&self, _ndim: usize) {}
+        fn check_ndim(&self, _ndim: usize) -> bool {
+            true
+        }
     }
 
     // ---------------------------------------------------------------------------

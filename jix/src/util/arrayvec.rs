@@ -336,7 +336,7 @@ impl<T, const CAP: usize> Extend<T> for ArrayVec<T, CAP> {
 #[inline(never)]
 #[cold]
 #[track_caller]
-fn extend_panic() {
+fn extend_panic() -> ! {
     panic!("ArrayVec: capacity exceeded in extend/from_iter");
 }
 

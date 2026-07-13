@@ -25,11 +25,12 @@ impl RuntimeAlign {
     #[inline]
     #[track_caller]
     fn new(align: usize) -> Self {
-        if align != 0 {
-            assert!(
-                align.is_power_of_two(),
-                "alignment ({align}) is not a power of two.",
-            );
+        if align != 0 && !align.is_power_of_two() {
+            #[inline(never)]
+            fn panic_align_not_power_of_two(align: usize) -> ! {
+                panic!("alignment ({align}) is not a power of two.");
+            }
+            panic_align_not_power_of_two(align);
         }
         RuntimeAlign { align }
     }

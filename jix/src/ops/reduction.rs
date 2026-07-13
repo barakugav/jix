@@ -308,7 +308,6 @@ where
         //   `product(inner_range_full[d].end - .start for d in reduced dims)` items (when
         //   `out_nitems > 0`).
 
-        check_get_range(self.shape(), index)?;
         let out_nitems = check_get_buffer_size(index, &K::Output::DTYPE, buf)?;
 
         let inner_shape = self.array.shape();

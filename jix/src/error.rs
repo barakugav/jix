@@ -111,20 +111,53 @@ pub(crate) use {bail, ensure, error};
 
 #[inline]
 pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
+    #[inline(never)]
+    fn check_dim_fail<D: Dimension>(ndim: usize) -> Result<()> {
+        if let Some(expected) = D::NDIM {
+            bail!(
+                TooManyDimensions,
+                "ndim {ndim} does not match expected {expected} for this dimension type"
+            );
+        } else {
+            bail!(
+                TooManyDimensions,
+                "Too many dimensions: {ndim} (max={NDIM_MAX})"
+            );
+        }
+    }
     if let Some(expected) = D::NDIM {
-        ensure!(
-            ndim == expected,
-            TooManyDimensions,
-            "ndim {ndim} does not match expected {expected} for this dimension type"
-        );
+        if ndim != expected {
+            return check_dim_fail::<D>(ndim);
+        }
     } else {
-        ensure!(
-            ndim <= NDIM_MAX,
-            TooManyDimensions,
-            "Too many dimensions: {ndim} (max={NDIM_MAX})"
-        );
+        if ndim > NDIM_MAX {
+            return check_dim_fail::<D>(ndim);
+        }
     }
     Ok(())
+}
+
+#[track_caller]
+#[inline]
+pub(crate) fn assert_dim<D: Dimension>(ndim: usize) {
+    #[track_caller]
+    #[inline(never)]
+    fn assert_dim_fail<D: Dimension>(ndim: usize) -> ! {
+        if let Some(expected) = D::NDIM {
+            panic!("ndim {ndim} does not match expected {expected} for this dimension type");
+        } else {
+            panic!("Too many dimensions: {ndim} (max={NDIM_MAX})");
+        }
+    }
+    if let Some(expected) = D::NDIM {
+        if ndim != expected {
+            assert_dim_fail::<D>(ndim);
+        }
+    } else {
+        if ndim > NDIM_MAX {
+            assert_dim_fail::<D>(ndim);
+        }
+    }
 }
 
 #[inline(always)]
@@ -144,39 +177,43 @@ pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
 
 #[inline]
 pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
-    ensure!(
-        shape
-            .iter()
-            .cloned()
-            .chain([itemsize])
-            .try_product()
-            .is_some(),
-        InvalidShapeOperation,
-        "shape has overflowed u64 product with itemsize {itemsize}: {shape:?}"
-    );
+    let product = shape.iter().cloned().chain([itemsize]).try_product();
+    if product.is_none() {
+        #[inline(never)]
+        fn shape_overflow_fail(shape: &[u64], itemsize: u64) -> Result<()> {
+            bail!(
+                InvalidShapeOperation,
+                "shape has overflowed u64 product with itemsize {itemsize}: {shape:?}"
+            );
+        }
+        return shape_overflow_fail(shape, itemsize);
+    }
     Ok(())
 }
 
 #[inline]
 pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
-    ensure!(
-        shape.len() == index.len(),
-        InvalidIndex,
-        "Index has different number of dimensions {} than shape {}",
-        index.len(),
-        shape.len()
-    );
+    if shape.len() != index.len() {
+        #[inline(never)]
+        fn get_range_fail_ndim(shape_ndim: usize, index_ndim: usize) -> Result<()> {
+            bail!(
+                InvalidIndex,
+                "Index has different number of dimensions {index_ndim} than shape {shape_ndim}"
+            )
+        }
+        return get_range_fail_ndim(shape.len(), index.len());
+    }
     for (dim, (&dim_size, range)) in shape.iter().zip(index).enumerate() {
-        ensure!(
-            range.start <= range.end,
-            InvalidIndex,
-            "Index range {range:?} has start greater than end at dimension {dim}"
-        );
-        ensure!(
-            range.end <= dim_size,
-            InvalidIndex,
-            "Index range {range:?} out of bounds for shape {shape:?} at dimension {dim}"
-        );
+        #[inline(never)]
+        fn check_range_fail(dim: usize, range: &Range<u64>, dim_size: u64) -> Result<()> {
+            bail!(
+                InvalidIndex,
+                "Index range {range:?} out of bounds for shape dimension {dim} with size {dim_size}"
+            )
+        }
+        if range.start > range.end || range.end > dim_size {
+            return check_range_fail(dim, range, dim_size);
+        }
     }
     Ok(())
 }
@@ -190,16 +227,38 @@ pub(crate) fn check_get_buffer_size(
     let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
     let required_size = nitems * dtype.itemsize() as usize;
     let buf_len = buf.len();
-    ensure!(
-        buf_len == required_size,
-        InvalidBufferSize,
-        "Unexpected buffer size {buf_len} requested index {index:?} with dtype {dtype} (required size: {required_size})"
-    );
-    ensure!(
-        (buf.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize()),
-        InvalidArgument,
-        "Buffer pointer is not aligned to required alignment {} for dtype {dtype}",
-        dtype.alignment(),
-    );
+
+    if buf_len != required_size {
+        #[inline(never)]
+        fn buffer_size_fail(
+            buf_len: usize,
+            required_size: usize,
+            index: &[Range<u64>],
+            dtype: &Dtype,
+        ) -> Result<usize> {
+            bail!(
+                InvalidBufferSize,
+                "Unexpected buffer size {buf_len} requested index {index:?} with dtype {dtype} (required size: {required_size})"
+            );
+        }
+        return buffer_size_fail(buf_len, required_size, index, dtype);
+    }
+    check_buffer_aligned(buf.as_ptr(), dtype)?;
     Ok(nitems)
+}
+
+#[inline]
+pub(crate) fn check_buffer_aligned(buf: *const u8, dtype: &Dtype) -> Result<()> {
+    if !(buf as usize).is_multiple_of(dtype.alignment().as_usize()) {
+        #[inline(never)]
+        fn buffer_alignment_fail(buf: *const u8, dtype: &Dtype) -> Result<()> {
+            bail!(
+                InvalidArgument,
+                "Buffer pointer {buf:p} is not aligned to required alignment {} for dtype {dtype}",
+                dtype.alignment(),
+            );
+        }
+        return buffer_alignment_fail(buf, dtype);
+    }
+    Ok(())
 }
