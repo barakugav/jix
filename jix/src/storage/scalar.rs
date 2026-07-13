@@ -105,13 +105,14 @@ where
         _context: &ReadContext,
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
         let dtype = T::DTYPE;
-        let (buf, strides) = buf.get_mut(index, &dtype);
+        let (buf, strides) = buf.get_mut(nitems, &dtype);
         match strides {
             // Contiguous: fill the whole buffer in one tight loop.
             None => {
                 let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
-                for item in buf.iter_mut() {
+                for item in buf.iter_mut().take(nitems) {
                     *item = self.data;
                 }
             }

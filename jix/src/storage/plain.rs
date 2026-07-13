@@ -21,7 +21,7 @@ use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 /// together with a per-dimension shape and byte-stride description. The
 /// buffer may be laid out in any order (C-contiguous, Fortran-contiguous,
 /// transposed, sliced with gaps, etc.) - reads use the strides to copy the
-/// requested sub-region into a C-contiguous output buffer.
+/// requested sub-region straight into the destination buffer.
 ///
 /// The type parameter `A` is the *owner* of the underlying memory, and potentially can be any type.
 /// Keeping `A` alive alongside the pointer ensures the data remains valid. Two

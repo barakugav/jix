@@ -128,7 +128,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         // Empty output (any zero-length range, including repeats == 0) is a no-op.
         if index.iter().any(|r| r.start >= r.end) {
             // ensure buffer is allocated for empty read
-            buf.materialize(index, self.dtype());
+            buf.materialize(0, self.dtype());
             return Ok(());
         }
 

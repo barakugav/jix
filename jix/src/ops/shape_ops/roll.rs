@@ -111,7 +111,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         let len2 = e - shift;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
         if nitems == 0 {
-            buf.materialize(index, dtype);
+            buf.materialize(0, dtype);
             return Ok(());
         }
         // Forward the (possibly strided) destination's own strides so each region scatters directly

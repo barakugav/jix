@@ -184,9 +184,10 @@ where
         for (i, &axis) in self.axes_mapping.iter().enumerate() {
             inner_strides[axis as usize] = out_strides[i];
         }
+        let nitems = out_shape.as_ref().iter().product::<u64>() as usize;
         // SAFETY: `inner_strides` reindexes `buf`'s output strides onto the kept inner axes (removed
         // axes have extent 1 and are never stepped), addressing bytes `buf` already spans.
-        let mut inner_buf = unsafe { buf.with_strides(index, dtype, inner_strides.as_ref()) };
+        let mut inner_buf = unsafe { buf.with_strides(nitems, dtype, inner_strides.as_ref()) };
         self.array.read_data(&inner_index, &mut inner_buf, context)
     }
 

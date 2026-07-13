@@ -129,7 +129,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
         if index.iter().any(|r| r.start >= r.end) {
             // ensure buffer is allocated for empty read
-            buf.materialize(index, self.dtype());
+            buf.materialize(0, self.dtype());
             return Ok(());
         }
 
@@ -164,9 +164,9 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
         let copier = NdCopier::new(dtype);
 
-        // Case B - two reads, single wrap (total <= L): split the request into two
-        // contiguous input ranges along axis k and read each into a separate tmp_buf, then
-        // place them at the right axis-k offset in `buf`.
+        // Case B - two reads, single wrap (total <= L): split the request into two contiguous input
+        // ranges along axis k and read each straight into `buf` at the right axis-k offset (via a
+        // strided OutBuf).
         if total <= l {
             let len1 = l - s_in;
             let len2 = total - len1;

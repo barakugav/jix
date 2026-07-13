@@ -96,7 +96,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
         if index.iter().any(|r| r.start >= r.end) {
             // ensure buffer is allocated for empty read
-            buf.materialize(index, self.dtype());
+            buf.materialize(0, self.dtype());
             return Ok(());
         }
 

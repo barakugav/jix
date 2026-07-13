@@ -256,24 +256,20 @@ where
         //        of unmatched orig dims in the flat index space, so `flat`
         //        decomposes cleanly using the original strides.
         //
-        //   2. READ into `tmp_buf` from the underlying storage using `read_range`.
-        //      `tmp_buf` is sized for the matched-dims block only (one element per
-        //      unmatched orig dim, full range for matched dims).
-        //
-        //   3. COPY from `tmp_buf` into the correct position in `buf` using
-        //      `nd_copy`. The source shape is `new_read_shape` (the matched dims'
-        //      requested sizes, 1 elsewhere). The destination pointer is offset
-        //      by the byte contribution of the unmatched dims' current position:
+        //   2. READ the matched-dims block (using `read_range`) straight into `buf`
+        //      at the unmatched dims' byte offset:
         //
         //          dst_byte_offset = sum_{unmatched new dim d} idx[d] * dst_strides[d]
         //
-        //      `nd_copy` then iterates over the matched dims internally, so each
-        //      element ends up exactly where it belongs in `buf`.
+        //      The read targets a strided `OutBuf` over `buf[dst_byte_offset..]` whose
+        //      strides (expressed in original axis order) place each matched element at
+        //      its C-order position in `buf`, so no temporary buffer or extra copy is
+        //      needed.
         // -----------------------------------------------------------------------
         check_get_range(self.shape(), index)?;
         let dtype = self.dtype();
         if index.iter().any(|r| r.start >= r.end) {
-            buf.materialize(index, dtype);
+            buf.materialize(0, dtype);
             return Ok(());
         }
         // Write straight into the (possibly strided) destination, using its own strides: each inner
@@ -366,8 +362,8 @@ where
                 }
             });
 
-            // Place this matched-dims block into `buf` at the unmatched dims' byte offset; the
-            // strided OutBuf scatters the contiguous inner read into `buf` on success.
+            // Read this matched-dims block straight into `buf` at the unmatched dims' byte offset;
+            // the strided OutBuf places each element at its C-order position in `buf`.
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&dim| same_logical_stride[dim].is_none())
                 .map(|dim| idx[dim] as usize * dst_strides[dim])

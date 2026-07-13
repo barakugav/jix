@@ -211,9 +211,11 @@ pub(crate) trait ReadDataExt<T>: ReadData<T>
 where
     T: Copy + Send + Sync + Sized + 'static,
 {
-    /// Read all items into the given buffer.
+    /// Write all `self.len()` items into `buf` for the read region `index`.
     ///
-    /// The given buffer must have the exact size of `self.len() * size_of::<T>()` and be properly aligned for `T`.
+    /// A contiguous destination (see [`OutBuf`]) is filled with a bulk copy; a strided destination
+    /// receives each item scattered to its position. `D` is the dimension used to walk a strided
+    /// destination.
     #[inline(never)]
     fn to_buf<D: Dimension>(&mut self, buf: &mut OutBuf, index: &[Range<u64>]) -> Result<()>
     where
@@ -221,7 +223,7 @@ where
         Self: Sized,
     {
         let dtype = T::DTYPE;
-        let (out, strides) = buf.get_mut(index, &dtype);
+        let (out, strides) = buf.get_mut(self.len(), &dtype);
 
         match strides {
             None => {

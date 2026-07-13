@@ -14,7 +14,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, Result};
+use crate::error::{check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ElementType, OutBuf};
@@ -305,9 +305,9 @@ where
     {
         let shape = self.shape();
         check_get_range(shape, index)?;
-        let mut cbuf = buf.get_contiguous_mut(index, self.blocks.dtype(), context);
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let mut cbuf = buf.get_contiguous_mut(nitems, self.blocks.dtype(), context)?;
         let buf = cbuf.as_mut_slice();
-        let nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
         if nitems == 0 {
             return Ok(());
         }

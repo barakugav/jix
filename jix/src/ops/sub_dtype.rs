@@ -129,7 +129,7 @@ where
         check_get_range(self.shape(), index)?;
         let dst_dtype = self.dtype();
         if index.iter().any(|r| r.end == r.start) {
-            buf.materialize(index, dst_dtype);
+            buf.materialize(0, dst_dtype);
             return Ok(());
         }
         let src_itemsize = self.array.dtype().itemsize() as usize;

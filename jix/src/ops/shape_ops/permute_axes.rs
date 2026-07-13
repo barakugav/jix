@@ -136,9 +136,10 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
         let out_shape = S::Dimension::vec(ndim, |i| index[i].end - index[i].start);
         let out_strides = buf.strides_or_default::<S::Dimension>(&out_shape, itemsize);
         let inner_strides = S::Dimension::vec(ndim, |d| out_strides[self.inv_axes[d] as usize]);
+        let nitems = out_shape.as_ref().iter().product::<u64>() as usize;
         // SAFETY: `inner_strides` is a permutation of `buf`'s output strides, so it addresses exactly
         // the bytes `buf` already spans - just visited in input-axis order.
-        let mut inner_buf = unsafe { buf.with_strides(index, dtype, inner_strides.as_ref()) };
+        let mut inner_buf = unsafe { buf.with_strides(nitems, dtype, inner_strides.as_ref()) };
         self.array
             .read_data(input_index.as_ref(), &mut inner_buf, context)
     }

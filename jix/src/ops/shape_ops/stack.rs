@@ -146,7 +146,7 @@ where
         check_get_range(shape, index)?;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
         if nitems == 0 {
-            buf.materialize(index, dtype);
+            buf.materialize(0, dtype);
             return Ok(());
         }
 

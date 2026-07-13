@@ -186,7 +186,7 @@ where
     ) -> Result<()> {
         let Some(inner_index) = self.transform_index(index)? else {
             // Empty read (some requested range is empty): just ensure a lazy buffer is materialized.
-            buf.materialize(index, self.dtype());
+            buf.materialize(0, self.dtype());
             return Ok(());
         };
         let dtype = self.dtype();
@@ -199,9 +199,10 @@ where
         let inner_strides = S::Dimension::vec(self.original_dims.len(), |d| {
             out_strides[self.original_dims[d] as usize]
         });
+        let nitems = out_shape.as_ref().iter().product::<u64>() as usize;
         // SAFETY: `inner_strides` gathers a subset of `buf`'s output strides, addressing bytes `buf`
         // already spans.
-        let mut inner_buf = unsafe { buf.with_strides(index, dtype, inner_strides.as_ref()) };
+        let mut inner_buf = unsafe { buf.with_strides(nitems, dtype, inner_strides.as_ref()) };
         self.array.read_data(&inner_index, &mut inner_buf, context)
     }
 

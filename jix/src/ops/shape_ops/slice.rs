@@ -145,7 +145,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // output indices. For each step:
         // * Strided dims use a single-element inner range for that step's position.
         // * Non-strided dims use the full translated range.
-        // The inner read goes into a temporary buffer which is then scattered into `buf` via [`nd_copy`].
+        // Each inner read goes straight into its strided sub-region of `buf` - no temporary buffer.
 
         check_get_range(self.shape(), index)?;
 
@@ -170,7 +170,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // We iterate over all combinations of strided-dim output indices with
         // NdIter. On each step we read from the inner storage (strided dims
         // collapsed to a single-element range; non-strided dims as full ranges)
-        // and scatter the result into `buf` using nd_copy.
+        // straight into the matching strided sub-region of `buf`.
         //
         // Let:
         //   strided dim     - dims[d].step > 1
@@ -193,19 +193,16 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         //   dst_byte_offset = sum_{strided d} idx[d] * dst_strides[d]
         //   (non-strided dims contribute 0 since idx[d] == 0 for them in iter_shape)
         //
-        //   nd_copy(tmp_buf -> buf + dst_byte_offset, shape = inner_read_shape,
-        //           src_strides = C-order over inner_read_shape,
-        //           dst_strides = C-order over out_shape)
-        //
-        // nd_copy iterates over inner_read_shape (1 for strided dims, full for non-
-        // strided). The single step on strided dims is handled by dst_byte_offset
-        // already placing us at the right row/column; nd_copy takes care of the rest.
+        // The inner read targets a strided OutBuf over `buf[dst_byte_offset..]` with
+        // `dst_strides` (the destination's own strides), so each non-strided dim's full
+        // range lands at its correct position in `buf` directly - no temporary buffer or
+        // copy. `dst_byte_offset` places the single strided-dim step at the right row/column.
         // -----------------------------------------------------------------------
         let dtype = self.dtype();
         let ndim = self.slice.len();
         let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
         if out_shape.as_ref().contains(&0) {
-            buf.materialize(index, dtype);
+            buf.materialize(0, dtype);
             return Ok(());
         }
         // Forward the (possibly strided) destination's own strides so each inner read scatters

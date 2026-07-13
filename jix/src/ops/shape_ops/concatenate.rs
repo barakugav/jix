@@ -141,7 +141,7 @@ where
     type ElementType = ArraysT::ElementType;
     type Dimension = ArraysT::Dimension;
 
-    /// Fills `buf` with a C-order slice of the concatenated array described by `index`.
+    /// Fills `buf` with the slice of the concatenated array described by `index`.
     ///
     /// `borders` stores the cumulative end positions of each sub-array along `concat_axis`, so
     /// sub-array `i` owns the range `[borders[i-1], borders[i])` (with `borders[-1] == 0`).
@@ -151,12 +151,11 @@ where
     /// located with a linear scan for small `borders` slices or a binary search otherwise.
     /// The loop then runs forward and breaks as soon as an array starts past the requested range.
     ///
-    /// Each overlapping sub-array is read with a local (array-relative) index on the concat axis.
-    /// When all dimensions before `concat_axis` have size <= 1 the output buffer is contiguous for
-    /// each sub-array ("in-place"), so the data is written directly at the right byte offset.
-    /// Otherwise each sub-array is read into a temporary buffer and scattered into `buf` with
-    /// `NdIter`, using the full output strides for dimensions before `concat_axis` and the
-    /// sub-array strides for dimensions at and after it.
+    /// Each overlapping sub-array is read with a local (array-relative) index on the concat axis,
+    /// straight into its sub-region of `buf` at the right byte offset using the destination's own
+    /// strides - no temporary buffer. When `buf` is contiguous and all dimensions before `concat_axis`
+    /// have size <= 1, each sub-array's region is itself contiguous and is read into a plain contiguous
+    /// slice (the `inner_contiguous` fast path).
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -168,7 +167,7 @@ where
 
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
         if nitems == 0 {
-            buf.materialize(index, dtype);
+            buf.materialize(0, dtype);
             return Ok(());
         }
 
