@@ -259,16 +259,13 @@ impl<'a> Decoder<'a> {
 
     pub(crate) fn decode(&self, src: &[u8], dst: &mut [u8]) -> Result<usize> {
         let mut buffers = None;
+        let mut tmp_buf;
         let decompress_out = if self.filters.is_empty() {
             dst
         } else {
-            let tmp_buf = unsafe { &mut *self.context.filters_tmp_buf.get() };
-            tmp_buf.clear();
-            tmp_buf.reserve(dst.len());
-            unsafe {
-                #[allow(clippy::uninit_vec)]
-                tmp_buf.set_len(dst.len())
-            };
+            tmp_buf = self
+                .context
+                .tmp_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap());
             let tmp_buf = tmp_buf.as_mut_slice();
 
             let dst_ptr = dst.as_mut_ptr();
@@ -361,7 +358,6 @@ impl<'a> Decoder<'a> {
 /// reinitializing the decompressor and keeps the scratch buffer allocations warm:
 pub struct ReadContext {
     tmp_buffers: TmpBufferPool,
-    filters_tmp_buf: UnsafeCell<AlignedBytes>,
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
 }
@@ -373,7 +369,6 @@ impl ReadContext {
     pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         Ok(Self {
             tmp_buffers: TmpBufferPool::new(),
-            filters_tmp_buf: UnsafeCell::new(AlignedBytes::new_exact(CACHE_LINE_SIZE)),
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
         })
