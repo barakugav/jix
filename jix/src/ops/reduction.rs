@@ -141,8 +141,13 @@ where
             512 => Self::read_data_impl::<512>,
             _ => Self::read_data_impl::<1024>,
         };
-        let buf = buf.get_mut(index, self.dtype());
-        read_fn(self, index, buf, context)?;
+
+        check_get_range(self.shape(), index)?;
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let mut buf = buf.get_contiguous_mut(nitems, self.dtype(), context)?;
+        read_fn(self, index, buf.as_mut_slice(), context)?;
+        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        buf.finalize(out_shape.as_ref(), self.dtype());
         Ok(())
     }
 

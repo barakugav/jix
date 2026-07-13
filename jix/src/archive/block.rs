@@ -157,7 +157,7 @@ where
                     }),
                 })
                 .collect(),
-            body_description: Some(schema::block_table_header::BodyDescription::ContinuousV1(())),
+            body_description: Some(schema::block_table_header::BodyDescription::ContiguousV1(())),
         };
         writer.write_message(&header).map_err(Error::io)?;
 
@@ -360,7 +360,7 @@ where
 
         // Read body data sections
         let (block_data, blocks_loc) = match header.body_description {
-            Some(schema::block_table_header::BodyDescription::ContinuousV1(())) => {
+            Some(schema::block_table_header::BodyDescription::ContiguousV1(())) => {
                 let [blocks_loc_section, block_data_section] = unsafe {
                     value_from_io::<[Section; 2]>(reader.reader_mut()).map_err(Error::io)?
                 };

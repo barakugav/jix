@@ -2,11 +2,13 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, check_get_buffer_size, check_get_range, check_ndim, Result};
+use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArraySpec, ArrayStorage, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData, Ty,
 };
+use crate::util::iter::strides::NdIterExtStridesPtrMut;
+use crate::util::iter::NdIter;
 use crate::util::{cast_slice_mut, dim_arr};
 use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 
@@ -103,11 +105,29 @@ where
         _context: &ReadContext,
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        let buf = buf.get_mut(index, &T::DTYPE);
-        check_get_buffer_size(index, &T::DTYPE, buf)?;
-        let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
-        for item in buf.iter_mut() {
-            *item = self.data;
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let dtype = T::DTYPE;
+        let (buf, strides) = buf.get_mut(nitems, &dtype);
+        match strides {
+            // Contiguous: fill the whole buffer in one tight loop.
+            None => {
+                let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
+                for item in buf.iter_mut().take(nitems) {
+                    *item = self.data;
+                }
+            }
+            // Strided: write the scalar to each strided output position.
+            Some(strides) => {
+                let strides = D::vec(index.len(), |d| strides[d]);
+                let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
+                let iter = NdIter::new(
+                    read_shape,
+                    NdIterExtStridesPtrMut::new(strides, buf.as_mut_ptr()),
+                );
+                for (_, dst) in iter {
+                    unsafe { dst.cast::<T>().write(self.data) };
+                }
+            }
         }
         Ok(())
     }

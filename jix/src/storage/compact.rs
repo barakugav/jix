@@ -14,7 +14,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, Result};
+use crate::error::{check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ElementType, OutBuf};
@@ -22,7 +22,7 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, dim_arr, DimArray, NdCopier};
-use crate::{default_strides_cast, ArrayParams, ArrayStorage, DimVec, Dimension};
+use crate::{default_strides_cast, ArrayParams, ArrayStorage, Dim, DimVec, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -305,25 +305,25 @@ where
     {
         let shape = self.shape();
         check_get_range(shape, index)?;
-        let buf = buf.get_mut(index, self.blocks.dtype());
-        let _nitems = check_get_buffer_size(index, self.blocks.dtype(), buf)?;
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let mut cbuf = buf.get_contiguous_mut(nitems, self.blocks.dtype(), context)?;
+        let buf = cbuf.as_mut_slice();
+        if nitems == 0 {
+            return Ok(());
+        }
 
         let ndim = shape.len();
         let block_shape = self.block_shape();
         assert_eq!(ndim, block_shape.len());
-        let block_shape_u64 = D::vec(ndim, |dim| block_shape[dim] as u64);
 
-        let mut b_range = DimArray::default();
+        let mut b_range = D::vec(ndim, |_| 0..0);
         let mut is_single_block = true; // every dimension touches exactly one block.
         let mut is_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
         for dim in 0..ndim {
-            let b = block_shape_u64[dim];
+            let b = block_shape[dim] as u64;
             let (i_start, i_end) = (index[dim].start, index[dim].end);
-            if i_start == i_end {
-                return Ok(()); // empty read
-            }
             let (b_begin, b_end) = (i_start / b, calc_block_end(i_start, i_end, b));
-            b_range.push(b_begin..b_end);
+            b_range[dim] = b_begin..b_end;
             is_single_block &= b_begin + 1 == b_end;
             is_aligned &= i_start.is_multiple_of(b) && i_end.is_multiple_of(b);
         }
@@ -339,13 +339,68 @@ where
         if let Some(single_block_idx) = single_block_idx
             && is_aligned
         {
-            return self.blocks.read_block(single_block_idx, buf, context);
+            self.blocks.read_block(single_block_idx, buf, context)?;
+        } else {
+            self.read_data_slow(index, buf, context, single_block_idx)?;
         }
+
+        let out_shape = D::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+        cbuf.finalize(out_shape.as_ref(), self.blocks.dtype());
+        Ok(())
+    }
+
+    fn read_data_slow(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut [u8],
+        context: &ReadContext,
+        single_block_idx: Option<u64>,
+    ) -> Result<()>
+    where
+        ET: ElementType,
+        D: Dimension,
+    {
+        let read_fn = if D::NDIM.is_some() {
+            Self::read_data_slow_impl::<D>
+        } else {
+            match self.shape().len() {
+                0 => Self::read_data_slow_impl::<Dim<0>>,
+                1 => Self::read_data_slow_impl::<Dim<1>>,
+                2 => Self::read_data_slow_impl::<Dim<2>>,
+                3 => Self::read_data_slow_impl::<Dim<3>>,
+                4 => Self::read_data_slow_impl::<Dim<4>>,
+                5 => Self::read_data_slow_impl::<Dim<5>>,
+                6 => Self::read_data_slow_impl::<Dim<6>>,
+                7 => Self::read_data_slow_impl::<Dim<7>>,
+                8 => Self::read_data_slow_impl::<Dim<8>>,
+                _ => unreachable!(),
+            }
+        };
+        read_fn(self, index, buf, context, single_block_idx)
+    }
+
+    #[inline(never)]
+    fn read_data_slow_impl<ActualD: Dimension>(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut [u8],
+        context: &ReadContext,
+        single_block_idx: Option<u64>,
+    ) -> Result<()>
+    where
+        ET: ElementType,
+        D: Dimension,
+    {
+        let shape = self.shape();
+        let ndim = shape.len();
+        let block_shape = self.block_shape();
+        assert_eq!(ndim, block_shape.len());
 
         let dtype = self.blocks.dtype();
         let itemsize = dtype.itemsize() as usize;
-        let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_shape = ActualD::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let out_strides = default_strides(&out_shape, itemsize);
+        let block_shape_u64 = ActualD::vec(ndim, |dim| block_shape[dim] as u64);
         let block_strides = default_strides_cast(&block_shape_u64, itemsize);
         let copier = NdCopier::new(dtype);
 
@@ -382,12 +437,14 @@ where
         }
 
         // Block-space begin/end for NdIter.
-        let block_begin = D::vec(ndim, |dim| index[dim].start / block_shape_u64[dim]);
-        let block_end = D::vec(ndim, |dim| {
+        let block_begin = ActualD::vec(ndim, |dim| index[dim].start / block_shape_u64[dim]);
+        let block_end = ActualD::vec(ndim, |dim| {
             calc_block_end(index[dim].start, index[dim].end, block_shape_u64[dim])
         });
-        let block_global_idx_ext =
-            nd_iter_ext_logical_global_index::<D>(&self.block_grid_shape, block_begin.as_ref());
+        let block_global_idx_ext = nd_iter_ext_logical_global_index::<ActualD>(
+            &self.block_grid_shape,
+            block_begin.as_ref(),
+        );
 
         let block_iter = NdIter::new_with_begin(
             block_begin,
@@ -395,8 +452,8 @@ where
             (
                 block_global_idx_ext,
                 NdIterExtBlockOffsetSize::new(
-                    &D::vec(ndim, |dim| index[dim].start),
-                    &D::vec(ndim, |dim| index[dim].end),
+                    &ActualD::vec(ndim, |dim| index[dim].start),
+                    &ActualD::vec(ndim, |dim| index[dim].end),
                     block_shape_u64.clone(),
                 ),
             ),
@@ -424,7 +481,7 @@ where
                 copier.copy(
                     src_ptr,
                     dst_ptr,
-                    D::vec(ndim, |dim| block_size[dim] as usize).as_ref(),
+                    ActualD::vec(ndim, |dim| block_size[dim] as usize).as_ref(),
                     block_strides.as_ref(),
                     out_strides.as_ref(),
                     dtype,

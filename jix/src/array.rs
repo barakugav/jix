@@ -16,8 +16,8 @@ use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
-    assert_unchecked_eq, calc_block_end, cast_slice_mut, default_strides, scale_read_shape,
-    AlignedBytes, IterExt, NdCopier,
+    assert_unchecked_eq, calc_block_end, cast_slice_mut, scale_read_shape, AlignedBytes, IterExt,
+    NdCopier,
 };
 use crate::{
     default_logical_strides, default_strides_cast, ArrayAny, ArrayParams, ArrayStorage, DimDyn,
@@ -454,17 +454,17 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 buf: &mut OutBuf,
                 _context: &ReadContext,
             ) -> Result<()> {
-                let buf = buf.get_mut(index, self.dtype());
                 let ndim = self.shape().len();
                 let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
-                let read_lstrides = default_logical_strides(&read_shape);
+                let (out_buf, out_strides) = buf.get_strided_mut::<D>(index, self.dtype());
+
                 let iter = NdIter::new(
                     read_shape,
-                    NdIterExtStridesPtrMut::new(read_lstrides, buf.as_mut_ptr().cast::<T>()),
+                    NdIterExtStridesPtrMut::new(out_strides, out_buf.as_mut_ptr()),
                 );
                 for (idx, dst) in iter {
                     let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
-                    unsafe { dst.write(value) };
+                    unsafe { dst.cast::<T>().write(value) };
                 }
                 Ok(())
             }
@@ -848,12 +848,11 @@ impl<S: ArrayStorage> Array<S> {
 
         let itemsize = dtype.itemsize() as usize;
         let out_strides = default_strides_cast(&out_shape, itemsize);
-        let copier = NdCopier::new(dtype);
 
-        let mut tmp_buf = context.tmp_buf(0, dtype.alignment());
         // If the read_shape spans the full output width in every dimension (other then the first)
-        // it lands as a single contiguous run in `buf`, decode straight into that destination slice,
-        // skipping the tmp_buf and nd_copy.
+        // it lands as a single contiguous run in `buf`, decode straight into that destination slice.
+        // Otherwise the block is a strided sub-region of `buf`: hand `read_data` a strided OutBuf so
+        // it scatters into `buf` in a single copy, instead of staging through a separate tmp here.
         let read_to_out_buf = (1..ndim).all(|dim| read_shape[dim] >= out_shape[dim]);
         for (block_idx, (block_inner_offset, block_size)) in block_iter {
             let inner_index = S::Dimension::vec(ndim, |dim| {
@@ -867,33 +866,14 @@ impl<S: ArrayStorage> Array<S> {
                 .map(|dim| (inner_index[dim].start - index[dim].start) as usize * out_strides[dim])
                 .sum::<usize>();
 
-            let (tmp_buf, buf_ptr) = if read_to_out_buf {
+            let mut out = if read_to_out_buf {
                 debug_assert!((1..ndim).all(|dim| block_size[dim] == out_shape[dim]));
-                let buf = &mut buf[out_offset..out_offset + read_nitems * itemsize];
-                (buf, None)
+                OutBuf::new(&mut buf[out_offset..out_offset + read_nitems * itemsize])
             } else {
-                tmp_buf.set_len(read_nitems * itemsize);
-                (tmp_buf.as_mut_slice(), Some(buf.as_mut_ptr()))
+                unsafe { OutBuf::new_strided(&mut buf[out_offset..], out_strides.as_ref()) }
             };
-
             self.storage
-                .read_data(inner_index.as_ref(), &mut OutBuf::new(tmp_buf), context)?;
-
-            if !read_to_out_buf {
-                let dst_ptr = unsafe { buf_ptr.unwrap().add(out_offset) };
-                let copy_shape = S::Dimension::vec(ndim, |dim| block_size[dim] as usize);
-                let copy_strides = default_strides(&copy_shape, itemsize);
-                unsafe {
-                    copier.copy(
-                        tmp_buf.as_ptr(),
-                        dst_ptr,
-                        copy_shape.as_ref(),
-                        copy_strides.as_ref(),
-                        out_strides.as_ref(),
-                        dtype,
-                    )
-                };
-            }
+                .read_data(inner_index.as_ref(), &mut out, context)?;
         }
         Ok(())
     }

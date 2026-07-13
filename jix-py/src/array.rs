@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::sync::Mutex;
 
-use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, ReadContext};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -372,9 +372,56 @@ impl Array {
                 let context = self.read_ctx()?;
                 let context = context.as_ref();
 
-                self.arr
-                    .to_ndarray_buf(&index, np_arr_data, context)
-                    .into_py_result()
+                let arr = self.arr.as_ref();
+                let res = match self.arr.ndim() {
+                    0 => arr.into_dim::<Dim<0>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    1 => arr.into_dim::<Dim<1>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    2 => arr.into_dim::<Dim<2>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    3 => arr.into_dim::<Dim<3>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    4 => arr.into_dim::<Dim<4>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    5 => arr.into_dim::<Dim<5>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    6 => arr.into_dim::<Dim<6>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    7 => arr.into_dim::<Dim<7>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    8 => arr.into_dim::<Dim<8>>().unwrap().to_ndarray_buf(
+                        &index,
+                        np_arr_data,
+                        context,
+                    ),
+                    _ => unimplemented!(),
+                };
+                res.into_py_result()
             })?;
         }
 

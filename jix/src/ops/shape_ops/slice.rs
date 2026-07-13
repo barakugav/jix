@@ -2,13 +2,13 @@ use std::ops::{Bound, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, Rang
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, try_dim_arr, DimArray, NdCopier};
-use crate::{default_strides_cast, Array, ArrayStorage, Dimension};
+use crate::util::{try_dim_arr, DimArray};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -145,7 +145,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // output indices. For each step:
         // * Strided dims use a single-element inner range for that step's position.
         // * Non-strided dims use the full translated range.
-        // The inner read goes into a temporary buffer which is then scattered into `buf` via [`nd_copy`].
+        // Each inner read goes straight into its strided sub-region of `buf` - no temporary buffer.
 
         check_get_range(self.shape(), index)?;
 
@@ -170,7 +170,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // We iterate over all combinations of strided-dim output indices with
         // NdIter. On each step we read from the inner storage (strided dims
         // collapsed to a single-element range; non-strided dims as full ranges)
-        // and scatter the result into `buf` using nd_copy.
+        // straight into the matching strided sub-region of `buf`.
         //
         // Let:
         //   strided dim     - dims[d].step > 1
@@ -193,34 +193,21 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         //   dst_byte_offset = sum_{strided d} idx[d] * dst_strides[d]
         //   (non-strided dims contribute 0 since idx[d] == 0 for them in iter_shape)
         //
-        //   nd_copy(tmp_buf -> buf + dst_byte_offset, shape = inner_read_shape,
-        //           src_strides = C-order over inner_read_shape,
-        //           dst_strides = C-order over out_shape)
-        //
-        // nd_copy iterates over inner_read_shape (1 for strided dims, full for non-
-        // strided). The single step on strided dims is handled by dst_byte_offset
-        // already placing us at the right row/column; nd_copy takes care of the rest.
+        // The inner read targets a strided OutBuf over `buf[dst_byte_offset..]` with
+        // `dst_strides` (the destination's own strides), so each non-strided dim's full
+        // range lands at its correct position in `buf` directly - no temporary buffer or
+        // copy. `dst_byte_offset` places the single strided-dim step at the right row/column.
         // -----------------------------------------------------------------------
         let dtype = self.dtype();
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
         let ndim = self.slice.len();
-        let itemsize = dtype.itemsize() as usize;
         let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
-        let dst_strides = default_strides_cast(&out_shape, itemsize);
-
-        // inner_read_shape: 1 for strided dims, full range for non-strided dims.
-        let inner_read_shape = S::Dimension::vec(ndim, |dim| {
-            if self.slice[dim].is_contiguous() {
-                out_shape[dim] as usize
-            } else {
-                1
-            }
-        });
-        let src_strides = default_strides(&inner_read_shape, itemsize);
-        let tmp_buf_bytes = inner_read_shape.as_ref().iter().product::<usize>() * itemsize;
-        let mut tmp_buf = context.tmp_buf(tmp_buf_bytes, dtype.alignment());
-        let copier = NdCopier::new(dtype);
+        if out_shape.as_ref().contains(&0) {
+            buf.materialize(0, dtype);
+            return Ok(());
+        }
+        // Forward the (possibly strided) destination's own strides so each inner read scatters
+        // directly into `buf`.
+        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
 
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
         let iter_shape = S::Dimension::vec(ndim, |dim| {
@@ -241,25 +228,14 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                     pos..(pos + 1)
                 }
             });
-            let tmp = tmp_buf.as_mut_slice();
-            self.array
-                .read_data(inner_index.as_ref(), &mut OutBuf::new(tmp), context)?;
-
             let dst_byte_offset = (0..ndim)
                 .filter(|&dim| !self.slice[dim].is_contiguous())
                 .map(|dim| idx[dim] as usize * dst_strides[dim])
                 .sum::<usize>();
-            let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
-            unsafe {
-                copier.copy(
-                    tmp.as_ptr(),
-                    dst_ptr,
-                    inner_read_shape.as_ref(),
-                    src_strides.as_ref(),
-                    dst_strides.as_ref(),
-                    dtype,
-                )
-            };
+            let mut out =
+                unsafe { OutBuf::new_strided(&mut dst[dst_byte_offset..], dst_strides.as_ref()) };
+            self.array
+                .read_data(inner_index.as_ref(), &mut out, context)?;
         }
         Ok(())
     }

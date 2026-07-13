@@ -2,9 +2,10 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
-use crate::error::{check_get_buffer_size, check_get_range, ensure, Result};
+use crate::error::{check_get_range, ensure, Result};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::{Array, ArrayStorage, ElementType, Ty, TypeDyn};
+use crate::util::{default_strides, NdCopier};
+use crate::{Array, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
 where
@@ -127,23 +128,35 @@ where
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
         let dst_dtype = self.dtype();
-        let (src_dtype, dst_dtype) = (self.array.dtype(), dst_dtype);
-        let (src_itemsize, dst_itemsize) =
-            (src_dtype.itemsize() as usize, dst_dtype.itemsize() as usize);
+        if index.iter().any(|r| r.end == r.start) {
+            buf.materialize(0, dst_dtype);
+            return Ok(());
+        }
+        let src_itemsize = self.array.dtype().itemsize() as usize;
 
+        // Read the full struct elements into a contiguous scratch, then extract the sub-field with a
+        // single strided copy.
         let mut tmp_buf = OutBuf::new_lazy(context);
         self.array.read_data(index, &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let buf = buf.get_mut(index, dst_dtype);
-        check_get_buffer_size(index, dst_dtype, buf)?;
 
-        let src_items = tmp_buf.chunks_exact(src_itemsize);
-        let dst_items = buf.chunks_exact_mut(dst_itemsize);
-        let sub_field_offset = self.sub_field_offset as usize;
-        for (src, dst) in src_items.zip(dst_items) {
-            let src_field = &src[sub_field_offset..sub_field_offset + dst_itemsize];
-            dst.copy_from_slice(src_field);
-        }
+        let ndim = index.len();
+        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+        let src_strides = default_strides(&out_shape, src_itemsize);
+        let src_ptr = unsafe { tmp_buf.as_ptr().add(self.sub_field_offset as usize) };
+        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dst_dtype);
+
+        let copier = NdCopier::new(dst_dtype);
+        unsafe {
+            copier.copy(
+                src_ptr,
+                dst.as_mut_ptr(),
+                out_shape.as_ref(),
+                src_strides.as_ref(),
+                dst_strides.as_ref(),
+                dst_dtype,
+            )
+        };
         Ok(())
     }
 

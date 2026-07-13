@@ -3,11 +3,11 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{default_strides, DimArray, IterExt, NdCopier};
+use crate::util::{DimArray, IterExt};
 use crate::{
     default_logical_strides, default_strides_from_iter, ArrayStorage, Dimension, IntoDimension,
 };
@@ -256,32 +256,30 @@ where
         //        of unmatched orig dims in the flat index space, so `flat`
         //        decomposes cleanly using the original strides.
         //
-        //   2. READ into `tmp_buf` from the underlying storage using `read_range`.
-        //      `tmp_buf` is sized for the matched-dims block only (one element per
-        //      unmatched orig dim, full range for matched dims).
-        //
-        //   3. COPY from `tmp_buf` into the correct position in `buf` using
-        //      `nd_copy`. The source shape is `new_read_shape` (the matched dims'
-        //      requested sizes, 1 elsewhere). The destination pointer is offset
-        //      by the byte contribution of the unmatched dims' current position:
+        //   2. READ the matched-dims block (using `read_range`) straight into `buf`
+        //      at the unmatched dims' byte offset:
         //
         //          dst_byte_offset = sum_{unmatched new dim d} idx[d] * dst_strides[d]
         //
-        //      `nd_copy` then iterates over the matched dims internally, so each
-        //      element ends up exactly where it belongs in `buf`.
+        //      The read targets a strided `OutBuf` over `buf[dst_byte_offset..]` whose
+        //      strides (expressed in original axis order) place each matched element at
+        //      its C-order position in `buf`, so no temporary buffer or extra copy is
+        //      needed.
         // -----------------------------------------------------------------------
         check_get_range(self.shape(), index)?;
         let dtype = self.dtype();
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
+        if index.iter().any(|r| r.start >= r.end) {
+            buf.materialize(0, dtype);
+            return Ok(());
+        }
+        // Write straight into the (possibly strided) destination, using its own strides: each inner
+        // read scatters directly into `buf` at the unmatched dims' byte offset.
+        let (dst, dst_strides) = buf.get_strided_mut::<D>(index, dtype);
 
         let orig_shape = S::Dimension::from_slice(self.array.shape());
         let new_shape = self.new_shape.as_slice();
         let ndim = new_shape.len();
         let orig_ndim = orig_shape.ndim();
-        if index.iter().any(|r| r.start >= r.end) {
-            return Ok(());
-        }
 
         let orig_logical_strides = default_strides_from_iter::<S::Dimension, _>(
             orig_ndim,
@@ -330,32 +328,15 @@ where
                 .count()
         );
 
-        // dims that have the same logical stride in the original and new shape can be read directly,
-        // the rest we need to read one entry at a time and copy into the output buffer.
-        let orig_read_shape = S::Dimension::vec(orig_ndim, |dim| {
-            if let Some(new_dim) = same_logical_stride_inv[dim] {
-                index[new_dim as usize].end - index[new_dim as usize].start
-            } else {
-                1
-            }
+        // dims that have the same logical stride in the original and new shape can be read
+        // directly; the rest we read one entry at a time and place into the output buffer.
+        // Byte-strides for the inner read, in *original* axis order (so they match the read's
+        // shape): a matched orig dim reuses its new dim's output stride; an unmatched orig dim has
+        // extent 1 and is never stepped, so its stride is a dummy 0.
+        let orig_strides = S::Dimension::vec(orig_ndim, |dim| match same_logical_stride_inv[dim] {
+            Some(new_dim) => dst_strides[new_dim as usize],
+            None => 0,
         });
-        let new_read_shape = D::vec(ndim, |dim| {
-            if same_logical_stride[dim].is_some() {
-                (index[dim].end - index[dim].start) as usize
-            } else {
-                1
-            }
-        });
-
-        let mut tmp_buf = context.tmp_buf(
-            orig_read_shape.as_ref().iter().product::<u64>() as usize * dtype.itemsize() as usize,
-            dtype.alignment(),
-        );
-        let itemsize = dtype.itemsize() as usize;
-        let tmp_buf_strides = default_strides(&new_read_shape, itemsize);
-        let out_buf_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let dst_strides = default_strides(&out_buf_shape, itemsize);
-        let copier = NdCopier::new(dtype);
 
         // We use an nd-iter over the dims that DO NOT match any original dim.
         let iteration_shape = D::vec(ndim, |dim| {
@@ -381,25 +362,16 @@ where
                 }
             });
 
-            let tmp_buf = tmp_buf.as_mut_slice();
-            self.array
-                .read_data(read_range.as_ref(), &mut OutBuf::new(tmp_buf), context)?;
-
+            // Read this matched-dims block straight into `buf` at the unmatched dims' byte offset;
+            // the strided OutBuf places each element at its C-order position in `buf`.
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&dim| same_logical_stride[dim].is_none())
                 .map(|dim| idx[dim] as usize * dst_strides[dim])
                 .sum();
-            let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
-            unsafe {
-                copier.copy(
-                    tmp_buf.as_ptr(),
-                    dst_ptr,
-                    new_read_shape.as_ref(),
-                    tmp_buf_strides.as_ref(),
-                    dst_strides.as_ref(),
-                    dtype,
-                )
-            };
+            let mut out =
+                unsafe { OutBuf::new_strided(&mut dst[dst_byte_offset..], orig_strides.as_ref()) };
+            self.array
+                .read_data(read_range.as_ref(), &mut out, context)?;
         }
 
         Ok(())

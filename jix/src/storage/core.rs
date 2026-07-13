@@ -94,11 +94,12 @@ pub trait ArrayStorage {
     /// - `index` - one half-open range per dimension (`start..end`).
     ///   The number of ranges must equal `self.shape().len()`.
     ///   Ranges must be within the array shape bounds; empty ranges are allowed.
-    /// - `buf` - destination buffer. Either a caller-provided buffer or a lazily-allocated one.
-    ///   If the buffer is provided by the caller, it must be aligned to `dtype.alignment()` and
-    ///   has a length of exactly `index.iter().map(|r| r.len()).product() * dtype.itemsize()` bytes.
-    ///   See [`OutBuf`](crate::storage::OutBuf) for details.
-    ///   On success the elements are written in row-major (C-contiguous) order.
+    /// - `buf` - destination: a caller-provided contiguous buffer, a lazily-allocated one, or a
+    ///   strided sub-region of a larger buffer (see [`OutBuf`](crate::storage::OutBuf)). A contiguous
+    ///   caller buffer must be aligned to `dtype.alignment()` and be exactly
+    ///   `index.iter().map(|r| r.len()).product() * dtype.itemsize()` bytes; on success its elements
+    ///   are written in row-major (C-contiguous) order. A strided destination receives the same
+    ///   elements written at its per-dimension byte strides.
     /// - `context` - read context carrying the decoder state.
     fn read_data(
         &self,

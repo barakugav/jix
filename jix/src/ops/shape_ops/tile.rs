@@ -4,13 +4,12 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{
-    check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Error,
-    ErrorKind, Result,
+    check_get_range, check_ndim, check_shape_overflow, ensure, Error, ErrorKind, Result,
 };
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, NdCopier};
-use crate::{default_strides_cast, Array, ArrayStorage, Dimension, NDIM_MAX};
+use crate::{Array, ArrayStorage, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -129,7 +128,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         check_get_range(self.shape(), index)?;
 
         if index.iter().any(|r| r.start >= r.end) {
-            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
+            // ensure buffer is allocated for empty read
+            buf.materialize(0, self.dtype());
             return Ok(());
         }
 
@@ -158,55 +158,34 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             return self.array.read_data(inner_index.as_ref(), buf, context);
         }
 
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
+        // Write straight into the (possibly strided) destination, using its own strides - each copy
+        // scatters directly into `buf`.
+        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-        let dst_strides = default_strides_cast(&out_shape, itemsize);
         let copier = NdCopier::new(dtype);
 
-        // Case B - two reads, single wrap (total <= L): split the request into two
-        // contiguous input ranges along axis k and read each into a separate tmp_buf, then
-        // place them at the right axis-k offset in `buf`.
+        // Case B - two reads, single wrap (total <= L): split the request into two contiguous input
+        // ranges along axis k and read each straight into `buf` at the right axis-k offset (via a
+        // strided OutBuf).
         if total <= l {
             let len1 = l - s_in;
             let len2 = total - len1;
 
-            let mut read_region = |inner_index: &[Range<u64>],
-                                   region_shape: &S::Dimension,
-                                   dst_axis_k_offset: u64|
-             -> Result<()> {
-                let region_shape = S::Dimension::vec(ndim, |d| region_shape[d] as usize);
-                let region_size = region_shape.as_ref().iter().product::<usize>() * itemsize;
-                let mut tmp = context.tmp_buf(region_size, dtype.alignment());
-                let tmp = tmp.as_mut_slice();
-                self.array
-                    .read_data(inner_index, &mut OutBuf::new(tmp), context)?;
-                let src_strides = default_strides(&region_shape, itemsize);
-                let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
-                unsafe {
-                    copier.copy(
-                        tmp.as_ptr(),
-                        buf.as_mut_ptr().add(dst_byte_offset),
-                        region_shape.as_ref(),
-                        src_strides.as_ref(),
-                        dst_strides.as_ref(),
-                        dtype,
-                    )
+            let mut read_region =
+                |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
+                    let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
+                    let mut out = unsafe {
+                        OutBuf::new_strided(&mut dst[dst_byte_offset..], dst_strides.as_ref())
+                    };
+                    self.array.read_data(inner_index, &mut out, context)
                 };
-                Ok(())
-            };
-
             let inner_r1 =
                 S::Dimension::vec(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
-            let r1_shape =
-                S::Dimension::from_fn(ndim, |d| if d == k { len1 } else { out_shape[d] });
-            read_region(inner_r1.as_ref(), &r1_shape, 0)?;
+            read_region(inner_r1.as_ref(), 0)?;
 
             let inner_r2 =
                 S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
-            let r2_shape =
-                S::Dimension::from_fn(ndim, |d| if d == k { len2 } else { out_shape[d] });
-            read_region(inner_r2.as_ref(), &r2_shape, len1)?;
+            read_region(inner_r2.as_ref(), len1)?;
 
             return Ok(());
         }
@@ -249,7 +228,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             unsafe {
                 copier.copy(
                     tmp.as_ptr().add(src_off),
-                    buf.as_mut_ptr(),
+                    dst.as_mut_ptr(),
                     copy_shape.as_ref(),
                     src_strides.as_ref(),
                     dst_strides.as_ref(),
@@ -295,7 +274,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             unsafe {
                 copier.copy(
                     tmp.as_ptr(),
-                    buf.as_mut_ptr().add(dst_off),
+                    dst.as_mut_ptr().add(dst_off),
                     copy_shape.as_ref(),
                     src_strides_split.as_ref(),
                     dst_strides_split.as_ref(),
@@ -317,7 +296,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             unsafe {
                 copier.copy(
                     tmp.as_ptr(),
-                    buf.as_mut_ptr().add(dst_off),
+                    dst.as_mut_ptr().add(dst_off),
                     copy_shape.as_ref(),
                     src_strides.as_ref(),
                     dst_strides.as_ref(),

@@ -6,7 +6,7 @@ use crate::error::{check_get_range, ensure, Result};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
-use crate::util::{cast_slice, cast_slice_mut};
+use crate::util::{cast_slice, cast_slice_mut, dim_arr};
 use crate::{Array, ArrayStorage};
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
@@ -129,18 +129,23 @@ where
         context: &ReadContext,
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
         let dtype = self.dtype();
 
         let mut condition_buf = OutBuf::new_lazy(context);
         let mut y_buf = OutBuf::new_lazy(context);
         self.condition
             .read_data(index, &mut condition_buf, context)?;
-        self.x.read_data(index, buf, context)?; // read x directly into the output buffer
+
+        let mut cbuf = buf.get_contiguous_mut(nitems, dtype, context)?;
+        let buf = cbuf.as_mut_slice();
+        // read x directly into the output buffer
+        self.x
+            .read_data(index, &mut OutBuf::new(&mut *buf), context)?;
         self.y.read_data(index, &mut y_buf, context)?;
 
         let condition = unsafe { cast_slice::<_, bool>(condition_buf.as_slice().unwrap()) };
         let y_buf = y_buf.as_slice().unwrap();
-        let buf = buf.as_mut_slice().unwrap();
 
         unsafe fn where_impl<T>(condition: &[bool], buf: &mut [u8], y_buf: &[u8])
         where
@@ -149,9 +154,7 @@ where
             let x = unsafe { cast_slice_mut::<_, T>(buf) };
             let y = unsafe { cast_slice::<_, T>(y_buf) };
             for (cond, (x, y)) in condition.iter().zip(x.iter_mut().zip(y)) {
-                if !cond {
-                    *x = *y;
-                }
+                *x = if *cond { *x } else { *y };
             }
         }
 
@@ -173,6 +176,8 @@ where
                 }
             }
         };
+        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        cbuf.finalize(out_shape.as_ref(), dtype);
         Ok(())
     }
 

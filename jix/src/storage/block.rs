@@ -41,7 +41,7 @@ pub(crate) struct BlockLocation2 {
 /// the codec pipeline described by `decoder_config`. All blocks are full - `nitems` must be an
 /// exact multiple of `block_size`.
 ///
-/// Internally the compressed bytes of all blocks live in a single continuous byte buffer
+/// Internally the compressed bytes of all blocks live in a single contiguous byte buffer
 /// (`block_data`), but the blocks may be stored in any order within it. A parallel array of
 /// [`BlockLocation2`] entries (`blocks_loc`) records where each block's data lives: block `i`
 /// occupies `blocks_loc[i >> 1].len[i & 1]` bytes of `block_data` starting at

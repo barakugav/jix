@@ -289,7 +289,7 @@ where
         context: &ReadContext,
     ) -> Result<()> {
         self.read_data_typed::<O>(index, context)?
-            .to_buf(buf.get_mut(index, self.dtype()))
+            .to_buf::<Self::Dimension>(buf, index)
     }
 
     #[inline(always)]

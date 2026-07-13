@@ -2,9 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{
-    bail, check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
-};
+use crate::error::{bail, check_get_range, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, DimArray, NdCopier};
@@ -172,8 +170,6 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         self.array
             .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
 
         // Source strides over tmp_buf, with broadcast dims set to 0.
         // A zero stride means advancing along that output axis always reads the same src byte,
@@ -185,15 +181,14 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
             }
         }
 
-        // Destination strides: C-contiguous over the requested output sub-shape.
         let out_shape = S::Dimension::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let dst_strides = default_strides(&out_shape, itemsize);
+        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
 
         let copier = NdCopier::new(dtype);
         unsafe {
             copier.copy(
                 tmp_buf.as_ptr(),
-                buf.as_mut_ptr(),
+                dst.as_mut_ptr(),
                 out_shape.as_ref(),
                 src_strides.as_ref(),
                 dst_strides.as_ref(),

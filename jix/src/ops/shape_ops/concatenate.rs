@@ -1,12 +1,10 @@
-use std::ops::{Not, Range};
+use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{
-    bail, check_get_buffer_size, check_get_range, check_shape_overflow, ensure, Result,
-};
+use crate::error::{bail, check_get_range, check_shape_overflow, ensure, Result};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{default_strides, ArraySequence, DimArray, NdCopier};
+use crate::util::{ArraySequence, DimArray};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
@@ -143,7 +141,7 @@ where
     type ElementType = ArraysT::ElementType;
     type Dimension = ArraysT::Dimension;
 
-    /// Fills `buf` with a C-order slice of the concatenated array described by `index`.
+    /// Fills `buf` with the slice of the concatenated array described by `index`.
     ///
     /// `borders` stores the cumulative end positions of each sub-array along `concat_axis`, so
     /// sub-array `i` owns the range `[borders[i-1], borders[i])` (with `borders[-1] == 0`).
@@ -153,12 +151,11 @@ where
     /// located with a linear scan for small `borders` slices or a binary search otherwise.
     /// The loop then runs forward and breaks as soon as an array starts past the requested range.
     ///
-    /// Each overlapping sub-array is read with a local (array-relative) index on the concat axis.
-    /// When all dimensions before `concat_axis` have size <= 1 the output buffer is contiguous for
-    /// each sub-array ("in-place"), so the data is written directly at the right byte offset.
-    /// Otherwise each sub-array is read into a temporary buffer and scattered into `buf` with
-    /// `NdIter`, using the full output strides for dimensions before `concat_axis` and the
-    /// sub-array strides for dimensions at and after it.
+    /// Each overlapping sub-array is read with a local (array-relative) index on the concat axis,
+    /// straight into its sub-region of `buf` at the right byte offset using the destination's own
+    /// strides - no temporary buffer. When `buf` is contiguous and all dimensions before `concat_axis`
+    /// have size <= 1, each sub-array's region is itself contiguous and is read into a plain contiguous
+    /// slice (the `inner_contiguous` fast path).
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -167,29 +164,31 @@ where
     ) -> Result<()> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-        let buf = buf.get_mut(index, dtype);
-        let nitems = check_get_buffer_size(index, dtype, buf)?;
+
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
         if nitems == 0 {
+            buf.materialize(0, dtype);
             return Ok(());
         }
 
         let itemsize = dtype.itemsize() as usize;
-
         let output_shape = Self::Dimension::vec(index.len(), |dim| {
             (index[dim].end - index[dim].start) as usize
         });
-        let output_strides = default_strides(&output_shape, itemsize);
+        // Write straight into the (possibly strided) destination, using its own strides. The
+        // `inner_contiguous` fast path (reading a sub-array directly into a contiguous slice of `buf`) is
+        // only valid when `buf` is itself contiguous; a strided destination always scatters.
+        let is_strided = buf.strides().is_some();
+        let (dst, output_strides) = buf.get_strided_mut::<Self::Dimension>(index, dtype);
         let concat_stride = output_strides[self.concat_axis];
-        // When all dims before concat_axis have size <=1 each array's data is contiguous in buf.
-        let in_place = output_shape
-            .as_ref()
-            .iter()
-            .take(self.concat_axis)
-            .all(|&s| s <= 1);
-        let mut tmp_buf = in_place
-            .not()
-            .then(|| context.tmp_buf(0, dtype.alignment()));
-
+        // When `buf` is contiguous and all dims before concat_axis have size <=1, each array's
+        // data is contiguous in buf.
+        let inner_contiguous = !is_strided
+            && output_shape
+                .as_ref()
+                .iter()
+                .take(self.concat_axis)
+                .all(|&s| s <= 1);
         let req_start = index[self.concat_axis].start;
         let req_end = index[self.concat_axis].end;
 
@@ -204,7 +203,6 @@ where
             self.borders.partition_point(|&b| b <= req_start)
         };
 
-        let copier = NdCopier::new(dtype);
         for arr in first_arr..self.borders.len() {
             let arr_start = if arr == 0 { 0 } else { self.borders[arr - 1] };
             let arr_end = self.borders[arr];
@@ -232,43 +230,13 @@ where
             let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
             let buf_offset = buf_concat_offset * concat_stride;
 
-            let read_buf = if in_place {
-                // Data lands contiguously at the right offset - read directly into buf.
-                &mut buf[buf_offset..buf_offset + sub_size_bytes]
+            let mut out = if inner_contiguous {
+                OutBuf::new(&mut dst[buf_offset..buf_offset + sub_size_bytes])
             } else {
-                // Read into tmp_buf then scatter into buf using strided copy.
-                let tmp_buf = tmp_buf.as_mut().unwrap();
-                tmp_buf.set_len(sub_size_bytes);
-                tmp_buf.as_mut_slice()
+                unsafe { OutBuf::new_strided(&mut dst[buf_offset..], output_strides.as_ref()) }
             };
             self.arrays
-                .read_data(arr, sub_index.as_ref(), &mut OutBuf::new(read_buf), context)?;
-
-            if !in_place {
-                // Scatter from tmp_buf into buf.
-                // src: C-strides of sub_shape.
-                // dst: output_strides for dims before concat_axis (wider due to full output width),
-                //      sub_strides for dims at/after (sizes match the output there).
-                let sub_strides = default_strides(&sub_shape, itemsize);
-                let dst_strides = Self::Dimension::vec(index.len(), |dim| {
-                    if dim < self.concat_axis {
-                        output_strides[dim]
-                    } else {
-                        sub_strides[dim]
-                    }
-                });
-
-                unsafe {
-                    copier.copy(
-                        read_buf.as_ptr(),
-                        buf.as_mut_ptr().add(buf_offset),
-                        sub_shape.as_ref(),
-                        sub_strides.as_ref(),
-                        dst_strides.as_ref(),
-                        dtype,
-                    )
-                };
-            }
+                .read_data(arr, sub_index.as_ref(), &mut out, context)?;
         }
 
         Ok(())

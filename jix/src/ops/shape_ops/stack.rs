@@ -2,13 +2,11 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{
-    check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Result,
-};
+use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf};
 use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray};
-use crate::{default_strides, Array, ArrayStorage, Dimension, NdCopier};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///
@@ -146,76 +144,57 @@ where
         let shape = self.shape();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
-        let buf = buf.get_mut(index, dtype);
-        let nitems = check_get_buffer_size(index, dtype, buf)?;
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
         if nitems == 0 {
+            buf.materialize(0, dtype);
             return Ok(());
         }
 
-        let in_place = shape.iter().take(self.stack_axis).all(|&s| s <= 1);
         let arr_range = index[..self.stack_axis]
             .iter()
             .chain(index[self.stack_axis + 1..].iter())
             .cloned()
             .collect::<DimArray<_>>();
-        let arr_range_shape = ArraysT::Dimension::vec(arr_range.len(), |dim| {
+        let arr_ndim = arr_range.len();
+        let arr_range_shape = ArraysT::Dimension::vec(arr_ndim, |dim| {
             (arr_range[dim].end - arr_range[dim].start) as usize
         });
         let itemsize = dtype.itemsize() as usize;
         let arr_size_bytes = arr_range_shape.as_ref().iter().product::<usize>() * itemsize;
-        let mut tmp_buf = in_place
-            .not()
-            .then(|| context.tmp_buf(arr_size_bytes, dtype.alignment()));
-        // Stride of the stack axis in the output buffer (= size of one sub-array slice).
-        let stack_axis_stride = arr_range_shape.as_ref()[self.stack_axis..]
-            .iter()
-            .product::<usize>()
-            * itemsize;
         let n_stack = (index[self.stack_axis].end - index[self.stack_axis].start) as usize;
+
+        // Write straight into the (possibly strided) destination using its own strides. The
+        // in_place fast path (each sub-array a contiguous chunk of buf) is valid only when buf is
+        // contiguous; a strided destination always scatters with the destination's strides.
+        let is_strided = buf.strides().is_some();
+        let (dst, out_strides) = buf.get_strided_mut::<Self::Dimension>(index, dtype);
+        // Stride of the stack axis in the output buffer (offset between consecutive sub-arrays).
+        let stack_axis_stride = out_strides[self.stack_axis];
+        let in_place = !is_strided && shape.iter().take(self.stack_axis).all(|&s| s <= 1);
+        // Per-sub-array strides = the output strides with the stack axis removed.
         let out_of_place_strides = in_place.not().then(|| {
-            let arr_strides = default_strides(&arr_range_shape, itemsize);
-            // For dims before the stack axis the output stride is n_stack times wider;
-            // for dims at or after it the stride is unchanged.
-            let out_strides = ArraysT::Dimension::vec(arr_range_shape.as_ref().len(), |dim| {
+            ArraysT::Dimension::vec(arr_ndim, |dim| {
                 if dim < self.stack_axis {
-                    arr_strides[dim] * n_stack
+                    out_strides[dim]
                 } else {
-                    arr_strides[dim]
+                    out_strides[dim + 1]
                 }
-            });
-            (arr_strides, out_strides)
+            })
         });
-        let copier = NdCopier::new(dtype);
 
         for arr_idx in 0..n_stack {
             // In-place: each array occupies a contiguous chunk in buf.
             // Out-of-place: each array starts at its column offset within buf.
             let buf_offset = arr_idx * stack_axis_stride;
-            let arr_buf = if in_place {
-                &mut buf[buf_offset..buf_offset + arr_size_bytes]
-            } else {
-                let tmp_buf = tmp_buf.as_mut().unwrap();
-                tmp_buf.set_len(arr_size_bytes);
-                tmp_buf.as_mut_slice()
-            };
-
             let arr = index[self.stack_axis].start as usize + arr_idx;
-            self.arrays
-                .read_data(arr, &arr_range, &mut OutBuf::new(arr_buf), context)?;
-
-            // copy arr_buf into the correct position in buf, as both buffers have different strides
-            if let Some((arr_strides, out_strides)) = &out_of_place_strides {
-                unsafe {
-                    copier.copy(
-                        arr_buf.as_ptr(),
-                        buf.as_mut_ptr().add(buf_offset),
-                        arr_range_shape.as_ref(),
-                        arr_strides.as_ref(),
-                        out_strides.as_ref(),
-                        dtype,
-                    )
-                };
-            }
+            let mut out = if in_place {
+                let sub = &mut dst[buf_offset..buf_offset + arr_size_bytes];
+                OutBuf::new(sub)
+            } else {
+                let strides = out_of_place_strides.as_ref().unwrap().as_ref();
+                unsafe { OutBuf::new_strided(&mut dst[buf_offset..], strides) }
+            };
+            self.arrays.read_data(arr, &arr_range, &mut out, context)?;
         }
 
         Ok(())

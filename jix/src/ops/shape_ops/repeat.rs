@@ -3,8 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{
-    check_get_buffer_size, check_get_range, check_ndim, check_shape_overflow, ensure, Error,
-    ErrorKind, Result,
+    check_get_range, check_ndim, check_shape_overflow, ensure, Error, ErrorKind, Result,
 };
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
@@ -128,7 +127,8 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
         // Empty output (any zero-length range, including repeats == 0) is a no-op.
         if index.iter().any(|r| r.start >= r.end) {
-            buf.get_mut(index, self.dtype()); // ensure buffer is allocated for empty read
+            // ensure buffer is allocated for empty read
+            buf.materialize(0, self.dtype());
             return Ok(());
         }
 
@@ -157,12 +157,10 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         self.array
             .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
         let tmp_buf = tmp_buf.as_slice().unwrap();
-        let buf = buf.get_mut(index, dtype);
-        check_get_buffer_size(index, dtype, buf)?;
-
+        // Write straight into the (possibly strided) destination, using its own strides
+        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
         // Output shape over the requested sub-range, all `ndim` axes.
         let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
-        let dst_strides = default_strides(&out_shape, itemsize);
         let inner_strides_bytes = default_strides(&inner_shape, itemsize);
         let copier = NdCopier::new(dtype);
 
@@ -209,7 +207,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             debug_assert!(first_out_k >= s);
             let dst_k_offset_units = first_out_k - s;
             let dst_byte_offset = (dst_k_offset_units as usize) * dst_strides[k];
-            let dst_ptr = unsafe { buf.as_mut_ptr().add(dst_byte_offset) };
+            let dst_ptr = unsafe { dst.as_mut_ptr().add(dst_byte_offset) };
 
             unsafe {
                 copier.copy(
