@@ -10,7 +10,7 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype};
-use crate::error::{ensure, Error, ErrorKind, Result};
+use crate::error::{ensure, error, Result};
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::{AlignedBytes, AlternatingBuffers};
@@ -124,12 +124,8 @@ impl Encoder {
             compressor: match params.codec {
                 Codec::Zstd => {
                     #[cfg(not(miri))]
-                    let inner = zstd::bulk::Compressor::new(params.level as i32).map_err(|e| {
-                        Error::new(
-                            ErrorKind::CodecError,
-                            format!("Failed to create Zstd compressor: {e}"),
-                        )
-                    })?;
+                    let inner = zstd::bulk::Compressor::new(params.level as i32)
+                        .map_err(|e| error!(CodecError, "Failed to create Zstd compressor: {e}"))?;
                     #[cfg(miri)]
                     let inner = ();
                     Compressor::Zstd(inner)
@@ -175,12 +171,9 @@ impl Encoder {
         match &mut self.compressor {
             Compressor::Zstd(compressor) => {
                 #[cfg(not(miri))]
-                let result = compressor.compress_to_buffer(data, dst).map_err(|e| {
-                    Error::new(
-                        ErrorKind::CodecError,
-                        format!("Failed to compress data with Zstd: {e}"),
-                    )
-                });
+                let result = compressor
+                    .compress_to_buffer(data, dst)
+                    .map_err(|e| error!(CodecError, "Failed to compress data with Zstd: {e}"));
                 #[cfg(miri)]
                 let result = {
                     let _ = compressor;
@@ -303,12 +296,7 @@ impl<'a> Decoder<'a> {
             let inner = unsafe { &mut *self.inner.get() };
             inner
                 .decompress_to_buffer(src, decompress_out)
-                .map_err(|e| {
-                    Error::new(
-                        ErrorKind::CodecError,
-                        format!("Failed to decompress data with Zstd: {e}"),
-                    )
-                })?
+                .map_err(|e| error!(CodecError, "Failed to decompress data with Zstd: {e}"))?
         };
         #[cfg(miri)]
         let nbytes = {

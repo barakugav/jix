@@ -28,7 +28,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::hint::assert_unchecked;
 
-use crate::error::{bail, ensure, Error, ErrorKind, Result};
+use crate::error::{bail, ensure, error, Error, Result};
 #[cfg(feature = "half")]
 use crate::scalar::f16;
 #[cfg(feature = "num-complex")]
@@ -109,11 +109,9 @@ impl TryFrom<usize> for Alignment {
     #[inline(always)]
     fn try_from(value: usize) -> Result<Self> {
         Self::new(value).ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidArgument,
-                format!(
-                    "invalid alignment {value}: must be a non-zero power of two, and less than or equal to 32768"
-                ),
+            error!(
+                InvalidArgument,
+                "invalid alignment {value}: must be a non-zero power of two, and less than or equal to 32768"
             )
         })
     }
@@ -458,12 +456,11 @@ impl Dtype {
     pub fn from_fields(fields: Vec<(String, Itemsize, Dtype)>) -> Result<Self> {
         let mut seen_names = HashSet::new();
         for (name, _offset, _dtype) in &fields {
-            if !seen_names.insert(name) {
-                bail!(
-                    InvalidArgument,
-                    "duplicate field name `{name}` in struct dtype"
-                );
-            }
+            ensure!(
+                seen_names.insert(name),
+                InvalidArgument,
+                "duplicate field name `{name}` in struct dtype"
+            );
         }
 
         let mut fields = fields;
@@ -582,18 +579,15 @@ impl Dtype {
         alignment: Alignment,
     ) -> Result<Self> {
         let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidArgument,
-                format!(
-                    "Dtype shape length exceeds the maximum supported dim number {}",
-                    DTYPE_MAX_NDIM
-                ),
+            error!(
+                InvalidArgument,
+                "Dtype shape length exceeds the maximum supported dim number {}", DTYPE_MAX_NDIM
             )
         })?;
         let shape_prod = shape
             .iter()
             .try_fold(1 as Itemsize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "Dtype shape overflow"))?;
+            .ok_or_else(|| error!(InvalidArgument, "Dtype shape overflow"))?;
         ensure!(
             shape_prod != 0,
             InvalidArgument,
@@ -829,19 +823,16 @@ impl Dtype {
     /// The itemsize will be updated to `itemsize *= new_shape.product() / old_shape.product()`.
     pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<()> {
         let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidArgument,
-                format!(
-                    "Dtype shape length exceeds the maximum supported dim number {}",
-                    DTYPE_MAX_NDIM
-                ),
+            error!(
+                InvalidArgument,
+                "Dtype shape length exceeds the maximum supported dim number {}", DTYPE_MAX_NDIM
             )
         })?;
         let shape_prod = shape
             .iter()
             .cloned()
             .try_product()
-            .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "Dtype shape overflow"))?;
+            .ok_or_else(|| error!(InvalidArgument, "Dtype shape overflow"))?;
         ensure!(
             shape_prod != 0,
             InvalidArgument,
@@ -852,7 +843,7 @@ impl Dtype {
         let base_itemsize = self.itemsize() / current_shape_size;
         *self.itemsize_mut() = base_itemsize
             .checked_mul(shape_prod)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "Dtype shape overflow"))?;
+            .ok_or_else(|| error!(InvalidArgument, "Dtype shape overflow"))?;
         *self.shape_mut() = shape;
         Ok(())
     }

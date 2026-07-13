@@ -2,25 +2,22 @@
 
 use crate::archive::schema;
 use crate::dtype::{Alignment, Itemsize};
-use crate::error::{bail, check_ndim, ensure, Error, ErrorKind, Result};
+use crate::error::{bail, check_ndim, ensure, error, Result};
 use crate::util::{DimArray, IterExt};
 use crate::DimDyn;
 
 impl crate::dtype::Dtype {
     pub(crate) fn from_proto(dtype: &schema::Dtype) -> Result<Self> {
         let alignment = Alignment::new(dtype.alignment as usize).ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidArchive,
-                format!("invalid dtype alignment: {}", dtype.alignment),
+            error!(
+                InvalidArchive,
+                "invalid dtype alignment: {}", dtype.alignment
             )
         })?;
         let itemsize: Itemsize = dtype.itemsize.try_into().map_err(|_| {
-            Error::new(
-                ErrorKind::InvalidArchive,
-                format!(
-                    "dtype itemsize exceeds maximum supported itemsize: {}",
-                    dtype.itemsize
-                ),
+            error!(
+                InvalidArchive,
+                "dtype itemsize exceeds maximum supported itemsize: {}", dtype.itemsize
             )
         })?;
         check_ndim::<DimDyn>(dtype.shape.len())?;
@@ -29,17 +26,17 @@ impl crate::dtype::Dtype {
             .iter()
             .map(|&d| {
                 d.try_into().map_err(|_| {
-                    Error::new(
-                        ErrorKind::InvalidArchive,
-                        "dtype shape has too many elements (size overflow)",
+                    error!(
+                        InvalidArchive,
+                        "dtype shape has too many elements (size overflow)"
                     )
                 })
             })
             .collect::<Result<DimArray<_>>>()?;
         let shape_size = shape.iter().cloned().try_product().ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidArchive,
-                "dtype shape has too many elements (size overflow)",
+            error!(
+                InvalidArchive,
+                "dtype shape has too many elements (size overflow)"
             )
         })?;
 
@@ -99,27 +96,23 @@ impl crate::dtype::Dtype {
                     .iter()
                     .map::<Result<_>, _>(|f| {
                         let offset: Itemsize = f.offset.try_into().map_err(|_| {
-                            Error::new(
-                                ErrorKind::InvalidArchive,
-                                "dtype struct field offset exceeds maximum supported offset",
+                            error!(
+                                InvalidArchive,
+                                "dtype struct field offset exceeds maximum supported offset"
                             )
                         })?;
                         let f_dtype = f
                             .dtype
                             .as_ref()
                             .ok_or_else(|| {
-                                Error::new(
-                                    ErrorKind::InvalidArchive,
-                                    "dtype struct field is missing dtype",
-                                )
+                                error!(InvalidArchive, "dtype struct field is missing dtype")
                             })
                             .and_then(Self::from_proto)?;
                         Ok((f.name.clone(), offset, f_dtype))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                Self::new_struct(fields, &shape, itemsize, alignment).map_err(|e| {
-                    Error::new(ErrorKind::InvalidArchive, format!("invalid dtype: {e}"))
-                })?
+                Self::new_struct(fields, &shape, itemsize, alignment)
+                    .map_err(|e| error!(InvalidArchive, "invalid dtype: {e}"))?
             }
             None => {
                 bail!(
@@ -129,12 +122,9 @@ impl crate::dtype::Dtype {
             }
         };
 
-        dtype.set_shape(&shape).map_err(|e| {
-            Error::new(
-                ErrorKind::InvalidArchive,
-                format!("invalid dtype shape: {e}"),
-            )
-        })?;
+        dtype
+            .set_shape(&shape)
+            .map_err(|e| error!(InvalidArchive, "invalid dtype shape: {e}"))?;
         Ok(dtype)
     }
     pub(crate) fn to_proto(&self) -> schema::Dtype {

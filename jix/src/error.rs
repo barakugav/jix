@@ -90,9 +90,14 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 
+macro_rules! error {
+    ($kind:ident, $($arg:tt)*) => {
+        crate::Error::new(crate::ErrorKind::$kind, format!($($arg)*))
+    };
+}
 macro_rules! bail {
     ($kind:ident, $($arg:tt)*) => {
-        return Err(crate::Error::new(crate::ErrorKind::$kind, format!($($arg)*)))
+        return Err(crate::error::error!($kind, $($arg)*))
     };
 }
 macro_rules! ensure {
@@ -102,7 +107,7 @@ macro_rules! ensure {
         }
     };
 }
-pub(crate) use {bail, ensure};
+pub(crate) use {bail, ensure, error};
 
 #[inline]
 pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
@@ -127,10 +132,10 @@ pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
     if actual != expected {
         #[inline(never)]
         fn fail_check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
-            Err(crate::Error::new(
-                crate::ErrorKind::UnsupportedDtype,
-                format!("expected dtype {expected} but got {actual}"),
-            ))
+            bail!(
+                UnsupportedDtype,
+                "expected dtype {expected} but got {actual}"
+            );
         }
         return fail_check_dtype(actual, expected);
     }

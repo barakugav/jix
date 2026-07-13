@@ -8,13 +8,11 @@ use crate::archive::block::{BlockArchiveWriter, BlockTableStorageRead};
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::codec::ReadContext;
-use crate::error::{check_ndim, ensure, Error, Result};
+use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
 use crate::util::{dim_arr, DimArray, Idx, IterExt};
-use crate::{
-    ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ErrorKind, TypeDyn,
-};
+use crate::{ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, TypeDyn};
 
 impl Array<Compact<TypeDyn, DimDyn>> {
     /// Load a compressed array from a `.jix` file, allocating storage on the heap.
@@ -487,20 +485,15 @@ where
             })
             .try_product()
             .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::InvalidArchive,
-                    format!(
-                        "array shape {shape:?} with block shape {block_shape:?} has too many items"
-                    ),
+                error!(
+                    InvalidArchive,
+                    "array shape {shape:?} with block shape {block_shape:?} has too many items"
                 )
             })?;
         let expected_block_size = block_shape.iter().cloned().try_product().ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidArchive,
-                format!(
-                    "block shape {:?} has too many items for a block",
-                    block_shape
-                ),
+            error!(
+                InvalidArchive,
+                "block shape {block_shape:?} has too many items for a block"
             )
         })?;
         let expected_nblocks = block_shape

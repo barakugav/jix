@@ -3,10 +3,10 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtyped;
-use crate::error::Result;
+use crate::error::{ensure, Result};
 use crate::storage::{ArrayStorageInfo, OutBuf, ReadData};
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, Dimension, Error, ErrorKind};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// A lazy storage adapter that re-tags an array's dimension parameter without copying data.
 ///
@@ -56,14 +56,11 @@ where
     pub fn new(array: S) -> Result<Self> {
         if let Some(ndim) = D::NDIM {
             let shape = array.shape();
-            if shape.len() != ndim {
-                return Err(Error::new(
-                    ErrorKind::InvalidShapeOperation,
-                    format!(
-                        "Cannot convert array with shape {shape:?} to dimension with ndim={ndim}"
-                    ),
-                ));
-            }
+            ensure!(
+                shape.len() == ndim,
+                InvalidShapeOperation,
+                "Cannot convert array with shape {shape:?} to dimension with ndim={ndim}"
+            );
         }
         Ok(Self {
             inner: array,
