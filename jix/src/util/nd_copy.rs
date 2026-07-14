@@ -164,37 +164,21 @@ impl<'a> NdCopier<'a> {
         let NdCopyArgs {
             src,
             dst,
-            mut shape,
-            mut src_strides, // TODO accept Option<>,
-            mut dst_strides,
+            shape,
+            src_strides, // TODO accept Option<>,
+            dst_strides,
             dtype,
         } = args;
         debug_assert_eq!(size_of::<T>(), dtype.itemsize() as usize);
         debug_assert_eq!(align_of::<T>(), dtype.alignment().as_usize());
 
-        let ndim = shape.len();
-        assert!(ndim == src_strides.len() && ndim == dst_strides.len());
-        let mut n_contiguous_items = 1;
-
-        // copy more then itemsize if the last dim(s) is contiguous
-        let n_contiguous_dims = (0..ndim)
-            .rev()
-            .scan(size_of::<T>(), |expected_stride, dim| {
-                let is_contiguous = shape[dim] <= 1
-                    || (src_strides[dim] == *expected_stride
-                        && dst_strides[dim] == *expected_stride);
-                *expected_stride *= shape[dim];
-                Some(is_contiguous)
-            })
-            .take_while(|&is_contiguous| is_contiguous)
-            .count();
-        if n_contiguous_dims > 0 {
-            let n_strided_dims = ndim - n_contiguous_dims;
-            n_contiguous_items = shape[n_strided_dims..].iter().product::<usize>();
-            shape = &shape[..n_strided_dims];
-            src_strides = &src_strides[..n_strided_dims];
-            dst_strides = &dst_strides[..n_strided_dims];
-        }
+        // Collapse the axes: drop size-1 axes, merge stride-compatible neighbors, and peel the
+        // trailing both-contiguous run as `n_contiguous_items`. What remains are strided axes.
+        let merged = merge_dims(shape, src_strides, dst_strides, size_of::<T>());
+        let mut shape = merged.shape.as_slice();
+        let mut src_strides = merged.src_strides.as_slice();
+        let mut dst_strides = merged.dst_strides.as_slice();
+        let n_contiguous_items = merged.n_contiguous_items;
         if shape.is_empty() {
             shape = &[1];
             src_strides = &[0];
@@ -592,35 +576,19 @@ impl<'a> NdCopier<'a> {
         let NdCopyArgs {
             src,
             dst,
-            mut shape,
-            mut src_strides,
-            mut dst_strides,
+            shape,
+            src_strides,
+            dst_strides,
             dtype,
         } = args;
 
-        let ndim = shape.len();
-        assert!(ndim == src_strides.len() && ndim == dst_strides.len());
-        let mut n_contiguous_bytes = dtype.itemsize() as usize;
-
-        // copy more then itemsize if the last dim(s) is contiguous
-        let n_contiguous_dims = (0..ndim)
-            .rev()
-            .scan(dtype.itemsize() as usize, |expected_stride, dim| {
-                let is_contiguous = shape[dim] <= 1
-                    || (src_strides[dim] == *expected_stride
-                        && dst_strides[dim] == *expected_stride);
-                *expected_stride *= shape[dim];
-                Some(is_contiguous)
-            })
-            .take_while(|&is_contiguous| is_contiguous)
-            .count();
-        if n_contiguous_dims > 0 {
-            let n_strided_dims = ndim - n_contiguous_dims;
-            n_contiguous_bytes *= shape[n_strided_dims..].iter().product::<usize>();
-            shape = &shape[..n_strided_dims];
-            src_strides = &src_strides[..n_strided_dims];
-            dst_strides = &dst_strides[..n_strided_dims];
-        }
+        let itemsize = dtype.itemsize() as usize;
+        // Same axis collapse as the scalar path (see `merge_dims`), keyed on the dtype's itemsize.
+        let merged = merge_dims(shape, src_strides, dst_strides, itemsize);
+        let mut shape = merged.shape.as_slice();
+        let mut src_strides = merged.src_strides.as_slice();
+        let mut dst_strides = merged.dst_strides.as_slice();
+        let n_contiguous_bytes = merged.n_contiguous_items * itemsize;
         if shape.is_empty() {
             shape = &[1];
             src_strides = &[0];
@@ -673,6 +641,76 @@ impl<'a> NdCopier<'a> {
                 n_contiguous_bytes,
             )
         }
+    }
+}
+
+/// Result of [`merge_dims`]: the remaining strided axes (outermost-first) plus the size of the
+/// trailing run of elements that are contiguous on both sides.
+struct MergedDims {
+    shape: DimArray<usize>,
+    src_strides: DimArray<usize>,
+    dst_strides: DimArray<usize>,
+    n_contiguous_items: usize,
+}
+
+/// Collapse a copy region to the fewest axes: drop size-1 axes (they contribute offset 0), merge
+/// any adjacent pair that is contiguous with respect to itself on BOTH src and dst
+/// (`stride_outer == stride_inner * extent_inner`), then peel the innermost surviving axis as the
+/// contiguous run when its stride equals `itemsize` on both sides. Byte strides / byte `itemsize`
+/// throughout, so it serves both the scalar (`size_of::<T>()`) and byte-wise (`dtype.itemsize()`)
+/// callers.
+///
+/// This generalizes the old "merge only the trailing both-contiguous axes" scan: those trailing
+/// axes still collapse into one unit-stride innermost axis - yielding the same `n_contiguous_items`
+/// - but interior/outer axes now coalesce too, cutting the iterated rank (e.g. a wholly
+/// stride-compatible region collapses to a single 1D copy, and a transpose whose outer axes are
+/// stride-compatible loses those extra iterator dimensions).
+#[inline]
+fn merge_dims(
+    shape: &[usize],
+    src_strides: &[usize],
+    dst_strides: &[usize],
+    itemsize: usize,
+) -> MergedDims {
+    debug_assert!(shape.len() == src_strides.len() && shape.len() == dst_strides.len());
+    // Coalesce right-to-left, so `tmp_*[0]` is the innermost surviving group.
+    let mut tmp_shape = DimArray::new();
+    let mut tmp_src = DimArray::new();
+    let mut tmp_dst = DimArray::new();
+    for d in (0..shape.len()).rev() {
+        let sz = shape[d];
+        if sz == 1 {
+            continue; // size-1 axis: offset always 0 - drop it (this also lets its neighbors meet)
+        }
+        let (ss, ds) = (src_strides[d], dst_strides[d]);
+        if let Some(cur) = tmp_shape.len().checked_sub(1) {
+            // Merge into the current innermost group when contiguous-adjacent on both sides; the
+            // merged group keeps the inner strides and grows its extent.
+            if ss == tmp_src[cur] * tmp_shape[cur] && ds == tmp_dst[cur] * tmp_shape[cur] {
+                tmp_shape[cur] *= sz;
+                continue;
+            }
+        }
+        tmp_shape.push(sz);
+        tmp_src.push(ss);
+        tmp_dst.push(ds);
+    }
+
+    let m = tmp_shape.len();
+    // Peel the innermost group as the contiguous run iff it is unit-stride on both sides.
+    let (n_contiguous_items, strided_start) =
+        if m > 0 && tmp_src[0] == itemsize && tmp_dst[0] == itemsize {
+            (tmp_shape[0], 1)
+        } else {
+            (1, 0)
+        };
+    let n_strided = m - strided_start;
+    // Reverse the surviving strided groups into outermost-first order.
+    MergedDims {
+        shape: dim_arr(n_strided, |i| tmp_shape[m - 1 - i]),
+        src_strides: dim_arr(n_strided, |i| tmp_src[m - 1 - i]),
+        dst_strides: dim_arr(n_strided, |i| tmp_dst[m - 1 - i]),
+        n_contiguous_items,
     }
 }
 
