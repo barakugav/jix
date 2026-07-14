@@ -225,6 +225,34 @@ impl<'a> NdCopier<'a> {
                 && dst_stride.is_multiple_of(align_of::<T>()));
 
         unsafe {
+            Self::copy_1d_dispatch::<T>(
+                src,
+                dst,
+                len,
+                src_stride,
+                dst_stride,
+                n_contiguous_items,
+                aligned,
+            )
+        }
+    }
+
+    /// Copy a single strided axis of `len` runs, each `n_contiguous_items` contiguous elements,
+    /// selecting the const-generic [`copy_1d`](Self::copy_1d) arm for the common run sizes and
+    /// falling back to [`copy_1d_unsized`](Self::copy_1d_unsized) otherwise. `src`/`dst` carry the
+    /// run's base pointer (as zero-length slices; see [`copy`](Self::copy)). Shared by the 1D fast
+    /// path and by `copy_nd`'s peeled innermost axis.
+    #[inline(always)]
+    unsafe fn copy_1d_dispatch<T: Copy>(
+        src: &[u8],
+        dst: &mut [u8],
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        n_contiguous_items: usize,
+        aligned: bool,
+    ) {
+        unsafe {
             match n_contiguous_items {
                 1 => Self::copy_1d::<T, 1>(src, dst, len, src_stride, dst_stride, aligned),
                 2 => Self::copy_1d::<T, 2>(src, dst, len, src_stride, dst_stride, aligned),
@@ -422,6 +450,14 @@ impl<'a> NdCopier<'a> {
         }
     }
 
+    /// Copy a region whose innermost axes did not fully coalesce (at least two strided axes
+    /// remain). We peel the innermost remaining axis and copy each of its runs with the
+    /// specialized [`copy_1d_dispatch`](Self::copy_1d_dispatch) path, walking only the OUTER axes
+    /// with the [`NdIter`]. Unlike a flat nd-walk that copies `n_contiguous_items` at every
+    /// element, this exploits one-sided contiguity of the innermost axis - the common shape after
+    /// the destination-stride permutation, where the destination is unit-stride along the
+    /// innermost axis but the source is not - turning each run into a tight sequential-store /
+    /// strided-load loop and cutting the iterator trip count by a factor of the innermost extent.
     #[inline(never)]
     unsafe fn copy_nd<T: Copy>(
         shape: &[usize],
@@ -431,44 +467,16 @@ impl<'a> NdCopier<'a> {
         dst: &mut [u8],
         n_contiguous_items: usize,
     ) {
-        unsafe fn copy_nd_inner<T: Copy, D: Dimension>(
-            shape: &[usize],
-            src_strides: &[usize],
-            dst_strides: &[usize],
-            src: &[u8],
-            dst: &mut [u8],
-            n_contiguous_items: usize,
-            aligned: bool,
-        ) {
-            let src = src.as_ptr();
-            let dst = dst.as_mut_ptr();
-            let iter = NdIter::new(
-                D::vec(shape.len(), |i| shape[i] as u64),
-                (
-                    NdIterExtStridesPtr::new(src_strides.to_dim_vec::<D>(), src),
-                    NdIterExtStridesPtrMut::new(dst_strides.to_dim_vec::<D>(), dst),
-                ),
-            );
-            if aligned {
-                for (_, (src_ptr, dst_ptr)) in iter {
-                    unsafe {
-                        std::ptr::copy_nonoverlapping::<T>(
-                            src_ptr.cast::<T>(),
-                            dst_ptr.cast::<T>(),
-                            n_contiguous_items,
-                        );
-                    }
-                }
-            } else {
-                let n_contiguous_bytes = size_of::<T>() * n_contiguous_items;
-                for (_, (src_ptr, dst_ptr)) in iter {
-                    unsafe {
-                        std::ptr::copy_nonoverlapping::<u8>(src_ptr, dst_ptr, n_contiguous_bytes);
-                    }
-                }
-            }
-        }
+        let ndim = shape.len();
+        debug_assert!(ndim >= 2);
+        // Peel the innermost axis; the NdIter walks only the outer axes `[0, ndim - 1)`.
+        let inner = ndim - 1;
+        let inner_len = shape[inner];
+        let inner_src_stride = src_strides[inner];
+        let inner_dst_stride = dst_strides[inner];
 
+        // `aligned` covers every stride and both bases, so each row base stays aligned and the
+        // innermost strides are aligned too - the precondition `copy_1d`'s aligned path needs.
         let aligned = (src.as_ptr().cast::<T>().is_aligned()
             && src_strides
                 .iter()
@@ -478,24 +486,69 @@ impl<'a> NdCopier<'a> {
                     .iter()
                     .all(|s| s.is_multiple_of(align_of::<T>())));
 
-        let copy_nd_fn = match shape.len() {
-            0 | 1 => unreachable!(),
+        unsafe fn copy_nd_inner<T: Copy, D: Dimension>(
+            outer_shape: &[usize],
+            outer_src_strides: &[usize],
+            outer_dst_strides: &[usize],
+            src: &[u8],
+            dst: &mut [u8],
+            inner_len: usize,
+            inner_src_stride: usize,
+            inner_dst_stride: usize,
+            n_contiguous_items: usize,
+            aligned: bool,
+        ) {
+            let src = src.as_ptr();
+            let dst = dst.as_mut_ptr();
+            let iter = NdIter::new(
+                D::vec(outer_shape.len(), |i| outer_shape[i] as u64),
+                (
+                    NdIterExtStridesPtr::new(outer_src_strides.to_dim_vec::<D>(), src),
+                    NdIterExtStridesPtrMut::new(outer_dst_strides.to_dim_vec::<D>(), dst),
+                ),
+            );
+            for (_, (src_ptr, dst_ptr)) in iter {
+                // Zero-length slices carrying each row's base pointer (see `copy`).
+                let src_row = unsafe { std::slice::from_raw_parts(src_ptr, 0) };
+                let dst_row = unsafe { std::slice::from_raw_parts_mut(dst_ptr, 0) };
+                unsafe {
+                    NdCopier::copy_1d_dispatch::<T>(
+                        src_row,
+                        dst_row,
+                        inner_len,
+                        inner_src_stride,
+                        inner_dst_stride,
+                        n_contiguous_items,
+                        aligned,
+                    );
+                }
+            }
+        }
+
+        let outer_shape = &shape[..inner];
+        let outer_src_strides = &src_strides[..inner];
+        let outer_dst_strides = &dst_strides[..inner];
+        let copy_nd_fn = match outer_shape.len() {
+            0 => unreachable!(),
+            1 => copy_nd_inner::<T, Dim<1>>,
             2 => copy_nd_inner::<T, Dim<2>>,
             3 => copy_nd_inner::<T, Dim<3>>,
             4 => copy_nd_inner::<T, Dim<4>>,
             5 => copy_nd_inner::<T, Dim<5>>,
             6 => copy_nd_inner::<T, Dim<6>>,
             7 => copy_nd_inner::<T, Dim<7>>,
-            8 => copy_nd_inner::<T, Dim<8>>,
             _ => unimplemented!(),
         };
         unsafe {
             copy_nd_fn(
-                shape,
-                src_strides,
-                dst_strides,
+                outer_shape,
+                outer_src_strides,
+                outer_dst_strides,
                 src,
                 dst,
+                inner_len,
+                inner_src_stride,
+                inner_dst_stride,
                 n_contiguous_items,
                 aligned,
             )
