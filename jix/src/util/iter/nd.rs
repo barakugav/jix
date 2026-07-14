@@ -51,12 +51,12 @@ impl IterStatus {
 
     #[inline(always)]
     fn start(&mut self) {
-        assert!(self.is_not_started());
+        debug_assert!(self.is_not_started());
         self.0 = -self.0;
     }
     #[inline(always)]
     fn advance(&mut self) {
-        assert!(self.is_in_progress());
+        debug_assert!(self.is_in_progress());
         self.0 -= 1;
     }
 }

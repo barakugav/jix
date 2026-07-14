@@ -91,19 +91,19 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     }
 }
 
-pub(crate) fn array_map2_inline<T, U, V, const N: usize>(
-    a: [T; N],
-    b: [U; N],
-    mut f: impl FnMut(T, U) -> V,
-) -> [V; N] {
-    let mut data_a = a.into_iter();
-    let mut data_b = b.into_iter();
-    array_from_fn_inline(|_| {
-        let x = unsafe { data_a.next().unwrap_unchecked() };
-        let y = unsafe { data_b.next().unwrap_unchecked() };
-        f(x, y)
-    })
-}
+// pub(crate) fn array_map2_inline<T, U, V, const N: usize>(
+//     a: [T; N],
+//     b: [U; N],
+//     mut f: impl FnMut(T, U) -> V,
+// ) -> [V; N] {
+//     let mut data_a = a.into_iter();
+//     let mut data_b = b.into_iter();
+//     array_from_fn_inline(|_| {
+//         let x = unsafe { data_a.next().unwrap_unchecked() };
+//         let y = unsafe { data_b.next().unwrap_unchecked() };
+//         f(x, y)
+//     })
+// }
 
 #[cfg(test)]
 mod tests {
