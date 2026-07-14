@@ -503,7 +503,6 @@ where
                         ),
                     ),
                 );
-
                 // Reduction-axis walk inside `items_buf`. `tile_size[reduced] == bulk_size[reduced]`
                 // so this equals `reduction_size`.
                 let reduction_shape = S::Dimension::vec(inner_ndim, |dim| {
@@ -517,100 +516,24 @@ where
                     reduction_shape.as_ref().iter().product::<u64>(),
                     reduction_size
                 );
-
-                while out_iter.len() >= LANES as u64 {
-                    let src_base_and_state = array_from_fn_inline::<_, LANES>(|_| unsafe {
-                        out_iter.next().unwrap_unchecked().1
-                    });
-                    let src_base =
-                        src_base_and_state.map_inline_ref(|(src_base, _state_ptr)| *src_base);
-                    let state_ptr =
-                        src_base_and_state.map_inline_ref(|(_src_base, state_ptr)| *state_ptr);
-                    let reduction_iter = NdIter::new(
-                        reduction_shape.clone(),
-                        NdIterExtStridesOffset::new(default_logical_strides(&tile_size), 0),
-                    );
-                    debug_assert_eq!(reduction_size, reduction_iter.len());
-                    let mut reduction_iter = reduction_iter.map(|(_idx, offset)| {
-                        src_base.map_inline_ref(|src_base| unsafe {
-                            src_base.add(offset as usize).read()
-                        })
-                    });
-                    let mut item_idx = base_item_idx;
-
-                    let state_ref =
-                        state_ptr.map_inline_ref(|&state_ptr| unsafe { &mut *state_ptr });
-                    if !state_initialized {
-                        // init state with the first item
-                        debug_assert_eq!(item_idx, 0);
-                        let first = reduction_iter.next();
-                        match first {
-                            Some(first) => {
-                                for i in 0..LANES {
-                                    state_ref[i].write(self.kernel.init_state(Some(first[i])));
-                                }
-                            }
-                            None => {
-                                for i in 0..LANES {
-                                    state_ref[i].write(self.kernel.init_state(None));
-                                }
-                            }
-                        }
-                        if first.is_some() {
-                            item_idx += 1;
-                        }
-                    }
-                    // SAFETY: every state was written during the first bulk.
-                    let mut state = state_ref
-                        .map_inline_ref(|state_ref| unsafe { state_ref.assume_init_read() });
-
-                    while item_idx < item_idx_end {
-                        let item = reduction_iter.next();
-                        let item = unsafe { item.unwrap_unchecked() };
-                        state = array_map2_inline(state, item, |state_i, item_i| {
-                            self.kernel.update_state(state_i, item_i, item_idx)
-                        });
-
-                        item_idx += 1;
-                    }
-                    debug_assert!(reduction_iter.next().is_none());
-                    for (state_ref, state) in state_ref.into_iter().zip(state) {
-                        state_ref.write(state);
-                    }
-                }
-
-                for (_idx, (src_base, state)) in out_iter {
-                    let reduction_iter = NdIter::new(
-                        reduction_shape.clone(),
-                        NdIterExtStridesPtr::new(default_logical_strides(&tile_size), src_base),
-                    );
-                    debug_assert_eq!(reduction_size, reduction_iter.len());
-                    let mut reduction_iter =
-                        reduction_iter.map(|(_idx, in_ptr)| unsafe { in_ptr.read() });
-                    let mut item_idx = base_item_idx;
-
-                    let state_ref = unsafe { &mut *state };
-                    if !state_initialized {
-                        // init state with the first item
-                        debug_assert_eq!(item_idx, 0);
-                        let first = reduction_iter.next();
-                        state_ref.write(self.kernel.init_state(first));
-                        if first.is_some() {
-                            item_idx += 1;
-                        }
-                    }
-                    // SAFETY: every state was written during the first bulk.
-                    let mut state = unsafe { state_ref.assume_init_read() };
-
-                    while item_idx < item_idx_end {
-                        let item = reduction_iter.next();
-                        let item = unsafe { item.unwrap_unchecked() };
-                        state = self.kernel.update_state(state, item, item_idx);
-                        item_idx += 1;
-                    }
-                    debug_assert!(reduction_iter.next().is_none());
-                    state_ref.write(state);
-                }
+                self.inner_loop::<LANES>(
+                    &mut out_iter,
+                    &reduction_shape,
+                    &tile_size,
+                    reduction_size,
+                    base_item_idx,
+                    item_idx_end,
+                    state_initialized,
+                );
+                self.inner_loop::<1>(
+                    &mut out_iter,
+                    &reduction_shape,
+                    &tile_size,
+                    reduction_size,
+                    base_item_idx,
+                    item_idx_end,
+                    state_initialized,
+                );
             }
 
             base_item_idx = item_idx_end;
@@ -667,6 +590,80 @@ where
         }
 
         Ok(())
+    }
+
+    #[inline]
+    fn inner_loop<const LANES: usize>(
+        &self,
+        out_iter: &mut NdIter<
+            D,
+            (
+                NdIterExtStridesPtr<D, S::Item, u64>,
+                NdIterExtStridesPtrMut<D, MaybeUninit<K::State>, u64>,
+            ),
+        >,
+        reduction_shape: &<S::Dimension as Dimension>::Vec<u64>,
+        tile_shape: &<S::Dimension as Dimension>::Vec<u64>,
+        reduction_size: u64,
+        base_item_idx: u64,
+        item_idx_end: u64,
+        state_initialized: bool,
+    ) {
+        while out_iter.len() >= LANES as u64 {
+            let src_base_and_state = array_from_fn_inline::<_, LANES>(|_| unsafe {
+                out_iter.next().unwrap_unchecked().1
+            });
+            let src_base = src_base_and_state.map_inline_ref(|(src_base, _state_ptr)| *src_base);
+            let state_ptr = src_base_and_state.map_inline_ref(|(_src_base, state_ptr)| *state_ptr);
+            let reduction_iter = NdIter::new(
+                reduction_shape.clone(),
+                NdIterExtStridesOffset::new(default_logical_strides(tile_shape), 0),
+            );
+            debug_assert_eq!(reduction_size, reduction_iter.len());
+            let mut reduction_iter = reduction_iter.map(|(_idx, offset)| {
+                src_base.map_inline_ref(|src_base| unsafe { src_base.add(offset as usize).read() })
+            });
+            let mut item_idx = base_item_idx;
+
+            let state_ref = state_ptr.map_inline_ref(|&state_ptr| unsafe { &mut *state_ptr });
+            if !state_initialized {
+                // init state with the first item
+                debug_assert_eq!(item_idx, 0);
+                let first = reduction_iter.next();
+                match first {
+                    Some(first) => {
+                        for i in 0..LANES {
+                            state_ref[i].write(self.kernel.init_state(Some(first[i])));
+                        }
+                    }
+                    None => {
+                        for i in 0..LANES {
+                            state_ref[i].write(self.kernel.init_state(None));
+                        }
+                    }
+                }
+                if first.is_some() {
+                    item_idx += 1;
+                }
+            }
+            // SAFETY: every state was written during the first bulk.
+            let mut state =
+                state_ref.map_inline_ref(|state_ref| unsafe { state_ref.assume_init_read() });
+
+            while item_idx < item_idx_end {
+                let item = reduction_iter.next();
+                let item = unsafe { item.unwrap_unchecked() };
+                state = array_map2_inline(state, item, |state_i, item_i| {
+                    self.kernel.update_state(state_i, item_i, item_idx)
+                });
+
+                item_idx += 1;
+            }
+            debug_assert!(reduction_iter.next().is_none());
+            for (state_ref, state) in state_ref.into_iter().zip(state) {
+                state_ref.write(state);
+            }
+        }
     }
 }
 
