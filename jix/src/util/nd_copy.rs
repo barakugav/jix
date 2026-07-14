@@ -2,7 +2,7 @@ use crate::arrayvec::ArrayVec;
 use crate::dtype::{Dtype, Itemsize};
 use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::iter::NdIter;
-use crate::{Dim, Dimension, SliceExt};
+use crate::{dim_arr, Dim, DimArray, Dimension, SliceExt};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// raw byte buffers under independent source and destination strides.
@@ -106,6 +106,27 @@ impl<'a> NdCopier<'a> {
         if shape.contains(&0) {
             return;
         }
+        // Reorder axes so the destination's strides are non-increasing (largest axis outermost,
+        // smallest - most contiguous - innermost). This turns a scattered-write transpose into a
+        // sequential-write copy and lets the coalescing scans below merge more runs; it is a
+        // no-op for the already-C-order layouts that dominate.
+        let dim_perm = compute_dim_permutation(dst_strides);
+        let shape_permuted;
+        let src_strides_permuted;
+        let dst_strides_permuted;
+        let (shape, src_strides, dst_strides) = if let Some(dim_perm) = dim_perm {
+            shape_permuted = apply_dim_permutation(shape, &dim_perm);
+            src_strides_permuted = apply_dim_permutation(src_strides, &dim_perm);
+            dst_strides_permuted = apply_dim_permutation(dst_strides, &dim_perm);
+            (
+                shape_permuted.as_slice(),
+                src_strides_permuted.as_slice(),
+                dst_strides_permuted.as_slice(),
+            )
+        } else {
+            (shape, src_strides, dst_strides)
+        };
+
         // The internal pipeline works over slices (so the reference-derived pointers carry
         // `noalias`), but the public API is raw pointers. Carry each pointer as a zero-length
         // slice beginning at it: the length is never read (callers pass an explicit `shape`),
@@ -600,6 +621,22 @@ impl<'a> NdCopier<'a> {
             )
         }
     }
+}
+
+#[inline]
+fn compute_dim_permutation(dst_strides: &[usize]) -> Option<DimArray<usize>> {
+    if dst_strides.windows(2).all(|w| w[0] >= w[1]) {
+        None
+    } else {
+        let ndim = dst_strides.len();
+        let mut perm = dim_arr(ndim, |d| d);
+        perm[..ndim].sort_by(|&a, &b| dst_strides[b].cmp(&dst_strides[a]));
+        Some(perm)
+    }
+}
+#[inline]
+fn apply_dim_permutation<T: Copy>(arr: &[T], perm: &[usize]) -> DimArray<T> {
+    dim_arr(perm.len(), |d| arr[perm[d]])
 }
 
 #[cfg(test)]
