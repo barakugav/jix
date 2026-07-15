@@ -32,6 +32,21 @@ struct NdCopyArgs<'a> {
     dtype: &'a Dtype,
 }
 
+/// A fully-resolved row copy: `len` runs of `n_contiguous_items` `T`s (`T` erased) from a source
+/// to a destination base under the given byte strides, with run size, alignment and per-side
+/// contiguity already baked into *which* function this points at (see [`NdCopier::copy_1d_row`] /
+/// [`NdCopier::copy_1d_unsized`]). `src`/`dst` carry the row's base as zero-length slices (see
+/// [`NdCopier::copy`]). The nd walk resolves one of these ONCE and calls through it per row, so no
+/// per-row dispatch survives without monomorphizing the walk over the run flags.
+type Copy1dRowFn = unsafe fn(
+    src: &[u8],
+    dst: &mut [u8],
+    len: usize,
+    src_stride: usize,
+    dst_stride: usize,
+    n_contiguous_items: usize,
+);
+
 impl<'a> NdCopier<'a> {
     #[inline(always)]
     pub(crate) fn new(dtype: &'a Dtype) -> Self {
@@ -175,275 +190,36 @@ impl<'a> NdCopier<'a> {
         // Collapse the axes: drop size-1 axes, merge stride-compatible neighbors, and peel the
         // trailing both-contiguous run as `n_contiguous_items`. What remains are strided axes.
         let merged = merge_dims(shape, src_strides, dst_strides, size_of::<T>());
-        let mut shape = merged.shape.as_slice();
-        let mut src_strides = merged.src_strides.as_slice();
-        let mut dst_strides = merged.dst_strides.as_slice();
-        let n_contiguous_items = merged.n_contiguous_items;
-        if shape.is_empty() {
-            shape = &[1];
-            src_strides = &[0];
-            dst_strides = &[0];
-        }
-
-        if shape.len() > 1 {
-            return unsafe {
-                Self::copy_nd::<T>(
-                    shape,
-                    src_strides,
-                    dst_strides,
-                    src,
-                    dst,
-                    n_contiguous_items,
-                )
-            };
-        }
-        // 1D copy
-
-        let len = shape[0];
-        let src_stride = src_strides[0];
-        let dst_stride = dst_strides[0];
-
-        let aligned = (src.as_ptr().cast::<T>().is_aligned()
-            && src_stride.is_multiple_of(align_of::<T>()))
-            && (dst.as_ptr().cast::<T>().is_aligned()
-                && dst_stride.is_multiple_of(align_of::<T>()));
-
         unsafe {
-            Self::copy_1d_dispatch::<T>(
+            Self::copy_peeled::<T>(
+                merged.shape.as_slice(),
+                merged.src_strides.as_slice(),
+                merged.dst_strides.as_slice(),
                 src,
                 dst,
-                len,
-                src_stride,
-                dst_stride,
-                n_contiguous_items,
-                aligned,
+                merged.n_contiguous_items,
             )
         }
     }
 
-    /// Copy a single strided axis of `len` runs, each `n_contiguous_items` contiguous elements,
-    /// selecting the const-generic [`copy_1d`](Self::copy_1d) arm for the common run sizes and
-    /// falling back to [`copy_1d_unsized`](Self::copy_1d_unsized) otherwise. `src`/`dst` carry the
-    /// run's base pointer (as zero-length slices; see [`copy`](Self::copy)). Shared by the 1D fast
-    /// path and by `copy_nd`'s peeled innermost axis.
-    #[inline(always)]
-    unsafe fn copy_1d_dispatch<T: Copy>(
-        src: &[u8],
-        dst: &mut [u8],
-        len: usize,
-        src_stride: usize,
-        dst_stride: usize,
-        n_contiguous_items: usize,
-        aligned: bool,
-    ) {
-        unsafe {
-            match n_contiguous_items {
-                1 => Self::copy_1d::<T, 1>(src, dst, len, src_stride, dst_stride, aligned),
-                2 => Self::copy_1d::<T, 2>(src, dst, len, src_stride, dst_stride, aligned),
-                4 => Self::copy_1d::<T, 4>(src, dst, len, src_stride, dst_stride, aligned),
-                8 => Self::copy_1d::<T, 8>(src, dst, len, src_stride, dst_stride, aligned),
-                16 => Self::copy_1d::<T, 16>(src, dst, len, src_stride, dst_stride, aligned),
-                32 if size_of::<T>() <= 8 => {
-                    Self::copy_1d::<T, 32>(src, dst, len, src_stride, dst_stride, aligned)
-                }
-                64 if size_of::<T>() <= 4 => {
-                    Self::copy_1d::<T, 64>(src, dst, len, src_stride, dst_stride, aligned)
-                }
-                _ => Self::copy_1d_unsized::<T>(
-                    src,
-                    dst,
-                    len,
-                    src_stride,
-                    dst_stride,
-                    n_contiguous_items,
-                    aligned,
-                ),
-            }
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn copy_1d<T: Copy, const N_CONTIGUOUS: usize>(
-        src: &[u8],
-        dst: &mut [u8],
-        len: usize,
-        src_stride: usize,
-        dst_stride: usize,
-        aligned: bool,
-    ) {
-        if aligned {
-            unsafe {
-                Self::copy_1d_aligned::<T, N_CONTIGUOUS>(src, dst, len, src_stride, dst_stride)
-            }
-        } else {
-            unsafe {
-                Self::copy_1d_unaligned::<T, N_CONTIGUOUS>(src, dst, len, src_stride, dst_stride)
-            }
-        }
-    }
+    /// Copy the collapsed region produced by [`merge_dims`]: `shape`/strides are the surviving
+    /// STRIDED axes (outermost-first, every extent >= 2), and each element is a run of
+    /// `n_contiguous_items` `T`s that is contiguous on both sides.
+    ///
+    /// Run size, base/stride alignment and per-side contiguity of the innermost axis are all
+    /// loop-invariant, so they are resolved ONCE up front (into const generics), then:
+    /// - **1D (a single row):** call the fully specialized [`copy_1d_row`](Self::copy_1d_row)
+    ///   directly - it inlines here, so the common contiguous copy is one dispatch-free `memcpy`.
+    /// - **nD (>= 2 strided axes):** bind that same specialization to a [`Copy1dRowFn`] pointer
+    ///   ONCE, peel the innermost axis, and drive a static-rank [`NdIter`] walk of the OUTER axes
+    ///   ([`copy_nd_walk`](Self::copy_nd_walk)) that calls straight through the pointer per row.
+    ///   The checks are hoisted out of the loop without monomorphizing the walk over the run flags
+    ///   - only over the outer rank (`Dim<N>`), as before.
+    ///
+    /// `T = u8` (with `n_contiguous_items` = byte count) serves the byte-wise
+    /// [`copy_dynamic`](Self::copy_dynamic) path through the exact same code.
     #[inline]
-    unsafe fn copy_1d_aligned<T: Copy, const N_CONTIGUOUS: usize>(
-        src: &[u8],
-        dst: &mut [u8],
-        len: usize,
-        src_stride: usize,
-        dst_stride: usize,
-    ) {
-        let src = src.as_ptr();
-        let dst = dst.as_mut_ptr();
-        let src_contiguous = len <= 1 || src_stride == size_of::<T>() * N_CONTIGUOUS;
-        let dst_contiguous = len <= 1 || dst_stride == size_of::<T>() * N_CONTIGUOUS;
-        if src_contiguous && dst_contiguous {
-            unsafe {
-                std::ptr::copy_nonoverlapping::<[T; N_CONTIGUOUS]>(
-                    src.cast::<[T; N_CONTIGUOUS]>(),
-                    dst.cast::<[T; N_CONTIGUOUS]>(),
-                    len,
-                )
-            };
-        } else if src_contiguous {
-            let src = src.cast::<[T; N_CONTIGUOUS]>();
-            for i in 0..len {
-                unsafe {
-                    let src = src.add(i);
-                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTIGUOUS]>();
-                    dst.write(src.read());
-                }
-            }
-        } else if dst_contiguous {
-            let dst = dst.cast::<[T; N_CONTIGUOUS]>();
-            for i in 0..len {
-                unsafe {
-                    let src = src.add(i * src_stride).cast::<[T; N_CONTIGUOUS]>();
-                    let dst = dst.add(i);
-                    dst.write(src.read());
-                }
-            }
-        } else {
-            for i in 0..len {
-                unsafe {
-                    let src = src.add(i * src_stride).cast::<[T; N_CONTIGUOUS]>();
-                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTIGUOUS]>();
-                    dst.write(src.read());
-                }
-            }
-        }
-    }
-    #[inline(never)]
-    unsafe fn copy_1d_unaligned<T: Copy, const N_CONTIGUOUS: usize>(
-        src: &[u8],
-        dst: &mut [u8],
-        len: usize,
-        src_stride: usize,
-        dst_stride: usize,
-    ) {
-        let src = src.as_ptr();
-        let dst = dst.as_mut_ptr();
-        let src_contiguous = len <= 1 || src_stride == size_of::<T>() * N_CONTIGUOUS;
-        let dst_contiguous = len <= 1 || dst_stride == size_of::<T>() * N_CONTIGUOUS;
-        if src_contiguous && dst_contiguous {
-            let src = src.cast::<[T; N_CONTIGUOUS]>();
-            let dst = dst.cast::<[T; N_CONTIGUOUS]>();
-            for i in 0..len {
-                unsafe {
-                    let src = src.add(i);
-                    let dst = dst.add(i);
-                    dst.write_unaligned(src.read_unaligned());
-                }
-            }
-        } else if src_contiguous {
-            let src = src.cast::<[T; N_CONTIGUOUS]>();
-            for i in 0..len {
-                unsafe {
-                    let src = src.add(i);
-                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTIGUOUS]>();
-                    dst.write_unaligned(src.read_unaligned());
-                }
-            }
-        } else if dst_contiguous {
-            let dst = dst.cast::<[T; N_CONTIGUOUS]>();
-            for i in 0..len {
-                unsafe {
-                    let src = src.add(i * src_stride).cast::<[T; N_CONTIGUOUS]>();
-                    let dst = dst.add(i);
-                    dst.write_unaligned(src.read_unaligned());
-                }
-            }
-        } else {
-            for i in 0..len {
-                unsafe {
-                    let src = src.add(i * src_stride).cast::<[T; N_CONTIGUOUS]>();
-                    let dst = dst.add(i * dst_stride).cast::<[T; N_CONTIGUOUS]>();
-                    dst.write_unaligned(src.read_unaligned());
-                }
-            }
-        }
-    }
-
-    #[inline(never)]
-    unsafe fn copy_1d_unsized<T: Copy>(
-        src: &[u8],
-        dst: &mut [u8],
-        len: usize,
-        src_stride: usize,
-        dst_stride: usize,
-        n_contiguous_items: usize,
-        aligned: bool,
-    ) {
-        let src = src.as_ptr();
-        let dst = dst.as_mut_ptr();
-        unsafe {
-            if aligned {
-                let src_contiguous = len <= 1 || src_stride == size_of::<T>() * n_contiguous_items;
-                let dst_contiguous = len <= 1 || dst_stride == size_of::<T>() * n_contiguous_items;
-                if src_contiguous && dst_contiguous {
-                    std::ptr::copy_nonoverlapping::<T>(
-                        src.cast::<T>(),
-                        dst.cast::<T>(),
-                        len * n_contiguous_items,
-                    );
-                } else if src_contiguous {
-                    let src = src.cast::<T>();
-                    for i in 0..len {
-                        let src = src.add(i * n_contiguous_items);
-                        let dst = dst.add(i * dst_stride).cast::<T>();
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
-                    }
-                } else if dst_contiguous {
-                    let dst = dst.cast::<T>();
-                    for i in 0..len {
-                        let src = src.add(i * src_stride).cast::<T>();
-                        let dst = dst.add(i * n_contiguous_items);
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
-                    }
-                } else {
-                    for i in 0..len {
-                        let src = src.add(i * src_stride).cast::<T>();
-                        let dst = dst.add(i * dst_stride).cast::<T>();
-                        std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
-                    }
-                }
-            } else {
-                let n_contiguous_bytes = size_of::<T>() * n_contiguous_items;
-                for i in 0..len {
-                    let src = src.add(i * src_stride);
-                    let dst = dst.add(i * dst_stride);
-                    std::ptr::copy_nonoverlapping::<u8>(src, dst, n_contiguous_bytes);
-                }
-            }
-        }
-    }
-
-    /// Copy a region whose innermost axes did not fully coalesce (at least two strided axes
-    /// remain). We peel the innermost remaining axis and copy each of its runs with the
-    /// specialized [`copy_1d_dispatch`](Self::copy_1d_dispatch) path, walking only the OUTER axes
-    /// with the [`NdIter`]. Unlike a flat nd-walk that copies `n_contiguous_items` at every
-    /// element, this exploits one-sided contiguity of the innermost axis - the common shape after
-    /// the destination-stride permutation, where the destination is unit-stride along the
-    /// innermost axis but the source is not - turning each run into a tight sequential-store /
-    /// strided-load loop and cutting the iterator trip count by a factor of the innermost extent.
-    #[inline(never)]
-    unsafe fn copy_nd<T: Copy>(
+    unsafe fn copy_peeled<T: Copy>(
         shape: &[usize],
         src_strides: &[usize],
         dst_strides: &[usize],
@@ -452,90 +228,268 @@ impl<'a> NdCopier<'a> {
         n_contiguous_items: usize,
     ) {
         let ndim = shape.len();
-        debug_assert!(ndim >= 2);
-        // Peel the innermost axis; the NdIter walks only the outer axes `[0, ndim - 1)`.
-        let inner = ndim - 1;
-        let inner_len = shape[inner];
-        let inner_src_stride = src_strides[inner];
-        let inner_dst_stride = dst_strides[inner];
+        // `aligned` covers both bases and every stride, so each peeled row base stays aligned and
+        // the innermost strides are aligned too - the precondition the aligned row path needs.
+        let aligned = src.as_ptr().cast::<T>().is_aligned()
+            && dst.as_ptr().cast::<T>().is_aligned()
+            && src_strides.iter().all(|s| s.is_multiple_of(align_of::<T>()))
+            && dst_strides.iter().all(|s| s.is_multiple_of(align_of::<T>()));
 
-        // `aligned` covers every stride and both bases, so each row base stays aligned and the
-        // innermost strides are aligned too - the precondition `copy_1d`'s aligned path needs.
-        let aligned = (src.as_ptr().cast::<T>().is_aligned()
-            && src_strides
-                .iter()
-                .all(|s| s.is_multiple_of(align_of::<T>())))
-            && (dst.as_ptr().cast::<T>().is_aligned()
-                && dst_strides
-                    .iter()
-                    .all(|s| s.is_multiple_of(align_of::<T>())));
+        // The peeled innermost axis (a single contiguous run when `ndim == 0`).
+        let (inner_len, inner_ss, inner_ds) = if ndim == 0 {
+            (1, 0, 0)
+        } else {
+            (shape[ndim - 1], src_strides[ndim - 1], dst_strides[ndim - 1])
+        };
+        let run_bytes = size_of::<T>() * n_contiguous_items;
+        let src_c = inner_len <= 1 || inner_ss == run_bytes;
+        let dst_c = inner_len <= 1 || inner_ds == run_bytes;
 
-        unsafe fn copy_nd_inner<T: Copy, D: Dimension>(
-            outer_shape: &[usize],
-            outer_src_strides: &[usize],
-            outer_dst_strides: &[usize],
-            src: &[u8],
-            dst: &mut [u8],
-            inner_len: usize,
-            inner_src_stride: usize,
-            inner_dst_stride: usize,
-            n_contiguous_items: usize,
-            aligned: bool,
-        ) {
-            let src = src.as_ptr();
-            let dst = dst.as_mut_ptr();
-            let iter = NdIter::new(
-                D::vec(outer_shape.len(), |i| outer_shape[i] as u64),
-                (
-                    NdIterExtStridesPtr::new(outer_src_strides.to_dim_vec::<D>(), src),
-                    NdIterExtStridesPtrMut::new(outer_dst_strides.to_dim_vec::<D>(), dst),
-                ),
-            );
-            for (_, (src_ptr, dst_ptr)) in iter {
-                // Zero-length slices carrying each row's base pointer (see `copy`).
-                let src_row = unsafe { std::slice::from_raw_parts(src_ptr, 0) };
-                let dst_row = unsafe { std::slice::from_raw_parts_mut(dst_ptr, 0) };
-                unsafe {
-                    NdCopier::copy_1d_dispatch::<T>(
-                        src_row,
-                        dst_row,
-                        inner_len,
-                        inner_src_stride,
-                        inner_dst_stride,
-                        n_contiguous_items,
-                        aligned,
-                    );
+        // Expand a runtime (alignment, contiguity) match into const generics. `call` invokes the
+        // row in place (so the 1D path inlines it); `ptr` yields it as a `Copy1dRowFn`.
+        macro_rules! by_flags {
+            (call $f:ident $(, $n:literal)?) => {
+                match (aligned, src_c, dst_c) {
+                    (true, true, true) => Self::$f::<T $(, $n)?, true, true, true>(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items),
+                    (true, true, false) => Self::$f::<T $(, $n)?, true, true, false>(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items),
+                    (true, false, true) => Self::$f::<T $(, $n)?, true, false, true>(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items),
+                    (true, false, false) => Self::$f::<T $(, $n)?, true, false, false>(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items),
+                    (false, true, true) => Self::$f::<T $(, $n)?, false, true, true>(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items),
+                    (false, true, false) => Self::$f::<T $(, $n)?, false, true, false>(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items),
+                    (false, false, true) => Self::$f::<T $(, $n)?, false, false, true>(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items),
+                    (false, false, false) => Self::$f::<T $(, $n)?, false, false, false>(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items),
                 }
-            }
+            };
+            (ptr $f:ident $(, $n:literal)?) => {
+                match (aligned, src_c, dst_c) {
+                    (true, true, true) => Self::$f::<T $(, $n)?, true, true, true> as Copy1dRowFn,
+                    (true, true, false) => Self::$f::<T $(, $n)?, true, true, false> as Copy1dRowFn,
+                    (true, false, true) => Self::$f::<T $(, $n)?, true, false, true> as Copy1dRowFn,
+                    (true, false, false) => Self::$f::<T $(, $n)?, true, false, false> as Copy1dRowFn,
+                    (false, true, true) => Self::$f::<T $(, $n)?, false, true, true> as Copy1dRowFn,
+                    (false, true, false) => Self::$f::<T $(, $n)?, false, true, false> as Copy1dRowFn,
+                    (false, false, true) => Self::$f::<T $(, $n)?, false, false, true> as Copy1dRowFn,
+                    (false, false, false) => Self::$f::<T $(, $n)?, false, false, false> as Copy1dRowFn,
+                }
+            };
+        }
+        // Run-size dispatch, shared by both modes: powers of two hit `copy_1d_row`'s const arms,
+        // everything else the runtime-length `copy_1d_unsized`.
+        macro_rules! dispatch_n {
+            ($mode:ident) => {
+                match n_contiguous_items {
+                    1 => by_flags!($mode copy_1d_row, 1),
+                    2 => by_flags!($mode copy_1d_row, 2),
+                    4 => by_flags!($mode copy_1d_row, 4),
+                    8 => by_flags!($mode copy_1d_row, 8),
+                    16 => by_flags!($mode copy_1d_row, 16),
+                    32 if size_of::<T>() <= 8 => by_flags!($mode copy_1d_row, 32),
+                    64 if size_of::<T>() <= 4 => by_flags!($mode copy_1d_row, 64),
+                    _ => by_flags!($mode copy_1d_unsized),
+                }
+            };
         }
 
-        let outer_shape = &shape[..inner];
-        let outer_src_strides = &src_strides[..inner];
-        let outer_dst_strides = &dst_strides[..inner];
-        let copy_nd_fn = match outer_shape.len() {
-            0 => unreachable!(),
-            1 => copy_nd_inner::<T, Dim<1>>,
-            2 => copy_nd_inner::<T, Dim<2>>,
-            3 => copy_nd_inner::<T, Dim<3>>,
-            4 => copy_nd_inner::<T, Dim<4>>,
-            5 => copy_nd_inner::<T, Dim<5>>,
-            6 => copy_nd_inner::<T, Dim<6>>,
-            7 => copy_nd_inner::<T, Dim<7>>,
+        if ndim <= 1 {
+            // 1D: a single row. Call the specialization directly so it inlines - no walk, no
+            // pointer indirection (this is the fully-coalesced `memcpy` fast path).
+            unsafe { dispatch_n!(call) };
+            return;
+        }
+
+        // nD: bind the row specialization to a pointer ONCE, then walk the outer axes.
+        let row: Copy1dRowFn = dispatch_n!(ptr);
+        let src_ptr = src.as_ptr();
+        let dst_ptr = dst.as_mut_ptr();
+        let outer_shape = &shape[..ndim - 1];
+        let outer_ss = &src_strides[..ndim - 1];
+        let outer_ds = &dst_strides[..ndim - 1];
+        let walk = match outer_shape.len() {
+            1 => Self::copy_nd_walk::<Dim<1>>,
+            2 => Self::copy_nd_walk::<Dim<2>>,
+            3 => Self::copy_nd_walk::<Dim<3>>,
+            4 => Self::copy_nd_walk::<Dim<4>>,
+            5 => Self::copy_nd_walk::<Dim<5>>,
+            6 => Self::copy_nd_walk::<Dim<6>>,
+            7 => Self::copy_nd_walk::<Dim<7>>,
             _ => unimplemented!(),
         };
         unsafe {
-            copy_nd_fn(
+            walk(
                 outer_shape,
-                outer_src_strides,
-                outer_dst_strides,
-                src,
-                dst,
+                outer_ss,
+                outer_ds,
+                src_ptr,
+                dst_ptr,
                 inner_len,
-                inner_src_stride,
-                inner_dst_stride,
+                inner_ss,
+                inner_ds,
                 n_contiguous_items,
-                aligned,
+                row,
             )
+        }
+    }
+
+    /// Walk the OUTER axes (static rank `D`) with an [`NdIter`], calling the pre-resolved `row`
+    /// pointer at each peeled-row base. `row` already encodes run size, alignment and contiguity,
+    /// so the loop body is a single indirect call - no per-row dispatch - while `D` keeps the index
+    /// arithmetic monomorphized per rank (one instantiation per outer rank, not per run flag).
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)] // peeled-axis descriptor + row pointer; called once per copy
+    unsafe fn copy_nd_walk<D: Dimension>(
+        outer_shape: &[usize],
+        outer_ss: &[usize],
+        outer_ds: &[usize],
+        src_ptr: *const u8,
+        dst_ptr: *mut u8,
+        inner_len: usize,
+        inner_ss: usize,
+        inner_ds: usize,
+        n_contiguous_items: usize,
+        row: Copy1dRowFn,
+    ) {
+        let iter = NdIter::new(
+            D::vec(outer_shape.len(), |i| outer_shape[i] as u64),
+            (
+                NdIterExtStridesPtr::new(outer_ss.to_dim_vec::<D>(), src_ptr),
+                NdIterExtStridesPtrMut::new(outer_ds.to_dim_vec::<D>(), dst_ptr),
+            ),
+        );
+        for (_, (sp, dp)) in iter {
+            // Zero-length slices carrying this row's base pointer (see `copy`).
+            let src = unsafe { std::slice::from_raw_parts(sp, 0) };
+            let dst = unsafe { std::slice::from_raw_parts_mut(dp, 0) };
+            unsafe { row(src, dst, inner_len, inner_ss, inner_ds, n_contiguous_items) };
+        }
+    }
+
+    /// The specialized row copy: `len` runs of `N` `T`s each, from `src` to `dst` under byte
+    /// strides `src_stride`/`dst_stride`. Run size (`N`), alignment (`ALIGNED`) and per-side
+    /// contiguity (`SRC_C`/`DST_C`) are all const, so every branch below folds away at compile
+    /// time and each instantiation is one tight loop - a bulk `copy_nonoverlapping` when both sides
+    /// are contiguous, a sequential-store / strided-load (or vice-versa) loop when one side is,
+    /// the fully strided loop otherwise. `#[inline(always)]` so it fuses into the peeled walk.
+    /// `src`/`dst` carry the row base as zero-length slices (see [`copy`](Self::copy)).
+    #[inline(always)]
+    unsafe fn copy_1d_row<
+        T: Copy,
+        const N: usize,
+        const ALIGNED: bool,
+        const SRC_C: bool,
+        const DST_C: bool,
+    >(
+        src: &[u8],
+        dst: &mut [u8],
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        n_contiguous_items: usize,
+    ) {
+        debug_assert_eq!(n_contiguous_items, N);
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
+        unsafe {
+            if SRC_C && DST_C {
+                if ALIGNED {
+                    std::ptr::copy_nonoverlapping::<[T; N]>(src.cast(), dst.cast(), len);
+                } else {
+                    let src = src.cast::<[T; N]>();
+                    let dst = dst.cast::<[T; N]>();
+                    for i in 0..len {
+                        dst.add(i).write_unaligned(src.add(i).read_unaligned());
+                    }
+                }
+            } else if SRC_C {
+                let src = src.cast::<[T; N]>();
+                for i in 0..len {
+                    let d = dst.add(i * dst_stride).cast::<[T; N]>();
+                    let s = src.add(i);
+                    if ALIGNED {
+                        d.write(s.read());
+                    } else {
+                        d.write_unaligned(s.read_unaligned());
+                    }
+                }
+            } else if DST_C {
+                let dst = dst.cast::<[T; N]>();
+                for i in 0..len {
+                    let s = src.add(i * src_stride).cast::<[T; N]>();
+                    let d = dst.add(i);
+                    if ALIGNED {
+                        d.write(s.read());
+                    } else {
+                        d.write_unaligned(s.read_unaligned());
+                    }
+                }
+            } else {
+                for i in 0..len {
+                    let s = src.add(i * src_stride).cast::<[T; N]>();
+                    let d = dst.add(i * dst_stride).cast::<[T; N]>();
+                    if ALIGNED {
+                        d.write(s.read());
+                    } else {
+                        d.write_unaligned(s.read_unaligned());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Runtime-run-length fallback for [`copy_1d_row`](Self::copy_1d_row) (run size misses the
+    /// const arms). `#[inline(never)]`: it is the uncommon path (odd itemsizes / long runs) and
+    /// carries four contiguity variants, so keeping it out of line avoids bloating callers.
+    /// Alignment and contiguity are still const so the choice is made once, not per run.
+    #[inline(never)]
+    unsafe fn copy_1d_unsized<
+        T: Copy,
+        const ALIGNED: bool,
+        const SRC_C: bool,
+        const DST_C: bool,
+    >(
+        src: &[u8],
+        dst: &mut [u8],
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        n_contiguous_items: usize,
+    ) {
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
+        unsafe {
+            if !ALIGNED {
+                let n_contiguous_bytes = size_of::<T>() * n_contiguous_items;
+                for i in 0..len {
+                    let src = src.add(i * src_stride);
+                    let dst = dst.add(i * dst_stride);
+                    std::ptr::copy_nonoverlapping::<u8>(src, dst, n_contiguous_bytes);
+                }
+            } else if SRC_C && DST_C {
+                std::ptr::copy_nonoverlapping::<T>(
+                    src.cast::<T>(),
+                    dst.cast::<T>(),
+                    len * n_contiguous_items,
+                );
+            } else if SRC_C {
+                let src = src.cast::<T>();
+                for i in 0..len {
+                    let src = src.add(i * n_contiguous_items);
+                    let dst = dst.add(i * dst_stride).cast::<T>();
+                    std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
+                }
+            } else if DST_C {
+                let dst = dst.cast::<T>();
+                for i in 0..len {
+                    let src = src.add(i * src_stride).cast::<T>();
+                    let dst = dst.add(i * n_contiguous_items);
+                    std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
+                }
+            } else {
+                for i in 0..len {
+                    let src = src.add(i * src_stride).cast::<T>();
+                    let dst = dst.add(i * dst_stride).cast::<T>();
+                    std::ptr::copy_nonoverlapping::<T>(src, dst, n_contiguous_items);
+                }
+            }
         }
     }
 
@@ -585,60 +539,18 @@ impl<'a> NdCopier<'a> {
         let itemsize = dtype.itemsize() as usize;
         // Same axis collapse as the scalar path (see `merge_dims`), keyed on the dtype's itemsize.
         let merged = merge_dims(shape, src_strides, dst_strides, itemsize);
-        let mut shape = merged.shape.as_slice();
-        let mut src_strides = merged.src_strides.as_slice();
-        let mut dst_strides = merged.dst_strides.as_slice();
-        let n_contiguous_bytes = merged.n_contiguous_items * itemsize;
-        if shape.is_empty() {
-            shape = &[1];
-            src_strides = &[0];
-            dst_strides = &[0];
-        }
-
-        unsafe fn copy_dynamic_inner<D: Dimension>(
-            shape: &[usize],
-            src_strides: &[usize],
-            dst_strides: &[usize],
-            src: &[u8],
-            dst: &mut [u8],
-            n_contiguous_bytes: usize,
-        ) {
-            let src = src.as_ptr();
-            let dst = dst.as_mut_ptr();
-            let iter = NdIter::new(
-                D::vec(shape.len(), |i| shape[i] as u64),
-                (
-                    NdIterExtStridesPtr::new(src_strides.to_dim_vec::<D>(), src),
-                    NdIterExtStridesPtrMut::new(dst_strides.to_dim_vec::<D>(), dst),
-                ),
-            );
-            for (_, (src_ptr, dst_ptr)) in iter {
-                unsafe {
-                    std::ptr::copy_nonoverlapping::<u8>(src_ptr, dst_ptr, n_contiguous_bytes);
-                }
-            }
-        }
-
-        let copy_fn = match shape.len() {
-            0 => unreachable!(),
-            1 => copy_dynamic_inner::<Dim<1>>,
-            2 => copy_dynamic_inner::<Dim<2>>,
-            3 => copy_dynamic_inner::<Dim<3>>,
-            4 => copy_dynamic_inner::<Dim<4>>,
-            5 => copy_dynamic_inner::<Dim<5>>,
-            6 => copy_dynamic_inner::<Dim<6>>,
-            7 => copy_dynamic_inner::<Dim<7>>,
-            8 => copy_dynamic_inner::<Dim<8>>,
-            _ => unimplemented!(),
-        };
+        // Reuse the peeled walk byte-wise: element unit is a single `u8`, so the contiguous run is
+        // `n_contiguous_items * itemsize` bytes and the surviving axes carry byte strides directly.
+        // `u8` is always aligned, so the peeled innermost axis still gets the one-sided-contiguous
+        // (sequential-store / strided-load) row loop that the old per-element `NdIter` walk lacked.
         unsafe {
-            copy_fn(
-                shape,
-                src_strides,
-                dst_strides,
+            Self::copy_peeled::<u8>(
+                merged.shape.as_slice(),
+                merged.src_strides.as_slice(),
+                merged.dst_strides.as_slice(),
                 src,
                 dst,
-                n_contiguous_bytes,
+                merged.n_contiguous_items * itemsize,
             )
         }
     }
