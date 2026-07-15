@@ -354,17 +354,14 @@ mod tests {
     use super::BitShuffleFilter;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
-    use crate::util::ScalarStrategy;
 
     macro_rules! test_roundtrip {
         ($ty:ty, $fn_name:ident) => {
-            proptest::proptest! {
-                #[test]
-                fn $fn_name(data in proptest::collection::vec(
-                    <$ty as ScalarStrategy>::any_strategy(), 0..=1000usize
-                )) {
-                    crate::codec::filter::tests::test_roundtrip::<BitShuffleFilter, $ty>(&data);
-                }
+            #[test]
+            fn $fn_name() {
+                crate::codec::filter::tests::run_bytes_proptest::<$ty>(|data| {
+                    crate::codec::filter::tests::test_roundtrip::<BitShuffleFilter, $ty>(data);
+                });
             }
         };
     }
@@ -485,13 +482,11 @@ mod tests {
 
     macro_rules! test_agrees_with_trivial {
         ($ty:ty, $fn_name:ident) => {
-            proptest::proptest! {
-                #[test]
-                fn $fn_name(data in proptest::collection::vec(
-                    <$ty as ScalarStrategy>::any_strategy(), 0..=1000usize
-                )) {
-                    test_agrees_with_trivial::<$ty>(&data);
-                }
+            #[test]
+            fn $fn_name() {
+                crate::codec::filter::tests::run_bytes_proptest::<$ty>(|data| {
+                    test_agrees_with_trivial::<$ty>(data);
+                });
             }
         };
     }

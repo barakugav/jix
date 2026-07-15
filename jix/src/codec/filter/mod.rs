@@ -93,4 +93,27 @@ mod tests {
         F::default().decode(&encoded, &mut decoded, &dtype, &tmp_buffers);
         assert_eq!(decoded, src);
     }
+
+    /// Shared proptest driver for filter tests.
+    ///
+    /// Generic over the dtype only, with the per-filter check passed as a fn pointer, to
+    /// avoid per-filter monomorphization.
+    #[inline(never)]
+    pub(crate) fn run_bytes_proptest<T>(check: fn(&[T]))
+    where
+        T: crate::util::ScalarStrategy,
+    {
+        let strategy = proptest::collection::vec(
+            <T as crate::util::ScalarStrategy>::any_strategy(),
+            0..=1000usize,
+        );
+        let mut runner =
+            proptest::test_runner::TestRunner::new(proptest::test_runner::Config::default());
+        runner
+            .run(&strategy, |data| {
+                check(&data);
+                Ok(())
+            })
+            .unwrap();
+    }
 }

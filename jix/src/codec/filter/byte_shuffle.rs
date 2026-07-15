@@ -136,7 +136,6 @@ mod tests {
     use super::ByteShuffleFilter;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
-    use crate::util::ScalarStrategy;
 
     fn byte_shuffle_encode_reference(src: &[u8], dst: &mut [u8], itemsize: usize) {
         debug_assert!(src.len().is_multiple_of(itemsize));
@@ -188,13 +187,11 @@ mod tests {
 
     macro_rules! test_roundtrip {
         ($ty:ty, $fn_name:ident) => {
-            proptest::proptest! {
-                #[test]
-                fn $fn_name(data in proptest::collection::vec(
-                    <$ty as ScalarStrategy>::any_strategy(), 0..=1000usize
-                )) {
-                    crate::codec::filter::tests::test_roundtrip::<ByteShuffleFilter, $ty>(&data);
-                }
+            #[test]
+            fn $fn_name() {
+                crate::codec::filter::tests::run_bytes_proptest::<$ty>(|data| {
+                    crate::codec::filter::tests::test_roundtrip::<ByteShuffleFilter, $ty>(data);
+                });
             }
         };
     }
@@ -219,13 +216,11 @@ mod tests {
 
     macro_rules! test_agrees_with_reference {
         ($ty:ty, $fn_name:ident) => {
-            proptest::proptest! {
-                #[test]
-                fn $fn_name(data in proptest::collection::vec(
-                    <$ty as ScalarStrategy>::any_strategy(), 0..=1000usize
-                )) {
-                    test_agrees_with_reference::<$ty>(&data);
-                }
+            #[test]
+            fn $fn_name() {
+                crate::codec::filter::tests::run_bytes_proptest::<$ty>(|data| {
+                    test_agrees_with_reference::<$ty>(data);
+                });
             }
         };
     }

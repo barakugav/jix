@@ -5,7 +5,7 @@ use crate::dtype::Dtyped;
 use crate::storage::block::BlockSize;
 use crate::storage::Compact;
 use crate::util::AlignedBytes;
-use crate::{ArrayParams, DimDyn, Ty};
+use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Ty};
 
 // ---------------------------------------------------------------------------
 // arr_params - shared test helper (previously duplicated in every test module)
@@ -517,7 +517,7 @@ pub(crate) fn block_shape_strategy(
 }
 
 pub(crate) fn carray_strategy_any<T>(
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -527,7 +527,7 @@ where
 pub(crate) fn carray_strategy_from_shape<T>(
     shape: impl Strategy<Value = Vec<usize>>,
     element: impl Strategy<Value = T> + Clone,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -536,7 +536,7 @@ where
 
 pub(crate) fn carray_strategy_from_data<T>(
     data: impl Strategy<Value = ndarray::ArrayD<T>>,
-) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>)>
+) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>)>
 where
     T: ScalarStrategy + Debug,
 {
@@ -563,15 +563,15 @@ where
         if let Some(read_size) = read_size {
             params.read_size(read_size);
         }
-        let compact = crate::Array::compact_ndarray_with(&arr, params).unwrap();
+        let compact = Array::compact_ndarray_with(&arr, params).unwrap();
         (arr, compact)
     })
 }
 
 // pub(crate) fn carrays2_strategy<T>() -> impl Strategy<
 //     Value = (
-//         (ndarray::ArrayD<T>, crate::Array<Compact>),
-//         (ndarray::ArrayD<T>, crate::Array<Compact>),
+//         (ndarray::ArrayD<T>, Array<Compact>),
+//         (ndarray::ArrayD<T>, Array<Compact>),
 //     ),
 // >
 // where
@@ -585,8 +585,8 @@ pub(crate) fn carrays2_strategy_generic<T>(
     element: impl Strategy<Value = T> + Clone,
 ) -> impl Strategy<
     Value = (
-        (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>),
-        (ndarray::ArrayD<T>, crate::Array<Compact<Ty<T>, DimDyn>>),
+        (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>),
+        (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>),
     ),
 >
 where
@@ -622,12 +622,10 @@ pub(crate) fn sub_range_strategy(shape: &[u64]) -> BoxedStrategy<Vec<Range<u64>>
 /// Use [`assert_array_matches_approx`] for results of order-dependent
 /// floating-point arithmetic (e.g. reductions), where exact equality is too
 /// strict.
-pub(crate) fn assert_array_matches<S, T, D>(
-    actual: &crate::Array<S>,
-    expected: &ndarray::Array<T, D>,
-) where
-    S: crate::ArrayStorage,
-    T: crate::dtype::Dtyped + std::fmt::Debug + Clone + PartialEq,
+pub(crate) fn assert_array_matches<S, T, D>(actual: &Array<S>, expected: &ndarray::Array<T, D>)
+where
+    S: ArrayStorage,
+    T: Dtyped + std::fmt::Debug + Clone + PartialEq,
     D: ndarray::Dimension,
 {
     assert_array_matches_with(actual, expected, |a, b| a == b);
@@ -643,13 +641,13 @@ pub(crate) fn assert_array_matches<S, T, D>(
 ///
 /// [`ApproxEq`]: crate::scalar::ApproxEq
 pub(crate) fn assert_array_matches_approx<S, T, D>(
-    actual: &crate::Array<S>,
+    actual: &Array<S>,
     expected: &ndarray::Array<T, D>,
     rtol: <T as crate::scalar::ApproxEq>::RelativeTolerance,
     atol: <T as crate::scalar::ApproxEq>::AbsoluteTolerance,
 ) where
-    S: crate::ArrayStorage,
-    T: crate::dtype::Dtyped + std::fmt::Debug + Clone + crate::scalar::ApproxEq,
+    S: ArrayStorage,
+    T: Dtyped + std::fmt::Debug + Clone + crate::scalar::ApproxEq,
     D: ndarray::Dimension,
 {
     assert_array_matches_with(actual, expected, move |a, b| a.approx_eq(b, &rtol, &atol));
@@ -660,13 +658,31 @@ pub(crate) fn assert_array_matches_approx<S, T, D>(
 /// full read and 16 random sub-range reads against `expected` using the
 /// element-wise comparator `eq`.
 fn assert_array_matches_with<S, T, D>(
-    actual: &crate::Array<S>,
+    actual: &Array<S>,
     expected: &ndarray::Array<T, D>,
     eq: impl Fn(&T, &T) -> bool,
 ) where
-    S: crate::ArrayStorage,
-    T: crate::dtype::Dtyped + std::fmt::Debug + Clone,
+    S: ArrayStorage,
+    T: Dtyped + std::fmt::Debug + Clone,
     D: ndarray::Dimension,
+{
+    // Erase the storage to `&dyn ArrayStorage` and the dimension to `IxDyn` so the comparison
+    // body (`assert_array_matches_with_dyn`) is monomorphized once instead of once per
+    // (storage type x ndim).
+    let storage: &dyn ArrayStorage = &actual.storage;
+    let actual = Array::from_storage(storage);
+    let expected = expected.view().into_dyn();
+    assert_array_matches_dyn::<T>(&actual, expected, &eq);
+}
+
+/// Storage- and dimension-agnostic core of [`assert_array_matches_with`]: checks storage
+/// invariants, then compares the full read and 16 random sub-range reads against `expected`.
+fn assert_array_matches_dyn<T>(
+    actual: &Array<&dyn ArrayStorage>,
+    expected: ndarray::ArrayViewD<'_, T>,
+    eq: &impl Fn(&T, &T) -> bool,
+) where
+    T: Dtyped + std::fmt::Debug + Clone,
 {
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
@@ -683,10 +699,9 @@ fn assert_array_matches_with<S, T, D>(
     assert!(spec.block_size() > 0);
     assert!(spec.read_size().min > 0);
 
-    let expected = expected.view().into_dyn();
     let actual = actual.as_ref().into_typed::<T>().unwrap();
     let full = actual.to_ndarray().unwrap().into_dyn();
-    if let Err(msg) = elementwise_eq(&full, &expected, &eq) {
+    if let Err(msg) = elementwise_eq(&full, &expected, eq) {
         unreachable!("full array mismatch: {msg}");
     }
 
@@ -707,7 +722,7 @@ fn assert_array_matches_with<S, T, D>(
                 .map(|r| r.start as usize..r.end as usize)
                 .collect();
             let expected_sub = ndarray_slice(&expected, &ranges_usize);
-            elementwise_eq(&actual_sub.into_dyn(), &expected_sub, &eq)
+            elementwise_eq(&actual_sub.into_dyn(), &expected_sub, eq)
                 .map_err(TestCaseError::fail)?;
             Ok(())
         })

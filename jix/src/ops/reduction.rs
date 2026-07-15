@@ -690,7 +690,8 @@ where
             // from index 1. Later bulks (`state_initialized`) seed nothing, so they must fold
             // every item from index 0 - otherwise each later bulk's first item is dropped.
             let fold_from = (!state_initialized && reduction_size > 0) as usize;
-            let state = self.fold::<LANES_STATES, LANES_ITEMS>(state, src, base_item_idx, fold_from);
+            let state =
+                self.fold::<LANES_STATES, LANES_ITEMS>(state, src, base_item_idx, fold_from);
             for (state_ref, state) in state_ref.into_iter().zip(state) {
                 state_ref.write(state);
             }
@@ -2546,6 +2547,33 @@ pub(crate) mod tests {
             })
     }
 
+    use proptest::test_runner::{Config, TestRunner};
+
+    /// Shared proptest driver for reduction-op tests.
+    ///
+    /// Generic over the dtype only, with the op passed as a fn pointer, to avoid per-op
+    /// monomorphization.
+    #[inline(never)]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn check_reduction<T>(
+        cases: proptest::strategy::BoxedStrategy<(
+            ArrayD<T>,
+            Rc<Array<Compact<Ty<T>, DimDyn>>>,
+            Vec<usize>,
+        )>,
+        check: fn(&ArrayD<T>, &Array<Compact<Ty<T>, DimDyn>>, &[usize]),
+    ) where
+        T: crate::util::ScalarStrategy,
+    {
+        let mut runner = TestRunner::new(Config::default());
+        runner
+            .run(&cases, |(nd, za, axes)| {
+                check(&nd, &za, &axes);
+                Ok(())
+            })
+            .unwrap();
+    }
+
     macro_rules! test_reduction_dtype {
         (
             $op_method:ident,
@@ -2554,23 +2582,26 @@ pub(crate) mod tests {
             $strategy:ident
         ) => {
             paste::paste! {
-                proptest::proptest! {
-                    #[test]
-                    fn [<$op_method _ $dtype>](
-                        (nd, za, axes) in crate::ops::reduction::tests::carray_strategy_for_reduction::<$dtype>(
-                            <$dtype as crate::util::ScalarStrategy>::$strategy()
-                        )
-                    ) {
-                        let result = (*za).as_ref().$op_method(&axes);
-                        let expected = crate::ops::reduction::tests::ndarray_reduce(
-                            &nd, &axes,
-                            |arr| {
-                                let $items = arr.iter().cloned();
-                                $body
-                            }
-                        );
-                        crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
-                    }
+                #[test]
+                fn [<$op_method _ $dtype>]() {
+                    crate::ops::reduction::tests::check_reduction::<$dtype>(
+                        proptest::strategy::Strategy::boxed(
+                            crate::ops::reduction::tests::carray_strategy_for_reduction::<$dtype>(
+                                <$dtype as crate::util::ScalarStrategy>::$strategy()
+                            )
+                        ),
+                        |nd, za, axes| {
+                            let result = za.as_ref().$op_method(axes);
+                            let expected = crate::ops::reduction::tests::ndarray_reduce(
+                                nd, axes,
+                                |arr| {
+                                    let $items = arr.iter().cloned();
+                                    $body
+                                }
+                            );
+                            crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
+                        },
+                    );
                 }
             }
         };
@@ -2583,23 +2614,26 @@ pub(crate) mod tests {
             small_data = true
         ) => {
             paste::paste! {
-                proptest::proptest! {
-                    #[test]
-                    fn [<$op_method _ $dtype>](
-                        (nd, za, axes) in crate::ops::reduction::tests::carray_strategy_for_reduction_small::<$dtype>(
-                            <$dtype as crate::util::ScalarStrategy>::$strategy()
-                        )
-                    ) {
-                        let result = (*za).as_ref().$op_method(&axes);
-                        let expected = crate::ops::reduction::tests::ndarray_reduce(
-                            &nd, &axes,
-                            |arr| {
-                                let $items = arr.iter().cloned();
-                                $body
-                            }
-                        );
-                        crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
-                    }
+                #[test]
+                fn [<$op_method _ $dtype>]() {
+                    crate::ops::reduction::tests::check_reduction::<$dtype>(
+                        proptest::strategy::Strategy::boxed(
+                            crate::ops::reduction::tests::carray_strategy_for_reduction_small::<$dtype>(
+                                <$dtype as crate::util::ScalarStrategy>::$strategy()
+                            )
+                        ),
+                        |nd, za, axes| {
+                            let result = za.as_ref().$op_method(axes);
+                            let expected = crate::ops::reduction::tests::ndarray_reduce(
+                                nd, axes,
+                                |arr| {
+                                    let $items = arr.iter().cloned();
+                                    $body
+                                }
+                            );
+                            crate::ops::reduction::tests::assert_reduction_matches(&result, &expected);
+                        },
+                    );
                 }
             }
         };
