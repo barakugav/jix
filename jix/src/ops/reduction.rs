@@ -112,48 +112,6 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
     }
 }
 
-// --- Reduction fold tuning knobs (see `fold`) -------------------------------------------------
-//
-// `LANES_STATES` is how many independent output accumulators the fold's main loop carries at once
-// (one SIMD-friendly group). It is derived per reduction from the register footprint of the live
-// values - see `reduction_lanes_states`. Too large and the accumulators spill out of the vector
-// registers (the loop then does load-add-store to the stack every iteration, and the vectorizer is
-// forced to a narrower width); too small and there is not enough instruction-level parallelism to
-// hide the add latency. The tuning study (see `examples/reduce_asm.rs`) put the sweet spot at
-// ~4-8 accumulators.
-//
-// The main (multi-output) loop always folds one item per step: integer adds already auto-vectorize
-// there, and a manual item-unroll only adds register pressure. `LANES_ITEMS_TAIL` unrolls the
-// reduction dimension for the single-accumulator TAIL loop (the last few outputs, and any full
-// reduction to a scalar): with one accumulator the register file is free, so exposing more partial
-// sums / parallel loads there is a measured win for integer full reductions with no cost to the
-// main loop. The unroll preserves fold order, so every kernel stays correct.
-//
-// All compile-time constants so codegen fully specializes; tweak and re-measure with
-// `benches/reduction.rs` + the `examples/reduce_asm.rs` probe.
-const LANES_STATES_BUDGET: usize = 64;
-const LANES_ITEMS_TAIL: usize = 4;
-
-/// Number of output accumulators the fold's main loop carries, for item type `Item` accumulated
-/// into state type `State`. Sized off the larger of the two (the values that stay live in the
-/// vector registers across the loop): aim for `LANES_STATES_BUDGET` bytes worth, rounded to a
-/// power of two, then clamped to `[4, 16]` so no dtype spills the register file (too many) or
-/// starves instruction-level parallelism (too few).
-const fn reduction_lanes_states<Item, State>() -> usize {
-    let item = size_of::<Item>();
-    let state = size_of::<State>();
-    let unit = if state > item { state } else { item };
-    let unit = if unit == 0 { 1 } else { unit };
-    let raw = (LANES_STATES_BUDGET / unit).next_power_of_two();
-    if raw < 4 {
-        4
-    } else if raw > 16 {
-        16
-    } else {
-        raw
-    }
-}
-
 impl<S, K, D> ArrayStorage for ReductionOp<S, K, D>
 where
     S: ArrayStorageTyped,
@@ -170,9 +128,6 @@ where
         buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
-        // Compile-time constant per monomorphization; `reduction_lanes_states` only ever yields a
-        // power of two in [4, 16], so those are the live arms (the `_` is unreachable - any value
-        // would still be correct, just a different grouping).
         let read_fn = match reduction_lanes_states::<S::Item, K::State>() {
             4 => Self::read_data_impl::<4>,
             8 => Self::read_data_impl::<8>,
@@ -560,16 +515,15 @@ where
                     )
                     .with_strides_ptr_mut_ext(default_logical_strides(&out_shape), tile_state_base)
                     .build();
-                // Main loop: `LANES_STATES` outputs at a time, one item per step (the integer add
-                // auto-vectorizes; a manual item-unroll here only spills). Tail: the remaining
-                // `< LANES_STATES` outputs one at a time, with the reduction dimension unrolled.
+                // Main loop, LANES_STATES outputs at a time
                 self.inner_loop::<LANES_STATES, 1>(
                     &mut out_iter,
                     reduction_size as usize,
                     base_item_idx,
                     state_initialized,
                 );
-                self.inner_loop::<1, LANES_ITEMS_TAIL>(
+                // Tail loop, 1 output at a time, 4 items per step (manual unroll)
+                self.inner_loop::<1, 4>(
                     &mut out_iter,
                     reduction_size as usize,
                     base_item_idx,
@@ -629,6 +583,7 @@ where
         Ok(())
     }
 
+    #[allow(clippy::type_complexity)]
     fn inner_loop<const LANES_STATES: usize, const LANES_ITEMS: usize>(
         &self,
         out_iter: &mut NdIter<
@@ -652,10 +607,10 @@ where
             });
             let state_ptr = src_base_and_state.map_inline_ref(|(_src_base, state_ptr)| *state_ptr);
 
-            let state_ref = state_ptr.map_inline_ref(|&state_ptr| unsafe { &mut *state_ptr });
-            for src_idx in 0..LANES_STATES {
-                debug_assert_eq!(src[src_idx].len(), reduction_size);
-                unsafe { assert_unchecked_eq!(src[src_idx].len(), reduction_size) };
+            let mut state_ref = state_ptr.map_inline_ref(|&state_ptr| unsafe { &mut *state_ptr });
+            for src in &src {
+                debug_assert_eq!(src.len(), reduction_size);
+                unsafe { assert_unchecked_eq!(src.len(), reduction_size) };
             }
             if !state_initialized {
                 if !src[0].is_empty() {
@@ -663,17 +618,14 @@ where
                         state_ref[i].write(self.kernel.init_state(Some(src[i][0])));
                     }
                 } else {
-                    for i in 0..LANES_STATES {
-                        state_ref[i].write(self.kernel.init_state(None));
+                    for state_ref in state_ref.iter_mut() {
+                        state_ref.write(self.kernel.init_state(None));
                     }
                 }
             }
             // SAFETY: every state was written during the first bulk.
             let state =
                 state_ref.map_inline_ref(|state_ref| unsafe { state_ref.assume_init_read() });
-            // The first bulk seeds item 0 of each lane via `init_state` above, so it folds
-            // from index 1. Later bulks (`state_initialized`) seed nothing, so they must fold
-            // every item from index 0 - otherwise each later bulk's first item is dropped.
             let fold_from = (!state_initialized && reduction_size > 0) as usize;
             let state =
                 self.fold::<LANES_STATES, LANES_ITEMS>(state, src, base_item_idx, fold_from);
@@ -681,25 +633,6 @@ where
                 state_ref.write(state);
             }
         }
-    }
-
-    /// Fold item `i` of every lane's contiguous run into that lane's state, returning the new
-    /// states. `src[d].get_unchecked(i)` is sound because `i < reduction_size == src[d].len()`.
-    #[inline(always)]
-    fn fold_one<const LANES_STATES: usize>(
-        &self,
-        state: [K::State; LANES_STATES],
-        src: &[&[S::Item]; LANES_STATES],
-        i: usize,
-        base_item_idx: u64,
-    ) -> [K::State; LANES_STATES] {
-        let mut state_iter = state.into_iter();
-        array_from_fn_inline::<_, LANES_STATES>(|d| {
-            let state = state_iter.next().unwrap();
-            let item = unsafe { *src[d].get_unchecked(i) };
-            self.kernel
-                .update_state(state, item, base_item_idx + i as u64)
-        })
     }
 
     #[inline(always)]
@@ -711,27 +644,49 @@ where
         fold_from: usize,
     ) -> [K::State; LANES_STATES] {
         let reduction_size = src[0].len();
-        for src_idx in 0..LANES_STATES {
-            debug_assert_eq!(src[src_idx].len(), reduction_size);
-            unsafe { assert_unchecked_eq!(src[src_idx].len(), reduction_size) };
+        for src in &src {
+            debug_assert_eq!(src.len(), reduction_size);
+            unsafe { assert_unchecked_eq!(src.len(), reduction_size) };
         }
-        // Main loop: fold `LANES_ITEMS` consecutive items per step (the `0..LANES_ITEMS` loop is a
-        // const-bounded manual unroll). Order is preserved - item `i` is folded before `i + 1` -
-        // so every kernel (incl. index-sensitive ones like argmax) stays correct; the unroll only
-        // exposes more independent loads per step.
         let mut i = fold_from;
         while i + LANES_ITEMS <= reduction_size {
             for k in 0..LANES_ITEMS {
-                state = self.fold_one::<LANES_STATES>(state, &src, i + k, base_item_idx);
+                let mut state_iter = state.into_iter();
+                state = array_from_fn_inline::<_, LANES_STATES>(|s_idx| {
+                    let state = state_iter.next().unwrap();
+                    let item = unsafe { *src[s_idx].get_unchecked(i + k) };
+                    self.kernel
+                        .update_state(state, item, base_item_idx + (i + k) as u64)
+                });
             }
             i += LANES_ITEMS;
         }
-        // Remainder items (also covers the whole run when LANES_ITEMS == 1 or the run is short).
         while i < reduction_size {
-            state = self.fold_one::<LANES_STATES>(state, &src, i, base_item_idx);
+            let mut state_iter = state.into_iter();
+            state = array_from_fn_inline::<_, LANES_STATES>(|s_idx| {
+                let state = state_iter.next().unwrap();
+                let item = unsafe { *src[s_idx].get_unchecked(i) };
+                self.kernel
+                    .update_state(state, item, base_item_idx + i as u64)
+            });
             i += 1;
         }
         state
+    }
+}
+
+const fn reduction_lanes_states<Item, State>() -> usize {
+    let item = size_of::<Item>();
+    let state = size_of::<State>();
+    let unit = if state > item { state } else { item };
+    let unit = if unit == 0 { 1 } else { unit };
+    let raw = (64 / unit).next_power_of_two();
+    if raw < 4 {
+        4
+    } else if raw > 16 {
+        16
+    } else {
+        raw
     }
 }
 

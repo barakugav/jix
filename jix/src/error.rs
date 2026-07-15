@@ -129,10 +129,8 @@ pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
         if ndim != expected {
             return check_dim_fail::<D>(ndim);
         }
-    } else {
-        if ndim > NDIM_MAX {
-            return check_dim_fail::<D>(ndim);
-        }
+    } else if ndim > NDIM_MAX {
+        return check_dim_fail::<D>(ndim);
     }
     Ok(())
 }
@@ -153,10 +151,8 @@ pub(crate) fn assert_dim<D: Dimension>(ndim: usize) {
         if ndim != expected {
             assert_dim_fail::<D>(ndim);
         }
-    } else {
-        if ndim > NDIM_MAX {
-            assert_dim_fail::<D>(ndim);
-        }
+    } else if ndim > NDIM_MAX {
+        assert_dim_fail::<D>(ndim);
     }
 }
 

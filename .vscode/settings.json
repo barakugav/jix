@@ -40,6 +40,7 @@
         "ncols",
         "ndim",
         "nitems",
+        "nonoverlapping",
         "pyclass",
         "pyfunction",
         "pymethods",

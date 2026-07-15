@@ -192,7 +192,7 @@ pub(crate) trait IterExt: Iterator {
         D: Dimension,
     {
         let (sz_low, sz_high) = self.size_hint();
-        assert!(sz_low <= size && sz_high.map_or(true, |h| size <= h));
+        assert!(sz_low <= size && sz_high.is_none_or(|h| size <= h));
 
         let v = D::vec(size, |_| self.next().unwrap());
         assert!(self.next().is_none());

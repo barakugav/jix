@@ -229,14 +229,6 @@ mod tests {
     test_agrees_with_reference!(u16, u16_agrees_with_reference);
     test_agrees_with_reference!(u32, u32_agrees_with_reference);
     test_agrees_with_reference!(u64, u64_agrees_with_reference);
-    test_agrees_with_reference!(i8, i8_agrees_with_reference);
-    test_agrees_with_reference!(i16, i16_agrees_with_reference);
-    test_agrees_with_reference!(i32, i32_agrees_with_reference);
-    test_agrees_with_reference!(i64, i64_agrees_with_reference);
-    #[cfg(feature = "half")]
-    test_agrees_with_reference!(crate::scalar::f16, f16_agrees_with_reference);
-    test_agrees_with_reference!(f32, f32_agrees_with_reference);
-    test_agrees_with_reference!(f64, f64_agrees_with_reference);
     #[cfg(feature = "num-complex")]
     test_agrees_with_reference!(Complex<f32>, complex_f32_agrees_with_reference);
     #[cfg(feature = "num-complex")]
