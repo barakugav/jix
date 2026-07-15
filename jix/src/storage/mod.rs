@@ -139,6 +139,43 @@ impl<'a, S> Clone for Ref<'a, S> {
     }
 }
 
+impl ArrayStorage for &dyn ArrayStorage {
+    type ElementType = crate::TypeDyn;
+    type Dimension = crate::DimDyn;
+
+    #[inline(always)]
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut crate::storage::OutBuf<'_>,
+        context: &crate::codec::ReadContext,
+    ) -> crate::error::Result<()> {
+        (**self).read_data(index, buf, context)
+    }
+
+    #[inline(always)]
+    fn shape(&self) -> &[u64] {
+        (**self).shape()
+    }
+
+    #[inline(always)]
+    fn dtype(&self) -> &crate::dtype::Dtype {
+        (**self).dtype()
+    }
+
+    #[inline]
+    fn spec(&self) -> crate::storage::ArraySpec<'_> {
+        (**self).spec()
+    }
+
+    fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+        (**self).info()
+    }
+
+    crate::ops::impl_dimension_change_default!();
+    crate::ops::impl_element_type_change_default!();
+}
+
 macro_rules! impl_array_storage_forward {
     (<$($generics:tt),* $(,)?>) => {
         crate::storage::impl_array_storage_forward!('a, T, <$($generics),*>);
