@@ -5,7 +5,6 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_range, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::iter::strides::NdIterExtStridesPtr;
 use crate::util::iter::NdIter;
 use crate::{default_strides_cast, Array, ArrayStorage, Dimension, NdCopier};
 
@@ -142,10 +141,9 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let tmp_base = tmp_buf.as_ptr();
         let dst_base = dst.as_mut_ptr();
 
-        let iter = NdIter::new(
-            iter_shape,
-            NdIterExtStridesPtr::new(src_ptr_strides, tmp_base),
-        );
+        let iter = NdIter::builder(iter_shape)
+            .with_strides_ptr_ext(src_ptr_strides, tmp_base)
+            .build();
         let nd_copy = NdCopier::new(self.dtype());
         for (idx, src_ptr) in iter {
             // The output position on a flipped axis mirrors the tmp (source) position:

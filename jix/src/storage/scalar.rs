@@ -8,7 +8,6 @@ use crate::storage::{
     ArraySpec, ArrayStorage, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData, Ty,
 };
 use crate::util::cast_slice_mut;
-use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 
@@ -118,10 +117,9 @@ where
             Some(strides) => {
                 let strides = D::vec(index.len(), |d| strides[d]);
                 let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
-                let iter = NdIter::new(
-                    read_shape,
-                    NdIterExtStridesPtrMut::new(strides, buf.as_mut_ptr()),
-                );
+                let iter = NdIter::builder(read_shape)
+                    .with_strides_ptr_mut_ext(strides, buf.as_mut_ptr())
+                    .build();
                 for (_, dst) in iter {
                     unsafe { dst.cast::<T>().write(self.data) };
                 }

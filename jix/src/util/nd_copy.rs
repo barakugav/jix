@@ -1,6 +1,5 @@
 use crate::arrayvec::ArrayVec;
 use crate::dtype::{Dtype, Itemsize};
-use crate::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::iter::NdIter;
 use crate::{dim_arr, Dim, DimArray, Dimension, SliceExt};
 
@@ -232,14 +231,22 @@ impl<'a> NdCopier<'a> {
         // the innermost strides are aligned too - the precondition the aligned row path needs.
         let aligned = src.as_ptr().cast::<T>().is_aligned()
             && dst.as_ptr().cast::<T>().is_aligned()
-            && src_strides.iter().all(|s| s.is_multiple_of(align_of::<T>()))
-            && dst_strides.iter().all(|s| s.is_multiple_of(align_of::<T>()));
+            && src_strides
+                .iter()
+                .all(|s| s.is_multiple_of(align_of::<T>()))
+            && dst_strides
+                .iter()
+                .all(|s| s.is_multiple_of(align_of::<T>()));
 
         // The peeled innermost axis (a single contiguous run when `ndim == 0`).
         let (inner_len, inner_ss, inner_ds) = if ndim == 0 {
             (1, 0, 0)
         } else {
-            (shape[ndim - 1], src_strides[ndim - 1], dst_strides[ndim - 1])
+            (
+                shape[ndim - 1],
+                src_strides[ndim - 1],
+                dst_strides[ndim - 1],
+            )
         };
         let run_bytes = size_of::<T>() * n_contiguous_items;
         let src_c = inner_len <= 1 || inner_ss == run_bytes;
@@ -348,13 +355,10 @@ impl<'a> NdCopier<'a> {
         n_contiguous_items: usize,
         row: Copy1dRowFn,
     ) {
-        let iter = NdIter::new(
-            D::vec(outer_shape.len(), |i| outer_shape[i] as u64),
-            (
-                NdIterExtStridesPtr::new(outer_ss.to_dim_vec::<D>(), src_ptr),
-                NdIterExtStridesPtrMut::new(outer_ds.to_dim_vec::<D>(), dst_ptr),
-            ),
-        );
+        let iter = NdIter::builder(D::vec(outer_shape.len(), |i| outer_shape[i] as u64))
+            .with_strides_ptr_ext(outer_ss.to_dim_vec::<D>(), src_ptr)
+            .with_strides_ptr_mut_ext(outer_ds.to_dim_vec::<D>(), dst_ptr)
+            .build();
         for (_, (sp, dp)) in iter {
             // Zero-length slices carrying this row's base pointer (see `copy`).
             let src = unsafe { std::slice::from_raw_parts(sp, 0) };

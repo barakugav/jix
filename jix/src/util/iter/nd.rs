@@ -1,5 +1,11 @@
 use std::hint::unreachable_unchecked;
 
+use crate::util::iter::block::NdIterExtBlockOffsetSize;
+use crate::util::iter::strides::{
+    nd_iter_ext_logical_global_index, NdIterExtStridesOffset, NdIterExtStridesPtr,
+    NdIterExtStridesPtrMut,
+};
+use crate::util::Idx;
 use crate::{DimVec, Dimension};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
@@ -117,7 +123,7 @@ where
     #[inline(always)]
     fn get_current_and_advance_status(&mut self) -> (D::Vec<u64>, E::Item) {
         self.status.advance();
-        (self.current_idx.clone(), self.extensions.next())
+        (self.current_idx.clone(), self.extensions.value())
     }
 
     #[inline(always)]
@@ -184,22 +190,35 @@ where
 /// Instead of recomputing derived state (e.g. a raw pointer offset) from scratch at every step,
 /// implementors receive incremental [`on_increase`](NdIterExtension::on_increase) and
 /// [`on_decrease`](NdIterExtension::on_decrease) notifications and
-/// return the current derived value via [`next`](NdIterExtension::next).
+/// return the current derived value via [`value`](NdIterExtension::value).
 pub(crate) trait NdIterExtension {
     /// The derived value produced at each iteration step.
     type Item;
 
     /// Called when dimension `dim` changes from `before` to `after`.
     ///
-    /// All dimension changes for a single step are delivered before [`next`](NdIterExtension::next)
-    /// is called.
+    /// All dimension changes for a single step are delivered before
+    /// [`value`](NdIterExtension::value) is called.
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64);
     fn on_decrease(&mut self, dim: usize, before: u64, after: u64, diff: u64);
 
     /// Returns the current derived value after all index changes have been applied.
-    fn next(&self) -> Self::Item;
+    fn value(&self) -> Self::Item;
 
     fn check_ndim(&self, ndim: usize) -> bool;
+
+    /// The merged extension type of `Self` and `E`.
+    ///
+    /// A merge is performed like appending to a list:
+    /// - `()` is the identity of append: `() + E = E`
+    /// - A concrete extension `X` behaves as a one-element list: `X + E = (X, E)`
+    /// - An `n`-tuple appends to become an `(n + 1)`-tuple: `(X1, X2, ..., Xn) + E = (X1, X2, ..., Xn, E)`
+    type MergeExtension<E: NdIterExtension>: NdIterExtension;
+
+    /// Merge `self` with another extension `other`, producing a new extension that tracks both.
+    fn merge_extension<E: NdIterExtension>(self, other: E) -> Self::MergeExtension<E>
+    where
+        Self: Sized;
 }
 
 /// A plain index-only iterator; a thin wrapper around [`NdIter`] with a `()` extension.
@@ -239,10 +258,18 @@ impl NdIterExtension for () {
     #[inline(always)]
     fn on_decrease(&mut self, _dim: usize, _before: u64, _after: u64, _diff: u64) {}
     #[inline(always)]
-    fn next(&self) {}
+    fn value(&self) {}
     #[inline(always)]
     fn check_ndim(&self, _ndim: usize) -> bool {
         true
+    }
+
+    /// The merged extension type of `()` and `E` is just `E`.
+    type MergeExtension<E: NdIterExtension> = E;
+
+    #[inline(always)]
+    fn merge_extension<E: NdIterExtension>(self, ext: E) -> E {
+        ext
     }
 }
 impl<T1> NdIterExtension for (T1,)
@@ -259,12 +286,18 @@ where
         self.0.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn next(&self) -> (T1::Item,) {
-        (self.0.next(),)
+    fn value(&self) -> (T1::Item,) {
+        (self.0.value(),)
     }
     #[inline(always)]
     fn check_ndim(&self, ndim: usize) -> bool {
         self.0.check_ndim(ndim)
+    }
+
+    type MergeExtension<E: NdIterExtension> = (T1, E);
+    #[inline(always)]
+    fn merge_extension<E: NdIterExtension>(self, ext: E) -> (T1, E) {
+        (self.0, ext)
     }
 }
 impl<T1, T2> NdIterExtension for (T1, T2)
@@ -284,12 +317,18 @@ where
         self.1.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn next(&self) -> (T1::Item, T2::Item) {
-        (self.0.next(), self.1.next())
+    fn value(&self) -> (T1::Item, T2::Item) {
+        (self.0.value(), self.1.value())
     }
     #[inline(always)]
     fn check_ndim(&self, ndim: usize) -> bool {
         self.0.check_ndim(ndim) && self.1.check_ndim(ndim)
+    }
+
+    type MergeExtension<E: NdIterExtension> = (T1, T2, E);
+    #[inline(always)]
+    fn merge_extension<E: NdIterExtension>(self, ext: E) -> (T1, T2, E) {
+        (self.0, self.1, ext)
     }
 }
 impl<T1, T2, T3> NdIterExtension for (T1, T2, T3)
@@ -299,6 +338,7 @@ where
     T3: NdIterExtension,
 {
     type Item = (T1::Item, T2::Item, T3::Item);
+
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
         self.0.on_increase(dim, before, after, diff);
@@ -312,12 +352,153 @@ where
         self.2.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn next(&self) -> (T1::Item, T2::Item, T3::Item) {
-        (self.0.next(), self.1.next(), self.2.next())
+    fn value(&self) -> (T1::Item, T2::Item, T3::Item) {
+        (self.0.value(), self.1.value(), self.2.value())
     }
     #[inline(always)]
     fn check_ndim(&self, ndim: usize) -> bool {
         self.0.check_ndim(ndim) && self.1.check_ndim(ndim) && self.2.check_ndim(ndim)
+    }
+
+    // Three extensions is the terminal arity of the extension list: merging a fourth is unsupported,
+    // so `MergeExtension` resolves to `()` and `merge_extension` panics. No call site merges past three (real
+    // usage never exceeds two), so this is unreachable in practice.
+    type MergeExtension<E: NdIterExtension> = ();
+    #[inline(always)]
+    fn merge_extension<E: NdIterExtension>(self, _ext: E) {
+        unimplemented!(
+            "NdIter extension list is capped at three extensions; cannot append a fourth"
+        )
+    }
+}
+
+macro_rules! impl_merge_extension {
+    () => {
+        type MergeExtension<E: $crate::util::iter::NdIterExtension> = (Self, E);
+        #[inline(always)]
+        fn merge_extension<E: $crate::util::iter::NdIterExtension>(self, ext: E) -> (Self, E) {
+            (self, ext)
+        }
+    };
+}
+pub(crate) use impl_merge_extension;
+
+/// A builder for [`NdIter`] that accumulates extensions one at a time.
+///
+/// Start from [`NdIter::builder`] (or [`NdIter::builder_with_begin`]) with an empty extension list
+/// (`E = ()`), chain any number of `with_*_ext` calls - each appends one extension and advances the
+/// `E` type via [`NdIterExtension::MergeExtension`] - then call [`build`](NdIterBuilder::build).
+pub(crate) struct NdIterBuilder<D: Dimension, E: NdIterExtension> {
+    begin: D::Vec<u64>,
+    end: D::Vec<u64>,
+    extensions: E,
+}
+
+impl<D: Dimension> NdIter<D, ()> {
+    /// Starts a builder iterating `[0, shape)` in every dimension, with no extensions.
+    #[inline]
+    pub(crate) fn builder<V>(shape: V) -> NdIterBuilder<D, ()>
+    where
+        D: Dimension<Vec<u64> = V>,
+        V: DimVec<u64, Dimension = D>,
+    {
+        let begin = V::Dimension::vec(shape.as_ref().len(), |_| 0u64);
+        NdIterBuilder {
+            begin,
+            end: shape,
+            extensions: (),
+        }
+    }
+
+    /// Starts a builder iterating `[begin, end)` in every dimension, with no extensions.
+    #[inline]
+    pub(crate) fn builder_with_begin<V>(begin: V, end: V) -> NdIterBuilder<D, ()>
+    where
+        D: Dimension<Vec<u64> = V>,
+        V: DimVec<u64, Dimension = D>,
+    {
+        NdIterBuilder {
+            begin,
+            end,
+            extensions: (),
+        }
+    }
+}
+
+impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
+    /// Adds a [`NdIterExtStridesPtr`]  extension.
+    #[inline]
+    pub(crate) fn with_strides_ptr_ext<T, S>(
+        self,
+        strides: D::Vec<S>,
+        initial_ptr: *const T,
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtr<D, T, S>>>
+    where
+        S: Idx + 'static,
+    {
+        let ext = NdIterExtStridesPtr::<D, T, S>::new(strides, initial_ptr);
+        NdIterBuilder {
+            begin: self.begin,
+            end: self.end,
+            extensions: self.extensions.merge_extension(ext),
+        }
+    }
+
+    /// Adds a [`NdIterExtStridesPtrMut`] extension.
+    #[inline]
+    pub(crate) fn with_strides_ptr_mut_ext<T, S>(
+        self,
+        strides: D::Vec<S>,
+        initial_ptr: *mut T,
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtrMut<D, T, S>>>
+    where
+        S: Idx + 'static,
+    {
+        let ext = NdIterExtStridesPtrMut::<D, T, S>::new(strides, initial_ptr);
+        NdIterBuilder {
+            begin: self.begin,
+            end: self.end,
+            extensions: self.extensions.merge_extension(ext),
+        }
+    }
+
+    /// Adds a [`NdIterExtStridesOffset`] extension.
+    #[inline]
+    pub(crate) fn with_logical_global_index_ext(
+        self,
+        shape: &[u64],
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D>>> {
+        let ext = nd_iter_ext_logical_global_index::<D>(shape, self.begin.as_ref());
+        NdIterBuilder {
+            begin: self.begin,
+            end: self.end,
+            extensions: self.extensions.merge_extension(ext),
+        }
+    }
+
+    /// Adds a [`NdIterExtBlockOffsetSize`] extension.
+    #[inline]
+    pub(crate) fn with_block_offset_size_ext<V>(
+        self,
+        begin: &V,
+        end: &V,
+        block_shape: V,
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtBlockOffsetSize<D>>>
+    where
+        D: Dimension<Vec<u64> = V>,
+        V: DimVec<u64, Dimension = D>,
+    {
+        let ext = NdIterExtBlockOffsetSize::<D>::new(begin, end, block_shape);
+        NdIterBuilder {
+            begin: self.begin,
+            end: self.end,
+            extensions: self.extensions.merge_extension(ext),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn build(self) -> NdIter<D, E> {
+        NdIter::new_with_begin(self.begin, self.end, self.extensions)
     }
 }
 
@@ -360,19 +541,20 @@ mod tests {
         }
     }
     impl NdIterExtension for ChangeLog {
-        type Item = usize; // number of on_increase/decrease calls so far when next() is called
+        type Item = usize; // number of on_increase/decrease calls so far when value() is called
         fn on_increase(&mut self, dim: usize, before: u64, after: u64, _diff: u64) {
             self.log.push((dim, before, after));
         }
         fn on_decrease(&mut self, dim: usize, before: u64, after: u64, _diff: u64) {
             self.log.push((dim, before, after));
         }
-        fn next(&self) -> usize {
+        fn value(&self) -> usize {
             self.log.len()
         }
         fn check_ndim(&self, _ndim: usize) -> bool {
             true
         }
+        impl_merge_extension!();
     }
 
     // ---------------------------------------------------------------------------
@@ -724,5 +906,110 @@ mod tests {
         while let Some((_, item)) = iter.next() {
             let _: () = item;
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // NdIterBuilder
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn builder_no_ext_matches_new() {
+        let via_builder = collect_indices(NdIter::builder(dv(&[2u64, 3])).build());
+        let via_new = collect_indices(NdIter::new(dv(&[2u64, 3]), ()));
+        assert_eq!(via_builder, via_new);
+    }
+
+    #[test]
+    fn builder_with_begin_no_ext_matches_new_with_begin() {
+        let via_builder =
+            collect_indices(NdIter::builder_with_begin(dv(&[1u64, 2]), dv(&[3u64, 4])).build());
+        let via_new = collect_indices(NdIter::new_with_begin(dv(&[1u64, 2]), dv(&[3u64, 4]), ()));
+        assert_eq!(via_builder, via_new);
+    }
+
+    #[test]
+    fn builder_single_ext_yields_bare_item() {
+        // A single extension appends onto `()`, so the item is the bare pointer (not a 1-tuple):
+        // `ptr` below binds directly to `*mut u8` with no tuple destructuring.
+        let mut data = [0u8; 6];
+        let base = data.as_mut_ptr();
+        let iter = NdIter::builder(dv(&[2u64, 3]))
+            .with_strides_ptr_mut_ext(dv(&[3usize, 1]), base)
+            .build();
+        let mut flat = 0usize;
+        for (_, ptr) in iter {
+            let _: *mut u8 = ptr;
+            assert_eq!(ptr, unsafe { base.add(flat) }, "step {flat}");
+            flat += 1;
+        }
+        assert_eq!(flat, 6);
+    }
+
+    #[test]
+    fn builder_two_exts_yield_flat_pair_in_call_order() {
+        let mut src = [0u8; 6];
+        let mut dst = [0u8; 12]; // dst has stride 2
+        let base_src = src.as_mut_ptr();
+        let base_dst = dst.as_mut_ptr();
+        let iter = NdIter::builder(dv(&[2u64, 3]))
+            .with_strides_ptr_ext(dv(&[3usize, 1]), base_src.cast_const())
+            .with_strides_ptr_mut_ext(dv(&[6usize, 2]), base_dst)
+            .build();
+        let mut flat = 0usize;
+        for (_, (sp, dp)) in iter {
+            let _: *const u8 = sp;
+            let _: *mut u8 = dp;
+            assert_eq!(sp, unsafe { base_src.add(flat) }, "src step {flat}");
+            assert_eq!(dp, unsafe { base_dst.add(flat * 2) }, "dst step {flat}");
+            flat += 1;
+        }
+        assert_eq!(flat, 6);
+    }
+
+    #[test]
+    fn builder_two_exts_match_manual_tuple() {
+        let a = [0u8; 6];
+        let mut b = [0u8; 6];
+        let base_a = a.as_ptr();
+        let base_b = b.as_mut_ptr();
+        // The same two extensions, once via the builder and once via a manual tuple constructor.
+        let built: Vec<(*const u8, *mut u8)> = NdIter::builder(dv(&[2u64, 3]))
+            .with_strides_ptr_ext(dv(&[3usize, 1]), base_a)
+            .with_strides_ptr_mut_ext(dv(&[3usize, 1]), base_b)
+            .build()
+            .map(|(_, pair)| pair)
+            .collect();
+        let manual: Vec<(*const u8, *mut u8)> = NdIter::new(
+            dv(&[2u64, 3]),
+            (
+                NdIterExtStridesPtr::new(dv(&[3usize, 1]), base_a),
+                NdIterExtStridesPtrMut::new(dv(&[3usize, 1]), base_b),
+            ),
+        )
+        .map(|(_, pair)| pair)
+        .collect();
+        assert_eq!(built, manual);
+    }
+
+    #[test]
+    fn builder_three_exts_yield_flat_triple() {
+        let mut a = [0u8; 4];
+        let mut b = [0u8; 4];
+        let mut c = [0u8; 4];
+        let iter = NdIter::builder(dv(&[4u64]))
+            .with_strides_ptr_mut_ext(dv(&[1usize]), a.as_mut_ptr())
+            .with_strides_ptr_mut_ext(dv(&[1usize]), b.as_mut_ptr())
+            .with_strides_ptr_mut_ext(dv(&[1usize]), c.as_mut_ptr())
+            .build();
+        let mut count = 0usize;
+        for (_, (pa, pb, pc)) in iter {
+            let off_a = unsafe { pa.offset_from(a.as_ptr()) };
+            let off_b = unsafe { pb.offset_from(b.as_ptr()) };
+            let off_c = unsafe { pc.offset_from(c.as_ptr()) };
+            assert_eq!(off_a, off_b, "step {count}: a vs b");
+            assert_eq!(off_a, off_c, "step {count}: a vs c");
+            count += 1;
+        }
+        assert_eq!(count, 4);
     }
 }

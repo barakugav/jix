@@ -346,7 +346,7 @@ where
                 index[dim].end - index[dim].start
             }
         });
-        let iter = NdIter::new(iteration_shape, ());
+        let iter = NdIter::builder(iteration_shape).build();
         for (idx, ()) in iter {
             let read_range = S::Dimension::vec(orig_ndim, |dim| {
                 if let Some(new_dim) = same_logical_stride_inv[dim] {

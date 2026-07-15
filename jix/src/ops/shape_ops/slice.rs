@@ -217,7 +217,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 out_shape[dim]
             }
         });
-        let iter = NdIter::new(iter_shape, ());
+        let iter = NdIter::builder(iter_shape).build();
         for (idx, ()) in iter {
             let inner_index = S::Dimension::vec(ndim, |dim| {
                 let ds = &self.slice[dim];

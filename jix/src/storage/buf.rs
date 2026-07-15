@@ -10,8 +10,8 @@ use crate::{default_strides_from_iter, Dimension, ReadContext, SliceExt};
 ///
 /// One of:
 /// - a caller-provided contiguous byte buffer ([`OutBuf::new`]),
-/// - a lazily-allocated pooled buffer ([`OutBuf::new_lazy`]),
-/// - a caller-provided *strided* byte buffer ([`OutBuf::new_strided`]) - a rectangular sub-region of some
+/// - a lazily-allocated pooled buffer (`OutBuf::new_lazy`),
+/// - a caller-provided *strided* byte buffer (`OutBuf::new_strided`) - a rectangular sub-region of some
 ///   larger destination, described by per-dimension byte strides.
 pub struct OutBuf<'a>(pub(crate) OutBufInner<'a>);
 

@@ -27,7 +27,7 @@
 //!   `S::ElementType`. This is either [`Ty<T>`] (the concrete scalar type `T` is known at
 //!   compile time) or [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk).
 //!
-//! - **[`Dimension`](crate::Dimension)** - the compile-time dimension, accessible via
+//! - **[`Dimension`]** - the compile-time dimension, accessible via
 //!   `S::Dimension`. Either [`Dim<N>`](crate::Dim) (known statically) or
 //!   [`DimDyn`](crate::DimDyn) (runtime only).
 //!
@@ -53,7 +53,6 @@ use crate::dtype::Dtyped;
 use crate::error::{check_buffer_aligned, check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
-use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::{
     array_from_fn_inline, assert_unchecked_eq, ArrayExt, ArrayStorage, Dimension, ElementType, Ty,
@@ -329,10 +328,9 @@ where
                 where
                     T: Dtyped,
                 {
-                    let iter = NdIter::new(
-                        read_shape,
-                        NdIterExtStridesPtrMut::new(strides, buf.as_mut_ptr()),
-                    );
+                    let iter = NdIter::builder(read_shape)
+                        .with_strides_ptr_mut_ext(strides, buf.as_mut_ptr())
+                        .build();
                     for (offset, (_, dst)) in iter.enumerate() {
                         let item = data.read_bulk::<1>(offset)[0];
                         unsafe { dst.cast::<T>().write(item) };

@@ -7,7 +7,6 @@ use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ens
 use crate::ops::common::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf};
-use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{NdIterExtStridesPtr, NdIterExtStridesPtrMut};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, cast_slice_mut, default_logical_strides, DimArray};
@@ -413,15 +412,13 @@ where
                 .all(|d| self.is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
             "non-reduced dim must produce at most one bulk-block",
         );
-        let bulk_iter = NdIter::new_with_begin(
-            bulk_grid_begin,
-            bulk_grid_end,
-            NdIterExtBlockOffsetSize::new(
+        let bulk_iter = NdIter::builder_with_begin(bulk_grid_begin, bulk_grid_end)
+            .with_block_offset_size_ext(
                 &S::Dimension::vec(inner_ndim, |dim| inner_range_full[dim].start),
                 &S::Dimension::vec(inner_ndim, |dim| inner_range_full[dim].end),
                 bulk_shape.clone(),
-            ),
-        );
+            )
+            .build();
 
         let state_in_out_buf = size_of::<K::State>() == size_of::<K::Output>()
             && align_of::<K::State>() <= align_of::<K::Output>();
@@ -469,15 +466,13 @@ where
                     .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
                 "reduced dim must produce at most one tile per bulk",
             );
-            let tile_iter = NdIter::new_with_begin(
-                tile_grid_begin,
-                tile_grid_end,
-                NdIterExtBlockOffsetSize::new(
+            let tile_iter = NdIter::builder_with_begin(tile_grid_begin, tile_grid_end)
+                .with_block_offset_size_ext(
                     &bulk_begin,
                     &bulk_end,
                     S::Dimension::vec(inner_ndim, |d| tile_shape[d]), // TODO: clone
-                ),
-            );
+                )
+                .build();
 
             for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
                 let tile = S::Dimension::vec(inner_ndim, |dim| {
@@ -558,19 +553,13 @@ where
                     .sum::<u64>();
                 let tile_state_base = unsafe { state_buf.as_mut_ptr().add(state_offset as usize) };
 
-                let mut out_iter = NdIter::new(
-                    tile_out_shape,
-                    (
-                        NdIterExtStridesPtr::new(
-                            items_buf_lstrides_for_out_iter,
-                            items_buf.as_ptr().cast::<S::Item>(),
-                        ),
-                        NdIterExtStridesPtrMut::new(
-                            default_logical_strides(&out_shape),
-                            tile_state_base,
-                        ),
-                    ),
-                );
+                let mut out_iter = NdIter::builder(tile_out_shape)
+                    .with_strides_ptr_ext(
+                        items_buf_lstrides_for_out_iter,
+                        items_buf.as_ptr().cast::<S::Item>(),
+                    )
+                    .with_strides_ptr_mut_ext(default_logical_strides(&out_shape), tile_state_base)
+                    .build();
                 // Main loop: `LANES_STATES` outputs at a time, one item per step (the integer add
                 // auto-vectorizes; a manual item-unroll here only spills). Tail: the remaining
                 // `< LANES_STATES` outputs one at a time, with the reduction dimension unrolled.
@@ -611,14 +600,11 @@ where
         // `out_ptr`. Dont use `state_buf`.
         let out_lstrides = default_logical_strides(&out_shape);
         if state_initialized {
-            let out_iter = NdIter::new(
-                out_shape,
-                (
-                    // CAREFUL: state_ptr and out_ptr may alias
-                    NdIterExtStridesPtrMut::new(state_lstrides, state_ptr),
-                    NdIterExtStridesPtrMut::new(out_lstrides, out_ptr),
-                ),
-            );
+            // CAREFUL: state_ptr and out_ptr may alias
+            let out_iter = NdIter::builder(out_shape)
+                .with_strides_ptr_mut_ext(state_lstrides, state_ptr)
+                .with_strides_ptr_mut_ext(out_lstrides, out_ptr)
+                .build();
             for (_idx, (state, out_ptr)) in out_iter {
                 // CAREFUL: state and out_ptr may alias
                 let res = {
@@ -629,10 +615,9 @@ where
             }
         } else {
             // Empty reduction: write the empty-stream result to every output.
-            let out_iter = NdIter::new(
-                out_shape,
-                NdIterExtStridesPtrMut::new(out_lstrides, out_ptr),
-            );
+            let out_iter = NdIter::builder(out_shape)
+                .with_strides_ptr_mut_ext(out_lstrides, out_ptr)
+                .build();
             debug_assert_eq!(reduction_size_overall, 0);
             for (_idx, out_ptr) in out_iter {
                 let state = self.kernel.init_state(None);

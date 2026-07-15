@@ -18,8 +18,6 @@ use crate::error::{check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ElementType, OutBuf};
-use crate::util::iter::block::NdIterExtBlockOffsetSize;
-use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, NdCopier};
 use crate::{default_strides_cast, ArrayParams, ArrayStorage, Dim, DimVec, Dimension};
@@ -432,23 +430,15 @@ where
         });
         let block_grid_shape =
             ActualD::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
-        let block_global_idx_ext = nd_iter_ext_logical_global_index::<ActualD>(
-            block_grid_shape.as_ref(),
-            block_begin.as_ref(),
-        );
 
-        let block_iter = NdIter::new_with_begin(
-            block_begin,
-            block_end,
-            (
-                block_global_idx_ext,
-                NdIterExtBlockOffsetSize::new(
-                    &ActualD::vec(ndim, |dim| index[dim].start),
-                    &ActualD::vec(ndim, |dim| index[dim].end),
-                    block_shape_u64.clone(),
-                ),
-            ),
-        );
+        let block_iter = NdIter::builder_with_begin(block_begin, block_end)
+            .with_logical_global_index_ext(block_grid_shape.as_ref())
+            .with_block_offset_size_ext(
+                &ActualD::vec(ndim, |dim| index[dim].start),
+                &ActualD::vec(ndim, |dim| index[dim].end),
+                block_shape_u64.clone(),
+            )
+            .build();
         for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
             self.blocks.read_block(block_global_id, tmp_buf, context)?;
 
