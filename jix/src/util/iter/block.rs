@@ -1,4 +1,4 @@
-use crate::util::iter::NdIterExtension;
+use crate::util::iter::{impl_merge_extension, NdIterExtension};
 use crate::{DimVec, Dimension};
 
 /// [`NdIterExtension`] that tracks the per-block inner offset and active size for each dimension
@@ -6,14 +6,14 @@ use crate::{DimVec, Dimension};
 ///
 /// # Usage
 ///
-/// 1. Create the extension with [`NdIterExtBlockOffsetSize::new`], passing the full array `shape`,
-///    the element-space `[begin, end)` range.
-/// 2. Compute the block-space iteration bounds from the same inputs:
+/// Append it via the builder's `with_block_offset_size_ext`, passing the element-space
+/// `[begin, end)` range and the `block_shape`. Iteration happens in block space, whose bounds are:
 ///    - `block_begin[d] = begin[d] / block_shape[d]`
 ///    - `block_end[d]   = end[d].div_ceil(block_shape[d])`
-/// 3. Pass both to [`NdIter::new_with_begin`].
 ///
-/// Each call to [`NdIter::next`] returns `(block_idx, (inner_offset, block_size))` where
+/// so start the builder with [`NdIter::builder_with_begin`] using those bounds.
+///
+/// Each iteration step yields `(block_idx, (inner_offset, block_size))` where
 /// `inner_offset` and `block_size` are per-dimension slices describing which elements of the
 /// current block fall inside the requested range. Interior blocks (fully covered) always have
 /// `inner_offset = 0` and `block_size = block_shape`; border blocks carry their partial values.
@@ -48,8 +48,7 @@ where
         V: DimVec<u64, Dimension = D>,
     {
         let ndim = begin.as_ref().len();
-        assert_eq!(ndim, end.as_ref().len());
-        assert_eq!(ndim, block_shape.as_ref().len());
+        assert!(ndim == end.as_ref().len() && ndim == block_shape.as_ref().len());
 
         let borders = D::vec(ndim, |dim| {
             assert!(begin[dim] <= end[dim]);
@@ -121,17 +120,19 @@ where
     }
 
     #[inline(always)]
-    fn next(&self) -> Self::Item {
+    fn value(&self) -> Self::Item {
         (self.inner_offset.clone(), self.current_block_size.clone())
     }
 
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.block_shape.as_ref().len(), ndim);
-        assert_eq!(self.borders.as_ref().len(), ndim);
-        assert_eq!(self.inner_offset.as_ref().len(), ndim);
-        assert_eq!(self.current_block_size.as_ref().len(), ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.block_shape.as_ref().len() == ndim
+            && self.borders.as_ref().len() == ndim
+            && self.inner_offset.as_ref().len() == ndim
+            && self.current_block_size.as_ref().len() == ndim
     }
+
+    impl_merge_extension!();
 }
 
 #[cfg(test)]

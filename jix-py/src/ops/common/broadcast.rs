@@ -58,11 +58,13 @@ fn broadcast_operand(operand: Operand, shape: &[u64]) -> Result<Operand, jix_cor
             value,
             precision,
             shape: _,
+            params,
         } => {
             return Ok(Operand::Scalar {
                 value,
                 precision,
                 shape: shape.try_into().unwrap(),
+                params,
             });
         }
     };

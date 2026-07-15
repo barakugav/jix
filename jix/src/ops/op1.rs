@@ -989,22 +989,53 @@ pub(crate) mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
 
+    use proptest::strategy::BoxedStrategy;
+    use proptest::test_runner::{Config, TestRunner};
+
+    /// Shared proptest driver for unary-op tests.
+    ///
+    /// Generic over the dtype only, with the op passed as a fn pointer, to avoid per-op
+    /// monomorphization.
+    #[inline(never)]
+    pub(crate) fn check_op1<T>(
+        strategy: BoxedStrategy<T>,
+        check: fn(
+            &ndarray::ArrayD<T>,
+            crate::Array<crate::storage::Compact<crate::Ty<T>, crate::DimDyn>>,
+        ),
+    ) where
+        T: crate::util::ScalarStrategy + std::fmt::Debug,
+    {
+        let mut runner = TestRunner::new(Config::default());
+        runner
+            .run(
+                &crate::util::carray_strategy_from_shape::<T>(
+                    crate::util::shape_strategy(),
+                    strategy,
+                ),
+                |(nd, za)| {
+                    check(&nd, za);
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
+
     macro_rules! test_op1_dtype {
         ($op_method:ident, |$arg:ident| $body:expr, $dtype:ident, $strategy:ident) => {
             paste::paste! {
-                proptest::proptest! {
-                    #[test]
-                    fn [<$op_method _ $dtype>](
-                        (nd, za) in crate::util::carray_strategy_from_shape::<$dtype>(
-                            crate::util::shape_strategy(),
-                            <$dtype as crate::util::ScalarStrategy>::$strategy()
-                        )
-                    ) {
-                        #[allow(unused_imports)] use std::ops::Neg;
-                        let result = za.$op_method();
-                        let expected = nd.mapv(|$arg| $body);
-                        crate::util::assert_array_matches(&result, &expected);
-                    }
+                #[test]
+                fn [<$op_method _ $dtype>]() {
+                    crate::ops::op1::tests::check_op1::<$dtype>(
+                        <$dtype as crate::util::ScalarStrategy>::$strategy(),
+                        |nd, za| {
+                            #[allow(unused_imports)]
+                            use std::ops::Neg;
+                            let result = za.$op_method();
+                            let expected = nd.mapv(|$arg| $body);
+                            crate::util::assert_array_matches(&result, &expected);
+                        },
+                    );
                 }
             }
         };

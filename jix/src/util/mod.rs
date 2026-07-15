@@ -160,8 +160,7 @@ where
 {
     let (ptr, len) = (slice.as_ptr().cast::<U>(), slice.len());
     let len_bytes = len * size_of::<T>();
-    assert!(ptr.is_aligned());
-    assert!(size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
+    assert!(ptr.is_aligned() && size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
     unsafe { std::slice::from_raw_parts(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
 #[inline(always)]
@@ -172,8 +171,7 @@ where
 {
     let (ptr, len) = (slice.as_mut_ptr().cast::<U>(), slice.len());
     let len_bytes = len * size_of::<T>();
-    assert!(ptr.is_aligned());
-    assert!(size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
+    assert!(ptr.is_aligned() && size_of::<U>() > 0 && len_bytes.is_multiple_of(size_of::<U>()));
     unsafe { std::slice::from_raw_parts_mut(ptr.cast::<U>(), len_bytes / size_of::<U>()) }
 }
 
@@ -193,6 +191,9 @@ pub(crate) trait IterExt: Iterator {
         Self: Sized,
         D: Dimension,
     {
+        let (sz_low, sz_high) = self.size_hint();
+        assert!(sz_low <= size && sz_high.is_none_or(|h| size <= h));
+
         let v = D::vec(size, |_| self.next().unwrap());
         assert!(self.next().is_none());
         v

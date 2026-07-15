@@ -4,11 +4,9 @@
 - compress offsets array
 - buf-break workflow
 - consider block shape tag in scale_read_shape
-- optimize shuffle filter
 - delegate power to square/sqrt if exponent is 2/0.5
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
 - use multiple threads for reads
 - ArrayParams stream syntax
 - resolve TODOs across the repo
-- hold D::Vec in ops
-- union asserts
+- solve miri UB in nd_copy, zero size slice trick is not accepted

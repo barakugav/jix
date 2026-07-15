@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
 
-use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
@@ -355,6 +355,20 @@ impl Array {
         }
 
         let ndim = arr_shape.len();
+        if index.len() != ndim {
+            return Err(PyIndexError::new_err(format!(
+                "index has {} dimensions, but array has {ndim}",
+                index.len()
+            )));
+        }
+        for (dim, r) in index.iter().enumerate() {
+            if r.start > r.end || r.end > arr_shape[dim] {
+                return Err(PyIndexError::new_err(format!(
+                    "index {r:?} is out of bounds for axis {dim} with size {}",
+                    arr_shape[dim]
+                )));
+            }
+        }
         let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
         let itemsize = self.arr.dtype().itemsize() as usize;
 
@@ -1239,7 +1253,7 @@ pub fn compact<'py>(
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
-    let mut array = crate::asarray(array)?;
+    let mut array = crate::asarray(array, params.clone())?;
     let params = resolve_array_params(py, params)?;
 
     if let Some(dtype) = dtype {
@@ -1269,13 +1283,16 @@ pub(crate) fn resolve_array_params(
                 ($key:expr, $ty:ty) => {
                     kwargs
                         .remove($key)
-                        .map(|v| {
-                            v.bind(py).extract::<$ty>().map_err(|e| {
-                                PyTypeError::new_err(format!(
-                                    "{} must be of type {}: {e}",
-                                    $key,
-                                    stringify!($ty)
-                                ))
+                        .and_then(|v| {
+                            let v = v.bind(py);
+                            (!v.is_none()).then(|| {
+                                v.extract::<$ty>().map_err(|e| {
+                                    PyTypeError::new_err(format!(
+                                        "{} must be of type {}: {e}",
+                                        $key,
+                                        stringify!($ty)
+                                    ))
+                                })
                             })
                         })
                         .transpose()

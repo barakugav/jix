@@ -18,10 +18,8 @@ use crate::error::{check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ElementType, OutBuf};
-use crate::util::iter::block::NdIterExtBlockOffsetSize;
-use crate::util::iter::strides::nd_iter_ext_logical_global_index;
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, default_strides, dim_arr, DimArray, NdCopier};
+use crate::util::{calc_block_end, default_strides, NdCopier};
 use crate::{default_strides_cast, ArrayParams, ArrayStorage, Dim, DimVec, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
@@ -158,9 +156,6 @@ macro_rules! impl_array_storage {
                 Some(CompactBorrowed(ArrayBlockTableStorageBase {
                     blocks: self.0.blocks.as_ref(),
                     shape: self.0.shape.clone(),
-
-                    block_grid_shape: <_ as Clone>::clone(&self.0.block_grid_shape),
-
                     spec: self.0.spec.clone(),
                 }))
             }
@@ -204,9 +199,6 @@ where
     pub(crate) blocks: BlockTable<S, ET>,
     shape: D,
 
-    /// Number of blocks per dimension: `ceil(shape[d] / block_shape[d])`.
-    block_grid_shape: DimArray<u64>,
-
     spec: ArraySpecOwned,
 }
 impl<S, ET, D> ArrayBlockTableStorageBase<S, ET, D>
@@ -223,20 +215,14 @@ where
         D: Dimension,
     {
         let shape_slice = shape.as_slice();
-        let ndim = shape_slice.len();
         let spec = params.into_spec(
             shape_slice,
             blocks.dtype(),
             ArraySpecFlags::new().set_compact(),
         )?;
-        let block_shape = spec.as_ref().block_shape();
-        let block_grid_shape = dim_arr(ndim, |dim| {
-            shape_slice[dim].div_ceil(block_shape[dim] as u64)
-        });
         Ok(Self {
             blocks,
             shape,
-            block_grid_shape,
             spec,
         })
     }
@@ -331,7 +317,8 @@ where
         // Row-major-flattened 1D block index
         let single_block_idx = is_single_block.then(|| {
             (0..ndim).fold(0u64, |blk_idx, dim| {
-                blk_idx * self.block_grid_shape[dim] + b_range[dim].start
+                let block_grid_len = shape[dim].div_ceil(block_shape[dim] as u64);
+                blk_idx * block_grid_len + b_range[dim].start
             })
         });
 
@@ -441,23 +428,17 @@ where
         let block_end = ActualD::vec(ndim, |dim| {
             calc_block_end(index[dim].start, index[dim].end, block_shape_u64[dim])
         });
-        let block_global_idx_ext = nd_iter_ext_logical_global_index::<ActualD>(
-            &self.block_grid_shape,
-            block_begin.as_ref(),
-        );
+        let block_grid_shape =
+            ActualD::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
 
-        let block_iter = NdIter::new_with_begin(
-            block_begin,
-            block_end,
-            (
-                block_global_idx_ext,
-                NdIterExtBlockOffsetSize::new(
-                    &ActualD::vec(ndim, |dim| index[dim].start),
-                    &ActualD::vec(ndim, |dim| index[dim].end),
-                    block_shape_u64.clone(),
-                ),
-            ),
-        );
+        let block_iter = NdIter::builder_with_begin(block_begin, block_end)
+            .with_logical_global_index_ext(block_grid_shape.as_ref())
+            .with_block_offset_size_ext(
+                &ActualD::vec(ndim, |dim| index[dim].start),
+                &ActualD::vec(ndim, |dim| index[dim].end),
+                block_shape_u64.clone(),
+            )
+            .build();
         for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
             self.blocks.read_block(block_global_id, tmp_buf, context)?;
 
@@ -502,7 +483,6 @@ where
         Ok(ArrayBlockTableStorageBase {
             blocks: self.blocks.element_type_change()?,
             shape: self.shape,
-            block_grid_shape: self.block_grid_shape,
             spec: self.spec,
         })
     }
@@ -519,7 +499,6 @@ where
         Ok(ArrayBlockTableStorageBase {
             blocks: self.blocks,
             shape,
-            block_grid_shape: self.block_grid_shape,
             spec: self.spec,
         })
     }

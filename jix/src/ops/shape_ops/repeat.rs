@@ -2,9 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{
-    check_get_range, check_ndim, check_shape_overflow, ensure, Error, ErrorKind, Result,
-};
+use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
 use crate::util::calc_block_end;
@@ -61,12 +59,11 @@ impl<S: ArrayStorage> Repeat<S> {
         );
 
         let new_len = input_shape[axis].checked_mul(repeats).ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidShapeOperation,
-                format!(
-                    "repeat overflow: shape[{axis}] ({}) * repeats ({}) exceeds u64",
-                    input_shape[axis], repeats,
-                ),
+            error!(
+                InvalidShapeOperation,
+                "repeat overflow: shape[{axis}] ({}) * repeats ({}) exceeds u64",
+                input_shape[axis],
+                repeats,
             )
         })?;
 

@@ -65,7 +65,7 @@ use crate::{Array, ArrayStorage, Dimension};
 pub struct Slice<S: ArrayStorage> {
     array: S,
     /// Resolved slice for each dimension.
-    slice: DimArray<DimSlice>,
+    slice: <S::Dimension as Dimension>::Vec<DimSlice>,
     /// `true` when every dimension has `step == 1`. Enables a cheaper read path.
     no_steps: bool,
 
@@ -91,6 +91,7 @@ impl<S: ArrayStorage> Slice<S> {
         })?;
         let no_steps = slice.iter().all(|ds| ds.is_contiguous());
 
+        let slice = S::Dimension::vec(ndim, |dim| slice[dim].clone());
         let shape = S::Dimension::from_fn(ndim, |dim| slice[dim].len());
 
         let inner_spec = array.spec();
@@ -155,8 +156,8 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // Each requested output range [a, b) for dim maps to inner range
         // [start + a, start + b). A single forwarded call suffices.
         // -----------------------------------------------------------------------
+        let ndim = self.slice.as_ref().len();
         if self.no_steps {
-            let ndim = self.slice.len();
             let inner_index = S::Dimension::vec(ndim, |dim| {
                 let off = self.slice[dim].start;
                 (index[dim].start + off)..(index[dim].end + off)
@@ -199,7 +200,6 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // copy. `dst_byte_offset` places the single strided-dim step at the right row/column.
         // -----------------------------------------------------------------------
         let dtype = self.dtype();
-        let ndim = self.slice.len();
         let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
         if out_shape.as_ref().contains(&0) {
             buf.materialize(0, dtype);
@@ -217,7 +217,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 out_shape[dim]
             }
         });
-        let iter = NdIter::new(iter_shape, ());
+        let iter = NdIter::builder(iter_shape).build();
         for (idx, ()) in iter {
             let inner_index = S::Dimension::vec(ndim, |dim| {
                 let ds = &self.slice[dim];
@@ -264,11 +264,13 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     fn dimension_change<NewD: crate::Dimension>(
         self,
     ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        check_ndim::<NewD>(self.shape().len())?;
+        let ndim = self.shape().len();
+        check_ndim::<NewD>(ndim)?;
         let shape = NewD::from_slice(self.shape());
+        let slice = NewD::vec(ndim, |dim| self.slice[dim].clone());
         Ok(Slice {
             array: self.array.dimension_change()?,
-            slice: self.slice,
+            slice,
             no_steps: self.no_steps,
             shape,
             spec: self.spec,

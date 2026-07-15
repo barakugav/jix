@@ -6,7 +6,7 @@ use crate::archive::common::{ArchiveReader, ArchiveWriter, Section};
 use crate::archive::schema;
 use crate::codec::{Codec, DecoderCodecConfig, Filter, MAX_FILTERS};
 use crate::dtype::Dtype;
-use crate::error::{bail, ensure, Error, ErrorKind, Result};
+use crate::error::{bail, ensure, error, Error, Result};
 use crate::storage::block::{
     BlockLocation2, BlockSize, BlockTable, BlockTableBuilder, BlockTableStorage, Mmap, MmapData,
     Owned,
@@ -327,12 +327,10 @@ where
         let header = reader
             .read_message::<schema::BlockTableHeader>()
             .map_err(Error::io)?;
-        let codec = header.codec.and_then(|c| c.kind).ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidArchive,
-                "unknown or missing codec in header",
-            )
-        })?;
+        let codec = header
+            .codec
+            .and_then(|c| c.kind)
+            .ok_or_else(|| error!(InvalidArchive, "unknown or missing codec in header"))?;
         let codec = match codec {
             schema::codec::Kind::Zstd(()) => Codec::Zstd,
         };
@@ -349,10 +347,7 @@ where
                     Some(schema::filter::Kind::ByteShuffle(())) => Filter::ByteShuffle,
                     Some(schema::filter::Kind::BitShuffle(())) => Filter::BitShuffle,
                     None => {
-                        return Err(Error::new(
-                            ErrorKind::InvalidArchive,
-                            "unknown filter in header",
-                        ));
+                        bail!(InvalidArchive, "unknown filter in header");
                     }
                 })
             })

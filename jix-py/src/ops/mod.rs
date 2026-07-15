@@ -88,7 +88,7 @@ pub fn astype<'py>(
     array: &Bound<'py, PyAny>,
     dtype: &Bound<'_, PyAny>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = crate::ops::asarray(array)?;
+    let py_arr = crate::ops::asarray(array, None)?;
     let array = &py_arr.get().arr;
     let np_dtype = &PyArrayDescr::new(dtype.py(), dtype)?;
     let dtype = dtype_from_numpy(np_dtype)?;

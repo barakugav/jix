@@ -173,14 +173,14 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dt
             .map_err(|e| PyValueError::new_err(format!("Unsupported struct dtype: {e}")))?
     };
 
-    assert_eq!(dtype.itemsize() as usize, numpy_dtype.itemsize());
-    assert_eq!(dtype.alignment().as_usize(), numpy_dtype.alignment());
-    assert_eq!(
+    debug_assert_eq!(dtype.itemsize() as usize, numpy_dtype.itemsize());
+    debug_assert_eq!(dtype.alignment().as_usize(), numpy_dtype.alignment());
+    debug_assert_eq!(
         dtype.is_aligned() && dtype.fields().is_some(),
         numpy_dtype.is_aligned_struct()
     );
-    assert_eq!(dtype.shape().len(), shape.len());
-    assert!(dtype.shape().iter().zip(shape.iter()).all(|(a, b)| a == b));
+    debug_assert_eq!(dtype.shape().len(), shape.len());
+    debug_assert!(dtype.shape().iter().zip(shape.iter()).all(|(a, b)| a == b));
     Ok(dtype)
 }
 

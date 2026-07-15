@@ -62,7 +62,7 @@ pub fn broadcast<'py>(
     array: &Bound<'py, PyAny>,
     shape: ItemOrSequence<i64>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let array = &py_arr.get().arr;
     let old_shape = array.shape();
@@ -168,7 +168,7 @@ pub fn slice<'py>(
     array: &Bound<'py, PyAny>,
     index: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let arr = py_arr.get().to_core();
     let parsed = parse_basic_index(arr.shape(), Some(index))?;
@@ -397,7 +397,7 @@ pub fn insert_axis<'py>(
     array: &Bound<'py, PyAny>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
     if axis.is_empty() {
@@ -495,7 +495,7 @@ pub fn remove_axis<'py>(
     array: &Bound<'py, PyAny>,
     axis: ItemOrSequence<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
     let axes = normalize_axes(&axis.into_dim_array()?, array.ndim())?;
@@ -544,7 +544,7 @@ pub fn squeeze<'py>(
     array: &Bound<'py, PyAny>,
     axis: Option<ItemOrSequence<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let axis = axis.unwrap_or_else(|| {
         ItemOrSequence::Sequence(
             py_arr
@@ -606,7 +606,7 @@ pub fn permute_axes<'py>(
     array: &Bound<'py, PyAny>,
     axes: Option<Vec<usize>>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
     let axes = axes.unwrap_or_else(|| (0..array.ndim()).rev().collect());
@@ -669,7 +669,7 @@ pub fn reshape<'py>(
     shape: ItemOrSequence<i64>,
 ) -> PyResult<Bound<'py, Array>> {
     let new_shape = shape;
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let array = &py_arr.get().arr;
 
@@ -750,7 +750,7 @@ pub fn reshape<'py>(
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
 pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let size = py_arr.get().arr.shape().iter().product::<u64>();
     reshape(&py_arr, ItemOrSequence::Item(size as i64))
 }
@@ -794,14 +794,11 @@ pub fn flatten<'py>(array: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
 ///     ```
 #[pyo3_stub_gen::derive::gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (
-    arrays,
-    axis=0,
-))]
+#[pyo3(signature = (arrays, axis=0))]
 pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Bound<'py, Array>> {
     let py_arrays = arrays
         .iter()
-        .map(|arr| asarray(arr))
+        .map(|arr| asarray(arr, None))
         .collect::<Result<Vec<_>, _>>()?;
     let arrays = py_arrays
         .iter()
@@ -882,7 +879,7 @@ pub fn concatenate<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<B
 pub fn stack<'py>(arrays: Vec<Bound<'py, PyAny>>, axis: i32) -> PyResult<Array> {
     let py_arrays = arrays
         .into_iter()
-        .map(|arr| asarray(&arr))
+        .map(|arr| asarray(&arr, None))
         .collect::<Result<Vec<_>, _>>()?;
     let arrays = py_arrays
         .iter()
@@ -972,7 +969,7 @@ pub fn repeat<'py>(
     repeats: u64,
     axis: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
     let axis = normalize_axis_optional(axis, array.ndim())?;
@@ -1036,7 +1033,7 @@ pub fn flip<'py>(
     array: &Bound<'py, PyAny>,
     axis: Option<ItemOrSequence<i32>>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let array = py_arr.get().to_core();
     let ndim = array.ndim();
@@ -1100,7 +1097,7 @@ pub fn roll<'py>(
     shift: i64,
     axis: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let core = py_arr.get().to_core();
     let axis = normalize_axis_optional(axis, core.ndim())?;
@@ -1171,7 +1168,7 @@ pub fn tile<'py>(
     repeats: u64,
     axis: Option<i32>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = asarray(array)?;
+    let py_arr = asarray(array, None)?;
     let py = py_arr.py();
     let core = py_arr.get().to_core();
     let axis = normalize_axis_optional(axis, core.ndim())?;

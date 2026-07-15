@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::hint::assert_unchecked;
 use std::ops::{Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
-use crate::error::{check_ndim, Result};
+use crate::error::{assert_dim, check_ndim, Result};
 
 /// Maximum number of dimensions supported by the library for an array.
 pub const NDIM_MAX: usize = 8;
@@ -218,11 +218,8 @@ impl Dimension for DimDyn {
 
     #[inline(always)]
     fn from_fn(ndim: usize, f: impl FnMut(usize) -> u64) -> Self {
-        assert!(
-            ndim <= NDIM_MAX,
-            "cannot create DimDyn with ndim {ndim}: exceeds NDIM_MAX ({NDIM_MAX})"
-        );
-        Self(dim_arr(ndim, f))
+        assert_dim::<Self>(ndim);
+        Self(Self::vec(ndim, f))
     }
 
     #[inline(always)]
@@ -352,12 +349,7 @@ macro_rules! impl_dim {
 
             #[inline(always)]
             fn vec<T>(ndim: usize, f: impl FnMut(usize) -> T) -> Self::Vec<T> {
-                // TODO
-                assert_eq!(
-                    ndim, $dim,
-                    "cannot create Dim<{}> with ndim {ndim}",
-                    $dim
-                );
+                assert_dim::<Self>(ndim);
                 crate::array_from_fn_inline(f)
             }
         }
@@ -581,8 +573,7 @@ impl IntoDimension for ndarray::IxDyn {
         let dim = <Self as ndarray::Dimension>::as_array_view(&self);
         let dim = dim.as_slice().unwrap();
         check_ndim::<DimDyn>(dim.len())?;
-        let dim = dim_arr(dim.len(), |i| dim[i] as u64);
-        Ok(DimDyn::from_slice(&dim))
+        Ok(DimDyn::from_fn(dim.len(), |i| dim[i] as u64))
     }
 }
 

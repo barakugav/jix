@@ -408,7 +408,7 @@ pub fn clamp<'py>(
     max: Option<&Bound<'py, PyAny>>,
 ) -> pyo3::PyResult<Bound<'py, crate::Array>> {
     if min.is_none() && max.is_none() {
-        return asarray(array);
+        return asarray(array, None);
     }
     let py = array.py();
 

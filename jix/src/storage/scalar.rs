@@ -7,9 +7,8 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArraySpec, ArrayStorage, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData, Ty,
 };
-use crate::util::iter::strides::NdIterExtStridesPtrMut;
+use crate::util::cast_slice_mut;
 use crate::util::iter::NdIter;
-use crate::util::{cast_slice_mut, dim_arr};
 use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
@@ -24,13 +23,13 @@ use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
 /// # Examples
 ///
 /// ```
-/// use jix::Array;
+/// use jix::{Array, ArrayParams};
 /// # use jix::__private::Scalar;
 /// use ndarray::array;
 ///
 /// let arr = Array::compact_ndarray(&array![[1.0f32, 2.0], [3.0, 4.0]])?;
 ///
-/// let scalar_arr = Array::from_storage(Scalar::new(5.0f32, &[2, 2])?);
+/// let scalar_arr = Array::from_storage(Scalar::new(5.0f32, &[2, 2], ArrayParams::default())?);
 /// let result = (arr * scalar_arr).to_ndarray()?;
 /// assert_eq!(result, array![[5.0f32, 10.0], [15.0, 20.0]]);
 /// # Ok::<(), jix::Error>(())
@@ -51,7 +50,7 @@ impl<T, D> Scalar<T, D> {
     ///
     /// Returns an error if `shape.len()` exceeds the maximum supported number
     /// of dimensions.
-    pub fn new<Sh>(data: T, shape: Sh) -> Result<Self>
+    pub fn new<Sh>(data: T, shape: Sh, mut params: ArrayParams) -> Result<Self>
     where
         T: Dtyped,
         D: Dimension,
@@ -60,14 +59,12 @@ impl<T, D> Scalar<T, D> {
         let shape = shape.into_dimension()?;
         let ndim = shape.ndim();
 
-        let params = ArrayParams {
-            block_shape: Some(dim_arr(ndim, |_| 1)),
-            block_shape_tag: Some(dim_arr(ndim, |_| BlockShapeTag::Any)),
-            block_size: None,
-            read_size: None,
-            encoder_params: None,
-            decoder_params: None,
-        };
+        if params.block_shape_tag.is_none() {
+            params.block_shape_tag(D::vec(ndim, |_| BlockShapeTag::Any).as_ref());
+            if params.block_shape.is_none() {
+                params.block_shape(D::vec(ndim, |_| 1).as_ref());
+            }
+        }
         let spec = params.into_spec(
             shape.as_slice(),
             &T::DTYPE,
@@ -120,10 +117,9 @@ where
             Some(strides) => {
                 let strides = D::vec(index.len(), |d| strides[d]);
                 let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
-                let iter = NdIter::new(
-                    read_shape,
-                    NdIterExtStridesPtrMut::new(strides, buf.as_mut_ptr()),
-                );
+                let iter = NdIter::builder(read_shape)
+                    .with_strides_ptr_mut_ext(strides, buf.as_mut_ptr())
+                    .build();
                 for (_, dst) in iter {
                     unsafe { dst.cast::<T>().write(self.data) };
                 }
@@ -215,14 +211,18 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::dtype::Dtyped;
     use crate::error::Result;
-    use crate::{Array, IntoDimension};
+    use crate::{Array, ArrayParams, IntoDimension};
 
     pub fn plain_scalar<T, Sh>(value: T, shape: Sh) -> Result<Array<Scalar<T, Sh::Dimension>>>
     where
         T: Dtyped,
         Sh: IntoDimension,
     {
-        Ok(Array::from_storage(Scalar::new(value, shape)?))
+        Ok(Array::from_storage(Scalar::new(
+            value,
+            shape,
+            ArrayParams::default(),
+        )?))
     }
 
     // -----------------------------------------------------------------------

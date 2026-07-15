@@ -12,8 +12,6 @@ use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageInfo, ArrayStorageTyped, BlockSize,
     Compact, OutBuf, Ref,
 };
-use crate::util::iter::block::NdIterExtBlockOffsetSize;
-use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, calc_block_end, cast_slice_mut, scale_read_shape, AlignedBytes, IterExt,
@@ -458,10 +456,9 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
                 let (out_buf, out_strides) = buf.get_strided_mut::<D>(index, self.dtype());
 
-                let iter = NdIter::new(
-                    read_shape,
-                    NdIterExtStridesPtrMut::new(out_strides, out_buf.as_mut_ptr()),
-                );
+                let iter = NdIter::builder(read_shape)
+                    .with_strides_ptr_mut_ext(out_strides, out_buf.as_mut_ptr())
+                    .build();
                 for (idx, dst) in iter {
                     let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
                     unsafe { dst.cast::<T>().write(value) };
@@ -836,15 +833,13 @@ impl<S: ArrayStorage> Array<S> {
             calc_block_end(index[dim].start, index[dim].end, read_shape[dim])
         });
         // NdIter that yields blocks of size <= read_shape
-        let block_iter = NdIter::new_with_begin(
-            block_begin,
-            block_end,
-            NdIterExtBlockOffsetSize::new(
+        let block_iter = NdIter::builder_with_begin(block_begin, block_end)
+            .with_block_offset_size_ext(
                 &S::Dimension::vec(ndim, |dim| index[dim].start),
                 &S::Dimension::vec(ndim, |dim| index[dim].end),
                 S::Dimension::vec(ndim, |dim| read_shape[dim]), // TODO: clone
-            ),
-        );
+            )
+            .build();
 
         let itemsize = dtype.itemsize() as usize;
         let out_strides = default_strides_cast(&out_shape, itemsize);
@@ -1071,14 +1066,13 @@ impl<S: ArrayStorage> Array<S> {
 
         // Outer loop over chunks. The extension yields each chunk's active element extent, clamped
         // to the array at the high boundary.
-        let chunk_iter = NdIter::new(
-            chunk_grid_shape,
-            NdIterExtBlockOffsetSize::new(
+        let chunk_iter = NdIter::builder(chunk_grid_shape)
+            .with_block_offset_size_ext(
                 &S::Dimension::vec(ndim, |_| 0),
                 &S::Dimension::vec(ndim, |dim| shape[dim]),
                 chunk_shape.clone(),
-            ),
-        );
+            )
+            .build();
         for (chunk_idx, (chunk_inner_offset, chunk_size)) in chunk_iter {
             debug_assert!(chunk_inner_offset.as_ref().iter().all(|&off| off == 0));
             let read_range = S::Dimension::vec(ndim, |dim| {
@@ -1100,16 +1094,15 @@ impl<S: ArrayStorage> Array<S> {
                 .sum::<u64>();
 
             // Inner loop over the target blocks within the chunk.
-            let block_iter = NdIter::new(
-                S::Dimension::vec(ndim, |dim| {
-                    chunk_size[dim].div_ceil(block_shape[dim] as u64)
-                }),
-                NdIterExtBlockOffsetSize::new(
-                    &S::Dimension::vec(ndim, |_| 0),
-                    &chunk_size,
-                    S::Dimension::vec(ndim, |dim| block_shape[dim] as u64),
-                ),
-            );
+            let block_iter = NdIter::builder(S::Dimension::vec(ndim, |dim| {
+                chunk_size[dim].div_ceil(block_shape[dim] as u64)
+            }))
+            .with_block_offset_size_ext(
+                &S::Dimension::vec(ndim, |_| 0),
+                &chunk_size,
+                S::Dimension::vec(ndim, |dim| block_shape[dim] as u64),
+            )
+            .build();
             for (block_in_chunk_idx, (block_inner_offset, block_active_size)) in block_iter {
                 debug_assert!(block_inner_offset.as_ref().iter().all(|&off| off == 0));
                 // Logical (C-order) index of this block in the full grid.

@@ -10,7 +10,7 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype};
-use crate::error::{ensure, Error, ErrorKind, Result};
+use crate::error::{ensure, error, Result};
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;
 use crate::util::{AlignedBytes, AlternatingBuffers};
@@ -124,12 +124,8 @@ impl Encoder {
             compressor: match params.codec {
                 Codec::Zstd => {
                     #[cfg(not(miri))]
-                    let inner = zstd::bulk::Compressor::new(params.level as i32).map_err(|e| {
-                        Error::new(
-                            ErrorKind::CodecError,
-                            format!("Failed to create Zstd compressor: {e}"),
-                        )
-                    })?;
+                    let inner = zstd::bulk::Compressor::new(params.level as i32)
+                        .map_err(|e| error!(CodecError, "Failed to create Zstd compressor: {e}"))?;
                     #[cfg(miri)]
                     let inner = ();
                     Compressor::Zstd(inner)
@@ -175,12 +171,9 @@ impl Encoder {
         match &mut self.compressor {
             Compressor::Zstd(compressor) => {
                 #[cfg(not(miri))]
-                let result = compressor.compress_to_buffer(data, dst).map_err(|e| {
-                    Error::new(
-                        ErrorKind::CodecError,
-                        format!("Failed to compress data with Zstd: {e}"),
-                    )
-                });
+                let result = compressor
+                    .compress_to_buffer(data, dst)
+                    .map_err(|e| error!(CodecError, "Failed to compress data with Zstd: {e}"));
                 #[cfg(miri)]
                 let result = {
                     let _ = compressor;
@@ -266,16 +259,13 @@ impl<'a> Decoder<'a> {
 
     pub(crate) fn decode(&self, src: &[u8], dst: &mut [u8]) -> Result<usize> {
         let mut buffers = None;
+        let mut tmp_buf;
         let decompress_out = if self.filters.is_empty() {
             dst
         } else {
-            let tmp_buf = unsafe { &mut *self.context.filters_tmp_buf.get() };
-            tmp_buf.clear();
-            tmp_buf.reserve(dst.len());
-            unsafe {
-                #[allow(clippy::uninit_vec)]
-                tmp_buf.set_len(dst.len())
-            };
+            tmp_buf = self
+                .context
+                .tmp_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap());
             let tmp_buf = tmp_buf.as_mut_slice();
 
             let dst_ptr = dst.as_mut_ptr();
@@ -303,12 +293,7 @@ impl<'a> Decoder<'a> {
             let inner = unsafe { &mut *self.inner.get() };
             inner
                 .decompress_to_buffer(src, decompress_out)
-                .map_err(|e| {
-                    Error::new(
-                        ErrorKind::CodecError,
-                        format!("Failed to decompress data with Zstd: {e}"),
-                    )
-                })?
+                .map_err(|e| error!(CodecError, "Failed to decompress data with Zstd: {e}"))?
         };
         #[cfg(miri)]
         let nbytes = {
@@ -319,7 +304,6 @@ impl<'a> Decoder<'a> {
         // Apply filters in reverse order
         for filter in self.filters.iter().rev() {
             let (data, buf) = buffers.as_mut().unwrap().edit();
-            assert_eq!(data.len(), buf.len());
             filter.decode(data, buf, self.dtype, &self.context.tmp_buffers);
         }
 
@@ -374,7 +358,6 @@ impl<'a> Decoder<'a> {
 /// reinitializing the decompressor and keeps the scratch buffer allocations warm:
 pub struct ReadContext {
     tmp_buffers: TmpBufferPool,
-    filters_tmp_buf: UnsafeCell<AlignedBytes>,
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
 }
@@ -386,7 +369,6 @@ impl ReadContext {
     pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         Ok(Self {
             tmp_buffers: TmpBufferPool::new(),
-            filters_tmp_buf: UnsafeCell::new(AlignedBytes::new_exact(CACHE_LINE_SIZE)),
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
         })

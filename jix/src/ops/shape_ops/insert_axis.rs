@@ -7,7 +7,7 @@ use crate::ops::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData};
 use crate::util::DimArray;
-use crate::{dim_arr, Array, ArrayStorage, Dimension};
+use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
 /// returned by [`Array::insert_axis`](crate::Array::insert_axis). The inverse operation
@@ -78,9 +78,9 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// assert_eq!(a.as_ref().insert_axis([0, 0, 1, 1]).shape(), &[1, 1, 3, 1, 1]);
 /// # Ok::<(), jix::Error>(())
 /// ```
-pub struct InsertAxis<S, D> {
+pub struct InsertAxis<S: ArrayStorage, D> {
     array: S,
-    original_dims: DimArray<u8>,
+    original_dims: <S::Dimension as Dimension>::Vec<u8>,
 
     shape: D,
     spec: ArraySpecDynamic,
@@ -132,7 +132,7 @@ where
             .into_iter()
             .enumerate()
             .filter_map(|(dim, inserted)| (!inserted).then_some(dim as u8))
-            .collect();
+            .collect_dim_vec::<S::Dimension>(array.shape().len());
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_tag,
@@ -155,7 +155,10 @@ where
     }
 
     #[inline(always)]
-    fn transform_index(&self, index: &[Range<u64>]) -> Result<Option<DimArray<Range<u64>>>> {
+    fn transform_index(
+        &self,
+        index: &[Range<u64>],
+    ) -> Result<Option<<S::Dimension as Dimension>::Vec<Range<u64>>>> {
         check_get_range(self.shape(), index)?;
 
         for index in index.iter() {
@@ -163,9 +166,10 @@ where
                 return Ok(None);
             }
         }
-        Ok(Some(dim_arr(self.original_dims.len(), |dim| {
-            index[self.original_dims[dim] as usize].clone()
-        })))
+        Ok(Some(S::Dimension::vec(
+            self.original_dims.as_ref().len(),
+            |dim| index[self.original_dims[dim] as usize].clone(),
+        )))
     }
 }
 
@@ -196,14 +200,15 @@ where
         // Inserting a length-1 axis is a pure stride remap: inner dim d maps to output dim
         // `original_dims[d]` (the inserted axes just drop out; the byte layout is unchanged). Forward
         // `buf` to the inner read with the gathered strides.
-        let inner_strides = S::Dimension::vec(self.original_dims.len(), |d| {
+        let inner_strides = S::Dimension::vec(self.original_dims.as_ref().len(), |d| {
             out_strides[self.original_dims[d] as usize]
         });
         let nitems = out_shape.as_ref().iter().product::<u64>() as usize;
         // SAFETY: `inner_strides` gathers a subset of `buf`'s output strides, addressing bytes `buf`
         // already spans.
         let mut inner_buf = unsafe { buf.with_strides(nitems, dtype, inner_strides.as_ref()) };
-        self.array.read_data(&inner_index, &mut inner_buf, context)
+        self.array
+            .read_data(inner_index.as_ref(), &mut inner_buf, context)
     }
 
     #[inline(always)]
@@ -217,7 +222,7 @@ where
     {
         let data = self
             .transform_index(index)?
-            .map(|inner_index| self.array.read_data_typed(&inner_index, context))
+            .map(|inner_index| self.array.read_data_typed(inner_index.as_ref(), context))
             .transpose()?;
         struct ReadDataOptional<R>(Option<R>);
         impl<T, R> ReadData<T> for ReadDataOptional<R>

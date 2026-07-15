@@ -563,23 +563,57 @@ pub(crate) mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
 
+    use proptest::strategy::BoxedStrategy;
+    use proptest::test_runner::{Config, TestRunner};
+
+    /// Shared proptest driver for binary-op tests.
+    ///
+    /// Generic over the dtype only, with the op passed as a fn pointer, to avoid per-op
+    /// monomorphization.
+    #[allow(clippy::type_complexity)]
+    #[inline(never)]
+    pub(crate) fn check_op2<T>(
+        strategy: BoxedStrategy<T>,
+        check: fn(
+            &ndarray::ArrayD<T>,
+            &ndarray::ArrayD<T>,
+            crate::Array<crate::storage::Compact<crate::Ty<T>, crate::DimDyn>>,
+            crate::Array<crate::storage::Compact<crate::Ty<T>, crate::DimDyn>>,
+        ),
+    ) where
+        T: crate::util::ScalarStrategy + std::fmt::Debug,
+    {
+        let mut runner = TestRunner::new(Config::default());
+        runner
+            .run(
+                &crate::util::carrays2_strategy_generic::<T>(
+                    crate::util::shape_strategy(),
+                    strategy,
+                ),
+                |((nd_a, za), (nd_b, zb))| {
+                    check(&nd_a, &nd_b, za, zb);
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
+
     macro_rules! test_op2_dtype {
         ($op_method:ident, |$a:ident, $b:ident| $body:expr, $dtype:ident, $strategy:ident) => {
             paste::paste! {
-                proptest::proptest! {
-                    #[test]
-                    fn [<$op_method _ $dtype>](
-                        ((nd_a, za), (nd_b, zb)) in crate::util::carrays2_strategy_generic::<$dtype>(
-                            crate::util::shape_strategy(),
-                            <$dtype as crate::util::ScalarStrategy>::$strategy()
-                        )
-                    ) {
-                        #[allow(unused_imports)] use core::ops::{Add, Sub, Mul, Div};
-
-                        let result = za.$op_method(zb);
-                        let expected = ndarray::Zip::from(&nd_a).and(&nd_b).map_collect(|& $a, & $b| $body);
-                        crate::util::assert_array_matches(&result, &expected);
-                    }
+                #[test]
+                fn [<$op_method _ $dtype>]() {
+                    crate::ops::op2::tests::check_op2::<$dtype>(
+                        <$dtype as crate::util::ScalarStrategy>::$strategy(),
+                        |nd_a, nd_b, za, zb| {
+                            #[allow(unused_imports)]
+                            use core::ops::{Add, Div, Mul, Sub};
+                            let result = za.$op_method(zb);
+                            let expected =
+                                ndarray::Zip::from(nd_a).and(nd_b).map_collect(|& $a, & $b| $body);
+                            crate::util::assert_array_matches(&result, &expected);
+                        },
+                    );
                 }
             }
         };

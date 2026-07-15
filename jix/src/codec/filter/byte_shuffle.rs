@@ -6,26 +6,127 @@ use crate::dtype::Dtype;
 pub(in crate::codec::filter) struct ByteShuffleFilter;
 impl FilterImpl for ByteShuffleFilter {
     fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &TmpBufferPool) {
-        // TODO: optimize using [u8; 32] (SIMD)
+        assert_eq!(src.len(), dst.len());
         let itemsize = dtype.itemsize() as usize;
         debug_assert!(src.len().is_multiple_of(itemsize));
-        let nitems = src.len() / itemsize;
-        for i in 0..nitems {
-            for b in 0..itemsize {
-                dst[b * nitems + i] = src[i * itemsize + b];
+
+        #[inline(never)]
+        fn encode_impl<const ITEMSIZE: usize, const LANES: usize>(src: &[u8], dst: &mut [u8]) {
+            let nitems = src.len() / ITEMSIZE;
+
+            let src_ptr = src.as_ptr();
+            let dst_ptr = dst.as_mut_ptr();
+            let mut i = 0;
+            while i + LANES <= nitems {
+                let elms = unsafe {
+                    src_ptr
+                        .cast::<[u8; ITEMSIZE]>()
+                        .add(i)
+                        .cast::<[[u8; ITEMSIZE]; LANES]>()
+                        .read()
+                };
+                #[allow(clippy::needless_range_loop)]
+                for b in 0..ITEMSIZE {
+                    let byte_elms = std::array::from_fn(|j| elms[j][b]);
+                    unsafe {
+                        dst_ptr
+                            .add(b * nitems + i)
+                            .cast::<[u8; LANES]>()
+                            .write(byte_elms);
+                    }
+                }
+                i += LANES;
             }
+            // Tail of the remaining <LANES items
+            encode_impl_generic(src, dst, ITEMSIZE, i);
+        }
+
+        #[inline(never)]
+        fn encode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
+            debug_assert!(src.len().is_multiple_of(itemsize));
+            let nitems = src.len() / itemsize;
+            let src = src.as_ptr();
+            let dst = dst.as_mut_ptr();
+            for i in start..nitems {
+                for b in 0..itemsize {
+                    unsafe {
+                        let elm = src.add(i * itemsize + b).read();
+                        dst.add(b * nitems + i).write(elm);
+                    }
+                }
+            }
+        }
+
+        match itemsize {
+            1 => dst.copy_from_slice(src), // identity permutation
+            2 => encode_impl::<2, 64>(src, dst),
+            4 => encode_impl::<4, 32>(src, dst),
+            8 => encode_impl::<8, 16>(src, dst),
+            16 => encode_impl::<16, 8>(src, dst),
+            _ => encode_impl_generic(src, dst, itemsize, 0),
         }
     }
 
     fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &TmpBufferPool) {
-        // TODO: optimize using [u8; 32] (SIMD)
+        assert_eq!(src.len(), dst.len());
         let itemsize = dtype.itemsize() as usize;
         debug_assert!(src.len().is_multiple_of(itemsize));
-        let nitems = src.len() / itemsize;
-        for i in 0..nitems {
-            for b in 0..itemsize {
-                dst[i * itemsize + b] = src[b * nitems + i];
+
+        #[inline(never)]
+        fn decode_impl<const ITEMSIZE: usize, const LANES: usize>(src: &[u8], dst: &mut [u8]) {
+            let nitems = src.len() / ITEMSIZE;
+
+            let src_ptr = src.as_ptr();
+            let dst_ptr = dst.as_mut_ptr();
+            let mut i = 0;
+            while i + LANES <= nitems {
+                let mut elms = [[std::mem::MaybeUninit::<u8>::uninit(); ITEMSIZE]; LANES];
+                #[allow(clippy::needless_range_loop)]
+                for b in 0..ITEMSIZE {
+                    let byte_elms =
+                        unsafe { src_ptr.add(b * nitems + i).cast::<[u8; LANES]>().read() };
+                    for j in 0..LANES {
+                        elms[j][b].write(byte_elms[j]);
+                    }
+                }
+                // SAFETY: every one of the ITEMSIZE * LANES entries was written above.
+                let elms = unsafe { std::mem::transmute_copy::<_, [[u8; ITEMSIZE]; LANES]>(&elms) };
+                unsafe {
+                    dst_ptr
+                        .cast::<[u8; ITEMSIZE]>()
+                        .add(i)
+                        .cast::<[[u8; ITEMSIZE]; LANES]>()
+                        .write(elms);
+                }
+                i += LANES;
             }
+            // Tail of the remaining <LANES items
+            decode_impl_generic(src, dst, ITEMSIZE, i);
+        }
+
+        #[inline(never)]
+        fn decode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
+            debug_assert!(src.len().is_multiple_of(itemsize));
+            let nitems = src.len() / itemsize;
+            let src = src.as_ptr();
+            let dst = dst.as_mut_ptr();
+            for i in start..nitems {
+                for b in 0..itemsize {
+                    unsafe {
+                        let elm = src.add(b * nitems + i).read();
+                        dst.add(i * itemsize + b).write(elm);
+                    }
+                }
+            }
+        }
+
+        match itemsize {
+            1 => dst.copy_from_slice(src), // identity permutation
+            2 => decode_impl::<2, 64>(src, dst),
+            4 => decode_impl::<4, 32>(src, dst),
+            8 => decode_impl::<8, 16>(src, dst),
+            16 => decode_impl::<16, 8>(src, dst),
+            _ => decode_impl_generic(src, dst, itemsize, 0),
         }
     }
 }
@@ -35,17 +136,62 @@ mod tests {
     use super::ByteShuffleFilter;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
-    use crate::util::ScalarStrategy;
+
+    fn byte_shuffle_encode_reference(src: &[u8], dst: &mut [u8], itemsize: usize) {
+        debug_assert!(src.len().is_multiple_of(itemsize));
+        let nitems = src.len() / itemsize;
+        for i in 0..nitems {
+            for b in 0..itemsize {
+                dst[b * nitems + i] = src[i * itemsize + b];
+            }
+        }
+    }
+
+    fn byte_shuffle_decode_reference(src: &[u8], dst: &mut [u8], itemsize: usize) {
+        debug_assert!(src.len().is_multiple_of(itemsize));
+        let nitems = src.len() / itemsize;
+        for i in 0..nitems {
+            for b in 0..itemsize {
+                dst[i * itemsize + b] = src[b * nitems + i];
+            }
+        }
+    }
+
+    /// Assert the optimized `encode`/`decode` match the trivial reference
+    /// implementations on the same input, in both directions.
+    fn test_agrees_with_reference<T: crate::dtype::Dtyped>(items: &[T]) {
+        use crate::codec::filter::FilterImpl;
+        use crate::util::gen_data_bytes_from_slice;
+
+        let data = gen_data_bytes_from_slice::<T>(items);
+        let src = data.as_slice();
+        let itemsize = T::DTYPE.itemsize() as usize;
+        let dtype = T::DTYPE;
+        let tmp_buffers = crate::codec::TmpBufferPool::new();
+
+        // Encode: optimized vs reference.
+        let mut optimized_encoded = vec![0u8; src.len()];
+        ByteShuffleFilter.encode(src, &mut optimized_encoded, &dtype, &tmp_buffers);
+        let mut reference_encoded = vec![0u8; src.len()];
+        byte_shuffle_encode_reference(src, &mut reference_encoded, itemsize);
+        assert_eq!(optimized_encoded, reference_encoded);
+
+        // Decode: optimized vs reference, applied to the shuffled bytes.
+        let shuffled = reference_encoded.as_slice();
+        let mut optimized_decoded = vec![0u8; src.len()];
+        ByteShuffleFilter.decode(shuffled, &mut optimized_decoded, &dtype, &tmp_buffers);
+        let mut reference_decoded = vec![0u8; src.len()];
+        byte_shuffle_decode_reference(shuffled, &mut reference_decoded, itemsize);
+        assert_eq!(optimized_decoded, reference_decoded);
+    }
 
     macro_rules! test_roundtrip {
         ($ty:ty, $fn_name:ident) => {
-            proptest::proptest! {
-                #[test]
-                fn $fn_name(data in proptest::collection::vec(
-                    <$ty as ScalarStrategy>::any_strategy(), 0..=1000usize
-                )) {
-                    crate::codec::filter::tests::test_roundtrip::<ByteShuffleFilter, $ty>(&data);
-                }
+            #[test]
+            fn $fn_name() {
+                crate::codec::filter::tests::run_bytes_proptest::<$ty>(|data| {
+                    crate::codec::filter::tests::test_roundtrip::<ByteShuffleFilter, $ty>(data);
+                });
             }
         };
     }
@@ -67,4 +213,25 @@ mod tests {
     #[cfg(feature = "num-complex")]
     test_roundtrip!(Complex<f64>, complex_f64_roundtrip);
     test_roundtrip!(bool, bool_roundtrip);
+
+    macro_rules! test_agrees_with_reference {
+        ($ty:ty, $fn_name:ident) => {
+            #[test]
+            fn $fn_name() {
+                crate::codec::filter::tests::run_bytes_proptest::<$ty>(|data| {
+                    test_agrees_with_reference::<$ty>(data);
+                });
+            }
+        };
+    }
+
+    test_agrees_with_reference!(u8, u8_agrees_with_reference);
+    test_agrees_with_reference!(u16, u16_agrees_with_reference);
+    test_agrees_with_reference!(u32, u32_agrees_with_reference);
+    test_agrees_with_reference!(u64, u64_agrees_with_reference);
+    #[cfg(feature = "num-complex")]
+    test_agrees_with_reference!(Complex<f32>, complex_f32_agrees_with_reference);
+    #[cfg(feature = "num-complex")]
+    test_agrees_with_reference!(Complex<f64>, complex_f64_agrees_with_reference);
+    test_agrees_with_reference!(bool, bool_agrees_with_reference);
 }

@@ -6,8 +6,8 @@ use crate::error::{check_get_range, ensure, Result};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
-use crate::util::{cast_slice, cast_slice_mut, dim_arr};
-use crate::{Array, ArrayStorage};
+use crate::util::{cast_slice, cast_slice_mut};
+use crate::{Array, ArrayStorage, Dimension};
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
 /// examples.
@@ -176,7 +176,9 @@ where
                 }
             }
         };
-        let out_shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
+            (index[d].end - index[d].start) as usize
+        });
         cbuf.finalize(out_shape.as_ref(), dtype);
         Ok(())
     }

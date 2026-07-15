@@ -8,13 +8,11 @@ use crate::archive::block::{BlockArchiveWriter, BlockTableStorageRead};
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
 use crate::codec::ReadContext;
-use crate::error::{check_ndim, ensure, Error, Result};
+use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
-use crate::util::{dim_arr, DimArray, Idx, IterExt};
-use crate::{
-    ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, ErrorKind, TypeDyn,
-};
+use crate::util::{dim_arr, Idx, IterExt};
+use crate::{ArchiveValidation, Array, ArrayParams, ArrayStorage, DimDyn, Dimension, TypeDyn};
 
 impl Array<Compact<TypeDyn, DimDyn>> {
     /// Load a compressed array from a `.jix` file, allocating storage on the heap.
@@ -456,7 +454,7 @@ where
             .map_err(Error::io)?;
         let ndim = header.shape.len();
         check_ndim::<DimDyn>(ndim)?;
-        let shape = DimArray::from_slice(header.shape.as_slice()).unwrap();
+        let shape = DimDyn::from_slice(header.shape.as_slice());
         ensure!(
             header.block_shape.len() == ndim,
             InvalidArchive,
@@ -467,7 +465,7 @@ where
         ensure!(
             block_shape
                 .iter()
-                .zip(&shape)
+                .zip(shape.as_slice())
                 .all(|(&b, &s)| b > 0 && b as u64 <= s.max(1)),
             InvalidArchive,
             "invalid block shape {:?} for array shape {:?}",
@@ -487,25 +485,20 @@ where
             })
             .try_product()
             .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::InvalidArchive,
-                    format!(
-                        "array shape {shape:?} with block shape {block_shape:?} has too many items"
-                    ),
+                error!(
+                    InvalidArchive,
+                    "array shape {shape:?} with block shape {block_shape:?} has too many items"
                 )
             })?;
         let expected_block_size = block_shape.iter().cloned().try_product().ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidArchive,
-                format!(
-                    "block shape {:?} has too many items for a block",
-                    block_shape
-                ),
+            error!(
+                InvalidArchive,
+                "block shape {block_shape:?} has too many items for a block"
             )
         })?;
         let expected_nblocks = block_shape
             .iter()
-            .zip(shape.iter())
+            .zip(shape.as_slice().iter())
             .map(|(&b, &s)| s.div_ceil(b as u64))
             .product::<u64>();
 
@@ -534,7 +527,6 @@ where
 
         params.block_shape = Some(block_shape);
 
-        let shape = DimDyn::from_slice(&shape);
         Self::new(blocks, shape, params)
     }
 }

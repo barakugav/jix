@@ -27,7 +27,7 @@
 //!   `S::ElementType`. This is either [`Ty<T>`] (the concrete scalar type `T` is known at
 //!   compile time) or [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk).
 //!
-//! - **[`Dimension`](crate::Dimension)** - the compile-time dimension, accessible via
+//! - **[`Dimension`]** - the compile-time dimension, accessible via
 //!   `S::Dimension`. Either [`Dim<N>`](crate::Dim) (known statically) or
 //!   [`DimDyn`](crate::DimDyn) (runtime only).
 //!
@@ -50,12 +50,14 @@
 use std::ops::Range;
 
 use crate::dtype::Dtyped;
-use crate::error::{check_dtype, ensure, Result};
+use crate::error::{check_buffer_aligned, check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
-use crate::util::iter::strides::NdIterExtStridesPtrMut;
 use crate::util::iter::NdIter;
-use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
+use crate::{
+    array_from_fn_inline, assert_unchecked_eq, ArrayExt, ArrayStorage, Dimension, ElementType, Ty,
+    TypeDyn,
+};
 
 pub(crate) mod core;
 
@@ -134,6 +136,43 @@ impl<'a, S> Clone for Ref<'a, S> {
     fn clone(&self) -> Self {
         Self(self.0)
     }
+}
+
+impl ArrayStorage for &dyn ArrayStorage {
+    type ElementType = crate::TypeDyn;
+    type Dimension = crate::DimDyn;
+
+    #[inline(always)]
+    fn read_data(
+        &self,
+        index: &[Range<u64>],
+        buf: &mut crate::storage::OutBuf<'_>,
+        context: &crate::codec::ReadContext,
+    ) -> crate::error::Result<()> {
+        (**self).read_data(index, buf, context)
+    }
+
+    #[inline(always)]
+    fn shape(&self) -> &[u64] {
+        (**self).shape()
+    }
+
+    #[inline(always)]
+    fn dtype(&self) -> &crate::dtype::Dtype {
+        (**self).dtype()
+    }
+
+    #[inline]
+    fn spec(&self) -> crate::storage::ArraySpec<'_> {
+        (**self).spec()
+    }
+
+    fn info(&self) -> crate::storage::ArrayStorageInfo<'_> {
+        (**self).info()
+    }
+
+    crate::ops::impl_dimension_change_default!();
+    crate::ops::impl_element_type_change_default!();
 }
 
 macro_rules! impl_array_storage_forward {
@@ -260,12 +299,7 @@ where
                     InvalidBufferSize,
                     "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
                 );
-                ensure!(
-                    out.as_ptr().cast::<T>().is_aligned(),
-                    InvalidArgument,
-                    "Buffer pointer is not aligned to required alignment {} for dtype {dtype}",
-                    align_of::<T>(),
-                );
+                check_buffer_aligned(out.as_ptr(), &dtype)?;
 
                 // this is a compile time check, the compiler knows the value of LANES
                 let read_fn = match <T as LanesInfo>::LANES {
@@ -294,10 +328,9 @@ where
                 where
                     T: Dtyped,
                 {
-                    let iter = NdIter::new(
-                        read_shape,
-                        NdIterExtStridesPtrMut::new(strides, buf.as_mut_ptr()),
-                    );
+                    let iter = NdIter::builder(read_shape)
+                        .with_strides_ptr_mut_ext(strides, buf.as_mut_ptr())
+                        .build();
                     for (offset, (_, dst)) in iter.enumerate() {
                         let item = data.read_bulk::<1>(offset)[0];
                         unsafe { dst.cast::<T>().write(item) };
@@ -364,6 +397,8 @@ where
         R: ReadData<U>,
         U: Copy + Send + Sync + Sized + 'static,
     {
+        assert_eq!(self.len(), other.len());
+
         struct Zip<T, U, R1, R2> {
             left: R1,
             right: R2,
@@ -384,7 +419,7 @@ where
             }
             #[inline(always)]
             fn len(&self) -> usize {
-                assert_eq!(self.left.len(), self.right.len());
+                unsafe { assert_unchecked_eq!(self.left.len(), self.right.len()) };
                 self.left.len()
             }
         }

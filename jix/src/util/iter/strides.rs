@@ -1,4 +1,4 @@
-use crate::util::iter::NdIterExtension;
+use crate::util::iter::{impl_merge_extension, NdIterExtension};
 use crate::util::Idx;
 use crate::Dimension;
 use crate::{default_logical_strides_slice, DimVec};
@@ -47,14 +47,16 @@ where
     }
 
     #[inline(always)]
-    fn next(&self) -> *const T {
-        <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::next(&self.0).cast_const()
+    fn value(&self) -> *const T {
+        <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::value(&self.0).cast_const()
     }
 
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::assert_ndim(&self.0, ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::check_ndim(&self.0, ndim)
     }
+
+    impl_merge_extension!();
 }
 
 /// An nd-iterator extension that tracks a `*mut u8` pointer into a strided buffer.
@@ -114,14 +116,16 @@ where
     }
 
     #[inline(always)]
-    fn next(&self) -> *mut T {
+    fn value(&self) -> *mut T {
         self.current_ptr
     }
 
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.strides.as_ref().len(), ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.strides.as_ref().len() == ndim
     }
+
+    impl_merge_extension!();
 }
 
 /// An nd-iterator extension that tracks an offset into a strided array.
@@ -158,14 +162,16 @@ impl<D: Dimension> NdIterExtension for NdIterExtStridesOffset<D> {
     }
 
     #[inline(always)]
-    fn next(&self) -> u64 {
+    fn value(&self) -> u64 {
         self.offset
     }
 
     #[inline(always)]
-    fn assert_ndim(&self, ndim: usize) {
-        assert_eq!(self.strides.as_ref().len(), ndim);
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.strides.as_ref().len() == ndim
     }
+
+    impl_merge_extension!();
 }
 
 #[inline]

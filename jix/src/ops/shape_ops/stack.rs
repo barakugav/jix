@@ -6,7 +6,7 @@ use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, Re
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf};
 use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension, IterExt};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
 ///
@@ -150,12 +150,12 @@ where
             return Ok(());
         }
 
+        let arr_ndim = shape.len() - 1;
         let arr_range = index[..self.stack_axis]
             .iter()
             .chain(index[self.stack_axis + 1..].iter())
             .cloned()
-            .collect::<DimArray<_>>();
-        let arr_ndim = arr_range.len();
+            .collect_dim_vec::<ArraysT::Dimension>(arr_ndim);
         let arr_range_shape = ArraysT::Dimension::vec(arr_ndim, |dim| {
             (arr_range[dim].end - arr_range[dim].start) as usize
         });
@@ -194,7 +194,8 @@ where
                 let strides = out_of_place_strides.as_ref().unwrap().as_ref();
                 unsafe { OutBuf::new_strided(&mut dst[buf_offset..], strides) }
             };
-            self.arrays.read_data(arr, &arr_range, &mut out, context)?;
+            self.arrays
+                .read_data(arr, arr_range.as_ref(), &mut out, context)?;
         }
 
         Ok(())
