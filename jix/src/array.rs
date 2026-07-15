@@ -10,7 +10,7 @@ use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageInfo, ArrayStorageTyped, BlockSize,
-    Compact, OutBuf, Ref,
+    Compact, OutBuf, Plain, Ref,
 };
 use crate::util::iter::NdIter;
 use crate::util::{
@@ -564,7 +564,7 @@ impl<S: ArrayStorage> Array<S> {
             .unwrap_or_else(|| self.storage.dtype())
     }
 
-    /// Decode the entire array into a fresh heap-allocated [`ndarray::Array`].
+    /// Read the entire array into a fresh heap-allocated [`ndarray::Array`].
     ///
     /// This is the simplest way to materialize a jix array into a standard in-memory ndarray.
     /// All blocks of the underlying compact storage are decompressed and the elements are
@@ -631,7 +631,7 @@ impl<S: ArrayStorage> Array<S> {
         self.to_ndarray_sub(full_range.as_ref(), &self.read_ctx())
     }
 
-    /// Decode a rectangular sub-region of the array into a fresh heap-allocated [`ndarray::Array`].
+    /// Read a rectangular sub-region of the array into a fresh heap-allocated [`ndarray::Array`].
     ///
     /// `index` contains one half-open `start..end` range per dimension within
     /// `0..self.shape()[dim]`. The result has shape `[index[0].len(), index[1].len(), ...]`
@@ -753,7 +753,7 @@ impl<S: ArrayStorage> Array<S> {
         Ok(unsafe { array.assume_init() })
     }
 
-    /// Decode a rectangular sub-region into a caller-supplied byte buffer.
+    /// Read a rectangular sub-region into a caller-supplied byte buffer.
     ///
     /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
     /// [`to_ndarray_sub`](Array::to_ndarray_sub). `buf` must be exactly
@@ -871,6 +871,58 @@ impl<S: ArrayStorage> Array<S> {
                 .read_data(inner_index.as_ref(), &mut out, context)?;
         }
         Ok(())
+    }
+
+    /// Read the entire array into a fresh heap-allocated `Array<Plain>`.
+    ///
+    /// Similar to [`to_ndarray`](Array::to_ndarray), but returns a jix `Array<Plain>` instead of an
+    /// `ndarray::Array`.
+    /// Equivalent to `Array::plain_ndarray(self.to_ndarray()?)`.
+    ///
+    /// Like [`compact`](Array::compact), `to_plain` can be used to materialize an intermediate
+    /// array: it breaks the lazy storage chain - be it an operation pipeline or a shape view such
+    /// as the output of [`reshape`](Array::reshape) - so that later reads consume the stored result
+    /// directly instead of re-running the whole pipeline. The difference is that `to_plain` keeps
+    /// the result uncompressed, skipping the compression pass [`compact`](Array::compact) performs,
+    /// so it is cheaper to produce and to read back at the cost of holding the full data in memory.
+    ///
+    /// This is especially useful when a deep or expensive view is broadcast into another operation.
+    /// Because broadcasting reads the same logical elements many times, each read would otherwise
+    /// re-evaluate the entire view; materializing it once with `to_plain` (or
+    /// [`compact`](Array::compact)) avoids the repeated work. For example, dividing an array by its
+    /// per-row standard deviation (`a / a.std(axis=1)` in NumPy terms; in Rust the reduction must be
+    /// broadcast back to `a`'s shape explicitly) recomputes the reduction for every element it is
+    /// broadcast against unless the `std` result is materialized first.
+    ///
+    /// # Errors
+    ///
+    /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jix::Array;
+    /// use ndarray::array;
+    ///
+    /// let a = Array::compact_ndarray(&array![[1.0f64, 3.0], [4.0, 8.0]])?;
+    ///
+    /// // Dividing `a` by its per-row std broadcasts the reduction across the columns. Without
+    /// // `to_plain` the `std` view would be re-evaluated for every column; materializing it once
+    /// // computes each row's std a single time.
+    /// let std = a.as_ref().std(1, 0.0).insert_axis(1).to_plain()?; // shape [2, 1]
+    /// let normalized = (a / std.broadcast(&[2, 2])).to_ndarray()?;
+    ///
+    /// assert_eq!(normalized, array![[1.0f64, 3.0], [2.0, 4.0]]);
+    /// # Ok::<(), jix::Error>(())
+    /// ```
+    pub fn to_plain(&self) -> Result<Array<Plain<Vec<S::Item>, Ty<S::Item>, S::Dimension>>>
+    where
+        S: ArrayStorageTyped,
+    {
+        let array = self.to_ndarray()?;
+        Ok(Array::plain_ndarray(array)?
+            .into_dim::<S::Dimension>()
+            .unwrap())
     }
 
     /// Compress the data of this array into a new `Array<Compact>` with new blocks.
@@ -2000,5 +2052,24 @@ mod tests {
         let b = a.compact().unwrap();
         // Both should read back the same data independently.
         assert_eq!(a.to_ndarray().unwrap(), b.to_ndarray().unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // to_plain
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn to_plain_i32() {
+        let src = array![[10i32, 20, 30], [40, 50, 60]];
+        let a = Array::compact_ndarray(&src).unwrap();
+
+        // Materializing returns an equal array.
+        let plain = a.as_ref().to_plain().unwrap();
+        assert_eq!(plain.shape(), &[2, 3]);
+        assert_eq!(plain.to_ndarray().unwrap(), src);
+
+        // It also materializes a lazy view.
+        let plain = a.map(|x| x + 1).to_plain().unwrap();
+        assert_eq!(plain.to_ndarray().unwrap(), array![[11i32, 21, 31], [41, 51, 61]]);
     }
 }

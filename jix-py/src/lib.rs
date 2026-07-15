@@ -27,6 +27,7 @@ mod jix {
     #[pymodule_export]
     pub const __version__: &str = env!("CARGO_PKG_VERSION");
 
+    /// The build profile of the jix library (e.g., "debug" or "release").
     #[allow(non_upper_case_globals)]
     #[pymodule_export]
     pub const _build_profile: &str = env!("BUILD_PROFILE");

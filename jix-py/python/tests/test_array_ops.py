@@ -103,6 +103,23 @@ def test_compact_is_independent():
 
 
 # ---------------------------------------------------------------------------
+# plain
+# ---------------------------------------------------------------------------
+
+
+def test_plain_materializes_to_equal_array():
+    arr = np.arange(12, dtype=np.int32).reshape(3, 4)
+    za = jix.compact(arr)
+    # Materializing returns an equal array.
+    plain = za.plain()
+    assert plain.shape == za.shape
+    assert plain.dtype == za.dtype
+    np.testing.assert_array_equal(plain.numpy(), arr)
+    # It also materializes a lazy view.
+    np.testing.assert_array_equal((za + 1).plain().numpy(), arr + 1)
+
+
+# ---------------------------------------------------------------------------
 # flatten
 # ---------------------------------------------------------------------------
 

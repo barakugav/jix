@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
+use std::ops::Range;
 use std::sync::Mutex;
 
-use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, ReadContext};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, Dimension, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -12,10 +13,9 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pyme
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
 
+use crate::asarray;
 use crate::dtype::dtype_to_numpy;
-use crate::util::{
-    dim_arr, maybe_detach, numpy_empty, numpy_reshape, DimArray, IntoPyResult, ItemOrSequence,
-};
+use crate::util::{maybe_detach, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
 
 /// A multi-dimensional compressed array.
 ///
@@ -24,7 +24,7 @@ use crate::util::{
 /// independently with Zstd. Data is decoded on demand: constructing an array or
 /// chaining operations does no I/O. Actual decompression happens only when you
 /// materialize the result, for example by indexing with `[]`, calling `.numpy()`,
-/// `.compact()`, or `.write_to()`.
+/// `.plain()`, `.compact()`, or `.write_to()`.
 ///
 /// # Creating arrays
 ///
@@ -167,6 +167,85 @@ impl Array {
             array: self,
             context: Some(context),
         })
+    }
+
+    #[inline]
+    fn to_buf<'py>(&self, py: Python<'py>, index: &[Range<u64>], buf: &mut [u8]) -> PyResult<()> {
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize
+            * self.arr.dtype().itemsize() as usize;
+        if nitems == 0 {
+            return Ok(());
+        }
+
+        let should_detach = !self.arr.storage().spec().flags().plain_read() || nitems > 4096;
+        maybe_detach(py, should_detach, || {
+            let context = self.read_ctx()?;
+            let context = context.as_ref();
+
+            fn to_ndarray_impl<S: ArrayStorage, const D: usize>(
+                arr: jix_core::Array<S>,
+                index: &[std::ops::Range<u64>],
+                np_arr_data: &mut [u8],
+                context: &ReadContext,
+            ) -> Result<(), jix_core::Error>
+            where
+                Dim<D>: Dimension,
+            {
+                arr.into_dim::<Dim<D>>()
+                    .unwrap()
+                    .to_ndarray_buf(&index, np_arr_data, context)
+            }
+            let to_ndarray_fn = match self.arr.ndim() {
+                0 => to_ndarray_impl::<_, 0>,
+                1 => to_ndarray_impl::<_, 1>,
+                2 => to_ndarray_impl::<_, 2>,
+                3 => to_ndarray_impl::<_, 3>,
+                4 => to_ndarray_impl::<_, 4>,
+                5 => to_ndarray_impl::<_, 5>,
+                6 => to_ndarray_impl::<_, 6>,
+                7 => to_ndarray_impl::<_, 7>,
+                8 => to_ndarray_impl::<_, 8>,
+                _ => unimplemented!(),
+            };
+
+            to_ndarray_fn(self.arr.as_ref(), &index, buf, context).into_py_result()
+        })
+    }
+
+    fn parse_index<'py>(
+        &self,
+        index: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<(DimArray<Range<u64>>, DimArray<u64>)> {
+        let arr_shape = self.arr.shape();
+        let parsed = crate::ops::parse_basic_index(arr_shape, index)?;
+
+        let mut index = DimArray::new();
+        let mut out_shape = DimArray::new();
+        for (axis, item) in parsed.items.iter().enumerate() {
+            let start = item.start.unwrap() as u64;
+            let end = item.end.unwrap() as u64;
+            index.push(start..end);
+            if !parsed.drop_axes.contains(&axis) {
+                out_shape.push(end - start);
+            }
+        }
+
+        let ndim = arr_shape.len();
+        if index.len() != ndim {
+            return Err(PyIndexError::new_err(format!(
+                "index has {} dimensions, but array has {ndim}",
+                index.len()
+            )));
+        }
+        for (dim, r) in index.iter().enumerate() {
+            if r.start > r.end || r.end > arr_shape[dim] {
+                return Err(PyIndexError::new_err(format!(
+                    "index {r:?} is out of bounds for axis {dim} with size {}",
+                    arr_shape[dim]
+                )));
+            }
+        }
+        Ok((index, out_shape))
     }
 }
 
@@ -340,115 +419,68 @@ impl Array {
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let arr_shape = self.arr.shape();
-        let parsed = crate::ops::parse_basic_index(arr_shape, index)?;
+        let (index, out_shape) = self.parse_index(index)?;
 
-        let mut index = DimArray::new();
-        let mut out_shape = DimArray::new();
-        for (axis, item) in parsed.items.iter().enumerate() {
-            let start = item.start.unwrap() as u64;
-            let end = item.end.unwrap() as u64;
-            index.push(start..end);
-            if !parsed.drop_axes.contains(&axis) {
-                out_shape.push(end - start);
-            }
-        }
-
-        let ndim = arr_shape.len();
-        if index.len() != ndim {
-            return Err(PyIndexError::new_err(format!(
-                "index has {} dimensions, but array has {ndim}",
-                index.len()
-            )));
-        }
-        for (dim, r) in index.iter().enumerate() {
-            if r.start > r.end || r.end > arr_shape[dim] {
-                return Err(PyIndexError::new_err(format!(
-                    "index {r:?} is out of bounds for axis {dim} with size {}",
-                    arr_shape[dim]
-                )));
-            }
-        }
-        let read_shape = dim_arr(ndim, |dim| index[dim].end - index[dim].start);
-        let itemsize = self.arr.dtype().itemsize() as usize;
-
-        let mut np_arr = numpy_empty(self.dtype(py)?, &read_shape)?;
-        let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
-        let np_arr_data_size = itemsize * read_shape.iter().product::<u64>() as usize;
-        let np_arr_data =
-            unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
-
-        if np_arr_data_size > 0 {
-            let should_detach =
-                !self.arr.storage().spec().flags().plain_read() || np_arr_data_size > 4096;
-
-            maybe_detach(py, should_detach, || {
-                let context = self.read_ctx()?;
-                let context = context.as_ref();
-
-                let arr = self.arr.as_ref();
-                let res = match self.arr.ndim() {
-                    0 => arr.into_dim::<Dim<0>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    1 => arr.into_dim::<Dim<1>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    2 => arr.into_dim::<Dim<2>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    3 => arr.into_dim::<Dim<3>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    4 => arr.into_dim::<Dim<4>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    5 => arr.into_dim::<Dim<5>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    6 => arr.into_dim::<Dim<6>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    7 => arr.into_dim::<Dim<7>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    8 => arr.into_dim::<Dim<8>>().unwrap().to_ndarray_buf(
-                        &index,
-                        np_arr_data,
-                        context,
-                    ),
-                    _ => unimplemented!(),
-                };
-                res.into_py_result()
-            })?;
-        }
-
-        let arr_shape = np_arr.shape();
-        if arr_shape.len() != out_shape.len()
-            || arr_shape
-                .iter()
-                .zip(out_shape.iter())
-                .any(|(&a, &b)| a as u64 != b)
+        let np_arr = numpy_empty(self.dtype(py)?, &out_shape)?;
         {
-            np_arr = numpy_reshape(np_arr, out_shape.as_slice())?;
+            let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
+            let np_arr_data_size =
+                out_shape.iter().product::<u64>() as usize * self.arr.dtype().itemsize() as usize;
+            let np_arr_data =
+                unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
+            self.to_buf(py, &index, np_arr_data)?;
         }
+
         Ok(np_arr)
+    }
+
+    /// Read the array (or a sub-region of it) into a new plain (uncompressed) jix array.
+    ///
+    /// Identical to `numpy()`, except the decoded elements are wrapped as a plain
+    /// [`jix.Array`][jix.Array] - a view over a freshly-allocated buffer, with no block compression -
+    /// rather than returned as a NumPy array. Equivalent to `jix.asarray(self.numpy(index))`.
+    ///
+    /// Like [`compact()`][jix.Array.compact], `plain()` materializes an intermediate array: it
+    /// breaks the lazy operation chain - or a shape view such as the output of
+    /// [`reshape()`][jix.Array.reshape] - so that later reads consume the stored result directly
+    /// instead of re-running the whole pipeline. Unlike `compact()`, the result is kept
+    /// uncompressed, skipping the compression pass, so it is cheaper to produce and to read back at
+    /// the cost of keeping the full data in memory.
+    ///
+    /// This is especially useful when a deep or expensive view is broadcast into another operation:
+    /// broadcasting reads the same logical elements many times, so each read re-evaluates the whole
+    /// view unless it is materialized first. For example, `a / a.std(axis=1, keepdims=True)`
+    /// recomputes the standard deviation for every element it is broadcast against, whereas
+    /// `a / a.std(axis=1, keepdims=True).plain()` computes it once and reuses the stored result.
+    /// Reach for [`compact()`][jix.Array.compact] instead when you would rather compress the
+    /// intermediate (e.g. it is large, or will be read many times).
+    ///
+    /// Args:
+    ///     index: See `numpy()` for accepted index types and behavior.
+    ///
+    /// Returns:
+    ///     A plain [`jix.Array`][jix.Array] with the same dtype as `self` and shape determined by
+    ///         the `index` argument (or `self.shape` when no index is supplied). See `numpy()` for
+    ///         details.
+    ///
+    /// ```python
+    /// import jix
+    ///
+    /// a = jix.compact([[1.0, 3.0], [4.0, 8.0]])
+    /// # Dividing by the per-row std broadcasts the reduction across the columns; `.plain()`
+    /// # materializes it once instead of recomputing it for every column.
+    /// normalized = a / a.std(axis=1, keepdims=True).plain()
+    /// # normalized == [[1.0, 3.0], [2.0, 4.0]]
+    /// ```
+    #[pyo3(signature = (index=None))]
+    #[inline]
+    pub fn plain<'py>(
+        &self,
+        py: Python<'py>,
+        index: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, Array>> {
+        let np_arr = self.numpy(py, index)?;
+        asarray(&np_arr, None)
     }
 
     /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.

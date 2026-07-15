@@ -87,6 +87,7 @@ pub(crate) fn numpy_empty<'py>(
     unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
 }
 
+#[allow(unused)]
 #[inline]
 pub(crate) fn numpy_reshape<'py>(
     arr: Bound<'py, PyUntypedArray>,
