@@ -211,7 +211,7 @@ pub fn write_array(
     append: bool,
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<()> {
-    let array = asarray(array, params.clone())?;
+    let array = asarray(array, None, params.clone())?;
     let py = array.py();
     let array = array.get();
     let path_or_writer = PathOrWriter::from_pyany(path_or_writer)?;

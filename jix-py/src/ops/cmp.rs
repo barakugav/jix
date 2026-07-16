@@ -4,7 +4,7 @@ use jix_core::dtype::Dtyped;
 use jix_core::scalar::{f16, Complex};
 use pyo3::prelude::*;
 
-use crate::asarray;
+use crate::ops::asarray_simple;
 use crate::ops::common::{
     broadcast_operands, define_op2, CastKind, OpDescriptor, OpFnDescriptor, Operand, Scalar,
 };
@@ -408,7 +408,7 @@ pub fn clamp<'py>(
     max: Option<&Bound<'py, PyAny>>,
 ) -> pyo3::PyResult<Bound<'py, crate::Array>> {
     if min.is_none() && max.is_none() {
-        return asarray(array, None);
+        return asarray_simple(array);
     }
     let py = array.py();
 

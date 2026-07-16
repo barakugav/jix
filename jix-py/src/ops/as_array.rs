@@ -1,9 +1,12 @@
 use jix_core::ArrayAny;
+use numpy::PyArrayDescr;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
 use crate::array::{resolve_array_params, Array};
+use crate::dtype::dtype_from_numpy;
+use crate::ops::astype_impl;
 use crate::ops::common::Operand;
 
 /// Convert any array-like object to a [`jix.Array`][jix.Array].
@@ -19,6 +22,10 @@ use crate::ops::common::Operand;
 /// Args:
 ///     value: The array-like to convert. Accepts Python scalars, lists, tuples, NumPy arrays,
 ///         or any object accepted by `numpy.asarray`.
+///     dtype: Optional dtype to cast the array to. Accepts a numpy dtype object, a dtype string
+///         (e.g. `'float32'`), or a Python type like `np.float32` - anything `numpy.dtype()`
+///         accepts. When omitted, the input dtype is preserved. The cast is a lazy view, so no
+///         computation happens until the result is read (see [`jix.astype()`][jix.astype]).
 ///     params: Block layout and codec configuration. See [`jix.compact()`][jix.compact] for
 ///         details. The returned array is never compressed, so these mostly affect only arrays
 ///         later created from it (e.g. via `compact()` or `write_array()`), which inherit them.
@@ -26,7 +33,8 @@ use crate::ops::common::Operand;
 ///         returned as-is.
 ///
 /// Note:
-///     - If `value` is already an `Array`, it is returned as-is with no copy.
+///     - If `value` is already an `Array` and `dtype` is `None`, it is returned as-is with no copy.
+///       When `dtype` is given, the result is a lazy cast view over the input instead.
 ///     - 0-dimensional inputs produce a scalar array backed by a single value (no buffer).
 ///     - All other inputs share the underlying buffer with the intermediate NumPy array (zero-copy);
 ///       the NumPy array is kept alive for as long as the returned `Array` is alive.
@@ -35,25 +43,46 @@ use crate::ops::common::Operand;
 ///     ValueError: If the input cannot be converted by `numpy.asarray`.
 ///     ValueError: If the array has more dimensions than jix supports.
 ///     ValueError: If the array has negative strides (e.g. a reversed slice `a[::-1]`).
+///     TypeError: If `dtype` requests an unsupported cast (e.g. from a complex type to an int or
+///         float type, or a cast involving struct dtypes).
 ///
 /// Returns:
-///     A [`jix.Array`][jix.Array] view of the input. If `value` is already a [`jix.Array`][jix.Array], it is returned
-///         unchanged with no copy.
+///     A [`jix.Array`][jix.Array] view of the input. If `value` is already a [`jix.Array`][jix.Array]
+///         and no `dtype` is given, it is returned unchanged with no copy.
 #[gen_stub_pyfunction]
 #[pyfunction]
-#[pyo3(signature = (value, *, params=None))]
+#[pyo3(signature = (value, *, dtype=None, params=None))]
 #[inline]
 pub fn asarray<'py>(
     value: &Bound<'py, PyAny>,
+    dtype: Option<&Bound<'_, PyAny>>,
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Bound<'py, Array>> {
-    let params = resolve_array_params(value.py(), params)?;
-    Operand::from_any_with_params(value, params, false)?.into_py_array(value.py())
+    let py = value.py();
+    let params = resolve_array_params(py, params)?;
+    let mut py_arr = Operand::from_any_with_params(value, params, false)?.into_py_array(py)?;
+
+    if let Some(dtype) = dtype {
+        let np_dtype = &PyArrayDescr::new(py, dtype)?;
+        let dtype = dtype_from_numpy(np_dtype)?;
+        let array = astype_impl(py_arr.get().arr.clone(), &dtype)?;
+        py_arr = Bound::new(
+            py,
+            Array::from_core_with_np_dtype(array, np_dtype.clone().unbind()),
+        )?;
+    }
+
+    Ok(py_arr)
+}
+
+#[inline]
+pub(crate) fn asarray_simple<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Array>> {
+    asarray(value, None, None)
 }
 
 #[inline]
 pub(crate) fn any_to_core_array<'py>(value: &Bound<'py, PyAny>) -> PyResult<ArrayAny> {
-    Ok(asarray(value, None)?.get().to_core())
+    Ok(asarray_simple(value)?.get().to_core())
 }
 
 #[cfg(test)]
@@ -68,7 +97,7 @@ mod tests {
 
     /// Call `asarray` and read back the data as an ndarray.
     fn collect<T: Dtyped>(val: &Bound<'_, PyAny>) -> ArrayD<T> {
-        asarray(val, None)
+        asarray(val, None, None)
             .unwrap()
             .get()
             .arr
@@ -264,7 +293,7 @@ mod tests {
         Python::attach(|py| {
             let orig =
                 ArrayD::from_shape_vec(vec![2, 3, 4], (0..24).map(|x| x as f32).collect()).unwrap();
-            let arr = asarray(&npd(py, orig), None).unwrap();
+            let arr = asarray(&npd(py, orig), None, None).unwrap();
             assert_eq!(arr.get().arr.shape(), &[2u64, 3, 4]);
         });
     }
@@ -275,9 +304,9 @@ mod tests {
     fn test_passthrough() {
         Python::attach(|py| {
             let orig = array![1.0f32, 2.0];
-            let arr1 = asarray(&npd(py, orig), None).unwrap();
+            let arr1 = asarray(&npd(py, orig), None, None).unwrap();
             let ptr1 = arr1.as_ptr();
-            let arr2 = asarray(arr1.as_any(), None).unwrap();
+            let arr2 = asarray(arr1.as_any(), None, None).unwrap();
             assert_eq!(arr2.as_ptr(), ptr1);
         });
     }
@@ -290,7 +319,7 @@ mod tests {
             let val = py
                 .eval(cr#"__import__('numpy').array([1, 2, 3])[::-1]"#, None, None)
                 .unwrap();
-            assert!(asarray(&val, None)
+            assert!(asarray(&val, None, None)
                 .unwrap_err()
                 .is_instance_of::<pyo3::exceptions::PyOverflowError>(py));
         });

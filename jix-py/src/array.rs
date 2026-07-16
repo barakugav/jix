@@ -13,8 +13,8 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pyme
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::types::PyAnyMethods;
 
-use crate::asarray;
 use crate::dtype::dtype_to_numpy;
+use crate::ops::asarray_simple;
 use crate::util::{maybe_detach, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
 
 /// A multi-dimensional compressed array.
@@ -480,7 +480,7 @@ impl Array {
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, Array>> {
         let np_arr = self.numpy(py, index)?;
-        asarray(&np_arr, None)
+        asarray_simple(&np_arr)
     }
 
     /// Read elements from the array (or a sub-region of it) and return them as a NumPy array.
@@ -1285,12 +1285,9 @@ pub fn compact<'py>(
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Bound<'py, Array>> {
     let py = array.py();
-    let mut array = crate::asarray(array, params.clone())?;
+    let array = crate::asarray(array, dtype, params.clone())?;
     let params = resolve_array_params(py, params)?;
 
-    if let Some(dtype) = dtype {
-        array = crate::ops::astype(&array, dtype)?;
-    }
     let array = array.get();
     let compacted = py.detach(|| {
         let context = array.read_ctx()?;
@@ -1307,118 +1304,117 @@ pub(crate) fn resolve_array_params(
     py: Python<'_>,
     params: Option<Bound<'_, PyDict>>,
 ) -> PyResult<jix_core::ArrayParams> {
-    match params {
-        None => Ok(jix_core::ArrayParams::default()),
-        Some(kwargs) => {
-            let mut kwargs = kwargs.extract::<BTreeMap<String, Py<PyAny>>>()?;
-            macro_rules! extract_arg {
-                ($key:expr, $ty:ty) => {
-                    kwargs
-                        .remove($key)
-                        .and_then(|v| {
-                            let v = v.bind(py);
-                            (!v.is_none()).then(|| {
-                                v.extract::<$ty>().map_err(|e| {
-                                    PyTypeError::new_err(format!(
-                                        "{} must be of type {}: {e}",
-                                        $key,
-                                        stringify!($ty)
-                                    ))
-                                })
-                            })
+    let Some(kwargs) = params else {
+        return Ok(jix_core::ArrayParams::default());
+    };
+
+    let mut kwargs = kwargs.extract::<BTreeMap<String, Py<PyAny>>>()?;
+    macro_rules! extract_arg {
+        ($key:expr, $ty:ty) => {
+            kwargs
+                .remove($key)
+                .and_then(|v| {
+                    let v = v.bind(py);
+                    (!v.is_none()).then(|| {
+                        v.extract::<$ty>().map_err(|e| {
+                            PyTypeError::new_err(format!(
+                                "{} must be of type {}: {e}",
+                                $key,
+                                stringify!($ty)
+                            ))
                         })
-                        .transpose()
-                };
+                    })
+                })
+                .transpose()
+        };
+    }
+    let block_shape = extract_arg!("block_shape", Vec<u32>)?;
+    let block_shape_tag = extract_arg!("block_shape_tag", Vec<String>)?;
+    let block_size = extract_arg!("block_size", u64)?;
+    let read_size = extract_arg!("read_size", ItemOrSequence<u64>)?;
+    let codec = extract_arg!("codec", String)?;
+    let compression_level = extract_arg!("compression_level", i32)?;
+    let filters = extract_arg!("filters", Vec<String>)?;
+    if !kwargs.is_empty() {
+        return Err(PyTypeError::new_err(format!(
+            "Unexpected array params kwargs: {}",
+            kwargs.into_keys().collect::<Vec<_>>().join(", ")
+        )));
+    }
+
+    let mut params = jix_core::ArrayParams::default();
+    if let Some(block_shape) = block_shape {
+        params.block_shape(&block_shape);
+    }
+    if let Some(block_shape_tag) = block_shape_tag {
+        let block_shape_tag = block_shape_tag
+            .iter()
+            .map(|s| match s.as_str() {
+                "fixed" => Ok(jix_core::storage::BlockShapeTag::Fixed),
+                "multiple-of" => Ok(jix_core::storage::BlockShapeTag::MultipleOf),
+                "any" => Ok(jix_core::storage::BlockShapeTag::Any),
+                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid block_shape_tag: {s}"
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        params.block_shape_tag(&block_shape_tag);
+    }
+    if let Some(block_size) = block_size {
+        params.block_size(block_size);
+    }
+    if let Some(read_size) = read_size {
+        if read_size.len() > 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "read_size must be a scalar or a 2-element sequence, got {} elements",
+                read_size.len()
+            )));
+        }
+        let read_size = read_size.into_dim_array().unwrap();
+        let pair = match read_size.len() {
+            1 => {
+                let [read_size] = read_size.as_slice().try_into().unwrap();
+                (read_size, read_size)
             }
-            let block_shape = extract_arg!("block_shape", Vec<u32>)?;
-            let block_shape_tag = extract_arg!("block_shape_tag", Vec<String>)?;
-            let block_size = extract_arg!("block_size", u64)?;
-            let read_size = extract_arg!("read_size", ItemOrSequence<u64>)?;
-            let codec = extract_arg!("codec", String)?;
-            let compression_level = extract_arg!("compression_level", i32)?;
-            let filters = extract_arg!("filters", Vec<String>)?;
-            if !kwargs.is_empty() {
-                return Err(PyTypeError::new_err(format!(
-                    "Unexpected array params kwargs: {}",
-                    kwargs.into_keys().collect::<Vec<_>>().join(", ")
+            2 => {
+                let [min, max] = read_size.as_slice().try_into().unwrap();
+                (min, max)
+            }
+            _ => unreachable!(),
+        };
+        params.read_size(pair);
+    }
+
+    if let Some(codec) = codec {
+        match codec.as_str() {
+            "zstd" => {
+                params.codec(Codec::Zstd);
+            }
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Unsupported codec: {codec}"
                 )));
             }
-
-            let mut params = jix_core::ArrayParams::default();
-            if let Some(block_shape) = block_shape {
-                params.block_shape(&block_shape);
-            }
-            if let Some(block_shape_tag) = block_shape_tag {
-                let block_shape_tag = block_shape_tag
-                    .iter()
-                    .map(|s| match s.as_str() {
-                        "fixed" => Ok(jix_core::storage::BlockShapeTag::Fixed),
-                        "multiple-of" => Ok(jix_core::storage::BlockShapeTag::MultipleOf),
-                        "any" => Ok(jix_core::storage::BlockShapeTag::Any),
-                        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-                            "Invalid block_shape_tag: {s}"
-                        ))),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                params.block_shape_tag(&block_shape_tag);
-            }
-            if let Some(block_size) = block_size {
-                params.block_size(block_size);
-            }
-            if let Some(read_size) = read_size {
-                if read_size.len() > 2 {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "read_size must be a scalar or a 2-element sequence, got {} elements",
-                        read_size.len()
-                    )));
-                }
-                let read_size = read_size.into_dim_array().unwrap();
-                let pair = match read_size.len() {
-                    1 => {
-                        let [read_size] = read_size.as_slice().try_into().unwrap();
-                        (read_size, read_size)
-                    }
-                    2 => {
-                        let [min, max] = read_size.as_slice().try_into().unwrap();
-                        (min, max)
-                    }
-                    _ => unreachable!(),
-                };
-                params.read_size(pair);
-            }
-
-            if let Some(codec) = codec {
-                match codec.as_str() {
-                    "zstd" => {
-                        params.codec(Codec::Zstd);
-                    }
-                    _ => {
-                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                            "Unsupported codec: {codec}"
-                        )));
-                    }
-                }
-            }
-            if let Some(compression_level) = compression_level {
-                params.level(compression_level).into_py_result()?;
-            }
-            if let Some(filters) = filters {
-                let filters = filters
-                    .into_iter()
-                    .map(|filter| match filter.as_str() {
-                        "byte-shuffle" => Ok(Filter::ByteShuffle),
-                        "bit-shuffle" => Ok(Filter::BitShuffle),
-                        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-                            "Unsupported filter: {filter}"
-                        ))),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                params.filters(&filters).into_py_result()?;
-            }
-
-            Ok(params)
         }
     }
+    if let Some(compression_level) = compression_level {
+        params.level(compression_level).into_py_result()?;
+    }
+    if let Some(filters) = filters {
+        let filters = filters
+            .into_iter()
+            .map(|filter| match filter.as_str() {
+                "byte-shuffle" => Ok(Filter::ByteShuffle),
+                "bit-shuffle" => Ok(Filter::BitShuffle),
+                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Unsupported filter: {filter}"
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        params.filters(&filters).into_py_result()?;
+    }
+
+    Ok(params)
 }
 
 pub(crate) struct ContextGuard<'a> {
