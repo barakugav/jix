@@ -127,7 +127,6 @@ where
     type ElementType = Ty<K::Output>;
     type Dimension = D;
 
-    #[inline]
     fn read_data(
         &self,
         index: &[Range<u64>],
@@ -158,25 +157,27 @@ where
         // The inner index range `inner_range_full` (reduced dims spanning the full source
         // extent, non-reduced dims forwarded from `index`) is partitioned at two granularities:
         //
-        //   * **bulk** - the outer chunk. Splits *reduced* dims only. Walking bulks in
-        //     row-major order is what advances `base_item_idx`: each bulk delivers
-        //     `reduction_size = product(bulk_size[d] for d reduced)` items per output position.
-        //     `bulk_shape[d] = tile_shape[d]` for reduced dims and `inner_shape[d]`
-        //     for non-reduced - i.e. the full non-reduced extent always sits in one bulk
-        //     along that dim, so consecutive bulks never re-walk the same outputs.
+        //   * **bulk** - the outer chunk. Splits *non-reduced* (output) dims only.
+        //     `bulk_shape[d] = inner_shape[d]` for reduced dims (the full reduced extent sits
+        //     in one bulk) and `tile_shape[d]` for non-reduced. So each bulk owns a *disjoint
+        //     block of outputs* and contains that block's *entire* reduction stream - the
+        //     block is fully reduced before moving on, and consecutive bulks never re-walk the
+        //     same outputs. The live state working set is therefore one bulk's outputs, not
+        //     the whole output buffer.
         //   * **tile** - the inner chunk. Splits *both* dim groups, but is shaped so the
-        //     reduced part exactly matches one bulk's reduced range (one tile-along-reduced
-        //     per bulk). Within a bulk the tile iterator sweeps the non-reduced output
-        //     region. Each `(bulk, tile)` pair produces *one* `self.array.read_data` call,
-        //     sized to land within the source's `read_size` `(min, max)` window.
+        //     non-reduced part exactly matches one bulk's output block (one tile-along-non-
+        //     reduced per bulk). Within a bulk the tile iterator sweeps the reduced axes in
+        //     row-major order, so a tile is `bulk-non-reduced * tile-reduced`. Each
+        //     `(bulk, tile)` pair produces *one* `self.array.read_data` call, sized to land
+        //     within the source's `read_size` `(min, max)` window.
         //
         // `tile_shape` is chosen once per call by the source spec's
         // [`read_shape_heuristic_with_scale_order`], passing a custom scale order that
         // visits reduced dims first (rightmost first), then non-reduced dims (rightmost
         // first). The heuristic seeds every dim from the source storage block hint and
         // greedily scales each dim up in that order until the byte budget is spent.
-        // Setting `bulk_shape[reduced] = tile_shape[reduced]` then makes the inner read
-        // shape come out to `tile_shape` for every tile.
+        // Setting `bulk_shape[non-reduced] = tile_shape[non-reduced]` then makes the inner
+        // read shape come out to `tile_shape` for every tile.
         //
         // [`read_shape_heuristic_with_scale_order`]: crate::params::ArraySpec::read_shape_heuristic_with_scale_order
         //
@@ -189,61 +190,62 @@ where
         // # Per-tile processing
         //
         // ```text
-        // for each bulk:
-        //   reduction_size = product(bulk_size[d] for d in reduced dims)
-        //   item_idx_end   = base_item_idx + reduction_size
-        //   for each tile in this bulk:
-        //     items_buf <- self.array.read_data(tile = bulk-reduced * tile-non-reduced)
-        //     for each output position O in this tile's non-reduced sub-region:
-        //       walk the tile's `reduction_size` items at the right offset into items_buf,
-        //       folding them into state_buf[O] via K::init_state / K::update_state. item_idx
-        //       runs `[base_item_idx, item_idx_end)` regardless of init-vs-continue branch.
-        //   base_item_idx = item_idx_end
-        //   if reduction_size > 0 { state_initialized = true }
+        // full_reduction_size = product(inner_range_full[d] len for d in reduced dims)
+        // for each bulk:                      // a disjoint block of outputs
+        //   bulk_base_item_idx = 0            // reduced-stream position within this bulk
+        //   bulk_initialized   = false
+        //   for each tile in this bulk:       // walks the reduced axes; one non-reduced tile
+        //     reduction_size = product(tile_size[d] for d in reduced dims)
+        //     items_buf <- self.array.read_data(tile = bulk-non-reduced * tile-reduced)
+        //     for each output position O in this bulk's output block:
+        //       fold the tile's `reduction_size` items at O's offset into state_buf[O],
+        //       at stream indices [bulk_base_item_idx, bulk_base_item_idx + reduction_size).
+        //       The first tile of the bulk seeds the slot (K::init_state); later tiles merge.
+        //     bulk_base_item_idx += reduction_size
+        //     bulk_initialized = true
+        //   // assert bulk_base_item_idx == full_reduction_size (block fully reduced)
         // ```
         //
-        // The first-init vs. continue split is per-slot inside the inner output loop: when
-        // `!state_initialized`, the first reduction item per output is consumed by
-        // `K::init_state(first)` to write the slot; control then falls into the same
-        // `K::update_state` loop as later bulks. Within the first bulk, *all* tiles take
-        // the init branch - each tile only initializes the slots it covers, and together
-        // the first bulk's tiles cover every output exactly once. The flag flips only at
-        // the *end* of a bulk that contributed items, never inside a bulk.
+        // The first-seed vs. merge split is per-bulk: the *first* tile of a bulk takes the
+        // seed branch (`K::init_state` writes each slot it covers - and one non-reduced tile
+        // per bulk means it covers the bulk's whole output block); every later tile of the
+        // same bulk merges its partial fold into those slots via `K::merge`. `bulk_initialized`
+        // resets at the start of each bulk, so every output block is seeded exactly once, by
+        // its own bulk.
         //
         // # Finalization
         //
-        // After all bulks:
-        //   - If any bulk was visited (`state_initialized`): finalize every state into `buf`
-        //     via `K::finalize_state(state, reduction_size_overall)`. When
-        //     `state_in_out_buf`, the state and output pointers for each slot alias the same
-        //     bytes, so each iteration `assume_init_read`s the state *before* writing the
-        //     result.
+        // After all bulks (every output has been fully reduced within its bulk):
+        //   - If any output was written (`state_initialized`): finalize every state into `buf`
+        //     via `K::finalize_state(state, full_reduction_size)`. When `state_in_out_buf`,
+        //     the state and output pointers for each slot alias the same bytes, so each
+        //     iteration `assume_init_read`s the state *before* writing the result.
         //   - Otherwise (empty reduction - only reachable when a reduced dim is empty and the
-        //     kernel supports empty): write `K::finalize_state(K::init_state(None), 0)` to
-        //     every output.
+        //     kernel supports empty - which produces zero bulks): write
+        //     `K::finalize_state(K::init_state(None), 0)` to every output.
         //
         // # Scratch buffers
         //
         // - `items_buf`: raw input elements for the current *tile*. Resized each tile.
-        // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Initialized lazily
-        //   one tile at a time during the first bulk; finalized in the post-loop pass.
-        //   When `K::State` matches `K::Output` in size and is no more strictly aligned
-        //   (`state_in_out_buf`), we skip the scratch allocation entirely and reuse the
-        //   caller's `buf` as the state buffer - `finalize_state` then reads each slot and
-        //   writes the output into the same byte range it just consumed. The finalization
-        //   loop reads the state out of each slot *before* writing the result back, since
-        //   state and output pointers alias in that mode (see the `CAREFUL` comments).
+        // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Seeded one output
+        //   block at a time (the first tile of each bulk seeds that bulk's block); finalized
+        //   in the post-loop pass. When `K::State` matches `K::Output` in size and is no more
+        //   strictly aligned (`state_in_out_buf`), we skip the scratch allocation entirely and
+        //   reuse the caller's `buf` as the state buffer - `finalize_state` then reads each
+        //   slot and writes the output into the same byte range it just consumed. The
+        //   finalization loop reads the state out of each slot *before* writing the result
+        //   back, since state and output pointers alias in that mode (see the `CAREFUL`
+        //   comments).
         //
         // # Invariants (also enforced by `debug_assert!`s)
         //
-        // - Non-reduced dims produce at most one bulk-block per call.
-        // - Each bulk has exactly one tile-along-reduced
-        //   (`tile_shape[reduced] == bulk_shape[reduced]`).
+        // - Reduced dims produce at most one bulk-block per call
+        //   (`bulk_shape[reduced] == inner_shape[reduced]`).
+        // - Each bulk has exactly one tile-along-non-reduced
+        //   (`tile_shape[non-reduced] == bulk_shape[non-reduced]`).
         // - Every tile's absolute element range is contained in `inner_range_full`.
-        // - On the first state init pass, `base_item_idx == 0`.
-        // - After all bulks, each output's reduction stream consumes exactly
-        //   `product(inner_range_full[d].end - .start for d in reduced dims)` items (when
-        //   `out_nitems > 0`).
+        // - At the end of each bulk, `bulk_base_item_idx == full_reduction_size` - i.e. the
+        //   bulk folded its outputs over exactly the full reduced stream.
 
         let out_nitems = check_get_buffer_size(index, &K::Output::DTYPE, buf)?;
 
@@ -285,15 +287,15 @@ where
             tile_scale_order,
         );
 
-        // Bulk shape: tile shape on reduced dims (so each bulk has exactly one
-        // tile-along-reduced), full source extent on non-reduced dims (so the requested
-        // output range sits in one bulk along that dim - otherwise consecutive bulks would
-        // re-walk the same outputs and double-count).
+        // Bulk shape: full source extent on reduced dims (so an output's entire reduction
+        // stream sits inside one bulk and is finished there), tile shape on non-reduced dims
+        // (so each bulk owns a disjoint block of outputs, one tile wide - consecutive bulks
+        // never re-walk the same outputs and double-count).
         let bulk_shape = S::Dimension::vec(inner_ndim, |dim| {
             if self.is_reduced[dim] {
-                tile_shape[dim]
-            } else {
                 inner_shape[dim].max(1)
+            } else {
+                tile_shape[dim]
             }
         });
         let bulk_grid_begin = S::Dimension::vec(inner_ndim, |dim| {
@@ -308,8 +310,8 @@ where
         });
         debug_assert!(
             (0..inner_ndim)
-                .all(|d| self.is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
-            "non-reduced dim must produce at most one bulk-block",
+                .all(|d| !self.is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
+            "reduced dim must produce at most one bulk-block",
         );
         let bulk_iter = NdIter::builder_with_begin(bulk_grid_begin, bulk_grid_end)
             .with_block_offset_size_ext(
@@ -318,6 +320,13 @@ where
                 bulk_shape.clone(),
             )
             .build();
+
+        // Every output is fully reduced within its own bulk, so this is the stream length
+        // folded into each output cell - and the `nitems` passed to `finalize_state`.
+        let full_reduction_size = (0..inner_ndim)
+            .filter(|&d| self.is_reduced[d])
+            .map(|d| inner_range_full[d].end - inner_range_full[d].start)
+            .product::<u64>();
 
         let state_in_out_buf = size_of::<K::State>() == size_of::<K::Output>()
             && align_of::<K::State>() <= align_of::<K::Output>();
@@ -336,7 +345,6 @@ where
         let mut state_initialized = false;
 
         let mut items_buf = context.tmp_buf(0, Alignment::of::<S::Item>());
-        let mut base_item_idx = 0;
         for (bulk_idx, (bulk_inner_offset, bulk_size)) in bulk_iter {
             // The bulk's absolute element range, used as the tile iterator's universe.
             let bulk_begin = S::Dimension::vec(inner_ndim, |dim| {
@@ -344,23 +352,10 @@ where
             });
             let bulk_end = S::Dimension::vec(inner_ndim, |dim| bulk_begin[dim] + bulk_size[dim]);
 
-            // Each bulk contributes `reduction_size` items to every output it covers
-            // (which is every output, since non-reduced dims sit in one bulk). That count
-            // is determined by the bulk along reduced dims and is independent of tiling.
-            let reduction_size = (0..inner_ndim)
-                .filter(|&d| self.is_reduced[d])
-                .map(|d| bulk_size[d])
-                .product::<u64>();
-            // A bulk with no reduced items contributes nothing. Only reachable defensively:
-            // an empty reduced dim produces zero bulks, so the finalize empty-path handles
-            // that case and `fold_cell` may assume `reduction_size > 0`.
-            if reduction_size == 0 {
-                continue;
-            }
-
-            // Tile iterator: walks the bulk's range partitioned by `tile_shape`. Reduced
-            // dims have exactly one tile per bulk (tile_shape[reduced] == bulk reduced
-            // width), non-reduced dims are subdivided.
+            // Tile iterator: walks the bulk's range partitioned by `tile_shape`. Non-reduced
+            // dims have exactly one tile per bulk (tile_shape[non-reduced] == bulk non-reduced
+            // width), reduced dims are subdivided - and their tiles are swept in row-major
+            // order so each output's reduced stream is folded front-to-back across the bulk.
             let tile_grid_begin =
                 S::Dimension::vec(inner_ndim, |dim| bulk_begin[dim] / tile_shape[dim]);
             let tile_grid_end = S::Dimension::vec(inner_ndim, |dim| {
@@ -368,8 +363,8 @@ where
             });
             debug_assert!(
                 (0..inner_ndim)
-                    .all(|d| { !self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
-                "reduced dim must produce at most one tile per bulk",
+                    .all(|d| { self.is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
+                "non-reduced dim must produce at most one tile per bulk",
             );
             let tile_iter = NdIter::builder_with_begin(tile_grid_begin, tile_grid_end)
                 .with_block_offset_size_ext(
@@ -378,6 +373,13 @@ where
                     S::Dimension::vec(inner_ndim, |d| tile_shape[d]), // TODO: clone
                 )
                 .build();
+
+            // Per-bulk bookkeeping. `bulk_base_item_idx` is the reduced-stream position within
+            // this bulk (0-based; resets each bulk because bulks own disjoint output blocks).
+            // `bulk_initialized` flips after the first tile: the first tile of a bulk seeds its
+            // output cells, later tiles merge their partial folds into the same cells.
+            let mut bulk_base_item_idx = 0u64;
+            let mut bulk_initialized = false;
 
             for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
                 let tile = S::Dimension::vec(inner_ndim, |dim| {
@@ -391,6 +393,14 @@ where
                     }),
                     "tile not contained in inner_range_full",
                 );
+
+                // Items in this tile per output cell = product of the tile's reduced sizes.
+                // (In the swapped layout the reduced axes are subdivided across tiles, so this
+                // is a per-tile count, not the whole reduction.)
+                let reduction_size = (0..inner_ndim)
+                    .filter(|&d| self.is_reduced[d])
+                    .map(|d| tile_size[d])
+                    .product::<u64>();
 
                 // Read this tile's items into a `(output, reduced)` layout - reduced dims
                 // innermost/contiguous - so each output's reduced stream is a unit-stride run.
@@ -466,21 +476,25 @@ where
                     .with_strides_ptr_mut_ext(default_logical_strides(&out_shape), tile_state_base)
                     .build();
                 // One output cell at a time: fold its contiguous reduced stream with
-                // `LANES`-way interleaving, then continue across bulks via `merge`.
+                // `LANES`-way interleaving, then continue across the bulk's tiles via `merge`.
                 let reduction_size = reduction_size as usize;
-                // Store one cell's freshly-folded bulk state into its slot, merging across
-                // bulks. `state_ptr` is this cell's slot in `state_buf`.
-                let store = |bulk_state: K::State, state_ptr: *mut MaybeUninit<K::State>| {
+                // The first tile of a bulk seeds each output slot; later tiles of the same
+                // bulk merge their partial fold into it. (Snapshot the flag so mutating
+                // `bulk_initialized` after the fold doesn't clash with the closure's borrow.)
+                let merge_into_existing = bulk_initialized;
+                // Store one cell's freshly-folded tile state into its slot. `state_ptr` is
+                // this cell's slot in `state_buf`.
+                let store = |cell_state: K::State, state_ptr: *mut MaybeUninit<K::State>| {
                     // SAFETY: `state_ptr` is this cell's slot in `state_buf`.
                     let slot = unsafe { &mut *state_ptr };
-                    if state_initialized {
+                    if merge_into_existing {
                         // CAREFUL: with `state_in_out_buf`, `slot` aliases the output buffer;
                         // read the state out before writing the merged result back into the
                         // same bytes.
                         let prev = unsafe { slot.assume_init_read() };
-                        slot.write(self.kernel.merge(prev, bulk_state));
+                        slot.write(self.kernel.merge(prev, cell_state));
                     } else {
-                        slot.write(bulk_state);
+                        slot.write(cell_state);
                     }
                 };
                 let out_iter = out_iter.map(|(_out_idx, (src_base, state_ptr))| {
@@ -493,34 +507,32 @@ where
                 const LANES: usize = 16;
                 if reduction_size >= LANES {
                     for (src, state_ptr) in out_iter {
-                        let state = self.fold_cell::<LANES>(src, base_item_idx);
+                        let state = self.fold_cell::<LANES>(src, bulk_base_item_idx);
                         store(state, state_ptr);
                     }
                 } else if reduction_size > 0 {
                     for (src, state_ptr) in out_iter {
-                        let state = self.fold_cell::<1>(src, base_item_idx);
+                        let state = self.fold_cell::<1>(src, bulk_base_item_idx);
                         store(state, state_ptr);
                     }
                 }
+
+                if reduction_size > 0 {
+                    bulk_base_item_idx += reduction_size as u64;
+                    bulk_initialized = true;
+                    state_initialized = true;
+                }
             }
 
-            if reduction_size > 0 {
-                base_item_idx += reduction_size;
-                state_initialized = true;
-            }
+            debug_assert_eq!(
+                bulk_base_item_idx, full_reduction_size,
+                "bulk did not fold each of its outputs over the full reduced stream",
+            );
         }
 
-        // finalize_state
-        let reduction_size_overall = base_item_idx;
-        debug_assert!(
-            out_nitems == 0
-                || reduction_size_overall
-                    == (0..inner_ndim)
-                        .filter(|&d| self.is_reduced[d])
-                        .map(|d| inner_range_full[d].end - inner_range_full[d].start)
-                        .product::<u64>(),
-            "total items folded per output does not match product of reduced-dim sizes",
-        );
+        // finalize_state. Every output was fully reduced inside its own bulk, so each cell
+        // folded exactly `full_reduction_size` items.
+        let reduction_size_overall = full_reduction_size;
         // CAREFUL: state_buf and out_ptr may alias
         let state_ptr = state_buf.as_mut_ptr();
         // From here on the state/output buffers are touched only through `state_ptr` and
@@ -541,11 +553,19 @@ where
                 unsafe { out_ptr.write(res) };
             }
         } else {
-            // Empty reduction: write the empty-stream result to every output.
+            // Empty path: write the empty-stream result to every output. Reachable only when
+            // there was nothing to seed - either the output range is empty (no bulks, so the
+            // loop below runs zero times) or the reduced stream is empty (no tiles, so
+            // `full_reduction_size == 0` and this writes the kernel's empty-reduction result).
+            // A non-empty output with a non-empty reduction always seeds every slot and takes
+            // the `if` branch instead.
             let out_iter = NdIter::builder(out_shape)
                 .with_strides_ptr_mut_ext(out_lstrides, out_ptr)
                 .build();
-            debug_assert_eq!(reduction_size_overall, 0);
+            debug_assert!(
+                out_nitems == 0 || full_reduction_size == 0,
+                "output left unseeded despite a non-empty output and non-empty reduction",
+            );
             for (_idx, out_ptr) in out_iter {
                 let state = self.kernel.init_state(None);
                 let res = self.kernel.finalize_state(state, 0);
@@ -640,7 +660,7 @@ where
         let mut state = self.merge_states::<LANES>(locals);
 
         // Fold any remaining tail sequentially.
-        while i + 1 <= n {
+        while i < n {
             let item = unsafe { *src.get_unchecked(i) };
             state = self.kernel.update_state(state, item, base + i as u64);
             i += 1;
@@ -835,7 +855,7 @@ pub(crate) mod _traits {
 
                 #[inline(always)]
                 fn init() -> Self::Output {
-                    <i32 as crate::scalar::Cast<Self::Output>>::cast(0)
+                    <f32 as crate::scalar::Cast<Self::Output>>::cast(-0.0)
                 }
                 #[inline(always)]
                 fn update(state: Self::Output, item: Self) -> Self::Output {
@@ -3067,6 +3087,104 @@ pub(crate) mod tests {
         assert!((std_row[[0]] - 0.8164).abs() < 0.001);
     }
 
+    /// Drives a `sum` reduction through the two-level bulk/tile chunking, with `block_shape`
+    /// and a small `read_size` chosen so the tile lands at a genuine sub-block (smaller than
+    /// the array along both a reduced and a non-reduced axis). That exercises both non-trivial
+    /// paths at once: more than one *bulk*, and more than one *tile* within a bulk.
+    ///
+    /// The reduction's `read_data` is driven **directly** over the full output range in one
+    /// call. The top-level readers (`to_ndarray`, `to_ndarray_sub`) chunk the output by the
+    /// reduction op's block shape before calling `read_data`, so each call's non-reduced extent
+    /// equals one block and the read-shape heuristic snaps the tile to it - never subdividing
+    /// the non-reduced axis. Handing `read_data` the whole non-reduced extent at once makes it
+    /// split that axis into several tiles per bulk. Correctness is exact: the i64 sum of small
+    /// signed values can't reassociate or overflow. During development, path coverage is
+    /// confirmed with the temporary debug print in `ReductionOp::read_data`.
+    fn check_sum_divided(
+        shape: &[usize],
+        block_shape: &[u32],
+        read_size: (u64, u64),
+        axes: &[usize],
+    ) {
+        use crate::ArrayStorage;
+
+        // Deterministic values in a small signed range so a wrong tile offset or a
+        // double-counted / dropped item shows up as a mismatch.
+        let n: usize = shape.iter().product();
+        let nd = ndarray::ArrayD::from_shape_vec(
+            shape.to_vec(),
+            (0..n as i32).map(|x| (x % 97) - 48).collect(),
+        )
+        .unwrap();
+
+        let mut params = crate::ArrayParams::new();
+        params.block_shape(block_shape);
+        params.read_size(read_size);
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+
+        let reduced = za.as_ref().sum(axes);
+        let out_shape: Vec<u64> = reduced.shape().to_vec();
+        let full_index: Vec<std::ops::Range<u64>> = out_shape.iter().map(|&s| 0..s).collect();
+        let n_out: usize = out_shape.iter().product::<u64>() as usize;
+        let ctx = reduced.read_ctx();
+        let storage = reduced.into_storage();
+
+        let mut buf = vec![0i64; n_out.max(1)];
+        {
+            let bytes = unsafe {
+                std::slice::from_raw_parts_mut(
+                    buf.as_mut_ptr().cast::<u8>(),
+                    n_out * size_of::<i64>(),
+                )
+            };
+            let mut out = crate::storage::OutBuf::new(bytes);
+            storage.read_data(&full_index, &mut out, &ctx).unwrap();
+        }
+
+        let expected = ndarray_reduce(&nd, axes, |v| v.iter().map(|&x| x as i64).sum::<i64>());
+        assert_eq!(&buf[..n_out], expected.as_slice().unwrap());
+    }
+
+    #[test]
+    fn reduction_empty_output_subrange() {
+        // Reading an EMPTY output sub-range (a non-reduced dim with zero extent) must succeed
+        // and yield an empty result - it must not touch the empty-reduction path's assumptions.
+        // Regression: the swapped bulk/tile layout finalizes with `nitems = full_reduction_size`
+        // (the product of reduced extents), so an empty output range - which seeds no state and
+        // falls into the empty path - must not assume that count is zero.
+        let nd =
+            ndarray::ArrayD::from_shape_vec(vec![5usize, 5], (0..25i32).map(|x| x as i8).collect())
+                .unwrap();
+        let za = Array::compact_ndarray(&nd).unwrap();
+        let reduced = za.as_ref().max(1usize); // output shape [5]
+        let ctx = reduced.read_ctx();
+        // An empty sub-range along the (sole) output axis.
+        let got = reduced.to_ndarray_sub(&[1..1], &ctx).unwrap();
+        assert_eq!(got.shape(), &[0]);
+    }
+
+    #[test]
+    fn sum_multi_bulk_multi_tile_2d_reduce_outer() {
+        // Reduce axis 0 (the strided/outer axis), tile == block == [2, 3]. Current scheme:
+        // bulks split the reduced axis 0 (8/2 = 4 bulks); within each bulk, tiles split the
+        // non-reduced axis 1 (6/3 = 2 tiles/bulk).
+        check_sum_divided(&[8, 6], &[2, 3], (32, 64), &[0]);
+    }
+
+    #[test]
+    fn sum_multi_bulk_multi_tile_2d_reduce_inner() {
+        // Reduce axis 1 (the contiguous/inner axis), tile == block == [3, 2]. bulks split
+        // reduced axis 1 (8/2 = 4); tiles split non-reduced axis 0 (6/3 = 2).
+        check_sum_divided(&[6, 8], &[3, 2], (32, 64), &[1]);
+    }
+
+    #[test]
+    fn sum_multi_bulk_multi_tile_3d_reduce_middle() {
+        // 3D, reduce the middle axis, tile == block == [2, 2, 2]. bulks split reduced axis 1
+        // (4/2 = 2); tiles split the two non-reduced axes 0 and 2 ((4/2)*(4/2) = 4 tiles/bulk).
+        check_sum_divided(&[4, 4, 4], &[2, 2, 2], (32, 64), &[1]);
+    }
+
     /* TODO(reduction-merge): reduce/fold tests removed along with the ops; restore later.
     #[test]
     fn reduce_single_axis_in_logical_order() {
@@ -3295,7 +3413,7 @@ pub(crate) mod tests {
                 .copied()
                 .zip(kept_indices.iter().copied())
                 .collect();
-            pairs.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            pairs.sort_unstable_by_key(|p| core::cmp::Reverse(p.0));
 
             for (ax, idx) in &pairs {
                 view = view.index_axis_move(ndarray::Axis(*ax), *idx);
