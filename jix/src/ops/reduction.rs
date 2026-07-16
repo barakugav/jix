@@ -134,73 +134,12 @@ where
         buf: &mut OutBuf,
         context: &ReadContext,
     ) -> Result<()> {
-        let read_fn = match reduction_lanes::<S::Item, K::State>() {
-            4 => Self::read_data_impl::<4>,
-            8 => Self::read_data_impl::<8>,
-            16 => Self::read_data_impl::<16>,
-            _ => Self::read_data_impl::<8>,
-        };
-
         check_get_range(self.shape(), index)?;
-        let out_shape = D::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-        let mut buf = buf.get_contiguous_mut(out_shape.as_ref(), self.dtype(), context)?;
-        read_fn(self, index, buf.as_mut_slice(), context)?;
-        buf.finalize(out_shape.as_ref(), self.dtype());
-        Ok(())
-    }
+        let out_shape_usize = D::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let mut contiguous_buf =
+            buf.get_contiguous_mut(out_shape_usize.as_ref(), self.dtype(), context)?;
+        let buf = contiguous_buf.as_mut_slice();
 
-    #[inline(always)]
-    fn shape(&self) -> &[u64] {
-        self.shape.as_slice()
-    }
-    #[inline(always)]
-    fn dtype(&self) -> &Dtype {
-        const { &K::Output::DTYPE }
-    }
-    #[inline]
-    fn spec(&self) -> ArraySpec<'_> {
-        self.array
-            .spec()
-            .with_dynamic_spec(&self.spec)
-            .with_cleared_flags()
-    }
-    fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("ReductionOp", [&self.array])
-    }
-
-    type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
-    #[inline]
-    fn dimension_change<NewD: crate::Dimension>(
-        self,
-    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
-        let shape = self.shape.as_slice();
-        check_ndim::<NewD>(shape.len())?;
-        let shape = NewD::from_slice(shape);
-
-        Ok(ReductionOp {
-            kernel: self.kernel,
-            array: self.array,
-            is_reduced: self.is_reduced,
-            shape,
-            spec: self.spec,
-        })
-    }
-
-    crate::ops::impl_element_type_change_default!();
-}
-impl<S, K, D> ReductionOp<S, K, D>
-where
-    S: ArrayStorageTyped,
-    K: ReductionOpKernel<S::Item, Output: Dtyped>,
-    D: Dimension,
-{
-    #[inline(always)] // weird to inline(always), but its only called from read_data
-    fn read_data_impl<const LANES: usize>(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        context: &ReadContext,
-    ) -> Result<()> {
         // Streams the reduction over a two-level chunking of the inner array so peak scratch
         // memory stays bounded *and* each downstream `self.array.read_data` call is sized to
         // roughly fit the caller's request in cache.
@@ -529,11 +468,9 @@ where
                 // One output cell at a time: fold its contiguous reduced stream with
                 // `LANES`-way interleaving, then continue across bulks via `merge`.
                 let reduction_size = reduction_size as usize;
-                for (_out_idx, (src_base, state_ptr)) in out_iter {
-                    // SAFETY: `src_base` points at this cell's contiguous reduced stream of
-                    // `reduction_size` items in the permuted (output, reduced) tile buffer.
-                    let src = unsafe { std::slice::from_raw_parts(src_base, reduction_size) };
-                    let bulk_state = self.fold_cell::<LANES>(src, base_item_idx);
+                // Store one cell's freshly-folded bulk state into its slot, merging across
+                // bulks. `state_ptr` is this cell's slot in `state_buf`.
+                let store = |bulk_state: K::State, state_ptr: *mut MaybeUninit<K::State>| {
                     // SAFETY: `state_ptr` is this cell's slot in `state_buf`.
                     let slot = unsafe { &mut *state_ptr };
                     if state_initialized {
@@ -544,6 +481,25 @@ where
                         slot.write(self.kernel.merge(prev, bulk_state));
                     } else {
                         slot.write(bulk_state);
+                    }
+                };
+                let out_iter = out_iter.map(|(_out_idx, (src_base, state_ptr))| {
+                    // SAFETY: `src_base` points at this cell's contiguous reduced stream
+                    // of `reduction_size` items in the permuted (output, reduced) buffer.
+                    let src = unsafe { std::slice::from_raw_parts(src_base, reduction_size) };
+                    (src, state_ptr)
+                });
+
+                const LANES: usize = 16;
+                if reduction_size >= LANES {
+                    for (src, state_ptr) in out_iter {
+                        let state = self.fold_cell::<LANES>(src, base_item_idx);
+                        store(state, state_ptr);
+                    }
+                } else if reduction_size > 0 {
+                    for (src, state_ptr) in out_iter {
+                        let state = self.fold_cell::<1>(src, base_item_idx);
+                        store(state, state_ptr);
                     }
                 }
             }
@@ -597,61 +553,105 @@ where
             }
         }
 
+        contiguous_buf.finalize(out_shape_usize.as_ref(), self.dtype());
         Ok(())
     }
 
-    /// Fold one output cell's contiguous reduced stream (`src`, guaranteed non-empty) into
-    /// a single accumulator. Seeds `LANES` lane accumulators from the first `LANES` items,
-    /// then interleaves the remainder with a contiguous `LANES`-wide load per step (breaking
-    /// the reduction dependency chain so it can vectorize), tree-merges the lanes, and folds
-    /// any tail sequentially. `base` is the global stream index of `src[0]` - needed by
-    /// argmax/argmin and to continue a cell's state across bulks.
+    #[inline(always)]
+    fn shape(&self) -> &[u64] {
+        self.shape.as_slice()
+    }
+    #[inline(always)]
+    fn dtype(&self) -> &Dtype {
+        const { &K::Output::DTYPE }
+    }
+    #[inline]
+    fn spec(&self) -> ArraySpec<'_> {
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
+    }
+    fn info(&self) -> ArrayStorageInfo<'_> {
+        ArrayStorageInfo::new_deps("ReductionOp", [&self.array])
+    }
+
+    type DimensionChange<NewD: crate::Dimension> = ReductionOp<S, K, NewD>;
+    #[inline]
+    fn dimension_change<NewD: crate::Dimension>(
+        self,
+    ) -> crate::error::Result<Self::DimensionChange<NewD>> {
+        let shape = self.shape.as_slice();
+        check_ndim::<NewD>(shape.len())?;
+        let shape = NewD::from_slice(shape);
+
+        Ok(ReductionOp {
+            kernel: self.kernel,
+            array: self.array,
+            is_reduced: self.is_reduced,
+            shape,
+            spec: self.spec,
+        })
+    }
+
+    crate::ops::impl_element_type_change_default!();
+}
+impl<S, K, D> ReductionOp<S, K, D>
+where
+    S: ArrayStorageTyped,
+    K: ReductionOpKernel<S::Item, Output: Dtyped>,
+    D: Dimension,
+{
+    /// Fold one output cell's contiguous reduced stream (`src`, which must hold at least
+    /// `LANES` items) into a single accumulator. Seeds `LANES` lane accumulators from the
+    /// first `LANES` items, then interleaves the remainder with a contiguous `LANES`-wide
+    /// load per step (breaking the reduction dependency chain so it can vectorize),
+    /// tree-merges the lanes, and folds any tail sequentially. `base` is the global stream
+    /// index of `src[0]` - needed by argmax/argmin and to continue a cell's state across
+    /// bulks. Callers hoist the `len >= LANES` test out of the per-cell loop and fold
+    /// shorter streams with `LANES == 1`, which collapses to a plain sequential fold.
     #[inline(always)]
     fn fold_cell<const LANES: usize>(&self, src: &[S::Item], base: u64) -> K::State {
         let n = src.len();
-        debug_assert!(n > 0, "fold_cell requires a non-empty stream");
-        if n >= LANES {
-            // Seed one accumulator per lane from the first LANES items.
-            let mut locals: [K::State; LANES] = array_from_fn_inline(|b| {
-                let item = unsafe { *src.get_unchecked(b) };
-                self.kernel.init_state(Some((item, base + b as u64)))
+        let mut i = 0;
+
+        // Seed one accumulator per lane from the first LANES items.
+        debug_assert!(n >= LANES, "fold_cell requires at least LANES items");
+        let mut locals: [K::State; LANES] = array_from_fn_inline(|b| {
+            let item = unsafe { *src.get_unchecked(b) };
+            self.kernel.init_state(Some((item, base + b as u64)))
+        });
+        i += LANES;
+
+        // Process the main bulk of the stream in LANES-sized chunks.
+        while i + LANES <= n {
+            let items: [S::Item; LANES] =
+                array_from_fn_inline(|b| unsafe { *src.get_unchecked(i + b) });
+            let mut it = locals.into_iter();
+            locals = array_from_fn_inline(|b| {
+                let state = it.next().unwrap();
+                self.kernel
+                    .update_state(state, items[b], base + (i + b) as u64)
             });
-            let mut i = LANES;
-            while i + LANES <= n {
-                let items: [S::Item; LANES] =
-                    array_from_fn_inline(|b| unsafe { *src.get_unchecked(i + b) });
-                let mut it = locals.into_iter();
-                locals = array_from_fn_inline(|b| {
-                    let state = it.next().unwrap();
-                    self.kernel
-                        .update_state(state, items[b], base + (i + b) as u64)
-                });
-                i += LANES;
-            }
-            let mut state = self.merge_lanes::<LANES>(locals);
-            while i < n {
-                let item = unsafe { *src.get_unchecked(i) };
-                state = self.kernel.update_state(state, item, base + i as u64);
-                i += 1;
-            }
-            state
-        } else {
-            // Short stream: plain sequential fold.
-            let mut state = self
-                .kernel
-                .init_state(Some((unsafe { *src.get_unchecked(0) }, base)));
-            for i in 1..n {
-                let item = unsafe { *src.get_unchecked(i) };
-                state = self.kernel.update_state(state, item, base + i as u64);
-            }
-            state
+            i += LANES;
         }
+
+        // merge the LANES states to a single one
+        let mut state = self.merge_states::<LANES>(locals);
+
+        // Fold any remaining tail sequentially.
+        while i + 1 <= n {
+            let item = unsafe { *src.get_unchecked(i) };
+            state = self.kernel.update_state(state, item, base + i as u64);
+            i += 1;
+        }
+        state
     }
 
     /// Collapse `LANES` lane accumulators into one via a bottom-up pairwise tree (dependency
     /// depth `log2(LANES)`). `LANES` must be a power of two (the dispatch only picks 4/8/16).
     #[inline(always)]
-    fn merge_lanes<const LANES: usize>(&self, states: [K::State; LANES]) -> K::State {
+    fn merge_states<const LANES: usize>(&self, states: [K::State; LANES]) -> K::State {
         // TODO: this code is not panic-safe.
         assert!(LANES > 0 && LANES.is_power_of_two());
         let mut states = states.map_inline(MaybeUninit::new);
@@ -665,24 +665,6 @@ where
             }
         }
         unsafe { states[0].assume_init_read() }
-    }
-}
-
-/// Number of interleaved lane accumulators to use in the per-cell fold, chosen by element
-/// and state size so the accumulator array maps onto a SIMD register. Always a power of two
-/// in `{4, 8, 16}` (required by [`ReductionOp::merge_lanes`]).
-const fn reduction_lanes<Item, State>() -> usize {
-    let item = size_of::<Item>();
-    let state = size_of::<State>();
-    let unit = if state > item { state } else { item };
-    let unit = if unit == 0 { 1 } else { unit };
-    let raw = (64 / unit).next_power_of_two();
-    if raw < 4 {
-        4
-    } else if raw > 16 {
-        16
-    } else {
-        raw
     }
 }
 
