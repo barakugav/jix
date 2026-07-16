@@ -51,6 +51,10 @@ python scripts/check_only_ascii.py         # see "ASCII-only" constraint below
 cargo run                                  # rewrites jix/src/archive/schema/_proto_gen/
 ```
 
+The `.venv` at `{repo-root}/.venv` is normally already activated in the shell - do NOT
+prefix commands with `source .venv/bin/activate` by default. Only activate (or create) it
+if a command actually fails because the venv is missing or inactive.
+
 Python dev dependencies: before installing them, make sure a venv is activated at
 `{repo-root}/.venv`. If it does not exist, create it with uv using Python 3.13:
 

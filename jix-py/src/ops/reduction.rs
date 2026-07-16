@@ -292,12 +292,13 @@ define_reduction_op!(
 define_reduction_op!(
     /// Reduces one or more axes by summing all elements.
     ///
-    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+    /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `bool`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
-    /// The output dtype is widened to avoid overflow: signed integers accumulate into
-    /// `i64`, unsigned integers and `bool` into `u64`, floats into `f64`, and complex into
-    /// `Complex<f64>`. A 64-bit accumulator can still wrap on a sufficiently large sum. An
+    /// The output dtype matches NumPy: signed integers accumulate into `i64`, unsigned
+    /// integers into `u64`, and float/complex inputs keep their input width (`f16 -> f16`,
+    /// `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...). `bool` sums into `u64` (NumPy uses
+    /// `int64`). A 64-bit integer accumulator can still wrap on a sufficiently large sum. An
     /// empty reduction returns `0`.
     ///
     /// Args:
@@ -332,10 +333,11 @@ define_reduction_op!(
     /// Supported dtypes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
     /// `f16`, `f32`, `f64`, `Complex<f32>`, `Complex<f64>`.
     ///
-    /// The output dtype is widened to avoid overflow: signed integers accumulate into
-    /// `i64`, unsigned integers into `u64`, floats into `f64`, and complex into
-    /// `Complex<f64>` (`bool` is not supported). A 64-bit accumulator can still wrap on a
-    /// sufficiently large product. An empty reduction returns `1`.
+    /// The output dtype matches NumPy: signed integers accumulate into `i64`, unsigned
+    /// integers into `u64`, and float/complex inputs keep their input width (`f16 -> f16`,
+    /// `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...). `bool` is not supported. A 64-bit
+    /// integer accumulator can still wrap on a sufficiently large product. An empty reduction
+    /// returns `1`.
     ///
     /// Args:
     ///     array: Input array.
@@ -368,8 +370,9 @@ define_reduction_op!(
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
     ///
-    /// Integer and `bool` inputs are accepted directly and promote to `f64`; complex inputs
-    /// produce a `Complex<f64>` result.
+    /// The output dtype matches NumPy: integer and `bool` inputs promote to `f64`, while float
+    /// and complex inputs keep their input width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> ->
+    /// Complex<f32>`, ...).
     ///
     /// Args:
     ///     array: Input array.
@@ -401,6 +404,11 @@ define_reduction_op!(
     /// Computes the variance along one or more axes.
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
+    ///
+    /// The variance is real-valued and its dtype matches NumPy: integer and `bool` inputs
+    /// promote to `f64`, real floats keep their width (`f16 -> f16`, `f32 -> f32`, `f64 ->
+    /// f64`), and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
+    /// `Complex<f64> -> f64`).
     ///
     /// Args:
     ///     array: Input array.
@@ -435,6 +443,11 @@ define_reduction_op!(
     /// Computes the standard deviation along one or more axes.
     ///
     /// Supported dtypes: all integers, floats, complex types, and `bool`.
+    ///
+    /// The standard deviation is real-valued and its dtype matches NumPy (same rules as
+    /// `jix.var`): integer and `bool` inputs promote to `f64`, real floats keep their width,
+    /// and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
+    /// `Complex<f64> -> f64`).
     ///
     /// Args:
     ///     array: Input array.

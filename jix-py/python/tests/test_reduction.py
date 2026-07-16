@@ -7,6 +7,8 @@ Python-specific coverage beyond the Rust tests:
   - list and tuple axis inputs for multi-axis reductions
   - axis=None (reduce all axes)
   - keepdims=True / False
+  - dtype promotion parity with numpy for sum/product/mean/var/std (the output dtype of
+    each reduction must match numpy exactly; see test_output_dtype_matches_numpy)
 """
 
 import numpy as np
@@ -165,6 +167,15 @@ def _element_st(dtype):
 # Dtype lists
 # ---------------------------------------------------------------------------
 
+# float16 reductions now accumulate in native f16 (see commit "Preset float dtype in
+# reductions, upcast integers"), so for sum/product/mean their values can drift far from a
+# high-precision reference under catastrophic cancellation or overflow. The adversarial
+# property tests for those ops therefore cover f32/f64 only; float16 value parity for the
+# common (well-behaved) case is checked in test_common_case_matches_numpy, and float16
+# output dtype is checked exhaustively in test_output_dtype_matches_numpy. var/std keep f16
+# in the property tests because they accumulate the mean in f64 internally and stay precise.
+_WIDE_FLOATS = [np.float32, np.float64]
+
 
 # ---------------------------------------------------------------------------
 # max / min - any strategy; op_safe for floats to avoid NaN-ignoring semantics
@@ -221,7 +232,7 @@ def test_argmin(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + complexes + [np.bool_])
+@pytest.mark.parametrize("dtype", ints + uints + _WIDE_FLOATS + complexes + [np.bool_])
 @given(st.data())
 def test_sum(dtype: np.dtype, data: DataObject):
     np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
@@ -235,7 +246,7 @@ def test_sum(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
+@pytest.mark.parametrize("dtype", ints + uints + _WIDE_FLOATS + complexes)
 @given(st.data())
 def test_product(dtype: np.dtype, data: DataObject):
     np_a, za, axis, keepdims = data.draw(
@@ -256,7 +267,7 @@ def test_product(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + complexes + [np.bool_])
+@pytest.mark.parametrize("dtype", ints + uints + _WIDE_FLOATS + complexes + [np.bool_])
 @given(st.data())
 def test_mean(dtype: np.dtype, data: DataObject):
     np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
@@ -418,3 +429,122 @@ def test_var_std_ddof1():
     assert abs(jix.var(za, ddof=1.0).numpy()[()] - np.var(d, ddof=1)) < 1e-3
     assert abs(jix.std(za).numpy()[()] - 2.0) < 1e-4
     assert abs(jix.std(za, ddof=1.0).numpy()[()] - np.std(d, ddof=1)) < 1e-3
+
+
+# ---------------------------------------------------------------------------
+# Dtype promotion parity with numpy
+#
+# The commit "Preset float dtype in reductions, upcast integers" changed sum/product/mean/
+# var/std so that float and complex inputs keep their own width instead of always widening
+# to 64-bit, while integers still upcast. The result is that jix's reduction output dtype
+# now matches numpy exactly for every integer, unsigned, float, and complex input. These
+# tests pin that mapping.
+#
+# The only intentional divergences (verified against numpy and documented in the op
+# docstrings) both involve bool:
+#   - sum(bool)     -> jix u64, numpy int64  (values equal; signedness differs)
+#   - product(bool) -> unsupported in jix,   numpy would upcast to int64
+# They are covered by test_bool_sum_dtype_divergence / test_product_bool_unsupported and
+# excluded from the exact-parity checks below.
+# ---------------------------------------------------------------------------
+
+# name -> (jix fn, numpy fn)
+_REDUCE_FN = {
+    "sum": (jix.sum, np.sum),
+    "product": (jix.product, np.prod),
+    "mean": (jix.mean, np.mean),
+    "var": (jix.var, np.var),
+    "std": (jix.std, np.std),
+}
+
+# Input dtypes whose reduction output dtype must match numpy exactly, per op.
+_DTYPE_MATCH = {
+    "sum": ints + uints + floats + complexes,  # bool: divergence, see below
+    "product": ints + uints + floats + complexes,  # bool: unsupported, see below
+    "mean": ints + uints + floats + complexes + [np.bool_],
+    "var": ints + uints + floats + complexes + [np.bool_],
+    "std": ints + uints + floats + complexes + [np.bool_],
+}
+
+_DTYPE_MATCH_CASES = [(fname, dtype) for fname, dtypes in _DTYPE_MATCH.items() for dtype in dtypes]
+
+
+def _dtype_sample(dtype: np.dtype) -> np.ndarray:
+    """A small (3, 4) array of the given dtype for exercising reduction code paths."""
+    if dtype == np.bool_:
+        return np.array(
+            [[True, False, True, True], [False, True, True, False], [True, True, False, True]],
+            dtype=np.bool_,
+        )
+    if np.issubdtype(dtype, np.complexfloating):
+        base = np.arange(1, 13, dtype=np.float64).reshape(3, 4)
+        return (base + 1j * base[::-1]).astype(dtype)
+    return np.arange(1, 13, dtype=dtype).reshape(3, 4)
+
+
+@pytest.mark.parametrize(
+    "func_name,dtype",
+    _DTYPE_MATCH_CASES,
+    ids=[f"{f}-{np.dtype(d).name}" for f, d in _DTYPE_MATCH_CASES],
+)
+@pytest.mark.parametrize("axis,keepdims", [(None, False), (None, True), (0, True), (1, False)])
+def test_output_dtype_matches_numpy(func_name: str, dtype: np.dtype, axis, keepdims: bool):
+    """jix's reduction output dtype matches numpy exactly across all code paths."""
+    jix_fn, np_fn = _REDUCE_FN[func_name]
+    np_a = _dtype_sample(dtype)
+    za = jix.compact(np_a)
+    jix_out = jix_fn(za, axis=axis, keepdims=keepdims)
+    np_out = np_fn(np_a, axis=axis, keepdims=keepdims)
+    assert jix_out.dtype == np_out.dtype, (
+        f"{func_name}({np.dtype(dtype).name}) axis={axis} keepdims={keepdims}: "
+        f"jix -> {jix_out.dtype}, numpy -> {np_out.dtype}"
+    )
+
+
+# Well-behaved (moderate magnitude, no cancellation/overflow) inputs where jix and numpy
+# agree value-wise even for the reduced-precision dtypes. Edge cases are allowed to diverge.
+_COMMON_CASE_ARRAYS = {
+    np.float16: np.array([1.0, 2.5, 3.0, 0.5, 4.25, 2.0, 1.5, 3.75, 2.25, 1.0], dtype=np.float16),
+    np.float32: np.array([1.1, 2.5, 3.0, 0.5, 4.25, 2.0, 1.5, 3.75, 2.25, 1.0], dtype=np.float32),
+    np.float64: np.array([1.1, 2.5, 3.0, 0.5, 4.25, 2.0, 1.5, 3.75, 2.25, 1.0], dtype=np.float64),
+    np.complex64: np.array([1 + 0.5j, 2 + 1.5j, 3 + 2j, 0.5 + 1j, 4 + 0.25j], dtype=np.complex64),
+    np.complex128: np.array([1 + 0.5j, 2 + 1.5j, 3 + 2j, 0.5 + 1j, 4 + 0.25j], dtype=np.complex128),
+    np.int32: np.array([3, 1, 4, 1, 5, 9, 2, 6], dtype=np.int32),
+    np.uint8: np.array([3, 1, 4, 1, 5, 9, 2, 6], dtype=np.uint8),
+}
+
+
+@pytest.mark.parametrize("dtype", list(_COMMON_CASE_ARRAYS), ids=[np.dtype(d).name for d in _COMMON_CASE_ARRAYS])
+@pytest.mark.parametrize("func_name", list(_REDUCE_FN))
+def test_common_case_matches_numpy(func_name: str, dtype: np.dtype):
+    """For common-case inputs jix reductions match numpy in both dtype and value (isclose)."""
+    jix_fn, np_fn = _REDUCE_FN[func_name]
+    np_a = _COMMON_CASE_ARRAYS[dtype]
+    za = jix.compact(np_a)
+    jix_out = jix_fn(za)
+    np_out = np_fn(np_a)
+    assert jix_out.dtype == np_out.dtype
+    np.testing.assert_allclose(
+        np.asarray(jix_out.numpy()).astype(np.complex128),
+        np.asarray(np_out).astype(np.complex128),
+        rtol=1e-2,
+        atol=1e-3,
+    )
+
+
+def test_bool_sum_dtype_divergence():
+    """sum(bool): jix uses u64, numpy uses int64. Values (the true count) match; dtype does not."""
+    np_a = np.array([True, False, True, True, False], dtype=np.bool_)
+    za = jix.compact(np_a)
+    jix_out = jix.sum(za)
+    np_out = np.sum(np_a)
+    assert jix_out.dtype == np.dtype("uint64")
+    assert jix_out.dtype != np_out.dtype  # numpy promotes bool -> int64 instead
+    assert int(jix_out.numpy()[()]) == int(np_out) == 3
+
+
+def test_product_bool_unsupported():
+    """product(bool) is not supported by jix (numpy would upcast bool -> int64)."""
+    za = jix.compact(np.array([True, False, True], dtype=np.bool_))
+    with pytest.raises(RuntimeError):
+        jix.product(za)

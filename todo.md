@@ -10,3 +10,4 @@
 - ArrayParams stream syntax
 - resolve TODOs across the repo
 - solve miri UB in nd_copy, zero size slice trick is not accepted
+- add type arg to asarray

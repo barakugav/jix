@@ -814,10 +814,11 @@ pub(crate) mod _traits {
 
     /// Scalar kernel trait for the element-wise `sum` reduction.
     ///
-    /// Accumulates into a wider output type to reduce overflow risk: integer types accumulate
-    /// into `i64`/`u64`, floating-point types accumulate into `f64`.
+    /// Integer types accumulate into a wider output to reduce overflow risk (`i8..=i64 ->
+    /// i64`; `u8..=u64` and `bool -> u64`). Floating-point and complex types keep their input
+    /// width (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...), matching NumPy.
     pub trait Sum {
-        /// The sum element type (wider than the input for most types).
+        /// The sum element type: `i64`/`u64` for integers and `bool`, otherwise the input type.
         type Output;
         /// Return the initial accumulator (zero).
         fn init() -> Self::Output;
@@ -856,21 +857,22 @@ pub(crate) mod _traits {
     impl_sum!(u32, u64);
     impl_sum!(u64, u64);
     #[cfg(feature = "half")]
-    impl_sum!(f16, f64);
-    impl_sum!(f32, f64);
+    impl_sum!(f16, f16);
+    impl_sum!(f32, f32);
     impl_sum!(f64, f64);
     #[cfg(feature = "num-complex")]
-    impl_sum!(Complex<f32>, Complex<f64>);
+    impl_sum!(Complex<f32>, Complex<f32>);
     #[cfg(feature = "num-complex")]
     impl_sum!(Complex<f64>, Complex<f64>);
     impl_sum!(bool, u64);
 
     /// Scalar kernel trait for the element-wise `product` reduction.
     ///
-    /// Accumulates into a wider output type to reduce overflow risk: integer types accumulate
-    /// into `i64`/`u64`, floating-point types accumulate into `f64`.
+    /// Integer types accumulate into a wider output to reduce overflow risk (`i8..=i64 ->
+    /// i64`; `u8..=u64 -> u64`). Floating-point and complex types keep their input width
+    /// (`f16 -> f16`, `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...), matching NumPy.
     pub trait Product {
-        /// The product element type (wider than the input for most types).
+        /// The product element type: `i64`/`u64` for integers, otherwise the input type.
         type Output;
         /// Return the initial accumulator (one).
         fn init() -> Self::Output;
@@ -908,23 +910,24 @@ pub(crate) mod _traits {
     impl_product!(u32, u64);
     impl_product!(u64, u64);
     #[cfg(feature = "half")]
-    impl_product!(f16, f64);
-    impl_product!(f32, f64);
+    impl_product!(f16, f16);
+    impl_product!(f32, f32);
     impl_product!(f64, f64);
     #[cfg(feature = "num-complex")]
-    impl_product!(Complex<f32>, Complex<f64>);
+    impl_product!(Complex<f32>, Complex<f32>);
     #[cfg(feature = "num-complex")]
     impl_product!(Complex<f64>, Complex<f64>);
 
     /// Scalar kernel trait for the element-wise `mean` reduction.
     ///
-    /// The mean is computed as the sum divided by the count; the output is always `f64`
-    /// (or `Complex<f64>` for complex inputs) to preserve precision.
+    /// The mean is computed as the sum divided by the count. Integer and `bool` inputs promote
+    /// to `f64`; floating-point and complex inputs keep their input width (`f16 -> f16`,
+    /// `f32 -> f32`, `Complex<f32> -> Complex<f32>`, ...), matching NumPy.
     ///
     /// The count is tracked **outside** the accumulator: callers thread the number of
     /// folded items into [`finalize`](Self::finalize) themselves.
     pub trait Mean {
-        /// The output element type - always `f64` or `Complex<f64>`.
+        /// The output element type: `f64` for integer and `bool` inputs, otherwise the input type.
         type Output;
         /// Accumulator state - the running sum.
         type State;
@@ -961,7 +964,10 @@ pub(crate) mod _traits {
                     if nitems == 0 {
                         return None;
                     }
-                    Some(<_ as crate::scalar::Cast<Self::Output>>::cast(state) / nitems as f64)
+                    Some(
+                        <_ as crate::scalar::Cast<Self::Output>>::cast(state)
+                            / <_ as crate::scalar::Cast<Self::Output>>::cast(nitems),
+                    )
                 }
             }
         };
@@ -975,11 +981,11 @@ pub(crate) mod _traits {
     impl_mean!(u32, f64);
     impl_mean!(u64, f64);
     #[cfg(feature = "half")]
-    impl_mean!(f16, f64);
-    impl_mean!(f32, f64);
+    impl_mean!(f16, f16);
+    impl_mean!(f32, f32);
     impl_mean!(f64, f64);
     #[cfg(feature = "num-complex")]
-    impl_mean!(Complex<f32>, Complex<f64>);
+    impl_mean!(Complex<f32>, Complex<f32>);
     #[cfg(feature = "num-complex")]
     impl_mean!(Complex<f64>, Complex<f64>);
     impl_mean!(bool, f64);
@@ -991,7 +997,7 @@ pub(crate) mod _traits {
     pub struct VarianceState<M> {
         /// Running mean in the type-specific accumulator domain.
         mean: M,
-        /// Running sum of squared deviations from the mean (`f64`).
+        /// Running sum of squared deviations from the mean.
         m2: f64,
         /// Number of items folded into this accumulator.
         count: u64,
@@ -1007,7 +1013,9 @@ pub(crate) mod _traits {
     ///
     /// [`finalize`]: Variance::finalize
     pub trait Variance {
-        /// The output element type - always a `Float` (i.e. `f64` for most inputs).
+        /// The output element type - always a real `Float`: `f64` for integer and `bool`
+        /// inputs, the input width for real floats (`f16`/`f32`/`f64`), and the real component
+        /// type for complex inputs (`Complex<f32> -> f32`, `Complex<f64> -> f64`).
         type Output;
         /// Welford accumulator state.
         type State;
@@ -1026,9 +1034,9 @@ pub(crate) mod _traits {
         fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output;
     }
     macro_rules! impl_variance {
-        ($item_ty:ty, $mean_ty:ty, |$delta:ident, $delta2:ident| $m2_expr:expr) => {
+        ($item_ty:ty => $output_ty:ty, MeanT = $mean_ty:ty, |$delta:ident, $delta2:ident| $m2_expr:expr) => {
             impl Variance for $item_ty {
-                type Output = f64;
+                type Output = $output_ty;
                 type State = VarianceState<$mean_ty>;
 
                 #[inline(always)]
@@ -1057,16 +1065,18 @@ pub(crate) mod _traits {
                     if b.count == 0 {
                         return a;
                     }
-                    let na = a.count as f64;
-                    let nb = b.count as f64;
+                    let na = a.count;
+                    let nb = b.count;
                     let n = na + nb;
                     // Chan's parallel Welford combine. The m2 cross-term reuses the per-type
                     // squared-deviation expression with `delta2 = delta` (real: delta^2;
                     // complex: |delta|^2).
                     let $delta = b.mean - a.mean;
-                    let mean = a.mean + $delta * (nb / n);
+                    let mean = a.mean
+                        + $delta
+                            * <f64 as crate::scalar::Cast<$mean_ty>>::cast(nb as f64 / n as f64);
                     let $delta2 = $delta;
-                    let m2 = a.m2 + b.m2 + ($m2_expr) * (na * nb / n);
+                    let m2 = a.m2 + b.m2 + ($m2_expr) * (na as f64 * nb as f64 / n as f64);
                     VarianceState {
                         mean,
                         m2,
@@ -1076,36 +1086,37 @@ pub(crate) mod _traits {
                 #[inline(always)]
                 fn finalize(state: Self::State, ddof: f64, nitems: u64) -> Self::Output {
                     let denom = nitems as f64 - ddof;
-                    if denom <= 0.0 {
+                    let res = if denom <= 0.0 {
                         f64::NAN
                     } else {
                         state.m2 / denom
-                    }
+                    };
+                    <_ as crate::scalar::Cast<Self::Output>>::cast(res)
                 }
             }
         };
     }
-    impl_variance!(i8, f64, |delta, delta2| delta * delta2);
-    impl_variance!(i16, f64, |delta, delta2| delta * delta2);
-    impl_variance!(i32, f64, |delta, delta2| delta * delta2);
-    impl_variance!(i64, f64, |delta, delta2| delta * delta2);
-    impl_variance!(u8, f64, |delta, delta2| delta * delta2);
-    impl_variance!(u16, f64, |delta, delta2| delta * delta2);
-    impl_variance!(u32, f64, |delta, delta2| delta * delta2);
-    impl_variance!(u64, f64, |delta, delta2| delta * delta2);
+    impl_variance!(i8 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(i16 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(i32 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(i64 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(u8 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(u16 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(u32 => f64, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(u64 => f64, MeanT = f64, |delta, delta2| delta * delta2);
     #[cfg(feature = "half")]
-    impl_variance!(f16, f64, |delta, delta2| delta * delta2);
-    impl_variance!(f32, f64, |delta, delta2| delta * delta2);
-    impl_variance!(f64, f64, |delta, delta2| delta * delta2);
+    impl_variance!(f16 => f16, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(f32 => f32, MeanT = f64, |delta, delta2| delta * delta2);
+    impl_variance!(f64 => f64, MeanT = f64, |delta, delta2| delta * delta2);
     #[cfg(feature = "num-complex")]
-    impl_variance!(Complex<f32>, Complex<f64>, |delta, delta2| delta.re
+    impl_variance!(Complex<f32> => f32, MeanT = Complex<f64>, |delta, delta2| delta.re
         * delta2.re
         + delta.im * delta2.im);
     #[cfg(feature = "num-complex")]
-    impl_variance!(Complex<f64>, Complex<f64>, |delta, delta2| delta.re
+    impl_variance!(Complex<f64> => f64, MeanT = Complex<f64>, |delta, delta2| delta.re
         * delta2.re
         + delta.im * delta2.im);
-    impl_variance!(bool, f64, |delta, delta2| delta * delta2);
+    impl_variance!(bool => f64, MeanT = f64, |delta, delta2| delta * delta2);
 }
 
 define_reduction_op!(
@@ -1440,10 +1451,15 @@ define_reduction_op!(
     /// |-------------|--------------|
     /// | `i8`, `i16`, `i32`, `i64` | `i64` |
     /// | `u8`, `u16`, `u32`, `u64`, `bool` | `u64` |
-    /// | `f16`, `f32`, `f64` | `f64` |
-    /// | `Complex<f32>`, `Complex<f64>` | `Complex<f64>` |
+    /// | `f16` | `f16` |
+    /// | `f32` | `f32` |
+    /// | `f64` | `f64` |
+    /// | `Complex<f32>` | `Complex<f32>` |
+    /// | `Complex<f64>` | `Complex<f64>` |
     ///
-    /// The output dtype is always widened to avoid overflow on large reductions.
+    /// Integer inputs are widened to a 64-bit accumulator to reduce overflow on large
+    /// reductions; floating-point and complex inputs keep their width, matching NumPy (except
+    /// `bool`, which jix sums into `u64` whereas NumPy uses `int64`).
     /// An empty reduction (zero elements along the reduced axes) returns `0`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -1519,10 +1535,15 @@ define_reduction_op!(
     /// |-------------|--------------|
     /// | `i8`, `i16`, `i32`, `i64` | `i64` |
     /// | `u8`, `u16`, `u32`, `u64` | `u64` |
-    /// | `f16`, `f32`, `f64` | `f64` |
-    /// | `Complex<f32>`, `Complex<f64>` | `Complex<f64>` |
+    /// | `f16` | `f16` |
+    /// | `f32` | `f32` |
+    /// | `f64` | `f64` |
+    /// | `Complex<f32>` | `Complex<f32>` |
+    /// | `Complex<f64>` | `Complex<f64>` |
     ///
-    /// Note: `bool` is not supported. The output dtype is always widened.
+    /// Integer inputs are widened to a 64-bit accumulator to reduce overflow on large
+    /// reductions; floating-point and complex inputs keep their width, matching NumPy. `bool`
+    /// is not supported (NumPy would promote it to `int64`).
     /// An empty reduction (zero elements along the reduced axes) returns `1`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
@@ -1592,8 +1613,9 @@ where
 define_reduction_op!(
     /// Reduces one or more axes by computing the arithmetic mean.
     ///
-    /// Output dtype is `f64` for all scalar inputs; `Complex<f64>` for `Complex<f32>` and
-    /// `Complex<f64>` inputs.
+    /// Integer and `bool` inputs promote to `f64`; floating-point and complex inputs keep
+    /// their input width (`f16 -> f16`, `f32 -> f32`, `f64 -> f64`, `Complex<f32> ->
+    /// Complex<f32>`, `Complex<f64> -> Complex<f64>`), matching NumPy.
     ///
     /// Reducing an empty slice (zero elements) panics.
     ///
@@ -1664,8 +1686,10 @@ where
 define_reduction_op!(
     /// Reduces one or more axes by computing the variance.
     ///
-    /// Output dtype is `f64`. For complex inputs the result is the real-valued variance
-    /// `E[|x - mean|^2]`.
+    /// The variance is real-valued and its dtype matches NumPy: integer and `bool` inputs
+    /// promote to `f64`, real floats keep their width (`f16 -> f16`, `f32 -> f32`, `f64 ->
+    /// f64`), and complex inputs reduce to their real component type (`Complex<f32> -> f32`,
+    /// `Complex<f64> -> f64`), computing `E[|x - mean|^2]`.
     ///
     /// The `ddof` parameter (delta degrees of freedom) adjusts the divisor: the variance
     /// is computed as `sum((x - mean)^2) / (n - ddof)`. Use `ddof=0` for the population
@@ -1741,8 +1765,10 @@ where
 define_reduction_op!(
     /// Reduces one or more axes by computing the standard deviation.
     ///
-    /// Output dtype is `f64`. For complex inputs the result is the real-valued standard
-    /// deviation `sqrt(E[|x - mean|^2])`.
+    /// The standard deviation is real-valued and follows the same dtype rules as [`Variance`]:
+    /// integer and `bool` inputs promote to `f64`, real floats keep their width, and complex
+    /// inputs reduce to their real component type (`Complex<f32> -> f32`, `Complex<f64> ->
+    /// f64`), computing `sqrt(E[|x - mean|^2])`.
     ///
     /// Equivalent to `sqrt(variance)`. The `ddof` parameter has the same meaning as in
     /// [`Variance`]: use `ddof=0` for population std and `ddof=1` for sample std.
@@ -2453,14 +2479,16 @@ pub(crate) mod tests {
 
     /// Per-dtype comparison policy for the reduction property tests.
     ///
-    /// A reduction reads its input block-by-block, so a floating accumulator
-    /// reassociates and can land a few ULP away from the sequential reference
-    /// fold. Every float and complex reduction folds into the widening
-    /// `f64` / `Complex<f64>` accumulator (which is therefore the element type of
-    /// `expected`), so those two types are compared with [`ApproxEq`]; integer
-    /// and `bool` reductions are exact and compared bit-for-bit. `f32` / `f16`
-    /// (and `Complex<f32>`) only ever surface here as `max` / `min` results,
-    /// which just select an input element and so also compare exactly.
+    /// A reduction reads its input block-by-block, so a floating accumulator reassociates and can
+    /// land a few ULP away from a sequential reference fold. Float and complex reductions are
+    /// therefore compared with [`ApproxEq`], using a per-dtype tolerance (looser for the narrower
+    /// `f32` / `Complex<f32>`, tighter for `f64` / `Complex<f64>`). Integer and `bool` reductions
+    /// are exact and compared bit-for-bit.
+    ///
+    /// `f16` only ever surfaces here as a `max` / `min` result (its `sum`/`product`/`mean` value
+    /// parity is skipped - native `f16` accumulation drifts/overflows too far to pin with a
+    /// tolerance, mirroring the Python suite), and `max`/`min` select an input element, so `f16`
+    /// is compared exactly like the integers.
     ///
     /// [`ApproxEq`]: crate::scalar::ApproxEq
     trait ReductionCompare: crate::dtype::Dtyped + std::fmt::Debug + Clone {
@@ -2477,15 +2505,29 @@ pub(crate) mod tests {
             }
         )*};
     }
-    reduction_compare_exact!(i8, i16, i32, i64, u8, u16, u32, u64, bool, f32);
+    reduction_compare_exact!(i8, i16, i32, i64, u8, u16, u32, u64, bool);
     #[cfg(feature = "half")]
     reduction_compare_exact!(f16);
-    #[cfg(feature = "num-complex")]
-    reduction_compare_exact!(complex_f32);
 
+    impl ReductionCompare for f32 {
+        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+            crate::util::assert_array_matches_approx(actual, expected, 1e-3, 1e-1);
+        }
+    }
     impl ReductionCompare for f64 {
         fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
             crate::util::assert_array_matches_approx(actual, expected, 1e-9, 1e-6);
+        }
+    }
+    #[cfg(feature = "num-complex")]
+    impl ReductionCompare for complex_f32 {
+        fn assert_matches<S: crate::ArrayStorage>(actual: &Array<S>, expected: &ArrayD<Self>) {
+            crate::util::assert_array_matches_approx(
+                actual,
+                expected,
+                1e-3,
+                Complex::new(1e-1, 1e-1),
+            );
         }
     }
     #[cfg(feature = "num-complex")]
@@ -2500,8 +2542,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// Asserts a reduction result matches its reference, dispatching exact vs.
-    /// approximate comparison on the accumulator type via [`ReductionCompare`].
+    /// Asserts a reduction result matches its reference, dispatching exact vs. approximate
+    /// comparison (and the per-dtype tolerance) on the output dtype via [`ReductionCompare`].
     fn assert_reduction_matches<S: crate::ArrayStorage, T: ReductionCompare>(
         actual: &Array<S>,
         expected: &ArrayD<T>,
@@ -2793,6 +2835,43 @@ pub(crate) mod tests {
                 );
             )+)*
         };
+
+        // Approximate variants for order-dependent float/complex `sum`/`product`/`mean`. Those
+        // ops preserve the input width and accumulate in it, so the block fold reassociates. The
+        // reference `$body` folds in a wide accumulator; here it is cast to the op's output dtype
+        // (`$dtype`, which for these ops equals the input dtype) so the reference and the
+        // natively-accumulated jix result share a dtype. The cast is the only difference from the
+        // plain arms - comparison then goes through the usual (approximate, for floats)
+        // `ReductionCompare` dispatch.
+        (
+            $op_method:ident,
+            approx,
+            |$items:ident| { $body:expr },
+            [$($dtype:ident),+ $(,)?], $strategy:ident
+        ) => {
+            $(crate::ops::reduction::tests::test_reduction_dtype!(
+                $op_method,
+                |$items| { <_ as crate::scalar::Cast<$dtype>>::cast($body) },
+                $dtype,
+                $strategy
+            );)+
+        };
+
+        (
+            $op_method:ident,
+            approx,
+            |$items:ident| { $body:expr },
+            [$($dtype:ident),+ $(,)?], $strategy:ident,
+            small_data = true
+        ) => {
+            $(crate::ops::reduction::tests::test_reduction_dtype!(
+                $op_method,
+                |$items| { <_ as crate::scalar::Cast<$dtype>>::cast($body) },
+                $dtype,
+                $strategy,
+                small_data = true
+            );)+
+        };
     }
 
     #[allow(unused_imports)]
@@ -2856,17 +2935,20 @@ pub(crate) mod tests {
         [i8, i16, i32, i64],
         op_safe_strategy
     );
+    // Float/complex sum preserves the input width and accumulates in it, so the block fold
+    // reassociates - compare approximately, and skip f16 (its native accumulation drifts too
+    // far to pin with a tolerance; covered by max/min instead).
     test_reduction!(
         sum,
+        approx,
         |items| { items.fold(0.0f64, |m, x| m + <_ as crate::scalar::Cast<f64>>::cast(x)) },
         [f32, f64],
-        op_safe_strategy,
-        #[cfg(feature = "half")]
-        [f16]
+        op_safe_strategy
     );
     #[cfg(feature = "num-complex")]
     test_reduction!(
         sum,
+        approx,
         |items| {
             items.fold(Complex::<f64>::default(), |m, x| {
                 m + <_ as crate::scalar::Cast<Complex<f64>>>::cast(x)
@@ -2891,16 +2973,16 @@ pub(crate) mod tests {
     );
     test_reduction!(
         product,
+        approx,
         |items| { items.fold(1.0f64, |m, x| m * <_ as crate::scalar::Cast<f64>>::cast(x)) },
         [f32, f64],
         op_safe_strategy,
-        #[cfg(feature = "half")]
-        [f16],
         small_data = true
     );
     #[cfg(feature = "num-complex")]
     test_reduction!(
         product,
+        approx,
         |items| {
             items.fold(Complex::<f64>::new(1.0, 0.0), |m, x| {
                 m * <_ as crate::scalar::Cast<Complex<f64>>>::cast(x)
@@ -2910,7 +2992,9 @@ pub(crate) mod tests {
         op_safe_strategy,
         small_data = true
     );
-    // mean
+    // mean. Integer/bool inputs widen to f64 (exact-in-f64 sum, then divide) - compared via the
+    // f64 `ReductionCompare` (approx). Float/complex inputs preserve their width and reassociate,
+    // so they take the approx path; f16 is skipped (see `sum`).
     test_reduction!(
         mean,
         |items| {
@@ -2924,14 +3008,30 @@ pub(crate) mod tests {
                 sum / count as f64
             }
         },
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
-        op_safe_strategy,
-        #[cfg(feature = "half")]
-        [f16]
+        [i8, i16, i32, i64, u8, u16, u32, u64],
+        op_safe_strategy
+    );
+    test_reduction!(
+        mean,
+        approx,
+        |items| {
+            {
+                let mut sum: f64 = 0.0;
+                let mut count: usize = 0;
+                for x in items {
+                    sum += <_ as crate::scalar::Cast<f64>>::cast(x);
+                    count += 1;
+                }
+                sum / count as f64
+            }
+        },
+        [f32, f64],
+        op_safe_strategy
     );
     #[cfg(feature = "num-complex")]
     test_reduction!(
         mean,
+        approx,
         |items| {
             {
                 let mut sum: Complex<f64> = Complex::default();
