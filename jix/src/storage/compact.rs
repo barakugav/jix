@@ -292,7 +292,8 @@ where
         let shape = self.shape();
         check_get_range(shape, index)?;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-        let mut cbuf = buf.get_contiguous_mut(nitems, self.blocks.dtype(), context)?;
+        let out_shape = D::vec(shape.len(), |d| (index[d].end - index[d].start) as usize);
+        let mut cbuf = buf.get_contiguous_mut(out_shape.as_ref(), self.blocks.dtype(), context)?;
         let buf = cbuf.as_mut_slice();
         if nitems == 0 {
             return Ok(());

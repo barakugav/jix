@@ -125,11 +125,6 @@ where
         self.status.advance();
         (self.current_idx.clone(), self.extensions.value())
     }
-
-    #[inline(always)]
-    pub(crate) fn len(&self) -> u64 {
-        self.status.len()
-    }
 }
 impl<D, E> Iterator for NdIter<D, E>
 where

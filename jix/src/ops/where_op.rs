@@ -129,7 +129,9 @@ where
         context: &ReadContext,
     ) -> Result<()> {
         check_get_range(self.shape(), index)?;
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
+            (index[d].end - index[d].start) as usize
+        });
         let dtype = self.dtype();
 
         let mut condition_buf = OutBuf::new_lazy(context);
@@ -137,7 +139,7 @@ where
         self.condition
             .read_data(index, &mut condition_buf, context)?;
 
-        let mut cbuf = buf.get_contiguous_mut(nitems, dtype, context)?;
+        let mut cbuf = buf.get_contiguous_mut(out_shape.as_ref(), dtype, context)?;
         let buf = cbuf.as_mut_slice();
         // read x directly into the output buffer
         self.x
@@ -176,9 +178,6 @@ where
                 }
             }
         };
-        let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
-            (index[d].end - index[d].start) as usize
-        });
         cbuf.finalize(out_shape.as_ref(), dtype);
         Ok(())
     }

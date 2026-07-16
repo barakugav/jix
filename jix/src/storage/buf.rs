@@ -61,45 +61,64 @@ impl<'a> OutBuf<'a> {
         Self(OutBufInner::Strided { buf, strides })
     }
 
-    /// Obtain a contiguous, writable buffer for a `read_data` of the given `index`/`dtype`.
+    /// Obtain a contiguous, writable buffer for a `read_data` whose row-major output shape is
+    /// `out_shape` (element counts per dimension), for `dtype`.
     ///
     /// The returned [`OutBufContiguousBuf`] exposes a contiguous `&mut [u8]` of exactly
-    /// `nitems * dtype.itemsize()` bytes via [`as_mut_slice`](OutBufContiguousBuf::as_mut_slice).
-    /// For the contiguous and lazy variants that slice IS the real destination and
-    /// [`finalize`](OutBufContiguousBuf::finalize) is a no-op. For the strided
-    /// variant the slice is a temporary contiguous scratch buffer, allocated here from `context`; the
-    /// caller fills it and then calls `finalize` to scatter it into the real strided
-    /// destination. Skipping that final call (e.g. by returning early on error) leaves the
-    /// destination untouched.
+    /// `out_shape.product() * dtype.itemsize()` bytes via
+    /// [`as_mut_slice`](OutBufContiguousBuf::as_mut_slice). For the contiguous and lazy variants
+    /// that slice IS the real destination and [`finalize`](OutBufContiguousBuf::finalize) is a
+    /// no-op.
     ///
-    /// `context` is used only to allocate scratch for the strided variant; the lazy variant keeps
-    /// using its own stored context.
+    /// For the strided variant there are two cases. When the destination's strides equal the
+    /// C-contiguous (row-major) strides for `out_shape` it is really contiguous, so - provided it
+    /// is large enough and aligned - the slice IS the destination and `finalize` is a no-op, with
+    /// no scratch allocation or scatter. Otherwise the slice is a temporary contiguous scratch
+    /// buffer, allocated here from `context`; the caller fills it and then calls `finalize` to
+    /// scatter it into the real strided destination. Skipping that final call (e.g. by returning
+    /// early on error) leaves the destination untouched.
+    ///
+    /// `context` is used only to allocate scratch for the (genuinely) strided variant; the lazy
+    /// variant keeps using its own stored context.
     #[inline]
     pub(crate) fn get_contiguous_mut<'b>(
         &'b mut self,
-        nitems: usize,
+        out_shape: &[usize],
         dtype: &Dtype,
         context: &'b ReadContext,
     ) -> Result<OutBufContiguousBuf<'b>> {
+        let itemsize = dtype.itemsize() as usize;
+        let nbytes = out_shape.iter().product::<usize>() * itemsize;
+
         // ContiguousLazy: materialize into an owned `ContiguousLazyAllocated` in place, so a later `unwrap_tmp`/`as_slice` sees it.
         let lazy_ctx = match &self.0 {
             OutBufInner::ContiguousLazy(ctx) => Some(*ctx),
             _ => None,
         };
         if let Some(lazy_ctx) = lazy_ctx {
-            let tmp = lazy_ctx.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
+            let tmp = lazy_ctx.tmp_buf(nbytes, dtype.alignment());
             self.0 = OutBufInner::ContiguousLazyAllocated(tmp);
         }
 
-        // Strided: take the destination out (leaving a harmless empty placeholder) and allocate a
-        // contiguous scratch buffer to fill; `finalize` scatters it into `strided_buf`.
+        // Strided: take the destination out (leaving a harmless empty placeholder).
         if matches!(self.0, OutBufInner::Strided { .. }) {
             let taken = std::mem::replace(&mut self.0, OutBufInner::Contiguous(&mut []));
             let OutBufInner::Strided { buf, strides } = taken else {
                 unreachable!()
             };
-            let contiguous_buf =
-                context.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
+            // Fast path: a strided destination whose strides equal the C-contiguous (row-major)
+            // strides for `out_shape` is really contiguous - the write lands in `buf[..nbytes]`
+            // with no gaps. Hand that slice out directly, skipping both the scratch allocation and
+            // the `finalize` scatter. Falls back to the scatter path if the buffer is too short or
+            // insufficiently aligned to be used as a typed destination.
+            let is_contiguous = strides == default_strides_slice(out_shape, itemsize).as_ref();
+            let aligned = (buf.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize());
+            if is_contiguous && buf.len() >= nbytes && aligned {
+                return Ok(OutBufContiguousBuf::Direct(&mut buf[..nbytes]));
+            }
+            // Fallback: allocate a contiguous scratch buffer to fill; `finalize` scatters it into
+            // `strided_buf`.
+            let contiguous_buf = context.tmp_buf(nbytes, dtype.alignment());
             return Ok(OutBufContiguousBuf::Strided {
                 strided_buf: buf,
                 strides,
@@ -116,15 +135,15 @@ impl<'a> OutBuf<'a> {
             }
             OutBufInner::ContiguousLazy(_) | OutBufInner::Strided { .. } => unreachable!(),
         };
-        if buf.as_mut_slice().len() != nitems * dtype.itemsize() as usize {
+        if buf.as_mut_slice().len() != nbytes {
             #[inline(never)]
-            fn buffer_size_fail(buf_len: usize, nitems: usize, dtype: &Dtype) -> Result<()> {
+            fn buffer_size_fail(buf_len: usize, nbytes: usize, dtype: &Dtype) -> Result<()> {
                 bail!(
                     InvalidBufferSize,
-                    "Unexpected buffer size {buf_len} requested for {nitems} items with dtype {dtype}"
+                    "Unexpected buffer size {buf_len} requested for {nbytes} bytes with dtype {dtype}"
                 );
             }
-            buffer_size_fail(buf.as_mut_slice().len(), nitems, dtype)?;
+            buffer_size_fail(buf.as_mut_slice().len(), nbytes, dtype)?;
         }
         check_buffer_aligned(buf.as_mut_slice().as_ptr(), dtype)?;
         Ok(buf)
@@ -312,5 +331,115 @@ impl OutBufContiguousBuf<'_> {
                 dtype,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OutBuf, OutBufContiguousBuf};
+    use crate::dtype::{Dtype, Dtyped};
+    use crate::ReadContext;
+
+    fn i32_dtype() -> Dtype {
+        <i32 as Dtyped>::DTYPE
+    }
+
+    /// View a mutable `i32` slice as bytes. The buffer is `i32`-aligned, which the
+    /// contiguous fast path requires.
+    fn as_bytes_mut(v: &mut [i32]) -> &mut [u8] {
+        unsafe {
+            std::slice::from_raw_parts_mut(v.as_mut_ptr().cast::<u8>(), std::mem::size_of_val(v))
+        }
+    }
+
+    fn write_i32s(dst: &mut [u8], vals: impl IntoIterator<Item = i32>) {
+        for (i, v) in vals.into_iter().enumerate() {
+            dst[i * 4..i * 4 + 4].copy_from_slice(&v.to_ne_bytes());
+        }
+    }
+
+    /// A strided destination whose strides are the C-contiguous defaults for the shape is
+    /// written straight through: `get_contiguous_mut` returns `Direct` (no scratch) and
+    /// `finalize` performs no scatter.
+    #[test]
+    fn strided_with_default_strides_writes_directly_no_scatter() {
+        let dtype = i32_dtype();
+        let ctx = ReadContext::default();
+        let shape = [2usize, 3];
+        // C-default byte strides for [2, 3] of i32: [3*4, 4] = [12, 4].
+        let strides = [12usize, 4];
+        let mut backing = vec![0i32; 6]; // exactly the 24-byte region, i32-aligned
+        {
+            let bytes = as_bytes_mut(&mut backing);
+            let mut ob = unsafe { OutBuf::new_strided(bytes, &strides) };
+            let mut cbuf = ob.get_contiguous_mut(&shape, &dtype, &ctx).unwrap();
+            assert!(matches!(cbuf, OutBufContiguousBuf::Direct(_)));
+            write_i32s(cbuf.as_mut_slice(), 1..=6);
+            cbuf.finalize(&shape, &dtype); // no-op for Direct
+        }
+        assert_eq!(backing, [1, 2, 3, 4, 5, 6]);
+    }
+
+    /// The fast path uses only the leading `nbytes` of an over-sized destination, matching how
+    /// callers hand in `&mut buf[offset..]` (a strided sub-region base). Trailing bytes are
+    /// left untouched.
+    #[test]
+    fn strided_default_into_larger_buffer_uses_prefix() {
+        let dtype = i32_dtype();
+        let ctx = ReadContext::default();
+        let shape = [2usize, 2];
+        let strides = [8usize, 4]; // C-default for [2, 2] of i32
+        let mut backing = vec![7i32; 6]; // 24 bytes; the region needs only 16
+        {
+            let bytes = as_bytes_mut(&mut backing);
+            let mut ob = unsafe { OutBuf::new_strided(bytes, &strides) };
+            let mut cbuf = ob.get_contiguous_mut(&shape, &dtype, &ctx).unwrap();
+            assert!(matches!(cbuf, OutBufContiguousBuf::Direct(_)));
+            assert_eq!(cbuf.as_mut_slice().len(), 16);
+            write_i32s(cbuf.as_mut_slice(), 1..=4);
+            cbuf.finalize(&shape, &dtype);
+        }
+        assert_eq!(backing, [1, 2, 3, 4, 7, 7]);
+    }
+
+    /// A genuinely strided destination (gaps between rows) stages through a contiguous scratch
+    /// buffer and is scattered into place by `finalize`.
+    #[test]
+    fn strided_with_gaps_scatters_via_finalize() {
+        let dtype = i32_dtype();
+        let ctx = ReadContext::default();
+        let shape = [2usize, 3];
+        // Row stride 16 bytes (one i32 gap per row) instead of the default 12.
+        let strides = [16usize, 4];
+        let mut backing = vec![0i32; 8]; // 32 bytes; max element offset is 16 + 8 = 24
+        {
+            let bytes = as_bytes_mut(&mut backing);
+            let mut ob = unsafe { OutBuf::new_strided(bytes, &strides) };
+            let mut cbuf = ob.get_contiguous_mut(&shape, &dtype, &ctx).unwrap();
+            assert!(matches!(cbuf, OutBufContiguousBuf::Strided { .. }));
+            assert_eq!(cbuf.as_mut_slice().len(), 24); // contiguous scratch of 6 i32
+            write_i32s(cbuf.as_mut_slice(), 1..=6);
+            cbuf.finalize(&shape, &dtype);
+        }
+        // Element (i, j) lands at i*4 + j in i32 units: row 0 -> [0,1,2], gap@3; row 1 -> [4,5,6], gap@7.
+        assert_eq!(backing, [1, 2, 3, 0, 4, 5, 6, 0]);
+    }
+
+    /// A plain contiguous destination is handed out directly, as before.
+    #[test]
+    fn contiguous_outbuf_is_direct() {
+        let dtype = i32_dtype();
+        let ctx = ReadContext::default();
+        let shape = [4usize];
+        let mut backing = vec![0i32; 4];
+        {
+            let bytes = as_bytes_mut(&mut backing);
+            let mut ob = OutBuf::new(bytes);
+            let mut cbuf = ob.get_contiguous_mut(&shape, &dtype, &ctx).unwrap();
+            assert!(matches!(cbuf, OutBufContiguousBuf::Direct(_)));
+            write_i32s(cbuf.as_mut_slice(), 10..=13);
+            cbuf.finalize(&shape, &dtype);
+        }
+        assert_eq!(backing, [10, 11, 12, 13]);
     }
 }

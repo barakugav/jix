@@ -2070,6 +2070,9 @@ mod tests {
 
         // It also materializes a lazy view.
         let plain = a.map(|x| x + 1).to_plain().unwrap();
-        assert_eq!(plain.to_ndarray().unwrap(), array![[11i32, 21, 31], [41, 51, 61]]);
+        assert_eq!(
+            plain.to_ndarray().unwrap(),
+            array![[11i32, 21, 31], [41, 51, 61]]
+        );
     }
 }
