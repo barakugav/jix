@@ -1,0 +1,65 @@
+name: schema buf-breaking check
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      # Default types
+      - opened
+      - synchronize
+      - reopened
+      # Re-run if the 'schema-skip-breaking' label is added or removed
+      - labeled
+      - unlabeled
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  schema-breaking-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    timeout-minutes: 15
+    steps:
+      - name: Repo head checkout
+        uses: actions/checkout@v7
+        with:
+          path: head
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0 # Full-history for merge-base
+
+      - name: Determine the git base of the PR
+        id: fetch_git_base
+        run: |
+          git fetch origin main
+          base=$(git merge-base ${{ github.event.pull_request.head.sha }} origin/main)
+          echo "the base is $base"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+        working-directory: head
+
+      # Check out the base tree separately so buf can diff head against it on disk. This avoids
+      # relying on buf-action to fetch the base branch itself, which is buggy in some setups.
+      # https://github.com/bufbuild/buf-action/issues/63
+      - name: Repo base checkout
+        uses: actions/checkout@v7
+        with:
+          path: base
+          ref: ${{ steps.fetch_git_base.outputs.base_sha }}
+
+      - name: Protobuf Buf breaking-change check
+        uses: bufbuild/buf-action@v1
+        with:
+          version: 1.71.0 # matches the version in ci.yaml
+          input: head/jix/schema/proto
+          breaking_against: base/jix/schema/proto
+          breaking: ${{ !contains(github.event.pull_request.labels.*.name, 'schema-skip-breaking') }}
+          lint: false
+          format: false
+          push: false
+          archive: false
+          pr_comment: false
+          github_token: ${{ secrets.GITHUB_TOKEN }}
