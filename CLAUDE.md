@@ -14,7 +14,8 @@ type, then runs in a single decompression pass when output is requested.
 
 Each crate is built and tested **independently from its own directory**. The root has no
 `Cargo.toml`, and `Cargo.lock` files are per-crate (gitignored). `cargo <cmd> -p jix` from the repo
-root will NOT work - you must `cd` into the crate directory first (this is how CI runs everything).
+root will NOT work - you must pass `--manifest-path` or `cd` into the crate directory first.
+Prefer `--manifest-path`.
 
 | Directory | Cargo package | Purpose |
 |-----------|---------------|---------|

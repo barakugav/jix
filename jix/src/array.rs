@@ -1097,7 +1097,7 @@ impl<S: ArrayStorage> Array<S> {
             (read_size.max / block_size_bytes as u64).max(1),
         );
         scale_read_shape(
-            &mut chunk_shape_in_blocks,
+            chunk_shape_in_blocks.as_mut_slice(),
             block_grid_shape.as_ref(),
             block_grid_shape.as_ref(),
             (min_chunk, max_chunk),

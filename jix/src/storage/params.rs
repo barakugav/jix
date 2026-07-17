@@ -386,20 +386,17 @@ impl ArrayParams {
         shape: &[u64],
     ) -> DimArray<BlockSize> {
         let ndim = shape.len();
+        let mut volume = block_shape.iter().map(|&b| b as u64).product::<u64>();
         let mut scaled_block_shape = (0..ndim)
             .rev()
-            .scan(1, |inner_block_volume, dim| {
+            .map(|dim| {
                 let mut block_len = block_shape[dim];
                 if scale_dim[dim] {
-                    block_len = Self::block_len_heuristic(
-                        block_len,
-                        shape[dim],
-                        block_size_max,
-                        *inner_block_volume,
-                    )
+                    block_len =
+                        Self::block_len_heuristic(block_len, shape[dim], block_size_max, volume);
+                    volume = volume / (block_shape[dim].max(1) as u64) * block_len as u64;
                 };
-                *inner_block_volume *= block_len as u64;
-                Some(block_len)
+                block_len
             })
             .collect::<DimArray<_>>();
         scaled_block_shape.reverse();
@@ -427,7 +424,7 @@ impl ArrayParams {
         } else {
             // multiple_of should a power of 2, on the order of dim_len//8
             let multiple_of = base_block_len
-                * ((dim_len / (16 * base_block_len)) + 1)
+                * ((dim_len.min(max_block_len) / (16 * base_block_len)) + 1)
                     .next_power_of_two()
                     .min(1 << 20);
 
@@ -651,7 +648,7 @@ impl<'a> ArraySpec<'a> {
 
     pub(crate) fn read_shape_heuristic<D>(
         &self,
-        total_read_shape: &[u64],
+        max_shape: &[u64],
         shape: &[u64],
         itemsize: Itemsize,
     ) -> D
@@ -659,16 +656,16 @@ impl<'a> ArraySpec<'a> {
         D: Dimension,
     {
         self.read_shape_heuristic_with_scale_order(
-            total_read_shape,
+            max_shape,
             shape,
             itemsize,
-            (0..total_read_shape.len()).rev(),
+            (0..max_shape.len()).rev(),
         )
     }
 
     pub(crate) fn read_shape_heuristic_with_scale_order<D>(
         &self,
-        total_read_shape: &[u64],
+        max_shape: &[u64],
         shape: &[u64],
         itemsize: Itemsize,
         scale_order: impl Iterator<Item = usize>,
@@ -679,8 +676,8 @@ impl<'a> ArraySpec<'a> {
         let block_shape = self.block_shape();
         let mut read_shape = D::from_fn(shape.len(), |dim| block_shape[dim] as u64);
         scale_read_shape(
-            &mut read_shape,
-            total_read_shape,
+            read_shape.as_mut_slice(),
+            max_shape,
             shape,
             self.read_size().nitems(itemsize),
             scale_order,
@@ -872,5 +869,170 @@ mod tests {
             .unwrap();
         let rs = spec.as_ref().read_size();
         assert_eq!((rs.min, rs.max), (4096, 65536));
+    }
+
+    // ---- block-shape scaling heuristics ----
+    //
+    // `scale_block_shape` chooses a per-dimension block length so that the total block volume
+    // (product of the lengths) stays approximately within `block_size_max` items, filling that
+    // budget greedily from the innermost (last) axis outward. `scale_dim[d] == false` marks a
+    // fixed dim that must keep its input length; scaled dims are sized by `block_len_heuristic`
+    // and clamped to `[1, shape[d]]`. Because the heuristics only approximate the target, the
+    // budget assertions below check "not wildly over", not a strict ceiling.
+
+    use crate::storage::block::BlockSize;
+
+    fn sbs(
+        block_shape: &[BlockSize],
+        scale_dim: &[bool],
+        block_size_max: u64,
+        shape: &[u64],
+    ) -> Vec<BlockSize> {
+        ArrayParams::scale_block_shape(block_shape, scale_dim, block_size_max, shape).to_vec()
+    }
+
+    fn vol(block: &[BlockSize]) -> u64 {
+        block.iter().map(|&b| b as u64).product()
+    }
+
+    #[test]
+    fn scale_block_shape_output_len_matches_ndim() {
+        assert_eq!(
+            sbs(&[1, 1, 1], &[true, true, true], 1000, &[100, 100, 100]).len(),
+            3
+        );
+        assert_eq!(sbs(&[4], &[false], 1000, &[100]).len(), 1);
+    }
+
+    #[test]
+    fn scale_block_shape_preserves_fixed_dims() {
+        // dims 0 and 2 are fixed and must survive unchanged; dim 1 is scaled.
+        let out = sbs(&[7, 1, 3], &[false, true, false], 10_000, &[100, 100, 100]);
+        assert_eq!(out[0], 7);
+        assert_eq!(out[2], 3);
+    }
+
+    #[test]
+    fn scale_block_shape_clamps_within_shape() {
+        // Every chosen block length must land in [1, shape[dim]], scaled or fixed.
+        for (bs, sd, budget, shape) in [
+            (vec![1, 1], vec![true, true], 64u64, vec![50u64, 50]),
+            (vec![1, 1, 1], vec![true, true, true], 1000, vec![7, 200, 3]),
+            (vec![1], vec![true], 10, vec![1000]),
+            (vec![1], vec![true], 1_000_000, vec![5]),
+        ] {
+            let out = sbs(&bs, &sd, budget, &shape);
+            for (d, &b) in out.iter().enumerate() {
+                assert!(b >= 1, "dim {d}: block len {b} < 1 for shape {shape:?}");
+                assert!(
+                    b as u64 <= shape[d].max(1),
+                    "dim {d}: block len {b} exceeds shape {}",
+                    shape[d]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scale_block_shape_singleton_scaled_dim_is_one() {
+        // A scaled dimension of extent 1 must collapse to a block length of 1.
+        let out = sbs(&[1, 1], &[true, true], 1000, &[1, 500]);
+        assert_eq!(out[0], 1);
+        // A fully-degenerate shape stays all ones.
+        assert_eq!(sbs(&[1, 1], &[true, true], 1000, &[1, 1]), vec![1, 1]);
+    }
+
+    #[test]
+    fn scale_block_shape_fully_auto_stays_near_budget() {
+        // The all-scaled path must not blow far past the budget. Also guards the `multiple_of`
+        // cap fix (dim_len.min(max_block_len)) via a huge dim with a tiny budget.
+        for (budget, shape) in [
+            (64u64, vec![1_000_000u64]),
+            (100, vec![1000]),
+            (1000, vec![1000, 1000]),
+            (256, vec![10_000, 10_000]),
+            (4096, vec![64, 64, 64]),
+        ] {
+            let ndim = shape.len();
+            let out = sbs(&vec![1; ndim], &vec![true; ndim], budget, &shape);
+            assert!(
+                vol(&out) <= budget * 8,
+                "fully-auto volume {} >> budget {budget} for shape {shape:?}: {out:?}",
+                vol(&out)
+            );
+        }
+    }
+
+    #[test]
+    fn scale_block_shape_reserves_budget_for_outer_fixed_dim() {
+        // Regression: an OUTER fixed dim (index 0, processed last) must still be reserved out of
+        // the budget when an inner scaled dim is sized, or the block overshoots wildly.
+        let out = sbs(&[50, 1], &[false, true], 100, &[1000, 1000]);
+        assert_eq!(out[0], 50, "fixed dim must be preserved");
+        assert!(
+            vol(&out) <= 100 * 4,
+            "outer fixed dim not reserved out of budget: volume {} for {out:?}",
+            vol(&out)
+        );
+    }
+
+    #[test]
+    fn scale_block_shape_inner_fixed_dim_stays_near_budget() {
+        // Symmetric case: an INNER fixed dim (last index, processed first) is already accounted
+        // for even before the fix. Ensures the fix does not regress this direction.
+        let out = sbs(&[1, 50], &[true, false], 100, &[1000, 1000]);
+        assert_eq!(out[1], 50);
+        assert!(vol(&out) <= 100 * 4, "volume {} for {out:?}", vol(&out));
+    }
+
+    #[test]
+    fn scale_block_shape_scaled_dim_yields_to_fixed_dims() {
+        // Two fixed dims already exceed the budget; the remaining scaled dim must shrink to 1
+        // rather than greedily taking the whole budget on top of them.
+        let out = sbs(&[40, 40, 1], &[false, false, true], 100, &[100, 100, 100]);
+        assert_eq!(out[0], 40);
+        assert_eq!(out[1], 40);
+        assert_eq!(
+            out[2], 1,
+            "scaled dim should collapse to 1 under budget pressure: {out:?}"
+        );
+    }
+
+    #[test]
+    fn block_len_heuristic_returns_one_for_degenerate_dim() {
+        assert_eq!(ArrayParams::block_len_heuristic(5, 1, 1000, 1), 1);
+        assert_eq!(ArrayParams::block_len_heuristic(1, 0, 1000, 1), 1);
+    }
+
+    #[test]
+    fn block_len_heuristic_never_exceeds_dim_len_or_budget() {
+        // Result stays within the dimension extent and roughly within the per-dim budget
+        // (max_volume / inner_block_volume). Guards the `multiple_of` cap fix.
+        for (base, dim_len, max_volume, inner) in [
+            (1u32, 1_000_000u64, 64u64, 1u64),
+            (1, 1000, 100, 1),
+            (1, 1000, 100, 50),
+            (8, 500, 4096, 2),
+            (1, 10, 1_000_000, 1),
+        ] {
+            let b = ArrayParams::block_len_heuristic(base, dim_len, max_volume, inner) as u64;
+            assert!(b >= 1 && b <= dim_len, "block len {b} out of [1,{dim_len}]");
+            let budget = (max_volume / inner).max(1);
+            assert!(
+                b <= budget * 4,
+                "block len {b} >> per-dim budget {budget} (base={base}, dim_len={dim_len})"
+            );
+        }
+    }
+
+    #[test]
+    fn block_len_heuristic_budget_shrinks_with_inner_volume() {
+        // A larger inner-block volume leaves less budget, so the chosen length cannot grow.
+        let big = ArrayParams::block_len_heuristic(1, 10_000, 4096, 1);
+        let small = ArrayParams::block_len_heuristic(1, 10_000, 4096, 64);
+        assert!(
+            small <= big,
+            "expected {small} <= {big} as inner volume grows"
+        );
     }
 }
