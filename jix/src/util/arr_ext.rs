@@ -44,6 +44,16 @@ pub(crate) trait ArrayExt<T, const N: usize> {
     fn try_map_inline<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
     where
         Self: Sized;
+
+    #[allow(unused)]
+    fn map_inline_ref<U>(&self, f: impl FnMut(&T) -> U) -> [U; N]
+    where
+        Self: Sized;
+
+    #[allow(unused)]
+    fn try_map_inline_ref<U, E>(&self, f: impl FnMut(&T) -> Result<U, E>) -> Result<[U; N], E>
+    where
+        Self: Sized;
 }
 impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     #[inline(always)]
@@ -61,6 +71,24 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
         Self: Sized,
     {
         let mut data = self.into_iter();
+        array_try_from_fn_inline(|_| f(unsafe { data.next().unwrap_unchecked() }))
+    }
+
+    #[inline(always)]
+    fn map_inline_ref<U>(&self, mut f: impl FnMut(&T) -> U) -> [U; N]
+    where
+        Self: Sized,
+    {
+        self.try_map_inline_ref(|x| Ok(f(x)))
+            .unwrap_or_else(|_: ()| unsafe { unreachable_unchecked() })
+    }
+
+    #[inline(always)]
+    fn try_map_inline_ref<U, E>(&self, mut f: impl FnMut(&T) -> Result<U, E>) -> Result<[U; N], E>
+    where
+        Self: Sized,
+    {
+        let mut data = self.iter();
         array_try_from_fn_inline(|_| f(unsafe { data.next().unwrap_unchecked() }))
     }
 }

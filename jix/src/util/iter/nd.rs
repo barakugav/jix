@@ -125,6 +125,12 @@ where
         self.status.advance();
         (self.current_idx.clone(), self.extensions.value())
     }
+
+    #[allow(unused)]
+    #[inline(always)]
+    pub(crate) fn len(&self) -> u64 {
+        self.status.len()
+    }
 }
 impl<D, E> Iterator for NdIter<D, E>
 where
@@ -429,7 +435,7 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
         initial_ptr: *const T,
     ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtr<D, T, S>>>
     where
-        S: Idx + 'static,
+        S: Idx,
     {
         let ext = NdIterExtStridesPtr::<D, T, S>::new(strides, initial_ptr);
         NdIterBuilder {
@@ -447,7 +453,7 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
         initial_ptr: *mut T,
     ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtrMut<D, T, S>>>
     where
-        S: Idx + 'static,
+        S: Idx,
     {
         let ext = NdIterExtStridesPtrMut::<D, T, S>::new(strides, initial_ptr);
         NdIterBuilder {
@@ -459,12 +465,12 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 
     /// Adds a [`NdIterExtStridesOffset`] extension.
     #[inline]
-    pub(crate) fn with_strides_offset_ext(
+    pub(crate) fn with_strides_offset_ext<S: Idx>(
         self,
-        strides: D::Vec<u64>,
-        initial_offset: u64,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D>>> {
-        let ext = NdIterExtStridesOffset::<D>::new(strides, initial_offset);
+        strides: D::Vec<S>,
+        initial_offset: S,
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D, S>>> {
+        let ext = NdIterExtStridesOffset::<D, S>::new(strides, initial_offset);
         NdIterBuilder {
             begin: self.begin,
             end: self.end,
@@ -477,7 +483,7 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
     pub(crate) fn with_logical_global_index_ext(
         self,
         shape: &[u64],
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D>>> {
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D, u64>>> {
         let ext = nd_iter_ext_logical_global_index::<D>(shape, self.begin.as_ref());
         NdIterBuilder {
             begin: self.begin,

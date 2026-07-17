@@ -10,3 +10,4 @@
 - resolve TODOs across the repo
 - solve miri UB in nd_copy, zero size slice trick is not accepted
 - add likely/unlikely branch hints
+- permute dims in nd_copy according to src strides as well, and remove <=1-len dims

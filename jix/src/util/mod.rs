@@ -37,12 +37,17 @@ pub(crate) trait Idx:
     + core::fmt::Display
     + core::fmt::Debug
     + core::iter::Sum
+    + 'static
 {
     const ZERO: Self;
     const ONE: Self;
 
     fn usize(self) -> usize;
     fn from_usize(n: usize) -> Self;
+
+    #[allow(unused)]
+    fn u64(self) -> u64;
+    fn from_u64(n: u64) -> Self;
 
     fn div_ceil(self, rhs: Self) -> Self;
     fn checked_mul(self, rhs: Self) -> Option<Self>;
@@ -75,6 +80,15 @@ macro_rules! impl_idx_for_primitive {
             }
 
             #[inline(always)]
+            fn u64(self) -> u64 {
+                self as u64
+            }
+            #[inline(always)]
+            fn from_u64(n: u64) -> Self {
+                n as $t
+            }
+
+            #[inline(always)]
             fn div_ceil(self, rhs: Self) -> Self {
                 self.div_ceil(rhs)
             }
@@ -99,10 +113,7 @@ where
     let shape = shape.as_ref();
     default_strides_from_iter::<V::Dimension, Ix>(shape.len(), shape.iter().copied(), itemsize)
 }
-/// The number of bytes an `NdCopier::copy` region spans forward from its base: the smallest backing
-/// length whose byte range is a superset of every element visited under `shape` and (non-negative)
-/// byte `strides`. Raw-pointer-backed callers use this to build the `&[u8]`/`&mut [u8]` that `copy`
-/// requires from a bare pointer. Returns 0 for an empty region.
+/// Compute the largest byte offset of a region accessed by `shape` and `strides`.
 #[inline]
 pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
     let mut span = itemsize;

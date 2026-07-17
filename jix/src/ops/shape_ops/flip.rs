@@ -132,7 +132,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         // are iter_shape=1 so they don't step regardless, but 0 keeps it explicit).
         let src_ptr_strides = S::Dimension::vec(ndim, |d| {
             if self.is_flipped[d] {
-                src_strides[d] as u64
+                src_strides[d]
             } else {
                 0
             }
@@ -153,7 +153,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
             unsafe {
                 nd_copy.copy(
-                    tmp_buf.get_unchecked(src_off as usize..),
+                    tmp_buf.get_unchecked(src_off..),
                     dst.get_unchecked_mut(dst_off..),
                     slab_shape.as_ref(),
                     src_strides.as_ref(),

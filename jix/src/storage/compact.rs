@@ -409,8 +409,6 @@ where
                     inner_offset as usize * block_strides[dim]
                 })
                 .sum::<usize>();
-            // Slices spanning from the active region's start to each buffer's end (supersets of
-            // what the copy touches). SAFETY: `active_start` is within the full-block `tmp_buf`.
             let src = unsafe { tmp_buf.get_unchecked(active_start..) };
 
             unsafe {
@@ -458,8 +456,6 @@ where
                 })
                 .sum::<usize>();
 
-            // Slices spanning from each region's start to its buffer's end (supersets of what this
-            // block's copy touches). SAFETY: `active_start`/`out_start` are within `tmp_buf`/`buf`.
             let src = unsafe { tmp_buf.get_unchecked(active_start..) };
             let dst = unsafe { buf.get_unchecked_mut(out_start..) };
 

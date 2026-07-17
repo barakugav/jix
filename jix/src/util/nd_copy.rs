@@ -96,11 +96,8 @@ impl<'a> NdCopier<'a> {
 
     /// Copies a rectangular `shape` region from `src` to `dst` under independent byte strides.
     ///
-    /// `src` and `dst` are the backing byte slices. The all-zero index maps to each slice's start
-    /// and every visited element is reached by offsetting forward from there; the slice lengths are
-    /// never read (the explicit `shape`/strides drive every access), only their base pointers and
-    /// provenance. Passing slices - rather than raw pointers - lets the inner loops derive
-    /// `noalias`-tagged pointers.
+    /// `src` and `dst` are the backing byte slices.
+    /// Passing slices - rather than raw pointers - lets the inner loops derive `noalias`-tagged pointers.
     ///
     /// # Safety
     ///
@@ -495,26 +492,15 @@ impl<'a> NdCopier<'a> {
         n_contiguous_items: usize,
         copy_1d_row: Copy1dRowFn,
     ) {
-        let src_base = src.as_ptr();
-        let dst_base = dst.as_mut_ptr();
         let iter = NdIter::builder(D::vec(outer_shape.len(), |i| outer_shape[i] as u64))
-            .with_strides_ptr_ext(outer_src_strides.to_dim_vec::<D>(), src_base)
-            .with_strides_ptr_mut_ext(outer_dst_strides.to_dim_vec::<D>(), dst_base)
+            .with_strides_offset_ext(outer_src_strides.to_dim_vec::<D>(), 0)
+            .with_strides_offset_ext(outer_dst_strides.to_dim_vec::<D>(), 0)
             .build();
-        for (_, (row_src_ptr, row_dst_ptr)) in iter {
-            // Reslice `src`/`dst` at this row's base so the row slices keep provenance over the rest
-            // of the backing region; a zero-length slice would forbid the strided reads below.
-            // SAFETY: the iterator derives both row pointers by offsetting `src_base`/`dst_base`, so
-            // the offsets are in bounds of the original slices (which the caller guaranteed cover
-            // the whole region).
-            let src_off = unsafe { row_src_ptr.offset_from(src_base) as usize };
-            let dst_off = unsafe { row_dst_ptr.offset_from(dst_base) as usize };
-            let src = unsafe { src.get_unchecked(src_off..) };
-            let dst = unsafe { dst.get_unchecked_mut(dst_off..) };
+        for (_, (src_off, dst_off)) in iter {
             unsafe {
                 copy_1d_row(
-                    src,
-                    dst,
+                    src.get_unchecked(src_off..),
+                    dst.get_unchecked_mut(dst_off..),
                     inner_len,
                     inner_src_stride,
                     inner_dst_stride,
@@ -540,9 +526,6 @@ impl<'a> NdCopier<'a> {
             .zip(struct_copier.offsets.iter())
             .zip(struct_copier.dtypes.iter())
         {
-            // Reslice at this field's byte offset within the element. SAFETY: the field at `offset`
-            // lies within every element, so `offset` is in bounds of the backing slices; distinct
-            // fields do not overlap, and each field's forward span stays within the caller's region.
             let field_args = NdCopyArgs {
                 src: unsafe { src.get_unchecked(offset as usize..) },
                 dst: unsafe { dst.get_unchecked_mut(offset as usize..) },
@@ -821,7 +804,6 @@ mod tests {
         let expected = reference_copy(src, dst_len, shape, src_strides, dst_strides, itemsize);
 
         let copier = NdCopier::new(&dtype);
-        // Slices spanning each buffer; `buf_len` sized them to cover every accessed byte.
         let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
         unsafe {
             copier.copy(src, dst, shape, src_strides, dst_strides, &dtype);

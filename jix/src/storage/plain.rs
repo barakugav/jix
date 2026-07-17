@@ -445,9 +445,6 @@ where
             .sum::<usize>();
         let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
 
-        // `data` is a bare pointer (a zero-copy view), not a slice, so build the source slice from
-        // the region's own extent. SAFETY: the view is valid for `out_shape`/`src_strides` from
-        // `src_ptr`, and `strided_span_bytes` is exactly that region's forward span.
         let itemsize = dtype.itemsize() as usize;
         let src_span = strided_span_bytes(out_shape.as_ref(), src_strides.as_ref(), itemsize);
         let src = unsafe { std::slice::from_raw_parts(src_ptr, src_span) };

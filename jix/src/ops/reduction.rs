@@ -21,10 +21,8 @@ pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
     spec: ArraySpecDynamic,
 }
 pub(crate) trait ReductionOpKernel<T> {
-    /// The reduction's output element type.
     type Output;
 
-    /// Accumulator state.
     type State;
 
     /// Build the initial accumulator. `init_item` is the first stream element together with
@@ -36,18 +34,19 @@ pub(crate) trait ReductionOpKernel<T> {
     /// item, and a cell can be re-seeded partway through the stream when the reduced axis
     /// spans several bulks. Kernels whose result depends on element position (argmax/argmin)
     /// record it; the others ignore it.
-    ///
-    /// [`update_state`]: Self::update_state
     fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State;
+
     /// Fold `item` (at true global stream position `idx`) into `state`.
     fn update_state(&self, state: Self::State, item: T, idx: u64) -> Self::State;
+
     /// Combine two partial accumulators folded over DISJOINT subsets of the stream.
     ///
     /// MUST be associative and commutative with respect to the folded result (up to float
-    /// ULP): it collapses the interleaved lane accumulators of a single cell, and continues
+    /// accuracy): it collapses the interleaved lane accumulators of a single cell, and continues
     /// a cell's accumulator across the bulks of a large reduced axis. The two subsets never
     /// overlap and together cover the folded elements exactly once.
     fn merge(&self, a: Self::State, b: Self::State) -> Self::State;
+
     /// Produce the final result. `nitems` is the total number of stream elements that
     /// were folded into `state`, so `nitems == 0` exactly when the reduction was empty.
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output;
@@ -374,13 +373,8 @@ where
                 )
                 .build();
 
-            // Per-bulk bookkeeping. `bulk_base_item_idx` is the reduced-stream position within
-            // this bulk (0-based; resets each bulk because bulks own disjoint output blocks).
-            // `bulk_initialized` flips after the first tile: the first tile of a bulk seeds its
-            // output cells, later tiles merge their partial folds into the same cells.
             let mut bulk_base_item_idx = 0u64;
             let mut bulk_initialized = false;
-
             for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
                 let tile = S::Dimension::vec(inner_ndim, |dim| {
                     let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
@@ -394,13 +388,10 @@ where
                     "tile not contained in inner_range_full",
                 );
 
-                // Items in this tile per output cell = product of the tile's reduced sizes.
-                // (In the swapped layout the reduced axes are subdivided across tiles, so this
-                // is a per-tile count, not the whole reduction.)
-                let reduction_size = (0..inner_ndim)
+                let tile_reduction_size = (0..inner_ndim)
                     .filter(|&d| self.is_reduced[d])
-                    .map(|d| tile_size[d])
-                    .product::<u64>();
+                    .map(|d| tile_size[d] as usize)
+                    .product::<usize>();
 
                 // Read this tile's items into a `(output, reduced)` layout - reduced dims
                 // innermost/contiguous - so each output's reduced stream is a unit-stride run.
@@ -408,7 +399,7 @@ where
                 let mut perm_lstrides = S::Dimension::vec(inner_ndim, |_| 0u64);
                 {
                     let mut red_acc = 1u64;
-                    let mut out_acc = reduction_size;
+                    let mut out_acc = tile_reduction_size as u64;
                     for d in (0..inner_ndim).rev() {
                         if self.is_reduced[d] {
                             perm_lstrides[d] = red_acc;
@@ -475,9 +466,6 @@ where
                     )
                     .with_strides_ptr_mut_ext(default_logical_strides(&out_shape), tile_state_base)
                     .build();
-                // One output cell at a time: fold its contiguous reduced stream with
-                // `LANES`-way interleaving, then continue across the bulk's tiles via `merge`.
-                let reduction_size = reduction_size as usize;
                 // The first tile of a bulk seeds each output slot; later tiles of the same
                 // bulk merge their partial fold into it. (Snapshot the flag so mutating
                 // `bulk_initialized` after the fold doesn't clash with the closure's borrow.)
@@ -500,25 +488,25 @@ where
                 let out_iter = out_iter.map(|(_out_idx, (src_base, state_ptr))| {
                     // SAFETY: `src_base` points at this cell's contiguous reduced stream
                     // of `reduction_size` items in the permuted (output, reduced) buffer.
-                    let src = unsafe { std::slice::from_raw_parts(src_base, reduction_size) };
+                    let src = unsafe { std::slice::from_raw_parts(src_base, tile_reduction_size) };
                     (src, state_ptr)
                 });
 
                 const LANES: usize = 16;
-                if reduction_size >= LANES {
+                if tile_reduction_size >= LANES {
                     for (src, state_ptr) in out_iter {
                         let state = self.fold_cell::<LANES>(src, bulk_base_item_idx);
                         store(state, state_ptr);
                     }
-                } else if reduction_size > 0 {
+                } else if tile_reduction_size > 0 {
                     for (src, state_ptr) in out_iter {
                         let state = self.fold_cell::<1>(src, bulk_base_item_idx);
                         store(state, state_ptr);
                     }
                 }
 
-                if reduction_size > 0 {
-                    bulk_base_item_idx += reduction_size as u64;
+                if tile_reduction_size > 0 {
+                    bulk_base_item_idx += tile_reduction_size as u64;
                     bulk_initialized = true;
                     state_initialized = true;
                 }
@@ -553,12 +541,7 @@ where
                 unsafe { out_ptr.write(res) };
             }
         } else {
-            // Empty path: write the empty-stream result to every output. Reachable only when
-            // there was nothing to seed - either the output range is empty (no bulks, so the
-            // loop below runs zero times) or the reduced stream is empty (no tiles, so
-            // `full_reduction_size == 0` and this writes the kernel's empty-reduction result).
-            // A non-empty output with a non-empty reduction always seeds every slot and takes
-            // the `if` branch instead.
+            // Empty reduction: write the empty-stream result to every output.
             let out_iter = NdIter::builder(out_shape)
                 .with_strides_ptr_mut_ext(out_lstrides, out_ptr)
                 .build();
@@ -622,23 +605,17 @@ where
     K: ReductionOpKernel<S::Item, Output: Dtyped>,
     D: Dimension,
 {
-    /// Fold one output cell's contiguous reduced stream (`src`, which must hold at least
-    /// `LANES` items) into a single accumulator. Seeds `LANES` lane accumulators from the
-    /// first `LANES` items, then interleaves the remainder with a contiguous `LANES`-wide
-    /// load per step (breaking the reduction dependency chain so it can vectorize),
-    /// tree-merges the lanes, and folds any tail sequentially. `base` is the global stream
-    /// index of `src[0]` - needed by argmax/argmin and to continue a cell's state across
-    /// bulks. Callers hoist the `len >= LANES` test out of the per-cell loop and fold
-    /// shorter streams with `LANES == 1`, which collapses to a plain sequential fold.
+    /// Fold one output cell's contiguous reduced stream (`items`, which must hold at least
+    /// `LANES` items) into a single accumulator.
     #[inline(always)]
-    fn fold_cell<const LANES: usize>(&self, src: &[S::Item], base: u64) -> K::State {
-        let n = src.len();
+    fn fold_cell<const LANES: usize>(&self, items: &[S::Item], base: u64) -> K::State {
+        let n = items.len();
         let mut i = 0;
 
         // Seed one accumulator per lane from the first LANES items.
-        debug_assert!(n >= LANES, "fold_cell requires at least LANES items");
-        let mut locals: [K::State; LANES] = array_from_fn_inline(|b| {
-            let item = unsafe { *src.get_unchecked(b) };
+        debug_assert!(n >= LANES);
+        let mut states: [K::State; LANES] = array_from_fn_inline(|b| {
+            let item = unsafe { *items.get_unchecked(b) };
             self.kernel.init_state(Some((item, base + b as u64)))
         });
         i += LANES;
@@ -646,9 +623,9 @@ where
         // Process the main bulk of the stream in LANES-sized chunks.
         while i + LANES <= n {
             let items: [S::Item; LANES] =
-                array_from_fn_inline(|b| unsafe { *src.get_unchecked(i + b) });
-            let mut it = locals.into_iter();
-            locals = array_from_fn_inline(|b| {
+                array_from_fn_inline(|b| unsafe { *items.get_unchecked(i + b) });
+            let mut it = states.into_iter();
+            states = array_from_fn_inline(|b| {
                 let state = it.next().unwrap();
                 self.kernel
                     .update_state(state, items[b], base + (i + b) as u64)
@@ -657,11 +634,11 @@ where
         }
 
         // merge the LANES states to a single one
-        let mut state = self.merge_states::<LANES>(locals);
+        let mut state = self.merge_states::<LANES>(states);
 
         // Fold any remaining tail sequentially.
         while i < n {
-            let item = unsafe { *src.get_unchecked(i) };
+            let item = unsafe { *items.get_unchecked(i) };
             state = self.kernel.update_state(state, item, base + i as u64);
             i += 1;
         }
@@ -1194,7 +1171,6 @@ where
     }
     #[inline(always)]
     fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        // `maximum` is NaN-propagating, hence associative + commutative including NaN.
         a.maximum(b)
     }
     #[inline(always)]
@@ -1262,7 +1238,6 @@ where
     }
     #[inline(always)]
     fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        // `minimum` is NaN-propagating, hence associative + commutative including NaN.
         a.minimum(b)
     }
     #[inline(always)]
@@ -1281,10 +1256,10 @@ define_reduction_op!(
     /// Output dtype is `u64`.
     ///
     /// Unlike [`Max`], this op accepts only a single axis. If multiple elements share
-    /// the maximum value, the index of one of them is returned (not necessarily the first).
-    /// For **float** types, `NaN` propagates: if any element along the reduced axis is `NaN`,
-    /// the returned index is that of some `NaN` (not necessarily the first). This differs
-    /// from `numpy.argmax`, which returns the index of the *first* `NaN`.
+    /// the maximum value, the index of the *first* such element is returned, matching
+    /// `numpy.argmax`. For **float** types, `NaN` propagates: if any element along the
+    /// reduced axis is `NaN`, the returned index is that of some `NaN` (not necessarily the
+    /// first). This differs from `numpy.argmax`, which returns the index of the *first* `NaN`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1348,14 +1323,25 @@ where
     }
     #[inline(always)]
     fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        // Same rule as `update_state`, and commutative on the value: the larger value wins,
-        // and any `NaN` wins. The index of ties / `NaN`s is unspecified (some occurrence).
+        // The larger value wins, and any `NaN` wins (propagating as in `update_state`). On an
+        // exact value tie the *smaller* index wins - together with `update_state` keeping the
+        // earlier index on ties, this makes argmax report the first occurrence of the maximum,
+        // matching `numpy.argmax`. The two subsets folded into `a`/`b` need not be contiguous
+        // index ranges (lane interleaving, tree merge), so the tie-break must compare indices
+        // rather than assume one side is "earlier". A `NaN` tie's index is still unspecified.
         let (ai, av) = a;
         let (bi, bv) = b;
         if bv > av || bv != bv {
             (bi, bv)
-        } else {
+        } else if av > bv || av != av {
             (ai, av)
+        } else {
+            // av == bv and neither is `NaN`: keep the earlier index.
+            if bi < ai {
+                (bi, bv)
+            } else {
+                (ai, av)
+            }
         }
     }
     #[inline(always)]
@@ -1375,10 +1361,10 @@ define_reduction_op!(
     /// Output dtype is `u64`.
     ///
     /// Unlike [`Min`], this op accepts only a single axis. If multiple elements share
-    /// the minimum value, the index of one of them is returned (not necessarily the first).
-    /// For **float** types, `NaN` propagates: if any element along the reduced axis is `NaN`,
-    /// the returned index is that of some `NaN` (not necessarily the first). This differs
-    /// from `numpy.argmin`, which returns the index of the *first* `NaN`.
+    /// the minimum value, the index of the *first* such element is returned, matching
+    /// `numpy.argmin`. For **float** types, `NaN` propagates: if any element along the
+    /// reduced axis is `NaN`, the returned index is that of some `NaN` (not necessarily the
+    /// first). This differs from `numpy.argmin`, which returns the index of the *first* `NaN`.
     ///
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
@@ -1441,14 +1427,25 @@ where
     }
     #[inline(always)]
     fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        // Same rule as `update_state`, and commutative on the value: the smaller value wins,
-        // and any `NaN` wins. The index of ties / `NaN`s is unspecified (some occurrence).
+        // The smaller value wins, and any `NaN` wins (propagating as in `update_state`). On an
+        // exact value tie the *smaller* index wins - together with `update_state` keeping the
+        // earlier index on ties, this makes argmin report the first occurrence of the minimum,
+        // matching `numpy.argmin`. The two subsets folded into `a`/`b` need not be contiguous
+        // index ranges (lane interleaving, tree merge), so the tie-break must compare indices
+        // rather than assume one side is "earlier". A `NaN` tie's index is still unspecified.
         let (ai, av) = a;
         let (bi, bv) = b;
         if bv < av || bv != bv {
             (bi, bv)
-        } else {
+        } else if av < bv || av != av {
             (ai, av)
+        } else {
+            // av == bv and neither is `NaN`: keep the earlier index.
+            if bi < ai {
+                (bi, bv)
+            } else {
+                (ai, av)
+            }
         }
     }
     #[inline(always)]
@@ -1990,10 +1987,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
     }
 }
 
-// TODO(reduction-merge): Reduce/Fold removed while reductions use interleave+merge.
-// Their single-reduced-axis contract guarantees logical visitation order for
-// non-commutative closures, which interleave + merge violates. Restore behind a
-// sequential fallback path later.
+// TODO
 /*
 /// Reduces one or more axes by repeatedly applying a user-supplied binary closure to the
 /// elements along those axes.
@@ -2438,7 +2432,7 @@ where
         }
     );
 
-    /* TODO(reduction-merge): Array::reduce / Array::fold removed; restore later.
+    /* TODO
     /// Applies the [`Reduce`] operation, see the op struct docs for details.
     #[track_caller]
     pub fn reduce<F, Ax>(
