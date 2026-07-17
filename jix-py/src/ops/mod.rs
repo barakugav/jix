@@ -46,13 +46,16 @@ use crate::dtype::dtype_from_numpy;
 /// Casts each element of `array` to a new dtype.
 ///
 /// Supported casts:
-/// - Between any two scalar types: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`,
-///   `uint32`, `uint64`, `float16`, `float32`, `float64`, `bool`.
-/// - Between the two complex types: `complex64` <-> `complex128`.
+/// - Between any two non-complex scalar types: `int8`, `int16`, `int32`, `int64`, `uint8`,
+///   `uint16`, `uint32`, `uint64`, `float16`, `float32`, `float64`, `bool`.
+/// - From any non-complex scalar type to a complex type (`complex64`, `complex128`): the value
+///   becomes the real part and the imaginary part is zero.
+/// - Between the two complex types (`complex64` <-> `complex128`), and from a complex type to
+///   `bool`.
 ///
 /// `bool` conversions follow C semantics: zero -> `False`, any non-zero value -> `True`.
-/// Casting between complex and non-complex types, or involving struct dtypes, is not
-/// supported.
+/// Casting from a complex type to a real numeric type (int, uint, or float), or any cast
+/// involving struct dtypes, is not supported.
 ///
 /// Output dtype is the target dtype. Output shape equals the input shape.
 ///
@@ -88,7 +91,7 @@ pub fn astype<'py>(
     array: &Bound<'py, PyAny>,
     dtype: &Bound<'_, PyAny>,
 ) -> PyResult<Bound<'py, Array>> {
-    let py_arr = crate::ops::asarray(array, None)?;
+    let py_arr = crate::ops::asarray_simple(array)?;
     let array = &py_arr.get().arr;
     let np_dtype = &PyArrayDescr::new(dtype.py(), dtype)?;
     let dtype = dtype_from_numpy(np_dtype)?;

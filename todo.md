@@ -2,7 +2,6 @@
 - consider AlignedBytes with compile time alignment
 - build wheels for wsam
 - compress offsets array
-- buf-break workflow
 - consider block shape tag in scale_read_shape
 - delegate power to square/sqrt if exponent is 2/0.5
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
@@ -10,3 +9,5 @@
 - ArrayParams stream syntax
 - resolve TODOs across the repo
 - solve miri UB in nd_copy, zero size slice trick is not accepted
+- add likely/unlikely branch hints
+- permute dims in nd_copy according to src strides as well, and remove <=1-len dims

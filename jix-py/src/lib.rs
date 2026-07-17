@@ -1,4 +1,4 @@
-#![cfg_attr(deny_warnings, deny(missing_docs))]
+#![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //
 #![doc = include_str!("../docs/module.md")]
@@ -27,6 +27,7 @@ mod jix {
     #[pymodule_export]
     pub const __version__: &str = env!("CARGO_PKG_VERSION");
 
+    /// The build profile of the jix library (e.g., "debug" or "release").
     #[allow(non_upper_case_globals)]
     #[pymodule_export]
     pub const _build_profile: &str = env!("BUILD_PROFILE");

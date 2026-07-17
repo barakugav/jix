@@ -40,6 +40,42 @@ def test_asarray_from_jix_array_is_noop():
     np.testing.assert_array_equal(a.numpy(), [1, 2, 3])
 
 
+def test_asarray_dtype_string():
+    a = jix.asarray([1, 2, 3], dtype="float32")
+    assert a.dtype == np.float32
+    np.testing.assert_array_equal(a.numpy(), [1.0, 2.0, 3.0])
+
+
+def test_asarray_dtype_numpy_type():
+    src = np.array([1.9, 2.1, -3.7], dtype=np.float64)
+    a = jix.asarray(src, dtype=np.int32)
+    assert a.dtype == np.int32
+    np.testing.assert_array_equal(a.numpy(), src.astype(np.int32))
+
+
+def test_asarray_dtype_to_bool():
+    a = jix.asarray(np.array([0, 1, -2, 0], dtype=np.int32), dtype=np.bool_)
+    assert a.dtype == np.bool_
+    np.testing.assert_array_equal(a.numpy(), [False, True, True, False])
+
+
+def test_asarray_dtype_none_preserves_dtype():
+    a = jix.asarray(np.array([1, 2], dtype=np.int16))
+    assert a.dtype == np.int16
+
+
+def test_asarray_dtype_casts_existing_jix_array():
+    arr = jix.asarray([1, 2, 3], dtype="float32")
+    cast = jix.asarray(arr, dtype=np.int32)
+    assert cast.dtype == np.int32
+    np.testing.assert_array_equal(cast.numpy(), [1, 2, 3])
+
+
+def test_asarray_dtype_unsupported_cast_raises():
+    with pytest.raises(TypeError):
+        jix.asarray(np.array([1 + 2j, 3 + 4j]), dtype="float64")
+
+
 # ---------------------------------------------------------------------------
 # astype
 # ---------------------------------------------------------------------------
@@ -100,6 +136,23 @@ def test_compact_is_independent():
     za = jix.compact(arr)
     copied = jix.compact(za)
     np.testing.assert_array_equal(copied.numpy(), za.numpy())
+
+
+# ---------------------------------------------------------------------------
+# plain
+# ---------------------------------------------------------------------------
+
+
+def test_plain_materializes_to_equal_array():
+    arr = np.arange(12, dtype=np.int32).reshape(3, 4)
+    za = jix.compact(arr)
+    # Materializing returns an equal array.
+    plain = za.plain()
+    assert plain.shape == za.shape
+    assert plain.dtype == za.dtype
+    np.testing.assert_array_equal(plain.numpy(), arr)
+    # It also materializes a lazy view.
+    np.testing.assert_array_equal((za + 1).plain().numpy(), arr + 1)
 
 
 # ---------------------------------------------------------------------------

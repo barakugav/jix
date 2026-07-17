@@ -193,23 +193,23 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             dst_strides_split[k] = dst_strides[k] * n as usize;
             dst_strides_split[k + 1..].copy_from_slice(&dst_strides[k..]);
 
-            // src ptr: tmp_buf offset to (g_range.start) along the inner k axis.
+            // src slice: tmp_buf from (g_range.start) along the inner k axis to its end.
             let src_byte_offset = (g_range.start as usize) * inner_strides_bytes[k];
-            let src_ptr = unsafe { tmp_buf.as_ptr().add(src_byte_offset) };
+            let src = unsafe { tmp_buf.get_unchecked(src_byte_offset..) };
 
-            // dst ptr: buf offset to the first output position of this region.
+            // dst slice: buf from the first output position of this region to its end.
             // First output k-position = g_start*n + g_range.start*n + p_range.start.
             // Output-relative k-position = that minus s.
             let first_out_k = g_start * n + g_range.start * n + p_range.start;
             debug_assert!(first_out_k >= s);
             let dst_k_offset_units = first_out_k - s;
             let dst_byte_offset = (dst_k_offset_units as usize) * dst_strides[k];
-            let dst_ptr = unsafe { dst.as_mut_ptr().add(dst_byte_offset) };
+            let dst = unsafe { dst.get_unchecked_mut(dst_byte_offset..) };
 
             unsafe {
                 copier.copy(
-                    src_ptr,
-                    dst_ptr,
+                    src,
+                    dst,
                     copy_shape.as_ref(),
                     src_strides.as_ref(),
                     dst_strides_split.as_ref(),

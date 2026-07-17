@@ -1,4 +1,4 @@
-#![cfg_attr(deny_warnings, deny(missing_docs))]
+#![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Multi-dimensional array library with block-compressed storage and lazy-evaluated operations.
@@ -44,6 +44,9 @@
 //!
 //! // materialize the pipeline into a new compressed Array<Compact>
 //! let result_compressed = result.compact()?;
+//! // or, materialize into an uncompressed jix Array<Plain> (cheaper than compact, useful
+//! // e.g. to reuse an intermediate view that would otherwise be recomputed on every read)
+//! let result_plain = result.to_plain()?;
 //! // or alternatively, materialize into an uncompressed ndarray::Array
 //! let result_decompressed = result.to_ndarray()?;
 //! // or alternatively, materialize directly to disk without ever holding the

@@ -1,4 +1,4 @@
-#![cfg_attr(deny_warnings, deny(missing_docs))]
+#![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Procedural macros for the [`jix`](https://docs.rs/jix) crate.

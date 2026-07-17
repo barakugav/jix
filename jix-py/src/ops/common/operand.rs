@@ -91,7 +91,11 @@ impl Operand {
             return Err(PyErr::new::<PyTypeError, _>("expected a scalar value"));
         }
 
-        let array = np_asarray.call1((value,))?.cast_into::<PyUntypedArray>()?;
+        let array = if let Ok(array) = value.cast::<PyUntypedArray>() {
+            array.clone() // already a NumPy array
+        } else {
+            np_asarray.call1((value,))?.cast_into::<PyUntypedArray>()?
+        };
         let dtype = dtype_from_numpy(&array.dtype())?;
         if array.ndim() == 0
             && let Some(scalar) = dtype.try_to_scalar()
@@ -176,7 +180,7 @@ impl Operand {
             let arr_ptr = unsafe { &*array.as_array_ptr() };
             arr_ptr.data.cast_const().cast::<u8>()
         };
-        let array = array.clone().unbind();
+        let array = array.unbind();
         let storage = unsafe {
             jix_core::storage::Plain::new(
                 array,

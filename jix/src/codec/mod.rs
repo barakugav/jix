@@ -10,6 +10,7 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 
 use crate::dtype::{Alignment, Dtype};
+#[allow(unused_imports)]
 use crate::error::{ensure, error, Result};
 use crate::util::arrayvec::ArrayVec;
 use crate::util::cpu_cache::CACHE_LINE_SIZE;

@@ -33,7 +33,7 @@ impl<D: Dimension, T, S: Copy> NdIterExtStridesPtr<D, T, S> {
 impl<D, T, S> NdIterExtension for NdIterExtStridesPtr<D, T, S>
 where
     D: Dimension,
-    S: Idx + 'static,
+    S: Idx,
 {
     type Item = *const T;
 
@@ -98,7 +98,7 @@ impl<D: Dimension, T, S: Copy> NdIterExtStridesPtrMut<D, T, S> {
 impl<D, T, S> NdIterExtension for NdIterExtStridesPtrMut<D, T, S>
 where
     D: Dimension,
-    S: Idx + 'static,
+    S: Idx,
 {
     type Item = *mut T;
 
@@ -132,16 +132,16 @@ where
 ///
 /// On each dimension change the offset is adjusted by the difference in element counts:
 /// `offset += (after - before) * stride[dim]`.
-pub(crate) struct NdIterExtStridesOffset<D: Dimension> {
-    strides: D::Vec<u64>,
-    offset: u64,
+pub(crate) struct NdIterExtStridesOffset<D: Dimension, S> {
+    strides: D::Vec<S>,
+    offset: S,
 }
-impl<D: Dimension> NdIterExtStridesOffset<D> {
+impl<D: Dimension, S: Idx> NdIterExtStridesOffset<D, S> {
     #[inline]
-    pub fn new<V>(strides: V, initial_offset: u64) -> Self
+    pub fn new<V>(strides: V, initial_offset: S) -> Self
     where
-        D: Dimension<Vec<u64> = V>,
-        V: DimVec<u64, Dimension = D>,
+        D: Dimension<Vec<S> = V>,
+        V: DimVec<S, Dimension = D>,
     {
         Self {
             strides,
@@ -149,20 +149,20 @@ impl<D: Dimension> NdIterExtStridesOffset<D> {
         }
     }
 }
-impl<D: Dimension> NdIterExtension for NdIterExtStridesOffset<D> {
-    type Item = u64;
+impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
+    type Item = S;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
-        self.offset += diff * self.strides[dim];
+        self.offset += S::from_u64(diff) * self.strides[dim];
     }
     #[inline(always)]
     fn on_decrease(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
-        self.offset -= diff * self.strides[dim];
+        self.offset -= S::from_u64(diff) * self.strides[dim];
     }
 
     #[inline(always)]
-    fn value(&self) -> u64 {
+    fn value(&self) -> S {
         self.offset
     }
 
@@ -178,7 +178,7 @@ impl<D: Dimension> NdIterExtension for NdIterExtStridesOffset<D> {
 pub(crate) fn nd_iter_ext_logical_global_index<D: Dimension>(
     shape: &[u64],
     begin: &[u64],
-) -> NdIterExtStridesOffset<D> {
+) -> NdIterExtStridesOffset<D, u64> {
     let logical_strides = default_logical_strides_slice(shape);
     let initial_offset = (0..shape.len())
         .map(|dim| begin[dim] * logical_strides[dim])

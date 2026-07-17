@@ -14,7 +14,8 @@ type, then runs in a single decompression pass when output is requested.
 
 Each crate is built and tested **independently from its own directory**. The root has no
 `Cargo.toml`, and `Cargo.lock` files are per-crate (gitignored). `cargo <cmd> -p jix` from the repo
-root will NOT work - you must `cd` into the crate directory first (this is how CI runs everything).
+root will NOT work - you must pass `--manifest-path` or `cd` into the crate directory first.
+Prefer `--manifest-path`.
 
 | Directory | Cargo package | Purpose |
 |-----------|---------------|---------|
@@ -50,6 +51,10 @@ python scripts/check_only_ascii.py         # see "ASCII-only" constraint below
 # --- Regenerate protobuf Rust (requires protoc installed; cd jix/schema) ---
 cargo run                                  # rewrites jix/src/archive/schema/_proto_gen/
 ```
+
+The `.venv` at `{repo-root}/.venv` is normally already activated in the shell - do NOT
+prefix commands with `source .venv/bin/activate` by default. Only activate (or create) it
+if a command actually fails because the venv is missing or inactive.
 
 Python dev dependencies: before installing them, make sure a venv is activated at
 `{repo-root}/.venv`. If it does not exist, create it with uv using Python 3.13:
@@ -150,8 +155,10 @@ with `cargo run --bin generate_pyi`.
 
 - **ASCII-only source** - `scripts/check_only_ascii.py` fails CI on any non-ASCII byte in a tracked
   file. Use `-` (hyphen), not em-dashes/unicode, in code and docs.
-- **`JIX_DENY_WARNINGS=1`** is set via `.cargo/config.toml`, which turns on `deny(missing_docs)` (see
-  `build.rs` + `lib.rs`). Missing doc comments on public items become **build errors** locally.
+- **Warnings-as-errors is CI-only.** `.github/workflows/ci.yaml` sets `RUSTFLAGS=-D warnings` on each
+  build/check/clippy/test step, so warnings - and, via `#![warn(missing_docs)]` in each crate root,
+  missing doc comments on public items - are hard errors in CI but only warnings locally. Reproduce
+  locally with `RUSTFLAGS="-D warnings" cargo <cmd>`.
 - **Little-endian targets only** - enforced by a compile-time assertion.
 - **Max 8 array dimensions** (`NDIM_MAX`); **max 4 inner dtype dimensions** (`DTYPE_MAX_NDIM`).
 - **Rust edition 2024, MSRV 1.89.0.** Element types must be `Copy + Send + Sync + 'static` and not
