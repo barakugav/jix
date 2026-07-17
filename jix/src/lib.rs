@@ -1,4 +1,4 @@
-#![cfg_attr(deny_warnings, deny(missing_docs))]
+#![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Multi-dimensional array library with block-compressed storage and lazy-evaluated operations.

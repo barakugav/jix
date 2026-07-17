@@ -76,19 +76,29 @@ jobs:
       - name: Build jix-schema
         run: cargo build
         working-directory: jix/schema
+        env:
+          RUSTFLAGS: "-D warnings"
       - name: Build jix-macros
         run: cargo build
         working-directory: jix-macros
+        env:
+          RUSTFLAGS: "-D warnings"
       - name: Build jix
         run: cargo build
         working-directory: jix
+        env:
+          RUSTFLAGS: "-D warnings"
       - name: Build jix-py
         run: cargo build
         working-directory: jix-py
+        env:
+          RUSTFLAGS: "-D warnings"
       # cargo check with feature powerset
       - name: cargo check jix with feature powerset
         run: cargo hack check --feature-powerset  --depth 2
         working-directory: jix
+        env:
+          RUSTFLAGS: "-D warnings"
       # install jix-py into venv
       - name: install jix-py
         uses: PyO3/maturin-action@v1
@@ -112,24 +122,32 @@ jobs:
       ############ Linters ############
       - name: Clippy jix-schema
         uses: auguwu/clippy-action@1.5.0
+        env:
+          RUSTFLAGS: "-D warnings"
         with:
           working-directory: jix/schema
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix-macros
         uses: auguwu/clippy-action@1.5.0
+        env:
+          RUSTFLAGS: "-D warnings"
         with:
           working-directory: jix-macros
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix
         uses: auguwu/clippy-action@1.5.0
+        env:
+          RUSTFLAGS: "-D warnings"
         with:
           working-directory: jix
           check-args: --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix-py
         uses: auguwu/clippy-action@1.5.0
+        env:
+          RUSTFLAGS: "-D warnings"
         with:
           working-directory: jix-py
           check-args: --all-features
@@ -159,9 +177,13 @@ jobs:
       - name: Test jix
         run: cargo test --all-features
         working-directory: jix
+        env:
+          RUSTFLAGS: "-D warnings"
       - name: Test jix-py (Rust tests)
         run: cargo test --all-features --all-targets
         working-directory: jix-py
+        env:
+          RUSTFLAGS: "-D warnings"
       - name: Test jix-py (Python tests)
         run: pytest python/tests --numprocesses auto
         working-directory: jix-py
@@ -204,8 +226,12 @@ jobs:
       - name: cargo check jix
         run: cargo check --all-features
         working-directory: jix
+        env:
+          RUSTFLAGS: "-D warnings"
       - name: cargo clippy jix
         uses: auguwu/clippy-action@1.5.0
+        env:
+          RUSTFLAGS: "-D warnings"
         with:
           working-directory: jix
           check-args: --all-features
@@ -214,8 +240,12 @@ jobs:
       - name: cargo check jix-py
         run: cargo check --all-features
         working-directory: jix-py
+        env:
+          RUSTFLAGS: "-D warnings"
       - name: cargo clippy jix-py
         uses: auguwu/clippy-action@1.5.0
+        env:
+          RUSTFLAGS: "-D warnings"
         with:
           working-directory: jix-py
           check-args: --all-features
