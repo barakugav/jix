@@ -193,7 +193,7 @@ impl Array {
             {
                 arr.into_dim::<Dim<D>>()
                     .unwrap()
-                    .to_ndarray_buf(&index, np_arr_data, context)
+                    .to_ndarray_buf(index, np_arr_data, context)
             }
             let to_ndarray_fn = match self.arr.ndim() {
                 0 => to_ndarray_impl::<_, 0>,
@@ -208,7 +208,7 @@ impl Array {
                 _ => unimplemented!(),
             };
 
-            to_ndarray_fn(self.arr.as_ref(), &index, buf, context).into_py_result()
+            to_ndarray_fn(self.arr.as_ref(), index, buf, context).into_py_result()
         })
     }
 

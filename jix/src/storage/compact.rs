@@ -409,12 +409,14 @@ where
                     inner_offset as usize * block_strides[dim]
                 })
                 .sum::<usize>();
-            let src_ptr = unsafe { tmp_buf.as_ptr().add(active_start) };
+            // Slices spanning from the active region's start to each buffer's end (supersets of
+            // what the copy touches). SAFETY: `active_start` is within the full-block `tmp_buf`.
+            let src = unsafe { tmp_buf.get_unchecked(active_start..) };
 
             unsafe {
                 copier.copy(
-                    src_ptr,
-                    buf.as_mut_ptr(),
+                    src,
+                    buf,
                     out_shape.as_ref(),
                     block_strides.as_ref(),
                     out_strides.as_ref(),
@@ -447,8 +449,6 @@ where
             let active_start = (0..ndim)
                 .map(|dim| block_inner_offset[dim] as usize * block_strides[dim])
                 .sum::<usize>();
-            let src_ptr = unsafe { tmp_buf.as_ptr().add(active_start) };
-
             // Map the active region's start to its position in the output array.
             let out_start = (0..ndim)
                 .map(|dim| {
@@ -457,12 +457,16 @@ where
                     out_idx as usize * out_strides[dim]
                 })
                 .sum::<usize>();
-            let dst_ptr = unsafe { buf.as_mut_ptr().add(out_start) };
+
+            // Slices spanning from each region's start to its buffer's end (supersets of what this
+            // block's copy touches). SAFETY: `active_start`/`out_start` are within `tmp_buf`/`buf`.
+            let src = unsafe { tmp_buf.get_unchecked(active_start..) };
+            let dst = unsafe { buf.get_unchecked_mut(out_start..) };
 
             unsafe {
                 copier.copy(
-                    src_ptr,
-                    dst_ptr,
+                    src,
+                    dst,
                     ActualD::vec(ndim, |dim| block_size[dim] as usize).as_ref(),
                     block_strides.as_ref(),
                     out_strides.as_ref(),

@@ -143,14 +143,14 @@ where
         let ndim = index.len();
         let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
         let src_strides = default_strides(&out_shape, src_itemsize);
-        let src_ptr = unsafe { tmp_buf.as_ptr().add(self.sub_field_offset as usize) };
+        let src = unsafe { tmp_buf.get_unchecked(self.sub_field_offset as usize..) };
         let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dst_dtype);
 
         let copier = NdCopier::new(dst_dtype);
         unsafe {
             copier.copy(
-                src_ptr,
-                dst.as_mut_ptr(),
+                src,
+                dst,
                 out_shape.as_ref(),
                 src_strides.as_ref(),
                 dst_strides.as_ref(),

@@ -132,20 +132,17 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         // are iter_shape=1 so they don't step regardless, but 0 keeps it explicit).
         let src_ptr_strides = S::Dimension::vec(ndim, |d| {
             if self.is_flipped[d] {
-                src_strides[d]
+                src_strides[d] as u64
             } else {
                 0
             }
         });
 
-        let tmp_base = tmp_buf.as_ptr();
-        let dst_base = dst.as_mut_ptr();
-
         let iter = NdIter::builder(iter_shape)
-            .with_strides_ptr_ext(src_ptr_strides, tmp_base)
+            .with_strides_offset_ext(src_ptr_strides, 0)
             .build();
         let nd_copy = NdCopier::new(self.dtype());
-        for (idx, src_ptr) in iter {
+        for (idx, src_off) in iter {
             // The output position on a flipped axis mirrors the tmp (source) position:
             // out_idx = L-1 - src_idx. Compute the destination byte offset in the destination's
             // own strides (which may differ from tmp's row-major strides).
@@ -153,12 +150,11 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
                 .filter(|&d| self.is_flipped[d])
                 .map(|d| (out_shape[d] - 1 - idx[d] as usize) * dst_strides[d])
                 .sum::<usize>();
-            let dst_ptr = unsafe { dst_base.add(dst_off) };
 
             unsafe {
                 nd_copy.copy(
-                    src_ptr,
-                    dst_ptr,
+                    tmp_buf.get_unchecked(src_off as usize..),
+                    dst.get_unchecked_mut(dst_off..),
                     slab_shape.as_ref(),
                     src_strides.as_ref(),
                     dst_strides.as_ref(),

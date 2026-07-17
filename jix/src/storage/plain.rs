@@ -7,7 +7,7 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn,
 };
-use crate::util::{DimArray, NdCopier, SendSyncPtr};
+use crate::util::{strided_span_bytes, DimArray, NdCopier, SendSyncPtr};
 use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
@@ -445,13 +445,20 @@ where
             .sum::<usize>();
         let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
 
+        // `data` is a bare pointer (a zero-copy view), not a slice, so build the source slice from
+        // the region's own extent. SAFETY: the view is valid for `out_shape`/`src_strides` from
+        // `src_ptr`, and `strided_span_bytes` is exactly that region's forward span.
+        let itemsize = dtype.itemsize() as usize;
+        let src_span = strided_span_bytes(out_shape.as_ref(), src_strides.as_ref(), itemsize);
+        let src = unsafe { std::slice::from_raw_parts(src_ptr, src_span) };
+
         let (dst, dst_strides) = buf.get_strided_mut::<D>(index, dtype);
 
         let copier = NdCopier::new(dtype);
         unsafe {
             copier.copy(
-                src_ptr,
-                dst.as_mut_ptr(),
+                src,
+                dst,
                 out_shape.as_ref(),
                 src_strides.as_ref(),
                 dst_strides.as_ref(),

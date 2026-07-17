@@ -187,8 +187,8 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         let copier = NdCopier::new(dtype);
         unsafe {
             copier.copy(
-                tmp_buf.as_ptr(),
-                dst.as_mut_ptr(),
+                tmp_buf,
+                dst,
                 out_shape.as_ref(),
                 src_strides.as_ref(),
                 dst_strides.as_ref(),

@@ -6,7 +6,7 @@ use crate::iter::NdIter;
 use crate::{dim_arr, Dim, DimArray, Dimension, SliceExt};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
-/// raw byte buffers under independent source and destination strides.
+/// byte slices under independent source and destination strides.
 ///
 /// [`new`](Self::new) inspects the dtype once and picks the cheapest copy routine up front: a
 /// monomorphized scalar copy for the common power-of-two `(itemsize, alignment)` pairs, a
@@ -94,11 +94,26 @@ impl<'a> NdCopier<'a> {
         })
     }
 
+    /// Copies a rectangular `shape` region from `src` to `dst` under independent byte strides.
+    ///
+    /// `src` and `dst` are the backing byte slices. The all-zero index maps to each slice's start
+    /// and every visited element is reached by offsetting forward from there; the slice lengths are
+    /// never read (the explicit `shape`/strides drive every access), only their base pointers and
+    /// provenance. Passing slices - rather than raw pointers - lets the inner loops derive
+    /// `noalias`-tagged pointers.
+    ///
+    /// # Safety
+    ///
+    /// - Each slice's byte range must be a superset of every byte the copy touches. For a region
+    ///   with the given `shape`/strides that is `sum_d (shape[d] - 1) * stride[d] + itemsize` bytes
+    ///   from the slice start (all byte strides are non-negative). A shorter slice is undefined
+    ///   behavior even though no explicit bounds checks run.
+    /// - The `src` and `dst` regions must not overlap.
     #[inline(always)]
     pub(crate) unsafe fn copy(
         &self,
-        src: *const u8,
-        dst: *mut u8,
+        src: &[u8],
+        dst: &mut [u8],
         shape: &[usize],
         src_strides: &[usize],
         dst_strides: &[usize],
@@ -128,15 +143,9 @@ impl<'a> NdCopier<'a> {
             (shape, src_strides, dst_strides)
         };
 
-        // The internal pipeline works over slices (so the reference-derived pointers carry
-        // `noalias`), but the public API is raw pointers. Carry each pointer as a zero-length
-        // slice beginning at it: the length is never read (callers pass an explicit `shape`),
-        // the pointer is recovered via `as_ptr`/`as_mut_ptr`, and a zero-length `u8` slice is
-        // always well-aligned. SAFETY: `copy`'s contract already requires `src`/`dst` to be
-        // valid, non-overlapping regions for the described `shape`/strides.
         let args = NdCopyArgs {
-            src: unsafe { std::slice::from_raw_parts(src, 0) },
-            dst: unsafe { std::slice::from_raw_parts_mut(dst, 0) },
+            src,
+            dst,
             shape,
             src_strides,
             dst_strides,
@@ -486,14 +495,22 @@ impl<'a> NdCopier<'a> {
         n_contiguous_items: usize,
         copy_1d_row: Copy1dRowFn,
     ) {
+        let src_base = src.as_ptr();
+        let dst_base = dst.as_mut_ptr();
         let iter = NdIter::builder(D::vec(outer_shape.len(), |i| outer_shape[i] as u64))
-            .with_strides_ptr_ext(outer_src_strides.to_dim_vec::<D>(), src.as_ptr())
-            .with_strides_ptr_mut_ext(outer_dst_strides.to_dim_vec::<D>(), dst.as_mut_ptr())
+            .with_strides_ptr_ext(outer_src_strides.to_dim_vec::<D>(), src_base)
+            .with_strides_ptr_mut_ext(outer_dst_strides.to_dim_vec::<D>(), dst_base)
             .build();
         for (_, (row_src_ptr, row_dst_ptr)) in iter {
-            // Zero-length slices carrying this row's base pointer (see `copy`).
-            let src = unsafe { std::slice::from_raw_parts(row_src_ptr, 0) };
-            let dst = unsafe { std::slice::from_raw_parts_mut(row_dst_ptr, 0) };
+            // Reslice `src`/`dst` at this row's base so the row slices keep provenance over the rest
+            // of the backing region; a zero-length slice would forbid the strided reads below.
+            // SAFETY: the iterator derives both row pointers by offsetting `src_base`/`dst_base`, so
+            // the offsets are in bounds of the original slices (which the caller guaranteed cover
+            // the whole region).
+            let src_off = unsafe { row_src_ptr.offset_from(src_base) as usize };
+            let dst_off = unsafe { row_dst_ptr.offset_from(dst_base) as usize };
+            let src = unsafe { src.get_unchecked(src_off..) };
+            let dst = unsafe { dst.get_unchecked_mut(dst_off..) };
             unsafe {
                 copy_1d_row(
                     src,
@@ -517,20 +534,18 @@ impl<'a> NdCopier<'a> {
             dst_strides,
             dtype: _,
         } = args;
-        let src_ptr = src.as_ptr();
-        let dst_ptr = dst.as_mut_ptr();
         for ((f, &offset), field_dtype) in struct_copier
             .scalar_fns
             .iter()
             .zip(struct_copier.offsets.iter())
             .zip(struct_copier.dtypes.iter())
         {
-            // Rebuild the per-field zero-length slices from the base pointers. SAFETY: the field
-            // at `offset` lies within the element; distinct fields do not overlap; the lengths are
-            // unused and a zero-length u8 slice is always aligned.
+            // Reslice at this field's byte offset within the element. SAFETY: the field at `offset`
+            // lies within every element, so `offset` is in bounds of the backing slices; distinct
+            // fields do not overlap, and each field's forward span stays within the caller's region.
             let field_args = NdCopyArgs {
-                src: unsafe { std::slice::from_raw_parts(src_ptr.add(offset as usize), 0) },
-                dst: unsafe { std::slice::from_raw_parts_mut(dst_ptr.add(offset as usize), 0) },
+                src: unsafe { src.get_unchecked(offset as usize..) },
+                dst: unsafe { dst.get_unchecked_mut(offset as usize..) },
                 shape,
                 src_strides,
                 dst_strides,
@@ -806,8 +821,10 @@ mod tests {
         let expected = reference_copy(src, dst_len, shape, src_strides, dst_strides, itemsize);
 
         let copier = NdCopier::new(&dtype);
+        // Slices spanning each buffer; `buf_len` sized them to cover every accessed byte.
+        let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
         unsafe {
-            copier.copy(src_ptr, dst_ptr, shape, src_strides, dst_strides, &dtype);
+            copier.copy(src, dst, shape, src_strides, dst_strides, &dtype);
         }
 
         let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };

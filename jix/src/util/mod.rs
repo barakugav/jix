@@ -99,6 +99,22 @@ where
     let shape = shape.as_ref();
     default_strides_from_iter::<V::Dimension, Ix>(shape.len(), shape.iter().copied(), itemsize)
 }
+/// The number of bytes an `NdCopier::copy` region spans forward from its base: the smallest backing
+/// length whose byte range is a superset of every element visited under `shape` and (non-negative)
+/// byte `strides`. Raw-pointer-backed callers use this to build the `&[u8]`/`&mut [u8]` that `copy`
+/// requires from a bare pointer. Returns 0 for an empty region.
+#[inline]
+pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
+    let mut span = itemsize;
+    for (&len, &stride) in shape.iter().zip(strides) {
+        if len == 0 {
+            return 0;
+        }
+        span += stride * (len - 1);
+    }
+    span
+}
+
 #[inline(always)]
 pub(crate) fn default_strides_cast<V, IxIn: Idx, IxOut: Idx>(
     shape: &V,

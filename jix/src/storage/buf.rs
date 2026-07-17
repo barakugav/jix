@@ -323,8 +323,8 @@ impl OutBufContiguousBuf<'_> {
         // which `OutBuf::new_strided`'s (unsafe) contract requires to be valid for these writes.
         unsafe {
             copier.copy(
-                contiguous_buf.as_slice().as_ptr(),
-                strided_buf.as_mut_ptr(),
+                contiguous_buf.as_slice(),
+                strided_buf,
                 shape,
                 src_strides.as_ref(),
                 strides,

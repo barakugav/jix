@@ -459,6 +459,21 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 
     /// Adds a [`NdIterExtStridesOffset`] extension.
     #[inline]
+    pub(crate) fn with_strides_offset_ext(
+        self,
+        strides: D::Vec<u64>,
+        initial_offset: u64,
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D>>> {
+        let ext = NdIterExtStridesOffset::<D>::new(strides, initial_offset);
+        NdIterBuilder {
+            begin: self.begin,
+            end: self.end,
+            extensions: self.extensions.merge_extension(ext),
+        }
+    }
+
+    /// Adds a [`NdIterExtStridesOffset`] extension.
+    #[inline]
     pub(crate) fn with_logical_global_index_ext(
         self,
         shape: &[u64],

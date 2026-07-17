@@ -222,10 +222,11 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 }
             });
             let src_off = s_in as usize * src_strides[k];
+            let src = unsafe { tmp.get_unchecked(src_off..) };
             unsafe {
                 copier.copy(
-                    tmp.as_ptr().add(src_off),
-                    dst.as_mut_ptr(),
+                    src,
+                    dst,
                     copy_shape.as_ref(),
                     src_strides.as_ref(),
                     dst_strides.as_ref(),
@@ -267,11 +268,12 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                     Ordering::Greater => dst_strides[src_axis(i)],
                 });
             let dst_off = head_len as usize * dst_strides[k];
+            let dst = unsafe { dst.get_unchecked_mut(dst_off..) };
             let copier = NdCopier::new(dtype);
             unsafe {
                 copier.copy(
-                    tmp.as_ptr(),
-                    dst.as_mut_ptr().add(dst_off),
+                    tmp,
+                    dst,
                     copy_shape.as_ref(),
                     src_strides_split.as_ref(),
                     dst_strides_split.as_ref(),
@@ -290,10 +292,11 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 }
             });
             let dst_off = (head_len + num_full * l) as usize * dst_strides[k];
+            let dst = unsafe { dst.get_unchecked_mut(dst_off..) };
             unsafe {
                 copier.copy(
-                    tmp.as_ptr(),
-                    dst.as_mut_ptr().add(dst_off),
+                    tmp,
+                    dst,
                     copy_shape.as_ref(),
                     src_strides.as_ref(),
                     dst_strides.as_ref(),

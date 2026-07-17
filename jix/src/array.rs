@@ -915,6 +915,7 @@ impl<S: ArrayStorage> Array<S> {
     /// assert_eq!(normalized, array![[1.0f64, 3.0], [2.0, 4.0]]);
     /// # Ok::<(), jix::Error>(())
     /// ```
+    #[allow(clippy::type_complexity)]
     pub fn to_plain(&self) -> Result<Array<Plain<Vec<S::Item>, Ty<S::Item>, S::Dimension>>>
     where
         S: ArrayStorageTyped,
@@ -1184,8 +1185,8 @@ impl<S: ArrayStorage> Array<S> {
                 // In that case, we can compress directly from the chunk buffer
                 unsafe {
                     copier.copy(
-                        chunk_buf.as_ptr().add(src_byte_offset),
-                        tmp_block_plain.as_mut_ptr(),
+                        chunk_buf.as_slice().get_unchecked(src_byte_offset..),
+                        tmp_block_plain.as_mut_slice(),
                         S::Dimension::vec(ndim, |dim| block_active_size[dim] as usize).as_ref(),
                         chunk_strides.as_ref(),
                         block_strides.as_ref(),
