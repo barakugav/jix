@@ -94,7 +94,7 @@ where
     type ElementType = Ty<T>;
     type Dimension = D;
 
-    #[inline(always)]
+    #[inline]
     fn read_data(
         &self,
         index: &[Range<u64>],

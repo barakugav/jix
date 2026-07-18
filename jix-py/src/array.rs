@@ -3,7 +3,7 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Mutex;
 
-use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, Dimension, ReadContext};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, DimDyn, Dimension, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -182,30 +182,22 @@ impl Array {
             let context = self.read_ctx()?;
             let context = context.as_ref();
 
-            fn to_ndarray_impl<S: ArrayStorage, const D: usize>(
+            fn to_ndarray_impl<S: ArrayStorage, D: Dimension>(
                 arr: jix_core::Array<S>,
                 index: &[std::ops::Range<u64>],
                 np_arr_data: &mut [u8],
                 context: &ReadContext,
-            ) -> Result<(), jix_core::Error>
-            where
-                Dim<D>: Dimension,
-            {
-                arr.into_dim::<Dim<D>>()
+            ) -> Result<(), jix_core::Error> {
+                arr.into_dim::<D>()
                     .unwrap()
                     .to_ndarray_buf(index, np_arr_data, context)
             }
             let to_ndarray_fn = match self.arr.ndim() {
-                0 => to_ndarray_impl::<_, 0>,
-                1 => to_ndarray_impl::<_, 1>,
-                2 => to_ndarray_impl::<_, 2>,
-                3 => to_ndarray_impl::<_, 3>,
-                4 => to_ndarray_impl::<_, 4>,
-                5 => to_ndarray_impl::<_, 5>,
-                6 => to_ndarray_impl::<_, 6>,
-                7 => to_ndarray_impl::<_, 7>,
-                8 => to_ndarray_impl::<_, 8>,
-                _ => unimplemented!(),
+                1 => to_ndarray_impl::<_, Dim<1>>,
+                2 => to_ndarray_impl::<_, Dim<2>>,
+                3 => to_ndarray_impl::<_, Dim<3>>,
+                4 => to_ndarray_impl::<_, Dim<4>>,
+                _ => to_ndarray_impl::<_, DimDyn>,
             };
 
             to_ndarray_fn(self.arr.as_ref(), index, buf, context).into_py_result()

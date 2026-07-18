@@ -633,8 +633,7 @@ fn compute_dim_permutation(
     src_strides: &[usize],
     dst_strides: &[usize],
 ) -> Option<DimArray<usize>> {
-    // Rank each axis by its write stride (weight 64) over its read stride (weight 1). u128 keeps the
-    // weighting from overflowing usize even for pathologically large byte strides.
+    // Rank each axis by its write stride (weight 64) over its read stride (weight 1)
     let key = |d: usize| -> u64 { dst_strides[d] as u64 * 64 + src_strides[d] as u64 };
 
     let ndim = shape.len();

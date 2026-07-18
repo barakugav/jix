@@ -20,7 +20,7 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ElementType, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, NdCopier};
-use crate::{default_strides_cast, ArrayParams, ArrayStorage, Dim, DimVec, Dimension};
+use crate::{default_strides_cast, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -357,11 +357,7 @@ where
                 2 => Self::read_data_slow_impl::<Dim<2>>,
                 3 => Self::read_data_slow_impl::<Dim<3>>,
                 4 => Self::read_data_slow_impl::<Dim<4>>,
-                5 => Self::read_data_slow_impl::<Dim<5>>,
-                6 => Self::read_data_slow_impl::<Dim<6>>,
-                7 => Self::read_data_slow_impl::<Dim<7>>,
-                8 => Self::read_data_slow_impl::<Dim<8>>,
-                _ => unreachable!(),
+                _ => Self::read_data_slow_impl::<DimDyn>,
             }
         };
         read_fn(self, index, buf, context, single_block_idx)

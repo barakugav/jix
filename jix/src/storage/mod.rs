@@ -266,7 +266,7 @@ where
 
         match strides {
             None => {
-                #[inline(always)]
+                #[inline(never)]
                 unsafe fn read_to_buf_impl<T, const LANES: usize>(
                     data: &mut impl ReadData<T>,
                     buf: &mut [u8],
@@ -318,7 +318,7 @@ where
                 unsafe { read_fn(self, out) }
             }
             Some(strides) => {
-                #[inline(always)]
+                #[inline(never)]
                 unsafe fn read_to_buf_impl_strided<T, D: Dimension, const LANES: usize>(
                     data: &mut impl ReadData<T>,
                     buf: &mut [u8],
