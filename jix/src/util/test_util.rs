@@ -62,12 +62,6 @@ pub(crate) trait ScalarStrategy:
     fn op_safe_non_negative_strategy() -> BoxedStrategy<Self> {
         Self::op_safe_strategy()
     }
-    /// Values in the closed interval [-1, 1]. Used for ops whose domain is restricted to that
-    /// range (e.g. `asin`, `acos`). Overridden for `f32` and `f64`; falls back to
-    /// `op_safe_strategy` for all other types (where the method is not expected to be called).
-    fn unit_strategy() -> BoxedStrategy<Self> {
-        Self::op_safe_strategy()
-    }
     /// Values in `[0, bit_width)`. Used as shift amounts so that `a << b` / `a >> b` never
     /// panic in debug mode. Overridden for all integer types; falls back to `any_strategy`
     /// for non-integer types (not expected to be called for those).
@@ -301,9 +295,6 @@ impl ScalarStrategy for f32 {
     fn op_safe_non_negative_strategy() -> BoxedStrategy<Self> {
         (0..=(100 * 100)).prop_map(|x| (x as f32) / 100.0).boxed()
     }
-    fn unit_strategy() -> BoxedStrategy<Self> {
-        (-100i8..=100).prop_map(|x| x as f32 / 100.0).boxed()
-    }
     fn comparable_strategy() -> BoxedStrategy<Self> {
         prop_oneof![Just(0.0f32), Just(1.0f32), Just(2.4f32), Just(f32::NAN)].boxed()
     }
@@ -338,9 +329,6 @@ impl ScalarStrategy for f64 {
         (0..=(100 * 100)).prop_map(|x| (x as f64) / 100.0).boxed()
     }
 
-    fn unit_strategy() -> BoxedStrategy<Self> {
-        (-100i8..=100).prop_map(|x| x as f64 / 100.0).boxed()
-    }
     fn comparable_strategy() -> BoxedStrategy<Self> {
         prop_oneof![Just(0.0f64), Just(1.0f64), Just(2.4f64), Just(f64::NAN)].boxed()
     }
@@ -554,7 +542,6 @@ where
         (Just(arr), block_shape, block_size, read_size)
     })
     .prop_map(|(arr, block_shape, block_size, read_size)| {
-        let block_shape = block_shape;
         let mut params = ArrayParams::default();
         params.block_shape(&block_shape);
         if let Some(block_size) = block_size {
@@ -580,6 +567,7 @@ where
 //     carrays2_strategy_generic(shape_strategy(), T::any_strategy())
 // }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn carrays2_strategy_generic<T>(
     shape: impl Strategy<Value = Vec<usize>>,
     element: impl Strategy<Value = T> + Clone,
@@ -713,7 +701,7 @@ fn assert_array_matches_dyn<T>(
         ..Config::default()
     });
     runner
-        .run(&sub_range_strategy(&shape), |ranges| {
+        .run(&sub_range_strategy(shape), |ranges| {
             let actual_sub = actual
                 .to_ndarray_sub(&ranges, &ctx)
                 .map_err(|e| TestCaseError::fail(e.to_string()))?;

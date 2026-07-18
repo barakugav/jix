@@ -19,10 +19,10 @@ from tests_util import (
     assert_array_matches,
     carrays2_mixed_strategy,
     carrays2_strategy,
+    check_op2_concrete,
     complexes,
     floats,
     ints,
-    op_safe_element_strategy,
     op_safe_non_zero_element_strategy,
     uints,
 )
@@ -86,14 +86,25 @@ def test_add_custom_inputs():
     check(zac + [1 + 1j, 2 + 2j], dc + np.array([1 + 1j, 2 + 2j]))  # list of complex
 
 
-@pytest.mark.parametrize("dtype", ints + floats + complexes)
-@given(st.data())
-def test_subtract(dtype: np.dtype, data: DataObject):
-    # Unsigned types are excluded: the jix extension is a debug build that panics on
-    # unsigned underflow, matching Rust's test_op2!(sub, ..., [i8, i16, i32, i64, ...]).
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype), label="arrays")
-    result = za - zb
-    assert_array_matches(result, np_a - np_b, data=data)
+def test_subtract_concrete():
+    # int32: negatives, zero, positive, at the op_safe bound (+/-100); differences stay
+    # well within int32 range so there's no overflow panic. Unsigned dtypes are excluded
+    # (the jix extension is a debug build that panics on unsigned underflow).
+    # float64: negatives, zero, fractions, and the +/-100.0 bound, with a non-default
+    # block shape so this case crosses a block boundary.
+    check_op2_concrete(
+        lambda a, b: a - b,
+        lambda a, b: a - b,
+        [
+            (np.int32, [[-100, -1, 0], [1, 50, 100]], [[100, 1, 0], [-1, -50, -100]]),
+            (
+                np.float64,
+                [[-100.0, -0.5, 0.0], [0.5, 50.0, 100.0]],
+                [[100.0, 0.5, 0.0], [-0.5, -50.0, -100.0]],
+                [1, 2],
+            ),
+        ],
+    )
 
 
 def test_subtract_custom_inputs():
@@ -129,14 +140,39 @@ def test_subtract_custom_inputs():
     )
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + complexes)
-@given(st.data())
-def test_multiply(dtype: np.dtype, data: DataObject):
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype), label="arrays")
-    result = za * zb
-    # Complex multiplication of large values can differ by a few ULP across implementations.
-    rtol = 1e-5 if np.issubdtype(dtype, np.complexfloating) else 0.0
-    assert_array_matches(result, np_a * np_b, data=data, rtol=rtol)
+def test_multiply_concrete():
+    # int32: negatives, zero, positive, at the op_safe bound (+/-100); products stay well
+    # within int32 range so there's no overflow panic.
+    # float64: negatives, zero, fractions, and the +/-100.0 bound, with a non-default
+    # block shape so this case crosses a block boundary.
+    check_op2_concrete(
+        lambda a, b: a * b,
+        lambda a, b: a * b,
+        [
+            (np.int32, [[-100, -1, 0], [1, 10, 100]], [[100, -1, 0], [-1, 10, -100]]),
+            (
+                np.float64,
+                [[-100.0, -0.5, 0.0], [0.5, 10.0, 100.0]],
+                [[100.0, -0.5, 0.0], [-0.5, 10.0, -100.0]],
+                [1, 2],
+            ),
+        ],
+    )
+
+    # complex64: full complex multiplication with negative and zero components on both
+    # operands. Complex multiplication of large values can differ by a few ULP, hence rtol.
+    check_op2_concrete(
+        lambda a, b: a * b,
+        lambda a, b: a * b,
+        [
+            (
+                np.complex64,
+                [[-3.0 + 4.0j, 0.0 + 0.0j], [2.5 - 1.5j, 100.0 - 100.0j]],
+                [[1.0 - 2.0j, 5.0 + 5.0j], [-2.5 + 1.5j, -100.0 + 100.0j]],
+            ),
+        ],
+        rtol=1e-5,
+    )
 
 
 def test_multiply_custom_inputs():
@@ -220,18 +256,28 @@ def test_divide_custom_inputs():
     check(zac / [1 + 0j, 2 + 0j], dc / np.array([1 + 0j, 2 + 0j]))
 
 
-@pytest.mark.parametrize("dtype", ints + uints)
-@given(st.data())
-def test_floor_divide(dtype: np.dtype, data: DataObject):
-    # floor_divide dispatches only on integer/unsigned dtypes. Non-zero strategy
-    # avoids divide-by-zero panics. jix's `//` truncates toward zero (Rust `/`
-    # semantics) - for signed-negative quotients this differs from numpy's `//`
-    # which floors toward -inf, so the expected is computed via float / and cast.
-    nz = op_safe_non_zero_element_strategy(dtype)
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
-    result = za // zb
-    expected = (np_a.astype(np.float64) / np_b.astype(np.float64)).astype(dtype)
-    assert_array_matches(result, expected, data=data)
+def _floor_divide_ref(np_a, np_b):
+    return (np_a.astype(np.float64) / np_b.astype(np.float64)).astype(np_a.dtype)
+
+
+def test_floor_divide_concrete():
+    # floor_divide dispatches only on integer/unsigned dtypes. Non-zero divisors avoid
+    # divide-by-zero panics. jix's `//` truncates toward zero (Rust `/` semantics) - for
+    # signed-negative quotients this differs from numpy's `//` which floors toward -inf,
+    # so the expected is computed via float / and cast (mirroring the original
+    # op_safe_non_zero_strategy-based test). A non-default block shape crosses a block
+    # boundary for the signed-int case. uint32/uint64: unsigned floor division has no
+    # sign/truncation subtlety.
+    check_op2_concrete(
+        lambda a, b: a // b,
+        _floor_divide_ref,
+        [
+            (np.int32, [[-100, -1, 7], [1, 50, 100]], [[3, -1, 2], [-4, 7, -100]], [1, 2]),
+            (np.int64, [[-100, -1, 7], [1, 50, 100]], [[3, -1, 2], [-4, 7, -100]], [1, 2]),
+            (np.uint32, [[1, 20, 100], [7, 50, 30]], [[1, 3, 7], [2, 6, 4]]),
+            (np.uint64, [[1, 20, 100], [7, 50, 30]], [[1, 3, 7], [2, 6, 4]]),
+        ],
+    )
 
 
 def test_floor_divide_custom_inputs():
@@ -340,21 +386,26 @@ _POWER_PROMOTE_CASES = [
 ]
 
 
-@pytest.mark.parametrize("base_dtype,exp_dtype,expected_dtype", _POWER_PROMOTE_CASES)
-@given(st.data())
-def test_power_promotes_mixed_dtypes(base_dtype, exp_dtype, expected_dtype, data: DataObject):
+def _power_promote_operands(base_dtype, exp_dtype):
+    """Small fixed (base, exponent) arrays within the safe range used by the original
+    hypothesis strategy (base in [1, 3], exponent in [0, 3])."""
+    base_vals = [1, 2, 3, 1] if np.issubdtype(base_dtype, np.integer) else [1.0, 2.0, 3.0, 1.0]
+    exp_vals = [0, 1, 2, 3] if np.issubdtype(exp_dtype, np.integer) else [0.0, 1.0, 2.0, 3.0]
+    np_a = np.array(base_vals, dtype=base_dtype)
+    np_b = np.array(exp_vals, dtype=exp_dtype)
+    return np_a, np_b
+
+
+def test_power_promotes_mixed_dtypes_concrete():
     """Mixed (base, exponent) dtypes promote to expected_dtype and values still match."""
-    base_st = st.integers(1, 3) if np.issubdtype(base_dtype, np.integer) else st.integers(1, 3).map(float)
-    exp_st = st.integers(0, 3) if np.issubdtype(exp_dtype, np.integer) else st.integers(0, 3).map(float)
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_mixed_strategy(base_dtype, exp_dtype, element_st_a=base_st, element_st_b=exp_st),
-        label="arrays",
-    )
-    result = jix.power(za, zb)
-    assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
-    expected = np.power(np_a, np_b).astype(expected_dtype)
-    rtol = 0.0 if np.issubdtype(expected_dtype, np.integer) else 1e-6
-    assert_array_matches(result, expected, data=data, rtol=rtol)
+    for base_dtype, exp_dtype, expected_dtype in _POWER_PROMOTE_CASES:
+        np_a, np_b = _power_promote_operands(base_dtype, exp_dtype)
+        za, zb = jix.compact(np_a), jix.compact(np_b)
+        result = jix.power(za, zb)
+        assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
+        expected = np.power(np_a, np_b).astype(expected_dtype)
+        rtol = 0.0 if np.issubdtype(expected_dtype, np.integer) else 1e-6
+        assert_array_matches(result, expected, rtol=rtol)
 
 
 def test_power_custom_inputs():
@@ -430,96 +481,86 @@ _MIXED_ARITH_CASES = [
 ]
 
 
-@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
-@given(st.data())
-def test_add_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+def _mixed_dtype_operands(dtype_a, dtype_b):
+    """Small fixed (np_a, np_b) pair for a mixed-dtype case, with values kept within each
+    dtype's safe range (no overflow/underflow). Same-category dtypes share a matching
+    value at index 0 (equal), the rest differ, so equal() coverage exercises both
+    True and False branches."""
+
+    def vals(dtype, variant):
+        if dtype == np.bool_:
+            return [True, False, True, False] if variant == 0 else [True, True, False, False]
+        if np.issubdtype(dtype, np.unsignedinteger):
+            return [0, 1, 2, 3] if variant == 0 else [0, 5, 2, 9]
+        if np.issubdtype(dtype, np.signedinteger):
+            return [-3, 0, 2, 3] if variant == 0 else [-3, 5, 2, -9]
+        if np.issubdtype(dtype, np.complexfloating):
+            return [1 + 1j, -2 - 2j, 0 + 0j, 3 - 1j] if variant == 0 else [1 + 1j, 2 + 2j, 0 + 0j, -3 + 1j]
+        return [-2.5, 0.0, 2.0, 3.5] if variant == 0 else [-2.5, 9.0, 2.0, -1.0]  # float
+
+    np_a = np.array(vals(dtype_a, 0), dtype=dtype_a)
+    np_b = np.array(vals(dtype_b, 1), dtype=dtype_b)
+    return np_a, np_b
+
+
+def test_add_mixed_dtypes_concrete():
     """add(a, b) with different dtypes casts both to expected_dtype, values match."""
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_mixed_strategy(
-            dtype_a,
-            dtype_b,
-            element_st_a=op_safe_element_strategy(dtype_a),
-            element_st_b=op_safe_element_strategy(dtype_b),
-        ),
-        label="arrays",
-    )
-    result = jix.add(za, zb)
-    assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
-    expected = np_a.astype(expected_dtype) + np_b.astype(expected_dtype)
-    np.testing.assert_array_equal(result.numpy(), expected)
+    for dtype_a, dtype_b, expected_dtype in _MIXED_ARITH_CASES:
+        np_a, np_b = _mixed_dtype_operands(dtype_a, dtype_b)
+        za, zb = jix.compact(np_a), jix.compact(np_b)
+        result = jix.add(za, zb)
+        assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
+        expected = np_a.astype(expected_dtype) + np_b.astype(expected_dtype)
+        np.testing.assert_array_equal(result.numpy(), expected)
 
 
-@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
-@given(st.data())
-def test_multiply_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+def test_multiply_mixed_dtypes_concrete():
     """multiply(a, b) with different dtypes casts both to expected_dtype, values match."""
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_mixed_strategy(
-            dtype_a,
-            dtype_b,
-            element_st_a=op_safe_element_strategy(dtype_a),
-            element_st_b=op_safe_element_strategy(dtype_b),
-        ),
-        label="arrays",
-    )
-    result = jix.multiply(za, zb)
-    assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
-    expected = np_a.astype(expected_dtype) * np_b.astype(expected_dtype)
-    rtol = 1e-5 if np.issubdtype(expected_dtype, np.complexfloating) else 0.0
-    np.testing.assert_allclose(result.numpy(), expected, rtol=rtol)
+    for dtype_a, dtype_b, expected_dtype in _MIXED_ARITH_CASES:
+        np_a, np_b = _mixed_dtype_operands(dtype_a, dtype_b)
+        za, zb = jix.compact(np_a), jix.compact(np_b)
+        result = jix.multiply(za, zb)
+        assert result.dtype == np.dtype(expected_dtype), f"dtype: {result.dtype} != {expected_dtype}"
+        expected = np_a.astype(expected_dtype) * np_b.astype(expected_dtype)
+        rtol = 1e-5 if np.issubdtype(expected_dtype, np.complexfloating) else 0.0
+        np.testing.assert_allclose(result.numpy(), expected, rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype_a,dtype_b,expected_dtype", _MIXED_ARITH_CASES)
-@given(st.data())
-def test_subtract_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+def test_subtract_mixed_dtypes_concrete():
     """subtract(a, b) with different dtypes casts both to expected_dtype, values match."""
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_mixed_strategy(
-            dtype_a,
-            dtype_b,
-            element_st_a=op_safe_element_strategy(dtype_a),
-            element_st_b=op_safe_element_strategy(dtype_b),
-        ),
-        label="arrays",
-    )
-    # Unsigned subtypes that would underflow: restrict to uint cases
-    if np.issubdtype(expected_dtype, np.unsignedinteger):
-        # skip: unsigned underflow panics in debug mode
-        return
-    result = jix.subtract(za, zb)
-    assert result.dtype == np.dtype(expected_dtype)
-    expected = np_a.astype(expected_dtype) - np_b.astype(expected_dtype)
-    np.testing.assert_array_equal(result.numpy(), expected)
+    for dtype_a, dtype_b, expected_dtype in _MIXED_ARITH_CASES:
+        # Unsigned subtypes that would underflow: restrict to uint cases
+        if np.issubdtype(expected_dtype, np.unsignedinteger):
+            # skip: unsigned underflow panics in debug mode
+            continue
+        np_a, np_b = _mixed_dtype_operands(dtype_a, dtype_b)
+        za, zb = jix.compact(np_a), jix.compact(np_b)
+        result = jix.subtract(za, zb)
+        assert result.dtype == np.dtype(expected_dtype)
+        expected = np_a.astype(expected_dtype) - np_b.astype(expected_dtype)
+        np.testing.assert_array_equal(result.numpy(), expected)
 
 
-@pytest.mark.parametrize(
-    "dtype_a,dtype_b,expected_dtype",
-    [
-        (np.uint8, np.uint16, np.uint16),
-        (np.uint8, np.int32, np.int32),
-        (np.uint8, np.float32, np.float32),
-        (np.int8, np.int32, np.int32),
-        (np.int32, np.float64, np.float64),
-        (np.float32, np.float64, np.float64),
-        (np.bool_, np.int32, np.int32),
-    ],
-)
-@given(st.data())
-def test_equal_mixed_dtypes(dtype_a, dtype_b, expected_dtype, data: DataObject):
+_EQUAL_MIXED_CASES = [
+    (np.uint8, np.uint16, np.uint16),
+    (np.uint8, np.int32, np.int32),
+    (np.uint8, np.float32, np.float32),
+    (np.int8, np.int32, np.int32),
+    (np.int32, np.float64, np.float64),
+    (np.float32, np.float64, np.float64),
+    (np.bool_, np.int32, np.int32),
+]
+
+
+def test_equal_mixed_dtypes_concrete():
     """equal(a, b) with different dtypes casts both to expected_dtype, output is bool."""
-    (np_a, za), (np_b, zb) = data.draw(
-        carrays2_mixed_strategy(
-            dtype_a,
-            dtype_b,
-            element_st_a=op_safe_element_strategy(dtype_a),
-            element_st_b=op_safe_element_strategy(dtype_b),
-        ),
-        label="arrays",
-    )
-    result = jix.equal(za, zb)
-    assert result.dtype == np.bool_
-    expected = np_a.astype(expected_dtype) == np_b.astype(expected_dtype)
-    np.testing.assert_array_equal(result.numpy(), expected)
+    for dtype_a, dtype_b, expected_dtype in _EQUAL_MIXED_CASES:
+        np_a, np_b = _mixed_dtype_operands(dtype_a, dtype_b)
+        za, zb = jix.compact(np_a), jix.compact(np_b)
+        result = jix.equal(za, zb)
+        assert result.dtype == np.bool_
+        expected = np_a.astype(expected_dtype) == np_b.astype(expected_dtype)
+        np.testing.assert_array_equal(result.numpy(), expected)
 
 
 def test_mixed_dtype_result_dtype_determinism():

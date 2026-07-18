@@ -466,6 +466,7 @@ mod tests {
     // Proptest: random data, representative broadcast patterns
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::type_complexity)]
     fn broadcast_2d_axis0_strategy() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<i32>,
@@ -478,24 +479,6 @@ mod tests {
         (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
             crate::util::carray_strategy_from_shape::<i32>(
                 proptest::strategy::Just(vec![1, m]),
-                <i32 as crate::util::ScalarStrategy>::any_strategy(),
-            )
-            .prop_map(move |(nd, za)| (nd, za, n, m))
-        })
-    }
-
-    fn broadcast_2d_axis1_strategy() -> impl proptest::strategy::Strategy<
-        Value = (
-            ndarray::ArrayD<i32>,
-            Array<Compact<Ty<i32>, DimDyn>>,
-            usize,
-            usize,
-        ),
-    > {
-        use proptest::prelude::*;
-        (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
-            crate::util::carray_strategy_from_shape::<i32>(
-                proptest::strategy::Just(vec![n, 1]),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             )
             .prop_map(move |(nd, za)| (nd, za, n, m))
@@ -525,28 +508,6 @@ mod tests {
             crate::util::assert_array_matches(&za.broadcast(&[n as u64, m as u64]), &expected);
         }
 
-        // [N, 1] -> [N, M]: broadcast axis 1
-        #[test]
-        fn proptest_broadcast_2d_axis1(
-            (nd, za, n, m) in broadcast_2d_axis1_strategy()
-        ) {
-            let expected = nd.broadcast(vec![n, m]).unwrap().to_owned();
-            crate::util::assert_array_matches(&za.broadcast(&[n as u64, m as u64]), &expected);
-        }
-
-        // [N, M] -> [N, M]: identity (no broadcast)
-        #[test]
-        fn proptest_broadcast_identity(
-            (nd, za) in crate::util::carray_strategy_from_shape::<i32>(
-                proptest::collection::vec(1usize..=15, 2usize),
-                <i32 as crate::util::ScalarStrategy>::any_strategy(),
-            )
-        ) {
-            let shape: Vec<u64> = nd.shape().iter().map(|&s| s as u64).collect();
-            let expected = nd.clone();
-            crate::util::assert_array_matches(&za.broadcast(&shape), &expected);
-        }
-
         #[test]
         fn broadcast_generic(
             (nd, za, broadcast_shape) in broadcast_axes_strategy::<i32>()
@@ -558,8 +519,50 @@ mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Concrete: [N, 1] -> [N, M] (axis 1) and [N, M] -> [N, M] (identity),
+    // converted from the proptests above. Fixed inputs cover the same shape
+    // edges the strategies swept: a trivial 1x1 array and a multi-element,
+    // non-square shape, plus dtype min/max among the values.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn broadcast_2d_axis1_concrete() {
+        // [N, 1] -> [N, M]: broadcast axis 1.
+        for (n, m, vals) in [
+            (1usize, 1usize, vec![i32::MAX]),
+            (4usize, 5usize, vec![i32::MIN, -7, 0, i32::MAX]),
+        ] {
+            let nd = ndarray::Array::from_shape_vec([n, 1], vals.clone()).unwrap();
+            let za = make(vals, &[n as u64, 1]);
+            let expected = nd.broadcast(vec![n, m]).unwrap().to_owned();
+            crate::util::assert_array_matches(&za.broadcast(&[n as u64, m as u64]), &expected);
+        }
+    }
+
+    #[test]
+    fn broadcast_identity_concrete() {
+        // [N, M] -> [N, M]: identity fast path (no dimension actually broadcast).
+        for (n, m, vals) in [
+            (1usize, 1usize, vec![i32::MAX]),
+            (3usize, 4usize, {
+                let mut v: Vec<i32> = (0..12i32).collect();
+                v[0] = i32::MIN;
+                v[11] = i32::MAX;
+                v
+            }),
+        ] {
+            let nd = ndarray::Array::from_shape_vec([n, m], vals.clone()).unwrap();
+            let za = make(vals, &[n as u64, m as u64]);
+            let shape: Vec<u64> = nd.shape().iter().map(|&s| s as u64).collect();
+            let expected = nd.clone();
+            crate::util::assert_array_matches(&za.broadcast(&shape), &expected);
+        }
+    }
+
     use proptest::prelude::*;
 
+    #[allow(clippy::type_complexity)]
     fn broadcast_axes_strategy<T>() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<T>,

@@ -407,49 +407,299 @@ mod tests {
         };
     }
 
-    // numeric widening / narrowing
-    test_cast_pair!(u8, f32); // smaller -> larger itemsize
-    test_cast_pair!(f32, u8); // larger -> smaller itemsize
+    // --- kept property tests: one representative pair per cast category (see
+    // cast_int_float_concrete / cast_float_widen_narrow_concrete /
+    // cast_int_sign_reinterpret_concrete / cast_identity_concrete / cast_bool_concrete /
+    // cast_f16_concrete / cast_complex_concrete below for the remaining pairs, converted to
+    // fixed-input tests) ---
+
+    // int-widen: smaller signed int -> larger signed int (sign-extension path).
+    test_cast_pair!(i8, i32);
+    // int-narrow: larger signed int -> smaller signed int (truncation/wraparound path).
+    test_cast_pair!(i64, i16);
+    // int<->float: both directions of the int/float boundary.
     test_cast_pair!(i32, f64);
     test_cast_pair!(f64, i32);
-    test_cast_pair!(f32, f64);
-    test_cast_pair!(f64, f32);
-    test_cast_pair!(i8, u8);
-    test_cast_pair!(u8, i8);
-    // identity cast (same src and dst dtype)
-    test_cast_pair!(i32, i32);
-    test_cast_pair!(f64, f64);
-    // bool
-    test_cast_pair!(i8, bool);
-    test_cast_pair!(bool, i8);
-    test_cast_pair!(u8, bool);
-    test_cast_pair!(bool, u8);
+    // to-bool: zero -> false, any nonzero -> true.
     test_cast_pair!(i32, bool);
-    test_cast_pair!(bool, i32);
-    test_cast_pair!(f32, bool);
-    test_cast_pair!(bool, f32);
-    // f16 (feature-gated)
+    // identity cast (same src and dst dtype).
+    test_cast_pair!(f32, f32);
+
+    // int <-> float at a different byte width than the kept i32/f64 pair: smaller -> larger
+    // itemsize (u8 -> f32, exact) and larger -> smaller itemsize (f32 -> u8, truncation +
+    // saturation).
+    #[test]
+    fn cast_int_float_concrete() {
+        use crate::Array;
+
+        // u8 -> f32: 0, a mid value, and u8::MAX; exact int-to-float widening.
+        let nd_u8 = ndarray::array![[0u8, 1, 128], [200, 254, u8::MAX]];
+        let za_u8 = Array::compact_ndarray(&nd_u8).unwrap();
+        let expected_u8_f32 = nd_u8.mapv(CastTo::<f32>::cast_to);
+        crate::util::assert_array_matches(&za_u8.cast::<f32>(), &expected_u8_f32);
+
+        // f32 -> u8: negative saturates to 0, a fraction truncates toward zero, the exact
+        // dtype max, an out-of-range value that saturates to u8::MAX, and NaN saturates to 0.
+        let nd_f32 = ndarray::array![[-5.5f32, 0.0, 128.9], [255.0, 300.5, f32::NAN]];
+        let za_f32 = Array::compact_ndarray(&nd_f32).unwrap();
+        let expected_f32_u8 = nd_f32.mapv(CastTo::<u8>::cast_to);
+        crate::util::assert_array_matches(&za_f32.cast::<u8>(), &expected_f32_u8);
+    }
+
+    // float widen (f32 -> f64, exact) / narrow (f64 -> f32, precision loss and
+    // out-of-range saturation to +/-infinity).
+    #[test]
+    fn cast_float_widen_narrow_concrete() {
+        use crate::Array;
+
+        let nd_f32 = ndarray::array![[f32::MIN, -1.5, 0.0], [1.5, 0.1, f32::MAX]];
+        let za_f32 = Array::compact_ndarray(&nd_f32).unwrap();
+        let expected_f32_f64 = nd_f32.mapv(CastTo::<f64>::cast_to);
+        crate::util::assert_array_matches(&za_f32.cast::<f64>(), &expected_f32_f64);
+
+        // f64::MIN / f64::MAX are far outside the f32 range, so they saturate to +/-infinity
+        // (same-sign infinity compares equal, so this is safe under exact equality).
+        let nd_f64 = ndarray::array![[f64::MIN, -1.5, 0.0], [1.5, 0.1, f64::MAX]];
+        let za_f64 =
+            Array::compact_ndarray_with(&nd_f64, crate::util::arr_params(&[1, 2])).unwrap();
+        let expected_f64_f32 = nd_f64.mapv(CastTo::<f32>::cast_to);
+        crate::util::assert_array_matches(&za_f64.cast::<f32>(), &expected_f64_f32);
+    }
+
+    // same-size signed/unsigned bit reinterpretation, both directions.
+    #[test]
+    fn cast_int_sign_reinterpret_concrete() {
+        use crate::Array;
+
+        let nd_i8 = ndarray::array![[i8::MIN, -1, 0], [1, 100, i8::MAX]];
+        let za_i8 = Array::compact_ndarray(&nd_i8).unwrap();
+        let expected_i8_u8 = nd_i8.mapv(CastTo::<u8>::cast_to);
+        crate::util::assert_array_matches(&za_i8.cast::<u8>(), &expected_i8_u8);
+
+        // 128 wraps to a negative i8; u8::MAX wraps to -1.
+        let nd_u8 = ndarray::array![[0u8, 127, 128], [200, 254, u8::MAX]];
+        let za_u8 = Array::compact_ndarray(&nd_u8).unwrap();
+        let expected_u8_i8 = nd_u8.mapv(CastTo::<i8>::cast_to);
+        crate::util::assert_array_matches(&za_u8.cast::<i8>(), &expected_u8_i8);
+    }
+
+    // identity casts at other dtypes than the kept f32 -> f32 representative.
+    #[test]
+    fn cast_identity_concrete() {
+        use crate::Array;
+
+        let nd_i32 = ndarray::array![[i32::MIN, -1, 0], [1, 100, i32::MAX]];
+        let za_i32 = Array::compact_ndarray(&nd_i32).unwrap();
+        let expected_i32 = nd_i32.mapv(CastTo::<i32>::cast_to);
+        crate::util::assert_array_matches(&za_i32.cast::<i32>(), &expected_i32);
+
+        let nd_f64 = ndarray::array![[f64::MIN, -1.5, 0.0], [1.5, 100.25, f64::MAX]];
+        let za_f64 =
+            Array::compact_ndarray_with(&nd_f64, crate::util::arr_params(&[1, 2])).unwrap();
+        let expected_f64 = nd_f64.mapv(CastTo::<f64>::cast_to);
+        crate::util::assert_array_matches(&za_f64.cast::<f64>(), &expected_f64);
+    }
+
+    // to-bool / from-bool at dtypes other than the kept i32 <-> bool representative.
+    #[test]
+    fn cast_bool_concrete() {
+        use crate::Array;
+
+        // i8 -> bool: zero is false; the negative and positive extremes are both true.
+        let nd_i8 = ndarray::array![[i8::MIN, -1, 0], [1, 100, i8::MAX]];
+        let za_i8 = Array::compact_ndarray(&nd_i8).unwrap();
+        let expected_i8_bool = nd_i8.mapv(CastTo::<bool>::cast_to);
+        crate::util::assert_array_matches(&za_i8.cast::<bool>(), &expected_i8_bool);
+
+        // u8 -> bool: zero is false; any nonzero, including the dtype max, is true.
+        let nd_u8 = ndarray::array![[0u8, 1, 128], [200, 254, u8::MAX]];
+        let za_u8 = Array::compact_ndarray(&nd_u8).unwrap();
+        let expected_u8_bool = nd_u8.mapv(CastTo::<bool>::cast_to);
+        crate::util::assert_array_matches(&za_u8.cast::<bool>(), &expected_u8_bool);
+
+        // f32 -> bool: 0.0 and -0.0 are both false (IEEE -0.0 == 0.0); any nonzero,
+        // including the extremes, is true.
+        let nd_f32 = ndarray::array![[0.0f32, -0.0, 1.5], [-1.5, f32::MIN, f32::MAX]];
+        let za_f32 = Array::compact_ndarray(&nd_f32).unwrap();
+        let expected_f32_bool = nd_f32.mapv(CastTo::<bool>::cast_to);
+        crate::util::assert_array_matches(&za_f32.cast::<bool>(), &expected_f32_bool);
+
+        // bool -> i8 / u8 / i32 / f32: false -> 0, true -> 1 (shared `bool => i8 => dst` path).
+        let nd_bool = ndarray::array![[false, true], [true, false]];
+
+        let expected_bool_i8 = nd_bool.mapv(CastTo::<i8>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_bool).unwrap().cast::<i8>(),
+            &expected_bool_i8,
+        );
+
+        let expected_bool_u8 = nd_bool.mapv(CastTo::<u8>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_bool).unwrap().cast::<u8>(),
+            &expected_bool_u8,
+        );
+
+        let expected_bool_i32 = nd_bool.mapv(CastTo::<i32>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_bool).unwrap().cast::<i32>(),
+            &expected_bool_i32,
+        );
+
+        let expected_bool_f32 = nd_bool.mapv(CastTo::<f32>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_bool).unwrap().cast::<f32>(),
+            &expected_bool_f32,
+        );
+    }
+
+    // f16 (feature-gated): both directions with i32/f32/f64, plus the f16 -> f16 identity.
     #[cfg(feature = "half")]
-    test_cast_pair!(i32, f16);
-    #[cfg(feature = "half")]
-    test_cast_pair!(f16, i32);
-    #[cfg(feature = "half")]
-    test_cast_pair!(f32, f16);
-    #[cfg(feature = "half")]
-    test_cast_pair!(f16, f32);
-    #[cfg(feature = "half")]
-    test_cast_pair!(f64, f16);
-    #[cfg(feature = "half")]
-    test_cast_pair!(f16, f64);
-    #[cfg(feature = "half")]
-    test_cast_pair!(f16, f16);
-    // complex (feature-gated)
+    #[test]
+    fn cast_f16_concrete() {
+        use crate::Array;
+
+        // i32 -> f16: 0, +/-1, a mid value, +/-2048 (an exactly-representable f16 integer),
+        // through the int -> f32 -> f16 widen-then-round path, and i32::MIN/MAX, which far
+        // exceed f16's ~65504 range and so saturate to +/-infinity (same-sign infinity
+        // compares equal, so this is safe under exact equality).
+        let nd_i32 = ndarray::array![[i32::MIN, -2048, -1, 0], [1, 100, 2048, i32::MAX]];
+        let za_i32 = Array::compact_ndarray(&nd_i32).unwrap();
+        let expected_i32_f16 = nd_i32.mapv(CastTo::<f16>::cast_to);
+        crate::util::assert_array_matches(&za_i32.cast::<f16>(), &expected_i32_f16);
+
+        // f16 -> i32: 0, +/-1, a fraction that truncates toward zero, and f16::MIN/MAX.
+        let nd_f16 = ndarray::array![
+            [f16::from_f32(-1.5), f16::from_f32(0.0), f16::from_f32(1.5)],
+            [f16::from_f32(100.0), f16::MIN, f16::MAX],
+        ];
+        let expected_f16_i32 = nd_f16.mapv(CastTo::<i32>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_f16).unwrap().cast::<i32>(),
+            &expected_f16_i32,
+        );
+
+        // f32 -> f16 (narrowing, with rounding) and f16 -> f32 (exact widening). f32::MIN/MAX
+        // are far outside f16's ~65504 range, so they saturate to +/-infinity (same-sign
+        // infinity compares equal, so this is safe under exact equality).
+        let nd_f32 = ndarray::array![
+            [f32::MIN, -100.0, -1.5, 0.0],
+            [1.5, 100.0, f16::MAX.to_f32(), f32::MAX]
+        ];
+        let expected_f32_f16 = nd_f32.mapv(CastTo::<f16>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_f32).unwrap().cast::<f16>(),
+            &expected_f32_f16,
+        );
+        let expected_f16_f32 = nd_f16.mapv(CastTo::<f32>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_f16).unwrap().cast::<f32>(),
+            &expected_f16_f32,
+        );
+
+        // f64 -> f16 (narrowing, with rounding) and f16 -> f64 (exact widening). f64::MIN/MAX
+        // are far outside f16's ~65504 range, so they saturate to +/-infinity (same-sign
+        // infinity compares equal, so this is safe under exact equality).
+        let nd_f64 = ndarray::array![
+            [f64::MIN, -100.0, -1.5, 0.0],
+            [1.5, 100.0, f16::MAX.to_f32() as f64, f64::MAX]
+        ];
+        let expected_f64_f16 = nd_f64.mapv(CastTo::<f16>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_f64).unwrap().cast::<f16>(),
+            &expected_f64_f16,
+        );
+        let expected_f16_f64 = nd_f16.mapv(CastTo::<f64>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_f16).unwrap().cast::<f64>(),
+            &expected_f16_f64,
+        );
+
+        // f16 -> f16: identity.
+        let expected_f16_f16 = nd_f16.mapv(CastTo::<f16>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_f16).unwrap().cast::<f16>(),
+            &expected_f16_f16,
+        );
+    }
+
+    // complex (feature-gated): widen/narrow between complex_f32/complex_f64 plus both
+    // identity casts.
     #[cfg(feature = "num-complex")]
-    test_cast_pair!(complex_f32, complex_f64);
-    #[cfg(feature = "num-complex")]
-    test_cast_pair!(complex_f64, complex_f32);
-    #[cfg(feature = "num-complex")]
-    test_cast_pair!(complex_f32, complex_f32);
-    #[cfg(feature = "num-complex")]
-    test_cast_pair!(complex_f64, complex_f64);
+    #[test]
+    fn cast_complex_concrete() {
+        use crate::Array;
+
+        // complex_f32 -> complex_f64 (exact widening of both parts) and
+        // complex_f32 -> complex_f32 (identity): zero, negative, fraction, and the f32
+        // extremes on the real/imaginary parts.
+        let nd_c32 = ndarray::array![
+            [
+                Complex {
+                    re: 0.0f32,
+                    im: 0.0
+                },
+                Complex { re: -1.5, im: 2.5 }
+            ],
+            [
+                Complex {
+                    re: f32::MIN,
+                    im: f32::MAX
+                },
+                Complex {
+                    re: 100.0,
+                    im: -100.0
+                }
+            ],
+        ];
+        let expected_c32_c64 = nd_c32.mapv(CastTo::<complex_f64>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_c32)
+                .unwrap()
+                .cast::<complex_f64>(),
+            &expected_c32_c64,
+        );
+        let expected_c32_c32 = nd_c32.mapv(CastTo::<complex_f32>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_c32)
+                .unwrap()
+                .cast::<complex_f32>(),
+            &expected_c32_c32,
+        );
+
+        // complex_f64 -> complex_f32 (narrowing, including an out-of-range magnitude that
+        // saturates to infinity) and complex_f64 -> complex_f64 (identity).
+        let nd_c64 = ndarray::array![
+            [
+                Complex {
+                    re: 0.0f64,
+                    im: 0.0
+                },
+                Complex { re: -1.5, im: 2.5 }
+            ],
+            [
+                Complex {
+                    re: f64::MIN,
+                    im: f64::MAX
+                },
+                Complex {
+                    re: 100.0,
+                    im: -100.0
+                }
+            ],
+        ];
+        let expected_c64_c32 = nd_c64.mapv(CastTo::<complex_f32>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_c64)
+                .unwrap()
+                .cast::<complex_f32>(),
+            &expected_c64_c32,
+        );
+        let expected_c64_c64 = nd_c64.mapv(CastTo::<complex_f64>::cast_to);
+        crate::util::assert_array_matches(
+            &Array::compact_ndarray(&nd_c64)
+                .unwrap()
+                .cast::<complex_f64>(),
+            &expected_c64_c64,
+        );
+    }
 }

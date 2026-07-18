@@ -255,6 +255,7 @@ mod tests {
 
     use super::{where_condition, Where};
     use crate::array::Array;
+    use crate::dtype::Dtyped;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
     use crate::storage::Compact;
@@ -267,6 +268,7 @@ mod tests {
     #[allow(non_camel_case_types)]
     type complex_f64 = crate::scalar::Complex<f64>;
 
+    #[allow(clippy::type_complexity)]
     fn strategy2<T>() -> impl Strategy<
         Value = (
             ndarray::ArrayD<bool>,
@@ -302,6 +304,38 @@ mod tests {
             })
     }
 
+    /// Compresses `cond`/`x`/`y` (with `block_shape`, if given, applied to all three), runs
+    /// `where_condition` on them, and asserts the result matches the elementwise `if c { x }
+    /// else { y }` reference. Shared by the concrete per-byte-width tests below, which only
+    /// differ in the fixed input arrays.
+    fn check_where_concrete<T, InD>(
+        cond: &ndarray::Array<bool, InD>,
+        x: &ndarray::Array<T, InD>,
+        y: &ndarray::Array<T, InD>,
+        block_shape: Option<&[usize]>,
+    ) where
+        T: Dtyped + Copy + Debug + PartialEq,
+        InD: ndarray::Dimension + crate::IntoDimension,
+    {
+        let za_cond = match block_shape {
+            Some(bs) => Array::compact_ndarray_with(cond, crate::util::arr_params(bs)).unwrap(),
+            None => Array::compact_ndarray(cond).unwrap(),
+        };
+        let za_x = match block_shape {
+            Some(bs) => Array::compact_ndarray_with(x, crate::util::arr_params(bs)).unwrap(),
+            None => Array::compact_ndarray(x).unwrap(),
+        };
+        let za_y = match block_shape {
+            Some(bs) => Array::compact_ndarray_with(y, crate::util::arr_params(bs)).unwrap(),
+            None => Array::compact_ndarray(y).unwrap(),
+        };
+        let expected = ndarray::Zip::from(cond)
+            .and(x)
+            .and(y)
+            .map_collect(|&c, &x, &y| if c { x } else { y });
+        crate::util::assert_array_matches(&where_condition(za_cond, za_x, za_y), &expected);
+    }
+
     // Proptest macro: one test per dtype covering random shapes, random block shapes,
     // full reads, and random sub-range reads via assert_array_matches.
     // The condition, x, and y arrays all share the same random shape.
@@ -331,26 +365,196 @@ mod tests {
         };
     }
 
-    // Covers where_impl branches: (1,1)=u8, (2,2)=u16, (4,4)=u32, (8,8)=u64
+    // where_impl's `match (dtype.itemsize(), dtype.alignment())` picks the copy strategy by
+    // byte width/alignment, not by the specific dtype (see `read_data` above), so one proptest
+    // dtype is kept per distinct branch and same-branch dtypes are covered by a concrete test:
+    //   (1,1)  u8-width  -> kept `i8`  proptest; u8/bool     -> where_1byte_concrete
+    //   (2,2)  u16-width -> kept `i16` proptest; u16/f16     -> where_2byte_concrete
+    //   (4,4)  u32-width -> kept `i32` proptest; u32/f32     -> where_4byte_concrete
+    //   (8,8)  u64-width -> kept `i64` proptest; u64/f64     -> where_8byte_concrete
+    //   (8,4)  mixed     -> where_complex_f32_concrete (Complex<f32>: 8 bytes, 4-byte align)
+    //   (16,8) mixed     -> where_complex_f64_concrete (Complex<f64>: 16 bytes, 8-byte align)
     test_where_dtype!(i8);
-    test_where_dtype!(u8);
-    test_where_dtype!(bool);
     test_where_dtype!(i16);
-    test_where_dtype!(u16);
     test_where_dtype!(i32);
-    test_where_dtype!(u32);
-    test_where_dtype!(f32);
     test_where_dtype!(i64);
-    test_where_dtype!(u64);
-    test_where_dtype!(f64);
 
-    #[cfg(feature = "half")]
-    test_where_dtype!(f16);
+    // --- concrete tests for the remaining dtypes ---
+    //
+    // Each converted dtype shares a byte-branch with one of the proptests kept above (or, for
+    // the two complex dtypes, hits its own mixed-alignment branch), so a fixed input is enough
+    // to keep the branch covered. Every condition mask below runs an all-true segment, then an
+    // all-false segment, then an alternating (mixed) tail, so a single array exercises all three
+    // selection patterns.
+
+    #[test]
+    fn where_1byte_concrete() {
+        // (1,1) branch, shared with the kept `i8` proptest: u8 and bool.
+        let cond = array![true, true, true, false, false, false, true, false];
+
+        let x_u8 = array![0u8, 1, 100, u8::MAX, 0xAA, 5, 6, 7];
+        let y_u8 = array![u8::MAX, 0, 0xAA, 1, 100, 50, 60, 70];
+        check_where_concrete(&cond, &x_u8, &y_u8, None);
+
+        let x_bool = array![true, true, false, false, true, false, true, false];
+        let y_bool = array![false, false, true, true, false, true, false, true];
+        check_where_concrete(&cond, &x_bool, &y_bool, None);
+    }
+
+    #[test]
+    fn where_2byte_concrete() {
+        // (2,2) branch, shared with the kept `i16` proptest: u16 and (feature-gated) f16.
+        let cond = array![true, true, true, false, false, false, true, false];
+
+        let x_u16 = array![0u16, 1, 100, u16::MAX, 0xAAAA, 5, 6, 7];
+        let y_u16 = array![u16::MAX, 0, 0xAAAA, 1, 100, 50, 60, 70];
+        check_where_concrete(&cond, &x_u16, &y_u16, None);
+
+        #[cfg(feature = "half")]
+        {
+            let x_f16 = array![
+                f16::from_f32(0.0),
+                f16::from_f32(-1.5),
+                f16::from_f32(1.5),
+                f16::MAX,
+                f16::MIN,
+                f16::from_f32(2.0),
+                f16::from_f32(-2.0),
+                f16::from_f32(3.0),
+            ];
+            let y_f16 = array![
+                f16::MIN,
+                f16::MAX,
+                f16::from_f32(0.0),
+                f16::from_f32(-1.5),
+                f16::from_f32(1.5),
+                f16::from_f32(30.0),
+                f16::from_f32(40.0),
+                f16::from_f32(50.0),
+            ];
+            check_where_concrete(&cond, &x_f16, &y_f16, None);
+        }
+    }
+
+    #[test]
+    fn where_4byte_concrete() {
+        // (4,4) branch, shared with the kept `i32` proptest: u32 and f32. Also exercises a
+        // non-default 2-D block shape to cross block boundaries.
+        let cond = ndarray::array![[true, true, false], [false, true, false]];
+
+        let x_u32 = ndarray::array![[0u32, 1, u32::MAX], [0xAAAAAAAAu32, 100, 200]];
+        let y_u32 = ndarray::array![[u32::MAX, 0, 1], [100, 0xAAAAAAAAu32, 300]];
+        check_where_concrete(&cond, &x_u32, &y_u32, Some(&[1, 2]));
+
+        let x_f32 = ndarray::array![
+            [0.0f32, -1.5, f32::MAX],
+            [f32::MIN, f32::INFINITY, f32::NEG_INFINITY]
+        ];
+        let y_f32 = ndarray::array![
+            [f32::MIN, f32::MAX, 0.0],
+            [f32::NEG_INFINITY, 1.5, f32::INFINITY]
+        ];
+        check_where_concrete(&cond, &x_f32, &y_f32, None);
+    }
+
+    #[test]
+    fn where_8byte_concrete() {
+        // (8,8) branch, shared with the kept `i64` proptest: u64 and f64.
+        let cond = array![true, true, true, false, false, false, true, false];
+
+        let x_u64 = array![0u64, 1, 100, u64::MAX, 0xAAAAAAAAAAAAAAAA, 5, 6, 7];
+        let y_u64 = array![u64::MAX, 0, 0xAAAAAAAAAAAAAAAA, 1, 100, 50, 60, 70];
+        check_where_concrete(&cond, &x_u64, &y_u64, None);
+
+        let x_f64 = array![
+            0.0f64,
+            -1.5,
+            f64::MAX,
+            f64::MIN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            1.5,
+            2.5
+        ];
+        let y_f64 = array![
+            f64::MIN,
+            f64::MAX,
+            0.0,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            1.5,
+            2.5,
+            3.5
+        ];
+        check_where_concrete(&cond, &x_f64, &y_f64, None);
+    }
 
     #[cfg(feature = "num-complex")]
-    test_where_dtype!(complex_f32); // (8, 4) branch
+    #[test]
+    fn where_complex_f32_concrete() {
+        // (8,4) mixed branch: Complex<f32> is 8 bytes wide but only 4-byte aligned, distinct
+        // from the (8,8) branch that i64/u64/f64 hit above.
+        let cond = array![true, true, false, false, true, false];
+        let x = array![
+            complex_f32 { re: 0.0, im: 0.0 },
+            complex_f32 { re: -1.5, im: 2.5 },
+            complex_f32 {
+                re: f32::MAX,
+                im: f32::MIN
+            },
+            complex_f32 { re: 1.0, im: -1.0 },
+            complex_f32 {
+                re: 100.0,
+                im: -100.0
+            },
+            complex_f32 { re: 3.0, im: 4.0 },
+        ];
+        let y = array![
+            complex_f32 {
+                re: f32::MIN,
+                im: f32::MAX
+            },
+            complex_f32 { re: 1.0, im: -1.0 },
+            complex_f32 { re: 0.0, im: 0.0 },
+            complex_f32 { re: -1.5, im: 2.5 },
+            complex_f32 { re: 5.0, im: 6.0 },
+            complex_f32 { re: 7.0, im: 8.0 },
+        ];
+        check_where_concrete(&cond, &x, &y, None);
+    }
+
     #[cfg(feature = "num-complex")]
-    test_where_dtype!(complex_f64); // (16, 8) branch
+    #[test]
+    fn where_complex_f64_concrete() {
+        // (16,8) mixed branch: Complex<f64> is 16 bytes wide but only 8-byte aligned.
+        let cond = array![true, true, false, false, true, false];
+        let x = array![
+            complex_f64 { re: 0.0, im: 0.0 },
+            complex_f64 { re: -1.5, im: 2.5 },
+            complex_f64 {
+                re: f64::MAX,
+                im: f64::MIN
+            },
+            complex_f64 { re: 1.0, im: -1.0 },
+            complex_f64 {
+                re: 100.0,
+                im: -100.0
+            },
+            complex_f64 { re: 3.0, im: 4.0 },
+        ];
+        let y = array![
+            complex_f64 {
+                re: f64::MIN,
+                im: f64::MAX
+            },
+            complex_f64 { re: 1.0, im: -1.0 },
+            complex_f64 { re: 0.0, im: 0.0 },
+            complex_f64 { re: -1.5, im: 2.5 },
+            complex_f64 { re: 5.0, im: 6.0 },
+            complex_f64 { re: 7.0, im: 8.0 },
+        ];
+        check_where_concrete(&cond, &x, &y, None);
+    }
 
     // --- error cases ---
 

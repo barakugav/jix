@@ -601,7 +601,12 @@ pub(crate) mod tests {
     macro_rules! test_op2_dtype {
         ($op_method:ident, |$a:ident, $b:ident| $body:expr, $dtype:ident, $strategy:ident) => {
             paste::paste! {
+                // `$body` is shared across all dtypes this macro is invoked with. For ops
+                // like `greater`/`less` that are also instantiated at `bool`, an ordering
+                // comparison such as `a > b` is a plain boolean comparison there rather than
+                // a numeric one (clippy::bool_comparison).
                 #[test]
+                #[allow(clippy::bool_comparison)]
                 fn [<$op_method _ $dtype>]() {
                     crate::ops::op2::tests::check_op2::<$dtype>(
                         <$dtype as crate::util::ScalarStrategy>::$strategy(),
@@ -648,27 +653,112 @@ pub(crate) mod tests {
         #[cfg(feature = "num-complex")]
         [complex_f32, complex_f64]
     );
-    test_op2!(
-        sub,
-        |a, b| a - b,
-        // TODO: unsigned ints
-        [i8, i16, i32, i64, f32, f64],
-        op_safe_strategy,
-        #[cfg(feature = "half")]
-        [f16],
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
-    test_op2!(
-        mul,
-        |a, b| a * b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64],
-        op_safe_strategy,
-        #[cfg(feature = "half")]
-        [f16],
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
+
+    // sub: converted to fixed-input tests (see sub_concrete below). Unsigned ints were never
+    // covered here (see sub_u32 below for the unsigned no-underflow path).
+    #[test]
+    fn sub_concrete() {
+        use crate::Array;
+
+        // i32: negatives, zero, positive, at the op_safe_strategy bound (+/-100); differences
+        // stay well within i32 range so there is no overflow panic in the reference either.
+        let nd_a = ndarray::array![[-100i32, -1, 0], [1, 50, 100]];
+        let nd_b = ndarray::array![[100i32, 1, 0], [-1, -50, -100]];
+        let za = Array::compact_ndarray(&nd_a).unwrap();
+        let zb = Array::compact_ndarray(&nd_b).unwrap();
+        let expected = ndarray::Zip::from(&nd_a)
+            .and(&nd_b)
+            .map_collect(|&a, &b| a - b);
+        crate::util::assert_array_matches(&(za - zb), &expected);
+
+        // f64: negatives, zero, fractions, and the +/-100.0 bound, with a non-default block
+        // shape so this arm crosses a block boundary.
+        let nd_a64 = ndarray::array![[-100.0f64, -0.5, 0.0], [0.5, 50.0, 100.0]];
+        let nd_b64 = ndarray::array![[100.0f64, 0.5, 0.0], [-0.5, -50.0, -100.0]];
+        let za64 = Array::compact_ndarray_with(&nd_a64, crate::util::arr_params(&[1, 2])).unwrap();
+        let zb64 = Array::compact_ndarray_with(&nd_b64, crate::util::arr_params(&[1, 2])).unwrap();
+        let expected64 = ndarray::Zip::from(&nd_a64)
+            .and(&nd_b64)
+            .map_collect(|&a, &b| a - b);
+        crate::util::assert_array_matches(&(za64 - zb64), &expected64);
+    }
+
+    // mul: converted to fixed-input tests (see mul_concrete / mul_concrete_complex below).
+    #[test]
+    fn mul_concrete() {
+        use crate::Array;
+
+        // i32: negatives, zero, positive, at the op_safe_strategy bound (+/-100); products
+        // stay well within i32 range so there is no overflow panic in the reference either.
+        let nd_a = ndarray::array![[-100i32, -1, 0], [1, 10, 100]];
+        let nd_b = ndarray::array![[100i32, -1, 0], [-1, 10, -100]];
+        let za = Array::compact_ndarray(&nd_a).unwrap();
+        let zb = Array::compact_ndarray(&nd_b).unwrap();
+        let expected = ndarray::Zip::from(&nd_a)
+            .and(&nd_b)
+            .map_collect(|&a, &b| a * b);
+        crate::util::assert_array_matches(&(za * zb), &expected);
+
+        // f64: negatives, zero, fractions, and the +/-100.0 bound, with a non-default block
+        // shape so this arm crosses a block boundary.
+        let nd_a64 = ndarray::array![[-100.0f64, -0.5, 0.0], [0.5, 10.0, 100.0]];
+        let nd_b64 = ndarray::array![[100.0f64, -0.5, 0.0], [-0.5, 10.0, -100.0]];
+        let za64 = Array::compact_ndarray_with(&nd_a64, crate::util::arr_params(&[1, 2])).unwrap();
+        let zb64 = Array::compact_ndarray_with(&nd_b64, crate::util::arr_params(&[1, 2])).unwrap();
+        let expected64 = ndarray::Zip::from(&nd_a64)
+            .and(&nd_b64)
+            .map_collect(|&a, &b| a * b);
+        crate::util::assert_array_matches(&(za64 * zb64), &expected64);
+    }
+
+    // mul, complex arm: full complex multiplication `(a+bi)*(c+di) = (ac-bd) + (ad+bc)i`,
+    // with negative and zero components on both operands.
+    #[cfg(feature = "num-complex")]
+    #[test]
+    fn mul_concrete_complex() {
+        use crate::scalar::Complex;
+        use crate::Array;
+
+        let nd_a = ndarray::array![
+            [
+                Complex {
+                    re: -3.0f32,
+                    im: 4.0
+                },
+                Complex { re: 0.0, im: 0.0 }
+            ],
+            [
+                Complex { re: 2.5, im: -1.5 },
+                Complex {
+                    re: 100.0,
+                    im: -100.0
+                }
+            ],
+        ];
+        let nd_b = ndarray::array![
+            [
+                Complex {
+                    re: 1.0f32,
+                    im: -2.0
+                },
+                Complex { re: 5.0, im: 5.0 }
+            ],
+            [
+                Complex { re: -2.5, im: 1.5 },
+                Complex {
+                    re: -100.0,
+                    im: 100.0
+                }
+            ],
+        ];
+        let za = Array::compact_ndarray(&nd_a).unwrap();
+        let zb = Array::compact_ndarray(&nd_b).unwrap();
+        let expected = ndarray::Zip::from(&nd_a)
+            .and(&nd_b)
+            .map_collect(|&a, &b| a * b);
+        crate::util::assert_array_matches(&(za * zb), &expected);
+    }
+
     test_op2!(
         div,
         |a, b| a / b,

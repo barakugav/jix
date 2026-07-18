@@ -24,7 +24,6 @@ from tests_util import (
     complexes,
     floats,
     ints,
-    logical_op_element_strategy,
     op_safe_element_strategy,
     uints,
 )
@@ -43,14 +42,6 @@ def _reduction_shape_strategy():
         st.lists(st.integers(1, 12), min_size=3, max_size=3),
         st.lists(st.integers(1, 8), min_size=4, max_size=4),
         st.lists(st.integers(1, 4), min_size=1, max_size=8),
-    )
-
-
-def _reduction_shape_strategy_small():
-    """Tiny shapes for product to keep accumulator from overflowing."""
-    return st.one_of(
-        st.lists(st.integers(1, 4), min_size=1, max_size=1),
-        st.lists(st.integers(1, 2), min_size=2, max_size=2),
     )
 
 
@@ -85,13 +76,6 @@ def _axes_strategy(draw, ndim):
     return tuple(axes) if draw(st.booleans()) else list(axes)
 
 
-@st.composite
-def _single_axis_strategy(draw, ndim):
-    """Single int axis (possibly negative). For argmax/argmin."""
-    ax = draw(st.integers(0, ndim - 1))
-    return ax - ndim if draw(st.booleans()) else ax
-
-
 # ---------------------------------------------------------------------------
 # Composite array + axis strategies
 # ---------------------------------------------------------------------------
@@ -108,21 +92,6 @@ def _carray_reduction(draw, dtype, element_st, shape_st=None):
     block_shape = [min(b, max(s, 1)) for b, s in zip(block_shape, shape)]
     za = jix.compact(np_a, params={"block_shape": block_shape})
     axis = draw(_axes_strategy(ndim))
-    keepdims = draw(st.booleans())
-    return np_a, za, axis, keepdims
-
-
-@st.composite
-def _carray_single_axis_reduction(draw, dtype, element_st):
-    """Yields (np_array, jix_array, single_int_axis, keepdims)."""
-    shape = tuple(draw(_reduction_shape_strategy()))
-    ndim = len(shape)
-    np_a = draw(np_arrays(dtype=dtype, shape=shape, elements=element_st))
-    block_shape = draw(st.lists(st.integers(1, 4), min_size=ndim, max_size=ndim))
-    # A block dim may not exceed its array dim (validation requires 1 <= block <= max(shape, 1)).
-    block_shape = [min(b, max(s, 1)) for b, s in zip(block_shape, shape)]
-    za = jix.compact(np_a, params={"block_shape": block_shape})
-    axis = draw(_single_axis_strategy(ndim))
     keepdims = draw(st.booleans())
     return np_a, za, axis, keepdims
 
@@ -193,15 +162,29 @@ def test_max(dtype: np.dtype, data: DataObject):
     )
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
-@given(st.data())
-def test_min(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, _element_st(dtype)), label="array")
-    assert_array_matches(
-        jix.min(za, axis=axis, keepdims=keepdims),
-        np.min(np_a, axis=_np_axis(axis), keepdims=keepdims),
-        data=data,
-    )
+def test_min_concrete():
+    # Edge inputs: dtype min/max (int8/uint8), float NaN/inf/-inf (min propagates NaN like
+    # numpy.min, not numpy.nanmin - see reduction.rs docs), and bool. Non-default block
+    # shapes cross block boundaries.
+    d_i8 = np.array([[-128, 0, 127], [5, -100, 3]], dtype=np.int8)
+    za = jix.compact(d_i8, params={"block_shape": [1, 2]})
+    for axis in (0, 1, None):
+        assert_array_matches(jix.min(za, axis=axis), np.min(d_i8, axis=_np_axis(axis)))
+
+    d_u8 = np.array([[0, 255, 3], [7, 1, 254]], dtype=np.uint8)
+    zb = jix.compact(d_u8, params={"block_shape": [2, 1]})
+    for axis in (0, 1, None):
+        assert_array_matches(jix.min(zb, axis=axis), np.min(d_u8, axis=_np_axis(axis)))
+
+    d_f = np.array([[-1.5, 0.0, float("inf")], [float("nan"), 2.5, float("-inf")]], dtype=np.float64)
+    zc = jix.compact(d_f, params={"block_shape": [1, 3]})
+    for axis in (0, 1, None):
+        assert_array_matches(jix.min(zc, axis=axis), np.min(d_f, axis=_np_axis(axis)))
+
+    d_b = np.array([[True, False, True], [False, False, True]], dtype=np.bool_)
+    zd = jix.compact(d_b, params={"block_shape": [1, 1]})
+    for axis in (0, 1, None):
+        assert_array_matches(jix.min(zd, axis=axis), np.min(d_b, axis=_np_axis(axis)))
 
 
 # ---------------------------------------------------------------------------
@@ -209,22 +192,82 @@ def test_min(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
-@given(st.data())
-def test_argmax(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_single_axis_reduction(dtype, _element_st(dtype)), label="array")
-    result = jix.argmax(za, axis=axis, keepdims=keepdims)
-    expected = np.argmax(np_a, axis=_np_axis(axis), keepdims=keepdims).astype(np.uint64)
-    assert_array_matches(result, expected, data=data)
+def test_argmax_concrete():
+    # Tie: verify jix returns the FIRST index of the max, matching numpy.argmax.
+    d = np.array([[3, 5, 5, 1], [5, 2, 5, 4]], dtype=np.int32)
+    za = jix.compact(d, params={"block_shape": [1, 2]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmax(za, axis=axis), np.argmax(d, axis=_np_axis(axis)).astype(np.uint64))
+    assert jix.argmax(za, axis=1).numpy().tolist() == [1, 0]  # first '5' in each row
+
+    # axis=None is only valid for 1-D arrays (equivalent to axis=0); tie included.
+    d_1d = np.array([2, 7, 7, 1, 7], dtype=np.int32)
+    zb = jix.compact(d_1d, params={"block_shape": [2]})
+    assert_array_matches(jix.argmax(zb, axis=None), np.argmax(d_1d).astype(np.uint64))
+    assert jix.argmax(zb, axis=None).numpy()[()] == 1  # first occurrence of the max (7)
+
+    # dtype min/max edges: int8, uint8.
+    d_i8 = np.array([[-128, 127, 0], [127, -128, 5]], dtype=np.int8)
+    zc = jix.compact(d_i8, params={"block_shape": [2, 1]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmax(zc, axis=axis), np.argmax(d_i8, axis=_np_axis(axis)).astype(np.uint64))
+
+    d_u8 = np.array([[0, 255, 3], [255, 1, 254]], dtype=np.uint8)
+    zd = jix.compact(d_u8, params={"block_shape": [1, 3]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmax(zd, axis=axis), np.argmax(d_u8, axis=_np_axis(axis)).astype(np.uint64))
+
+    # float, NaN-free: jix's NaN-index semantics diverge from numpy.argmax by design (see
+    # reduction.rs docs), so NaN is intentionally excluded from this numpy cross-check.
+    d_f = np.array([[-1.5, 2.5, 2.5], [2.5, 0.0, -1.5]], dtype=np.float64)
+    ze = jix.compact(d_f, params={"block_shape": [1, 2]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmax(ze, axis=axis), np.argmax(d_f, axis=_np_axis(axis)).astype(np.uint64))
+
+    # bool
+    d_b = np.array([[False, True, True], [True, False, False]], dtype=np.bool_)
+    zf = jix.compact(d_b, params={"block_shape": [1, 1]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmax(zf, axis=axis), np.argmax(d_b, axis=_np_axis(axis)).astype(np.uint64))
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
-@given(st.data())
-def test_argmin(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_single_axis_reduction(dtype, _element_st(dtype)), label="array")
-    result = jix.argmin(za, axis=axis, keepdims=keepdims)
-    expected = np.argmin(np_a, axis=_np_axis(axis), keepdims=keepdims).astype(np.uint64)
-    assert_array_matches(result, expected, data=data)
+def test_argmin_concrete():
+    # Tie: verify jix returns the FIRST index of the min, matching numpy.argmin.
+    d = np.array([[3, 1, 1, 5], [1, 4, 1, 2]], dtype=np.int32)
+    za = jix.compact(d, params={"block_shape": [1, 2]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmin(za, axis=axis), np.argmin(d, axis=_np_axis(axis)).astype(np.uint64))
+    assert jix.argmin(za, axis=1).numpy().tolist() == [1, 0]  # first '1' in each row
+
+    # axis=None is only valid for 1-D arrays (equivalent to axis=0); tie included.
+    d_1d = np.array([5, 0, 0, 3, 0], dtype=np.int32)
+    zb = jix.compact(d_1d, params={"block_shape": [2]})
+    assert_array_matches(jix.argmin(zb, axis=None), np.argmin(d_1d).astype(np.uint64))
+    assert jix.argmin(zb, axis=None).numpy()[()] == 1  # first occurrence of the min (0)
+
+    # dtype min/max edges: int8, uint8.
+    d_i8 = np.array([[-128, 127, 0], [127, -128, 5]], dtype=np.int8)
+    zc = jix.compact(d_i8, params={"block_shape": [2, 1]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmin(zc, axis=axis), np.argmin(d_i8, axis=_np_axis(axis)).astype(np.uint64))
+
+    d_u8 = np.array([[0, 255, 3], [255, 1, 254]], dtype=np.uint8)
+    zd = jix.compact(d_u8, params={"block_shape": [1, 3]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmin(zd, axis=axis), np.argmin(d_u8, axis=_np_axis(axis)).astype(np.uint64))
+
+    # float, NaN-free: jix's NaN-index semantics diverge from numpy.argmin by design (see
+    # reduction.rs docs), so NaN is intentionally excluded from this numpy cross-check.
+    d_f = np.array([[-1.5, -1.5, 2.5], [2.5, 0.0, -1.5]], dtype=np.float64)
+    ze = jix.compact(d_f, params={"block_shape": [1, 2]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmin(ze, axis=axis), np.argmin(d_f, axis=_np_axis(axis)).astype(np.uint64))
+
+    # bool
+    d_b = np.array([[True, False, False], [False, True, True]], dtype=np.bool_)
+    zf = jix.compact(d_b, params={"block_shape": [1, 1]})
+    for axis in (0, 1):
+        assert_array_matches(jix.argmin(zf, axis=axis), np.argmin(d_b, axis=_np_axis(axis)).astype(np.uint64))
 
 
 # ---------------------------------------------------------------------------
@@ -246,20 +289,27 @@ def test_sum(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ints + uints + _WIDE_FLOATS + complexes)
-@given(st.data())
-def test_product(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(
-        _carray_reduction(
-            dtype,
-            op_safe_element_strategy(dtype),
-            shape_st=_reduction_shape_strategy_small(),
-        ),
-        label="array",
-    )
-    result = jix.product(za, axis=axis, keepdims=keepdims)
-    rtol = 0.0 if np.issubdtype(dtype, np.integer) else 1e-3
-    assert_array_matches(result, _prod_ref(np_a, axis, keepdims, dtype), data=data, rtol=rtol)
+def test_product_concrete():
+    # Tiny shapes (as in the original property test) keep the accumulator from overflowing.
+    # Mix of zero and non-zero, positive and negative, across signed/unsigned ints, wide
+    # floats, and complex.
+    cases = [
+        (np.int8, np.array([-4, 4, 0, -1], dtype=np.int8)),
+        (np.int64, np.array([[-100, 5], [100, -1]], dtype=np.int64)),
+        (np.uint8, np.array([4, 2, 3, 1], dtype=np.uint8)),
+        (np.uint64, np.array([[30, 0], [15, 2]], dtype=np.uint64)),
+        (np.float32, np.array([[-2.5, 4.0], [3.0, -1.5]], dtype=np.float32)),
+        (np.float64, np.array([[-100.0, 0.0], [50.5, -1.5]], dtype=np.float64)),
+        (np.complex64, np.array([[-2 + 1j, 3 - 1j], [1 + 1j, 2 - 2j]], dtype=np.complex64)),
+        (np.complex128, np.array([[-50 + 25j, 0 + 0j], [10 - 10j, 1 + 1j]], dtype=np.complex128)),
+    ]
+    for dtype, np_a in cases:
+        za = jix.compact(np_a, params={"block_shape": [1] * np_a.ndim})
+        rtol = 0.0 if np.issubdtype(dtype, np.integer) else 1e-3
+        axes = (0, None) if np_a.ndim == 1 else (0, 1, None)
+        for axis in axes:
+            result = jix.product(za, axis=axis)
+            assert_array_matches(result, _prod_ref(np_a, axis, False, dtype), rtol=rtol)
 
 
 # ---------------------------------------------------------------------------
@@ -285,32 +335,43 @@ def test_mean(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
-@given(st.data())
-def test_var(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
-    assert_array_matches(
-        jix.var(za, axis=axis, keepdims=keepdims, ddof=0.0),
-        np.var(np_a.astype(np.float64), axis=_np_axis(axis), keepdims=keepdims, ddof=0),
-        data=data,
-        rtol=1e-3,
-        # atol covers near-zero cases where the true variance is 0 but numpy accumulates
-        # a tiny FP error (e.g. all-equal elements like [-99.97, -99.97, -99.97]).
-        atol=1e-10,
-    )
+# Covers ints/uints (upcast to float64), f16/f32/f64, and bool. The all-equal-elements case
+# (near-zero true variance) exercises the atol below; 0 is present in every case.
+_VAR_STD_CASES = [
+    np.array([[-100, 0, 100], [50, -50, 0]], dtype=np.int32),
+    np.array([[0, 30, 15], [30, 0, 10]], dtype=np.uint32),
+    np.array([[-100.0, 0.0, 100.0], [50.0, -50.0, 25.0]], dtype=np.float16),
+    np.array([[-99.97, -99.97, -99.97], [1.5, -1.5, 0.0]], dtype=np.float32),
+    np.array([[-99.97, -99.97, -99.97], [1.5, -1.5, 0.0]], dtype=np.float64),
+    np.array([[True, False, True], [False, False, True]], dtype=np.bool_),
+]
 
 
-@pytest.mark.parametrize("dtype", ints + uints + floats + [np.bool_])
-@given(st.data())
-def test_std(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, op_safe_element_strategy(dtype)), label="array")
-    assert_array_matches(
-        jix.std(za, axis=axis, keepdims=keepdims, ddof=0.0),
-        np.std(np_a.astype(np.float64), axis=_np_axis(axis), keepdims=keepdims, ddof=0),
-        data=data,
-        rtol=1e-3,
-        atol=1e-10,
-    )
+def test_var_concrete():
+    for np_a in _VAR_STD_CASES:
+        za = jix.compact(np_a, params={"block_shape": [1, 2]})
+        for axis in (0, 1, None):
+            assert_array_matches(
+                jix.var(za, axis=axis, ddof=0.0),
+                np.var(np_a.astype(np.float64), axis=_np_axis(axis), ddof=0),
+                rtol=1e-3,
+                # atol covers near-zero cases where the true variance is 0 but numpy
+                # accumulates a tiny FP error (e.g. all-equal elements like
+                # [-99.97, -99.97, -99.97]).
+                atol=1e-10,
+            )
+
+
+def test_std_concrete():
+    for np_a in _VAR_STD_CASES:
+        za = jix.compact(np_a, params={"block_shape": [1, 2]})
+        for axis in (0, 1, None):
+            assert_array_matches(
+                jix.std(za, axis=axis, ddof=0.0),
+                np.std(np_a.astype(np.float64), axis=_np_axis(axis), ddof=0),
+                rtol=1e-3,
+                atol=1e-10,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -318,42 +379,32 @@ def test_std(dtype: np.dtype, data: DataObject):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "dtype",
-    [
-        # np.int8, np.int16, np.int32, np.int64,  # not supported
-        # np.uint8, np.uint16, np.uint32, np.uint64,  # not supported
-        # np.float16, np.float32, np.float64,  # not supported
-        np.bool_,
-    ],
-)
-@given(st.data())
-def test_all(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, logical_op_element_strategy(dtype)), label="array")
-    assert_array_matches(
-        jix.all(za, axis=axis, keepdims=keepdims),
-        np.all(np_a, axis=_np_axis(axis), keepdims=keepdims),
-        data=data,
-    )
+def test_all_concrete():
+    # bool is the only supported dtype. Mixed rows/columns plus an all-True array exercise
+    # both the True and False outcomes on every axis.
+    d = np.array([[True, True, False], [True, True, True], [False, False, False]], dtype=np.bool_)
+    za = jix.compact(d, params={"block_shape": [1, 2]})
+    for axis in (0, 1, None):
+        assert_array_matches(jix.all(za, axis=axis), np.all(d, axis=_np_axis(axis)))
+
+    d_all_true = np.array([[True, True], [True, True]], dtype=np.bool_)
+    zb = jix.compact(d_all_true, params={"block_shape": [1, 1]})
+    for axis in (0, 1, None):
+        assert_array_matches(jix.all(zb, axis=axis), np.all(d_all_true, axis=_np_axis(axis)))
 
 
-@pytest.mark.parametrize(
-    "dtype",
-    [
-        # np.int8, np.int16, np.int32, np.int64,  # not supported
-        # np.uint8, np.uint16, np.uint32, np.uint64,  # not supported
-        # np.float16, np.float32, np.float64,  # not supported
-        np.bool_,
-    ],
-)
-@given(st.data())
-def test_any(dtype: np.dtype, data: DataObject):
-    np_a, za, axis, keepdims = data.draw(_carray_reduction(dtype, logical_op_element_strategy(dtype)), label="array")
-    assert_array_matches(
-        jix.any(za, axis=axis, keepdims=keepdims),
-        np.any(np_a, axis=_np_axis(axis), keepdims=keepdims),
-        data=data,
-    )
+def test_any_concrete():
+    # bool is the only supported dtype. Mixed rows/columns plus an all-False array exercise
+    # both the True and False outcomes on every axis.
+    d = np.array([[False, False, True], [False, False, False], [True, True, True]], dtype=np.bool_)
+    za = jix.compact(d, params={"block_shape": [1, 2]})
+    for axis in (0, 1, None):
+        assert_array_matches(jix.any(za, axis=axis), np.any(d, axis=_np_axis(axis)))
+
+    d_all_false = np.array([[False, False], [False, False]], dtype=np.bool_)
+    zb = jix.compact(d_all_false, params={"block_shape": [1, 1]})
+    for axis in (0, 1, None):
+        assert_array_matches(jix.any(zb, axis=axis), np.any(d_all_false, axis=_np_axis(axis)))
 
 
 # ---------------------------------------------------------------------------

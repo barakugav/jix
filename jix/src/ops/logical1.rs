@@ -133,20 +133,62 @@ mod tests {
         #[cfg(feature = "half")]
         [f16]
     );
-    test_op1!(
-        is_finite,
-        |a| a.is_finite(),
-        [f32, f64],
-        maybe_non_finite_strategy,
+
+    #[test]
+    fn is_finite_concrete() {
+        use crate::Array;
+        // Edge inputs: NaN, +inf, -inf, 0.0, 1.0 - only 0.0 and 1.0 are finite.
+        let nd = ndarray::array![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, 1.0];
+        let za = Array::compact_ndarray(&nd).unwrap();
+        let expected = nd.mapv(|a: f32| a.is_finite());
+        crate::util::assert_array_matches(&za.as_ref().is_finite(), &expected);
+
+        let nd64 = ndarray::array![f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 1.0];
+        let za64 = Array::compact_ndarray(&nd64).unwrap();
+        let expected64 = nd64.mapv(|a: f64| a.is_finite());
+        crate::util::assert_array_matches(&za64.as_ref().is_finite(), &expected64);
+
         #[cfg(feature = "half")]
-        [f16]
-    );
-    test_op1!(
-        is_infinite,
-        |a| a.is_infinite(),
-        [f32, f64],
-        maybe_non_finite_strategy,
+        {
+            let ndh = ndarray::array![
+                f16::NAN,
+                f16::INFINITY,
+                f16::NEG_INFINITY,
+                f16::from_f32(0.0),
+                f16::from_f32(1.0)
+            ];
+            let zah = Array::compact_ndarray(&ndh).unwrap();
+            let expectedh = ndh.mapv(|a: f16| a.is_finite());
+            crate::util::assert_array_matches(&zah.as_ref().is_finite(), &expectedh);
+        }
+    }
+
+    #[test]
+    fn is_infinite_concrete() {
+        use crate::Array;
+        // Edge inputs: NaN, +inf, -inf, 0.0, 1.0 - only +inf/-inf are infinite.
+        let nd = ndarray::array![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, 1.0];
+        let za = Array::compact_ndarray(&nd).unwrap();
+        let expected = nd.mapv(|a: f32| a.is_infinite());
+        crate::util::assert_array_matches(&za.as_ref().is_infinite(), &expected);
+
+        let nd64 = ndarray::array![f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 1.0];
+        let za64 = Array::compact_ndarray(&nd64).unwrap();
+        let expected64 = nd64.mapv(|a: f64| a.is_infinite());
+        crate::util::assert_array_matches(&za64.as_ref().is_infinite(), &expected64);
+
         #[cfg(feature = "half")]
-        [f16]
-    );
+        {
+            let ndh = ndarray::array![
+                f16::NAN,
+                f16::INFINITY,
+                f16::NEG_INFINITY,
+                f16::from_f32(0.0),
+                f16::from_f32(1.0)
+            ];
+            let zah = Array::compact_ndarray(&ndh).unwrap();
+            let expectedh = ndh.mapv(|a: f16| a.is_infinite());
+            crate::util::assert_array_matches(&zah.as_ref().is_infinite(), &expectedh);
+        }
+    }
 }

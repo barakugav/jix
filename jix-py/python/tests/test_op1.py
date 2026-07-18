@@ -1,8 +1,10 @@
 """
-Property tests for element-wise unary ops. Mirrors the test block in jix/src/ops/op1.rs.
+Tests for element-wise unary ops. Mirrors the test block in jix/src/ops/op1.rs.
 
-One test per dtype, parametrized via @pytest.mark.parametrize, analogous to the
-test_op1! macro which expands to one proptest per (op, dtype) pair.
+negative/exp/log are kept as property tests, one per dtype, parametrized via
+@pytest.mark.parametrize (analogous to the test_op1! macro expanding to one proptest
+per (op, dtype) pair). The remaining ops use fixed-input `test_*_concrete` functions
+covering the same edge cases over 2-3 representative dtypes each.
 
 Python name differences vs Rust:
   ln  -> log
@@ -19,12 +21,11 @@ from hypothesis.strategies import DataObject
 from tests_util import (
     assert_array_matches,
     carray_strategy,
+    check_op1_concrete,
     complexes,
     floats,
     ints,
     op_safe_non_negative_element_strategy,
-    unit_element_strategy,
-    uints,
 )
 
 
@@ -35,18 +36,17 @@ def test_negative(dtype: np.dtype, data: DataObject):
     assert_array_matches(jix.negative(za), -np_a, data=data)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_floor(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    assert_array_matches(jix.floor(za), np.floor(np_a), data=data)
+def test_floor_concrete():
+    # Edge inputs: exact ints, +/- fractions, .5 tie; float32 + float64 paths;
+    # a non-default block shape to cross block boundaries.
+    values = [[-2.5, -0.5, 0.0], [0.5, 2.5, 3.9]]
+    check_op1_concrete(jix.floor, np.floor, [(np.float32, values, [1, 2]), (np.float64, values, [1, 2])])
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_ceil(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    assert_array_matches(jix.ceil(za), np.ceil(np_a), data=data)
+def test_ceil_concrete():
+    # Same edge inputs as floor: exact ints, +/- fractions, .5 tie.
+    values = [[-2.5, -0.5, 0.0], [0.5, 2.5, 3.9]]
+    check_op1_concrete(jix.ceil, np.ceil, [(np.float32, values), (np.float64, values)])
 
 
 def _round_half_away_from_zero(a: np.ndarray) -> np.ndarray:
@@ -54,24 +54,19 @@ def _round_half_away_from_zero(a: np.ndarray) -> np.ndarray:
     return np.sign(a) * np.floor(np.abs(a) + 0.5)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_round(dtype: np.dtype, data: DataObject):
+def test_round_concrete():
     # numpy.round uses banker's rounding (half-to-even); jix.round rounds half away from zero.
-    # Use a reference that matches Rust's f32::round / f64::round semantics.
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    assert_array_matches(jix.round(za), _round_half_away_from_zero(np_a), data=data)
+    # .5 ties round away from zero: 0.5 -> 1.0, -0.5 -> -1.0, 2.5 -> 3.0, -2.5 -> -3.0.
+    values = [[-2.5, -0.5, 0.0], [0.5, 2.5, 1.4]]
+    check_op1_concrete(jix.round, _round_half_away_from_zero, [(np.float32, values), (np.float64, values)])
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_sqrt(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=op_safe_non_negative_element_strategy(dtype)),
-        label="array",
-    )
-    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    assert_array_matches(jix.sqrt(za), np.sqrt(np_a).astype(dtype), data=data, rtol=rtol)
+def test_sqrt_concrete():
+    # Domain is non-negative: 0.0, a perfect square, a non-perfect square, and the
+    # op_safe_non_negative_strategy bound (100.0).
+    values = [[0.0, 4.0, 2.0], [9.0, 0.25, 100.0]]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(jix.sqrt, np.sqrt, [(dtype, values, [1, 2])], rtol=rtol)
 
 
 @pytest.mark.parametrize("dtype", floats)
@@ -101,109 +96,85 @@ def test_log(dtype: np.dtype, data: DataObject):
     assert_array_matches(jix.log(za), np.log(np_a).astype(dtype), data=data, rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_log_base2(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=op_safe_non_negative_element_strategy(dtype)),
-        label="array",
-    )
-    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    assert_array_matches(jix.log(za, base=2), np.log2(np_a).astype(dtype), data=data, rtol=rtol)
+def test_log_base2_concrete():
+    # Domain is non-negative (incl. 0.0): 0, 1, a perfect power of 2, and a non-power value,
+    # up to the op_safe_non_negative_strategy bound (100.0).
+    values = [[0.0, 1.0, 2.0], [4.0, 0.25, 100.0]]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(lambda za: jix.log(za, base=2), np.log2, [(dtype, values)], rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_log_base10(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=op_safe_non_negative_element_strategy(dtype)),
-        label="array",
-    )
-    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    assert_array_matches(jix.log(za, base=10), np.log10(np_a).astype(dtype), data=data, rtol=rtol)
+def test_log_base10_concrete():
+    # Domain is non-negative (incl. 0.0): 0, 1, powers of 10, and a non-power value.
+    values = [[0.0, 1.0, 10.0], [100.0, 0.25, 50.0]]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(lambda za: jix.log(za, base=10), np.log10, [(dtype, values)], rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_sin(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    assert_array_matches(jix.sin(za), np.sin(np_a).astype(dtype), data=data, rtol=rtol)
+def test_sin_concrete():
+    # 0, +/-pi/2, pi, and a couple of interior op_safe_strategy values.
+    values = [0.0, np.pi / 2, np.pi, -np.pi / 2, 1.0, -1.0]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(jix.sin, np.sin, [(dtype, values)], rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_cos(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    assert_array_matches(jix.cos(za), np.cos(np_a).astype(dtype), data=data, rtol=rtol)
+def test_cos_concrete():
+    values = [0.0, np.pi / 2, np.pi, -np.pi / 2, 1.0, -1.0]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(jix.cos, np.cos, [(dtype, values)], rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_tan(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    assert_array_matches(jix.tan(za), np.tan(np_a).astype(dtype), data=data, rtol=rtol)
+def test_tan_concrete():
+    # Avoid drawing exactly at the +/-pi/2 asymptote; op_safe_strategy never hits it either.
+    values = [0.0, np.pi / 4, -np.pi / 4, 1.0, -1.0, 10.0]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(jix.tan, np.tan, [(dtype, values)], rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
-@given(st.data())
-def test_asin(dtype: np.dtype, data: DataObject):
-    # Domain [-1, 1]; use unit_element_strategy to avoid NaN comparison failures.
+def test_asin_concrete():
+    # Domain [-1, 1]: both endpoints plus interior points.
     # f16 excluded: asin is in [-pi/2, pi/2], not representable precisely in f16.
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=unit_element_strategy(dtype)),
-        label="array",
-    )
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(jix.asin(za), np.arcsin(np_a), data=data, rtol=rtol)
+    values = [-1.0, -0.5, 0.0, 0.5, 1.0]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(jix.asin, np.arcsin, [(dtype, values)], rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
-@given(st.data())
-def test_acos(dtype: np.dtype, data: DataObject):
-    # Domain [-1, 1]; use unit_element_strategy to avoid NaN comparison failures.
-    np_a, za = data.draw(
-        carray_strategy(dtype, element_st=unit_element_strategy(dtype)),
-        label="array",
-    )
-    rtol = 1e-5 if dtype == np.float32 else 1e-12
-    assert_array_matches(jix.acos(za), np.arccos(np_a), data=data, rtol=rtol)
+def test_acos_concrete():
+    # Domain [-1, 1]: both endpoints plus interior points.
+    values = [-1.0, -0.5, 0.0, 0.5, 1.0]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(jix.acos, np.arccos, [(dtype, values)], rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_atan(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype == np.float32 else 1e-12)
-    assert_array_matches(jix.atan(za), np.arctan(np_a).astype(dtype), data=data, rtol=rtol)
+def test_atan_concrete():
+    values = [0.0, 1.0, -1.0, 100.0, -100.0]
+    for dtype, rtol in ((np.float32, 1e-5), (np.float64, 1e-12)):
+        check_op1_concrete(jix.atan, np.arctan, [(dtype, values)], rtol=rtol)
 
 
-@pytest.mark.parametrize("dtype", floats)
-@given(st.data())
-def test_sign_float(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
+def test_sign_float_concrete():
     # jix.sign on floats: +1.0 for positive and +0.0, -1.0 for negative and -0.0.
     # np.sign returns 0.0 for 0.0; np.copysign(1, x) matches Rust's f32::signum.
-    assert_array_matches(jix.sign(za), np.copysign(np.ones_like(np_a), np_a), data=data)
+    values = [-3.0, -0.0, 0.0, 5.0]
+    check_op1_concrete(
+        jix.sign,
+        lambda a: np.copysign(np.ones_like(a), a),
+        [(np.float32, values, [2]), (np.float64, values, [2])],
+    )
 
 
-@pytest.mark.parametrize("dtype", ints)
-@given(st.data())
-def test_sign_int(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
+def test_sign_int_concrete():
     # jix.sign on signed integers: -1, 0, or +1 of the same dtype.
-    assert_array_matches(jix.sign(za), np.sign(np_a).astype(dtype), data=data)
+    check_op1_concrete(jix.sign, np.sign, [(np.int32, [-5, 0, 7])])
 
 
-@pytest.mark.parametrize("dtype", uints)
-@given(st.data())
-def test_sign_uint(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
+def test_sign_uint_concrete():
     # unsigned: sign is 0 when zero, 1 otherwise; output keeps the same uint dtype.
-    expected = np.where(np_a == 0, np.zeros_like(np_a), np.ones_like(np_a))
-    assert_array_matches(jix.sign(za), expected, data=data)
+    check_op1_concrete(
+        jix.sign,
+        lambda a: np.where(a == 0, np.zeros_like(a), np.ones_like(a)),
+        [(np.uint32, [0, 1, 7])],
+    )
 
 
 def test_sign_auto_cast_bool():
@@ -215,44 +186,57 @@ def test_sign_auto_cast_bool():
     np.testing.assert_array_equal(result.numpy(), np.sign(np_a.astype(np.int8)))
 
 
-@pytest.mark.parametrize("dtype", ints + floats)
-@given(st.data())
-def test_absolute_scalar(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    assert_array_matches(jix.absolute(za), np.abs(np_a), data=data)
+def test_absolute_scalar_concrete():
+    # int32: negative, zero, positive, and the op_safe_strategy bound (+/-100).
+    # float32/float64: negative, zero, positive.
+    check_op1_concrete(
+        jix.absolute,
+        np.abs,
+        [
+            (np.int32, [-5, 0, 7, -100, 100]),
+            (np.float32, [-5.0, 0.0, 7.5, -100.0]),
+            (np.float64, [-5.0, 0.0, 7.5, -100.0]),
+        ],
+    )
 
 
-@pytest.mark.parametrize("dtype", complexes)
-@given(st.data())
-def test_absolute_complex(dtype: np.dtype, data: DataObject):
-    # Complex absolute returns the real component dtype, not the input dtype.
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    result = jix.absolute(za)
-    expected = np.abs(np_a)
-    # Output dtype: complex64 -> float32, complex128 -> float64
-    expected_dtype = np.float32 if dtype == np.complex64 else np.float64
-    assert result.dtype == expected_dtype
-    assert_array_matches(result, expected, data=data, rtol=1e-5)
+def test_absolute_complex_concrete():
+    # Complex absolute returns the real-component dtype, not the input dtype
+    # (complex64 -> float32, complex128 -> float64). 3+4j / -3-4j exercise an exact
+    # abs()==5 via the 3-4-5 triangle; 0+0j and pure-real/pure-imaginary round out the domain.
+    values = [0 + 0j, 3 + 4j, -3 - 4j, 0 + 5j, 5 + 0j]
+    cases = [(np.complex64, np.float32), (np.complex128, np.float64)]
+    for dtype, expected_dtype in cases:
+        za = jix.compact(np.array(values, dtype=dtype))
+        assert jix.absolute(za).dtype == expected_dtype
+    check_op1_concrete(jix.absolute, np.abs, [(dtype, values) for dtype, _ in cases], rtol=1e-5)
 
 
-@pytest.mark.parametrize("dtype", ints + uints)
-@given(st.data())
-def test_square_int(dtype: np.dtype, data: DataObject):
-    # op_safe ranges keep x*x within the dtype, so squaring does not overflow.
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    result = jix.square(za)
-    assert result.dtype == dtype  # square preserves the input dtype
-    assert_array_matches(result, np.square(np_a), data=data)
+def test_square_int_concrete():
+    # int32: negative, zero, positive, and the op_safe_strategy bound (+/-100) so the squared
+    # result (10000) still fits comfortably in int32.
+    # uint32: zero, and positive values up to the op_safe_strategy bound (30).
+    cases = [(np.int32, [-100, -1, 0, 1, 5, 100]), (np.uint32, [0, 1, 5, 30])]
+    for dtype, values in cases:
+        za = jix.compact(np.array(values, dtype=dtype))
+        assert jix.square(za).dtype == dtype  # square preserves the input dtype
+    check_op1_concrete(jix.square, np.square, cases)
 
 
-@pytest.mark.parametrize("dtype", floats + complexes)
-@given(st.data())
-def test_square_float_complex(dtype: np.dtype, data: DataObject):
-    np_a, za = data.draw(carray_strategy(dtype), label="array")
-    result = jix.square(za)
-    assert result.dtype == dtype  # square preserves the input dtype
-    rtol = 1e-2 if dtype == np.float16 else (1e-5 if dtype in (np.float32, np.complex64) else 1e-12)
-    assert_array_matches(result, np.square(np_a), data=data, rtol=rtol)
+def test_square_float_complex_concrete():
+    # float32/float64: negative, zero, positive, and the op_safe_strategy bound (+/-100.0).
+    # complex64/complex128: zero, pure-real, pure-imaginary, and a mixed value.
+    float_vals = [[-100.0, -0.5, 0.0], [0.5, 5.0, 100.0]]
+    complex_vals = [0 + 0j, 3 + 0j, 0 + 4j, 3 + 4j]
+    rtol_groups = [
+        (1e-5, [(np.float32, float_vals), (np.complex64, complex_vals)]),
+        (1e-12, [(np.float64, float_vals), (np.complex128, complex_vals)]),
+    ]
+    for rtol, cases in rtol_groups:
+        for dtype, values in cases:
+            za = jix.compact(np.array(values, dtype=dtype))
+            assert jix.square(za).dtype == dtype  # square preserves the input dtype
+        check_op1_concrete(jix.square, np.square, cases, rtol=rtol)
 
 
 def test_square_method_matches_function():

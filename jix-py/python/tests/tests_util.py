@@ -61,27 +61,6 @@ def any_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     }[dtype]
 
 
-def logical_op_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
-    """any_strategy plus extra zero/default. Mirrors ScalarStrategy::logical_op_strategy()."""
-    _zero = {
-        np.int8: 0,
-        np.int16: 0,
-        np.int32: 0,
-        np.int64: 0,
-        np.uint8: 0,
-        np.uint16: 0,
-        np.uint32: 0,
-        np.uint64: 0,
-        np.float16: 0.0,
-        np.float32: 0.0,
-        np.float64: 0.0,
-        np.bool_: False,
-        np.complex64: complex(0.0, 0.0),
-        np.complex128: complex(0.0, 0.0),
-    }[dtype]
-    return st.one_of(any_element_strategy(dtype), st.just(_zero))
-
-
 def comparable_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     """Small fixed set for ~33% equal pairs; floats include NaN for NaN!=NaN coverage.
     Mirrors ScalarStrategy::comparable_strategy()."""
@@ -214,18 +193,6 @@ def op_safe_non_negative_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
     }[dtype]
 
 
-def unit_element_strategy(dtype: np.dtype) -> st.SearchStrategy:
-    """Float elements in [-1, 1] mirroring ScalarStrategy::unit_strategy().
-
-    (-100..=100).map(|x| x / 100.0) -> [-1.0, 1.0]
-    """
-    _st = st.integers(-100, 100).map(lambda x: float(x) / 100.0)
-    return {
-        np.float32: _st,
-        np.float64: _st,
-    }[dtype]
-
-
 @st.composite
 def carrays2_strategy(draw, dtype: np.dtype, element_st=None):
     """
@@ -301,3 +268,31 @@ def assert_array_matches(
     if data is not None and actual.shape and all(s > 0 for s in actual.shape):
         sub_idx = data.draw(sub_range_strategy(actual.shape), label="sub_range")
         assert_arr_equal(actual[sub_idx], expected[sub_idx])
+
+
+def check_op1_concrete(jix_fn, ref_fn, cases, *, rtol=0.0, atol=0.0):
+    """Run a fixed-input unary-op test across a set of concrete cases.
+
+    cases: iterable of (dtype, values[, block_shape]). Builds a jix.compact array from
+    values, applies jix_fn, and compares to ref_fn(np_a) via assert_array_matches (no
+    data=, no sub-range).
+    """
+    for dtype, values, *rest in cases:
+        np_a = np.asarray(values, dtype=dtype)
+        params = {"block_shape": rest[0]} if rest else None
+        za = jix.compact(np_a, params=params)
+        assert_array_matches(jix_fn(za), ref_fn(np_a), rtol=rtol, atol=atol)
+
+
+def check_op2_concrete(jix_fn, ref_fn, cases, *, rtol=0.0, atol=0.0):
+    """Run a fixed-input binary-op test across a set of concrete cases.
+
+    cases: iterable of (dtype, a_values, b_values[, block_shape]).
+    """
+    for dtype, a_values, b_values, *rest in cases:
+        np_a = np.asarray(a_values, dtype=dtype)
+        np_b = np.asarray(b_values, dtype=dtype)
+        params = {"block_shape": rest[0]} if rest else None
+        za = jix.compact(np_a, params=params)
+        zb = jix.compact(np_b, params=params)
+        assert_array_matches(jix_fn(za, zb), ref_fn(np_a, np_b), rtol=rtol, atol=atol)
