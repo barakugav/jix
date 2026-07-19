@@ -267,6 +267,14 @@ where
         match strides {
             None => {
                 #[inline(never)]
+                #[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+                    // x86-64-v4
+                    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+                    // x86-64-v3
+                    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+                    // x86-64-v2
+                    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+                )))]
                 unsafe fn read_to_buf_impl<T, const LANES: usize>(
                     data: &mut impl ReadData<T>,
                     buf: &mut [u8],
