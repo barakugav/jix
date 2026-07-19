@@ -8,7 +8,7 @@ use crate::common::{create_data, Profile};
 fn bench_sum_plain(c: &mut Criterion) {
     for size in [40_000_u64, 400_000, 1_000_000] {
         let shape = [size, 300];
-        let mut group = c.benchmark_group(format!("sum plain [{size}, 64]"));
+        let mut group = c.benchmark_group(format!("sum plain [{size}, 300]"));
         group.sample_size(20);
 
         let base = create_data::<i32>(Profile::Smooth, &shape, 0)
@@ -44,7 +44,7 @@ fn bench_sum_plain(c: &mut Criterion) {
 fn bench_sum_compact(c: &mut Criterion) {
     for size in [40_000_u64, 400_000, 1_000_000] {
         let shape = [size, 300];
-        let mut group = c.benchmark_group(format!("sum compact [{size}, 64]"));
+        let mut group = c.benchmark_group(format!("sum compact [{size}, 300]"));
         group.sample_size(20);
 
         let base = create_data::<i32>(Profile::Smooth, &shape, 0)

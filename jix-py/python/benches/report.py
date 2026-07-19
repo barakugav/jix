@@ -93,8 +93,33 @@ def load_criterion_dir(root):
     return rows
 
 
+# Light chart theme (validated categorical palette; see the data-viz reference). Sub-3:1
+# categorical hues are fine here: the relief rule is met by the per-bar value labels + legend.
+_LIGHT = {
+    "surface": "#fcfcfb",
+    "ink": "#0b0b0b",
+    "sub": "#52514e",
+    "muted": "#898781",
+    "grid": "#e1e0d9",
+    "base": "#c3c2b7",
+    "single": "#2a78d6",
+    "cat": ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"],
+}
+
+
+def _humanize_ns(ns):
+    for unit, div in (("s", 1e9), ("ms", 1e6), ("us", 1e3)):
+        if ns >= div:
+            return f"{ns / div:.2f} {unit}"
+    return f"{ns:.0f} ns"
+
+
 def report_criterion(root, out_dir):
-    """Render Rust criterion results: one bar PNG per group + a markdown summary table."""
+    """Render Rust criterion results: one horizontal bar PNG per group + a markdown summary table.
+
+    Bars keep the data's original order (not sorted by value). When every bench in a group carries
+    a ``profile=`` field they are colored by profile with a legend; otherwise a single hue is used.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = load_criterion_dir(root)
@@ -102,16 +127,57 @@ def report_criterion(root, out_dir):
     by_group = defaultdict(list)
     for r in rows:
         by_group[r["group"]].append(r)
+    st = _LIGHT
     for group, grows in by_group.items():
-        grows = sorted(grows, key=lambda r: _natkey(r["bench"]))
-        fig, ax = plt.subplots()
-        ax.bar([r["bench"] for r in grows], [r["mean_ns"] for r in grows])
-        ax.set_yscale("log")
-        ax.set_ylabel("mean time (ns)")
-        ax.set_title(f"rust: {group}")
-        ax.tick_params(axis="x", rotation=90)
+        profiles = [re.search(r"profile=(\w+)", r["bench"]) for r in grows]
+        by_profile = all(profiles)
+        n = len(grows)
+        fig, ax = plt.subplots(figsize=(9.5, 0.34 * n + 1.4))
+        fig.set_facecolor(st["surface"])
+        ax.set_facecolor(st["surface"])
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color(st["base"])
+        ax.tick_params(colors=st["muted"], labelsize=8, length=0)
+        if by_profile:
+            uniq = sorted({m.group(1) for m in profiles})
+            pcolor = {p: st["cat"][i % len(st["cat"])] for i, p in enumerate(uniq)}
+            colors = [pcolor[m.group(1)] for m in profiles]
+            labels = [re.sub(r"profile=\w+,\s*", "", r["bench"]) for r in grows]
+        else:
+            colors = st["single"]
+            labels = [r["bench"] for r in grows]
+        y = list(range(n))
+        ax.barh(y, [r["mean_ns"] for r in grows], height=0.72, color=colors, zorder=3)
+        ax.invert_yaxis()  # first bench at top, preserving the data's original order
+        ax.set_xscale("log")
+        ax.set_axisbelow(True)
+        ax.grid(axis="x", color=st["grid"], lw=0.7, zorder=0)
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels, fontsize=8, color=st["sub"])
+        xmax = max(r["mean_ns"] for r in grows)
+        ax.set_xlim(right=xmax * 2.6)
+        for yi, r in zip(y, grows):
+            ax.text(
+                r["mean_ns"] * 1.08,
+                yi,
+                _humanize_ns(r["mean_ns"]),
+                va="center",
+                ha="left",
+                fontsize=7.5,
+                color=st["muted"],
+            )
+        ax.set_xlabel("mean time (log scale)", color=st["muted"], fontsize=9)
+        ax.set_title(f"rust: {group}", color=st["ink"], fontsize=13, fontweight="bold", loc="left", pad=12)
+        if by_profile:
+            handles = [plt.Line2D([0], [0], marker="s", ls="", mfc=pcolor[p], mec="none", ms=9) for p in uniq]
+            leg = ax.legend(
+                handles, uniq, title="profile", loc="lower right", fontsize=8, frameon=False, labelcolor=st["sub"]
+            )
+            leg.get_title().set_color(st["muted"])
         png = out_dir / f"rust_{group}.png"
-        fig.savefig(png, dpi=120, bbox_inches="tight")
+        fig.savefig(png, dpi=140, bbox_inches="tight", facecolor=st["surface"])
         plt.close(fig)
         written.append(png)
     lines = ["| group | bench | mean ns |", "|---|---|---|"]
