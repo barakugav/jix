@@ -71,8 +71,8 @@ impl ReadSize {
 /// # Recommended usage
 ///
 /// Use `ArrayParams::new()` (equivalent to `ArrayParams::default()`) for most cases - the
-/// defaults select a block shape that fits in the L1 data cache using Zstd level 3 with byte
-/// shuffling. For latency-sensitive workloads where you know the access pattern, set `block_shape`
+/// defaults select a block shape automatically according to the CPU cache sizes using Zstd level 3
+/// with byte shuffling. For latency-sensitive workloads where you know the access pattern, set `block_shape`
 /// explicitly and call `compact_with` instead of `compact` after shape-changing ops.
 ///
 /// ```
@@ -142,7 +142,8 @@ impl ArrayParams {
     /// bytes.
     ///
     /// When not provided, defaults to `block_shape.product() * itemsize` (the block size in
-    /// bytes), or the L1 data cache size if no block shape is given.
+    /// bytes), or a size chosen automatically according to the CPU cache sizes if no block shape
+    /// is given.
     pub fn block_size(&mut self, size_hint: u64) -> &mut Self {
         self.block_size = Some(size_hint);
         self
@@ -156,11 +157,9 @@ impl ArrayParams {
     /// scaling differently:
     ///
     /// - `max` is the *scale-down ceiling*: an oversized read shape is shrunk only until it
-    ///   fits within `max`. Keeping `max` large (the L2 cache size by default) lets reads
-    ///   stay big.
-    /// - `min` is the *scale-up floor*: an undersized read shape is grown only up to `min`
-    ///   (the L1 cache size by default). Reads already at or above `min` are left as the
-    ///   scale-down step produced them.
+    ///   fits within `max`. Keeping `max` large lets reads stay big.
+    /// - `min` is the *scale-up floor*: an undersized read shape is grown only up to `min`.
+    ///   Reads already at or above `min` are left as the scale-down step produced them.
     ///
     /// The motivation is block-grid misalignment. When the source array's block shape differs
     /// from the output's, a read that straddles source-block boundaries forces whole-block
@@ -169,7 +168,7 @@ impl ArrayParams {
     /// guarantee, but the waste shrinks as the region grows); the counter-pressure is cache
     /// residency, which the `max` ceiling bounds.
     ///
-    ///When unset, the range defaults to `(L1 data cache size, L2 cache size)`.
+    /// When unset, the range is chosen automatically according to the CPU cache sizes.
     pub fn read_size(&mut self, size_hint: (u64, u64)) -> &mut Self {
         self.read_size = Some(ReadSize::new(size_hint.0, size_hint.1));
         self
@@ -277,10 +276,10 @@ impl ArrayParams {
     ///   requires `block_shape` to also be provided. Defaults to all-[`BlockShapeTag::Fixed`].
     ///   See [`BlockShapeTag`] for the available options.
     /// - `block_size` - target block size in bytes used when auto-computing or scaling
-    ///   the block shape. Defaults to the L1 data cache size when the shape is not fully
-    ///   [`BlockShapeTag::Fixed`].
+    ///   the block shape. Defaults to a size chosen automatically according to the CPU cache
+    ///   sizes when the shape is not fully [`BlockShapeTag::Fixed`].
     /// - `read_size` - target size for the preferred read region in bytes.
-    ///   Defaults to the L1 cache size.
+    ///   Defaults to a range chosen automatically according to the CPU cache sizes.
     /// - `shape` - the array shape, used to clamp block dimensions that would exceed the array.
     /// - `itemsize` - bytes per array element.
     ///
@@ -366,11 +365,14 @@ impl ArrayParams {
                 block_shape.iter().map(|&b| b as u64).try_product().unwrap() * itemsize
             })
             .max(1);
-        // read_size defaults to the (L1, L2) cache-size window.
-        let read_size = self.read_size.unwrap_or(ReadSize::new(
-            cache_sizes.l1_data as u64,
-            cache_sizes.l2 as u64,
-        ));
+        // read_size defaults to a window derived from the cache sizes.
+        let read_size = self.read_size.unwrap_or_else(|| {
+            let l2 = cache_sizes.l2 as u64;
+            let read_size_min =
+                std::cmp::max(cache_sizes.l1_data as u64 / 2, l2 / 16).max(block_size);
+            let read_size_max = l2 / 2;
+            ReadSize::new(read_size_min, read_size_max)
+        });
 
         self.block_shape = Some(block_shape);
         self.block_shape_tag = Some(block_shape_tag);
@@ -845,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    fn read_size_defaults_to_l1_l2() {
+    fn read_size_defaults_to_cache_window() {
         use crate::dtype::Dtyped;
         use crate::util::cpu_cache::cache_sizes;
         let mut params = ArrayParams::new();
@@ -855,7 +857,16 @@ mod tests {
             .unwrap();
         let rs = spec.as_ref().read_size();
         let cs = cache_sizes();
-        assert_eq!((rs.min, rs.max), (cs.l1_data as u64, cs.l2 as u64));
+        let block_size = 8 * i32::DTYPE.itemsize() as u64;
+        // When unset, the read-size window is derived automatically from the CPU cache sizes:
+        // a valid, non-degenerate range no smaller than the block and bounded by the caches.
+        assert!(
+            rs.min >= block_size,
+            "min {} < block_size {block_size}",
+            rs.min
+        );
+        assert!(rs.min <= rs.max, "min {} > max {}", rs.min, rs.max);
+        assert!(rs.max <= cs.l2 as u64, "max {} > l2 {}", rs.max, cs.l2);
     }
 
     #[test]

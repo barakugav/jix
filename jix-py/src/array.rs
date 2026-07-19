@@ -1181,8 +1181,8 @@ impl Array {
 ///           compressed blocks. A good block layout is critical for performance and should match the
 ///           access pattern of your workload.
 ///         - **Codec** - compression settings used when writing and reading blocks. The defaults
-///           (Zstd level 3 with byte shuffling, block sized to fit in the L1 data cache) are
-///           suitable for most workloads.
+///           (Zstd level 3 with byte shuffling, block sized automatically according to the CPU
+///           cache sizes) are suitable for most workloads.
 ///
 ///         When omitted, defaults are chosen automatically.
 ///         If the source array is a jix array, unset fields are inherited from the source storage.
@@ -1204,7 +1204,7 @@ impl Array {
 ///             Length must equal the number of dimensions.
 ///         - `block_size`: Target block size in bytes, used when auto-computing or scaling the
 ///             block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
-///             are `"fixed"`. Defaults to the L1 data cache size.
+///             are `"fixed"`. Defaults to a size chosen automatically according to the CPU cache sizes.
 ///         - `read_size`: The target byte range for a single preferred read region as
 ///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
 ///             `(min, max)` sequence of non-negative ints.
@@ -1215,11 +1215,10 @@ impl Array {
 ///             that scaling differently:
 ///
 ///             - `max` is the *scale-down ceiling*: an oversized read shape is shrunk only until
-///               it fits within `max`. Keeping `max` large (the L2 cache size by default) lets
-///               reads stay big.
+///               it fits within `max`. Keeping `max` large lets reads stay big.
 ///             - `min` is the *scale-up floor*: an undersized read shape is grown only up to
-///               `min` (the L1 cache size by default). Reads already at or above `min` are left
-///               as the scale-down step produced them.
+///               `min`. Reads already at or above `min` are left as the scale-down step produced
+///               them.
 ///
 ///             The motivation is block-grid misalignment. When the source array's block shape
 ///             differs from the output's, a read that straddles source-block boundaries forces
@@ -1228,7 +1227,7 @@ impl Array {
 ///             wasted work (no alignment guarantee, but the waste shrinks as the region grows);
 ///             the counter-pressure is cache residency, which the `max` ceiling bounds.
 ///
-///             When unset, the range defaults to `(L1 data cache size, L2 cache size)`.
+///             When unset, the range is chosen automatically according to the CPU cache sizes.
 ///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
 ///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
 ///         - `compression_level`: Compression level passed to the codec.

@@ -112,8 +112,7 @@ matches your access pattern avoids wasteful work. For example, a `[1, ncols]` bl
 means reading a single row decompresses exactly one block; a `[nrows, 1]` shape is
 similarly efficient for column reads.
 
-When no block shape is specified, jix picks one automatically - it greedily expands each
-dimension (innermost first) until the block byte-size reaches the L1 data cache.
+When no block shape is specified, jix picks one automatically according to the CPU cache sizes.
 
 You can supply an explicit block shape through `params` when constructing an array:
 

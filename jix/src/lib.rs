@@ -252,9 +252,8 @@
 //! performance. If the access pattern is known in advance, providing a matching block shape can
 //! improve performance significantly.
 //!
-//! When no block shape is specified, the library automatically selects one that fits within the
-//! L1 data cache: starting from a block shape of all-ones, it greedily increases each dimension
-//! (from last to first) as long as the block byte-size does not exceed the target size.
+//! When no block shape is specified, the library selects one automatically according to the CPU
+//! cache sizes.
 //!
 //! [`ArrayParams`] groups all layout and codec settings. Unset fields are inherited from the
 //! source array when copying.
