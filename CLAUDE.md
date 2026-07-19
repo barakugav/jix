@@ -103,7 +103,7 @@ Nothing runs until you materialize via `.to_ndarray()`, `.compact()`, or `.write
 
 Arrays are an n-d grid of fixed-size blocks, each compressed independently; `BlockStorage`
 (`jix/src/storage/block.rs`) tracks per-block offsets for random access, and a `ReadContext` carries
-an optional block cache. When no block shape is given, one is auto-selected to fit the L1 cache.
+an optional block cache. When no block shape is given, one is auto-selected according to the CPU cache sizes.
 Codec pipeline (`jix/src/codec/`): `raw bytes -> filters (byte-shuffle default, bit-shuffle) -> codec
 (zstd) -> stored bytes`, reversed on read. All settings live in `ArrayParams` and are serialized into
 the archive, so readers never need to know them in advance.
@@ -150,6 +150,8 @@ with `cargo run --bin generate_pyi`.
 - **Python:** `hypothesis` property tests in `jix-py/python/tests/`, with strategies in
   `tests_util.py` that intentionally mirror the Rust `test_util.rs`. Always run under pytest-xdist
   (`--numprocesses auto`). Requires `maturin develop` first.
+- Write elementwise reference implementations as plain Python loops, not `np.vectorize`: it is simpler
+  and has no measurable effect on test speed.
 
 ## Key Constraints
 

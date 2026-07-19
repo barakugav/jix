@@ -752,7 +752,7 @@ class CheckReadonly:
             let cls = locals.get_item("CheckReadonly").unwrap().unwrap();
             let obj = cls.call0().unwrap();
             let mut pw = PyWriter::new(obj.clone()).unwrap();
-            pw.write(b"x").unwrap();
+            pw.write_all(b"x").unwrap();
             let readonly: bool = obj.getattr("readonly").unwrap().extract().unwrap();
             assert!(readonly, "memoryview should be read-only");
         });
@@ -778,7 +778,7 @@ class StashWriter:
             let cls = locals.get_item("StashWriter").unwrap().unwrap();
             let obj = cls.call0().unwrap();
             let mut pw = PyWriter::new(obj.clone()).unwrap();
-            pw.write(b"dangerous").unwrap();
+            pw.write_all(b"dangerous").unwrap();
 
             // The stashed memoryview should be released - accessing it should
             // raise.
@@ -809,7 +809,7 @@ class CaptureWriter:
             let cls = locals.get_item("CaptureWriter").unwrap().unwrap();
             let obj = cls.call0().unwrap();
             let mut pw = PyWriter::new(obj.clone()).unwrap();
-            pw.write(b"\x00\x01\x02\xff\xfe\xfd").unwrap();
+            pw.write_all(b"\x00\x01\x02\xff\xfe\xfd").unwrap();
             let captured: Vec<u8> = obj.getattr("captured").unwrap().extract().unwrap();
             assert_eq!(captured, b"\x00\x01\x02\xff\xfe\xfd");
         });

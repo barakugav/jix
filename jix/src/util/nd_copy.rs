@@ -119,11 +119,11 @@ impl<'a> NdCopier<'a> {
         if shape.contains(&0) {
             return;
         }
-        // Reorder axes so the destination's strides are non-increasing (largest axis outermost,
-        // smallest - most contiguous - innermost). This turns a scattered-write transpose into a
-        // sequential-write copy and lets the coalescing scans below merge more runs; it is a
-        // no-op for the already-C-order layouts that dominate.
-        let dim_perm = compute_dim_permutation(dst_strides);
+        // Reorder axes (largest stride outermost, smallest - most contiguous - innermost) and drop
+        // size-1 axes, ranking each axis by a write-weighted stride key. This turns a scattered-write
+        // transpose into a sequential-write copy and lets the coalescing scans below merge more runs;
+        // it is a no-op for the already-C-order layouts that dominate.
+        let dim_perm = compute_dim_permutation(shape, src_strides, dst_strides);
         let shape_permuted;
         let src_strides_permuted;
         let dst_strides_permuted;
@@ -624,16 +624,33 @@ fn merge_dims(
     )
 }
 
+/// Choose the axis order for the copy loop.
+///
+/// Drops size-1 axes and permute the dims such that strides of the dst buffer are non-increasing.
 #[inline]
-fn compute_dim_permutation(dst_strides: &[usize]) -> Option<DimArray<usize>> {
-    if dst_strides.windows(2).all(|w| w[0] >= w[1]) {
-        None
-    } else {
-        let ndim = dst_strides.len();
-        let mut perm = dim_arr(ndim, |d| d);
-        perm[..ndim].sort_by(|&a, &b| dst_strides[b].cmp(&dst_strides[a]));
-        Some(perm)
+fn compute_dim_permutation(
+    shape: &[usize],
+    src_strides: &[usize],
+    dst_strides: &[usize],
+) -> Option<DimArray<usize>> {
+    // Rank each axis by its write stride (weight 64) over its read stride (weight 1)
+    let key = |d: usize| -> u64 { dst_strides[d] as u64 * 64 + src_strides[d] as u64 };
+
+    let ndim = shape.len();
+    // Fast path: nothing to drop and the keys are already non-increasing -> identity, no reorder.
+    if shape.iter().all(|&len| len > 1) && (1..ndim).all(|d| key(d - 1) >= key(d)) {
+        return None;
     }
+
+    let mut perm = DimArray::new();
+    for (d, &len) in shape.iter().enumerate() {
+        debug_assert!(len > 0);
+        if len > 1 {
+            perm.push(d);
+        }
+    }
+    perm.sort_by_key(|&d| std::cmp::Reverse(key(d)));
+    Some(perm)
 }
 #[inline]
 fn apply_dim_permutation<T: Copy>(arr: &[T], perm: &[usize]) -> DimArray<T> {
@@ -1030,5 +1047,59 @@ mod tests {
         fuzz::<crate::scalar::Complex<f64>>();
         fuzz::<StructNoPad>();
         fuzz::<[u8; 3]>();
+    }
+
+    // Direct tests for the axis-ordering helper. It uses `shape` only to decide which axes to drop
+    // (size-1) and ranks the survivors by the key `dst_stride * 64 + src_stride`; the strides are
+    // plain sort keys here, not tied to any itemsize.
+
+    // Already-optimal layouts return `None`, letting the caller skip the reorder entirely.
+    #[test]
+    fn dim_perm_already_ordered_is_none() {
+        // C-order, no size-1 axis: keys already non-increasing.
+        assert!(compute_dim_permutation(&[4, 8], &[8, 1], &[8, 1]).is_none());
+        // A single axis and the 0-D scalar are trivially ordered.
+        assert!(compute_dim_permutation(&[5], &[1], &[1]).is_none());
+        assert!(compute_dim_permutation(&[], &[], &[]).is_none());
+    }
+
+    // A transposed write (dst strides increasing inward) moves the larger-stride axis outermost.
+    #[test]
+    fn dim_perm_transpose_reorders() {
+        assert_eq!(
+            compute_dim_permutation(&[4, 8], &[1, 4], &[1, 4]).as_deref(),
+            Some([1usize, 0].as_slice())
+        );
+    }
+
+    // Size-1 axes are dropped from the permutation; surviving axes keep their relative order.
+    #[test]
+    fn dim_perm_drops_size_1_axes() {
+        // Interior size-1 axis dropped; axes 0 and 2 stay in place (already sorted).
+        assert_eq!(
+            compute_dim_permutation(&[4, 1, 8], &[8, 0, 1], &[8, 0, 1]).as_deref(),
+            Some([0usize, 2].as_slice())
+        );
+        // Every axis size-1 -> empty permutation (the copy degenerates to a single element).
+        assert_eq!(
+            compute_dim_permutation(&[1, 1], &[9, 9], &[9, 9]).as_deref(),
+            Some(&[] as &[usize])
+        );
+    }
+
+    // The write (dst) stride is weighted 64x the read (src) stride in the ranking key.
+    #[test]
+    fn dim_perm_write_stride_dominates_read() {
+        // Write order says d1 outermost (3 > 2); read order says d0 (50 > 1). The 64x write weight
+        // beats a read gap of 49, so the write order wins.
+        assert_eq!(
+            compute_dim_permutation(&[4, 5], &[50, 1], &[2, 3]).as_deref(),
+            Some([1usize, 0].as_slice())
+        );
+        // With equal write strides, the read stride breaks the tie (larger read outermost).
+        assert_eq!(
+            compute_dim_permutation(&[4, 5], &[1, 5], &[2, 2]).as_deref(),
+            Some([1usize, 0].as_slice())
+        );
     }
 }

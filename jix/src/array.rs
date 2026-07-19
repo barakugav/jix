@@ -141,9 +141,7 @@ use crate::{
 /// The n-dimensional block shape used by `Array<Compact>` has a huge effect on both compression
 /// ratio and read performance. If the access pattern is known in advance, providing a matching
 /// block shape can improve the performance of the library significantly. If not provided, the
-/// block shape is chosen automatically to fit within the L1 data cache, by starting with a block
-/// shape of all ones and iteratively increasing each dimension greedily, in order from last to first
-/// dim, as long the block size in bytes does not exceed the target size.
+/// block shape is chosen automatically according to the CPU cache sizes.
 /// Additional arrays that are created from existing arrays (`.compact()`, `.reshape()`, result
 /// of operations, etc.) choose their block shape with a heuristic, trying to preserve the original
 /// user block shape as much as possible while respecting the new shape and layout.
@@ -191,7 +189,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// Compress an ndarray into a block-compressed `Array<Compact<D>>` with default encoding settings.
     ///
     /// The array is partitioned into n-dimensional blocks, each independently compressed. The
-    /// block shape is derived automatically to fit within the L1 data cache. Use
+    /// block shape is derived automatically according to the CPU cache sizes. Use
     /// [`compact_ndarray_with`](Array::compact_ndarray_with) for explicit control over block shape,
     /// compression level, and other codec settings. If the access pattern is known in advance,
     /// providing a matching block shape can improve read performance significantly.
@@ -1534,6 +1532,7 @@ impl<S: ArrayStorage> std::fmt::Debug for Array<S> {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use ndarray::array;
 
@@ -1558,7 +1557,7 @@ mod tests {
         S: ndarray::Data<Elem = T>,
         D: ndarray::Dimension + IntoDimension,
     {
-        let a = Array::compact_ndarray_with(&src, arr_params(block_shape)).unwrap();
+        let a = Array::compact_ndarray_with(src, arr_params(block_shape)).unwrap();
         a.to_ndarray().unwrap().into_dimensionality().unwrap()
     }
 
@@ -1587,11 +1586,7 @@ mod tests {
         Sh: IntoDimension,
     {
         let shape = shape.into_dimension().unwrap();
-        let shape = shape
-            .as_slice()
-            .iter()
-            .map(|&x| x as u64)
-            .collect::<DimArray<_>>();
+        let shape = shape.as_slice().iter().copied().collect::<DimArray<_>>();
         let block_shape = block_shape
             .iter()
             .map(|&x| x as BlockSize)
@@ -1689,7 +1684,6 @@ mod tests {
 
     #[test]
     fn to_ndarray_sub_1d_aligned_second_block() {
-        // range [3..6) -> output shape [3], values [3,4,5]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let got = a.to_ndarray_sub(&[3..6], &a.read_ctx()).unwrap();
         assert_eq!(got, array![3, 4, 5]);
@@ -1697,7 +1691,6 @@ mod tests {
 
     #[test]
     fn to_ndarray_sub_1d_cross_block_boundary() {
-        // range [1..5) -> output shape [4], values [1,2,3,4]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let got = a.to_ndarray_sub(&[1..5], &a.read_ctx()).unwrap();
         assert_eq!(got, array![1, 2, 3, 4]);
@@ -1705,7 +1698,6 @@ mod tests {
 
     #[test]
     fn to_ndarray_sub_1d_within_single_block() {
-        // range [1..2) -> output shape [1], value [1]
         let a = array(&[&[0u8, 1, 2], &[3, 4, 5]], &[6], &[3]);
         let got = a.to_ndarray_sub(&[1..2], &a.read_ctx()).unwrap();
         assert_eq!(got, array![1]);
@@ -2051,7 +2043,6 @@ mod tests {
         let src = array![10u8, 20, 30, 40];
         let a = Array::compact_ndarray_with(&src, arr_params(&[4])).unwrap();
         let b = a.compact().unwrap();
-        // Both should read back the same data independently.
         assert_eq!(a.to_ndarray().unwrap(), b.to_ndarray().unwrap());
     }
 

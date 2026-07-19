@@ -260,6 +260,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use ndarray::array;
     use proptest::prelude::*;
@@ -295,28 +296,24 @@ mod tests {
 
     #[test]
     fn shape_remove_leading() {
-        // [1, 6] remove axis 0 -> [6]
         let a = make1d(arange(6), 6).insert_axis(&[0]);
         assert_eq!(a.remove_axis(&[0]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_trailing() {
-        // [6, 1] remove axis 1 -> [6]
         let a = make1d(arange(6), 6).insert_axis(&[1]);
         assert_eq!(a.remove_axis(&[1]).shape(), &[6]);
     }
 
     #[test]
     fn shape_remove_middle() {
-        // [3, 1, 4] remove axis 1 -> [3, 4]
         let a = make2d(arange(12), 3, 4).insert_axis(&[1]);
         assert_eq!(a.remove_axis(&[1]).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_remove_multiple() {
-        // [1, 2, 1, 3, 1] remove axes [0, 2, 4] -> [2, 3]
         let a = make2d(arange(6), 2, 3).insert_axis(&[0, 1, 2]);
         assert_eq!(a.remove_axis(&[0, 2, 4]).shape(), &[2, 3]);
     }
@@ -401,7 +398,6 @@ mod tests {
 
     #[test]
     fn sub_read_after_remove_leading() {
-        // [1, 6] -> remove axis 0 -> [6]; read elements 2..5
         let got = make1d(arange(6), 6)
             .insert_axis(&[0])
             .remove_axis(&[0])
@@ -412,13 +408,11 @@ mod tests {
 
     #[test]
     fn sub_read_after_remove_middle() {
-        // [3, 1, 4] -> remove axis 1 -> [3, 4]; read rows 1..3, cols 0..2
         let got = make2d(arange(12), 3, 4)
             .insert_axis(&[1])
             .remove_axis(&[1])
             .to_ndarray_sub(&[1..3, 0..2], &ReadContext::default())
             .unwrap();
-        // row1=[4,5], row2=[8,9]
         assert_eq!(got, array![[4, 5], [8, 9]]);
     }
 
@@ -443,10 +437,10 @@ mod tests {
     #[test]
     fn error_duplicate_axis() {
         let a = make3d(arange(6), 1, 2, 3);
-        // axis 0 appears twice
         assert!(super::RemoveAxis::new_array(a, &[0, 0]).is_err());
     }
 
+    #[allow(clippy::type_complexity)]
     fn remove_axes_strategy<T>() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<T>,

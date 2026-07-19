@@ -385,6 +385,7 @@ impl ReadContext {
         self.tmp_buffers.get(size, alignment)
     }
 
+    #[allow(unused)]
     #[inline]
     pub(crate) fn tmp_buf_typed<T>(&self, nitems: usize) -> TmpBuf<'_> {
         self.tmp_buffers

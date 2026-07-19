@@ -480,7 +480,7 @@ mod tests {
     fn collect() {
         let v = AlignedBytes::from_iter(64, 0..4);
         assert_eq!(&*v, &[0, 1, 2, 3]);
-        let v = AlignedBytes::from_iter(64, repeat(77).take(4));
+        let v = AlignedBytes::from_iter(64, std::iter::repeat_n(77, 4));
         assert_eq!(&*v, &[77, 77, 77, 77]);
     }
 

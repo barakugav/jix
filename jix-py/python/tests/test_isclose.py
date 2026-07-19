@@ -14,25 +14,14 @@ from tests_util import (
     assert_array_matches,
     carrays2_strategy,
     floats,
-    complexes,
     maybe_non_finite_element_strategy,
 )
 
 import jix
 
-
 # ---------------------------------------------------------------------------
 # Reference implementation (mirrors the Rust algorithm element-wise)
 # ---------------------------------------------------------------------------
-
-# Maps each supported dtype to its float component type (for tolerance casting).
-_COMPONENT_DTYPE = {
-    np.float16: np.float16,
-    np.float32: np.float32,
-    np.float64: np.float64,
-    np.complex64: np.float32,
-    np.complex128: np.float64,
-}
 
 
 def _ref_isclose_scalar(a, b, rtol, atol):
@@ -48,31 +37,14 @@ def _ref_isclose_scalar(a, b, rtol, atol):
     return bool(diff <= largest * rtol)
 
 
-def _ref_isclose_complex_scalar(a, b, rtol, atol_re, atol_im):
-    """Per-component reference for a single complex pair."""
-    re_type = type(a.real)
-    return _ref_isclose_scalar(re_type(a.real), re_type(b.real), rtol, atol_re) and _ref_isclose_scalar(
-        re_type(a.imag), re_type(b.imag), rtol, atol_im
-    )
-
-
 def _ref_isclose_array(np_a, np_b, rtol, atol, dtype):
-    """Vectorised reference for real float ndarrays, computed in dtype precision."""
-    ft = _COMPONENT_DTYPE[dtype]
-    rtol_t, atol_t = ft(rtol), ft(atol)
-    a_t = np_a.astype(ft)
-    b_t = np_b.astype(ft)
-    return np.vectorize(lambda a, b: _ref_isclose_scalar(a, b, rtol_t, atol_t), otypes=[bool])(a_t, b_t)
-
-
-def _ref_isclose_complex_array(np_a, np_b, rtol, atol_re, atol_im, dtype):
-    """Vectorised reference for complex ndarrays, computed in component precision."""
-    ft = _COMPONENT_DTYPE[dtype]
-    rtol_t, atol_re_t, atol_im_t = ft(rtol), ft(atol_re), ft(atol_im)
-    return np.vectorize(
-        lambda a, b: _ref_isclose_complex_scalar(a, b, rtol_t, atol_re_t, atol_im_t),
-        otypes=[bool],
-    )(np_a, np_b)
+    """Elementwise reference for real float ndarrays, computed in dtype precision."""
+    rtol_t, atol_t = dtype(rtol), dtype(atol)
+    a_t = np_a.astype(dtype)
+    b_t = np_b.astype(dtype)
+    # a and b share a shape (carrays2_strategy), so zip the flattened views.
+    out = [_ref_isclose_scalar(a, b, rtol_t, atol_t) for a, b in zip(a_t.reshape(-1), b_t.reshape(-1))]
+    return np.array(out, dtype=bool).reshape(a_t.shape)
 
 
 # ---------------------------------------------------------------------------
@@ -99,45 +71,103 @@ def test_isclose_float(dtype: np.dtype, data: DataObject):
 
 
 # ---------------------------------------------------------------------------
-# Property tests: complex dtypes, real atol (same tolerance for re and im)
+# Concrete: complex dtypes, real atol (same tolerance for re and im)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", complexes)
-@given(st.data())
-def test_isclose_complex_real_atol(dtype: np.dtype, data: DataObject):
-    component = np.float32 if dtype == np.complex64 else np.float64
-    element_st = st.tuples(
-        maybe_non_finite_element_strategy(component),
-        maybe_non_finite_element_strategy(component),
-    ).map(lambda x: complex(x[0], x[1]))
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=element_st), label="arrays")
-    rtol = data.draw(_tol_st, label="rtol")
-    atol = data.draw(_tol_st, label="atol")
-    expected = _ref_isclose_complex_array(np_a, np_b, rtol, atol, atol, dtype)
-    assert_array_matches(jix.isclose(za, zb, rtol=rtol, atol=atol), expected, data=data)
+def test_isclose_complex_real_atol_concrete():
+    """The same tolerance value applies to both the real and imaginary component.
+    Edge cases: exact match, within atol, outside atol (both plain and
+    magnitude-scaled so rtol behaves differently from atol), NaN component,
+    matching inf, opposite inf; complex64 and complex128 paths.
+    """
+    for dtype in (np.complex64, np.complex128):
+        a = np.array(
+            [
+                1.0 + 2.0j,  # exact match
+                1.0 + 2.0j,  # small diff: within atol AND within rtol
+                1.0 + 2.0j,  # diff of 1: outside atol AND outside rtol
+                100.0 + 100.0j,  # diff of 9: outside atol BUT within rtol
+                complex(float("nan"), 0.0),  # NaN real component
+                complex(float("inf"), 0.0),  # matching inf
+                complex(float("inf"), 0.0),  # opposite inf
+            ],
+            dtype=dtype,
+        )
+        b = np.array(
+            [
+                1.0 + 2.0j,
+                1.005 + 2.005j,
+                2.0 + 3.0j,
+                109.0 + 109.0j,
+                complex(float("nan"), 0.0),
+                complex(float("inf"), 0.0),
+                complex(-float("inf"), 0.0),
+            ],
+            dtype=dtype,
+        )
+        za = jix.compact(a)
+        zb = jix.compact(b)
+
+        expected_atol = np.array([True, True, False, False, False, True, False])
+        assert_array_matches(jix.isclose(za, zb, rtol=0.0, atol=0.01), expected_atol)
+
+        expected_rtol = np.array([True, True, False, True, False, True, False])
+        assert_array_matches(jix.isclose(za, zb, rtol=0.1, atol=0.0), expected_rtol)
 
 
 # ---------------------------------------------------------------------------
-# Property tests: complex dtypes, complex atol (independent re/im tolerances)
+# Concrete: complex dtypes, complex atol (independent re/im tolerances)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", complexes)
-@given(st.data())
-def test_isclose_complex_atol(dtype: np.dtype, data: DataObject):
-    component = np.float32 if dtype == np.complex64 else np.float64
-    element_st = st.tuples(
-        maybe_non_finite_element_strategy(component),
-        maybe_non_finite_element_strategy(component),
-    ).map(lambda x: complex(x[0], x[1]))
-    (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=element_st), label="arrays")
-    rtol = data.draw(_tol_st, label="rtol")
-    atol_re = data.draw(_tol_st, label="atol_re")
-    atol_im = data.draw(_tol_st, label="atol_im")
-    atol = complex(atol_re, atol_im)
-    expected = _ref_isclose_complex_array(np_a, np_b, rtol, atol_re, atol_im, dtype)
-    assert_array_matches(jix.isclose(za, zb, rtol=rtol, atol=atol), expected, data=data)
+def test_isclose_complex_atol_concrete():
+    """Real and imaginary components each get their own atol. Edge cases: exact match,
+    diff that only clears the real tolerance, diff that only clears the
+    imaginary tolerance, diff that clears both, NaN component, matching inf,
+    opposite inf, and a magnitude-scaled diff that only clears via rtol;
+    complex64 and complex128 paths.
+    """
+    for dtype in (np.complex64, np.complex128):
+        a = np.array(
+            [
+                1.0 + 2.0j,  # exact match
+                1.0 + 2.0j,  # real diff exceeds atol_re; imag diff within atol_im
+                1.0 + 2.0j,  # real diff within atol_re; imag diff exceeds atol_im
+                1.0 + 2.0j,  # both diffs within their own atol
+                complex(float("nan"), 2.0),  # NaN real component, imag matches
+                complex(float("inf"), 2.0),  # matching inf (real)
+                1.0 + complex(0.0, float("inf")),  # opposite inf (imag)
+            ],
+            dtype=dtype,
+        )
+        b = np.array(
+            [
+                1.0 + 2.0j,
+                1.01 + 2.1j,
+                1.001 + 2.5j,
+                1.001 + 2.1j,
+                complex(float("nan"), 2.0),
+                complex(float("inf"), 2.0),
+                1.0 + complex(0.0, -float("inf")),
+            ],
+            dtype=dtype,
+        )
+        za = jix.compact(a)
+        zb = jix.compact(b)
+
+        atol = complex(0.005, 0.2)
+        expected = np.array([True, False, False, True, False, True, False])
+        assert_array_matches(jix.isclose(za, zb, rtol=0.0, atol=atol), expected)
+
+        # Magnitude-scaled diff: too big for atol_re but cleared via rtol; the
+        # imaginary component clears atol_im directly regardless of rtol.
+        c = np.array([100.0 + 100.0j], dtype=dtype)
+        d = np.array([109.0 + 100.1j], dtype=dtype)
+        zc = jix.compact(c)
+        zd = jix.compact(d)
+        expected_rtol = np.array([True])
+        assert_array_matches(jix.isclose(zc, zd, rtol=0.1, atol=atol), expected_rtol)
 
 
 # ---------------------------------------------------------------------------

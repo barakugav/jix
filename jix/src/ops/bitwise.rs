@@ -500,98 +500,202 @@ mod tests {
     use crate::ops::op1::tests::test_op1;
     use crate::ops::op2::tests::test_op2;
 
-    // bitwise_not: !a, full range is valid (no overflow for bitwise complement)
-    test_op1!(
-        not,
-        |a| !a,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
-        any_strategy
-    );
-    // bit-counting ops: full range is valid, output is u32
-    test_op1!(
-        count_ones,
-        |a| a.count_ones(),
-        [i8, i16, i32, i64, u8, u16, u32, u64],
-        any_strategy
-    );
-    test_op1!(
-        count_zeros,
-        |a| a.count_zeros(),
-        [i8, i16, i32, i64, u8, u16, u32, u64],
-        any_strategy
-    );
-    test_op1!(
-        leading_zeros,
-        |a| a.leading_zeros(),
-        [i8, i16, i32, i64, u8, u16, u32, u64],
-        any_strategy
-    );
-    test_op1!(
-        trailing_zeros,
-        |a| a.trailing_zeros(),
-        [i8, i16, i32, i64, u8, u16, u32, u64],
-        any_strategy
-    );
-    // byte/bit permutation ops: same output type, full range is valid
-    test_op1!(
-        swap_bytes,
-        |a| a.swap_bytes(),
-        [i16, i32, i64, u16, u32, u64],
-        any_strategy
-    );
-    test_op1!(
-        reverse_bits,
-        |a| a.reverse_bits(),
-        [i8, i16, i32, i64, u8, u16, u32, u64],
-        any_strategy
-    );
-
-    // bitwise_and/or/xor: same output type, full range valid
-    test_op2!(
-        bitand,
-        |a, b| a & b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
-        any_strategy
-    );
-    test_op2!(
-        bitor,
-        |a, b| a | b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
-        any_strategy
-    );
-    test_op2!(
-        bitxor,
-        |a, b| a ^ b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
-        any_strategy
-    );
-
-    // shift ops: shift amount b must be in [0, bit_width) to avoid debug panic
+    test_op1!(count_ones, |a| a.count_ones(), [u8, u32], any_strategy);
+    test_op2!(bitand, |a, b| a & b, [u8, u32], any_strategy);
     test_op2!(
         bitwise_shift_left,
         |a, b| a.unbounded_shl(b as u32),
-        [i8, i16, i32, i64, u8, u16, u32, u64],
-        shift_safe_strategy
-    );
-    test_op2!(
-        bitwise_shift_right,
-        |a, b| a.unbounded_shr(b as u32),
-        [i8, i16, i32, i64, u8, u16, u32, u64],
+        [u8, u32],
         shift_safe_strategy
     );
 
-    // TODO
-    // rotate ops: rotation wraps modulo bit width, so any value of b is valid
-    // test_op2!(
-    //     bitwise_rotate_left,
-    //     |a, b| a.rotate_left(b as u32),
-    //     [i8, i16, i32, i64, u8, u16, u32, u64],
-    //     any_strategy
-    // );
-    // test_op2!(
-    //     bitwise_rotate_right,
-    //     |a, b| a.rotate_right(b as u32),
-    //     [i8, i16, i32, i64, u8, u16, u32, u64],
-    //     any_strategy
-    // );
+    // Surplus widths (u16, u64) of the three ops kept as property tests above: u8/u32 are
+    // already covered there, so only the remaining two byte widths need concrete coverage.
+
+    // Edge-value inputs shared by the `*_concrete` tests below: 0, MAX (all bits set), a
+    // single set bit, and an alternating 0xAA bit pattern, one array per byte width. The `_2`
+    // arrays pair each value with a different one at the same index, so binary ops
+    // (bitand/bitor/bitxor) get every "one side is the edge value" combination exercised.
+    const EDGE_U8: [u8; 4] = [0, u8::MAX, 1, 0xAA];
+    const EDGE_U8_2: [u8; 4] = [u8::MAX, 0, 0xAA, 1];
+    const EDGE_U16: [u16; 4] = [0, u16::MAX, 1, 0xAAAA];
+    const EDGE_U16_2: [u16; 4] = [u16::MAX, 0, 0xAAAA, 1];
+    const EDGE_U32: [u32; 4] = [0, u32::MAX, 1, 0xAAAA_AAAA];
+    const EDGE_U32_2: [u32; 4] = [u32::MAX, 0, 0xAAAA_AAAA, 1];
+    const EDGE_U64: [u64; 4] = [0, u64::MAX, 1, 0xAAAA_AAAA_AAAA_AAAA];
+    const EDGE_U64_2: [u64; 4] = [u64::MAX, 0, 0xAAAA_AAAA_AAAA_AAAA, 1];
+
+    // Shift-amount arrays for the shift ops: 0 and width - 1 alongside 1 and half the width,
+    // matching the `EDGE_*` array of the same width.
+    const SHIFT_U8: [u8; 4] = [0, 7, 1, 4];
+    const SHIFT_U16: [u16; 4] = [0, 15, 1, 8];
+    const SHIFT_U32: [u32; 4] = [0, 31, 1, 16];
+    const SHIFT_U64: [u64; 4] = [0, 63, 1, 32];
+
+    // A single unary-op assertion for one input array: compact it, apply `$method`, and check
+    // against the `ndarray`-computed reference `$body`.
+    macro_rules! concrete_op1_case {
+        ($method:ident, |$a:ident| $body:expr, $arr:expr) => {{
+            use crate::Array;
+            let nd = ndarray::arr1(&$arr);
+            let za = Array::compact_ndarray(&nd).unwrap();
+            let expected = nd.mapv(|$a| $body);
+            crate::util::assert_array_matches(&za.as_ref().$method(), &expected);
+        }};
+    }
+
+    // A `#[test]` fn running `concrete_op1_case!` for each input array in `[...]`.
+    macro_rules! concrete_op1 {
+        ($name:ident, $method:ident, |$a:ident| $body:expr, [$($arr:expr),+ $(,)?]) => {
+            #[test]
+            fn $name() {
+                $(concrete_op1_case!($method, |$a| $body, $arr);)+
+            }
+        };
+    }
+
+    // A single binary-op assertion for one pair of input arrays (the second array is the
+    // shift amount for the shift ops).
+    macro_rules! concrete_op2_case {
+        ($method:ident, |$a:ident, $b:ident| $body:expr, $arr_a:expr, $arr_b:expr) => {{
+            use crate::Array;
+            let nd_a = ndarray::arr1(&$arr_a);
+            let nd_b = ndarray::arr1(&$arr_b);
+            let za = Array::compact_ndarray(&nd_a).unwrap();
+            let zb = Array::compact_ndarray(&nd_b).unwrap();
+            let expected = ndarray::Zip::from(&nd_a)
+                .and(&nd_b)
+                .map_collect(|&$a, &$b| $body);
+            crate::util::assert_array_matches(&za.as_ref().$method(zb.as_ref()), &expected);
+        }};
+    }
+
+    // A `#[test]` fn running `concrete_op2_case!` for each array pair in `[...]`.
+    macro_rules! concrete_op2 {
+        (
+            $name:ident, $method:ident, |$a:ident, $b:ident| $body:expr,
+            [$(($arr_a:expr, $arr_b:expr)),+ $(,)?]
+        ) => {
+            #[test]
+            fn $name() {
+                $(concrete_op2_case!($method, |$a, $b| $body, $arr_a, $arr_b);)+
+            }
+        };
+    }
+
+    concrete_op1!(
+        count_ones_concrete,
+        count_ones,
+        |a| a.count_ones(),
+        [EDGE_U16, EDGE_U64]
+    );
+
+    concrete_op2!(
+        bitand_concrete,
+        bitand,
+        |a, b| a & b,
+        [(EDGE_U16, EDGE_U16_2), (EDGE_U64, EDGE_U64_2)]
+    );
+
+    // shift amounts include 0 and width - 1, the values kept in `SHIFT_*` above.
+    concrete_op2!(
+        bitwise_shift_left_concrete,
+        bitwise_shift_left,
+        |a, b| a.unbounded_shl(b as u32),
+        [(EDGE_U16, SHIFT_U16), (EDGE_U64, SHIFT_U64)]
+    );
+
+    #[test]
+    fn not_concrete() {
+        use crate::Array;
+
+        // Edge inputs per width: 0, MAX (all ones), a single set bit, and an alternating
+        // 0xAA pattern.
+        concrete_op1_case!(not, |a| !a, EDGE_U8);
+        concrete_op1_case!(not, |a| !a, EDGE_U16);
+        concrete_op1_case!(not, |a| !a, EDGE_U32);
+
+        // Non-default block shape (2 blocks of 2 elements) so a multi-block read exercises
+        // this op family too.
+        let a64 = ndarray::arr1(&EDGE_U64);
+        let za64 = Array::compact_ndarray_with(&a64, crate::util::arr_params(&[2])).unwrap();
+        let expected64 = a64.mapv(|a: u64| !a);
+        crate::util::assert_array_matches(&za64.as_ref().not(), &expected64);
+    }
+
+    concrete_op1!(
+        count_zeros_concrete,
+        count_zeros,
+        |a| a.count_zeros(),
+        [EDGE_U8, EDGE_U16, EDGE_U32, EDGE_U64]
+    );
+
+    concrete_op1!(
+        leading_zeros_concrete,
+        leading_zeros,
+        |a| a.leading_zeros(),
+        [EDGE_U8, EDGE_U16, EDGE_U32, EDGE_U64]
+    );
+
+    concrete_op1!(
+        trailing_zeros_concrete,
+        trailing_zeros,
+        |a| a.trailing_zeros(),
+        [EDGE_U8, EDGE_U16, EDGE_U32, EDGE_U64]
+    );
+
+    // No u8 case: single-byte types don't support swap_bytes (swapping one byte is a no-op),
+    // see the doc comment on `SwapBytes` above.
+    concrete_op1!(
+        swap_bytes_concrete,
+        swap_bytes,
+        |a| a.swap_bytes(),
+        [EDGE_U16, EDGE_U32, EDGE_U64]
+    );
+
+    concrete_op1!(
+        reverse_bits_concrete,
+        reverse_bits,
+        |a| a.reverse_bits(),
+        [EDGE_U8, EDGE_U16, EDGE_U32, EDGE_U64]
+    );
+
+    // Each operand pairs an edge value against its permuted partner (`EDGE_*_2`) so every
+    // "one side is the edge value" combination is exercised.
+    concrete_op2!(
+        bitor_concrete,
+        bitor,
+        |a, b| a | b,
+        [
+            (EDGE_U8, EDGE_U8_2),
+            (EDGE_U16, EDGE_U16_2),
+            (EDGE_U32, EDGE_U32_2),
+            (EDGE_U64, EDGE_U64_2),
+        ]
+    );
+
+    concrete_op2!(
+        bitxor_concrete,
+        bitxor,
+        |a, b| a ^ b,
+        [
+            (EDGE_U8, EDGE_U8_2),
+            (EDGE_U16, EDGE_U16_2),
+            (EDGE_U32, EDGE_U32_2),
+            (EDGE_U64, EDGE_U64_2),
+        ]
+    );
+
+    // shift amounts include 0 and width - 1 alongside the edge values being shifted.
+    concrete_op2!(
+        bitwise_shift_right_concrete,
+        bitwise_shift_right,
+        |a, b| a.unbounded_shr(b as u32),
+        [
+            (EDGE_U8, SHIFT_U8),
+            (EDGE_U16, SHIFT_U16),
+            (EDGE_U32, SHIFT_U32),
+            (EDGE_U64, SHIFT_U64),
+        ]
+    );
 }

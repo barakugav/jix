@@ -497,7 +497,6 @@ mod tests {
 
     #[test]
     fn shape_slice_rows() {
-        // tuple syntax: (1..3, ..) keeps rows 1 and 2
         assert_eq!(make2d(arange(12), 3, 4).slice((1..3, ..)).shape(), &[2, 4]);
     }
 
@@ -513,7 +512,6 @@ mod tests {
 
     #[test]
     fn shape_slice_empty_dim() {
-        // empty range on axis 0
         assert_eq!(make2d(arange(12), 3, 4).slice((1..1, ..)).shape(), &[0, 4]);
     }
 
@@ -565,7 +563,6 @@ mod tests {
 
     #[test]
     fn full_read_3d_slice() {
-        // [2,3,4] -> (0..2, 1..3, 1..3)
         let got = make3d(arange(24), 2, 3, 4)
             .slice((0..2, 1..3, 1..3))
             .to_ndarray()
@@ -579,7 +576,6 @@ mod tests {
 
     #[test]
     fn full_read_strided_axis1_step2() {
-        // [3, 8], step 2 on axis 1 -> cols 0,2,4,6
         let got = make2d(arange(24), 3, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray()
@@ -589,7 +585,6 @@ mod tests {
 
     #[test]
     fn full_read_strided_axis0_step2() {
-        // [6, 4], step 2 on axis 0 -> rows 0, 2, 4
         let got = make2d(arange(24), 6, 4)
             .slice((SliceItem::new(None, None, 2), ..))
             .to_ndarray()
@@ -599,7 +594,6 @@ mod tests {
 
     #[test]
     fn full_read_strided_both_axes() {
-        // [4, 6], step 2 on both -> rows 0,2; cols 0,2,4
         let got = make2d(arange(24), 4, 6)
             .slice((SliceItem::new(None, None, 2), SliceItem::new(None, None, 2)))
             .to_ndarray()
@@ -621,7 +615,6 @@ mod tests {
 
     #[test]
     fn full_read_strided_3d() {
-        // [4, 4, 4], step 2 on middle axis
         let got = make3d(arange(64), 4, 4, 4)
             .slice((.., SliceItem::new(None, None, 2), ..))
             .to_ndarray()
@@ -672,7 +665,6 @@ mod tests {
             .slice((.., -4..-1))
             .to_ndarray()
             .unwrap();
-        // row 0: [2,3,4]; row 1: [8,9,10]; row 2: [14,15,16]
         assert_eq!(got, array![[2, 3, 4], [8, 9, 10], [14, 15, 16]]);
     }
 
@@ -702,7 +694,6 @@ mod tests {
 
     #[test]
     fn sub_read_within_strided_slice() {
-        // [6, 8] step 2 on axis 1 -> shape [6, 4]; then read only row 0
         let got = make2d(arange(48), 6, 8)
             .slice((.., SliceItem::new(None, None, 2)))
             .to_ndarray_sub(&[0..1, 0..4], &ReadContext::default())
@@ -755,6 +746,7 @@ mod tests {
     // Proptest: arbitrary shape, per-dim start/end/step, ndarray oracle
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::type_complexity)]
     fn slice_strategy<T>() -> impl Strategy<
         Value = (
             ndarray::ArrayD<T>,

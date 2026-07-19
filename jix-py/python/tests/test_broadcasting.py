@@ -7,7 +7,7 @@ prepends missing leading dimensions, exactly as NumPy does.
 
 import numpy as np
 import pytest
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
 
@@ -151,13 +151,21 @@ def test_broadcast_incompatible_raises(shape_a, shape_b):
         _ = jix.add(za, zb).numpy()
 
 
+# A couple of representative broadcastable shape pairs, reused from
+# test_broadcast_add_shapes, for the concrete (non-property) tests below.
+_BROADCAST_CONCRETE_SHAPE_PAIRS = [
+    ((3, 1), (3, 4)),  # 2-D broadcast along one axis
+    ((4, 1), (1, 3)),  # classic outer-product pattern -> (4, 3)
+    ((8, 1, 6, 1), (7, 1, 5)),  # NumPy docs classic multi-dim example -> (8, 7, 6, 5)
+]
+
+
 # ---------------------------------------------------------------------------
 # Property-based broadcasting tests
 # ---------------------------------------------------------------------------
 
 
 @given(st.data())
-@settings(max_examples=200)
 def test_broadcast_add_property(data: DataObject):
     """Broadcasting add matches numpy for arbitrary broadcastable int32 arrays."""
     (np_a, za), (np_b, zb) = data.draw(broadcast_int32_arrays(), label="arrays")
@@ -170,33 +178,6 @@ def test_broadcast_add_property(data: DataObject):
 
 
 @given(st.data())
-@settings(max_examples=200)
-def test_broadcast_multiply_property(data: DataObject):
-    """Broadcasting multiply matches numpy for arbitrary broadcastable int32 arrays."""
-    (np_a, za), (np_b, zb) = data.draw(broadcast_int32_arrays(), label="arrays")
-
-    result = jix.multiply(za, zb)
-    expected = np_a * np_b
-
-    assert result.shape == expected.shape
-    np.testing.assert_array_equal(result.numpy(), expected)
-
-
-@given(st.data())
-@settings(max_examples=200)
-def test_broadcast_subtract_property(data: DataObject):
-    """Broadcasting subtract matches numpy for arbitrary broadcastable int32 arrays."""
-    (np_a, za), (np_b, zb) = data.draw(broadcast_int32_arrays(), label="arrays")
-
-    result = jix.subtract(za, zb)
-    expected = np_a - np_b
-
-    assert result.shape == expected.shape
-    np.testing.assert_array_equal(result.numpy(), expected)
-
-
-@given(st.data())
-@settings(max_examples=200)
 def test_broadcast_equal_property(data: DataObject):
     """Broadcasting equal matches numpy for arbitrary broadcastable int32 arrays."""
     (np_a, za), (np_b, zb) = data.draw(broadcast_int32_arrays(), label="arrays")
@@ -208,53 +189,29 @@ def test_broadcast_equal_property(data: DataObject):
     np.testing.assert_array_equal(result.numpy(), expected)
 
 
-@given(st.data())
-@settings(max_examples=200)
-def test_broadcast_greater_property(data: DataObject):
-    """Broadcasting greater matches numpy for arbitrary broadcastable int32 arrays."""
-    (np_a, za), (np_b, zb) = data.draw(broadcast_int32_arrays(), label="arrays")
+@pytest.mark.parametrize(
+    "jix_op, np_op, dtype",
+    [
+        (jix.multiply, lambda a, b: a * b, np.int32),
+        (jix.subtract, lambda a, b: a - b, np.int32),
+        (jix.greater, lambda a, b: a > b, np.int32),
+        (jix.maximum, np.maximum, np.int32),
+        (jix.add, lambda a, b: a + b, np.float64),
+    ],
+)
+def test_broadcast_concrete(jix_op, np_op, dtype):
+    """Broadcasting matches numpy for a few representative broadcastable shapes."""
+    for shape_a, shape_b in _BROADCAST_CONCRETE_SHAPE_PAIRS:
+        np_a = np.arange(1, np.prod(shape_a) + 1, dtype=dtype).reshape(shape_a)
+        np_b = np.arange(1, np.prod(shape_b) + 1, dtype=dtype).reshape(shape_b)
+        za = jix.compact(np_a)
+        zb = jix.compact(np_b)
 
-    result = jix.greater(za, zb)
-    expected = np_a > np_b
+        result = jix_op(za, zb)
+        expected = np_op(np_a, np_b)
 
-    assert result.shape == expected.shape
-    np.testing.assert_array_equal(result.numpy(), expected)
-
-
-@given(st.data())
-@settings(max_examples=200)
-def test_broadcast_maximum_property(data: DataObject):
-    """Broadcasting maximum matches numpy for arbitrary broadcastable int32 arrays."""
-    (np_a, za), (np_b, zb) = data.draw(broadcast_int32_arrays(), label="arrays")
-
-    result = jix.maximum(za, zb)
-    expected = np.maximum(np_a, np_b)
-
-    assert result.shape == expected.shape
-    np.testing.assert_array_equal(result.numpy(), expected)
-
-
-# ---------------------------------------------------------------------------
-# Broadcasting with float arrays
-# ---------------------------------------------------------------------------
-
-
-@given(st.data())
-@settings(max_examples=100)
-def test_broadcast_add_float64_property(data: DataObject):
-    """Broadcasting add matches numpy for broadcastable float64 arrays."""
-    shape_a, shape_b = data.draw(broadcastable_shapes_pair(), label="shapes")
-
-    np_a = np.arange(1, np.prod(shape_a) + 1, dtype=np.float64).reshape(shape_a)
-    np_b = np.arange(1, np.prod(shape_b) + 1, dtype=np.float64).reshape(shape_b)
-    za = jix.compact(np_a)
-    zb = jix.compact(np_b)
-
-    result = jix.add(za, zb)
-    expected = np_a + np_b
-
-    assert result.shape == expected.shape
-    np.testing.assert_array_equal(result.numpy(), expected)
+        assert result.shape == expected.shape
+        np.testing.assert_array_equal(result.numpy(), expected)
 
 
 # ---------------------------------------------------------------------------

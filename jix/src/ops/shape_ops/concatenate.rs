@@ -275,7 +275,7 @@ mod tests {
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::{Array, DimDyn, Ty};
 
-    // 1D i32: concatenate two arrays of equal size along axis 0 (in-place path)
+    // in-place path
     #[test]
     fn test_i32_1d_equal_sizes() {
         let a = array![1i32, 2, 3];
@@ -287,7 +287,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 1D i32: concatenate two arrays of unequal sizes along axis 0
     #[test]
     fn test_i32_1d_unequal_sizes() {
         let a = array![1i32, 2];
@@ -299,7 +298,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 1D i32: concatenate three arrays along axis 0
     #[test]
     fn test_i32_1d_three_arrays() {
         let a = array![1i32, 2];
@@ -314,7 +312,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 2D i32: concatenate along axis 0 - in-place path
+    // in-place path
     #[test]
     fn test_i32_2d_axis0() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
@@ -326,7 +324,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 2D i32: concatenate along axis 1 - scatter path
+    // scatter path
     #[test]
     fn test_i32_2d_axis1() {
         let a = array![[1i32, 2], [3, 4], [5, 6]];
@@ -338,7 +336,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 2D i32: three arrays along axis 1 with unequal sizes - scatter path
+    // scatter path
     #[test]
     fn test_i32_2d_axis1_three_unequal() {
         let a = array![[1i32], [2]];
@@ -353,7 +351,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 1D f32: concatenate two arrays along axis 0
     #[test]
     fn test_f32_1d_axis0() {
         let a = array![1.0f32, 2.0, 3.0];
@@ -365,7 +362,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 2D f32: concatenate along axis 1 - scatter path
+    // scatter path
     #[test]
     fn test_f32_2d_axis1() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0]];
@@ -411,6 +408,7 @@ mod tests {
     // Proptest: arbitrary ndim, arbitrary axis, arbitrary number of arrays
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::type_complexity)]
     fn concat_strategy<T>() -> impl Strategy<
         Value = (
             Vec<ndarray::ArrayD<T>>,

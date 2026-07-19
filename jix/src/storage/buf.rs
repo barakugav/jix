@@ -425,7 +425,7 @@ mod tests {
         assert_eq!(backing, [1, 2, 3, 0, 4, 5, 6, 0]);
     }
 
-    /// A plain contiguous destination is handed out directly, as before.
+    /// A plain contiguous destination is handed out directly.
     #[test]
     fn contiguous_outbuf_is_direct() {
         let dtype = i32_dtype();

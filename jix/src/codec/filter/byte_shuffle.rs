@@ -196,23 +196,20 @@ mod tests {
         };
     }
 
+    // This filter operates on raw bytes keyed only by itemsize, so dtypes that
+    // share a byte width run byte-identical code (same principle as the
+    // `copy_tests!` dedup at `jix/src/util/nd_copy.rs:916`, e.g. i32/f32 both
+    // hit the same 4-byte path as u32). Keep one representative dtype per
+    // distinct itemsize actually exercised here: 1 (u8, also covers i8/bool),
+    // 2 (u16, also covers i16/f16), 4 (u32, also covers i32/f32), 8 (u64, also
+    // covers i64/f64/Complex<f32>), and 16 (Complex<f64>, not covered by any
+    // narrower width).
     test_roundtrip!(u8, u8_roundtrip);
     test_roundtrip!(u16, u16_roundtrip);
     test_roundtrip!(u32, u32_roundtrip);
     test_roundtrip!(u64, u64_roundtrip);
-    test_roundtrip!(i8, i8_roundtrip);
-    test_roundtrip!(i16, i16_roundtrip);
-    test_roundtrip!(i32, i32_roundtrip);
-    test_roundtrip!(i64, i64_roundtrip);
-    #[cfg(feature = "half")]
-    test_roundtrip!(crate::scalar::f16, f16_roundtrip);
-    test_roundtrip!(f32, f32_roundtrip);
-    test_roundtrip!(f64, f64_roundtrip);
-    #[cfg(feature = "num-complex")]
-    test_roundtrip!(Complex<f32>, complex_f32_roundtrip);
     #[cfg(feature = "num-complex")]
     test_roundtrip!(Complex<f64>, complex_f64_roundtrip);
-    test_roundtrip!(bool, bool_roundtrip);
 
     macro_rules! test_agrees_with_reference {
         ($ty:ty, $fn_name:ident) => {
@@ -225,13 +222,12 @@ mod tests {
         };
     }
 
+    // Same itemsize-only dedup as the roundtrip macros above: one dtype per
+    // distinct byte width (1/2/4/8/16), see `jix/src/util/nd_copy.rs:916`.
     test_agrees_with_reference!(u8, u8_agrees_with_reference);
     test_agrees_with_reference!(u16, u16_agrees_with_reference);
     test_agrees_with_reference!(u32, u32_agrees_with_reference);
     test_agrees_with_reference!(u64, u64_agrees_with_reference);
     #[cfg(feature = "num-complex")]
-    test_agrees_with_reference!(Complex<f32>, complex_f32_agrees_with_reference);
-    #[cfg(feature = "num-complex")]
     test_agrees_with_reference!(Complex<f64>, complex_f64_agrees_with_reference);
-    test_agrees_with_reference!(bool, bool_agrees_with_reference);
 }

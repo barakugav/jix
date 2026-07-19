@@ -238,7 +238,6 @@ mod tests {
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
     use crate::{DimDyn, Ty, NDIM_MAX};
 
-    // stack two 1D i32 arrays along axis 0 -> shape [2, N]
     #[test]
     fn test_i32_1d_axis0() {
         let a = array![1i32, 2, 3, 4];
@@ -250,7 +249,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // stack two 1D i32 arrays along axis 1 -> shape [N, 2]
     #[test]
     fn test_i32_1d_axis1() {
         let a = array![1i32, 2, 3];
@@ -262,7 +260,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // stack two 2D i32 arrays along axis 0 -> shape [2, M, N]
     #[test]
     fn test_i32_2d_axis0() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
@@ -274,7 +271,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // stack two 2D i32 arrays along axis 1 -> shape [M, 2, N]
     #[test]
     fn test_i32_2d_axis1() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
@@ -288,7 +284,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // stack three 1D i32 arrays along axis 0 -> shape [3, N]
     #[test]
     fn test_i32_three_arrays() {
         let a = array![1i32, 2, 3];
@@ -302,7 +297,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // stack two 1D f32 arrays along axis 0 -> shape [2, N]
     #[test]
     fn test_f32_1d_axis0() {
         let a = array![1.0f32, 2.0, 3.0, 4.0];
@@ -314,7 +308,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // stack two 2D f32 arrays along axis 1 -> shape [M, 2, N]
     #[test]
     fn test_f32_2d_axis1() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
@@ -326,7 +319,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // stack three f32 arrays along axis 0 with multi-block layout
     #[test]
     fn test_f32_three_arrays_multi_block() {
         let a = array![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -370,6 +362,7 @@ mod tests {
     // Proptest: arbitrary ndim, arbitrary axis, arbitrary number of arrays
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::type_complexity)]
     fn stack_strategy<T>() -> impl Strategy<
         Value = (
             Vec<ndarray::ArrayD<T>>,

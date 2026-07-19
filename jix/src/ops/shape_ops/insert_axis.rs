@@ -330,19 +330,16 @@ mod tests {
 
     #[test]
     fn shape_insert_before_first_dim() {
-        // gap 0 on [6] -> [1, 6]
         assert_eq!(make1d(arange(6), 6).insert_axis(&[0]).shape(), &[1, 6]);
     }
 
     #[test]
     fn shape_insert_after_last_dim() {
-        // gap 1 (=orig_ndim) on [6] -> [6, 1]
         assert_eq!(make1d(arange(6), 6).insert_axis(&[1]).shape(), &[6, 1]);
     }
 
     #[test]
     fn shape_insert_between_dims() {
-        // gap 1 on [3, 4] -> [3, 1, 4]
         assert_eq!(
             make2d(arange(12), 3, 4).insert_axis(&[1]).shape(),
             &[3, 1, 4]
@@ -351,7 +348,6 @@ mod tests {
 
     #[test]
     fn shape_insert_front_and_back() {
-        // gaps 0 and 1 on [6] -> [1, 6, 1]
         assert_eq!(
             make1d(arange(6), 6).insert_axis(&[0, 1]).shape(),
             &[1, 6, 1]
@@ -360,7 +356,6 @@ mod tests {
 
     #[test]
     fn shape_insert_duplicates_same_gap() {
-        // gaps 0, 0 on [3, 4] -> [1, 1, 3, 4]
         assert_eq!(
             make2d(arange(12), 3, 4).insert_axis(&[0, 0]).shape(),
             &[1, 1, 3, 4]
@@ -369,7 +364,6 @@ mod tests {
 
     #[test]
     fn shape_insert_user_example() {
-        // axes=(0,1,1,1,3) on (N=2, M=3, K=4) -> (1, 2, 1, 1, 1, 3, 4, 1)
         let a = make3d(arange(24), 2, 3, 4);
         assert_eq!(
             a.insert_axis(&[0, 1, 1, 1, 3]).shape(),
@@ -438,7 +432,6 @@ mod tests {
 
     #[test]
     fn full_read_insert_user_example() {
-        // axes=(0,1,1,1,3) on (2,3,4) -> (1,2,1,1,1,3,4,1), elements unchanged
         let got = make3d(arange(24), 2, 3, 4)
             .insert_axis(&[0, 1, 1, 1, 3])
             .to_ndarray()
@@ -467,7 +460,6 @@ mod tests {
 
     #[test]
     fn sub_read_inserted_dim_is_stripped() {
-        // [1, 6]: read [0..1, 2..5] -> same as reading [2..5] from the 1D inner
         let got = make1d(arange(6), 6)
             .insert_axis(&[0])
             .to_ndarray_sub(&[0..1, 2..5], &ReadContext::default())
@@ -477,12 +469,10 @@ mod tests {
 
     #[test]
     fn sub_read_2d_with_inserted_middle() {
-        // [3, 1, 4]: read rows 1..3, inserted dim 0..1, cols 0..2
         let got = make2d(arange(12), 3, 4)
             .insert_axis(&[1])
             .to_ndarray_sub(&[1..3, 0..1, 0..2], &ReadContext::default())
             .unwrap();
-        // row1=[4,5], row2=[8,9]
         assert_eq!(got, array![[[4, 5]], [[8, 9]]]);
     }
 
@@ -501,6 +491,7 @@ mod tests {
     // Proptest: arbitrary shape, arbitrary gap multiset, order-independent
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::type_complexity)]
     fn insert_axis_strategy<T>() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<T>,

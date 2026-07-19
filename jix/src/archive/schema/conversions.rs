@@ -320,7 +320,7 @@ mod tests {
                 fields: vec![schema::dtype_struct::Field {
                     name: "x".to_string(),
                     offset: 0,
-                    dtype: None, // missing
+                    dtype: None,
                 }],
             })),
         };

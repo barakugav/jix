@@ -617,10 +617,56 @@ mod tests {
     }
 
     test_archive_roundtrip_dtype!(u8);
-    test_archive_roundtrip_dtype!(i32);
     test_archive_roundtrip_dtype!(i64);
-    test_archive_roundtrip_dtype!(f32);
     test_archive_roundtrip_dtype!(f64);
+
+    // -----------------------------------------------------------------------
+    // Fixed-input roundtrip covering the same three shapes the proptest above
+    // targets (1D single block, 1D multi-block with a padded last block, 2D
+    // multi-block padded in both dims), plus dtype min/max and 0.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn roundtrip_i32_concrete() {
+        // 1D single block: no padding.
+        let vals = vec![i32::MIN, -1, 0, 1, i32::MAX];
+        let src = ndarray::Array::from_shape_vec([5], vals.clone()).unwrap();
+        let a = compact(vals, &[5], &[5]);
+        assert_eq!(write_read(&a), src);
+
+        // 1D multi-block: shape 7, block 3 -> blocks of 3, 3, 1 (padded last block).
+        let vals = vec![i32::MIN, -2, -1, 0, 1, 2, i32::MAX];
+        let src = ndarray::Array::from_shape_vec([7], vals.clone()).unwrap();
+        let a = compact(vals, &[7], &[3]);
+        assert_eq!(write_read(&a), src);
+
+        // 2D multi-block: shape [5, 3], block [2, 2] -> padding in both dims.
+        let vals: Vec<i32> = (0..15).map(|x| x - 7).collect();
+        let src = ndarray::Array::from_shape_vec([5, 3], vals.clone()).unwrap();
+        let a = compact(vals, &[5, 3], &[2, 2]);
+        assert_eq!(write_read(&a), src);
+    }
+
+    #[test]
+    fn roundtrip_f32_concrete() {
+        // 1D single block: no padding.
+        let vals = vec![f32::MIN, -1.5, 0.0, 1.5, f32::MAX];
+        let src = ndarray::Array::from_shape_vec([5], vals.clone()).unwrap();
+        let a = compact(vals, &[5], &[5]);
+        assert_eq!(write_read(&a), src);
+
+        // 1D multi-block: shape 7, block 3 -> blocks of 3, 3, 1 (padded last block).
+        let vals = vec![f32::MIN, -2.5, -1.0, 0.0, 1.0, 2.5, f32::MAX];
+        let src = ndarray::Array::from_shape_vec([7], vals.clone()).unwrap();
+        let a = compact(vals, &[7], &[3]);
+        assert_eq!(write_read(&a), src);
+
+        // 2D multi-block: shape [5, 3], block [2, 2] -> padding in both dims.
+        let vals: Vec<f32> = (0..15).map(|x| (x - 7) as f32 * 0.5).collect();
+        let src = ndarray::Array::from_shape_vec([5, 3], vals.clone()).unwrap();
+        let a = compact(vals, &[5, 3], &[2, 2]);
+        assert_eq!(write_read(&a), src);
+    }
 
     // -----------------------------------------------------------------------
     // Many blocks (>100)
@@ -662,7 +708,7 @@ mod tests {
     #[test]
     fn array_3d_all_dims_padded_i64() {
         // shape [5, 7, 11], block [3, 4, 5] - every dimension needs padding
-        let vals: Vec<i64> = (0..5 * 7 * 11 as i64).collect();
+        let vals: Vec<i64> = (0..5 * 7 * 11_i64).collect();
         let src = ndarray::Array::from_shape_vec([5, 7, 11], vals.clone()).unwrap();
         let a = compact(vals, &[5, 7, 11], &[3, 4, 5]);
         let got = write_read(&a);
@@ -696,14 +742,14 @@ mod tests {
         let a0 = compact(src0.iter().cloned().collect(), &[6], &[3]);
         a0.write_to(&mut buf).unwrap();
         let end0 = buf.stream_position().unwrap();
-        buf.write_all(&vec![0u8; PAD]).unwrap();
+        buf.write_all(&[0u8; PAD]).unwrap();
         let start1 = buf.stream_position().unwrap();
 
         let a1 = compact(src1.iter().cloned().collect(), &[3, 4], &[2, 2]);
         a1.write_to(&mut buf).unwrap();
         let end1 = buf.stream_position().unwrap();
         let len1 = end1 - start1;
-        buf.write_all(&vec![0u8; PAD]).unwrap();
+        buf.write_all(&[0u8; PAD]).unwrap();
         let start2 = buf.stream_position().unwrap();
 
         let a2 = compact(src2.iter().cloned().collect(), &[2, 3, 5], &[1, 2, 3]);

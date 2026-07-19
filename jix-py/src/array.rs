@@ -3,7 +3,7 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Mutex;
 
-use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, Dimension, ReadContext};
+use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, DimDyn, Dimension, ReadContext};
 use jix_core::{Codec, Filter};
 use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -182,30 +182,22 @@ impl Array {
             let context = self.read_ctx()?;
             let context = context.as_ref();
 
-            fn to_ndarray_impl<S: ArrayStorage, const D: usize>(
+            fn to_ndarray_impl<S: ArrayStorage, D: Dimension>(
                 arr: jix_core::Array<S>,
                 index: &[std::ops::Range<u64>],
                 np_arr_data: &mut [u8],
                 context: &ReadContext,
-            ) -> Result<(), jix_core::Error>
-            where
-                Dim<D>: Dimension,
-            {
-                arr.into_dim::<Dim<D>>()
+            ) -> Result<(), jix_core::Error> {
+                arr.into_dim::<D>()
                     .unwrap()
                     .to_ndarray_buf(index, np_arr_data, context)
             }
             let to_ndarray_fn = match self.arr.ndim() {
-                0 => to_ndarray_impl::<_, 0>,
-                1 => to_ndarray_impl::<_, 1>,
-                2 => to_ndarray_impl::<_, 2>,
-                3 => to_ndarray_impl::<_, 3>,
-                4 => to_ndarray_impl::<_, 4>,
-                5 => to_ndarray_impl::<_, 5>,
-                6 => to_ndarray_impl::<_, 6>,
-                7 => to_ndarray_impl::<_, 7>,
-                8 => to_ndarray_impl::<_, 8>,
-                _ => unimplemented!(),
+                1 => to_ndarray_impl::<_, Dim<1>>,
+                2 => to_ndarray_impl::<_, Dim<2>>,
+                3 => to_ndarray_impl::<_, Dim<3>>,
+                4 => to_ndarray_impl::<_, Dim<4>>,
+                _ => to_ndarray_impl::<_, DimDyn>,
             };
 
             to_ndarray_fn(self.arr.as_ref(), index, buf, context).into_py_result()
@@ -1189,8 +1181,8 @@ impl Array {
 ///           compressed blocks. A good block layout is critical for performance and should match the
 ///           access pattern of your workload.
 ///         - **Codec** - compression settings used when writing and reading blocks. The defaults
-///           (Zstd level 3 with byte shuffling, block sized to fit in the L1 data cache) are
-///           suitable for most workloads.
+///           (Zstd level 3 with byte shuffling, block sized automatically according to the CPU
+///           cache sizes) are suitable for most workloads.
 ///
 ///         When omitted, defaults are chosen automatically.
 ///         If the source array is a jix array, unset fields are inherited from the source storage.
@@ -1212,7 +1204,7 @@ impl Array {
 ///             Length must equal the number of dimensions.
 ///         - `block_size`: Target block size in bytes, used when auto-computing or scaling the
 ///             block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
-///             are `"fixed"`. Defaults to the L1 data cache size.
+///             are `"fixed"`. Defaults to a size chosen automatically according to the CPU cache sizes.
 ///         - `read_size`: The target byte range for a single preferred read region as
 ///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
 ///             `(min, max)` sequence of non-negative ints.
@@ -1223,11 +1215,10 @@ impl Array {
 ///             that scaling differently:
 ///
 ///             - `max` is the *scale-down ceiling*: an oversized read shape is shrunk only until
-///               it fits within `max`. Keeping `max` large (the L2 cache size by default) lets
-///               reads stay big.
+///               it fits within `max`. Keeping `max` large lets reads stay big.
 ///             - `min` is the *scale-up floor*: an undersized read shape is grown only up to
-///               `min` (the L1 cache size by default). Reads already at or above `min` are left
-///               as the scale-down step produced them.
+///               `min`. Reads already at or above `min` are left as the scale-down step produced
+///               them.
 ///
 ///             The motivation is block-grid misalignment. When the source array's block shape
 ///             differs from the output's, a read that straddles source-block boundaries forces
@@ -1236,7 +1227,7 @@ impl Array {
 ///             wasted work (no alignment guarantee, but the waste shrinks as the region grows);
 ///             the counter-pressure is cache residency, which the `max` ceiling bounds.
 ///
-///             When unset, the range defaults to `(L1 data cache size, L2 cache size)`.
+///             When unset, the range is chosen automatically according to the CPU cache sizes.
 ///         - `codec`: Compression algorithm applied to each block. Currently the only accepted
 ///             value is `"zstd"`. Defaults to `"zstd"` when left unset.
 ///         - `compression_level`: Compression level passed to the codec.
@@ -1464,7 +1455,7 @@ mod tests {
     {
         // ndarray::Array -> jix_core::Array -> jix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
-            let py_arr = make_py_array(py, &original);
+            let py_arr = make_py_array(py, original);
             let np = py_arr.get().numpy(py, None).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array().into_dimensionality().unwrap()

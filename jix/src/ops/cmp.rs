@@ -670,7 +670,12 @@ mod tests {
     type complex_f64 = crate::scalar::Complex<f64>;
     use crate::ops::op2::tests::test_op2;
 
-    // equal / not_equal: comparable_strategy gives ~33 % equal pairs and exercises NaN != NaN.
+    // Shared by greater_equal_concrete and less_equal_concrete: NaN operands, inf/-inf
+    // ordering, and an equal pair (1.0 == 1.0).
+    const CMP_FLOAT_A: [f32; 4] = [f32::NAN, 1.0, f32::INFINITY, f32::NEG_INFINITY];
+    const CMP_FLOAT_B: [f32; 4] = [1.0, f32::NAN, f32::INFINITY, 1.0];
+
+    // equal: comparable_strategy gives ~33 % equal pairs and exercises NaN != NaN.
     // Output is bool, so NaN in float inputs is safe for assert_array_matches.
     test_op2!(
         equal,
@@ -682,18 +687,32 @@ mod tests {
         #[cfg(feature = "num-complex")]
         [complex_f32, complex_f64]
     );
-    test_op2!(
-        not_equal,
-        |a, b| a != b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool],
-        comparable_strategy,
-        #[cfg(feature = "half")]
-        [f16],
-        #[cfg(feature = "num-complex")]
-        [complex_f32, complex_f64]
-    );
 
-    // Ordering ops: output is bool, so NaN inputs are safe.
+    // not_equal edge cases: NaN != NaN is true (IEEE 754) while equal ints/infinities
+    // are false, plus signed negatives.
+    #[test]
+    fn not_equal_concrete() {
+        use crate::Array;
+        // int path: equal values (false), signed negatives, differing values (true).
+        let a = ndarray::array![1i32, -5, 3, 0];
+        let b = ndarray::array![1i32, 5, 3, 0];
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
+        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a != b);
+        crate::util::assert_array_matches(&za.as_ref().not_equal(zb.as_ref()), &expected);
+
+        // float path: NaN != NaN is true; same infinities are equal (so not_equal is false).
+        let fa = ndarray::array![f32::NAN, f32::INFINITY, 1.0, f32::NEG_INFINITY];
+        let fb = ndarray::array![f32::NAN, f32::INFINITY, 1.0, 1.0];
+        let zfa = Array::compact_ndarray(&fa).unwrap();
+        let zfb = Array::compact_ndarray(&fb).unwrap();
+        let fexp = ndarray::Zip::from(&fa)
+            .and(&fb)
+            .map_collect(|&a, &b| a != b);
+        crate::util::assert_array_matches(&zfa.as_ref().not_equal(zfb.as_ref()), &fexp);
+    }
+
+    // greater: output is bool, so NaN inputs are safe.
     // Integers: any_strategy (no overflow). Floats: maybe_non_finite covers NaN -> false paths.
     test_op2!(
         greater,
@@ -709,48 +728,106 @@ mod tests {
         #[cfg(feature = "half")]
         [f16]
     );
-    test_op2!(
-        greater_equal,
-        |a, b| a >= b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
-        any_strategy
-    );
-    test_op2!(
-        greater_equal,
-        |a, b| a >= b,
-        [f32, f64],
-        maybe_non_finite_strategy,
-        #[cfg(feature = "half")]
-        [f16]
-    );
-    test_op2!(
-        less,
-        |a, b| a < b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
-        any_strategy
-    );
-    test_op2!(
-        less,
-        |a, b| a < b,
-        [f32, f64],
-        maybe_non_finite_strategy,
-        #[cfg(feature = "half")]
-        [f16]
-    );
-    test_op2!(
-        less_equal,
-        |a, b| a <= b,
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
-        any_strategy
-    );
-    test_op2!(
-        less_equal,
-        |a, b| a <= b,
-        [f32, f64],
-        maybe_non_finite_strategy,
-        #[cfg(feature = "half")]
-        [f16]
-    );
+
+    #[test]
+    fn greater_equal_concrete() {
+        use crate::Array;
+        // int path: equal values (true), ordering, signed negatives.
+        let a = ndarray::array![3i32, -1, 2, 2];
+        let b = ndarray::array![1i32, 1, 2, 3];
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
+        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a >= b);
+        crate::util::assert_array_matches(&za.as_ref().greater_equal(zb.as_ref()), &expected);
+
+        // float path: NaN comparisons are false; inf ordering and inf >= inf (true).
+        let fa = ndarray::arr1(&CMP_FLOAT_A);
+        let fb = ndarray::arr1(&CMP_FLOAT_B);
+        let zfa = Array::compact_ndarray(&fa).unwrap();
+        let zfb = Array::compact_ndarray(&fb).unwrap();
+        let fexp = ndarray::Zip::from(&fa)
+            .and(&fb)
+            .map_collect(|&a, &b| a >= b);
+        crate::util::assert_array_matches(&zfa.as_ref().greater_equal(zfb.as_ref()), &fexp);
+
+        // bool path: true>=false, false>=false, true>=true, false>=true.
+        let ba = ndarray::array![true, false, true, false];
+        let bb = ndarray::array![false, false, true, true];
+        let zba = Array::compact_ndarray(&ba).unwrap();
+        let zbb = Array::compact_ndarray(&bb).unwrap();
+        let bexp = ndarray::Zip::from(&ba)
+            .and(&bb)
+            .map_collect(|&a, &b| a >= b);
+        crate::util::assert_array_matches(&zba.as_ref().greater_equal(zbb.as_ref()), &bexp);
+    }
+
+    #[test]
+    // The bool path below intentionally exercises `a < b` on bool arrays directly (clippy
+    // would rewrite this to `!a & b`, which is less clear about what's being tested).
+    #[allow(clippy::bool_comparison)]
+    fn less_concrete() {
+        use crate::Array;
+        // int path: equal values (false), ordering, signed negatives.
+        let a = ndarray::array![1i32, 1, 3, -5];
+        let b = ndarray::array![3i32, 1, 1, -1];
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
+        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a < b);
+        crate::util::assert_array_matches(&za.as_ref().less(zb.as_ref()), &expected);
+
+        // float path: NaN comparisons are false; -inf < finite, inf < inf is false.
+        let fa = ndarray::array![f32::NAN, 1.0, f32::NEG_INFINITY, f32::INFINITY];
+        let fb = ndarray::array![1.0f32, f32::NAN, 1.0, f32::INFINITY];
+        let zfa = Array::compact_ndarray(&fa).unwrap();
+        let zfb = Array::compact_ndarray(&fb).unwrap();
+        let fexp = ndarray::Zip::from(&fa).and(&fb).map_collect(|&a, &b| a < b);
+        crate::util::assert_array_matches(&zfa.as_ref().less(zfb.as_ref()), &fexp);
+
+        // bool path: false<true (true), true<false (false), equal values are false.
+        let ba = ndarray::array![false, true, true, false];
+        let bb = ndarray::array![true, false, true, false];
+        let zba = Array::compact_ndarray(&ba).unwrap();
+        let zbb = Array::compact_ndarray(&bb).unwrap();
+        let bexp = ndarray::Zip::from(&ba).and(&bb).map_collect(|&a, &b| a < b);
+        crate::util::assert_array_matches(&zba.as_ref().less(zbb.as_ref()), &bexp);
+    }
+
+    #[test]
+    fn less_equal_concrete() {
+        use crate::Array;
+        // int path incl. equal values (a<=a true) and ordering
+        let a = ndarray::array![1i32, 2, 2, 5];
+        let b = ndarray::array![2i32, 2, 1, 5];
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
+        let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a <= b);
+        crate::util::assert_array_matches(&za.as_ref().less_equal(zb.as_ref()), &expected);
+
+        // float path: NaN <= x is false; inf ordering.
+        let fa = ndarray::arr1(&CMP_FLOAT_A);
+        let fb = ndarray::arr1(&CMP_FLOAT_B);
+        let zfa = Array::compact_ndarray(&fa).unwrap();
+        let zfb = Array::compact_ndarray(&fb).unwrap();
+        let fexp = ndarray::Zip::from(&fa)
+            .and(&fb)
+            .map_collect(|&a, &b| a <= b);
+        crate::util::assert_array_matches(&zfa.as_ref().less_equal(zfb.as_ref()), &fexp);
+
+        // bool path on a 2x2 shape with a non-default 1x1 block shape, so a
+        // block-boundary bug in the ordering kernel would still show up.
+        let ba = ndarray::array![[false, true], [true, false]];
+        let bb = ndarray::array![[true, false], [true, true]];
+        let mut params_a = crate::ArrayParams::new();
+        params_a.block_shape(&[1u32, 1]);
+        let mut params_b = crate::ArrayParams::new();
+        params_b.block_shape(&[1u32, 1]);
+        let zba = Array::compact_ndarray_with(&ba, params_a).unwrap();
+        let zbb = Array::compact_ndarray_with(&bb, params_b).unwrap();
+        let bexp = ndarray::Zip::from(&ba)
+            .and(&bb)
+            .map_collect(|&a, &b| a <= b);
+        crate::util::assert_array_matches(&zba.as_ref().less_equal(zbb.as_ref()), &bexp);
+    }
 
     // approx_equal: output is bool so NaN inputs are safe; use dedicated proptest tests because
     // the method takes extra rtol/atol parameters that test_op2! cannot supply.
@@ -884,7 +961,7 @@ mod tests {
         }
     }
 
-    // maximum / minimum: NaN propagates to the float *output*, which breaks assert_eq via PartialEq.
+    // maximum: NaN propagates to the float *output*, which breaks assert_eq via PartialEq.
     // Use op_safe_strategy for floats to keep all outputs finite.
     test_op2!(
         maximum,
@@ -900,18 +977,41 @@ mod tests {
         #[cfg(feature = "half")]
         [f16]
     );
-    test_op2!(
-        minimum,
-        |a, b| Minimum::minimum(a, b),
-        [i8, i16, i32, i64, u8, u16, u32, u64, bool],
-        any_strategy
-    );
-    test_op2!(
-        minimum,
-        |a, b| Minimum::minimum(a, b),
-        [f32, f64],
-        op_safe_strategy,
-        #[cfg(feature = "half")]
-        [f16]
-    );
+
+    // minimum edge cases: signed negatives, equal values, inf ordering (finite outputs),
+    // and a NaN-propagation case matching the kernel (checked directly since NaN output
+    // breaks the PartialEq-based assert_array_matches oracle).
+    #[test]
+    fn minimum_concrete() {
+        use crate::Array;
+        // int path: negatives, equal values, ordering.
+        let a = ndarray::array![1i32, -5, 3, 3];
+        let b = ndarray::array![4i32, -2, 3, -3];
+        let za = Array::compact_ndarray(&a).unwrap();
+        let zb = Array::compact_ndarray(&b).unwrap();
+        let expected = ndarray::Zip::from(&a)
+            .and(&b)
+            .map_collect(|&a, &b| Minimum::minimum(a, b));
+        crate::util::assert_array_matches(&za.as_ref().minimum(zb.as_ref()), &expected);
+
+        // float path: inf/-inf ordering, all finite outputs (no NaN yet).
+        let fa = ndarray::array![f32::NEG_INFINITY, 1.0, f32::INFINITY, -1.0];
+        let fb = ndarray::array![5.0f32, -1.0, 2.0, -1.0];
+        let zfa = Array::compact_ndarray(&fa).unwrap();
+        let zfb = Array::compact_ndarray(&fb).unwrap();
+        let fexp = ndarray::Zip::from(&fa)
+            .and(&fb)
+            .map_collect(|&a, &b| Minimum::minimum(a, b));
+        crate::util::assert_array_matches(&zfa.as_ref().minimum(zfb.as_ref()), &fexp);
+
+        // NaN-propagation edge: minimum(NaN, x) == NaN for any x, unlike f32::min which
+        // discards NaN when exactly one operand is NaN.
+        let na = ndarray::array![f32::NAN, 1.0f32];
+        let nb = ndarray::array![2.0f32, f32::NAN];
+        let zna = Array::compact_ndarray(&na).unwrap();
+        let znb = Array::compact_ndarray(&nb).unwrap();
+        let result = zna.as_ref().minimum(znb.as_ref()).to_ndarray().unwrap();
+        assert!(result[[0]].is_nan());
+        assert!(result[[1]].is_nan());
+    }
 }
