@@ -640,7 +640,6 @@ pub(crate) mod tests {
 
     pub(crate) use {test_op2, test_op2_dtype};
 
-    // Pairwise tests: one proptest per (op, dtype) using random shapes and block sizes.
     // sub excludes unsigned types: independent random arrays don't guarantee a >= b,
     // and unsigned underflow panics in debug mode. See sub_u32 below.
     test_op2!(
@@ -654,8 +653,6 @@ pub(crate) mod tests {
         [complex_f32, complex_f64]
     );
 
-    // sub: converted to fixed-input tests (see sub_concrete below). Unsigned ints were never
-    // covered here (see sub_u32 below for the unsigned no-underflow path).
     #[test]
     fn sub_concrete() {
         use crate::Array;
@@ -683,7 +680,6 @@ pub(crate) mod tests {
         crate::util::assert_array_matches(&(za64 - zb64), &expected64);
     }
 
-    // mul: converted to fixed-input tests (see mul_concrete / mul_concrete_complex below).
     #[test]
     fn mul_concrete() {
         use crate::Array;

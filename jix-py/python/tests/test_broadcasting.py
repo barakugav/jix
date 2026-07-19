@@ -189,8 +189,6 @@ def test_broadcast_equal_property(data: DataObject):
     np.testing.assert_array_equal(result.numpy(), expected)
 
 
-# Concrete broadcasting tests across a handful of ops and dtypes, all sharing the same
-# loop body over _BROADCAST_CONCRETE_SHAPE_PAIRS - collapsed into one parametrized test.
 @pytest.mark.parametrize(
     "jix_op, np_op, dtype",
     [

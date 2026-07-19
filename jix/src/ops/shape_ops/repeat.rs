@@ -301,6 +301,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use ndarray::array;
 
@@ -331,19 +332,16 @@ mod tests {
 
     #[test]
     fn shape_repeat_axis0() {
-        // [3, 4] repeat 2 along axis 0 -> [6, 4]
         assert_eq!(make(arange(12), &[3u64, 4]).repeat(2, 0).shape(), &[6, 4]);
     }
 
     #[test]
     fn shape_repeat_axis_last() {
-        // [3, 4] repeat 3 along axis 1 -> [3, 12]
         assert_eq!(make(arange(12), &[3u64, 4]).repeat(3, 1).shape(), &[3, 12]);
     }
 
     #[test]
     fn shape_repeat_3d_middle() {
-        // [2, 3, 4] repeat 5 along axis 1 -> [2, 15, 4]
         assert_eq!(
             make(arange(24), &[2u64, 3, 4]).repeat(5, 1).shape(),
             &[2, 15, 4]
@@ -352,7 +350,6 @@ mod tests {
 
     #[test]
     fn shape_repeats_zero() {
-        // [3, 4] repeat 0 along axis 0 -> [0, 4]
         assert_eq!(make(arange(12), &[3u64, 4]).repeat(0, 0).shape(), &[0, 4]);
     }
 
@@ -445,14 +442,12 @@ mod tests {
 
     #[test]
     fn full_read_1d() {
-        // [0, 1, 2] repeat 2 axis 0 -> [0, 0, 1, 1, 2, 2]
         let got = make(arange(3), &[3u64]).repeat(2, 0).to_ndarray().unwrap();
         assert_eq!(got, array![0, 0, 1, 1, 2, 2]);
     }
 
     #[test]
     fn full_read_2d_axis0() {
-        // [[0,1,2,3],[4,5,6,7]] repeat 2 axis 0 -> rows duplicated
         let got = make(arange(8), &[2u64, 4])
             .repeat(2, 0)
             .to_ndarray()
@@ -465,7 +460,6 @@ mod tests {
 
     #[test]
     fn full_read_2d_axis1() {
-        // [[0,1,2],[3,4,5]] repeat 3 axis 1 -> each col tripled in place
         let got = make(arange(6), &[2u64, 3])
             .repeat(3, 1)
             .to_ndarray()
@@ -478,7 +472,6 @@ mod tests {
 
     #[test]
     fn full_read_3d_middle_axis() {
-        // [2, 2, 2] repeat 2 axis 1 -> [2, 4, 2]
         let got = make(arange(8), &[2u64, 2, 2])
             .repeat(2, 1)
             .to_ndarray()
@@ -590,7 +583,6 @@ mod tests {
 
     #[test]
     fn compose_repeat_then_compact() {
-        // repeat then compact -> realized Compact with output shape.
         let got = make(arange(6), &[2u64, 3])
             .repeat(2, 0)
             .compact()
@@ -602,7 +594,6 @@ mod tests {
 
     #[test]
     fn compose_repeat_then_slice() {
-        // repeat axis 0 by 2, then slice rows 1..3 of the (4, 3) result.
         let got = make(arange(6), &[2u64, 3])
             .repeat(2, 0)
             .slice((1..3, ..))
@@ -685,6 +676,7 @@ mod tests {
         out
     }
 
+    #[allow(clippy::type_complexity)]
     fn repeat_strategy() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<i32>,

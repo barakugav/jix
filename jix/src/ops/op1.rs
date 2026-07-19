@@ -1259,14 +1259,13 @@ pub(crate) mod tests {
     #[test]
     fn sign_concrete() {
         use crate::Array;
-        // Signed int: negative, zero, positive.
         let nd = ndarray::array![-5i32, 0, 7];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: i32| a.signum());
         crate::util::assert_array_matches(&za.as_ref().sign(), &expected);
 
-        // Unsigned int: zero maps to 0, any positive value maps to 1 (mirrors the original
-        // macro body verbatim: `a - a` is 0, `a - a + 1` is 1).
+        // Unsigned int: zero maps to 0, any positive value maps to 1 (`a - a` is 0,
+        // `a - a + 1` is 1).
         let ndu = ndarray::array![0u32, 1, 7];
         let zau = Array::compact_ndarray(&ndu).unwrap();
         let expectedu = ndu.mapv(|a: u32| if a == 0 { a - a } else { a - a + 1 });
@@ -1296,7 +1295,6 @@ pub(crate) mod tests {
         let expected = nd.mapv(|a: i32| a.abs());
         crate::util::assert_array_matches(&za.as_ref().abs(), &expected);
 
-        // f32/f64: negative, zero, positive.
         let ndf = ndarray::array![-5.0f32, 0.0, 7.5, -100.0];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         let expectedf = ndf.mapv(|a: f32| a.abs());

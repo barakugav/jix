@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn view_non_contiguous_slice() {
-        // Take every-other column via an ndarray slice, then read it back.
+        // Take every-other column via an ndarray slice.
         let nd = array![[1i32, 2, 3, 4], [5, 6, 7, 8]];
         let sliced = nd.slice(s![.., ..;2]); // columns 0 and 2: [[1,3],[5,7]]
         let a = Array::plain_ndarray_ref(&sliced).unwrap();

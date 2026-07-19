@@ -625,7 +625,7 @@ def test_read_array_mmap():
 
 
 # ---------------------------------------------------------------------------
-# Relaxed inputs: shape ops + astype now accept anything `jix.asarray` accepts
+# Relaxed inputs: shape ops + astype accept anything `jix.asarray` accepts
 # (numpy arrays, Python lists, tuples, scalars), not just `jix.Array` instances.
 # ---------------------------------------------------------------------------
 

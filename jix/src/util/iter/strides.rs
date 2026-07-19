@@ -197,7 +197,7 @@ mod tests {
     use crate::{Dim, DimDyn, SliceExt};
 
     /// Build a [`DimArray`] (the `DimDyn` vec container) from a slice, for constructing test
-    /// extensions whose `new` now takes an owned `D::Vec<S>`.
+    /// extensions whose `new` takes an owned `D::Vec<S>`.
     fn dv<T: Copy>(s: &[T]) -> DimArray<T> {
         s.to_dim_vec::<DimDyn>()
     }
@@ -223,10 +223,8 @@ mod tests {
         let stride = 8usize;
         let ext = NdIterExtStridesPtrMut::new(dv(&[stride]), base);
         let iter = NdIter::new(dv(&[8u64]), ext);
-        let mut i = 0usize;
-        for (_, ptr) in iter {
+        for (i, (_, ptr)) in iter.enumerate() {
             assert_eq!(ptr, unsafe { base.add(i * stride) }, "step {i}");
-            i += 1;
         }
     }
 
@@ -255,7 +253,6 @@ mod tests {
         let cols = 3usize;
         let mut data = vec![0u8; rows * cols];
         let base = data.as_mut_ptr();
-        // Strides: dim 0 (row) = 1, dim 1 (col) = rows = 2
         let ext = NdIterExtStridesPtrMut::new(dv(&[1, rows]), base);
         let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         // Iteration order is row-major by *index*, but pointer jumps follow column-major layout:
@@ -276,7 +273,7 @@ mod tests {
         // Expected traversal offsets: [1,1]=5, [1,2]=6, [2,1]=9, [2,2]=10.
         let mut data = vec![0u8; 16];
         let base = data.as_mut_ptr();
-        let start = unsafe { base.add(1 * 4 + 1 * 1) };
+        let start = unsafe { base.add(4 + 1) };
         let ext = NdIterExtStridesPtrMut::new(dv(&[4usize, 1]), start);
         let iter = NdIter::new_with_begin(dv(&[1u64, 1]), dv(&[3u64, 3]), ext);
         let expected: &[usize] = &[5, 6, 9, 10];
@@ -381,7 +378,6 @@ mod tests {
         let cols = 3usize;
         let mut data = vec![0u32; rows * cols];
         let base = data.as_mut_ptr();
-        // dim 0 (row) stride = 1 element, dim 1 (col) stride = rows = 2 elements.
         let ext = NdIterExtStridesPtrMut::new(dv(&[1usize, rows]), base);
         let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
         let expected_offsets: &[usize] = &[0, 2, 4, 1, 3, 5];
@@ -399,7 +395,7 @@ mod tests {
         // Initial pointer = base + (1*4 + 1*1) elements = base+5.
         let mut data = vec![0u32; 16];
         let base = data.as_mut_ptr();
-        let start = unsafe { base.add(1 * 4 + 1 * 1) };
+        let start = unsafe { base.add(4 + 1) };
         let ext = NdIterExtStridesPtrMut::new(dv(&[4usize, 1]), start);
         let iter = NdIter::new_with_begin(dv(&[1u64, 1]), dv(&[3u64, 3]), ext);
         let expected: &[usize] = &[5, 6, 9, 10];

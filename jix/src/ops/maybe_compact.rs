@@ -244,8 +244,6 @@ mod tests {
 
     #[test]
     fn maybe_compact_with_block_shape_respected() {
-        // Build a lazy neg view, then compact it with a known block shape.
-        // Verify the resulting block_shape matches the requested one.
         let vals: Vec<i32> = (1..=12i32).collect();
         let src = ArrayD::from_shape_vec(vec![3, 4], vals.clone()).unwrap();
         let a = compact::<i32>(vals, &[3, 4], &[3, 4]);
@@ -255,9 +253,7 @@ mod tests {
             .maybe_compact_with(arr_params(&[2, 2]), &ctx)
             .unwrap();
 
-        // Values must be negated.
         assert_eq!(result.to_ndarray().unwrap(), -&src);
-        // The compacted storage must use block shape [2, 2].
         let bs = result
             .storage()
             .as_compact()
@@ -295,7 +291,6 @@ mod tests {
 
     #[test]
     fn maybe_compact_3d_add_chain_i32() {
-        // (a + a) over a 3-D array compressed via maybe_compact_with.
         let vals: Vec<i32> = (1..=60i32).collect();
         let src = ArrayD::from_shape_vec(vec![3, 4, 5], vals.clone()).unwrap();
         let expected = &src + &src;

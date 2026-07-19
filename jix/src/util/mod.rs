@@ -590,11 +590,11 @@ mod tests {
     #[test]
     fn test_default_strides() {
         let s = |shape, itemsize| default_strides_slice(shape, itemsize).to_vec();
-        assert_eq!(s(&[], 4), &[] as &[usize]); // scalar
-        assert_eq!(s(&[5], 2), &[2]); // 1-d
-        assert_eq!(s(&[3, 4], 4), &[16, 4]); // 2-d, itemsize 4
-        assert_eq!(s(&[2, 3, 4], 1), &[12, 4, 1]); // 3-d, itemsize 1
-        assert_eq!(s(&[2, 3, 4], 8), &[96, 32, 8]); // 3-d, itemsize 8
+        assert_eq!(s(&[], 4), &[] as &[usize]);
+        assert_eq!(s(&[5], 2), &[2]);
+        assert_eq!(s(&[3, 4], 4), &[16, 4]);
+        assert_eq!(s(&[2, 3, 4], 1), &[12, 4, 1]);
+        assert_eq!(s(&[2, 3, 4], 8), &[96, 32, 8]);
     }
 
     // --- AlternatingBuffers ---

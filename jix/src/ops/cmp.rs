@@ -688,8 +688,8 @@ mod tests {
         [complex_f32, complex_f64]
     );
 
-    // not_equal: converted to a concrete test (Task R1). Edge cases: NaN != NaN is true
-    // (IEEE 754) while equal ints/infinities are false, plus signed negatives.
+    // not_equal edge cases: NaN != NaN is true (IEEE 754) while equal ints/infinities
+    // are false, plus signed negatives.
     #[test]
     fn not_equal_concrete() {
         use crate::Array;
@@ -729,9 +729,6 @@ mod tests {
         [f16]
     );
 
-    // greater_equal / less / less_equal: converted to concrete tests (Task R1).
-    // Edge cases per op: NaN operands (always false), inf/-inf ordering, equal values
-    // (matters for >= and <=), signed negatives, and a bool path since these ops support bool.
     #[test]
     fn greater_equal_concrete() {
         use crate::Array;
@@ -981,9 +978,9 @@ mod tests {
         [f16]
     );
 
-    // minimum: converted to a concrete test (Task R1). Edge cases: signed negatives, equal
-    // values, inf ordering (finite outputs), and a NaN-propagation case matching the kernel
-    // (checked directly since NaN output breaks the PartialEq-based assert_array_matches oracle).
+    // minimum edge cases: signed negatives, equal values, inf ordering (finite outputs),
+    // and a NaN-propagation case matching the kernel (checked directly since NaN output
+    // breaks the PartialEq-based assert_array_matches oracle).
     #[test]
     fn minimum_concrete() {
         use crate::Array;

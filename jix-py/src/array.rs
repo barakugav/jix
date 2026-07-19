@@ -1455,7 +1455,7 @@ mod tests {
     {
         // ndarray::Array -> jix_core::Array -> jix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
-            let py_arr = make_py_array(py, &original);
+            let py_arr = make_py_array(py, original);
             let np = py_arr.get().numpy(py, None).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array().into_dimensionality().unwrap()

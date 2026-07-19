@@ -1,9 +1,6 @@
 """
 Property tests for element-wise binary ops. Mirrors the test block in jix/src/ops/op2.rs.
 
-One test per dtype, parametrized via @pytest.mark.parametrize, analogous to the
-test_op2! macro which expands to one proptest per (op, dtype) pair.
-
 Mixed-dtype section verifies the automatic casting / dispatch rules:
 - Safe cast: the first impl in the dispatch table that can accept both operands wins.
 - Scalars without explicit precision (Python int, float) are untyped and match any
@@ -45,18 +42,18 @@ def test_add_custom_inputs():
     # int64: Python ints coerce to int64 naturally
     d = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int64)
     za = jix.compact(d)
-    check(za + np.int64(10), d + 10)  # typed scalar, broadcast
+    check(za + np.int64(10), d + 10)
     check(np.int64(10) + za, 10 + d)  # __radd__ (int64 natural)
-    check(za + np.array([[10, 20, 30], [40, 50, 60]]), d + [[10, 20, 30], [40, 50, 60]])  # numpy array
-    check(za + [[10, 20, 30], [40, 50, 60]], d + [[10, 20, 30], [40, 50, 60]])  # list
-    check(za + ((10, 20, 30), (40, 50, 60)), d + ((10, 20, 30), (40, 50, 60)))  # tuple
+    check(za + np.array([[10, 20, 30], [40, 50, 60]]), d + [[10, 20, 30], [40, 50, 60]])
+    check(za + [[10, 20, 30], [40, 50, 60]], d + [[10, 20, 30], [40, 50, 60]])
+    check(za + ((10, 20, 30), (40, 50, 60)), d + ((10, 20, 30), (40, 50, 60)))
     check(jix.add(za, np.int64(10)), d + 10)  # free-function form
     check(jix.add(np.int64(10), za), 10 + d)  # free-function, scalar first
 
     # float64: Python floats coerce to float64 naturally
     df = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     zaf = jix.compact(df)
-    check(zaf + 10.0, df + 10.0)  # Python float scalar
+    check(zaf + 10.0, df + 10.0)
     check(10.0 + zaf, 10.0 + df)  # __radd__ (float64 natural)
     check(
         zaf + [[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]],
@@ -72,7 +69,7 @@ def test_add_custom_inputs():
     # "scalar first" via jix.add() to bypass Python's operator dispatch.
     df32 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
-    check(zaf32 + np.float32(10.0), df32 + np.float32(10.0))  # typed scalar, broadcast
+    check(zaf32 + np.float32(10.0), df32 + np.float32(10.0))
     check(jix.add(np.float32(10.0), zaf32), np.float32(10.0) + df32)  # scalar first via free-function
     check(
         zaf32 + np.array([10.0, 20.0, 30.0], dtype=np.float32),
@@ -82,8 +79,8 @@ def test_add_custom_inputs():
     # complex128: Python complex coerces to complex128 naturally
     dc = np.array([1 + 2j, 3 + 4j], dtype=np.complex128)
     zac = jix.compact(dc)
-    check(zac + complex(1, 1), dc + complex(1, 1))  # Python complex scalar
-    check(zac + [1 + 1j, 2 + 2j], dc + np.array([1 + 1j, 2 + 2j]))  # list of complex
+    check(zac + complex(1, 1), dc + complex(1, 1))
+    check(zac + [1 + 1j, 2 + 2j], dc + np.array([1 + 1j, 2 + 2j]))
 
 
 def test_subtract_concrete():
@@ -202,7 +199,7 @@ def test_multiply_custom_inputs():
     check(zaf32 * np.float32(2.0), df32 * np.float32(2.0))
     check(jix.multiply(np.float32(2.0), zaf32), np.float32(2.0) * df32)  # scalar first via free-function
 
-    # complex128: Python complex scalar
+    # complex128
     dc = np.array([1 + 2j, 3 + 4j], dtype=np.complex128)
     zac = jix.compact(dc)
     check(zac * complex(2, 0), dc * complex(2, 0))
@@ -214,7 +211,7 @@ def test_multiply_custom_inputs():
 def test_divide(dtype: np.dtype, data: DataObject):
     # divide dispatches only on float/complex dtypes; integer dtypes go through
     # floor_divide (see test_floor_divide). Non-zero strategy avoids inf/NaN from
-    # division-by-zero for the float case (mirrors Rust's op_safe_non_zero_strategy).
+    # division-by-zero for the float case.
     nz = op_safe_non_zero_element_strategy(dtype)
     (np_a, za), (np_b, zb) = data.draw(carrays2_strategy(dtype, element_st=nz), label="arrays")
     result = za / zb
@@ -264,8 +261,7 @@ def test_floor_divide_concrete():
     # floor_divide dispatches only on integer/unsigned dtypes. Non-zero divisors avoid
     # divide-by-zero panics. jix's `//` truncates toward zero (Rust `/` semantics) - for
     # signed-negative quotients this differs from numpy's `//` which floors toward -inf,
-    # so the expected is computed via float / and cast (mirroring the original
-    # op_safe_non_zero_strategy-based test). A non-default block shape crosses a block
+    # so the expected is computed via float / and cast. A non-default block shape crosses a block
     # boundary for the signed-int case. uint32/uint64: unsigned floor division has no
     # sign/truncation subtlety.
     check_op2_concrete(
@@ -387,8 +383,7 @@ _POWER_PROMOTE_CASES = [
 
 
 def _power_promote_operands(base_dtype, exp_dtype):
-    """Small fixed (base, exponent) arrays within the safe range used by the original
-    hypothesis strategy (base in [1, 3], exponent in [0, 3])."""
+    """Small fixed (base, exponent) arrays within the safe range (base in [1, 3], exponent in [0, 3])."""
     base_vals = [1, 2, 3, 1] if np.issubdtype(base_dtype, np.integer) else [1.0, 2.0, 3.0, 1.0]
     exp_vals = [0, 1, 2, 3] if np.issubdtype(exp_dtype, np.integer) else [0.0, 1.0, 2.0, 3.0]
     np_a = np.array(base_vals, dtype=base_dtype)
@@ -416,11 +411,11 @@ def test_power_custom_inputs():
     # Python int (signed) promotes to float (it can't fill the unsigned exponent slot).
     di32 = np.array([2, 3, 4], dtype=np.int32)
     zai32 = jix.compact(di32)
-    r = jix.power(zai32, np.uint32(3))  # typed unsigned scalar, broadcast
+    r = jix.power(zai32, np.uint32(3))
     assert r.dtype == np.int32
     check(r, di32**3)
     check(
-        jix.power(zai32, np.array([1, 2, 3], dtype=np.uint32)),  # uint32 array exponent
+        jix.power(zai32, np.array([1, 2, 3], dtype=np.uint32)),
         di32 ** np.array([1, 2, 3]),
     )
     assert jix.power(zai32, 3).dtype == np.float64  # plain Python int exponent -> float
@@ -433,9 +428,9 @@ def test_power_custom_inputs():
     # float32: typed numpy scalars/arrays required
     df32 = np.array([2.0, 3.0, 4.0], dtype=np.float32)
     zaf32 = jix.compact(df32)
-    check(jix.power(zaf32, np.float32(2.0)), df32 ** np.float32(2.0))  # scalar, broadcast
+    check(jix.power(zaf32, np.float32(2.0)), df32 ** np.float32(2.0))
     check(jix.power(np.float32(2.0), zaf32), np.float32(2.0) ** df32)  # scalar first
-    check(jix.power(zaf32, np.int32(2)), (df32**2).astype(np.float32))  # integer exponent
+    check(jix.power(zaf32, np.int32(2)), (df32**2).astype(np.float32))
     check(
         jix.power(zaf32, np.array([3.0, 2.0, 0.5], dtype=np.float32)),
         df32 ** np.array([3.0, 2.0, 0.5], dtype=np.float32),
@@ -444,10 +439,10 @@ def test_power_custom_inputs():
     # float64: Python floats coerce to float64 naturally
     df64 = np.array([2.0, 3.0, 4.0])
     zaf64 = jix.compact(df64)
-    check(jix.power(zaf64, 2.0), df64**2.0)  # Python float scalar
+    check(jix.power(zaf64, 2.0), df64**2.0)
     check(jix.power(2.0, zaf64), 2.0**df64)  # scalar first
-    check(jix.power(zaf64, [3.0, 2.0, 0.5]), df64 ** [3.0, 2.0, 0.5])  # list
-    check(jix.power(zaf64, (3.0, 2.0, 0.5)), df64 ** (3.0, 2.0, 0.5))  # tuple
+    check(jix.power(zaf64, [3.0, 2.0, 0.5]), df64 ** [3.0, 2.0, 0.5])
+    check(jix.power(zaf64, (3.0, 2.0, 0.5)), df64 ** (3.0, 2.0, 0.5))
 
 
 # ---------------------------------------------------------------------------

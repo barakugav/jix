@@ -500,11 +500,6 @@ mod tests {
     use crate::ops::op1::tests::test_op1;
     use crate::ops::op2::tests::test_op2;
 
-    // Kept as property tests: one multibyte width (u32) plus one narrow width (u8) is enough
-    // to catch width edges. Bitwise ops depend only on byte width, not on signedness or dtype
-    // identity (see the documented one-dtype-per-byte-layout principle at
-    // `util/nd_copy.rs:916`), so the other integer dtypes are redundant here; they - and the
-    // remaining ops - are covered by fixed-input `*_concrete` tests below instead.
     test_op1!(count_ones, |a| a.count_ones(), [u8, u32], any_strategy);
     test_op2!(bitand, |a, b| a & b, [u8, u32], any_strategy);
     test_op2!(

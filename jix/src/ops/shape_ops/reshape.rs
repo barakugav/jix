@@ -425,6 +425,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use ndarray::array;
     use proptest::prelude::*;
@@ -596,7 +597,6 @@ mod tests {
 
     #[test]
     fn full_read_2d_to_2d_repartition() {
-        // [3, 4] -> [2, 6]: rows of 3 in orig map to interleaved rows of 2 in new
         let a = make2d(u8s(12), 3, 4, &[3, 4]);
         let r = a.reshape([2, 6]);
         let got = r.to_ndarray().unwrap();
@@ -608,7 +608,6 @@ mod tests {
 
     #[test]
     fn full_read_2d_to_2d_repartition_asymmetric() {
-        // [4, 3] -> [3, 4]
         let a = make2d(u8s(12), 4, 3, &[4, 3]);
         let r = a.reshape([3, 4]);
         let got = r.to_ndarray().unwrap();
@@ -643,7 +642,6 @@ mod tests {
 
     #[test]
     fn full_read_3d_to_2d() {
-        // [2, 3, 4] -> [6, 4]
         let a = make3d(u8s(24), 2, 3, 4, &[2, 3, 4]);
         let r = a.reshape([6, 4]);
         let got = r.to_ndarray().unwrap();
@@ -655,7 +653,6 @@ mod tests {
 
     #[test]
     fn full_read_2d_to_3d() {
-        // [6, 4] -> [2, 3, 4]
         let a = make2d(u8s(24), 6, 4, &[6, 4]);
         let r = a.reshape([2, 3, 4]);
         let got = r.to_ndarray().unwrap();
@@ -667,7 +664,6 @@ mod tests {
 
     #[test]
     fn full_read_3d_repartition() {
-        // [2, 3, 4] -> [2, 12]
         let a = make3d(u8s(24), 2, 3, 4, &[2, 3, 4]);
         let r = a.reshape([2, 12]);
         let got = r.to_ndarray().unwrap();
@@ -792,7 +788,6 @@ mod tests {
 
     #[test]
     fn sub_read_first_two_columns() {
-        // [0..3, 0..2] -> rows 0-2, cols 0-1
         let a = make1d(u8s(12), 12);
         let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[0..3, 0..2], &r.read_ctx()).unwrap();
@@ -801,7 +796,6 @@ mod tests {
 
     #[test]
     fn sub_read_last_two_columns() {
-        // [0..3, 2..4] -> rows 0-2, cols 2-3
         let a = make1d(u8s(12), 12);
         let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[0..3, 2..4], &r.read_ctx()).unwrap();
@@ -810,7 +804,6 @@ mod tests {
 
     #[test]
     fn sub_read_inner_2x2() {
-        // [1..3, 1..3]
         let a = make1d(u8s(12), 12);
         let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[1..3, 1..3], &r.read_ctx()).unwrap();
@@ -819,7 +812,6 @@ mod tests {
 
     #[test]
     fn sub_read_single_element_center() {
-        // [1..2, 2..3] -> element at (1,2) = 6
         let a = make1d(u8s(12), 12);
         let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[1..2, 2..3], &r.read_ctx()).unwrap();
@@ -828,7 +820,6 @@ mod tests {
 
     #[test]
     fn sub_read_single_element_corner() {
-        // [2..3, 3..4] -> element at (2,3) = 11
         let a = make1d(u8s(12), 12);
         let r = a.reshape([3, 4]);
         let got = r.to_ndarray_sub(&[2..3, 3..4], &r.read_ctx()).unwrap();
@@ -867,7 +858,6 @@ mod tests {
 
     #[test]
     fn sub_read_2x6_row0_partial() {
-        // [0..1, 1..4] -> [1, 3] = [1, 2, 3]
         let a = make1d(u8s(12), 12);
         let r = a.reshape([2, 6]);
         let got = r.to_ndarray_sub(&[0..1, 1..4], &r.read_ctx()).unwrap();
@@ -876,8 +866,6 @@ mod tests {
 
     #[test]
     fn sub_read_2x6_both_rows_partial_cols() {
-        // [0..2, 2..5] -> rows 0-1, cols 2-4
-        // row 0: [2, 3, 4]; row 1: [8, 9, 10]
         let a = make1d(u8s(12), 12);
         let r = a.reshape([2, 6]);
         let got = r.to_ndarray_sub(&[0..2, 2..5], &r.read_ctx()).unwrap();
@@ -894,7 +882,6 @@ mod tests {
 
     #[test]
     fn sub_read_3d_single_row() {
-        // [0..1, 1..2, 0..4] -> (0,1,*) = [4, 5, 6, 7]
         let a = make1d(u8s(24), 24);
         let r = a.reshape([2, 3, 4]);
         let got = r
@@ -905,11 +892,6 @@ mod tests {
 
     #[test]
     fn sub_read_3d_inner_block() {
-        // [0..2, 1..3, 1..3]:
-        //   (0,1,1)=5  (0,1,2)=6
-        //   (0,2,1)=9  (0,2,2)=10
-        //   (1,1,1)=17 (1,1,2)=18
-        //   (1,2,1)=21 (1,2,2)=22
         let a = make1d(u8s(24), 24);
         let r = a.reshape([2, 3, 4]);
         let got = r
@@ -920,7 +902,6 @@ mod tests {
 
     #[test]
     fn sub_read_3d_second_slab() {
-        // [1..2, 0..3, 0..4] -> all of the second "slab" = [12..24]
         let a = make1d(u8s(24), 24);
         let r = a.reshape([2, 3, 4]);
         let got = r
@@ -981,7 +962,6 @@ mod tests {
 
     #[test]
     fn multiblock_2d_orig_reshape_to_1d() {
-        // orig [3, 4] with block_shape [2, 2], flatten to [12]
         let a = make2d(u8s(12), 3, 4, &[2, 2]);
         let r = a.reshape(12);
         let got = r.to_ndarray().unwrap();
@@ -990,8 +970,6 @@ mod tests {
 
     #[test]
     fn multiblock_2d_orig_reshape_sub_read() {
-        // orig [3, 4] with block_shape [2, 2], reshape to [2, 6]
-        // sub-read row 1: flat [6..12) -> [6, 7, 8, 9, 10, 11]
         let a = make2d(u8s(12), 3, 4, &[2, 2]);
         let r = a.reshape([2, 6]);
         let got = r.to_ndarray_sub(&[1..2, 0..6], &r.read_ctx()).unwrap();
@@ -1066,7 +1044,7 @@ mod tests {
         let mut divs = Vec::new();
         let mut d = 1;
         while d * d <= n {
-            if n % d == 0 {
+            if n.is_multiple_of(d) {
                 divs.push(d);
                 if d != n / d {
                     divs.push(n / d);
@@ -1078,6 +1056,7 @@ mod tests {
         divs
     }
 
+    #[allow(clippy::type_complexity)]
     fn reshape_strategy<T>(
     ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>, Vec<u64>)>
     where

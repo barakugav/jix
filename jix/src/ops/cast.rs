@@ -407,11 +407,10 @@ mod tests {
         };
     }
 
-    // --- kept property tests: one representative pair per cast category (see
+    // --- property tests: one representative pair per cast category (see
     // cast_int_float_concrete / cast_float_widen_narrow_concrete /
     // cast_int_sign_reinterpret_concrete / cast_identity_concrete / cast_bool_concrete /
-    // cast_f16_concrete / cast_complex_concrete below for the remaining pairs, converted to
-    // fixed-input tests) ---
+    // cast_f16_concrete / cast_complex_concrete below for the remaining pairs) ---
 
     // int-widen: smaller signed int -> larger signed int (sign-extension path).
     test_cast_pair!(i8, i32);
@@ -425,7 +424,7 @@ mod tests {
     // identity cast (same src and dst dtype).
     test_cast_pair!(f32, f32);
 
-    // int <-> float at a different byte width than the kept i32/f64 pair: smaller -> larger
+    // int <-> float at a different byte width than the i32/f64 pair: smaller -> larger
     // itemsize (u8 -> f32, exact) and larger -> smaller itemsize (f32 -> u8, truncation +
     // saturation).
     #[test]
@@ -483,7 +482,7 @@ mod tests {
         crate::util::assert_array_matches(&za_u8.cast::<i8>(), &expected_u8_i8);
     }
 
-    // identity casts at other dtypes than the kept f32 -> f32 representative.
+    // identity casts at other dtypes than the f32 -> f32 representative.
     #[test]
     fn cast_identity_concrete() {
         use crate::Array;
@@ -500,7 +499,7 @@ mod tests {
         crate::util::assert_array_matches(&za_f64.cast::<f64>(), &expected_f64);
     }
 
-    // to-bool / from-bool at dtypes other than the kept i32 <-> bool representative.
+    // to-bool / from-bool at dtypes other than the i32 <-> bool representative.
     #[test]
     fn cast_bool_concrete() {
         use crate::Array;

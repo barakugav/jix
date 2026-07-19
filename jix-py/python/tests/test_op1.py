@@ -2,8 +2,7 @@
 Tests for element-wise unary ops. Mirrors the test block in jix/src/ops/op1.rs.
 
 negative/exp/log are kept as property tests, one per dtype, parametrized via
-@pytest.mark.parametrize (analogous to the test_op1! macro expanding to one proptest
-per (op, dtype) pair). The remaining ops use fixed-input `test_*_concrete` functions
+@pytest.mark.parametrize. The remaining ops use fixed-input `test_*_concrete` functions
 covering the same edge cases over 2-3 representative dtypes each.
 
 Python name differences vs Rust:

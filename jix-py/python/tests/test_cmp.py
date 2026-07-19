@@ -67,7 +67,7 @@ def test_equal(dtype: np.dtype, data: DataObject):
     assert_array_matches(jix.equal(za, zb), np_a == np_b, data=data)
 
 
-# not_equal: converted to a concrete test. Edge cases: NaN != NaN is true (IEEE 754)
+# not_equal edge cases: NaN != NaN is true (IEEE 754)
 # while equal ints/infinities are false, plus signed negatives.
 def test_not_equal_concrete():
     a_i = np.array([1, -5, 3, 0], dtype=np.int32)
@@ -92,7 +92,7 @@ def test_greater(dtype: np.dtype, data: DataObject):
     assert_array_matches(jix.greater(za, zb), np_a > np_b, data=data)
 
 
-# greater_equal / less / less_equal: converted to concrete tests. Edge cases per op:
+# greater_equal / less / less_equal edge cases per op:
 # NaN operands (always false), inf/-inf ordering, equal values (matters for >= and <=),
 # signed negatives, and a bool path since these ops support bool.
 def test_greater_equal_concrete():
@@ -163,7 +163,7 @@ def test_maximum(dtype: np.dtype, data: DataObject):
     assert_array_matches(jix.maximum(za, zb), np.maximum(np_a, np_b), data=data)
 
 
-# minimum: converted to a concrete test. Edge cases: signed negatives, equal values,
+# minimum edge cases: signed negatives, equal values,
 # inf ordering (finite outputs), and a NaN-propagation case matching the kernel.
 def test_minimum_concrete():
     a_i = np.array([1, -5, 3, 3], dtype=np.int32)
@@ -197,8 +197,8 @@ def test_clamp_both(dtype: np.dtype, data: DataObject):
     assert_array_matches(jix.clamp(za, min=lo, max=hi), np.clip(np_a, lo, hi), data=data)
 
 
-# clamp_min_only / clamp_max_only / clamp_none: converted to concrete tests, using
-# np.clip as the reference (with the corresponding bound set to None).
+# clamp_min_only / clamp_max_only / clamp_none use np.clip as the reference
+# (with the corresponding bound set to None).
 def test_clamp_min_only_concrete():
     # int32: dtype min/max, 0, values on both sides of the bound.
     a_i = _CLAMP_INT_VALS

@@ -140,7 +140,7 @@ where
             &self.array,
             self.shape(),
             self.dtype(),
-            size_of::<K::State>() as usize,
+            size_of::<K::State>(),
             Alignment::of::<K::State>(),
             &self.is_reduced,
             &|args| self.reduce_tile(args),

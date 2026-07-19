@@ -206,7 +206,6 @@ mod tests {
     use crate::util::{shape_strategy, ScalarStrategy};
     use crate::{Array, DimDyn, Ty};
 
-    // 2D i32: transpose (axes=[1,0])
     #[test]
     fn test_i32_2d_transpose() {
         let a = array![[1i32, 2, 3], [4, 5, 6]];
@@ -220,7 +219,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 2D f32: transpose
     #[test]
     fn test_f32_2d_transpose() {
         let a = array![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
@@ -234,7 +232,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 3D i32: axes=[2,0,1]
     #[test]
     fn test_i32_3d_axes_2_0_1() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
@@ -248,7 +245,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 3D i32: swap only last two dims axes=[0,2,1]
     #[test]
     fn test_i32_3d_axes_0_2_1() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
@@ -262,7 +258,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // 3D i32: identity permutation
     #[test]
     fn test_i32_3d_identity() {
         let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
@@ -271,7 +266,6 @@ mod tests {
         assert_eq!(actual, a);
     }
 
-    // Panic: axes length does not match ndim
     #[test]
     #[should_panic]
     fn test_wrong_axes_length_panics() {
@@ -280,7 +274,6 @@ mod tests {
         let _ = za.permute_axes(&[0, 1, 2]);
     }
 
-    // Panic: axis out of bounds
     #[test]
     #[should_panic]
     fn test_axis_out_of_bounds_panics() {
@@ -289,7 +282,6 @@ mod tests {
         let _ = za.permute_axes(&[0, 5]);
     }
 
-    // Panic: duplicate axis
     #[test]
     #[should_panic]
     fn test_duplicate_axis_panics() {
@@ -302,6 +294,7 @@ mod tests {
     // Proptest: arbitrary ndim, arbitrary permutation, verified against ndarray
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::type_complexity)]
     fn permute_axes_strategy<T>() -> impl Strategy<
         Value = (
             ndarray::ArrayD<T>,

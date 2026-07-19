@@ -381,7 +381,7 @@ mod tests {
 
     // --- concrete tests for the remaining dtypes ---
     //
-    // Each converted dtype shares a byte-branch with one of the proptests kept above (or, for
+    // Each dtype here shares a byte-branch with one of the proptests kept above (or, for
     // the two complex dtypes, hits its own mixed-alignment branch), so a fixed input is enough
     // to keep the branch covered. Every condition mask below runs an all-true segment, then an
     // all-false segment, then an alternating (mixed) tail, so a single array exercises all three

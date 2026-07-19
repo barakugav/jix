@@ -527,7 +527,7 @@ mod tests {
     use crate::{Dim, DimDyn, SliceExt};
 
     /// Build a [`DimArray`] (the `DimDyn` vec container) from a slice, for constructing test
-    /// extensions whose `new` now takes an owned `D::Vec<S>`.
+    /// extensions whose `new` takes an owned `D::Vec<S>`.
     fn dv<T: Copy>(s: &[T]) -> DimArray<T> {
         s.to_dim_vec::<DimDyn>()
     }
@@ -672,9 +672,9 @@ mod tests {
     // NdIter with new_with_begin
     // ---------------------------------------------------------------------------
 
-    fn collect_indices<D: Dimension, E: NdIterExtension>(mut iter: NdIter<D, E>) -> Vec<Vec<u64>> {
+    fn collect_indices<D: Dimension, E: NdIterExtension>(iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
-        while let Some((idx, _)) = iter.next() {
+        for (idx, _) in iter {
             out.push(idx.as_ref().to_vec());
         }
         out
@@ -708,7 +708,7 @@ mod tests {
             [4u64, 5, 3],
             (),
         ));
-        assert_eq!(got.len(), (4 - 1) * (5 - 2) * (3 - 0));
+        assert_eq!(got.len(), (4 - 1) * (5 - 2) * 3);
     }
 
     #[test]
@@ -859,9 +859,9 @@ mod tests {
             NdIterExtStridesPtrMut::new(dv(&[3usize, 1]), base_a),
             NdIterExtStridesPtrMut::new(dv(&[6usize, 2]), base_b),
         );
-        let mut iter = NdIter::new(dv(&[2u64, 3]), ext);
+        let iter = NdIter::new(dv(&[2u64, 3]), ext);
         let mut flat = 0usize;
-        while let Some((_, (pa, pb))) = iter.next() {
+        for (_, (pa, pb)) in iter {
             assert_eq!(pa, unsafe { base_a.add(flat) }, "a step {flat}");
             assert_eq!(pb, unsafe { base_b.add(flat * 2) }, "b step {flat}");
             flat += 1;
@@ -879,7 +879,7 @@ mod tests {
         );
         let mut iter = NdIter::new(dv(&[4u64]), ext);
         let mut ptrs: Vec<*mut u8> = Vec::new();
-        while let Some((_, (ptr, _))) = iter.next() {
+        for (_, (ptr, _)) in iter.by_ref() {
             ptrs.push(ptr);
         }
         // 3 on_change calls: steps 2, 3, 4 each fire once for dim 0
@@ -899,9 +899,9 @@ mod tests {
             NdIterExtStridesPtrMut::new(dv(&[1usize]), b.as_mut_ptr()),
             NdIterExtStridesPtrMut::new(dv(&[1usize]), c.as_mut_ptr()),
         );
-        let mut iter = NdIter::new(dv(&[4u64]), ext);
+        let iter = NdIter::new(dv(&[4u64]), ext);
         let mut count = 0usize;
-        while let Some((_, (pa, pb, pc))) = iter.next() {
+        for (_, (pa, pb, pc)) in iter {
             let off_a = unsafe { pa.offset_from(a.as_ptr()) };
             let off_b = unsafe { pb.offset_from(b.as_ptr()) };
             let off_c = unsafe { pc.offset_from(c.as_ptr()) };
@@ -918,8 +918,8 @@ mod tests {
 
     #[test]
     fn unit_extension_yields_unit_items() {
-        let mut iter = NdIter::<Dim<2>, _>::new([2u64, 2], ());
-        while let Some((_, item)) = iter.next() {
+        let iter = NdIter::<Dim<2>, _>::new([2u64, 2], ());
+        for (_, item) in iter {
             let _: () = item;
         }
     }

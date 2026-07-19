@@ -808,7 +808,6 @@ mod tests {
 
     #[test]
     fn example() {
-        // Construct an array with a specific block shape.
         let data = ndarray::Array2::<f32>::zeros((1024, 1024));
         let mut params = ArrayParams::new();
         params.block_shape(&[64, 64]);

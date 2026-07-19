@@ -207,6 +207,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use ndarray::array;
 
@@ -237,13 +238,11 @@ mod tests {
 
     #[test]
     fn shape_preserved_single_axis() {
-        // Single axis: pass a usize.
         assert_eq!(make(arange(12), &[3u64, 4]).flip(0).shape(), &[3, 4]);
     }
 
     #[test]
     fn shape_preserved_all_axes() {
-        // Three axes: pass an array.
         assert_eq!(
             make(arange(24), &[2u64, 3, 4]).flip([0, 1, 2]).shape(),
             &[2, 3, 4]
@@ -261,14 +260,12 @@ mod tests {
 
     #[test]
     fn input_form_single_usize() {
-        // .flip(usize) - single axis.
         let got = make(arange(6), &[3u64, 2]).flip(0).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5], [2, 3], [0, 1]]);
     }
 
     #[test]
     fn input_form_array_two_axes() {
-        // .flip([usize; 2]) - two axes via fixed-size array.
         let got = make(arange(6), &[3u64, 2])
             .flip([0, 1])
             .to_ndarray()
@@ -278,7 +275,6 @@ mod tests {
 
     #[test]
     fn input_form_tuple_two_axes() {
-        // .flip((usize, usize)) - two axes via tuple.
         let got = make(arange(6), &[3u64, 2])
             .flip((0, 1))
             .to_ndarray()
@@ -288,7 +284,6 @@ mod tests {
 
     #[test]
     fn input_form_slice_dynamic() {
-        // .flip(&[usize]) - dynamic axis count via slice.
         let axes: Vec<usize> = vec![0, 1];
         let got = make(arange(6), &[3u64, 2])
             .flip(axes.as_slice())
@@ -322,7 +317,7 @@ mod tests {
     #[test]
     fn identity_empty_axes_full_read() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
-        let got = make(arange(12), &[3u64, 4]).flip(&[]).to_ndarray().unwrap();
+        let got = make(arange(12), &[3u64, 4]).flip([]).to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
@@ -330,14 +325,14 @@ mod tests {
     fn identity_size_one_flipped_axis() {
         // Flipping a size-1 axis is a no-op.
         let nd = ndarray::Array::from_shape_vec((1, 4), arange(4)).unwrap();
-        let got = make(arange(4), &[1u64, 4]).flip(&[0]).to_ndarray().unwrap();
+        let got = make(arange(4), &[1u64, 4]).flip([0]).to_ndarray().unwrap();
         assert_eq!(got, nd);
     }
 
     #[test]
     fn identity_empty_array() {
         // Flipping an axis of size 0 is a no-op (no data to move).
-        let got = make(vec![], &[0u64, 4]).flip(&[0]).to_ndarray().unwrap();
+        let got = make(vec![], &[0u64, 4]).flip([0]).to_ndarray().unwrap();
         assert_eq!(got.shape(), &[0, 4]);
     }
 
@@ -347,9 +342,8 @@ mod tests {
 
     #[test]
     fn full_read_1d_single_axis() {
-        // [10, 20, 30, 40] flip axis 0 -> [40, 30, 20, 10]
         let got = make(vec![10, 20, 30, 40], &[4u64])
-            .flip(&[0])
+            .flip([0])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, array![40, 30, 20, 10]);
@@ -357,23 +351,20 @@ mod tests {
 
     #[test]
     fn full_read_2d_axis0() {
-        // [[0,1,2,3],[4,5,6,7]] flip axis 0 -> rows reversed
-        let got = make(arange(8), &[2u64, 4]).flip(&[0]).to_ndarray().unwrap();
+        let got = make(arange(8), &[2u64, 4]).flip([0]).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5, 6, 7], [0, 1, 2, 3]]);
     }
 
     #[test]
     fn full_read_2d_axis1() {
-        // [[0,1,2,3],[4,5,6,7]] flip axis 1 -> columns reversed within each row
-        let got = make(arange(8), &[2u64, 4]).flip(&[1]).to_ndarray().unwrap();
+        let got = make(arange(8), &[2u64, 4]).flip([1]).to_ndarray().unwrap();
         assert_eq!(got, array![[3, 2, 1, 0], [7, 6, 5, 4]]);
     }
 
     #[test]
     fn full_read_2d_both_axes() {
-        // [[0,1,2,3],[4,5,6,7]] flip axes [0, 1] -> all reversed
         let got = make(arange(8), &[2u64, 4])
-            .flip(&[0, 1])
+            .flip([0, 1])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, array![[7, 6, 5, 4], [3, 2, 1, 0]]);
@@ -381,7 +372,6 @@ mod tests {
 
     #[test]
     fn full_read_3d_middle_axis() {
-        // Flip axis 1 of a 3-D array reverses only the middle axis.
         let arr = ndarray::Array::from_shape_vec((2, 3, 2), arange(12)).unwrap();
         // Expected: per (i, k), values along j are reversed.
         let mut expected = arr.clone();
@@ -394,7 +384,7 @@ mod tests {
             }
         }
         let got = make(arange(12), &[2u64, 3, 2])
-            .flip(&[1])
+            .flip([1])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, expected);
@@ -406,10 +396,8 @@ mod tests {
 
     #[test]
     fn sub_read_1d_partial() {
-        // [10, 20, 30, 40, 50] flip axis 0 -> [50, 40, 30, 20, 10]
-        // Read output positions [1..4) -> [40, 30, 20]
         let got = make(vec![10, 20, 30, 40, 50], &[5u64])
-            .flip(&[0])
+            .flip([0])
             .to_ndarray_sub(&[1..4], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![40, 30, 20]);
@@ -417,10 +405,8 @@ mod tests {
 
     #[test]
     fn sub_read_2d_axis0_partial_rows() {
-        // [[0,1,2],[3,4,5],[6,7,8]] flip axis 0 -> [[6,7,8],[3,4,5],[0,1,2]]
-        // Read rows [0..2) -> [[6,7,8],[3,4,5]]
         let got = make(arange(9), &[3u64, 3])
-            .flip(&[0])
+            .flip([0])
             .to_ndarray_sub(&[0..2, 0..3], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[6, 7, 8], [3, 4, 5]]);
@@ -428,10 +414,8 @@ mod tests {
 
     #[test]
     fn sub_read_2d_both_axes_corner() {
-        // [[0,1,2,3],[4,5,6,7],[8,9,10,11]] flip [0,1] -> [[11,10,9,8],[7,6,5,4],[3,2,1,0]]
-        // Read sub [0..2, 1..3) -> [[10, 9], [6, 5]]
         let got = make(arange(12), &[3u64, 4])
-            .flip(&[0, 1])
+            .flip([0, 1])
             .to_ndarray_sub(&[0..2, 1..3], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[10, 9], [6, 5]]);
@@ -440,7 +424,7 @@ mod tests {
     #[test]
     fn sub_read_empty_range() {
         let got = make(arange(8), &[2u64, 4])
-            .flip(&[0])
+            .flip([0])
             .to_ndarray_sub(&[1..1, 0..4], &ReadContext::default())
             .unwrap();
         assert_eq!(got.shape(), &[0, 4]);
@@ -450,10 +434,9 @@ mod tests {
     fn sub_read_single_element() {
         // Single-element read still goes through the flip path.
         let got = make(arange(5), &[5u64])
-            .flip(&[0])
+            .flip([0])
             .to_ndarray_sub(&[0..1], &ReadContext::default())
             .unwrap();
-        // output[0] is what was input[4]
         assert_eq!(got, array![4]);
     }
 
@@ -464,7 +447,7 @@ mod tests {
     #[test]
     fn compose_flip_then_compact() {
         let got = make(arange(6), &[2u64, 3])
-            .flip(&[0])
+            .flip([0])
             .compact()
             .unwrap()
             .to_ndarray()
@@ -474,20 +457,18 @@ mod tests {
 
     #[test]
     fn compose_flip_then_slice() {
-        // Flip axis 0, then slice the bottom two rows.
         let got = make(arange(9), &[3u64, 3])
-            .flip(&[0])
+            .flip([0])
             .slice((1..3, ..))
             .to_ndarray()
             .unwrap();
-        // Flipped: [[6,7,8],[3,4,5],[0,1,2]]; rows 1..3 = [[3,4,5],[0,1,2]]
         assert_eq!(got, array![[3, 4, 5], [0, 1, 2]]);
     }
 
     #[test]
     fn compose_flip_then_cast() {
         let got = make(vec![1, 2, 3], &[3u64])
-            .flip(&[0])
+            .flip([0])
             .cast::<f32>()
             .to_ndarray()
             .unwrap();
@@ -496,10 +477,9 @@ mod tests {
 
     #[test]
     fn compose_permute_then_flip() {
-        // [[0,1,2],[3,4,5]] permute -> [[0,3],[1,4],[2,5]]; flip axis 0 -> [[2,5],[1,4],[0,3]]
         let got = make(arange(6), &[2u64, 3])
             .permute_axes(&[1, 0])
-            .flip(&[0])
+            .flip([0])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, array![[2, 5], [1, 4], [0, 3]]);
@@ -509,8 +489,8 @@ mod tests {
     fn compose_flip_then_flip_same_axis_is_identity() {
         let nd = ndarray::Array::from_shape_vec((3, 4), arange(12)).unwrap();
         let got = make(arange(12), &[3u64, 4])
-            .flip(&[0])
-            .flip(&[0])
+            .flip([0])
+            .flip([0])
             .to_ndarray()
             .unwrap();
         assert_eq!(got, nd);
@@ -523,7 +503,7 @@ mod tests {
     #[test]
     fn dim_change_into_dim_dyn() {
         let a = make(arange(12), &[3u64, 4]); // Compact<Ty<i32>, Dim<2>>
-        let f = a.flip(&[0]); // Array<Flip<...Dim<2>>>
+        let f = a.flip([0]); // Array<Flip<...Dim<2>>>
         let dyn_arr = f.into_dim_dyn();
         assert_eq!(dyn_arr.shape(), &[3, 4]);
     }
@@ -531,7 +511,7 @@ mod tests {
     #[test]
     fn element_type_change_into_type_dyn() {
         let a = make(arange(6), &[2u64, 3]);
-        let f = a.flip(&[1]);
+        let f = a.flip([1]);
         let dyn_et = f.into_type_dyn();
         assert_eq!(dyn_et.dtype(), &<i32 as crate::dtype::Dtyped>::DTYPE);
     }
@@ -553,6 +533,7 @@ mod tests {
             .unwrap()
     }
 
+    #[allow(clippy::type_complexity)]
     fn flip_strategy() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<i32>,

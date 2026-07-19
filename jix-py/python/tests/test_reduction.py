@@ -69,7 +69,7 @@ def _axes_strategy(draw, ndim):
     if len(axes) == 1:
         form = draw(st.integers(0, 2))
         if form == 0:
-            return axes[0]  # bare int
+            return axes[0]
         if form == 1:
             return list(axes)
         return tuple(axes)
@@ -136,13 +136,13 @@ def _element_st(dtype):
 # Dtype lists
 # ---------------------------------------------------------------------------
 
-# float16 reductions now accumulate in native f16 (see commit "Preset float dtype in
-# reductions, upcast integers"), so for sum/product/mean their values can drift far from a
-# high-precision reference under catastrophic cancellation or overflow. The adversarial
-# property tests for those ops therefore cover f32/f64 only; float16 value parity for the
-# common (well-behaved) case is checked in test_common_case_matches_numpy, and float16
-# output dtype is checked exhaustively in test_output_dtype_matches_numpy. var/std keep f16
-# in the property tests because they accumulate the mean in f64 internally and stay precise.
+# float16 reductions accumulate in native f16, so for sum/product/mean their values can drift
+# far from a high-precision reference under catastrophic cancellation or overflow. The
+# adversarial property tests for those ops therefore cover f32/f64 only; float16 value parity
+# for the common (well-behaved) case is checked in test_common_case_matches_numpy, and
+# float16 output dtype is checked exhaustively in test_output_dtype_matches_numpy. var/std
+# keep f16 in the property tests because they accumulate the mean in f64 internally and stay
+# precise.
 _WIDE_FLOATS = [np.float32, np.float64]
 
 
@@ -224,7 +224,6 @@ def test_argmax_concrete():
     for axis in (0, 1):
         assert_array_matches(jix.argmax(ze, axis=axis), np.argmax(d_f, axis=_np_axis(axis)).astype(np.uint64))
 
-    # bool
     d_b = np.array([[False, True, True], [True, False, False]], dtype=np.bool_)
     zf = jix.compact(d_b, params={"block_shape": [1, 1]})
     for axis in (0, 1):
@@ -263,7 +262,6 @@ def test_argmin_concrete():
     for axis in (0, 1):
         assert_array_matches(jix.argmin(ze, axis=axis), np.argmin(d_f, axis=_np_axis(axis)).astype(np.uint64))
 
-    # bool
     d_b = np.array([[True, False, False], [False, True, True]], dtype=np.bool_)
     zf = jix.compact(d_b, params={"block_shape": [1, 1]})
     for axis in (0, 1):
@@ -290,9 +288,8 @@ def test_sum(dtype: np.dtype, data: DataObject):
 
 
 def test_product_concrete():
-    # Tiny shapes (as in the original property test) keep the accumulator from overflowing.
-    # Mix of zero and non-zero, positive and negative, across signed/unsigned ints, wide
-    # floats, and complex.
+    # Tiny shapes keep the accumulator from overflowing. Mix of zero and non-zero, positive
+    # and negative, across signed/unsigned ints, wide floats, and complex.
     cases = [
         (np.int8, np.array([-4, 4, 0, -1], dtype=np.int8)),
         (np.int64, np.array([[-100, 5], [100, -1]], dtype=np.int64)),
@@ -485,11 +482,9 @@ def test_var_std_ddof1():
 # ---------------------------------------------------------------------------
 # Dtype promotion parity with numpy
 #
-# The commit "Preset float dtype in reductions, upcast integers" changed sum/product/mean/
-# var/std so that float and complex inputs keep their own width instead of always widening
-# to 64-bit, while integers still upcast. The result is that jix's reduction output dtype
-# now matches numpy exactly for every integer, unsigned, float, and complex input. These
-# tests pin that mapping.
+# jix's reduction output dtype matches numpy exactly for every integer, unsigned, float, and
+# complex input: sum/product/mean/var/std keep float and complex inputs at their own width
+# while integers upcast. These tests pin that mapping.
 #
 # The only intentional divergences (verified against numpy and documented in the op
 # docstrings) both involve bool:

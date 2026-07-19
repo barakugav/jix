@@ -8,7 +8,7 @@ use crate::util::AlignedBytes;
 use crate::{Array, ArrayParams, ArrayStorage, DimDyn, Ty};
 
 // ---------------------------------------------------------------------------
-// arr_params - shared test helper (previously duplicated in every test module)
+// arr_params - shared test helper
 // ---------------------------------------------------------------------------
 
 pub(crate) fn arr_params(block_shape: &[usize]) -> ArrayParams {

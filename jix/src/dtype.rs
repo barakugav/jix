@@ -1192,7 +1192,6 @@ mod tests {
 
     #[test]
     fn nested_array_accumulates_shape() {
-        // [[i32; 3]; 2] should yield shape [2, 3]
         let d = <[[i32; 3]; 2] as Dtyped>::DTYPE;
         assert_eq!(d.shape(), &[2, 3]);
         assert_eq!(d.itemsize(), 2 * 3 * 4);

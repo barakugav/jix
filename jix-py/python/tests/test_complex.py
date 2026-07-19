@@ -65,7 +65,6 @@ def test_array_imag_method_getter():
 def test_array_real_is_property_not_method():
     """real / imag are properties: accessed without parentheses (like np.ndarray.real)."""
     a = jix.compact(np.array([1 + 2j], dtype=np.complex64))
-    # Property access yields a jix.Array directly.
     assert isinstance(a.real, jix.Array)
     assert isinstance(a.imag, jix.Array)
 

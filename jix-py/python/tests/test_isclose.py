@@ -19,20 +19,9 @@ from tests_util import (
 
 import jix
 
-
 # ---------------------------------------------------------------------------
 # Reference implementation (mirrors the Rust algorithm element-wise)
 # ---------------------------------------------------------------------------
-
-# Maps each supported float dtype to its component type (for tolerance casting).
-# Only used by test_isclose_float (real dtypes); the complex property tests were
-# converted to concrete tests that compute expected results by hand, so no complex
-# entries are needed here.
-_COMPONENT_DTYPE = {
-    np.float16: np.float16,
-    np.float32: np.float32,
-    np.float64: np.float64,
-}
 
 
 def _ref_isclose_scalar(a, b, rtol, atol):
@@ -49,12 +38,13 @@ def _ref_isclose_scalar(a, b, rtol, atol):
 
 
 def _ref_isclose_array(np_a, np_b, rtol, atol, dtype):
-    """Vectorised reference for real float ndarrays, computed in dtype precision."""
-    ft = _COMPONENT_DTYPE[dtype]
-    rtol_t, atol_t = ft(rtol), ft(atol)
-    a_t = np_a.astype(ft)
-    b_t = np_b.astype(ft)
-    return np.vectorize(lambda a, b: _ref_isclose_scalar(a, b, rtol_t, atol_t), otypes=[bool])(a_t, b_t)
+    """Elementwise reference for real float ndarrays, computed in dtype precision."""
+    rtol_t, atol_t = dtype(rtol), dtype(atol)
+    a_t = np_a.astype(dtype)
+    b_t = np_b.astype(dtype)
+    # a and b share a shape (carrays2_strategy), so zip the flattened views.
+    out = [_ref_isclose_scalar(a, b, rtol_t, atol_t) for a, b in zip(a_t.reshape(-1), b_t.reshape(-1))]
+    return np.array(out, dtype=bool).reshape(a_t.shape)
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +76,7 @@ def test_isclose_float(dtype: np.dtype, data: DataObject):
 
 
 def test_isclose_complex_real_atol_concrete():
-    """Concrete replacement for the complex real_atol property test: the same
-    tolerance value applies to both the real and imaginary component.
+    """The same tolerance value applies to both the real and imaginary component.
     Edge cases: exact match, within atol, outside atol (both plain and
     magnitude-scaled so rtol behaves differently from atol), NaN component,
     matching inf, opposite inf; complex64 and complex128 paths.
@@ -133,8 +122,7 @@ def test_isclose_complex_real_atol_concrete():
 
 
 def test_isclose_complex_atol_concrete():
-    """Concrete replacement for the complex atol property test: real and
-    imaginary components each get their own atol. Edge cases: exact match,
+    """Real and imaginary components each get their own atol. Edge cases: exact match,
     diff that only clears the real tolerance, diff that only clears the
     imaginary tolerance, diff that clears both, NaN component, matching inf,
     opposite inf, and a magnitude-scaled diff that only clears via rtol;

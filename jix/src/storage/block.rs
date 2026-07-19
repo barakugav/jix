@@ -498,7 +498,7 @@ mod tests {
             unsafe { cast_slice::<T, u8>(items) },
             T::DTYPE,
             block_size,
-            &encoder_params,
+            encoder_params,
         )
     }
 
@@ -514,7 +514,6 @@ mod tests {
 
     #[test]
     fn build_multiple_blocks_exact_divisor() {
-        // 12 items, block_size=4 -> 3 full blocks
         let items: Vec<u8> = (0u8..12).collect();
         let table = build_from_items(&items, 4, &EncoderParams::default()).unwrap();
         assert_eq!(table.nblocks(), 3);
@@ -537,7 +536,6 @@ mod tests {
 
     #[test]
     fn build_with_itemsize_greater_than_one() {
-        // 4 u32 values, block_size=2
         let items: Vec<u32> = vec![10, 20, 30, 40];
         let table = build_from_items(&items, 2, &EncoderParams::default()).unwrap();
         assert_eq!(table.nblocks(), 2);
@@ -625,7 +623,7 @@ mod tests {
         let file = std::fs::File::open(path).unwrap();
         let reader_len = file.metadata().unwrap().len();
         let table2 = BlockTable::read_from(file, reader_len).unwrap();
-        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
 
         assert_eq!(table2.nblocks(), 6);
         assert_eq!(table2.nitems, 18);
@@ -645,7 +643,7 @@ mod tests {
             unsafe { cast_slice::<T, u8>(items) },
             T::DTYPE,
             block_size,
-            &encoder_params,
+            encoder_params,
         )
         .unwrap()
     }
@@ -655,14 +653,12 @@ mod tests {
         T: Dtyped,
         S: BlockTableStorage,
     {
-        let mut context = ReadContext::default();
+        let context = ReadContext::default();
         let block_bytes = storage.block_size as usize * storage.dtype().itemsize() as usize;
         let mut buf =
             AlignedBytes::with_capacity_exact(T::DTYPE.alignment().as_usize(), block_bytes);
         unsafe { buf.set_len(block_bytes) };
-        storage
-            .read_block(idx as u64, &mut buf, &mut context)
-            .unwrap();
+        storage.read_block(idx as u64, &mut buf, &context).unwrap();
         unsafe { cast_slice::<u8, T>(&buf) }.to_vec()
     }
 
@@ -702,7 +698,7 @@ mod tests {
         let items: Vec<u8> = (0..4).collect();
         let s = make_storage(&items, 4, &EncoderParams::default());
         let mut buf = vec![0u8; 3]; // one byte short
-        let mut context = ReadContext::default();
-        assert!(s.read_block(0, &mut buf, &mut context).is_err());
+        let context = ReadContext::default();
+        assert!(s.read_block(0, &mut buf, &context).is_err());
     }
 }

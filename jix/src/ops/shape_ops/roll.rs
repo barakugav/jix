@@ -185,6 +185,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use ndarray::array;
 
@@ -295,28 +296,24 @@ mod tests {
 
     #[test]
     fn full_read_1d_positive_shift() {
-        // [0,1,2,3,4] roll +2 axis 0 -> [3, 4, 0, 1, 2]
         let got = make(arange(5), &[5u64]).roll(2, 0).to_ndarray().unwrap();
         assert_eq!(got, array![3, 4, 0, 1, 2]);
     }
 
     #[test]
     fn full_read_1d_negative_shift() {
-        // [0,1,2,3,4] roll -1 axis 0 -> [1, 2, 3, 4, 0]
         let got = make(arange(5), &[5u64]).roll(-1, 0).to_ndarray().unwrap();
         assert_eq!(got, array![1, 2, 3, 4, 0]);
     }
 
     #[test]
     fn full_read_2d_axis0() {
-        // [[0,1,2,3],[4,5,6,7]] roll +1 axis 0 -> [[4,5,6,7],[0,1,2,3]]
         let got = make(arange(8), &[2u64, 4]).roll(1, 0).to_ndarray().unwrap();
         assert_eq!(got, array![[4, 5, 6, 7], [0, 1, 2, 3]]);
     }
 
     #[test]
     fn full_read_2d_axis1() {
-        // [[0,1,2],[3,4,5]] roll +1 axis 1 -> [[2,0,1],[5,3,4]]
         let got = make(arange(6), &[2u64, 3]).roll(1, 1).to_ndarray().unwrap();
         assert_eq!(got, array![[2, 0, 1], [5, 3, 4]]);
     }
@@ -433,7 +430,6 @@ mod tests {
 
     #[test]
     fn compose_roll_then_slice() {
-        // Roll axis 0, then slice rows 1..3.
         let got = make(arange(9), &[3u64, 3])
             .roll(1, 0)
             .slice((1..3, ..))
@@ -531,6 +527,7 @@ mod tests {
         out
     }
 
+    #[allow(clippy::type_complexity)]
     fn roll_strategy() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<i32>,

@@ -188,9 +188,9 @@ mod tests {
     #[test]
     fn test_0d_f64() {
         Python::attach(|py| {
-            let data = collect::<f64>(&np0(py, -3.14f64));
+            let data = collect::<f64>(&np0(py, -2.5f64));
             assert_eq!(data.ndim(), 0);
-            assert_eq!(*data.first().unwrap(), -3.14f64);
+            assert_eq!(*data.first().unwrap(), -2.5f64);
         });
     }
 

@@ -9,7 +9,6 @@ Auto-cast section verifies that Safe/Unsafe dispatch rules work for non-matching
 
 import numpy as np
 import pytest
-import jix
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
@@ -26,19 +25,12 @@ from tests_util import (
     uints,
 )
 
+import jix
+
 _int_dtypes = ints + uints
 _int_bool_dtypes = ints + uints + [np.bool_]
 
-# Concrete (non-hypothesis) conversions below iterate over `uints`: bitwise/logical
-# behavior on integer types depends only on byte width, not signedness, so one unsigned
-# dtype per width covers the distinct code paths.
 
-# The 4 logical-op concrete tests below are truthiness-keyed, not byte-width-keyed, so the
-# uints loop alone misses the distinct float/complex/bool code paths (NaN and
-# signed-zero truthiness for float, real/imag-part nonzero-ness for complex). These fixed
-# inputs cover those edges; unary cases just need the values, binary cases are paired so
-# each dtype hits all four (False, False) / (False, True) / (True, False) / (True, True)
-# truthiness combinations.
 _LOGICAL_EXTRA_UNARY_CASES = {
     np.float64: np.array([float("nan"), -0.0, 0.0, 2.5], dtype=np.float64),
     np.complex128: np.array([0j, 2 + 0j, 3j, 1 + 1j], dtype=np.complex128),
@@ -74,7 +66,8 @@ def _as_uint(x: int, bits: int) -> int:
 
 def _ref_count_ones(a: np.ndarray) -> np.ndarray:
     bits = a.itemsize * 8
-    return np.vectorize(lambda x: bin(_as_uint(int(x), bits)).count("1"), otypes=[np.uint32])(a)
+    out = [bin(_as_uint(int(x), bits)).count("1") for x in a.reshape(-1)]
+    return np.array(out, dtype=np.uint32).reshape(a.shape)
 
 
 def _ref_rotate_left(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -86,14 +79,9 @@ def _ref_rotate_left(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         sh = int(y) % bits
         return ((x << sh) | (x >> (bits - sh))) & ((1 << bits) - 1) if sh else x
 
-    return np.vectorize(_rl, otypes=[ut])(a, b).view(a.dtype)
-
-
-# ---------------------------------------------------------------------------
-# Helpers for concrete (fixed-input) tests below: plain int/bit math (no
-# np.vectorize - inputs are a handful of literal values, so a Python-level
-# loop over them is already fast and keeps the reference easy to eyeball).
-# ---------------------------------------------------------------------------
+    # a and b share a shape (carrays2_mixed_strategy), so zip the flattened views.
+    out = [_rl(x, y) for x, y in zip(a.reshape(-1), b.reshape(-1))]
+    return np.array(out, dtype=ut).reshape(a.shape).view(a.dtype)
 
 
 def _alt_pattern(bits: int) -> int:
@@ -205,7 +193,7 @@ def _ref_reverse_bits(a: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-# logical_not: converted to concrete. Fixed inputs per byte width: 0 (false), a
+# Fixed inputs per byte width: 0 (false), a
 # single bit, dtype max, and an alternating pattern (all truthy) - bool output.
 def test_logical_not_concrete():
     cases = [(dtype, _logical_unary_vals(dtype)) for dtype in uints]
@@ -213,13 +201,11 @@ def test_logical_not_concrete():
     check_op1_concrete(jix.logical_not, np.logical_not, cases)
 
 
-# bitwise_not: converted to concrete (full range is valid, no overflow for complement).
 def test_bitwise_not_concrete():
     check_op1_concrete(jix.bitwise_not, lambda a: ~a, _std_cases())
 
 
-# bit-counting ops: output is u32. count_ones kept as a property test (bit-counting
-# is the family's representative random-input check); the rest are concrete.
+# bit-counting ops: output is u32.
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
 def test_count_ones(dtype: np.dtype, data: DataObject):
@@ -282,15 +268,13 @@ def test_bitwise_left_shift(dtype: np.dtype, data: DataObject):
     assert_array_matches(jix.bitwise_left_shift(za, zb), np_a << np_b, data=data)
 
 
-# right_shift: converted to concrete. Shift amounts include shift-by-0 and
-# shift-by-(width-1), the extremes shift_safe_element_strategy was drawing from.
+# Shift amounts include shift-by-0 and shift-by-(width-1).
 def test_bitwise_right_shift_concrete():
     cases = [(dtype, *_shift_pair_vals(dtype)) for dtype in uints]
     check_op2_concrete(jix.bitwise_right_shift, lambda a, b: a >> b, cases)
 
 
 # rotate ops: LHS is any integer dtype; RHS (rotation amount) is always u32.
-# rotate_left kept as a property test for its unique mixed-dtype (u32 amount) handling.
 @pytest.mark.parametrize("dtype", _int_dtypes)
 @given(st.data())
 def test_bitwise_rotate_left(dtype: np.dtype, data: DataObject):
@@ -326,7 +310,7 @@ def test_bitwise_rotate_right_concrete():
 # ---------------------------------------------------------------------------
 
 
-# logical_and/or/xor: converted to concrete. np_a/np_b truth values cover all four
+# logical_and/or/xor: np_a/np_b truth values cover all four
 # (False, False) / (False, True) / (True, False) / (True, True) combinations, with the
 # True side using dtype-max / alternating-pattern nonzero values (not just 1).
 def test_logical_and_concrete():
