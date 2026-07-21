@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray};
 use crate::{Array, ArrayStorage, Dimension, IterExt};
 
@@ -107,12 +107,12 @@ where
 
         let spec = arrays.spec(0);
         let mut block_shape = spec.block_shape().clone();
-        let mut block_shape_tag = spec.block_shape_tag().clone();
+        let mut block_shape_fixed_dims = spec.block_shape_fixed_dims();
         block_shape.insert(axis, 1);
-        block_shape_tag.insert(axis, BlockShapeTag::Any);
+        block_shape_fixed_dims.insert(axis, false);
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
         };
 
         Ok(Self {

@@ -1,3 +1,4 @@
+use std::hint::assert_unchecked;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 
@@ -6,7 +7,7 @@ use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::util::{scale_read_shape, DimArray, Idx, IterExt, SendSyncPtr};
-use crate::{dim_arr, Array, ArrayStorage, DimDyn, Dimension};
+use crate::{dim_arr, Array, ArrayStorage, DimDyn, Dimension, NDIM_MAX};
 
 /// Target byte range for a single read region.
 ///
@@ -94,7 +95,7 @@ impl ReadSize {
 #[derive(Clone, Default, Debug)]
 pub struct ArrayParams {
     pub(crate) block_shape: Option<DimArray<BlockSize>>,
-    pub(crate) block_shape_tag: Option<DimArray<BlockShapeTag>>,
+    pub(crate) block_shape_fixed_dims: Option<DimBitmap>,
     pub(crate) block_size: Option<u64>,
     pub(crate) read_size: Option<ReadSize>,
     pub(crate) encoder_params: Option<EncoderParams>,
@@ -115,30 +116,38 @@ impl ArrayParams {
     /// When set, the array is stored in nd-blocks of exactly this shape (subject to boundary
     /// clamping at the array edges). This overrides any auto-computed shape.
     ///
-    /// Setting the block shape also tags every dimension as [`BlockShapeTag::Fixed`] unless
-    /// [`block_shape_tag`](Self::block_shape_tag) is also set, meaning the shape will be
-    /// preserved as-is if this `ArrayParams` is later used as a propagation source.
+    /// Setting the block shape also marks every dimension as fixed unless
+    /// [`block_shape_fixed_dims`](Self::block_shape_fixed_dims) is also used, meaning the shape will
+    /// be preserved as-is if this `ArrayParams` is later used as a propagation source.
     pub fn block_shape(&mut self, block_shape: &[BlockSize]) -> &mut Self {
         check_ndim::<DimDyn>(block_shape.len()).unwrap();
         self.block_shape = Some(DimArray::from_slice(block_shape).unwrap());
         self
     }
 
-    /// Sets per-dimension tags that control how [`block_shape`](Self::block_shape) is scaled
-    /// when the block shape is auto-computed during propagation.
+    /// Sets, per dimension, whether that dimension of [`block_shape`](Self::block_shape) is
+    /// fixed.
     ///
-    /// `tags` must have the same length as `block_shape`. Requires `block_shape` to also be set.
-    /// See [`BlockShapeTag`] for the available options.
-    pub fn block_shape_tag(&mut self, tags: &[BlockShapeTag]) -> &mut Self {
-        check_ndim::<DimDyn>(tags.len()).unwrap();
-        self.block_shape_tag = Some(DimArray::from_slice(tags).unwrap());
+    /// A fixed dimension (`true`) keeps its exact block-shape length during any later
+    /// auto-scaling (e.g. when a downstream operation recomputes the block shape). A dimension that
+    /// is not fixed (`false`) may be freely resized to fit the target block size - it is used when
+    /// an operation makes the original block size irrelevant (e.g. a broadcast or reduced
+    /// dimension).
+    ///
+    /// `fixed` must have one entry per dimension (the same length as `block_shape`). Requires
+    /// [`block_shape`](Self::block_shape) to also be set. When this is not set, the default depends
+    /// on the block shape: an explicitly-set [`block_shape`](Self::block_shape) is all-fixed
+    /// (preserved exactly), while an auto-computed block shape is all-non-fixed.
+    pub fn block_shape_fixed_dims(&mut self, fixed: &[bool]) -> &mut Self {
+        check_ndim::<DimDyn>(fixed.len()).unwrap();
+        self.block_shape_fixed_dims = Some(fixed.iter().copied().collect());
         self
     }
 
     /// Sets the target block size in bytes, used when auto-computing the block shape.
     ///
-    /// When `block_shape` is not set, or when some dimensions are not [`BlockShapeTag::Fixed`],
-    /// the auto-computation scales the block shape so that each block is approximately this many
+    /// When `block_shape` is not set, or when some dimensions are not fixed, the
+    /// auto-computation scales the block shape so that each block is approximately this many
     /// bytes.
     ///
     /// When not provided, defaults to `block_shape.product() * itemsize` (the block size in
@@ -255,7 +264,7 @@ impl ArrayParams {
 
         if self.block_shape.is_none() {
             self.block_shape = Some(spec.block_shape().clone());
-            self.block_shape_tag = Some(spec.block_shape_tag().clone());
+            self.block_shape_fixed_dims = Some(spec.block_shape_fixed_dims());
         }
         self.block_size.get_or_insert(spec.block_size());
         self.read_size.get_or_insert(spec.read_size());
@@ -272,12 +281,13 @@ impl ArrayParams {
     /// - `block_shape` - shape of one storage block in items per dimension.
     ///   When `None`, a shape is chosen automatically so that each block is approximately
     ///   `block_size` bytes.
-    /// - `block_shape_tag` - per-dimension constraint on how the block shape may be scaled;
-    ///   requires `block_shape` to also be provided. Defaults to all-[`BlockShapeTag::Fixed`].
-    ///   See [`BlockShapeTag`] for the available options.
+    /// - `block_shape_fixed_dims` - per-dimension bitmap of which block-shape dimensions are fixed
+    ///   (must not be scaled); requires `block_shape` to also be provided. When `None`, an explicit
+    ///   `block_shape` defaults to all-fixed (preserved exactly) and an auto-computed one to
+    ///   all-non-fixed. See [`DimBitmap`].
     /// - `block_size` - target block size in bytes used when auto-computing or scaling
     ///   the block shape. Defaults to a size chosen automatically according to the CPU cache
-    ///   sizes when the shape is not fully [`BlockShapeTag::Fixed`].
+    ///   sizes when the shape is not fully fixed.
     /// - `read_size` - target size for the preferred read region in bytes.
     ///   Defaults to a range chosen automatically according to the CPU cache sizes.
     /// - `shape` - the array shape, used to clamp block dimensions that would exceed the array.
@@ -286,12 +296,12 @@ impl ArrayParams {
     /// # Errors
     ///
     /// Returns `InvalidArgument` if:
-    /// - `block_shape_tag` is provided without `block_shape`
-    /// - the length of `block_shape_tag` does not match `ndim`
-    /// - `ndim` exceeds [`crate::NDIM_MAX`]
+    /// - `block_shape_fixed_dims` is provided without `block_shape`
+    /// - the length of `block_shape_fixed_dims` does not match `ndim`
+    /// - `ndim` exceeds [`NDIM_MAX`]
     pub(crate) fn tune(&mut self, shape: &[u64], dtype: &Dtype) -> Result<()> {
         let block_shape = self.block_shape.clone();
-        let block_shape_tag = self.block_shape_tag.clone();
+        let block_shape_fixed_dims = self.block_shape_fixed_dims;
         let mut block_size = self.block_size;
 
         let ndim = shape.len();
@@ -301,22 +311,20 @@ impl ArrayParams {
         let cache_sizes = crate::util::cpu_cache::cache_sizes();
 
         ensure!(
-            block_shape_tag.is_none() || block_shape.is_some(),
+            block_shape_fixed_dims.is_none() || block_shape.is_some(),
             InvalidArgument,
-            "block_shape_tag is specified but block_shape is not specified"
+            "block_shape_fixed_dims is specified but block_shape is not specified"
         );
-        let block_shape_tag =
-            block_shape_tag.unwrap_or_else(|| dim_arr(ndim, |_| BlockShapeTag::Fixed));
+        let block_shape_fixed_dims = block_shape_fixed_dims
+            .unwrap_or_else(|| DimBitmap::filled(ndim, block_shape.is_some()));
         ensure!(
-            ndim == block_shape_tag.len(),
+            ndim == block_shape_fixed_dims.len(),
             InvalidArgument,
-            "ndim does not match block_shape_tag length: expected {}, got {}",
+            "ndim does not match block_shape_fixed_dims length: expected {}, got {}",
             ndim,
-            block_shape_tag.len()
+            block_shape_fixed_dims.len()
         );
-        let fixed_block_shape = block_shape_tag
-            .iter()
-            .all(|&tag| tag == BlockShapeTag::Fixed);
+        let fixed_block_shape = block_shape_fixed_dims.all();
         // Compute block_size if not specified, and if it cant be computed from block_shape
         if block_size.is_none() && (block_shape.is_none() || !fixed_block_shape) {
             block_size = Some(cache_sizes.l1_data as u64);
@@ -340,11 +348,14 @@ impl ArrayParams {
         // Scale block_shape up to block_size
         if !fixed_block_shape {
             block_shape = Self::scale_block_shape(
-                &dim_arr(ndim, |dim| match block_shape_tag[dim] {
-                    BlockShapeTag::Fixed | BlockShapeTag::MultipleOf => block_shape[dim],
-                    BlockShapeTag::Any => 1,
+                &dim_arr(ndim, |dim| {
+                    if block_shape_fixed_dims.get(dim) {
+                        block_shape[dim]
+                    } else {
+                        1
+                    }
                 }),
-                &dim_arr(ndim, |dim| block_shape_tag[dim] != BlockShapeTag::Fixed),
+                &dim_arr(ndim, |dim| !block_shape_fixed_dims.get(dim)),
                 block_size.unwrap() / itemsize,
                 shape,
             );
@@ -375,7 +386,7 @@ impl ArrayParams {
         });
 
         self.block_shape = Some(block_shape);
-        self.block_shape_tag = Some(block_shape_tag);
+        self.block_shape_fixed_dims = Some(block_shape_fixed_dims);
         self.block_size = Some(block_size);
         self.read_size = Some(read_size);
         Ok(())
@@ -455,7 +466,7 @@ impl ArrayParams {
         params.tune(shape, dtype)?;
         let spec = ArraySpecOwned::new(
             params.block_shape.unwrap(),
-            params.block_shape_tag.unwrap(),
+            params.block_shape_fixed_dims.unwrap(),
             params.block_size.unwrap(),
             params.read_size.unwrap(),
             params.encoder_params.unwrap_or_default(),
@@ -472,7 +483,7 @@ impl ArrayParams {
                 .iter()
                 .zip(shape)
                 .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
-            assert_eq!(spec.block_shape_tag().len(), ndim);
+            assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
             assert!(spec.block_size() > 0);
             assert!(spec.read_size().min > 0);
         }
@@ -481,29 +492,131 @@ impl ArrayParams {
     }
 }
 
-/// Per-dimension tag describing how a block shape dimension may be automatically scaled
-/// when a new array is constructed without an explicit block shape.
+/// A compact, fixed-length set of per-dimension boolean flags.
 ///
-/// Users typically choose a block shape based on their access patterns, so `Fixed`
-/// is the default - it preserves that choice in downstream arrays. Operations that
-/// change the logical shape (reduction, broadcast, reshape, etc.) may tag affected
-/// dimensions as `Any` or `MultipleOf` to let the heuristic freely pick a suitable
-/// size for those dimensions.
+/// Bit `d` (the low bit is dimension 0) stores one boolean for dimension `d`; callers decide what a
+/// set bit means. The bitmap tracks its own dimension count ([`len`](Self::len)), so it builds (via
+/// [`FromIterator`]), iterates (via [`IntoIterator`]), and compares as a fixed-length sequence of
+/// booleans. Since the maximum number of dimensions is [`NDIM_MAX`] (which is 8), all flags fit in a
+/// single `u8`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-#[non_exhaustive]
-pub enum BlockShapeTag {
-    /// The block size for this dimension is exactly the value in `block_shape_hint` and
-    /// must not be changed. Used for most user-specified block shapes to preserve the
-    /// user's intent.
-    Fixed,
-    /// The block size must be a multiple of the value in `block_shape_hint`, but may be
-    /// scaled up to fit the target byte size. Used when an operation constrains the
-    /// granularity without fixing the exact size.
-    MultipleOf,
-    /// The block size for this dimension can be freely chosen up to the target byte size.
-    /// The value in `block_shape_hint` is ignored. Used when an operation makes the
-    /// original block size irrelevant (e.g. a dimension added by broadcast).
-    Any,
+pub(crate) struct DimBitmap {
+    bits: u8,
+    len: u8,
+}
+
+impl DimBitmap {
+    /// The low `n` bits set (and nothing above), used to mask off unused high bits.
+    #[inline]
+    fn low_mask(n: usize) -> u8 {
+        debug_assert!(n <= NDIM_MAX);
+        if n >= NDIM_MAX {
+            u8::MAX
+        } else {
+            (1u8 << n) - 1
+        }
+    }
+
+    /// A bitmap of `len` dimensions, every flag set to `value`.
+    #[inline]
+    pub(crate) fn filled(len: usize, value: bool) -> Self {
+        assert!(len <= NDIM_MAX);
+        Self {
+            bits: if value { Self::low_mask(len) } else { 0 },
+            len: len as u8,
+        }
+    }
+
+    /// The number of dimensions the bitmap covers.
+    #[inline]
+    pub(crate) fn len(self) -> usize {
+        let len = self.len as usize;
+        unsafe { assert_unchecked(len <= NDIM_MAX) };
+        len
+    }
+
+    /// Returns the flag for dimension `dim`.
+    #[inline]
+    pub(crate) fn get(self, dim: usize) -> bool {
+        assert!(dim < self.len());
+        self.bits & (1u8 << dim) != 0
+    }
+
+    /// Sets the flag for dimension `dim` to `value`.
+    #[inline]
+    pub(crate) fn set(&mut self, dim: usize, value: bool) {
+        assert!(dim < self.len());
+        let bit = 1u8 << dim;
+        if value {
+            self.bits |= bit;
+        } else {
+            self.bits &= !bit;
+        }
+    }
+
+    /// Returns whether every dimension's flag is set.
+    #[inline]
+    pub(crate) fn all(self) -> bool {
+        let mask = Self::low_mask(self.len());
+        self.bits & mask == mask
+    }
+
+    /// Inserts a new dimension at position `pos`, shifting higher dimensions up by one, and
+    /// grows the length by one. The inserted dimension takes `value`.
+    pub(crate) fn insert(&mut self, pos: usize, value: bool) {
+        assert!(pos <= self.len() && self.len() < NDIM_MAX);
+        let low_mask = Self::low_mask(pos);
+        self.bits = (self.bits & low_mask) | ((self.bits & !low_mask) << 1);
+        self.len += 1;
+        self.set(pos, value);
+    }
+}
+
+impl FromIterator<bool> for DimBitmap {
+    fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
+        let mut bitmap = Self { bits: 0, len: 0 };
+        for value in iter {
+            assert!(bitmap.len() < NDIM_MAX);
+            let dim = bitmap.len();
+            bitmap.len += 1;
+            bitmap.set(dim, value);
+        }
+        bitmap
+    }
+}
+
+/// Iterator over a [`DimBitmap`], yielding the flag of each dimension (dimension 0 first).
+pub(crate) struct DimBitmapIter {
+    bitmap: DimBitmap,
+    pos: usize,
+}
+impl Iterator for DimBitmapIter {
+    type Item = bool;
+    #[inline]
+    fn next(&mut self) -> Option<bool> {
+        (self.pos < self.bitmap.len()).then(|| {
+            let value = self.bitmap.get(self.pos);
+            self.pos += 1;
+            value
+        })
+    }
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.bitmap.len() - self.pos;
+        (remaining, Some(remaining))
+    }
+}
+impl ExactSizeIterator for DimBitmapIter {}
+impl IntoIterator for DimBitmap {
+    type Item = bool;
+    type IntoIter = DimBitmapIter;
+    #[inline]
+    fn into_iter(self) -> DimBitmapIter {
+        DimBitmapIter {
+            bitmap: self,
+            pos: 0,
+        }
+    }
 }
 
 /// Internal specs of an array.
@@ -544,12 +657,12 @@ pub(crate) struct ArraySpecShared {
 #[derive(Clone)]
 pub(crate) struct ArraySpecDynamic {
     pub(crate) block_shape: DimArray<BlockSize>,
-    pub(crate) block_shape_tag: DimArray<BlockShapeTag>,
+    pub(crate) block_shape_fixed_dims: DimBitmap,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
         block_shape: DimArray<BlockSize>,
-        block_shape_tag: DimArray<BlockShapeTag>,
+        block_shape_fixed_dims: DimBitmap,
         block_size: u64,
         read_size: ReadSize,
         encoder_params: EncoderParams,
@@ -564,7 +677,7 @@ impl ArraySpecOwned {
         };
         let dynamic = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
         };
         Self {
             shared: Box::pin((shared, PhantomPinned)),
@@ -637,8 +750,8 @@ impl<'a> ArraySpec<'a> {
         &self.dynamic().block_shape
     }
     #[inline(always)]
-    pub(crate) fn block_shape_tag(&self) -> &'a DimArray<BlockShapeTag> {
-        &self.dynamic().block_shape_tag
+    pub(crate) fn block_shape_fixed_dims(&self) -> DimBitmap {
+        self.dynamic().block_shape_fixed_dims
     }
 
     // internal use only
@@ -786,8 +899,86 @@ pub(crate) mod flags {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::params::{ArraySpecFlags, ReadSize};
+    use crate::storage::params::{ArraySpecFlags, DimBitmap, ReadSize};
     use crate::{Array, ArrayParams};
+
+    fn bits(bm: DimBitmap) -> Vec<bool> {
+        bm.into_iter().collect()
+    }
+
+    #[test]
+    fn dim_bitmap_filled_and_len() {
+        let all = DimBitmap::filled(3, true);
+        assert_eq!(all.len(), 3);
+        assert_eq!(bits(all), [true, true, true]);
+
+        let none = DimBitmap::filled(3, false);
+        assert_eq!(none.len(), 3);
+        assert_eq!(bits(none), [false, false, false]);
+
+        assert_eq!(DimBitmap::filled(0, true).len(), 0);
+        assert_eq!(DimBitmap::filled(8, true).len(), 8);
+    }
+
+    #[test]
+    fn dim_bitmap_get_set() {
+        let mut bm = DimBitmap::filled(3, false);
+        assert!(!bm.get(0));
+        bm.set(2, true);
+        assert!(bm.get(2));
+        assert!(!bm.get(1));
+        bm.set(2, false);
+        assert!(!bm.get(2));
+
+        assert!(DimBitmap::filled(8, true).get(0));
+        assert!(DimBitmap::filled(8, true).get(7));
+    }
+
+    #[test]
+    fn dim_bitmap_all() {
+        assert!(DimBitmap::filled(8, true).all());
+        assert!(DimBitmap::filled(0, true).all());
+        assert!(!DimBitmap::filled(1, false).all());
+
+        let mut bm = DimBitmap::filled(2, false);
+        bm.set(0, true);
+        assert!(!bm.all());
+        bm.set(1, true);
+        assert!(bm.all());
+    }
+
+    #[test]
+    fn dim_bitmap_insert() {
+        // [fixed, free, fixed], insert a non-fixed dim at pos 1 -> [fixed, free(new), free, fixed]
+        let mut bm = DimBitmap::filled(3, false);
+        bm.set(0, true);
+        bm.set(2, true);
+        bm.insert(1, false);
+        assert_eq!(bm.len(), 4);
+        assert_eq!(bits(bm), [true, false, false, true]);
+
+        // insert at the front shifts everything up.
+        let mut bm = DimBitmap::filled(1, false);
+        bm.set(0, true);
+        bm.insert(0, false);
+        assert_eq!(bits(bm), [false, true]);
+    }
+
+    #[test]
+    fn dim_bitmap_from_into_iter_roundtrips() {
+        let src = [true, false, true, false];
+        let bm: DimBitmap = src.iter().copied().collect();
+        assert_eq!(bm.len(), 4);
+        assert_eq!(bits(bm), src);
+
+        // Reorder/select via iterators (what the ops do): keep dims 0 and 2.
+        let selected: DimBitmap = bm
+            .into_iter()
+            .enumerate()
+            .filter_map(|(dim, c)| (dim == 0 || dim == 2).then_some(c))
+            .collect();
+        assert_eq!(bits(selected), [true, true]);
+    }
 
     #[test]
     fn read_size_normalizes_and_converts() {
@@ -804,6 +995,60 @@ mod tests {
         assert_eq!((min_n, max_n), (8, 64));
         let (min_n, max_n) = ReadSize::new(2, 256).nitems(4u16); // 2/4 -> floored to 1
         assert_eq!((min_n, max_n), (1, 64));
+    }
+
+    #[test]
+    fn block_shape_fixed_dims_controls_scaling() {
+        use crate::dtype::Dtyped;
+
+        // All dims fixed by default: the explicit block shape is preserved exactly.
+        let mut params = ArrayParams::new();
+        params.block_shape(&[4, 4]);
+        let spec = params
+            .into_spec(&[1024, 1024], &i32::DTYPE, ArraySpecFlags::default())
+            .unwrap();
+        assert_eq!(spec.as_ref().block_shape().as_slice(), &[4, 4]);
+        assert!(spec.as_ref().block_shape_fixed_dims().all());
+
+        // Release dim 1: it may grow to fill the block-size budget, while dim 0 stays pinned.
+        let mut params = ArrayParams::new();
+        params.block_shape(&[4, 4]);
+        params.block_shape_fixed_dims(&[true, false]);
+        params.block_size(4 * 1024 * i32::DTYPE.itemsize() as u64);
+        let spec = params
+            .into_spec(&[1024, 1024], &i32::DTYPE, ArraySpecFlags::default())
+            .unwrap();
+        let bs = spec.as_ref().block_shape();
+        assert_eq!(bs[0], 4, "fixed dim 0 must be preserved");
+        assert!(bs[1] > 4, "non-fixed dim 1 should scale up: {bs:?}");
+        assert!(spec.as_ref().block_shape_fixed_dims().get(0));
+        assert!(!spec.as_ref().block_shape_fixed_dims().get(1));
+    }
+
+    #[test]
+    fn block_shape_fixed_dims_without_block_shape_errors() {
+        use crate::dtype::Dtyped;
+        let mut params = ArrayParams::new();
+        params.block_shape_fixed_dims(&[false]);
+        let result = params.into_spec(&[8], &i32::DTYPE, ArraySpecFlags::default());
+        match result {
+            Err(e) => assert!(matches!(e.kind(), crate::error::ErrorKind::InvalidArgument)),
+            Ok(_) => panic!("expected InvalidArgument error"),
+        }
+    }
+
+    #[test]
+    fn block_shape_fixed_dims_length_mismatch_errors() {
+        use crate::dtype::Dtyped;
+        // A 3-element fixed-dims mask on a 2-D array is a length mismatch.
+        let mut params = ArrayParams::new();
+        params.block_shape(&[4, 4]);
+        params.block_shape_fixed_dims(&[true, false, true]);
+        let result = params.into_spec(&[1024, 1024], &i32::DTYPE, ArraySpecFlags::default());
+        match result {
+            Err(e) => assert!(matches!(e.kind(), crate::error::ErrorKind::InvalidArgument)),
+            Ok(_) => panic!("expected InvalidArgument error"),
+        }
     }
 
     #[test]

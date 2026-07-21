@@ -4,9 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{
-    ArraySpec, ArrayStorage, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData, Ty,
-};
+use crate::storage::{ArraySpec, ArrayStorage, ArrayStorageInfo, DimBitmap, OutBuf, ReadData, Ty};
 use crate::util::cast_slice_mut;
 use crate::util::iter::NdIter;
 use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
@@ -59,8 +57,9 @@ impl<T, D> Scalar<T, D> {
         let shape = shape.into_dimension()?;
         let ndim = shape.ndim();
 
-        if params.block_shape_tag.is_none() {
-            params.block_shape_tag(D::vec(ndim, |_| BlockShapeTag::Any).as_ref());
+        if params.block_shape_fixed_dims.is_none() {
+            // A scalar broadcasts over every dimension, so none of them are fixed.
+            params.block_shape_fixed_dims = Some(DimBitmap::filled(ndim, false));
             if params.block_shape.is_none() {
                 params.block_shape(D::vec(ndim, |_| 1).as_ref());
             }

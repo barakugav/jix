@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, NdCopier};
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -96,7 +96,7 @@ where
 
         let new_shape = S::Dimension::from_slice(new_shape);
 
-        // For broadcast dims: Any tag, block_shape=max. For unchanged dims: inherit from inner.
+        // For broadcast dims: not fixed, block_shape=max. For unchanged dims: inherit from inner.
         let inner_spec = array.spec();
         let block_shape = dim_arr(ndim, |dim| {
             if is_broadcast[dim] {
@@ -105,16 +105,15 @@ where
                 inner_spec.block_shape()[dim]
             }
         });
-        let block_shape_tag = dim_arr(ndim, |dim| {
+        let mut block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
+        for dim in 0..ndim {
             if is_broadcast[dim] {
-                BlockShapeTag::Any
-            } else {
-                inner_spec.block_shape_tag()[dim]
+                block_shape_fixed_dims.set(dim, false);
             }
-        });
+        }
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
         };
 
         Ok(Self {

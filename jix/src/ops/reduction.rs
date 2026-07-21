@@ -105,8 +105,11 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             block_shape: (0..input_ndim)
                 .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape()[dim]))
                 .collect(),
-            block_shape_tag: (0..input_ndim)
-                .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape_tag()[dim]))
+            block_shape_fixed_dims: spec
+                .block_shape_fixed_dims()
+                .into_iter()
+                .enumerate()
+                .filter_map(|(dim, c)| is_reduced[dim].not().then_some(c))
                 .collect(),
         };
 

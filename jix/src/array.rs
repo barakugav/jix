@@ -1380,7 +1380,7 @@ impl<S: ArrayStorage> Array<S> {
                 .iter()
                 .zip(shape.iter())
                 .all(|(&b, &s)| b as u64 <= s.max(1)));
-            debug_assert_eq!(spec.block_shape_tag().len(), ndim);
+            debug_assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
             debug_assert!(spec.block_size() > 0);
             debug_assert!(spec.read_size().min > 0);
             debug_assert!(spec.read_size().min <= spec.read_size().max);

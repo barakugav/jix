@@ -2,7 +2,7 @@
 - consider AlignedBytes with compile time alignment
 - build wheels for wsam
 - compress offsets array
-- consider block shape tag in scale_read_shape
+- consider block shape fixed-dims bitmap in scale_read_shape
 - delegate power to square/sqrt if exponent is 2/0.5
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl
 - use multiple threads for reads

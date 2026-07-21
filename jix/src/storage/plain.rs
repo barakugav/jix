@@ -4,9 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{
-    ArraySpec, ArrayStorageInfo, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn,
-};
+use crate::storage::{ArraySpec, ArrayStorageInfo, DimBitmap, ElementType, OutBuf, Ty, TypeDyn};
 use crate::util::{strided_span_bytes, DimArray, NdCopier, SendSyncPtr};
 use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
 
@@ -139,8 +137,9 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
             "Data pointer or strides are not aligned to required alignment {alignment}"
         );
 
-        if params.block_shape_tag.is_none() {
-            params.block_shape_tag(D::vec(ndim, |_| BlockShapeTag::Any).as_ref());
+        if params.block_shape_fixed_dims.is_none() {
+            // A plain view is a strided copy, so no dimension is a fixed block boundary.
+            params.block_shape_fixed_dims = Some(DimBitmap::filled(ndim, false));
             if params.block_shape.is_none() {
                 params.block_shape(D::vec(ndim, |_| 1).as_ref());
             }

@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::calc_block_end;
 use crate::{default_strides, Array, ArrayStorage, Dimension, NdCopier, NDIM_MAX};
 
@@ -73,26 +73,16 @@ impl<S: ArrayStorage> Repeat<S> {
 
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
-        let mut block_shape_tag = inner_spec.block_shape_tag().clone();
-        let new_axis_block_size = block_shape[axis]
+        // A repeat preserves whether the repeated dimension is fixed: a fixed block length is
+        // scaled with the repeat count and stays fixed, a non-fixed one stays non-fixed.
+        let block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
+        block_shape[axis] = block_shape[axis]
             .saturating_mul(repeats.min(BlockSize::MAX as u64) as BlockSize)
             .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);
-        block_shape_tag[axis] = match block_shape_tag[axis] {
-            BlockShapeTag::Fixed => BlockShapeTag::Fixed,
-            BlockShapeTag::MultipleOf => BlockShapeTag::MultipleOf,
-            BlockShapeTag::Any => {
-                if block_shape[axis] == 1 {
-                    BlockShapeTag::MultipleOf
-                } else {
-                    BlockShapeTag::Any
-                }
-            }
-        };
-        block_shape[axis] = new_axis_block_size;
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
         };
 
         Ok(Self {
