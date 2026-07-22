@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_ndim, check_shape_overflow, ensure, Result};
-use crate::storage::params::ArraySpecDynamic;
+use crate::storage::params::{normalize_dim_scale_weights, ArraySpecDynamic};
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::{default_strides, dim_arr, NdCopier};
 use crate::{Array, ArrayStorage, Dimension};
@@ -111,9 +111,27 @@ where
                 block_shape_fixed_dims.set(dim, false);
             }
         }
+        let inner_sw = inner_spec.dim_scale_weights();
+        let dim_scale_weights = normalize_dim_scale_weights(
+            dim_arr(ndim, |dim| {
+                if is_broadcast[dim] {
+                    // A broadcast dim re-reads the same inner element `new_shape[dim]` times, so
+                    // reading it in full with a single read avoids that redundant work. The expanded
+                    // dim was size 1, so its own weight is meaningless: set the weight from the copy
+                    // count, dampened as `sqrt(2 * count)` so a huge broadcast does not utterly
+                    // dwarf the other dims (still `>= 2 > 1` for `count >= 2`, so it outranks them).
+                    (new_shape[dim] as f64).sqrt() * 1.414
+                } else {
+                    inner_sw[dim].f64()
+                }
+            })
+            .as_slice(),
+        );
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
+            element_cost: inner_spec.element_cost(),
+            dim_scale_weights,
         };
 
         Ok(Self {

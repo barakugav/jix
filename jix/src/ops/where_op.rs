@@ -3,6 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, ensure, Result};
+use crate::storage::params::{combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
@@ -71,6 +72,7 @@ pub struct Where<SC, SX, SY> {
     condition: SC,
     x: SX,
     y: SY,
+    spec: ArraySpecDynamic,
 }
 impl<SC, SX, SY> Where<SC, SX, SY>
 where
@@ -103,7 +105,24 @@ where
             y.shape()
         );
 
-        Ok(Self { condition, x, y })
+        // Layout follows `x`; the read hints combine all three operands.
+        let c_spec = condition.spec();
+        let x_spec = x.spec();
+        let y_spec = y.spec();
+        let (element_cost, dim_scale_weights) = combine_elementwise_hints(&[
+            (c_spec.element_cost(), c_spec.dim_scale_weights().as_slice()),
+            (x_spec.element_cost(), x_spec.dim_scale_weights().as_slice()),
+            (y_spec.element_cost(), y_spec.dim_scale_weights().as_slice()),
+        ]);
+        let mut spec = x_spec.dynamic().clone();
+        spec.element_cost = element_cost;
+        spec.dim_scale_weights = dim_scale_weights;
+        Ok(Self {
+            condition,
+            x,
+            y,
+            spec,
+        })
     }
 
     /// Constructs an array with [`Where`] storage. See the storage struct docs for semantics and examples.
@@ -210,7 +229,10 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.x.spec().with_cleared_flags()
+        self.x
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Where", [&self.condition, &self.x, &self.y])
@@ -226,6 +248,7 @@ where
             condition: self.condition.dimension_change()?,
             x: self.x.dimension_change()?,
             y: self.y.dimension_change()?,
+            spec: self.spec,
         })
     }
 
@@ -242,6 +265,7 @@ where
             condition: self.condition,
             x: self.x.element_type_change()?,
             y: self.y.element_type_change()?,
+            spec: self.spec,
         })
     }
 }

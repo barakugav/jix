@@ -129,9 +129,18 @@ where
             .enumerate()
             .filter_map(|(dim, c)| (!is_removed[dim]).then_some(c))
             .collect();
+        let dim_scale_weights = inner_spec
+            .dim_scale_weights()
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(dim, w)| (!is_removed[dim]).then_some(w))
+            .collect();
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
+            element_cost: inner_spec.element_cost(),
+            dim_scale_weights,
         };
 
         Ok(Self {

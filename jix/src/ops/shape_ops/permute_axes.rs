@@ -95,6 +95,10 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             block_shape_fixed_dims: (0..ndim)
                 .map(|i| inner_block_shape_fixed_dims.get(axes[i]))
                 .collect(),
+            element_cost: inner_spec.element_cost(),
+            dim_scale_weights: (0..ndim)
+                .map(|i| inner_spec.dim_scale_weights()[axes[i]])
+                .collect(),
         };
         let axes = S::Dimension::vec(ndim, |i| axes[i] as u8);
         Ok(Self {

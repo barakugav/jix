@@ -5,6 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::ops::common::define_array_op1_method;
+use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
@@ -13,6 +14,7 @@ use crate::{ArrayStorage, Ty};
 pub(crate) struct Op1<S, K> {
     pub(crate) array: S,
     kernel: K,
+    spec: ArraySpecDynamic,
 }
 pub(crate) trait Op1Kernel<T> {
     type Output;
@@ -24,7 +26,13 @@ impl<S, K> Op1<S, K> {
         S: ArrayStorageTyped,
         K: Op1Kernel<S::Item, Output: Dtyped>,
     {
-        Ok(Self { array, kernel })
+        let mut spec = array.spec().dynamic().clone();
+        spec.element_cost += 1.0;
+        Ok(Self {
+            array,
+            kernel,
+            spec,
+        })
     }
 }
 
@@ -75,7 +83,10 @@ where
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.array.spec().with_cleared_flags()
+        self.array
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -90,6 +101,7 @@ where
         Ok(Op1 {
             array: self.array.dimension_change()?,
             kernel: self.kernel,
+            spec: self.spec,
         })
     }
 

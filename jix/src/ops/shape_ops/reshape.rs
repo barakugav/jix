@@ -4,7 +4,7 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::ArraySpecDynamic;
+use crate::storage::params::{normalize_dim_scale_weights, ArraySpecDynamic};
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{DimArray, IterExt};
@@ -138,9 +138,18 @@ impl<S, D> Reshape<S, D> {
                 None => false,
             })
             .collect();
+        let dim_scale_weights_raw = (0..new_shape.len())
+            .map(|dim| match same_logical_stride[dim] {
+                Some(orig_dim) => inner_spec.dim_scale_weights()[orig_dim as usize].f64(),
+                // Split/merged dims have no single source dim; give them a low baseline.
+                None => 0.1, // TODO: do better
+            })
+            .collect::<DimArray<f64>>();
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
+            element_cost: inner_spec.element_cost(),
+            dim_scale_weights: normalize_dim_scale_weights(dim_scale_weights_raw.as_slice()),
         };
 
         Ok(Self {

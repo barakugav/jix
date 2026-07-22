@@ -109,6 +109,8 @@ impl<S: ArrayStorage> Slice<S> {
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims: inner_spec.block_shape_fixed_dims(),
+            element_cost: inner_spec.element_cost(),
+            dim_scale_weights: inner_spec.dim_scale_weights().clone(),
         };
 
         Ok(Self {

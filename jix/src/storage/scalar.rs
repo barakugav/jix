@@ -64,11 +64,13 @@ impl<T, D> Scalar<T, D> {
                 params.block_shape(D::vec(ndim, |_| 1).as_ref());
             }
         }
-        let spec = params.into_spec(
+        let mut spec = params.into_spec(
             shape.as_slice(),
             &T::DTYPE,
             ArraySpecFlags::new().set_plain_read(),
         )?;
+        // Reading a scalar element is free, and it broadcasts over every dimension.
+        spec.dynamic_mut().element_cost = 0.0;
 
         Ok(Self {
             data,

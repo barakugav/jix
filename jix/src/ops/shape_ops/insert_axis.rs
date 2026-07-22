@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::params::ArraySpecDynamic;
+use crate::storage::params::{normalize_dim_scale_weights, ArraySpecDynamic};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf, ReadData};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
@@ -120,12 +120,21 @@ where
         let orig_spec = array.spec();
         let mut block_shape = orig_spec.block_shape().clone();
         let mut block_shape_fixed_dims = orig_spec.block_shape_fixed_dims();
+        // A size-1 inserted dim has no source weight; seed it low but nonzero (so a later broadcast
+        // of it is not zeroed out), scaled down for pricier arrays.
+        let seed = (1.0 / orig_spec.element_cost() as f64).min(0.1);
+        let mut dim_scale_weights_raw = orig_spec
+            .dim_scale_weights()
+            .iter()
+            .map(|&w| w.f64())
+            .collect::<DimArray<f64>>();
         for (inserted_dim_count, dim) in axes.iter().enumerate() {
             let insert_pos = dim + inserted_dim_count;
             is_inserted.insert(insert_pos, true);
             shape.insert(insert_pos, 1);
             block_shape.insert(insert_pos, 1);
             block_shape_fixed_dims.insert(insert_pos, false);
+            dim_scale_weights_raw.insert(insert_pos, seed);
         }
         let shape = D::from_slice(&shape);
         let original_dims = is_inserted
@@ -136,6 +145,8 @@ where
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
+            element_cost: orig_spec.element_cost(),
+            dim_scale_weights: normalize_dim_scale_weights(dim_scale_weights_raw.as_slice()),
         };
 
         Ok(Self {

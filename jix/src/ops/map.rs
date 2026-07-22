@@ -3,6 +3,7 @@ use std::ops::Range;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
+use crate::storage::params::{combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
 use crate::{
     array_from_fn_inline, Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped,
@@ -250,6 +251,7 @@ where
 pub struct MapMultiple<ArraysT, F> {
     arrays: ArraysT,
     map_fn: F,
+    spec: ArraySpecDynamic,
 }
 impl<ArraysT, F> MapMultiple<ArraysT, F> {
     /// Constructs a [`MapMultiple`] storage. See the struct docs for semantics and examples.
@@ -269,7 +271,23 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
             );
         }
-        Ok(Self { arrays, map_fn })
+        let (element_cost, dim_scale_weights) = {
+            let inputs = (0..narrays)
+                .map(|i| {
+                    let sp = arrays.spec(i);
+                    (sp.element_cost(), sp.dim_scale_weights().as_slice())
+                })
+                .collect::<Vec<_>>();
+            combine_elementwise_hints(&inputs)
+        };
+        let mut spec = arrays.spec(0).dynamic().clone();
+        spec.element_cost = element_cost;
+        spec.dim_scale_weights = dim_scale_weights;
+        Ok(Self {
+            arrays,
+            map_fn,
+            spec,
+        })
     }
 }
 impl<ArraysT, O, F> ArrayStorage for MapMultiple<ArraysT, F>
@@ -347,7 +365,10 @@ where
 
     #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
-        self.arrays.spec(0).with_cleared_flags()
+        self.arrays
+            .spec(0)
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {

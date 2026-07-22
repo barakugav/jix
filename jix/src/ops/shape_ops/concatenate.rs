@@ -3,6 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_shape_overflow, ensure, Result};
+use crate::storage::params::{combine_select_hints, ArraySpecDynamic};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::{ArraySequence, DimArray};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
@@ -68,6 +69,7 @@ where
     borders: Vec<u64>,
 
     shape: ArraysT::Dimension,
+    spec: ArraySpecDynamic,
 }
 impl<ArraysT> Concatenate<ArraysT>
 where
@@ -120,12 +122,26 @@ where
         }
         check_shape_overflow(&shape, dtype.itemsize() as _)?;
 
+        let (element_cost, dim_scale_weights) = {
+            let inputs = (0..narrays)
+                .map(|i| {
+                    let sp = arrays.spec(i);
+                    (sp.element_cost(), sp.dim_scale_weights().as_slice())
+                })
+                .collect::<Vec<_>>();
+            combine_select_hints(&inputs)
+        };
+        let mut spec = arrays.spec(0).dynamic().clone();
+        spec.element_cost = element_cost;
+        spec.dim_scale_weights = dim_scale_weights;
+
         let shape = ArraysT::Dimension::from_slice(&shape);
         Ok(Self {
             shape,
             arrays,
             concat_axis: axis,
             borders,
+            spec,
         })
     }
 
@@ -252,7 +268,10 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.arrays.spec(0).with_cleared_flags()
+        self.arrays
+            .spec(0)
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         let deps = (0..self.arrays.narrays())

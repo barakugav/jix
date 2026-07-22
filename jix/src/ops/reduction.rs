@@ -101,6 +101,11 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
         let shape = D::from_slice(&shape);
 
         let spec = array.spec();
+        let reduced_prod = (0..input_ndim)
+            .filter(|&dim| is_reduced[dim])
+            .map(|dim| array.shape()[dim])
+            .product::<u64>();
+        let element_cost = (spec.element_cost() as f64 * (reduced_prod + 4) as f64) as f32;
         let spec = ArraySpecDynamic {
             block_shape: (0..input_ndim)
                 .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape()[dim]))
@@ -110,6 +115,14 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
                 .into_iter()
                 .enumerate()
                 .filter_map(|(dim, c)| is_reduced[dim].not().then_some(c))
+                .collect(),
+            element_cost,
+            dim_scale_weights: spec
+                .dim_scale_weights()
+                .iter()
+                .copied()
+                .enumerate()
+                .filter_map(|(dim, w)| is_reduced[dim].not().then_some(w))
                 .collect(),
         };
 

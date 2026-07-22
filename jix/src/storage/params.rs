@@ -658,6 +658,19 @@ pub(crate) struct ArraySpecShared {
 pub(crate) struct ArraySpecDynamic {
     pub(crate) block_shape: DimArray<BlockSize>,
     pub(crate) block_shape_fixed_dims: DimBitmap,
+    /// Estimated cost of reading a single element from this array, ignoring any broadcasting or
+    /// duplication (see [`normalize_dim_scale_weights`]/[`combine_elementwise_hints`] and the
+    /// read-hint design).
+    pub(crate) element_cost: f32,
+    /// Per-dimension relative scaling priority (higher = prefer to scale/cover that dim first, to
+    /// avoid recomputing an expensive broadcasted view). See [`DimScaleWeight`].
+    ///
+    /// These weights are normalized *within a single array* and are meaningless across arrays on
+    /// their own: two arrays' weights are only comparable once each is scaled by its own array's
+    /// [`element_cost`](Self::element_cost). Any op that combines the weights of several inputs
+    /// (element-wise, concatenate, stack, ...) must therefore multiply each input's weight by that
+    /// input's `element_cost` before comparing or summing them.
+    pub(crate) dim_scale_weights: DimArray<DimScaleWeight>,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -675,9 +688,16 @@ impl ArraySpecOwned {
             encoder_params,
             decoder_params,
         };
+        let ndim = block_shape.len();
         let dynamic = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
+            element_cost: 1.0,
+            // Default to C-order priority: the last, most-contiguous dim ranks highest. Leaves with
+            // a different layout (e.g. Plain) override this.
+            dim_scale_weights: normalize_dim_scale_weights(
+                dim_arr(ndim, |i| (i + 1) as f64).as_slice(),
+            ),
         };
         Self {
             shared: Box::pin((shared, PhantomPinned)),
@@ -693,6 +713,10 @@ impl ArraySpecOwned {
             dynamic: &self.dynamic,
             flags: self.flags,
         }
+    }
+
+    pub(crate) fn dynamic_mut(&mut self) -> &mut ArraySpecDynamic {
+        &mut self.dynamic
     }
 }
 impl<'a> ArraySpec<'a> {
@@ -725,7 +749,7 @@ impl<'a> ArraySpec<'a> {
         unsafe { std::mem::transmute::<&ArraySpecShared, &'a ArraySpecShared>(inner) }
     }
     #[inline(always)]
-    fn dynamic(&self) -> &'a ArraySpecDynamic {
+    pub(crate) fn dynamic(&self) -> &'a ArraySpecDynamic {
         self.dynamic
     }
 
@@ -752,6 +776,14 @@ impl<'a> ArraySpec<'a> {
     #[inline(always)]
     pub(crate) fn block_shape_fixed_dims(&self) -> DimBitmap {
         self.dynamic().block_shape_fixed_dims
+    }
+    #[inline(always)]
+    pub(crate) fn element_cost(&self) -> f32 {
+        self.dynamic().element_cost
+    }
+    #[inline(always)]
+    pub(crate) fn dim_scale_weights(&self) -> &'a DimArray<DimScaleWeight> {
+        &self.dynamic().dim_scale_weights
     }
 
     // internal use only
@@ -799,6 +831,113 @@ impl<'a> ArraySpec<'a> {
         );
         read_shape
     }
+}
+
+/// A per-dimension scaling-priority weight, normalized into `[0, 255]`. Interpret it as a fraction
+/// of 255 (i.e. a value in `[0, 1]`) via [`f64`](Self::f64).
+///
+/// Construct one only through [`normalize_dim_scale_weights`] or [`DimScaleWeight::zero`], so the
+/// "normalized" invariant is preserved - most ops build raw `f64` weights and re-normalize.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+pub(crate) struct DimScaleWeight(u8);
+impl DimScaleWeight {
+    /// The lowest weight - a dimension not worth covering.
+    #[inline]
+    pub(crate) fn zero() -> Self {
+        Self(0)
+    }
+    /// This weight as a fraction in `[0, 1]`.
+    #[inline]
+    pub(crate) fn f64(self) -> f64 {
+        self.0 as f64 / 255.0
+    }
+}
+
+/// Normalize raw per-dimension scale weights into stored [`DimScaleWeight`]s.
+///
+/// A `0.0` (or negative) weight maps to [`DimScaleWeight::zero`]. Positive weights map to distinct
+/// values in `[1, 255]`, ordered so a larger raw weight gets a larger stored weight, and rounded to
+/// preserve relative magnitude where possible. Ties (equal raw weight) are always broken so the
+/// inner (greater-index) dimension gets the lower weight. `weights.len()` must be `<= NDIM_MAX`.
+pub(crate) fn normalize_dim_scale_weights(weights: &[f64]) -> DimArray<DimScaleWeight> {
+    let n = weights.len();
+    debug_assert!(n <= NDIM_MAX);
+    let max = weights.iter().copied().fold(0.0f64, f64::max);
+    if max <= 0.0 {
+        return dim_arr(n, |_| DimScaleWeight::zero());
+    }
+    // Order the positive dims from lowest priority to highest: by raw weight ascending, breaking
+    // ties so the inner (greater-index) dim ranks lower (i.e. sorts earlier).
+    let mut order: DimArray<usize> = (0..n).filter(|&d| weights[d] > 0.0).collect();
+    order.sort_by(|&a, &b| weights[a].total_cmp(&weights[b]).then(b.cmp(&a)));
+    // Assign strictly increasing values in [1, 255], seeded from a magnitude-preserving round and
+    // separated as needed (forward pass), then capped at 255 (backward pass). For k <= NDIM_MAX
+    // this always yields k distinct values in [1, 255].
+    let k = order.len();
+    let mut vals = dim_arr(k, |_| 0u16);
+    let mut prev = 0u16;
+    for j in 0..k {
+        let rounded = (weights[order[j]] / max * 254.0).round() as u16 + 1;
+        vals[j] = rounded.max(prev + 1);
+        prev = vals[j];
+    }
+    let mut next = 256u16;
+    for j in (0..k).rev() {
+        vals[j] = vals[j].min((next - 1).min(255));
+        next = vals[j];
+    }
+    let mut out = dim_arr(n, |_| DimScaleWeight::zero());
+    for j in 0..k {
+        out[order[j]] = DimScaleWeight(vals[j] as u8);
+    }
+    out
+}
+
+/// Combine the read hints of the inputs of a *selection* op - one where each output element reads
+/// exactly one input (e.g. [`Concatenate`](crate::ops::Concatenate)/[`Stack`](crate::ops::Stack)).
+///
+/// There is no re-reading of any input, so `element_cost` is the worst case across inputs, plus one.
+/// Per dim, the weight is `normalize( max_i weight_i[d] * cost_i )` - each input's weight is rescaled
+/// by its own `element_cost` first, since a [`DimScaleWeight`] is not comparable across arrays.
+/// `inputs` must be non-empty with equal-length weight slices.
+pub(crate) fn combine_select_hints(
+    inputs: &[(f32, &[DimScaleWeight])],
+) -> (f32, DimArray<DimScaleWeight>) {
+    let ndim = inputs[0].1.len();
+    let element_cost = inputs.iter().map(|&(cost, _)| cost).fold(0.0f32, f32::max) + 1.0;
+    let weights = dim_arr(ndim, |d| {
+        inputs
+            .iter()
+            .map(|&(cost, sw)| sw[d].f64() * cost as f64)
+            .fold(0.0f64, f64::max)
+    });
+    (
+        element_cost,
+        normalize_dim_scale_weights(weights.as_slice()),
+    )
+}
+
+/// Combine the read hints of the inputs of an element-wise op (same shape).
+///
+/// Returns the combined `(element_cost, dim_scale_weights)`: `element_cost = sum(costs) + 1` and,
+/// per dim, `weight[d] = normalize( sum_i weight_i[d] * cost_i )`. Multiplying each input's
+/// normalized weight by its own cost re-injects the cross-input magnitude that per-input
+/// normalization strips. `inputs` must be non-empty and all weight slices the same length.
+pub(crate) fn combine_elementwise_hints(
+    inputs: &[(f32, &[DimScaleWeight])],
+) -> (f32, DimArray<DimScaleWeight>) {
+    let ndim = inputs[0].1.len();
+    let element_cost = (inputs.iter().map(|&(cost, _)| cost as f64).sum::<f64>() + 1.0) as f32;
+    let weights = dim_arr(ndim, |d| {
+        inputs
+            .iter()
+            .map(|&(cost, sw)| sw[d].f64() * cost as f64)
+            .sum::<f64>()
+    });
+    (
+        element_cost,
+        normalize_dim_scale_weights(weights.as_slice()),
+    )
 }
 
 /// See [`ArraySpecOwned`] docs.
@@ -899,11 +1038,167 @@ pub(crate) mod flags {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::params::{ArraySpecFlags, DimBitmap, ReadSize};
-    use crate::{Array, ArrayParams};
+    use crate::storage::params::{
+        combine_elementwise_hints, combine_select_hints, normalize_dim_scale_weights,
+        ArraySpecFlags, DimBitmap, DimScaleWeight, ReadSize,
+    };
+    use crate::{Array, ArrayParams, ArrayStorage};
 
     fn bits(bm: DimBitmap) -> Vec<bool> {
         bm.into_iter().collect()
+    }
+
+    /// Assert `out` is a valid normalization of `raw`: `0` -> `zero`; positive weights get distinct
+    /// values in `[1, 255]`; a larger raw weight gets a larger stored weight; and ties (equal raw)
+    /// are broken so the inner (greater-index) dim ranks lower.
+    fn assert_normalized(raw: &[f64], out: &[DimScaleWeight]) {
+        use std::cmp::Ordering;
+        assert_eq!(raw.len(), out.len());
+        for i in 0..raw.len() {
+            if raw[i] <= 0.0 {
+                assert_eq!(out[i], DimScaleWeight::zero());
+            } else {
+                assert!((1..=255).contains(&out[i].0));
+            }
+            for j in 0..raw.len() {
+                let expected = if raw[i] <= 0.0 && raw[j] <= 0.0 {
+                    Ordering::Equal
+                } else if raw[i] <= 0.0 {
+                    Ordering::Less
+                } else if raw[j] <= 0.0 {
+                    Ordering::Greater
+                } else if raw[i] != raw[j] {
+                    raw[i].partial_cmp(&raw[j]).unwrap()
+                } else {
+                    // Equal positive raw: inner (greater index) ranks lower.
+                    j.cmp(&i)
+                };
+                assert_eq!(
+                    out[i].cmp(&out[j]),
+                    expected,
+                    "({i},{j}) raw {raw:?} out {out:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn normalize_dim_scale_weights_orders_and_breaks_ties() {
+        for input in [
+            vec![],
+            vec![0.0f64],
+            vec![5.0],
+            vec![1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 2.0, 3.0],
+            vec![3.0, 1.0, 2.0],
+            vec![0.0, 7.0, 7.0, 100.0],
+            vec![1e12, 1.0, 1e12, 0.0],
+            vec![10.0, 20.0, 20.0, 5.0, 0.0, 1e6],
+        ] {
+            let out = normalize_dim_scale_weights(&input);
+            assert_normalized(&input, out.as_slice());
+        }
+    }
+
+    #[test]
+    fn normalize_dim_scale_weights_ties_favor_outer_dim() {
+        // All-equal positive weights strictly decrease by dim index (inner ranks lower).
+        let out = normalize_dim_scale_weights(&[4.0, 4.0, 4.0]);
+        assert!(out[0] > out[1] && out[1] > out[2]);
+    }
+
+    #[test]
+    fn normalize_dim_scale_weights_close_distinct_values_stay_distinct() {
+        // Two distinct weights that both round to the top must not collapse together.
+        let out = normalize_dim_scale_weights(&[1e18, 1e18 - 1.0]);
+        assert!(out[0] > out[1]);
+    }
+
+    #[test]
+    fn combine_elementwise_hints_costlier_operand_dominates() {
+        // Operand b weights dim 1 and is far more expensive per element, so it dominates dim 1.
+        let a_sw = normalize_dim_scale_weights(&[10.0, 1.0]);
+        let b_sw = normalize_dim_scale_weights(&[1.0, 10.0]);
+        let (ec, sw) =
+            combine_elementwise_hints(&[(1.0, a_sw.as_slice()), (1000.0, b_sw.as_slice())]);
+        assert_eq!(ec, 1.0 + 1000.0 + 1.0);
+        assert!(sw[1] > sw[0], "expected dim1 to dominate, got {sw:?}");
+    }
+
+    #[test]
+    fn read_hints_propagate_through_reduction_and_broadcast() {
+        let a = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap(),
+        )
+        .unwrap();
+        // A compact leaf reads at element_cost 8, with C-order dim priority (last dim highest).
+        {
+            let sp = a.storage().spec();
+            assert_eq!(sp.element_cost(), 8.0);
+            let sw = sp.dim_scale_weights();
+            assert!(sw[0] < sw[1] && sw[0] > DimScaleWeight::zero());
+        }
+        // Reduce over axis 1 (extent 4), re-insert the axis, and broadcast back to [3, 4].
+        let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4]);
+        let sp = bc.storage().spec();
+        // Reduction folds the whole reduced extent per output: 8 * (4 + 4) = 64.
+        assert_eq!(sp.element_cost(), 64.0);
+        // The broadcast dim (1) must outrank the untouched dim (0).
+        let sw = sp.dim_scale_weights();
+        assert!(sw[1] > sw[0], "broadcast dim should dominate, got {sw:?}");
+    }
+
+    #[test]
+    fn read_hints_combine_in_binary_op() {
+        let plain = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([3, 4], (0..12i64).collect()).unwrap(),
+        )
+        .unwrap();
+        let a = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap(),
+        )
+        .unwrap();
+        // `sum` promotes i32 -> i64, matching `plain`'s dtype for the binary op.
+        let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4]);
+        let out = plain.maximum(bc);
+        let sp = out.storage().spec();
+        // element_cost = plain (8) + broadcasted reduction (64) + 1.
+        assert_eq!(sp.element_cost(), 8.0 + 64.0 + 1.0);
+        // The expensive broadcast dim carries through the binary combine.
+        let sw = sp.dim_scale_weights();
+        assert!(sw[1] > sw[0], "expected dim1 to dominate, got {sw:?}");
+    }
+
+    #[test]
+    fn combine_select_hints_is_cost_weighted() {
+        // Each output reads one input, so element_cost is the max plus one, and per-dim weights are
+        // compared only after scaling by each input's own cost.
+        let a_sw = normalize_dim_scale_weights(&[10.0, 1.0]); // cheap input weights dim 0
+        let b_sw = normalize_dim_scale_weights(&[1.0, 10.0]); // expensive input weights dim 1
+        let (ec, sw) = combine_select_hints(&[(1.0, a_sw.as_slice()), (1000.0, b_sw.as_slice())]);
+        assert_eq!(ec, 1000.0 + 1.0);
+        assert!(sw[1] > sw[0], "expected dim1 to dominate, got {sw:?}");
+    }
+
+    #[test]
+    fn plain_leaf_dim_scale_weights_follow_strides() {
+        // C-contiguous: most contiguous (last) dim ranks highest, like a compact leaf.
+        let c = Array::plain_ndarray(
+            ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap(),
+        )
+        .unwrap();
+        let sw = c.storage().spec().dim_scale_weights().clone();
+        assert!(sw[0] < sw[1] && sw[0] > DimScaleWeight::zero());
+
+        // A size-1 dim reads the same regardless of coverage, so it gets the lowest weight (zero).
+        let s = Array::plain_ndarray(
+            ndarray::Array::from_shape_vec([3, 1], (0..3i32).collect()).unwrap(),
+        )
+        .unwrap();
+        let sw = s.storage().spec().dim_scale_weights().clone();
+        assert_eq!(sw[1], DimScaleWeight::zero());
+        assert!(sw[0] > DimScaleWeight::zero());
     }
 
     #[test]

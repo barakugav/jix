@@ -4,6 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::common::define_array_op2_method;
+use crate::storage::params::{combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
@@ -14,6 +15,7 @@ pub(crate) struct Op2<S1, S2, K> {
     pub(crate) a: S1,
     pub(crate) b: S2,
     kernel: K,
+    spec: ArraySpecDynamic,
 }
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
@@ -33,7 +35,17 @@ impl<S1, S2, K> Op2<S1, S2, K> {
             a.shape(),
             b.shape()
         );
-        Ok(Self { a, b, kernel })
+        // Layout follows `a`; the read hints combine both operands (see `combine_elementwise_hints`).
+        let a_spec = a.spec();
+        let b_spec = b.spec();
+        let (element_cost, dim_scale_weights) = combine_elementwise_hints(&[
+            (a_spec.element_cost(), a_spec.dim_scale_weights().as_slice()),
+            (b_spec.element_cost(), b_spec.dim_scale_weights().as_slice()),
+        ]);
+        let mut spec = a_spec.dynamic().clone();
+        spec.element_cost = element_cost;
+        spec.dim_scale_weights = dim_scale_weights;
+        Ok(Self { a, b, kernel, spec })
     }
 }
 
@@ -87,7 +99,10 @@ where
 
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.a.spec().with_cleared_flags()
+        self.a
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {
@@ -104,6 +119,7 @@ where
             a: self.a.dimension_change()?,
             b: self.b.dimension_change()?,
             kernel: self.kernel,
+            spec: self.spec,
         })
     }
 
