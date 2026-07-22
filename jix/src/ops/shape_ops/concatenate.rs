@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_shape_overflow, ensure, Result};
-use crate::storage::params::{combine_select_hints, ArraySpecDynamic};
+use crate::storage::params::{combine_block_layout, combine_select_hints, ArraySpecDynamic};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::{ArraySequence, DimArray};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
@@ -131,7 +131,20 @@ where
                 .collect::<Vec<_>>();
             combine_select_hints(&inputs)
         };
+        // Combine the block layout over every input, on all dims including the concat axis (where
+        // the inputs' differing lengths naturally leave it non-fixed).
+        let (block_shape, block_shape_fixed_dims) = {
+            let inputs = (0..narrays)
+                .map(|i| {
+                    let sp = arrays.spec(i);
+                    (sp.block_shape().as_slice(), sp.block_shape_fixed_dims())
+                })
+                .collect::<Vec<_>>();
+            combine_block_layout(&inputs)
+        };
         let mut spec = arrays.spec(0).dynamic().clone();
+        spec.block_shape = block_shape;
+        spec.block_shape_fixed_dims = block_shape_fixed_dims;
         spec.element_cost = element_cost;
         spec.dim_scale_weights = dim_scale_weights;
 

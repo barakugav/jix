@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::common::define_array_op2_method;
-use crate::storage::params::{combine_elementwise_hints, ArraySpecDynamic};
+use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
@@ -35,14 +35,19 @@ impl<S1, S2, K> Op2<S1, S2, K> {
             a.shape(),
             b.shape()
         );
-        // Layout follows `a`; the read hints combine both operands (see `combine_elementwise_hints`).
         let a_spec = a.spec();
         let b_spec = b.spec();
         let (element_cost, dim_scale_weights) = combine_elementwise_hints(&[
-            (a_spec.element_cost(), a_spec.dim_scale_weights().as_slice()),
-            (b_spec.element_cost(), b_spec.dim_scale_weights().as_slice()),
+            (a_spec.element_cost(), &a_spec.dim_scale_weights()),
+            (b_spec.element_cost(), &b_spec.dim_scale_weights()),
+        ]);
+        let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
+            (&a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
+            (&b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
         ]);
         let mut spec = a_spec.dynamic().clone();
+        spec.block_shape = block_shape;
+        spec.block_shape_fixed_dims = block_shape_fixed_dims;
         spec.element_cost = element_cost;
         spec.dim_scale_weights = dim_scale_weights;
         Ok(Self { a, b, kernel, spec })

@@ -656,7 +656,23 @@ pub(crate) struct ArraySpecShared {
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
 pub(crate) struct ArraySpecDynamic {
+    /// Per-dimension block length, in items.
+    ///
+    /// For **Compact**/**CompactMmap** storage this is the literal storage block shape (blocks are
+    /// compressed independently at this granularity). For **every other** storage or lazy view it is
+    /// the *minimum read shape that doesn't waste work*: the smallest read tile, per dim, below which
+    /// a read would redundantly re-read or recompute underlying data (e.g. a broadcast dim's whole
+    /// length, so the single source element is read once instead of once per tile). It seeds
+    /// [`scale_read_shape`](crate::util::scale_read_shape) - the read region is scaled down/up from
+    /// it - so propagating a sensible value here is what lets a reader avoid recomputing an expensive
+    /// broadcasted view per output tile.
     pub(crate) block_shape: DimArray<BlockSize>,
+    /// Per-dimension "fixed" flags for [`block_shape`](Self::block_shape).
+    ///
+    /// A fixed dim keeps its exact block length when a **new Compact array** is materialized
+    /// (`ArrayParams::tune`/`scale_block_shape`); a non-fixed dim may be freely resized to fit the
+    /// target block size. This flag only affects Compact materialization - it does *not* enter the
+    /// read path (`scale_read_shape` ignores it).
     pub(crate) block_shape_fixed_dims: DimBitmap,
     /// Estimated cost of reading a single element from this array, ignoring any broadcasting or
     /// duplication (see [`normalize_dim_scale_weights`]/[`combine_elementwise_hints`] and the
@@ -940,6 +956,32 @@ pub(crate) fn combine_elementwise_hints(
     )
 }
 
+/// Combine the block layout (`block_shape` + `block_shape_fixed_dims`) of several equal-ndim inputs
+/// of an element-wise or selection op (binary, `where`, map-multiple, concatenate, stack).
+///
+/// Per dimension the output block length is the `max` over inputs - the coarsest "minimum read shape
+/// that doesn't waste work" wins, so a broadcasted operand's full-dim coverage is preserved rather
+/// than dropped in favor of a smaller operand's block. A dimension is marked fixed only if every
+/// input agrees on that block length *and* at least one input marks it fixed: a disagreement means
+/// there is no single meaningful storage boundary to preserve. `inputs` must be non-empty with
+/// equal-length block-shape slices, each matching its `block_shape_fixed_dims` length.
+pub(crate) fn combine_block_layout(
+    inputs: &[(&[BlockSize], DimBitmap)],
+) -> (DimArray<BlockSize>, DimBitmap) {
+    let ndim = inputs[0].0.len();
+    let block_shape = dim_arr(ndim, |d| {
+        inputs.iter().map(|&(bs, _)| bs[d]).max().unwrap_or(1)
+    });
+    let block_shape_fixed_dims = (0..ndim)
+        .map(|d| {
+            let all_equal = inputs.iter().all(|&(bs, _)| bs[d] == block_shape[d]);
+            let any_fixed = inputs.iter().any(|&(_, fixed)| fixed.get(d));
+            all_equal && any_fixed
+        })
+        .collect::<DimBitmap>();
+    (block_shape, block_shape_fixed_dims)
+}
+
 /// See [`ArraySpecOwned`] docs.
 #[derive(Clone)]
 pub(crate) struct ArraySpecPtr {
@@ -1039,8 +1081,8 @@ pub(crate) mod flags {
 #[cfg(test)]
 mod tests {
     use crate::storage::params::{
-        combine_elementwise_hints, combine_select_hints, normalize_dim_scale_weights,
-        ArraySpecFlags, DimBitmap, DimScaleWeight, ReadSize,
+        combine_block_layout, combine_elementwise_hints, combine_select_hints,
+        normalize_dim_scale_weights, ArraySpecFlags, DimBitmap, DimScaleWeight, ReadSize,
     };
     use crate::{Array, ArrayParams, ArrayStorage};
 
@@ -1179,6 +1221,47 @@ mod tests {
         let (ec, sw) = combine_select_hints(&[(1.0, a_sw.as_slice()), (1000.0, b_sw.as_slice())]);
         assert_eq!(ec, 1000.0 + 1.0);
         assert!(sw[1] > sw[0], "expected dim1 to dominate, got {sw:?}");
+    }
+
+    #[test]
+    fn combine_block_layout_takes_max_and_fixes_on_agreement() {
+        let a_fixed: DimBitmap = [true, false, false].iter().copied().collect();
+        let b_fixed: DimBitmap = [false, true, false].iter().copied().collect();
+        // dim 0: equal len (4) and `a` fixed -> fixed. dim 1: differing len (2 vs 8) -> not fixed
+        // even though `b` is fixed. dim 2: equal len (5) but neither fixed -> not fixed.
+        let (bs, fx) =
+            combine_block_layout(&[(&[4u32, 2, 5][..], a_fixed), (&[4u32, 8, 5][..], b_fixed)]);
+        assert_eq!(bs.as_slice(), &[4, 8, 5]);
+        assert_eq!(bits(fx), [true, false, false]);
+    }
+
+    #[test]
+    fn binary_op_preserves_broadcast_full_dim_block() {
+        // A small explicit block on dim 1, so the broadcast's full-dim coverage is strictly larger.
+        // The ops consume their receiver, so build two identical arrays.
+        let mk = || {
+            let mut params = ArrayParams::new();
+            params.block_shape(&[3, 2]);
+            Array::compact_ndarray_with(
+                &ndarray::Array::from_shape_vec([3, 4], (0..12i64).collect()).unwrap(),
+                params,
+            )
+            .unwrap()
+        };
+        let a = mk();
+        assert_eq!(a.storage().spec().block_shape()[1], 2);
+
+        // std-like: reduce axis 1, re-insert it, broadcast back. The broadcast dim's block covers
+        // the whole extent so the reduction is not recomputed per column-tile.
+        let bc = mk().sum(1).insert_axis(1).broadcast(&[3, 4]);
+        assert_eq!(bc.storage().spec().block_shape()[1], 4);
+
+        // The binary op must keep the broadcasted full-dim coverage: max(2, 4) = 4, not `a`'s 2.
+        let out = a.maximum(bc);
+        let sp = out.storage().spec();
+        assert_eq!(sp.block_shape().as_slice(), &[3, 4]);
+        // dim 0: equal block (3) and `a` fixed -> fixed. dim 1: differing block (2 vs 4) -> not fixed.
+        assert_eq!(bits(sp.block_shape_fixed_dims()), [true, false]);
     }
 
     #[test]
