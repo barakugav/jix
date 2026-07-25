@@ -271,11 +271,11 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
             );
         }
-        let (element_cost, dim_scale_weights) = {
+        let (element_cost, read_shape_scale_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
                     let sp = arrays.spec(i);
-                    (sp.element_cost(), sp.dim_scale_weights().as_slice())
+                    (sp.element_cost(), sp.read_shape_scale_order().as_slice())
                 })
                 .collect::<Vec<_>>();
             combine_elementwise_hints(&inputs)
@@ -293,7 +293,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
         spec.block_shape = block_shape;
         spec.block_shape_fixed_dims = block_shape_fixed_dims;
         spec.element_cost = element_cost;
-        spec.dim_scale_weights = dim_scale_weights;
+        spec.read_shape_scale_order = read_shape_scale_order;
         Ok(Self {
             arrays,
             map_fn,

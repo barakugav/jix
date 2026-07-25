@@ -129,18 +129,18 @@ where
             .enumerate()
             .filter_map(|(dim, c)| (!is_removed[dim]).then_some(c))
             .collect();
-        let dim_scale_weights = inner_spec
-            .dim_scale_weights()
+        let out_dim = |d: usize| (d - (0..d).filter(|&j| is_removed[j]).count()) as u8;
+        let read_shape_scale_order = inner_spec
+            .read_shape_scale_order()
             .iter()
-            .copied()
-            .enumerate()
-            .filter_map(|(dim, w)| (!is_removed[dim]).then_some(w))
+            .filter(|&&d| !is_removed[d as usize])
+            .map(|&d| out_dim(d as usize))
             .collect();
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
-            dim_scale_weights,
+            read_shape_scale_order,
         };
 
         Ok(Self {

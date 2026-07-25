@@ -4,10 +4,10 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
-use crate::storage::params::{normalize_dim_scale_weights, ArraySpecDynamic};
+use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::{default_strides, NdCopier};
-use crate::{dim_arr, Array, ArrayStorage, Dimension, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimArray, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -92,26 +92,20 @@ impl<S: ArrayStorage> Tile<S> {
         // there is nothing smarter than reading the whole dimension at once
         block_shape[axis] = (new_len.min(BlockSize::MAX as u64) as BlockSize).max(1);
         block_shape_fixed_dims.set(axis, false);
-        let inner_sw = inner_spec.dim_scale_weights();
-        let dim_scale_weights = normalize_dim_scale_weights(
-            dim_arr(ndim, |d| {
-                let mut w = inner_sw[d].f64();
-                if d == axis {
-                    // Tiling re-reads the inner sequence `repeats` times along `axis`; reading it
-                    // in full with a single read avoids that redundant work - scale the dim by the
-                    // copy count, dampened as `sqrt(2 * repeats)` so a huge tile does not dwarf the
-                    // other dims.
-                    w *= (repeats as f64).sqrt() * 1.414;
-                }
-                w
-            })
-            .as_slice(),
-        );
+        let read_shape_scale_order = std::iter::once(axis as u8)
+            .chain(
+                inner_spec
+                    .read_shape_scale_order()
+                    .iter()
+                    .copied()
+                    .filter(|&d| d as usize != axis),
+            )
+            .collect::<DimArray<_>>();
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
-            dim_scale_weights,
+            read_shape_scale_order,
         };
 
         Ok(Self {

@@ -392,6 +392,24 @@ impl<'a> AlternatingBuffers<'a> {
     }
 }
 
+/// Choose a read tile from a block-shape seed, steered by a per-dim coverage priority.
+///
+/// `read_shape` enters holding the block-shape seed (the minimum non-wasteful read shape) and
+/// leaves holding the chosen tile. `scale_order` is the coverage priority, **highest first**: the
+/// down-scan shrinks from the low-priority end and the up-scan grows from the high-priority end, so
+/// the dim we would grow first is the last we would shrink. Concretely:
+///
+/// 1. clamp each scaled dim into `[1, max_shape]`,
+/// 2. scale down to `<= max_nitems` by shrinking the lowest-priority dims first, each only as much
+///    as needed so higher-priority dims stay fully covered,
+/// 3. scale up to `>= min_nitems` by growing the highest-priority dims first, by an integer multiple
+///    of the (block-aligned) seed toward each dim's extent,
+/// 4. snap any scaled dim that reached `max_shape[d]` to the full `array_shape[d]`, so the read
+///    boundary doesn't split the requested range along an unaligned start.
+///
+/// Only the dims listed in `scale_order` are touched; any dim absent from it is left exactly as
+/// seeded. A caller can therefore scale a *subset* of the dims by passing a partial order and
+/// seeding the remaining dims to their final value (typically 1, so they don't consume the budget).
 pub(crate) fn scale_read_shape(
     read_shape: &mut [u64],
     max_shape: &[u64],
@@ -401,28 +419,38 @@ pub(crate) fn scale_read_shape(
 ) {
     let ndim = max_shape.len();
     assert_eq!(array_shape.len(), ndim);
+    assert_eq!(read_shape.len(), ndim);
     let (min_nitems, max_nitems) = target_nitems;
 
-    // Scale down
-    {
-        let mut max_dim_size = (1u64 << 30).min(max_nitems.next_power_of_two());
-        loop {
-            for dim in 0..ndim {
-                read_shape[dim] = read_shape[dim].min(max_dim_size).min(max_shape[dim]).max(1);
-            }
-            if let Some(read_size) = read_shape.iter().copied().try_product()
-                && (read_size / 2 <= max_nitems || max_dim_size <= 1)
-            {
-                break;
-            }
-            max_dim_size = (max_dim_size / 2).max(1);
-        }
-    };
+    // The dims to scale, in coverage priority (highest first); dims absent from it are left as seeded.
+    let order = scale_order.collect::<DimArray<_>>();
+    debug_assert!(order.len() <= ndim);
 
-    // Scale up
+    // Clamp the seed of each scaled dim into [1, max_shape].
+    for &dim in order.iter() {
+        read_shape[dim] = read_shape[dim].clamp(1, max_shape[dim].max(1));
+    }
+
+    // Track the running volume across both scans, updating it by each dim's change factor - so the
+    // whole routine is O(ndim) rather than recomputing the product each step.
     let mut current_volume = read_shape.iter().product::<u64>();
-    for dim in scale_order {
-        let dim_len = max_shape[dim];
+
+    // Scale down to `<= max_nitems`: shrink the lowest-priority dims first, each only as much as
+    // needed so higher-priority dims stay fully covered where the budget allows.
+    for &dim in order.iter().rev() {
+        if current_volume <= max_nitems {
+            break;
+        }
+        let others = current_volume / read_shape[dim];
+        let new_len = (max_nitems / others.max(1)).clamp(1, read_shape[dim]);
+        current_volume = others * new_len;
+        read_shape[dim] = new_len;
+    }
+
+    // Scale up to `>= min_nitems`: grow the highest-priority dims first, by an integer multiple of
+    // the current (block-aligned) length, toward each dim's extent.
+    for &dim in order.iter() {
+        let dim_len = max_shape[dim].max(1);
         let mult_by_budget = min_nitems / current_volume.max(1);
         let mult_by_range = dim_len.div_ceil(read_shape[dim]);
         let multiplier = mult_by_budget.min(mult_by_range).max(1);
@@ -431,9 +459,9 @@ pub(crate) fn scale_read_shape(
         read_shape[dim] = new_read_size;
     }
 
-    // Snap any dim already covering its full requested range to `shape[d]` so
-    // the read boundary doesn't accidentally split the range along an unaligned start.
-    for dim in 0..ndim {
+    // Snap any scaled dim already covering its full requested range to `array_shape[d]` so the read
+    // boundary doesn't accidentally split the range along an unaligned start.
+    for &dim in order.iter() {
         if read_shape[dim] == max_shape[dim] {
             read_shape[dim] = array_shape[dim].max(1);
         }
@@ -726,6 +754,48 @@ mod tests {
             v >= 128,
             "expected the cap to stay near max, not collapse to min, got {v}"
         );
+    }
+
+    #[test]
+    fn scale_read_shape_prioritizes_high_order_dim() {
+        use crate::Dimension;
+        // 2-D [100, 100], budget max=200 items. Seed the whole thing (over budget -> scale down).
+        // Priority order = [dim1, dim0] (dim1 highest), so dim0 (low priority) is shrunk first and
+        // dim1 stays fully covered.
+        let shape = [100u64, 100];
+        let mut read_shape = DimDyn::from_fn(2, |_| 100);
+        scale_read_shape(
+            read_shape.as_mut_slice(),
+            &shape,
+            &shape,
+            (1, 200),
+            [1usize, 0].into_iter(),
+        );
+        assert_eq!(read_shape[1], 100, "high-priority dim stays fully covered");
+        assert!(
+            read_shape[0] <= 2,
+            "low-priority dim absorbs the shrink, got {}",
+            read_shape[0]
+        );
+    }
+
+    #[test]
+    fn scale_read_shape_scales_only_ordered_dims() {
+        use crate::Dimension;
+        // The order lists only dim 1, so dim 0 is left exactly as seeded and only dim 1 grows -
+        // this is how reduction scales the reduced and non-reduced dim groups separately.
+        let shape = [100u64, 100];
+        let mut read_shape = DimDyn::from_fn(2, |_| 7);
+        scale_read_shape(
+            read_shape.as_mut_slice(),
+            &shape,
+            &shape,
+            (200, 200),
+            std::iter::once(1usize),
+        );
+        assert_eq!(read_shape[0], 7, "unlisted dim is left exactly as seeded");
+        // dim 1 grows in seed-multiples toward the budget: 7 * floor(200 / 7^2) = 7 * 4 = 28.
+        assert_eq!(read_shape[1], 28, "listed dim scales toward the budget");
     }
 }
 

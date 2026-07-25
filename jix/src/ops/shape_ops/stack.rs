@@ -3,9 +3,7 @@ use std::ops::{Not, Range};
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, Result};
-use crate::storage::params::{
-    combine_block_layout, combine_select_hints, normalize_dim_scale_weights, ArraySpecDynamic,
-};
+use crate::storage::params::{combine_block_layout, combine_select_hints, ArraySpecDynamic};
 use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray};
 use crate::{Array, ArrayStorage, Dimension, IterExt};
@@ -120,27 +118,25 @@ where
         };
         block_shape.insert(axis, 1);
         block_shape_fixed_dims.insert(axis, false);
-        let (element_cost, dim_scale_weights) = {
+        let (element_cost, shared_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
                     let sp = arrays.spec(i);
-                    (sp.element_cost(), sp.dim_scale_weights().as_slice())
+                    (sp.element_cost(), sp.read_shape_scale_order().as_slice())
                 })
                 .collect::<Vec<_>>();
             combine_select_hints(&inputs)
         };
-        // The new stack axis carries no data of its own; seed it low but nonzero (scaled down for
-        // pricier arrays) and re-normalize alongside the base dims.
-        let mut raw = dim_scale_weights
+        let read_shape_scale_order = shared_order
             .iter()
-            .map(|&w| w.f64())
+            .map(|&d| if d as usize >= axis { d + 1 } else { d })
+            .chain(std::iter::once(axis as u8))
             .collect::<DimArray<_>>();
-        raw.insert(axis, (1.0 / element_cost as f64).min(0.1));
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost,
-            dim_scale_weights: normalize_dim_scale_weights(raw.as_slice()),
+            read_shape_scale_order,
         };
 
         Ok(Self {

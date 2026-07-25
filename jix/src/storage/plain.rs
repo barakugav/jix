@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::{normalize_dim_scale_weights, ArraySpecFlags, ArraySpecOwned};
+use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ArrayStorageInfo, DimBitmap, ElementType, OutBuf, Ty, TypeDyn};
 use crate::util::{strided_span_bytes, DimArray, NdCopier, SendSyncPtr};
 use crate::{dim_arr, Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
@@ -149,19 +149,20 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
             &dtype,
             ArraySpecFlags::new().set_plain_read(),
         )?;
-        // Rank dims by contiguity for the read-scale hint: the most contiguous (smallest stride) dim
-        // ranks highest.
+        // Scaling order by contiguity: the most contiguous (smallest stride) real dims scale first;
         {
             let shape = shape.as_slice();
-            let mut reals = (0..ndim)
-                .filter(|&d| shape[d] > 1 && strides[d] != 0)
-                .collect::<DimArray<_>>();
-            reals.sort_by_key(|&d| std::cmp::Reverse(strides[d]));
-            let mut raw = dim_arr(ndim, |_| 0.0f64);
-            for (rank, &d) in reals.iter().enumerate() {
-                raw[d] = (rank + 1) as f64;
-            }
-            spec.dynamic_mut().dim_scale_weights = normalize_dim_scale_weights(raw.as_slice());
+            let mut order = dim_arr(ndim, |d| d as u8);
+            order.sort_by_key(|&d| {
+                let d = d as usize;
+                if shape[d] > 1 && strides[d] != 0 {
+                    (0u8, strides[d] as u64)
+                } else {
+                    // zero-stride / size-<=1 dims have no coverage benefit, so they trail at the end.
+                    (1u8, 0)
+                }
+            });
+            spec.dynamic_mut().read_shape_scale_order = order;
         }
 
         let element_type = TypeDyn::from_dtype(dtype).unwrap();

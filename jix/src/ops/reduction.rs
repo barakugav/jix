@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
-use crate::dtype::{Alignment, Dtype, Dtyped};
+use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
@@ -92,11 +92,15 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             );
         }
 
-        let shape = array
-            .shape()
+        let dim_new2orig = is_reduced
+            .as_ref()
             .iter()
             .enumerate()
-            .filter_map(|(dim, &s)| is_reduced[dim].not().then_some(s))
+            .filter_map(|(dim, &reduced)| reduced.not().then_some(dim))
+            .collect::<DimArray<_>>();
+        let shape = dim_new2orig
+            .iter()
+            .map(|&dim| array.shape()[dim])
             .collect::<DimArray<_>>();
         let shape = D::from_slice(&shape);
 
@@ -106,9 +110,17 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             .map(|dim| array.shape()[dim])
             .product::<u64>();
         let element_cost = (spec.element_cost() as f64 * (reduced_prod + 4) as f64) as f32;
+        let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as u8;
+        let read_shape_scale_order = spec
+            .read_shape_scale_order()
+            .iter()
+            .filter(|&&d| !is_reduced[d as usize])
+            .map(|&d| dim_orig2new(d as usize))
+            .collect();
         let spec = ArraySpecDynamic {
-            block_shape: (0..input_ndim)
-                .filter_map(|dim| is_reduced[dim].not().then_some(spec.block_shape()[dim]))
+            block_shape: dim_new2orig
+                .iter()
+                .map(|&dim| spec.block_shape()[dim])
                 .collect(),
             block_shape_fixed_dims: spec
                 .block_shape_fixed_dims()
@@ -117,13 +129,7 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
                 .filter_map(|(dim, c)| is_reduced[dim].not().then_some(c))
                 .collect(),
             element_cost,
-            dim_scale_weights: spec
-                .dim_scale_weights()
-                .iter()
-                .copied()
-                .enumerate()
-                .filter_map(|(dim, w)| is_reduced[dim].not().then_some(w))
-                .collect(),
+            read_shape_scale_order,
         };
 
         Ok(Self {
@@ -209,6 +215,64 @@ where
     crate::ops::impl_element_type_change_default!();
 }
 
+/// Choose the per-call read tile for a reduction, given the source array's `spec`.
+///
+/// The reduction kernel walks the reduced axes inside each tile, so the tile must keep enough volume
+/// on the reduced dims to amortize per-tile overhead. This scales the tile normally
+/// ([`read_shape_heuristic`](ArraySpec::read_shape_heuristic)); if that leaves the reduced dims'
+/// volume below `min(REDUCED_TILE_MIN_NITEMS, full_reduced_extent)`, it rebuilds the tile from two
+/// independent scales over the disjoint reduced / non-reduced dim groups (reduced dims to that floor,
+/// non-reduced dims to the remaining budget `max_nitems / floor`), which merge cleanly since
+/// [`read_shape_scale_dims`](ArraySpec::read_shape_scale_dims) scales only its selected dims.
+///
+/// `tile_max_shape` is the per-dim length of the region being read, `array_shape` the full source
+/// shape, and `is_reduced[d]` marks the reduced dims - all with one entry per source dim.
+fn reduction_tile_shape<D: Dimension>(
+    spec: &ArraySpec,
+    is_reduced: &[bool],
+    tile_max_shape: &[u64],
+    array_shape: &[u64],
+    itemsize: Itemsize,
+) -> D {
+    const REDUCED_TILE_MIN_NITEMS: u64 = 512;
+    let ndim = tile_max_shape.len();
+    let full_reduced = (0..ndim)
+        .filter(|&d| is_reduced[d])
+        .fold(1u64, |v, d| v.saturating_mul(tile_max_shape[d]));
+    let reduced_tile_floor = REDUCED_TILE_MIN_NITEMS.min(full_reduced);
+
+    let tile_shape = spec.read_shape_heuristic::<D>(tile_max_shape, array_shape, itemsize);
+    let reduced_tile_volume = (0..ndim)
+        .filter(|&d| is_reduced[d])
+        .fold(1u64, |v, d| v.saturating_mul(tile_shape[d]));
+    if reduced_tile_volume >= reduced_tile_floor {
+        return tile_shape;
+    }
+
+    // The regular tile starved the reduced dims: rebuild from two disjoint-group scales.
+    let max_nitems = spec.read_size().nitems(itemsize).1;
+    let non_reduced_target = (max_nitems / reduced_tile_floor).max(1);
+    let reduced_tile = spec.read_shape_scale_dims::<D>(
+        tile_max_shape,
+        array_shape,
+        (reduced_tile_floor, reduced_tile_floor),
+        |d| is_reduced[d],
+    );
+    let non_reduced_tile = spec.read_shape_scale_dims::<D>(
+        tile_max_shape,
+        array_shape,
+        (non_reduced_target, non_reduced_target),
+        |d| !is_reduced[d],
+    );
+    D::from_fn(ndim, |d| {
+        if is_reduced[d] {
+            reduced_tile[d]
+        } else {
+            non_reduced_tile[d]
+        }
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn read_data_impl<InnerD, OuterD>(
@@ -269,15 +333,10 @@ where
     //     `(bulk, tile)` pair produces *one* `self.array.read_data` call, sized to land
     //     within the source's `read_size` `(min, max)` window.
     //
-    // `tile_shape` is chosen once per call by the source spec's
-    // [`read_shape_heuristic_with_scale_order`], passing a custom scale order that
-    // visits reduced dims first (rightmost first), then non-reduced dims (rightmost
-    // first). The heuristic seeds every dim from the source storage block hint and
-    // greedily scales each dim up in that order until the byte budget is spent.
-    // Setting `bulk_shape[non-reduced] = tile_shape[non-reduced]` then makes the inner
-    // read shape come out to `tile_shape` for every tile.
-    //
-    // [`read_shape_heuristic_with_scale_order`]: crate::params::ArraySpec::read_shape_heuristic_with_scale_order
+    // `tile_shape` sizes each tile; it is chosen once per call by `reduction_tile_shape` (which keeps
+    // enough reduced-dim volume that the kernel's per-tile overhead is amortized). Setting
+    // `bulk_shape[non-reduced] = tile_shape[non-reduced]` then makes the inner read shape come out to
+    // `tile_shape` for every tile.
     //
     // Both iterators are driven by `NdIterExtBlockOffsetSize`. Each yields
     // `(blk_idx, (inner_offset, blk_size))`: the absolute element start in dim `d` is
@@ -367,23 +426,18 @@ where
 
     let out_shape = OuterD::vec(index.len(), |dim| index[dim].end - index[dim].start);
 
-    // Greedy scale-up: reduced dims first (rightmost first), then non-reduced
-    // (rightmost first). The reduction kernel walks the reduced axes inside one tile,
-    // so giving them first claim on the budget produces fewer outer iterations. Each
-    // dim grows by an integer multiplier of its seed (the storage block hint), so the
-    // tile stays a multiple of the source's natural block size along that dim.
-    let tile_scale_order = (0..inner_ndim)
-        .rev()
-        .filter(|&dim| is_reduced[dim])
-        .chain((0..inner_ndim).rev().filter(|&dim| !is_reduced[dim]));
-    let tile_shape: InnerD = inner_array.spec().read_shape_heuristic_with_scale_order(
-        InnerD::vec(inner_ndim, |dim| {
-            inner_range_full[dim].end - inner_range_full[dim].start
-        })
-        .as_ref(),
+    // The read tile is chosen so the reduced dims keep enough volume to amortize per-tile overhead
+    // (see `reduction_tile_shape`). Setting `bulk_shape[non-reduced] = tile_shape[non-reduced]` then
+    // makes the inner read shape come out to `tile_shape` for every tile.
+    let tile_max_shape = InnerD::vec(inner_ndim, |dim| {
+        inner_range_full[dim].end - inner_range_full[dim].start
+    });
+    let tile_shape = reduction_tile_shape::<InnerD>(
+        &inner_array.spec(),
+        is_reduced.as_ref(),
+        tile_max_shape.as_ref(),
         inner_shape,
         item_dtype.itemsize(),
-        tile_scale_order,
     );
 
     // Bulk shape: full source extent on reduced dims (so an output's entire reduction
@@ -2615,6 +2669,57 @@ pub(crate) mod tests {
     use crate::array::Array;
     use crate::storage::Compact;
     use crate::{DimDyn, Ty};
+
+    #[test]
+    fn reduction_tile_shape_two_scale_and_regular() {
+        use super::reduction_tile_shape;
+        use crate::dtype::Dtyped;
+        use crate::storage::params::ArraySpecFlags;
+        use crate::{ArrayParams, Dimension};
+
+        // Build a source spec directly (no data allocated): block [8, 8] and a read window in bytes
+        // that, for i32 (itemsize 4), gives known item counts. REDUCED_TILE_MIN_NITEMS is 512.
+        let spec_of = |shape: &[u64], read_min: u64, read_max: u64| {
+            let mut params = ArrayParams::new();
+            params.block_shape(&[8, 8]);
+            params.read_size((read_min, read_max));
+            params
+                .into_spec(shape, &i32::DTYPE, ArraySpecFlags::default())
+                .unwrap()
+        };
+
+        // Reduce axis 0 (the low-priority outer dim). Window (2048, 16384) bytes -> (512, 4096)
+        // items. The regular scale spends the min budget on the inner dim, starving the reduced dim
+        // (8 < 512 floor), so the tile is rebuilt: the reduced dim grows to the 512 floor and the
+        // non-reduced dim fills the rest (4096 / 512 = 8).
+        let a = spec_of(&[1024, 64], 2048, 16384);
+        let tile = reduction_tile_shape::<DimDyn>(
+            &a.as_ref(),
+            &[true, false],
+            &[1024, 64],
+            &[1024, 64],
+            4,
+        );
+        assert_eq!(
+            tile.as_slice(),
+            &[512, 8],
+            "two-scale: reduced dim reaches the floor"
+        );
+
+        // Reduce axis 1 (the high-priority inner dim) with a large min budget (16384, 16384) bytes ->
+        // (4096, 4096) items, so the regular scale already covers the reduced dim past the floor and
+        // `reduction_tile_shape` returns it unchanged.
+        let b = spec_of(&[64, 1024], 16384, 16384);
+        let sp = b.as_ref();
+        let tile = reduction_tile_shape::<DimDyn>(&sp, &[false, true], &[64, 1024], &[64, 1024], 4);
+        let regular = sp.read_shape_heuristic::<DimDyn>(&[64, 1024], &[64, 1024], 4);
+        assert_eq!(
+            tile.as_slice(),
+            regular.as_slice(),
+            "regular tile already covers the reduced dim"
+        );
+        assert!(tile[1] >= 512, "reduced dim meets the floor, got {tile:?}");
+    }
 
     /// Per-dtype comparison policy for the reduction property tests.
     ///

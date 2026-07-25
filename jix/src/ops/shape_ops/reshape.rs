@@ -4,7 +4,7 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::{normalize_dim_scale_weights, ArraySpecDynamic};
+use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{DimArray, IterExt};
@@ -138,18 +138,27 @@ impl<S, D> Reshape<S, D> {
                 None => false,
             })
             .collect();
-        let dim_scale_weights_raw = (0..new_shape.len())
-            .map(|dim| match same_logical_stride[dim] {
-                Some(orig_dim) => inner_spec.dim_scale_weights()[orig_dim as usize].f64(),
-                // Split/merged dims have no single source dim; give them a low baseline.
-                None => 0.1, // TODO: do better
-            })
-            .collect::<DimArray<f64>>();
+        // Carried dims (a 1:1 source mapping) keep their source's relative priority; split/merged
+        // dims have no single source, so they trail at the end. Rank each input dim by its position
+        // in the input scaling order, then sort the output dims by their source's rank (ties broken
+        // by output index, so this is always a full permutation even when several output dims - e.g.
+        // size-1 dims - share one source).
+        let mut in_rank = (0..orig_shape.len())
+            .map(|_| u8::MAX)
+            .collect::<DimArray<u8>>();
+        for (pos, &d) in inner_spec.read_shape_scale_order().iter().enumerate() {
+            in_rank[d as usize] = pos as u8;
+        }
+        let mut read_shape_scale_order = (0..new_shape.len() as u8).collect::<DimArray<u8>>();
+        read_shape_scale_order.sort_by_key(|&d| match same_logical_stride[d as usize] {
+            Some(orig) => (in_rank[orig as usize], d),
+            None => (u8::MAX, d),
+        });
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
-            dim_scale_weights: normalize_dim_scale_weights(dim_scale_weights_raw.as_slice()),
+            read_shape_scale_order,
         };
 
         Ok(Self {

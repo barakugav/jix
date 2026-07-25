@@ -3,10 +3,10 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
-use crate::storage::params::{normalize_dim_scale_weights, ArraySpecDynamic};
+use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::calc_block_end;
-use crate::{default_strides, dim_arr, Array, ArrayStorage, Dimension, NdCopier, NDIM_MAX};
+use crate::{default_strides, Array, ArrayStorage, DimArray, Dimension, NdCopier, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
@@ -80,26 +80,18 @@ impl<S: ArrayStorage> Repeat<S> {
             .saturating_mul(repeats.min(BlockSize::MAX as u64) as BlockSize)
             .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);
-        let inner_sw = inner_spec.dim_scale_weights();
-        let dim_scale_weights = normalize_dim_scale_weights(
-            dim_arr(ndim, |d| {
-                let mut w = inner_sw[d].f64();
-                if d == axis {
-                    // Repeating re-reads each inner element `repeats` times along `axis`; reading it
-                    // in full with a single read avoids that redundant work - scale the dim by the
-                    // copy count, dampened as `sqrt(2 * repeats)` so a huge repeat does not dwarf the
-                    // other dims.
-                    w *= (repeats as f64).sqrt() * 1.414;
-                }
-                w
-            })
-            .as_slice(),
-        );
+        // Repeating re-reads each inner element `repeats` times along `axis`; covering it in full
+        // with one read avoids that, so give `axis` the highest scaling priority (front of order),
+        // keeping the inner relative order among the rest.
+        let in_order = inner_spec.read_shape_scale_order();
+        let read_shape_scale_order = std::iter::once(axis as u8)
+            .chain(in_order.iter().copied().filter(|&d| d as usize != axis))
+            .collect::<DimArray<_>>();
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
-            dim_scale_weights,
+            read_shape_scale_order,
         };
 
         Ok(Self {

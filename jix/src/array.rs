@@ -1095,12 +1095,13 @@ impl<S: ArrayStorage> Array<S> {
             (read_size.min / block_size_bytes as u64).max(1),
             (read_size.max / block_size_bytes as u64).max(1),
         );
+        let scale_order = spec.read_shape_scale_order();
         scale_read_shape(
             chunk_shape_in_blocks.as_mut_slice(),
             block_grid_shape.as_ref(),
             block_grid_shape.as_ref(),
             (min_chunk, max_chunk),
-            (0..ndim).rev(),
+            scale_order.iter().map(|&d| d as usize),
         );
 
         // A chunk spans `chunk_shape_in_blocks` target blocks per dimension (element units). We read
