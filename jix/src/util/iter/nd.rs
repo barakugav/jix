@@ -2,8 +2,8 @@ use std::hint::unreachable_unchecked;
 
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{
-    nd_iter_ext_logical_global_index, NdIterExtStridesOffset, NdIterExtStridesPtr,
-    NdIterExtStridesPtrMut,
+    nd_iter_ext_logical_global_index, NdIterExtStridesOffset, NdIterExtStridesOffsetMulti,
+    NdIterExtStridesPtr, NdIterExtStridesPtrMut,
 };
 use crate::util::Idx;
 use crate::{DimVec, Dimension};
@@ -471,6 +471,21 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
         initial_offset: S,
     ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D, S>>> {
         let ext = NdIterExtStridesOffset::<D, S>::new(strides, initial_offset);
+        NdIterBuilder {
+            begin: self.begin,
+            end: self.end,
+            extensions: self.extensions.merge_extension(ext),
+        }
+    }
+
+    /// Adds a [`NdIterExtStridesOffsetMulti`] extension tracking `N` offsets at once.
+    #[inline]
+    pub(crate) fn with_strides_offset_multi_ext<S: Idx, const N: usize>(
+        self,
+        strides: [D::Vec<S>; N],
+        initial_offsets: [S; N],
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffsetMulti<D, S, N>>> {
+        let ext = NdIterExtStridesOffsetMulti::<D, S, N>::new(strides, initial_offsets);
         NdIterBuilder {
             begin: self.begin,
             end: self.end,
