@@ -423,4 +423,7 @@ pub type ArrayAny = Array<storage::ArrayStorageAny>;
 pub mod __private {
     pub use crate::storage::params::flags::ArraySpecFlags;
     pub use crate::storage::scalar::Scalar;
+
+    #[doc(hidden)]
+    pub use crate::util::bench_util;
 }

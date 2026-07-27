@@ -188,6 +188,14 @@ jobs:
         run: pytest python/tests --numprocesses auto
         working-directory: jix-py
 
+      - name: Install benchmark dependencies
+        run: uv pip install -r jix-py/python/benches/requirements.txt
+      - name: Test bench harness
+        run: pytest python/benches/tests --numprocesses auto
+        working-directory: jix-py
+      - name: Test bench compare
+        run: pytest scripts/tests --numprocesses auto
+
   rust-version-check-clippy:
     # check that we can build using different rust versions:
     # - the minimal rust version that is specified by this crate

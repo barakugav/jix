@@ -1,0 +1,118 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      ubuntu_x86:
+        description: "Run ubuntu x86_64 (ubuntu-24.04)"
+        type: boolean
+        default: false
+      ubuntu_arm64:
+        description: "Run ubuntu aarch64 (ubuntu-24.04-arm)"
+        type: boolean
+        default: false
+      macos_arm:
+        description: "Run macos arm64 (macos-14)"
+        type: boolean
+        default: false
+      suites:
+        description: "Which suites to run"
+        type: choice
+        options: [both, rust, python]
+        default: both
+      fast:
+        description: "Fast, low-fidelity run (quick dev cycle)"
+        type: boolean
+        default: false
+      rust_harness_args:
+        description: "Extra args forwarded to jix/benches/run.py (space-separated)"
+        type: string
+        default: ""
+      python_harness_args:
+        description: "Extra args forwarded to jix-py/python/benches/run_all.py (space-separated)"
+        type: string
+        default: ""
+      compare_to:
+        description: "Optional base ref for same-machine A/B (empty = single run on current sha)"
+        type: string
+        default: ""
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - id: build
+        env:
+          UBUNTU_X86: ${{ inputs.ubuntu_x86 }}
+          UBUNTU_ARM64: ${{ inputs.ubuntu_arm64 }}
+          MACOS_ARM: ${{ inputs.macos_arm }}
+        run: |
+          python3 -c '
+          import json, os, sys
+          legs = [
+              (os.environ["UBUNTU_X86"], {"name": "linux-x86_64", "runner": "ubuntu-24.04", "os": "linux", "arch": "x86_64"}),
+              (os.environ["UBUNTU_ARM64"], {"name": "linux-aarch64", "runner": "ubuntu-24.04-arm", "os": "linux", "arch": "aarch64"}),
+              (os.environ["MACOS_ARM"], {"name": "macos-aarch64", "runner": "macos-14", "os": "macos", "arch": "aarch64"}),
+          ]
+          include = [leg for on, leg in legs if on == "true"]
+          if not include:
+              sys.exit("No runners selected; enable at least one checkbox.")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("matrix=" + json.dumps({"include": include}) + "\n")
+          '
+
+  benchmark:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            jix
+            jix-py
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.13
+          activate-environment: true
+      - name: Install python deps
+        run: |
+          uv pip install \
+            -r scripts/dev_requirements.txt \
+            -r jix-py/python/benches/requirements.txt
+      - name: Build jix-py (release)
+        run: maturin develop --release --uv
+        working-directory: jix-py
+      - name: Run benchmarks (HEAD)
+        run: |
+          python scripts/bench/run.py \
+            --suites "${{ inputs.suites }}" \
+            --rust-args "${{ inputs.rust_harness_args }}" \
+            --py-args "${{ inputs.python_harness_args }}" \
+            ${{ inputs.fast && '--fast' || '' }}
+      - name: Run benchmarks (base ref)
+        if: inputs.compare_to != ''
+        run: |
+          python scripts/bench/run.py \
+            --suites "${{ inputs.suites }}" \
+            --rust-args "${{ inputs.rust_harness_args }}" \
+            --py-args "${{ inputs.python_harness_args }}" \
+            --gitsha "${{ inputs.compare_to }}" \
+            ${{ inputs.fast && '--fast' || '' }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_id }}
+          path: scripts/bench/.results
+          retention-days: 90
+          include-hidden-files: true # .results
