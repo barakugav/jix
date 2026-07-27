@@ -5,7 +5,7 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf, ReadData};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
 
@@ -119,23 +119,37 @@ where
         let mut shape = DimArray::from_slice(array.shape()).unwrap();
         let orig_spec = array.spec();
         let mut block_shape = orig_spec.block_shape().clone();
-        let mut block_shape_tag = orig_spec.block_shape_tag().clone();
+        let mut block_shape_fixed_dims = orig_spec.block_shape_fixed_dims();
         for (inserted_dim_count, dim) in axes.iter().enumerate() {
             let insert_pos = dim + inserted_dim_count;
             is_inserted.insert(insert_pos, true);
             shape.insert(insert_pos, 1);
             block_shape.insert(insert_pos, 1);
-            block_shape_tag.insert(insert_pos, BlockShapeTag::Any);
+            block_shape_fixed_dims.insert(insert_pos, false);
         }
         let shape = D::from_slice(&shape);
         let original_dims = is_inserted
-            .into_iter()
+            .iter()
             .enumerate()
             .filter_map(|(dim, inserted)| (!inserted).then_some(dim as u8))
             .collect_dim_vec::<S::Dimension>(array.shape().len());
+        let read_shape_scale_order = orig_spec
+            .read_shape_scale_order()
+            .iter()
+            .map(|&d| original_dims[d as usize])
+            .chain(
+                // inserted dims carry no coverage benefit, so they scale last (lowest priority)
+                is_inserted
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(dim, inserted)| inserted.then_some(dim as u8)),
+            )
+            .collect();
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
+            element_cost: orig_spec.element_cost(),
+            read_shape_scale_order,
         };
 
         Ok(Self {

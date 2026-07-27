@@ -5,7 +5,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{DimArray, IterExt};
 use crate::{
@@ -113,37 +113,52 @@ impl<S, D> Reshape<S, D> {
 
         let inner_spec = array.spec();
         let inner_block_shape = inner_spec.block_shape();
-        let inner_block_shape_tag = inner_spec.block_shape_tag();
+        let inner_block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
         let mut block_shape = DimArray::new();
-        let mut block_shape_tag = DimArray::new();
         for dim in 0..new_shape.len() {
-            if let Some(orig_dim) = same_logical_stride[dim] {
-                let orig_dim = orig_dim as usize;
-                let same_dim_len = orig_shape[orig_dim] == new_shape[dim];
-                block_shape.push(
-                    inner_block_shape[orig_dim]
+            match same_logical_stride[dim] {
+                Some(orig_dim) => block_shape.push(
+                    inner_block_shape[orig_dim as usize]
                         .min(new_shape[dim].min(BlockSize::MAX as u64) as BlockSize)
                         .max(1),
-                );
-                block_shape_tag.push(match inner_block_shape_tag[orig_dim] {
-                    BlockShapeTag::Fixed => {
-                        if same_dim_len {
-                            BlockShapeTag::Fixed
-                        } else {
-                            BlockShapeTag::MultipleOf
-                        }
-                    }
-                    BlockShapeTag::MultipleOf => BlockShapeTag::MultipleOf,
-                    BlockShapeTag::Any => BlockShapeTag::Any,
-                });
-            } else {
-                block_shape.push(1);
-                block_shape_tag.push(BlockShapeTag::Any);
+                ),
+                // Split/merged dims have no single source dim.
+                None => block_shape.push(1),
             }
         }
+        // A dim stays fixed only if it maps to a single source dim that was fixed and keeps the
+        // same length; a resized, split, merged, or already-non-fixed dim is not fixed.
+        let block_shape_fixed_dims = (0..new_shape.len())
+            .map(|dim| match same_logical_stride[dim] {
+                Some(orig_dim) => {
+                    let orig_dim = orig_dim as usize;
+                    inner_block_shape_fixed_dims.get(orig_dim)
+                        && orig_shape[orig_dim] == new_shape[dim]
+                }
+                None => false,
+            })
+            .collect();
+        // Carried dims (a 1:1 source mapping) keep their source's relative priority; split/merged
+        // dims have no single source, so they trail at the end. Rank each input dim by its position
+        // in the input scaling order, then sort the output dims by their source's rank (ties broken
+        // by output index, so this is always a full permutation even when several output dims - e.g.
+        // size-1 dims - share one source).
+        let mut in_rank = (0..orig_shape.len())
+            .map(|_| u8::MAX)
+            .collect::<DimArray<u8>>();
+        for (pos, &d) in inner_spec.read_shape_scale_order().iter().enumerate() {
+            in_rank[d as usize] = pos as u8;
+        }
+        let mut read_shape_scale_order = (0..new_shape.len() as u8).collect::<DimArray<u8>>();
+        read_shape_scale_order.sort_by_key(|&d| match same_logical_stride[d as usize] {
+            Some(orig) => (in_rank[orig as usize], d),
+            None => (u8::MAX, d),
+        });
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
+            element_cost: inner_spec.element_cost(),
+            read_shape_scale_order,
         };
 
         Ok(Self {

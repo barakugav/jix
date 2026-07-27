@@ -89,10 +89,18 @@ impl<S: ArrayStorage> PermuteAxes<S> {
 
         let inner_spec = array.spec();
         let block_shape = dim_arr(ndim, |i| inner_spec.block_shape()[axes[i]]);
-        let block_shape_tag = dim_arr(ndim, |i| inner_spec.block_shape_tag()[axes[i]]);
+        let inner_block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims: (0..ndim)
+                .map(|i| inner_block_shape_fixed_dims.get(axes[i]))
+                .collect(),
+            element_cost: inner_spec.element_cost(),
+            read_shape_scale_order: inner_spec
+                .read_shape_scale_order()
+                .iter()
+                .map(|&old| inv_axes[old as usize])
+                .collect(),
         };
         let axes = S::Dimension::vec(ndim, |i| axes[i] as u8);
         Ok(Self {

@@ -4,11 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{
-    ArraySpec, ArrayStorageInfo, BlockShapeTag, ElementType, OutBuf, Ty, TypeDyn,
-};
+use crate::storage::{ArraySpec, ArrayStorageInfo, ElementType, OutBuf, Ty, TypeDyn};
 use crate::util::{strided_span_bytes, DimArray, NdCopier, SendSyncPtr};
-use crate::{Array, ArrayParams, ArrayStorage, Dimension, IntoDimension};
+use crate::{dim_arr, Array, ArrayParams, ArrayStorage, DimBitmap, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -139,17 +137,33 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
             "Data pointer or strides are not aligned to required alignment {alignment}"
         );
 
-        if params.block_shape_tag.is_none() {
-            params.block_shape_tag(D::vec(ndim, |_| BlockShapeTag::Any).as_ref());
+        if params.block_shape_fixed_dims.is_none() {
+            // A plain view is a strided copy, so no dimension is a fixed block boundary.
+            params.block_shape_fixed_dims = Some(DimBitmap::filled(ndim, false));
             if params.block_shape.is_none() {
                 params.block_shape(D::vec(ndim, |_| 1).as_ref());
             }
         }
-        let spec = params.into_spec(
+        let mut spec = params.into_spec(
             shape.as_slice(),
             &dtype,
             ArraySpecFlags::new().set_plain_read(),
         )?;
+        // Scaling order by contiguity: the most contiguous (smallest stride) real dims scale first;
+        {
+            let shape = shape.as_slice();
+            let mut order = dim_arr(ndim, |d| d as u8);
+            order.sort_by_key(|&d| {
+                let d = d as usize;
+                if shape[d] > 1 && strides[d] != 0 {
+                    (0u8, strides[d] as u64)
+                } else {
+                    // zero-stride / size-<=1 dims have no coverage benefit, so they trail at the end.
+                    (1u8, 0)
+                }
+            });
+            spec.dynamic_mut().read_shape_scale_order = order;
+        }
 
         let element_type = TypeDyn::from_dtype(dtype).unwrap();
 

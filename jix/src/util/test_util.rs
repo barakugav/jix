@@ -683,7 +683,7 @@ fn assert_array_matches_dyn<T>(
         .iter()
         .zip(actual.shape())
         .all(|(&b, &s)| (0..=s.max(1)).contains(&(b as u64))));
-    assert_eq!(spec.block_shape_tag().len(), ndim);
+    assert_eq!(spec.block_shape_fixed_dims().len(), ndim);
     assert!(spec.block_size() > 0);
     assert!(spec.read_size().min > 0);
 

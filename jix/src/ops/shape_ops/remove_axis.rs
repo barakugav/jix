@@ -111,24 +111,36 @@ where
 
         let inner_spec = array.spec();
         let inner_block_shape = inner_spec.block_shape();
-        let inner_block_shape_tag = inner_spec.block_shape_tag();
         let mut block_shape = DimArray::new();
-        let mut block_shape_tag = DimArray::new();
 
         for input_dim in 0..input_ndim {
             if !is_removed[input_dim] {
                 axes_mapping.push(input_dim as u8);
                 shape.push(array.shape()[input_dim]);
                 block_shape.push(inner_block_shape[input_dim]);
-                block_shape_tag.push(inner_block_shape_tag[input_dim]);
             }
         }
         let shape = D::from_slice(&shape);
         let axes_mapping = D::vec(axes_mapping.len(), |d| axes_mapping[d]);
 
+        let block_shape_fixed_dims = inner_spec
+            .block_shape_fixed_dims()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(dim, c)| (!is_removed[dim]).then_some(c))
+            .collect();
+        let out_dim = |d: usize| (d - (0..d).filter(|&j| is_removed[j]).count()) as u8;
+        let read_shape_scale_order = inner_spec
+            .read_shape_scale_order()
+            .iter()
+            .filter(|&&d| !is_removed[d as usize])
+            .map(|&d| out_dim(d as usize))
+            .collect();
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
+            element_cost: inner_spec.element_cost(),
+            read_shape_scale_order,
         };
 
         Ok(Self {

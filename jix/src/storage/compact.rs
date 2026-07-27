@@ -215,11 +215,13 @@ where
         D: Dimension,
     {
         let shape_slice = shape.as_slice();
-        let spec = params.into_spec(
+        let mut spec = params.into_spec(
             shape_slice,
             blocks.dtype(),
             ArraySpecFlags::new().set_compact(),
         )?;
+        // Reading a compact element is more expensive than reading a plain element (1).
+        spec.dynamic_mut().element_cost = 8.0;
         Ok(Self {
             blocks,
             shape,

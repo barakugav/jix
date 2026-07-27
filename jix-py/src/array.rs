@@ -1195,16 +1195,16 @@ impl Array {
 ///             row slices, a block shape of `[1, <row_length>]` avoids decompressing neighboring
 ///             rows. When not set, the shape is auto-computed to fit approximately
 ///             `block_size` bytes.
-///         - `block_shape_tag`: Per-dimension constraint on how `block_shape` is scaled when a
-///             downstream operation auto-computes a new block shape. One string per dimension:
-///             `"fixed"` pins the block size exactly (the default when `block_shape` is set by
-///             the user); `"multiple-of"` allows scaling up while keeping it a multiple of the
-///             given value; `"any"` allows free choice (used when an op makes the original size
-///             irrelevant, e.g. a broadcast dimension). Requires `block_shape` to also be set.
-///             Length must equal the number of dimensions.
+///         - `block_shape_fixed_dims`: Per-dimension flag controlling how `block_shape` is scaled
+///             when a downstream operation auto-computes a new block shape. One bool per
+///             dimension: `True` pins the block size for that dimension exactly (the default for
+///             every dimension when `block_shape` is set by the user); `False` allows the block
+///             size to be freely resized (used when an op makes the original size irrelevant,
+///             e.g. a broadcast dimension). Requires `block_shape` to also be set. Length must
+///             equal the number of dimensions.
 ///         - `block_size`: Target block size in bytes, used when auto-computing or scaling the
-///             block shape for dimensions that are not `"fixed"`. Ignored when all dimensions
-///             are `"fixed"`. Defaults to a size chosen automatically according to the CPU cache sizes.
+///             block shape for dimensions that are not fixed. Ignored when all dimensions are
+///             fixed. Defaults to a size chosen automatically according to the CPU cache sizes.
 ///         - `read_size`: The target byte range for a single preferred read region as
 ///             `(min, max)`, given as either a scalar `s` (treated as `(s, s)`) or a 2-element
 ///             `(min, max)` sequence of non-negative ints.
@@ -1320,7 +1320,7 @@ pub(crate) fn resolve_array_params(
         };
     }
     let block_shape = extract_arg!("block_shape", Vec<u32>)?;
-    let block_shape_tag = extract_arg!("block_shape_tag", Vec<String>)?;
+    let block_shape_fixed_dims = extract_arg!("block_shape_fixed_dims", Vec<bool>)?;
     let block_size = extract_arg!("block_size", u64)?;
     let read_size = extract_arg!("read_size", ItemOrSequence<u64>)?;
     let codec = extract_arg!("codec", String)?;
@@ -1337,19 +1337,8 @@ pub(crate) fn resolve_array_params(
     if let Some(block_shape) = block_shape {
         params.block_shape(&block_shape);
     }
-    if let Some(block_shape_tag) = block_shape_tag {
-        let block_shape_tag = block_shape_tag
-            .iter()
-            .map(|s| match s.as_str() {
-                "fixed" => Ok(jix_core::storage::BlockShapeTag::Fixed),
-                "multiple-of" => Ok(jix_core::storage::BlockShapeTag::MultipleOf),
-                "any" => Ok(jix_core::storage::BlockShapeTag::Any),
-                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid block_shape_tag: {s}"
-                ))),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        params.block_shape_tag(&block_shape_tag);
+    if let Some(block_shape_fixed_dims) = block_shape_fixed_dims {
+        params.block_shape_fixed_dims(&block_shape_fixed_dims);
     }
     if let Some(block_size) = block_size {
         params.block_size(block_size);

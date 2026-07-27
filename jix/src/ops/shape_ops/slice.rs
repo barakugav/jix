@@ -103,12 +103,14 @@ impl<S: ArrayStorage> Slice<S> {
                 continue; // dim is sliced, but still larger than the block size - no change
             } else {
                 block_shape[dim] = (shape[dim] as BlockSize).max(1);
-                // block_shape_tag is unchanged
+                // block_shape_fixed_dims is unchanged
             }
         }
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag: inner_spec.block_shape_tag().clone(),
+            block_shape_fixed_dims: inner_spec.block_shape_fixed_dims(),
+            element_cost: inner_spec.element_cost(),
+            read_shape_scale_order: inner_spec.read_shape_scale_order().clone(),
         };
 
         Ok(Self {

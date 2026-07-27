@@ -3,6 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, ensure, Result};
+use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
     ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
 };
@@ -71,6 +72,7 @@ pub struct Where<SC, SX, SY> {
     condition: SC,
     x: SX,
     y: SY,
+    spec: ArraySpecDynamic,
 }
 impl<SC, SX, SY> Where<SC, SX, SY>
 where
@@ -103,7 +105,30 @@ where
             y.shape()
         );
 
-        Ok(Self { condition, x, y })
+        let c_spec = condition.spec();
+        let x_spec = x.spec();
+        let y_spec = y.spec();
+        let (element_cost, read_shape_scale_order) = combine_elementwise_hints(&[
+            (c_spec.element_cost(), c_spec.read_shape_scale_order()),
+            (x_spec.element_cost(), x_spec.read_shape_scale_order()),
+            (y_spec.element_cost(), y_spec.read_shape_scale_order()),
+        ]);
+        let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
+            (c_spec.block_shape(), c_spec.block_shape_fixed_dims()),
+            (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
+            (y_spec.block_shape(), y_spec.block_shape_fixed_dims()),
+        ]);
+        let mut spec = x_spec.dynamic().clone();
+        spec.block_shape = block_shape;
+        spec.block_shape_fixed_dims = block_shape_fixed_dims;
+        spec.element_cost = element_cost;
+        spec.read_shape_scale_order = read_shape_scale_order;
+        Ok(Self {
+            condition,
+            x,
+            y,
+            spec,
+        })
     }
 
     /// Constructs an array with [`Where`] storage. See the storage struct docs for semantics and examples.
@@ -210,7 +235,10 @@ where
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
-        self.x.spec().with_cleared_flags()
+        self.x
+            .spec()
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
     fn info(&self) -> ArrayStorageInfo<'_> {
         ArrayStorageInfo::new_deps("Where", [&self.condition, &self.x, &self.y])
@@ -226,6 +254,7 @@ where
             condition: self.condition.dimension_change()?,
             x: self.x.dimension_change()?,
             y: self.y.dimension_change()?,
+            spec: self.spec,
         })
     }
 
@@ -242,6 +271,7 @@ where
             condition: self.condition,
             x: self.x.element_type_change()?,
             y: self.y.element_type_change()?,
+            spec: self.spec,
         })
     }
 }

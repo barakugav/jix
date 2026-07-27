@@ -4,12 +4,10 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{
-    ArraySpec, ArrayStorage, ArrayStorageInfo, BlockShapeTag, OutBuf, ReadData, Ty,
-};
+use crate::storage::{ArraySpec, ArrayStorage, ArrayStorageInfo, OutBuf, ReadData, Ty};
 use crate::util::cast_slice_mut;
 use crate::util::iter::NdIter;
-use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
+use crate::{ArrayParams, DimBitmap, Dimension, ElementType, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -59,17 +57,20 @@ impl<T, D> Scalar<T, D> {
         let shape = shape.into_dimension()?;
         let ndim = shape.ndim();
 
-        if params.block_shape_tag.is_none() {
-            params.block_shape_tag(D::vec(ndim, |_| BlockShapeTag::Any).as_ref());
+        if params.block_shape_fixed_dims.is_none() {
+            // A scalar broadcasts over every dimension, so none of them are fixed.
+            params.block_shape_fixed_dims = Some(DimBitmap::filled(ndim, false));
             if params.block_shape.is_none() {
                 params.block_shape(D::vec(ndim, |_| 1).as_ref());
             }
         }
-        let spec = params.into_spec(
+        let mut spec = params.into_spec(
             shape.as_slice(),
             &T::DTYPE,
             ArraySpecFlags::new().set_plain_read(),
         )?;
+        // Reading a scalar element is free, and it broadcasts over every dimension.
+        spec.dynamic_mut().element_cost = 0.0;
 
         Ok(Self {
             data,

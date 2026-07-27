@@ -3,6 +3,7 @@ use std::ops::Range;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
+use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
 use crate::{
     array_from_fn_inline, Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped,
@@ -250,6 +251,7 @@ where
 pub struct MapMultiple<ArraysT, F> {
     arrays: ArraysT,
     map_fn: F,
+    spec: ArraySpecDynamic,
 }
 impl<ArraysT, F> MapMultiple<ArraysT, F> {
     /// Constructs a [`MapMultiple`] storage. See the struct docs for semantics and examples.
@@ -269,7 +271,34 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
             );
         }
-        Ok(Self { arrays, map_fn })
+        let (element_cost, read_shape_scale_order) = {
+            let inputs = (0..narrays)
+                .map(|i| {
+                    let sp = arrays.spec(i);
+                    (sp.element_cost(), sp.read_shape_scale_order().as_slice())
+                })
+                .collect::<Vec<_>>();
+            combine_elementwise_hints(&inputs)
+        };
+        let (block_shape, block_shape_fixed_dims) = {
+            let inputs = (0..narrays)
+                .map(|i| {
+                    let sp = arrays.spec(i);
+                    (sp.block_shape().as_slice(), sp.block_shape_fixed_dims())
+                })
+                .collect::<Vec<_>>();
+            combine_block_layout(&inputs)
+        };
+        let mut spec = arrays.spec(0).dynamic().clone();
+        spec.block_shape = block_shape;
+        spec.block_shape_fixed_dims = block_shape_fixed_dims;
+        spec.element_cost = element_cost;
+        spec.read_shape_scale_order = read_shape_scale_order;
+        Ok(Self {
+            arrays,
+            map_fn,
+            spec,
+        })
     }
 }
 impl<ArraysT, O, F> ArrayStorage for MapMultiple<ArraysT, F>
@@ -347,7 +376,10 @@ where
 
     #[inline]
     fn spec(&self) -> crate::storage::ArraySpec<'_> {
-        self.arrays.spec(0).with_cleared_flags()
+        self.arrays
+            .spec(0)
+            .with_dynamic_spec(&self.spec)
+            .with_cleared_flags()
     }
 
     fn info(&self) -> ArrayStorageInfo<'_> {

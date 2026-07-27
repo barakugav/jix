@@ -68,7 +68,7 @@ mod plain;
 pub use plain::*;
 
 pub(crate) mod params;
-pub use params::{ArraySpec, BlockShapeTag};
+pub use params::ArraySpec;
 
 mod any;
 pub use any::*;

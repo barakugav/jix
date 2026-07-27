@@ -5,9 +5,9 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, BlockSize, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
 use crate::util::{default_strides, NdCopier};
-use crate::{Array, ArrayStorage, Dimension, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimArray, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -88,13 +88,24 @@ impl<S: ArrayStorage> Tile<S> {
 
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
-        let mut block_shape_tag = inner_spec.block_shape_tag().clone();
+        let mut block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
         // there is nothing smarter than reading the whole dimension at once
         block_shape[axis] = (new_len.min(BlockSize::MAX as u64) as BlockSize).max(1);
-        block_shape_tag[axis] = BlockShapeTag::Any;
+        block_shape_fixed_dims.set(axis, false);
+        let read_shape_scale_order = std::iter::once(axis as u8)
+            .chain(
+                inner_spec
+                    .read_shape_scale_order()
+                    .iter()
+                    .copied()
+                    .filter(|&d| d as usize != axis),
+            )
+            .collect::<DimArray<_>>();
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
+            element_cost: inner_spec.element_cost(),
+            read_shape_scale_order,
         };
 
         Ok(Self {

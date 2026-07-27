@@ -3,8 +3,8 @@ use std::ops::{Not, Range};
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, Result};
-use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockShapeTag, OutBuf};
+use crate::storage::params::{combine_block_layout, combine_select_hints, ArraySpecDynamic};
+use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
 use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray};
 use crate::{Array, ArrayStorage, Dimension, IterExt};
 
@@ -105,14 +105,38 @@ where
         check_shape_overflow(new_shape.as_slice(), dtype.itemsize() as _)?;
         let new_shape = <Self as ArrayStorage>::Dimension::from_slice(&new_shape);
 
-        let spec = arrays.spec(0);
-        let mut block_shape = spec.block_shape().clone();
-        let mut block_shape_tag = spec.block_shape_tag().clone();
+        // Combine the block layout over the (equal-shape) inputs, then insert the new stack axis:
+        // it carries no data of its own, so its block is 1 and non-fixed.
+        let (mut block_shape, mut block_shape_fixed_dims) = {
+            let inputs = (0..narrays)
+                .map(|i| {
+                    let sp = arrays.spec(i);
+                    (sp.block_shape().as_slice(), sp.block_shape_fixed_dims())
+                })
+                .collect::<Vec<_>>();
+            combine_block_layout(&inputs)
+        };
         block_shape.insert(axis, 1);
-        block_shape_tag.insert(axis, BlockShapeTag::Any);
+        block_shape_fixed_dims.insert(axis, false);
+        let (element_cost, shared_order) = {
+            let inputs = (0..narrays)
+                .map(|i| {
+                    let sp = arrays.spec(i);
+                    (sp.element_cost(), sp.read_shape_scale_order().as_slice())
+                })
+                .collect::<Vec<_>>();
+            combine_select_hints(&inputs)
+        };
+        let read_shape_scale_order = shared_order
+            .iter()
+            .map(|&d| if d as usize >= axis { d + 1 } else { d })
+            .chain(std::iter::once(axis as u8))
+            .collect::<DimArray<_>>();
         let spec = ArraySpecDynamic {
             block_shape,
-            block_shape_tag,
+            block_shape_fixed_dims,
+            element_cost,
+            read_shape_scale_order,
         };
 
         Ok(Self {
