@@ -392,8 +392,19 @@ impl<'a> AlternatingBuffers<'a> {
     }
 }
 
+/// Compile-time toggle between the two read-tile scaling strategies used by [`scale_read_shape`].
+///
+/// `false` (default) runs the balanced strategy: cap all dims to a common shrinking bound, giving
+/// near-square tiles. `true` runs the priority strategy that fully covers the highest-priority
+/// (broadcast/reduction) dims first. The priority strategy wins only when the covered axis is
+/// contiguous; it regresses the common row-major / block-compressed case (block-orthogonal reads),
+/// so it is parked here until the heuristic is made stride/block-aware. `element_cost` and
+/// `read_shape_scale_order` are propagated by the ops regardless of this flag.
+pub(crate) const USE_NEW_READ_SCALING: bool = false;
+
 /// Choose a read tile from a block-shape seed, steered by a per-dim coverage priority.
 ///
+/// Which strategy runs is gated by [`USE_NEW_READ_SCALING`]. The priority strategy (below):
 /// `read_shape` enters holding the block-shape seed (the minimum non-wasteful read shape) and
 /// leaves holding the chosen tile. `scale_order` is the coverage priority, **highest first**: the
 /// down-scan shrinks from the low-priority end and the up-scan grows from the high-priority end, so
@@ -431,32 +442,58 @@ pub(crate) fn scale_read_shape(
         read_shape[dim] = read_shape[dim].clamp(1, max_shape[dim].max(1));
     }
 
-    // Track the running volume across both scans, updating it by each dim's change factor - so the
-    // whole routine is O(ndim) rather than recomputing the product each step.
-    let mut current_volume = read_shape.iter().product::<u64>();
-
-    // Scale down to `<= max_nitems`: shrink the lowest-priority dims first, each only as much as
-    // needed so higher-priority dims stay fully covered where the budget allows.
-    for &dim in order.iter().rev() {
-        if current_volume <= max_nitems {
-            break;
+    if USE_NEW_READ_SCALING {
+        // PRIORITY strategy (parked): shrink lowest-priority dims first so high-priority
+        // (broadcast/reduction) dims stay fully covered - anisotropic tiles. O(ndim): the running
+        // volume is maintained across both scans instead of recomputing the product each step.
+        let mut current_volume = read_shape.iter().product::<u64>();
+        for &dim in order.iter().rev() {
+            if current_volume <= max_nitems {
+                break;
+            }
+            let others = current_volume / read_shape[dim];
+            let new_len = (max_nitems / others.max(1)).clamp(1, read_shape[dim]);
+            current_volume = others * new_len;
+            read_shape[dim] = new_len;
         }
-        let others = current_volume / read_shape[dim];
-        let new_len = (max_nitems / others.max(1)).clamp(1, read_shape[dim]);
-        current_volume = others * new_len;
-        read_shape[dim] = new_len;
-    }
-
-    // Scale up to `>= min_nitems`: grow the highest-priority dims first, by an integer multiple of
-    // the current (block-aligned) length, toward each dim's extent.
-    for &dim in order.iter() {
-        let dim_len = max_shape[dim].max(1);
-        let mult_by_budget = min_nitems / current_volume.max(1);
-        let mult_by_range = dim_len.div_ceil(read_shape[dim]);
-        let multiplier = mult_by_budget.min(mult_by_range).max(1);
-        let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
-        current_volume = current_volume / read_shape[dim] * new_read_size;
-        read_shape[dim] = new_read_size;
+        for &dim in order.iter() {
+            let dim_len = max_shape[dim].max(1);
+            let mult_by_budget = min_nitems / current_volume.max(1);
+            let mult_by_range = dim_len.div_ceil(read_shape[dim]);
+            let multiplier = mult_by_budget.min(mult_by_range).max(1);
+            let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
+            current_volume = current_volume / read_shape[dim] * new_read_size;
+            read_shape[dim] = new_read_size;
+        }
+    } else {
+        // BALANCED strategy (default): cap every scaled dim to a common bound that halves until the
+        // volume fits `max_nitems` - order-independent, so it yields near-square tiles that stay
+        // aligned with storage blocks / contiguous runs. Then grow in priority order toward
+        // `min_nitems`.
+        let mut max_dim_size = (1u64 << 30).min(max_nitems.next_power_of_two());
+        loop {
+            for &dim in order.iter() {
+                read_shape[dim] = read_shape[dim]
+                    .min(max_dim_size)
+                    .min(max_shape[dim].max(1))
+                    .max(1);
+            }
+            let read_size = read_shape.iter().product::<u64>();
+            if read_size / 2 <= max_nitems || max_dim_size <= 1 {
+                break;
+            }
+            max_dim_size = (max_dim_size / 2).max(1);
+        }
+        let mut current_volume = read_shape.iter().product::<u64>();
+        for &dim in order.iter() {
+            let dim_len = max_shape[dim].max(1);
+            let mult_by_budget = min_nitems / current_volume.max(1);
+            let mult_by_range = dim_len.div_ceil(read_shape[dim]);
+            let multiplier = mult_by_budget.min(mult_by_range).max(1);
+            let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
+            current_volume = current_volume / read_shape[dim] * new_read_size;
+            read_shape[dim] = new_read_size;
+        }
     }
 
     // Snap any scaled dim already covering its full requested range to `array_shape[d]` so the read
@@ -578,7 +615,10 @@ impl<T> SliceExt<T> for [T] {
 
 #[cfg(test)]
 mod tests {
-    use super::{calc_block_end, default_strides_slice, scale_read_shape, AlternatingBuffers};
+    use super::{
+        calc_block_end, default_strides_slice, scale_read_shape, AlternatingBuffers,
+        USE_NEW_READ_SCALING,
+    };
     use crate::DimDyn;
 
     #[test]
@@ -760,8 +800,7 @@ mod tests {
     fn scale_read_shape_prioritizes_high_order_dim() {
         use crate::Dimension;
         // 2-D [100, 100], budget max=200 items. Seed the whole thing (over budget -> scale down).
-        // Priority order = [dim1, dim0] (dim1 highest), so dim0 (low priority) is shrunk first and
-        // dim1 stays fully covered.
+        // Priority order = [dim1, dim0] (dim1 highest).
         let shape = [100u64, 100];
         let mut read_shape = DimDyn::from_fn(2, |_| 100);
         scale_read_shape(
@@ -771,12 +810,25 @@ mod tests {
             (1, 200),
             [1usize, 0].into_iter(),
         );
-        assert_eq!(read_shape[1], 100, "high-priority dim stays fully covered");
-        assert!(
-            read_shape[0] <= 2,
-            "low-priority dim absorbs the shrink, got {}",
-            read_shape[0]
-        );
+        if USE_NEW_READ_SCALING {
+            // Priority: dim0 (low) is shrunk first, dim1 (high) stays fully covered.
+            assert_eq!(read_shape[1], 100, "high-priority dim stays fully covered");
+            assert!(
+                read_shape[0] <= 2,
+                "low-priority dim absorbs the shrink, got {}",
+                read_shape[0]
+            );
+        } else {
+            // Balanced: both dims capped to a common bound (near-square), volume within ~max.
+            assert_eq!(
+                read_shape[0], read_shape[1],
+                "balanced strategy yields a near-square tile, got {read_shape:?}"
+            );
+            assert!(
+                read_shape[0] * read_shape[1] <= 2 * 200,
+                "volume stays within ~max budget, got {read_shape:?}"
+            );
+        }
     }
 
     #[test]
