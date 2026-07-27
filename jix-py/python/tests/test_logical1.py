@@ -6,7 +6,6 @@ use fixed-input `test_*_concrete` functions ([nan, inf, -inf, 0.0, 1.0] per dtyp
 
 import numpy as np
 import pytest
-import jix
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
@@ -15,6 +14,8 @@ from tests_util import (
     carray_strategy,
     maybe_non_finite_element_strategy,
 )
+
+import jix
 
 _float_dtypes = [np.float16, np.float32, np.float64]
 

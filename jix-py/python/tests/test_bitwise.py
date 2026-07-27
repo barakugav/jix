@@ -66,7 +66,7 @@ def _as_uint(x: int, bits: int) -> int:
 
 def _ref_count_ones(a: np.ndarray) -> np.ndarray:
     bits = a.itemsize * 8
-    out = [bin(_as_uint(int(x), bits)).count("1") for x in a.reshape(-1)]
+    out = [_as_uint(int(x), bits).bit_count() for x in a.reshape(-1)]
     return np.array(out, dtype=np.uint32).reshape(a.shape)
 
 
@@ -90,7 +90,7 @@ def _alt_pattern(bits: int) -> int:
 
 
 def _popcount_int(x: int, bits: int) -> int:
-    return bin(_as_uint(x, bits)).count("1")
+    return _as_uint(x, bits).bit_count()
 
 
 def _leading_zeros_int(x: int, bits: int) -> int:

@@ -1,1 +1,9 @@
 line-length = 120
+
+[lint]
+ignore = ["B017"]
+extend-select = ["F405", "F403", "E402"]
+
+[lint.per-file-ignores]
+"jix-py/python/tests/*" = ["BLE001"]
+"jix-py/python/benches/*" = ["BLE001"]

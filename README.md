@@ -49,7 +49,7 @@ result.write_to("normalized.jix")
 
 # Load and read a sub-region; only the touched blocks are decompressed.
 b = jix.read_array("normalized.jix")
-row = b[42]   # only the blocks covering row 42 are decompressed
+row = b[42]  # only the blocks covering row 42 are decompressed
 ```
 
 ## When should I use this library?

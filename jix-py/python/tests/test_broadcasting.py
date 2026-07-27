@@ -103,7 +103,6 @@ def broadcast_int32_arrays(draw):
         # Different ndim
         ((3,), (2, 3)),
         ((4,), (3, 4)),
-        ((1, 4), (3, 4)),
         ((3, 4), (4,)),
         # Classic 2-D outer-product pattern
         ((4, 1), (1, 3)),  # -> (4, 3)

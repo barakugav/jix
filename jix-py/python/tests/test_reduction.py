@@ -13,7 +13,6 @@ Python-specific coverage beyond the Rust tests:
 
 import numpy as np
 import pytest
-import jix
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays as np_arrays
@@ -27,6 +26,8 @@ from tests_util import (
     op_safe_element_strategy,
     uints,
 )
+
+import jix
 
 # ---------------------------------------------------------------------------
 # Shape strategies for reductions (no zero-length dims - Rust mirrors this)
