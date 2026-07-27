@@ -38,5 +38,41 @@ fn bench_op1_impl<S: ArrayStorageTyped<Item = i32>>(
     }
 }
 
-criterion_group!(benches, bench_op1_compact, bench_op1_plain);
+fn bench_op1_plain_transposed(c: &mut Criterion) {
+    let mut group = c.benchmark_group("op1 plain transposed");
+    group.sample_size(20);
+
+    for shape in [[300, 300], [1200, 1200]] {
+        let data = create_data::<i32>(Profile::Smooth, &shape, 0x63fedb38a8565e8c);
+        let data = data.t();
+        let array = Array::plain_ndarray_ref(&data).unwrap();
+
+        let nitems = shape.iter().product::<u64>() as usize;
+        let index = [0..shape[0], 0..shape[1]];
+        let neg = array.as_ref().neg();
+        let ctx = neg.read_ctx();
+
+        let neg = neg.as_ref().transpose();
+
+        let id = format!("{shape:?}");
+        group.bench_function(&id, |b| {
+            let mut out = vec![0i32; nitems];
+            b.iter(|| {
+                let buf = unsafe {
+                    std::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<u8>(), nitems * 4)
+                };
+                neg.to_ndarray_buf(&index, buf, &ctx).unwrap();
+                out[0]
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_op1_compact,
+    bench_op1_plain,
+    bench_op1_plain_transposed,
+);
 criterion_main!(benches);
