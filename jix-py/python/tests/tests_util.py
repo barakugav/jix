@@ -9,13 +9,10 @@ Mirrors the test utilities in jix/src/util/test_util.rs:
   assert_array_matches     <-->  assert_array_matches()
 """
 
-from typing import Optional
-
 import numpy as np
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays as np_arrays
 from hypothesis.strategies import DataObject
-
 
 import jix
 
@@ -249,7 +246,7 @@ def assert_array_matches(
     actual: jix.Array,
     expected: np.ndarray,
     *,
-    data: Optional[DataObject] = None,
+    data: DataObject | None = None,
     rtol: float = 0.0,
     atol: float = 0.0,
 ):

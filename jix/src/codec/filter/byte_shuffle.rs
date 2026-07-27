@@ -11,6 +11,14 @@ impl FilterImpl for ByteShuffleFilter {
         debug_assert!(src.len().is_multiple_of(itemsize));
 
         #[inline(never)]
+        #[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+            // x86-64-v4
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+            // x86-64-v3
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+            // x86-64-v2
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+        )))]
         fn encode_impl<const ITEMSIZE: usize, const LANES: usize>(src: &[u8], dst: &mut [u8]) {
             let nitems = src.len() / ITEMSIZE;
 
@@ -42,13 +50,21 @@ impl FilterImpl for ByteShuffleFilter {
         }
 
         #[inline(never)]
+        #[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+            // x86-64-v4
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+            // x86-64-v3
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+            // x86-64-v2
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+        )))]
         fn encode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
             debug_assert!(src.len().is_multiple_of(itemsize));
             let nitems = src.len() / itemsize;
             let src = src.as_ptr();
             let dst = dst.as_mut_ptr();
-            for i in start..nitems {
-                for b in 0..itemsize {
+            for b in 0..itemsize {
+                for i in start..nitems {
                     unsafe {
                         let elm = src.add(i * itemsize + b).read();
                         dst.add(b * nitems + i).write(elm);
@@ -73,6 +89,14 @@ impl FilterImpl for ByteShuffleFilter {
         debug_assert!(src.len().is_multiple_of(itemsize));
 
         #[inline(never)]
+        #[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+            // x86-64-v4
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+            // x86-64-v3
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+            // x86-64-v2
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+        )))]
         fn decode_impl<const ITEMSIZE: usize, const LANES: usize>(src: &[u8], dst: &mut [u8]) {
             let nitems = src.len() / ITEMSIZE;
 
@@ -104,6 +128,14 @@ impl FilterImpl for ByteShuffleFilter {
             decode_impl_generic(src, dst, ITEMSIZE, i);
         }
 
+        #[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+            // x86-64-v4
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+            // x86-64-v3
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+            // x86-64-v2
+            "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+        )))]
         #[inline(never)]
         fn decode_impl_generic(src: &[u8], dst: &mut [u8], itemsize: usize, start: usize) {
             debug_assert!(src.len().is_multiple_of(itemsize));

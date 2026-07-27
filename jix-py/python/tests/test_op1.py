@@ -13,7 +13,6 @@ Python name differences vs Rust:
 
 import numpy as np
 import pytest
-import jix
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.strategies import DataObject
@@ -26,6 +25,8 @@ from tests_util import (
     ints,
     op_safe_non_negative_element_strategy,
 )
+
+import jix
 
 
 @pytest.mark.parametrize("dtype", ints + floats + complexes)

@@ -11,3 +11,4 @@
 - add likely/unlikely branch hints
 - return strided buf from read_data
 - add read benchmark of the whole array, also for low entropy data
+- add `out` arg to `Array.numpy()`

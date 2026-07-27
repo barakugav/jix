@@ -11,8 +11,8 @@ from hypothesis.strategies import DataObject
 from tests_util import (
     any_element_strategy,
     assert_array_matches,
-    carrays2_strategy,
     carray_strategy,
+    carrays2_strategy,
     comparable_element_strategy,
     complexes,
     floats,

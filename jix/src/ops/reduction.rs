@@ -143,9 +143,9 @@ where
             size_of::<K::State>(),
             Alignment::of::<K::State>(),
             &self.is_reduced,
-            &|args| self.reduce_tile(args),
+            &|args| reduce_tile::<S::Item, K, D>(&self.kernel, args),
             &|args| {
-                self.finalize_states(args);
+                finalize_states::<S::Item, K, D>(&self.kernel, args);
             },
             index,
             buf,
@@ -590,6 +590,134 @@ struct ReduceTileArgs<D: Dimension> {
     tile_reduction_size: usize,
     bulk_base_item_idx: u64,
 }
+fn reduce_tile<T, K, D>(kernel: &K, args: ReduceTileArgs<D>)
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T, Output: Dtyped>,
+    D: Dimension,
+{
+    let ReduceTileArgs {
+        tile_out_shape,
+        items_buf,
+        items_buf_strides,
+        state_buf,
+        state_buf_strides,
+        merge_into_existing,
+        tile_reduction_size,
+        bulk_base_item_idx,
+    } = args;
+
+    let out_iter = NdIter::builder(tile_out_shape)
+        .with_strides_ptr_ext(items_buf_strides, items_buf)
+        .with_strides_ptr_mut_ext(state_buf_strides, state_buf)
+        .build();
+
+    // The first tile of a bulk seeds each output slot; later tiles of the same
+    // bulk merge their partial fold into it. (Snapshot the flag so mutating
+    // `bulk_initialized` after the fold doesn't clash with the closure's borrow.)
+    // let merge_into_existing = bulk_initialized;
+    // Store one cell's freshly-folded tile state into its slot. `state_ptr` is
+    // this cell's slot in `state_buf`.
+    let store = |cell_state: K::State, state_ptr: *mut MaybeUninit<K::State>| {
+        // SAFETY: `state_ptr` is this cell's slot in `state_buf`.
+        let slot = unsafe { &mut *state_ptr };
+        if merge_into_existing {
+            // CAREFUL: with `state_in_out_buf`, `slot` aliases the output buffer;
+            // read the state out before writing the merged result back into the
+            // same bytes.
+            let prev = unsafe { slot.assume_init_read() };
+            slot.write(kernel.merge(prev, cell_state));
+        } else {
+            slot.write(cell_state);
+        }
+    };
+    let out_iter = out_iter.map(|(_out_idx, (src_base, state_ptr))| {
+        // SAFETY: `src_base` points at this cell's contiguous reduced stream
+        // of `reduction_size` items in the permuted (output, reduced) buffer.
+        let src = unsafe { std::slice::from_raw_parts(src_base.cast::<T>(), tile_reduction_size) };
+        let state_ptr = state_ptr.cast::<MaybeUninit<K::State>>();
+        (src, state_ptr)
+    });
+
+    const LANES: usize = 16;
+    if tile_reduction_size >= LANES {
+        for (src, state_ptr) in out_iter {
+            let state = fold_cell::<T, K, LANES>(kernel, src, bulk_base_item_idx);
+            store(state, state_ptr);
+        }
+    } else if tile_reduction_size > 0 {
+        for (src, state_ptr) in out_iter {
+            let state = fold_cell::<T, K, 1>(kernel, src, bulk_base_item_idx);
+            store(state, state_ptr);
+        }
+    }
+}
+
+/// Fold one output cell's contiguous reduced stream (`items`, which must hold at least
+/// `LANES` items) into a single accumulator.
+#[inline(always)]
+fn fold_cell<T, K, const LANES: usize>(kernel: &K, items: &[T], base: u64) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    let n = items.len();
+    let mut i = 0;
+
+    // Seed one accumulator per lane from the first LANES items.
+    debug_assert!(n >= LANES);
+    let mut states: [K::State; LANES] = array_from_fn_inline(|b| {
+        let item = unsafe { *items.get_unchecked(b) };
+        kernel.init_state(Some((item, base + b as u64)))
+    });
+    i += LANES;
+
+    // Process the main bulk of the stream in LANES-sized chunks.
+    while i + LANES <= n {
+        let items: [T; LANES] = array_from_fn_inline(|b| unsafe { *items.get_unchecked(i + b) });
+        let mut it = states.into_iter();
+        states = array_from_fn_inline(|b| {
+            let state = it.next().unwrap();
+            kernel.update_state(state, items[b], base + (i + b) as u64)
+        });
+        i += LANES;
+    }
+
+    // merge the LANES states to a single one
+    let mut state = merge_states::<T, K, LANES>(kernel, states);
+
+    // Fold any remaining tail sequentially.
+    while i < n {
+        let item = unsafe { *items.get_unchecked(i) };
+        state = kernel.update_state(state, item, base + i as u64);
+        i += 1;
+    }
+    state
+}
+
+/// Collapse `LANES` lane accumulators into one via a bottom-up pairwise tree (dependency
+/// depth `log2(LANES)`). `LANES` must be a power of two (the dispatch only picks 4/8/16).
+#[inline(always)]
+fn merge_states<T, K, const LANES: usize>(kernel: &K, states: [K::State; LANES]) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    // TODO: this code is not panic-safe.
+    assert!(LANES > 0 && LANES.is_power_of_two());
+    let mut states = states.map_inline(MaybeUninit::new);
+    let mut width = LANES;
+    while width > 1 {
+        width /= 2;
+        for j in 0..width {
+            let a = unsafe { states[j].assume_init_read() };
+            let b = unsafe { states[j + width].assume_init_read() };
+            states[j].write(kernel.merge(a, b));
+        }
+    }
+    unsafe { states[0].assume_init_read() }
+}
+
 struct FinalizeStateArgs<D: Dimension> {
     out_shape: D::Vec<u64>,
     state_buf: *mut u8,
@@ -599,172 +727,49 @@ struct FinalizeStateArgs<D: Dimension> {
     reduction_size_overall: u64,
     state_initialized: bool,
 }
-
-impl<S, K, D> ReductionOp<S, K, D>
+fn finalize_states<T, K, D>(kernel: &K, args: FinalizeStateArgs<D>)
 where
-    S: ArrayStorageTyped,
-    K: ReductionOpKernel<S::Item, Output: Dtyped>,
+    K: ReductionOpKernel<T>,
     D: Dimension,
 {
-    fn reduce_tile(&self, args: ReduceTileArgs<D>) {
-        let ReduceTileArgs {
-            tile_out_shape,
-            items_buf,
-            items_buf_strides,
-            state_buf,
-            state_buf_strides,
-            merge_into_existing,
-            tile_reduction_size,
-            bulk_base_item_idx,
-        } = args;
+    let FinalizeStateArgs {
+        out_shape,
+        state_buf,
+        state_buf_strides,
+        out_buf,
+        out_buf_strides,
+        reduction_size_overall,
+        state_initialized,
+    } = args;
 
-        let out_iter = NdIter::builder(tile_out_shape)
-            .with_strides_ptr_ext(items_buf_strides, items_buf)
+    if state_initialized {
+        // CAREFUL: state_ptr and out_ptr may alias
+        let out_iter = NdIter::builder(out_shape)
             .with_strides_ptr_mut_ext(state_buf_strides, state_buf)
+            .with_strides_ptr_mut_ext(out_buf_strides, out_buf)
             .build();
-
-        // The first tile of a bulk seeds each output slot; later tiles of the same
-        // bulk merge their partial fold into it. (Snapshot the flag so mutating
-        // `bulk_initialized` after the fold doesn't clash with the closure's borrow.)
-        // let merge_into_existing = bulk_initialized;
-        // Store one cell's freshly-folded tile state into its slot. `state_ptr` is
-        // this cell's slot in `state_buf`.
-        let store = |cell_state: K::State, state_ptr: *mut MaybeUninit<K::State>| {
-            // SAFETY: `state_ptr` is this cell's slot in `state_buf`.
-            let slot = unsafe { &mut *state_ptr };
-            if merge_into_existing {
-                // CAREFUL: with `state_in_out_buf`, `slot` aliases the output buffer;
-                // read the state out before writing the merged result back into the
-                // same bytes.
-                let prev = unsafe { slot.assume_init_read() };
-                slot.write(self.kernel.merge(prev, cell_state));
-            } else {
-                slot.write(cell_state);
-            }
-        };
-        let out_iter = out_iter.map(|(_out_idx, (src_base, state_ptr))| {
-            // SAFETY: `src_base` points at this cell's contiguous reduced stream
-            // of `reduction_size` items in the permuted (output, reduced) buffer.
-            let src = unsafe {
-                std::slice::from_raw_parts(src_base.cast::<S::Item>(), tile_reduction_size)
+        for (_idx, (state, out_ptr)) in out_iter {
+            // CAREFUL: state and out_ptr may alias
+            let res = {
+                let state = state.cast::<MaybeUninit<K::State>>();
+                let state = unsafe { (&*state).assume_init_read() };
+                kernel.finalize_state(state, reduction_size_overall)
             };
-            let state_ptr = state_ptr.cast::<MaybeUninit<K::State>>();
-            (src, state_ptr)
-        });
-
-        const LANES: usize = 16;
-        if tile_reduction_size >= LANES {
-            for (src, state_ptr) in out_iter {
-                let state = self.fold_cell::<LANES>(src, bulk_base_item_idx);
-                store(state, state_ptr);
-            }
-        } else if tile_reduction_size > 0 {
-            for (src, state_ptr) in out_iter {
-                let state = self.fold_cell::<1>(src, bulk_base_item_idx);
-                store(state, state_ptr);
-            }
+            unsafe { out_ptr.cast::<K::Output>().write(res) };
         }
-    }
-
-    /// Fold one output cell's contiguous reduced stream (`items`, which must hold at least
-    /// `LANES` items) into a single accumulator.
-    #[inline(always)]
-    fn fold_cell<const LANES: usize>(&self, items: &[S::Item], base: u64) -> K::State {
-        let n = items.len();
-        let mut i = 0;
-
-        // Seed one accumulator per lane from the first LANES items.
-        debug_assert!(n >= LANES);
-        let mut states: [K::State; LANES] = array_from_fn_inline(|b| {
-            let item = unsafe { *items.get_unchecked(b) };
-            self.kernel.init_state(Some((item, base + b as u64)))
-        });
-        i += LANES;
-
-        // Process the main bulk of the stream in LANES-sized chunks.
-        while i + LANES <= n {
-            let items: [S::Item; LANES] =
-                array_from_fn_inline(|b| unsafe { *items.get_unchecked(i + b) });
-            let mut it = states.into_iter();
-            states = array_from_fn_inline(|b| {
-                let state = it.next().unwrap();
-                self.kernel
-                    .update_state(state, items[b], base + (i + b) as u64)
-            });
-            i += LANES;
-        }
-
-        // merge the LANES states to a single one
-        let mut state = self.merge_states::<LANES>(states);
-
-        // Fold any remaining tail sequentially.
-        while i < n {
-            let item = unsafe { *items.get_unchecked(i) };
-            state = self.kernel.update_state(state, item, base + i as u64);
-            i += 1;
-        }
-        state
-    }
-
-    /// Collapse `LANES` lane accumulators into one via a bottom-up pairwise tree (dependency
-    /// depth `log2(LANES)`). `LANES` must be a power of two (the dispatch only picks 4/8/16).
-    #[inline(always)]
-    fn merge_states<const LANES: usize>(&self, states: [K::State; LANES]) -> K::State {
-        // TODO: this code is not panic-safe.
-        assert!(LANES > 0 && LANES.is_power_of_two());
-        let mut states = states.map_inline(MaybeUninit::new);
-        let mut width = LANES;
-        while width > 1 {
-            width /= 2;
-            for j in 0..width {
-                let a = unsafe { states[j].assume_init_read() };
-                let b = unsafe { states[j + width].assume_init_read() };
-                states[j].write(self.kernel.merge(a, b));
-            }
-        }
-        unsafe { states[0].assume_init_read() }
-    }
-
-    fn finalize_states(&self, args: FinalizeStateArgs<D>) {
-        let FinalizeStateArgs {
-            out_shape,
-            state_buf,
-            state_buf_strides,
-            out_buf,
-            out_buf_strides,
-            reduction_size_overall,
-            state_initialized,
-        } = args;
-
-        if state_initialized {
-            // CAREFUL: state_ptr and out_ptr may alias
-            let out_iter = NdIter::builder(out_shape)
-                .with_strides_ptr_mut_ext(state_buf_strides, state_buf)
-                .with_strides_ptr_mut_ext(out_buf_strides, out_buf)
-                .build();
-            for (_idx, (state, out_ptr)) in out_iter {
-                // CAREFUL: state and out_ptr may alias
-                let res = {
-                    let state = state.cast::<MaybeUninit<K::State>>();
-                    let state = unsafe { (&*state).assume_init_read() };
-                    self.kernel.finalize_state(state, reduction_size_overall)
-                };
-                unsafe { out_ptr.cast::<K::Output>().write(res) };
-            }
-        } else {
-            // Empty reduction: write the empty-stream result to every output.
-            let out_iter = NdIter::builder(out_shape)
-                .with_strides_ptr_mut_ext(out_buf_strides, out_buf)
-                .build();
-            // debug_assert!(
-            //     out_nitems == 0 || full_reduction_size == 0,
-            //     "output left unseeded despite a non-empty output and non-empty reduction",
-            // );
-            for (_idx, out_ptr) in out_iter {
-                let state = self.kernel.init_state(None);
-                let res = self.kernel.finalize_state(state, 0);
-                unsafe { out_ptr.cast::<K::Output>().write(res) };
-            }
+    } else {
+        // Empty reduction: write the empty-stream result to every output.
+        let out_iter = NdIter::builder(out_shape)
+            .with_strides_ptr_mut_ext(out_buf_strides, out_buf)
+            .build();
+        // debug_assert!( // TODO
+        //     out_nitems == 0 || full_reduction_size == 0,
+        //     "output left unseeded despite a non-empty output and non-empty reduction",
+        // );
+        for (_idx, out_ptr) in out_iter {
+            let state = kernel.init_state(None);
+            let res = kernel.finalize_state(state, 0);
+            unsafe { out_ptr.cast::<K::Output>().write(res) };
         }
     }
 }

@@ -69,6 +69,7 @@ jobs:
         uses: astral-sh/ruff-action@v3
         with:
           args: --config .ruff.toml format --check --diff
+          version: 0.16.x
       - name: Check only ASCII
         run: python scripts/check_only_ascii.py
 
@@ -156,6 +157,7 @@ jobs:
         uses: astral-sh/ruff-action@v3
         with:
           args: --config .ruff.toml check
+          version: 0.16.x
       # - name: Check schema is up to date
       #   run: |
       #     pushd schema; cargo run; popd

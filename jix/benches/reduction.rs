@@ -1,7 +1,7 @@
 mod common;
 
-use criterion::{criterion_group, criterion_main, BenchmarkGroup, BenchmarkId, Criterion};
-use jix::{dtype::Dtyped, scalar::Sum, Array};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use jix::Array;
 
 use crate::common::{create_data, Profile};
 
@@ -15,27 +15,29 @@ fn bench_sum_plain(c: &mut Criterion) {
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
 
-        fn bench_sum_impl<T: Dtyped + Sum<Output: Dtyped>>(
-            group: &mut BenchmarkGroup<'_, criterion::measurement::WallTime>,
-            data: &ndarray::Array2<T>,
-            dtype_str: &str,
-        ) {
-            let array = Array::plain_ndarray_ref(&data).unwrap();
-            group.bench_function(BenchmarkId::new(dtype_str, "axis=1 (contiguous)"), |b| {
-                b.iter(|| array.as_ref().sum(1usize).to_ndarray().unwrap());
-            });
-            group.bench_function(BenchmarkId::new(dtype_str, "axis=0 (strided)"), |b| {
-                b.iter(|| array.as_ref().sum(0usize).to_ndarray().unwrap());
-            });
-            group.bench_function(BenchmarkId::new(dtype_str, "all"), |b| {
-                b.iter(|| array.as_ref().sum((0usize, 1usize)).to_ndarray().unwrap());
-            });
-        }
+        let arr_i32 = Array::plain_ndarray_ref(&base).unwrap();
+        group.bench_function(BenchmarkId::new("i32", "axis=1 (contiguous)"), |b| {
+            b.iter(|| arr_i32.as_ref().sum(1usize).to_ndarray().unwrap());
+        });
+        group.bench_function(BenchmarkId::new("i32", "axis=0 (strided)"), |b| {
+            b.iter(|| arr_i32.as_ref().sum(0usize).to_ndarray().unwrap());
+        });
+        group.bench_function(BenchmarkId::new("i32", "all"), |b| {
+            b.iter(|| arr_i32.as_ref().sum((0usize, 1usize)).to_ndarray().unwrap());
+        });
 
-        bench_sum_impl(&mut group, &base, "i32");
-        bench_sum_impl(&mut group, &base.mapv(|x| x as i64), "i64");
-        bench_sum_impl(&mut group, &base.mapv(|x| x as f32), "f32");
-        bench_sum_impl(&mut group, &base.mapv(|x| x as f64), "f64");
+        let arr_i64 = Array::plain_ndarray(base.mapv(|x| x as i64)).unwrap();
+        group.bench_function(BenchmarkId::new("i64", "axis=1 (contiguous)"), |b| {
+            b.iter(|| arr_i64.as_ref().sum(1usize).to_ndarray().unwrap());
+        });
+        let arr_f32 = Array::plain_ndarray(base.mapv(|x| x as f32)).unwrap();
+        group.bench_function(BenchmarkId::new("f32", "axis=1 (contiguous)"), |b| {
+            b.iter(|| arr_f32.as_ref().sum(1usize).to_ndarray().unwrap());
+        });
+        let arr_f64 = Array::plain_ndarray(base.mapv(|x| x as f64)).unwrap();
+        group.bench_function(BenchmarkId::new("f64", "axis=1 (contiguous)"), |b| {
+            b.iter(|| arr_f64.as_ref().sum(1usize).to_ndarray().unwrap());
+        });
 
         group.finish();
     }
@@ -47,28 +49,20 @@ fn bench_sum_compact(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("sum compact [{size}, 300]"));
         group.sample_size(20);
 
-        let base = create_data::<i32>(Profile::Smooth, &shape, 0)
+        let data = create_data::<i32>(Profile::Smooth, &shape, 0)
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
 
-        fn bench_sum_impl<T: Dtyped + Sum<Output: Dtyped>>(
-            group: &mut BenchmarkGroup<'_, criterion::measurement::WallTime>,
-            data: &ndarray::Array2<T>,
-            dtype_str: &str,
-        ) {
-            let array = Array::compact_ndarray(&data).unwrap();
-            group.bench_function(BenchmarkId::new(dtype_str, "axis=1 (contiguous)"), |b| {
-                b.iter(|| array.as_ref().sum(1usize).to_ndarray().unwrap());
-            });
-            group.bench_function(BenchmarkId::new(dtype_str, "axis=0 (strided)"), |b| {
-                b.iter(|| array.as_ref().sum(0usize).to_ndarray().unwrap());
-            });
-            group.bench_function(BenchmarkId::new(dtype_str, "all"), |b| {
-                b.iter(|| array.as_ref().sum((0usize, 1usize)).to_ndarray().unwrap());
-            });
-        }
-
-        bench_sum_impl(&mut group, &base, "i32");
+        let array = Array::compact_ndarray(&data).unwrap();
+        group.bench_function(BenchmarkId::new("i32", "axis=1 (contiguous)"), |b| {
+            b.iter(|| array.as_ref().sum(1usize).to_ndarray().unwrap());
+        });
+        group.bench_function(BenchmarkId::new("i32", "axis=0 (strided)"), |b| {
+            b.iter(|| array.as_ref().sum(0usize).to_ndarray().unwrap());
+        });
+        group.bench_function(BenchmarkId::new("i32", "all"), |b| {
+            b.iter(|| array.as_ref().sum((0usize, 1usize)).to_ndarray().unwrap());
+        });
 
         group.finish();
     }

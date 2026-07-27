@@ -18,9 +18,8 @@ def _cpu_model():
                 if line.lower().startswith("model name"):
                     return line.split(":", 1)[1].strip()
         elif system == "Darwin":
-            out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True)
-            return out.stdout.strip()
-    except Exception:
+            return subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True).strip()
+    except Exception:  # noqa: S110
         pass
     return platform.processor() or "unknown"
 
@@ -37,16 +36,16 @@ def _ram_bytes():
                 if line.startswith("MemTotal"):
                     return int(line.split()[1]) * 1024
         elif system == "Darwin":
-            out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
-            return int(out.stdout.strip()) if out.stdout.strip() else 0
-    except Exception:
+            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
+            return int(out) if out else 0
+    except Exception:  # noqa: S110
         pass
     return 0
 
 
 def _rustc():
     try:
-        return subprocess.run(["rustc", "--version"], capture_output=True, text=True).stdout.strip()
+        return subprocess.check_output(["rustc", "--version"], text=True).strip()
     except Exception:
         return None
 

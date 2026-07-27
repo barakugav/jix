@@ -34,7 +34,7 @@ result.write_to("normalized.jix")
 
 # Load back; use mmap=True for zero-copy access to large files.
 b = jix.read_array("normalized.jix", mmap=True)
-print(b.shape, b.dtype)   # (1000, 1000) float32
+print(b.shape, b.dtype)  # (1000, 1000) float32
 ```
 
 ## When should I use this library?

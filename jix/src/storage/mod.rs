@@ -59,7 +59,7 @@ use crate::{
     TypeDyn,
 };
 
-pub(crate) mod core;
+pub(crate) mod core_trait;
 
 mod compact;
 pub use compact::*;

@@ -16,7 +16,7 @@ def _struct_1d():
 
 
 def test_extract_first_field():
-    pts, za = _struct_1d()
+    _pts, za = _struct_1d()
     xs = jix.dtype_sub_field(za, "x")
     assert xs.dtype == np.int32
     assert list(xs.shape) == [3]
@@ -24,7 +24,7 @@ def test_extract_first_field():
 
 
 def test_extract_second_field():
-    pts, za = _struct_1d()
+    _pts, za = _struct_1d()
     ys = jix.dtype_sub_field(za, "y")
     assert ys.dtype == np.int32
     np.testing.assert_array_equal(ys.numpy(), [10, 20, 30])

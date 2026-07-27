@@ -11,7 +11,7 @@ subprocess.check_call(
     ["cargo", "+nightly", "miri", "test", *sys.argv[1:]],
     env={
         **proptest_env,
-        "MIRIFLAGS": " ".join(f"-Zmiri-env-forward={k}" for k in proptest_env.keys()),
+        "MIRIFLAGS": " ".join(f"-Zmiri-env-forward={k}" for k in proptest_env),
         **os.environ,
     },
     cwd=Path(__file__).parent.resolve(),

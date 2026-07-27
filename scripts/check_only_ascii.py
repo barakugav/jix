@@ -7,20 +7,15 @@ import sys
 
 
 def git_tracked_files() -> list[str]:
-    result = subprocess.run(
-        ["git", "ls-files", "-z"],
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        print("fatal: not a git repository or git not found", file=sys.stderr)
-        sys.exit(128)
-    return [p.decode() for p in result.stdout.split(b"\0") if p]
+    result = subprocess.check_output(["git", "ls-files", "-z"])
+    return [p.decode() for p in result.split(b"\0") if p]
 
 
 def check_file(path: str) -> int:
     """Print each line containing non-ASCII bytes. Return count of bad lines."""
     try:
-        raw = open(path, "rb").read()
+        with open(path, "rb") as f:
+            raw = f.read()
     except (OSError, IsADirectoryError):
         return 0
 

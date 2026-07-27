@@ -43,7 +43,7 @@ result.write_to("normalized.jix")
 
 # Load back; use mmap=True for zero-copy access to large files.
 b = jix.read_array("normalized.jix", mmap=True)
-print(b.shape, b.dtype)   # (1000, 1000) float32
+print(b.shape, b.dtype)  # (1000, 1000) float32
 ```
 
 # When should I use this library?
@@ -95,6 +95,7 @@ The primary output method is `Array.numpy()`, or equivalently `array[...]`. Both
 the same indexing syntax as NumPy: integers (drop that axis), slices (keep that axis),
 `...` (fill remaining axes). Note: slices must have step 1; bounds are checked strictly.
 
+<!-- fmt:off -->
 ```python
 a.numpy()            # full array
 a.numpy(0)           # row 0 (integer drops axis 0)
@@ -102,6 +103,7 @@ a.numpy(slice(1, 4)) # rows 1-3 (slice keeps axis 0)
 a[0, 1:3]            # row 0, columns 1-2 (shorthand)
 a[..., -1]           # last column of any-rank array
 ```
+<!-- fmt:on -->
 
 ## Block shape
 
@@ -135,6 +137,7 @@ computed at call time. The deferred work only runs when you ask for output (`.nu
 Chains compose without intermediate allocations: the full pipeline is executed in a single
 pass over the compressed source data, block by block.
 
+<!-- fmt:off -->
 ```python
 # Nothing is read or computed during these calls.
 a = jix.read_array("data.jix")
@@ -148,6 +151,7 @@ result = (
 # This single call decompresses, transforms, and materializes the pipeline.
 out = result.numpy()
 ```
+<!-- fmt:on -->
 
 
 # Persistence

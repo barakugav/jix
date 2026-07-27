@@ -614,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "list":
         for r in list_runs(args.n):
             print(
-                f"{r['createdAt']}  {str(r['databaseId']):>12}  {r['conclusion'] or r['status']:<10} "
+                f"{r['createdAt']}  {r['databaseId']!s:>12}  {r['conclusion'] or r['status']:<10} "
                 f"{r['headBranch']:<20} {r['headSha'][:8]}  {r['displayTitle']}"
             )
         return 0
@@ -627,7 +627,7 @@ def main(argv: list[str] | None = None) -> int:
         new_dir = download_run(args.new, cache)
 
     # Main flow: compare two local result dirs, matched per platform.
-    stats_opts = dict(
+    stats_opts = dict(  # noqa: C408
         nresamples=_resolve_nresamples(args.nresamples, args.fast),
         significance=args.significance,
         noise=args.noise_threshold,
