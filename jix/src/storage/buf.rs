@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::codec::TmpBuf;
+use crate::buf_pool::PoolBuf;
 use crate::dtype::Dtype;
 use crate::util::default_strides_cast;
 use crate::{default_strides_from_iter, Dimension, ReadContext, SliceExt};
@@ -13,15 +13,15 @@ use crate::{default_strides_from_iter, Dimension, ReadContext, SliceExt};
 /// - a caller-provided *strided* byte buffer (`OutBuf::new_strided`) - a rectangular sub-region of some
 ///   larger destination, described by per-dimension byte strides.
 pub struct OutBuf<'a> {
-    data: OutBufInner<'a>,
+    data: OutBufData<'a>,
     strides: Option<&'a [usize]>,
 }
 
 /// Internal representation of an [`OutBuf`].
-pub(crate) enum OutBufInner<'a> {
-    Borrowed(&'a mut [u8]),
+pub(crate) enum OutBufData<'a> {
+    Slice(&'a mut [u8]),
+    PoolBuf(PoolBuf<'a>),
     Lazy(&'a ReadContext),
-    LazyAllocated(TmpBuf<'a>),
 }
 
 impl<'a> OutBuf<'a> {
@@ -29,7 +29,7 @@ impl<'a> OutBuf<'a> {
     #[inline(always)]
     pub fn new(buf: &'a mut [u8]) -> Self {
         Self {
-            data: OutBufInner::Borrowed(buf),
+            data: OutBufData::Slice(buf),
             strides: None,
         }
     }
@@ -39,7 +39,7 @@ impl<'a> OutBuf<'a> {
     #[inline(always)]
     pub(crate) fn new_lazy(context: &'a ReadContext) -> Self {
         Self {
-            data: OutBufInner::Lazy(context),
+            data: OutBufData::Lazy(context),
             strides: None,
         }
     }
@@ -56,7 +56,7 @@ impl<'a> OutBuf<'a> {
     #[inline(always)]
     pub(crate) unsafe fn new_strided(buf: &'a mut [u8], strides: &'a [usize]) -> Self {
         Self {
-            data: OutBufInner::Borrowed(buf),
+            data: OutBufData::Slice(buf),
             strides: Some(strides),
         }
     }
@@ -71,9 +71,9 @@ impl<'a> OutBuf<'a> {
     ) -> (&'b mut [u8], Option<&'b [usize]>) {
         self.materialize(nitems, dtype);
         let data = match &mut self.data {
-            OutBufInner::Borrowed(buf) => buf,
-            OutBufInner::LazyAllocated(tmp) => tmp.as_mut_slice(),
-            OutBufInner::Lazy(_) => unreachable!(),
+            OutBufData::Slice(buf) => buf,
+            OutBufData::PoolBuf(tmp) => tmp.as_mut_slice(),
+            OutBufData::Lazy(_) => unreachable!(),
         };
         (data, self.strides)
     }
@@ -103,19 +103,19 @@ impl<'a> OutBuf<'a> {
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> Option<&[u8]> {
         let data = match &self.data {
-            OutBufInner::Borrowed(buf) => buf,
-            OutBufInner::LazyAllocated(tmp) => tmp.as_slice(),
-            OutBufInner::Lazy(_) => return None,
+            OutBufData::Slice(buf) => buf,
+            OutBufData::PoolBuf(tmp) => tmp.as_slice(),
+            OutBufData::Lazy(_) => return None,
         };
         self.strides.is_none().then_some(data)
     }
 
     #[track_caller]
     #[inline(always)]
-    pub(crate) fn unwrap_tmp(self) -> TmpBuf<'a> {
+    pub(crate) fn unwrap_tmp(self) -> PoolBuf<'a> {
         assert!(self.strides.is_none());
         match self.data {
-            OutBufInner::LazyAllocated(tmp) => tmp,
+            OutBufData::PoolBuf(tmp) => tmp,
             _ => unreachable!(),
         }
     }
@@ -161,9 +161,9 @@ impl<'a> OutBuf<'a> {
         self.materialize(nitems, dtype);
         OutBuf {
             data: match &mut self.data {
-                OutBufInner::Borrowed(buf) => OutBufInner::Borrowed(buf),
-                OutBufInner::LazyAllocated(tmp) => OutBufInner::Borrowed(tmp.as_mut_slice()),
-                OutBufInner::Lazy(_) => unreachable!(),
+                OutBufData::Slice(buf) => OutBufData::Slice(buf),
+                OutBufData::PoolBuf(tmp) => OutBufData::Slice(tmp.as_mut_slice()),
+                OutBufData::Lazy(_) => unreachable!(),
             },
             strides: Some(new_strides),
         }
@@ -175,12 +175,11 @@ impl<'a> OutBuf<'a> {
     #[inline]
     pub(crate) fn materialize(&mut self, nitems: usize, dtype: &Dtype) {
         let ctx = match &self.data {
-            OutBufInner::Lazy(ctx) => *ctx,
+            OutBufData::Lazy(ctx) => *ctx,
             _ => return,
         };
-        self.data = OutBufInner::LazyAllocated(
-            ctx.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment()),
-        );
+        self.data =
+            OutBufData::PoolBuf(ctx.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment()));
     }
 }
 

@@ -1,6 +1,7 @@
 use std::ops::Range;
 
-use crate::codec::{ReadContext, TmpBuf};
+use crate::buf_pool::PoolBuf;
+use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
 use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, OutBuf, ReadData};
@@ -138,7 +139,7 @@ pub trait ArrayStorage {
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
 
         struct DefaultReadData<'a, T> {
-            buf: TmpBuf<'a>,
+            buf: PoolBuf<'a>,
             len_: usize,
             _phantom: std::marker::PhantomData<T>,
         }

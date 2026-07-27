@@ -1,11 +1,11 @@
+use crate::buf_pool::BufferPool;
 use crate::codec::filter::FilterImpl;
-use crate::codec::TmpBufferPool;
 use crate::dtype::Dtype;
 
 #[derive(Default)]
 pub(in crate::codec::filter) struct ByteShuffleFilter;
 impl FilterImpl for ByteShuffleFilter {
-    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &TmpBufferPool) {
+    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &BufferPool) {
         assert_eq!(src.len(), dst.len());
         let itemsize = dtype.itemsize() as usize;
         debug_assert!(src.len().is_multiple_of(itemsize));
@@ -83,7 +83,7 @@ impl FilterImpl for ByteShuffleFilter {
         }
     }
 
-    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &TmpBufferPool) {
+    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, _tmp_buffers: &BufferPool) {
         assert_eq!(src.len(), dst.len());
         let itemsize = dtype.itemsize() as usize;
         debug_assert!(src.len().is_multiple_of(itemsize));
@@ -166,6 +166,7 @@ impl FilterImpl for ByteShuffleFilter {
 #[cfg(test)]
 mod tests {
     use super::ByteShuffleFilter;
+    use crate::buf_pool::BufferPool;
     #[cfg(feature = "num-complex")]
     use crate::scalar::Complex;
 
@@ -199,7 +200,7 @@ mod tests {
         let src = data.as_slice();
         let itemsize = T::DTYPE.itemsize() as usize;
         let dtype = T::DTYPE;
-        let tmp_buffers = crate::codec::TmpBufferPool::new();
+        let tmp_buffers = BufferPool::new();
 
         // Encode: optimized vs reference.
         let mut optimized_encoded = vec![0u8; src.len()];

@@ -1,6 +1,6 @@
+use crate::buf_pool::BufferPool;
 use crate::codec::filter::bit_shuffle::BitShuffleFilter;
 use crate::codec::filter::byte_shuffle::ByteShuffleFilter;
-use crate::codec::TmpBufferPool;
 use crate::dtype::Dtype;
 
 mod bit_shuffle;
@@ -44,7 +44,7 @@ impl Filter {
         src: &[u8],
         dst: &mut [u8],
         dtype: &Dtype,
-        tmp_buffers: &TmpBufferPool,
+        tmp_buffers: &BufferPool,
     ) {
         match self {
             Filter::ByteShuffle => ByteShuffleFilter.encode(src, dst, dtype, tmp_buffers),
@@ -57,7 +57,7 @@ impl Filter {
         src: &[u8],
         dst: &mut [u8],
         dtype: &Dtype,
-        tmp_buffers: &TmpBufferPool,
+        tmp_buffers: &BufferPool,
     ) {
         match self {
             Filter::ByteShuffle => ByteShuffleFilter.decode(src, dst, dtype, tmp_buffers),
@@ -67,14 +67,14 @@ impl Filter {
 }
 
 trait FilterImpl {
-    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &TmpBufferPool);
-    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &TmpBufferPool);
+    fn encode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &BufferPool);
+    fn decode(&self, src: &[u8], dst: &mut [u8], dtype: &Dtype, tmp_buffers: &BufferPool);
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::buf_pool::BufferPool;
     use crate::codec::filter::FilterImpl;
-    use crate::codec::TmpBufferPool;
     use crate::dtype::Dtyped;
     use crate::util::gen_data_bytes_from_slice;
 
@@ -86,7 +86,7 @@ mod tests {
         let data = gen_data_bytes_from_slice::<T>(items);
         let src = data.as_slice();
         let dtype = T::DTYPE;
-        let tmp_buffers = TmpBufferPool::new();
+        let tmp_buffers = BufferPool::new();
         let mut encoded = vec![0u8; src.len()];
         F::default().encode(src, &mut encoded, &dtype, &tmp_buffers);
         let mut decoded = vec![0u8; src.len()];
