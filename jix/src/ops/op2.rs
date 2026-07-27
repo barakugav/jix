@@ -18,16 +18,6 @@ pub(crate) struct Op2<S1, S2, K> {
 pub(crate) trait Op2Kernel<T1, T2> {
     type Output;
     fn apply(&self, a: T1, b: T2) -> Self::Output;
-
-    // TODO: implement ops using explicit SIMD
-    // #[inline(always)]
-    // fn apply_bulk<const N: usize>(&self, a: [T1; N], b: [T2; N]) -> [Self::Output; N] {
-    //     let mut iter = a.into_iter().zip(b);
-    //     array_from_fn_inline(|_| {
-    //         let (a, b) = iter.next().unwrap();
-    //         self.apply(a, b)
-    //     })
-    // }
 }
 impl<S1, S2, K> Op2<S1, S2, K> {
     pub(crate) fn new(a: S1, b: S2, kernel: K) -> Result<Self>

@@ -23,6 +23,7 @@ pyo3 = "0.29"
 jix_core = { package = "jix", path = "../jix", version = "=0.0.3", features = [
     "half",
     "num-complex",
+    "multiversion",
 ] }
 numpy = { version = "0.29", features = ["half"] }
 num-traits = "0.2"

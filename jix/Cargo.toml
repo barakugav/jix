@@ -30,13 +30,14 @@ half = { version = "2", default-features = false, features = [
     "num-traits",
 ], optional = true }
 num-complex = { version = "0.4", default-features = false, optional = true }
+multiversion = { version = "0.8.0", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
 
 
 [features]
-default = []
+default = ["multiversion"]
 
 # Add the `half` crate for f16, and implement scalar kernels for it.
 half = ["dep:half"]
@@ -44,6 +45,12 @@ half = ["dep:half"]
 # Add the `num-complex` crate for complex numbers, and implement scalar kernels for Complex<f32>
 # and Complex<f64>.
 num-complex = ["dep:num-complex"]
+
+
+# Compile SIMD-specialized function clones dispatched at runtime by CPU features.
+# By enabling this feature, you can get better performance on CPUs that support SIMD, specifically
+# x86 system, with the cost of bigger binary size.
+multiversion = ["dep:multiversion"]
 
 
 [package.metadata.docs.rs]

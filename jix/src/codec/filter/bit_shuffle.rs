@@ -209,6 +209,14 @@ impl FilterImpl for BitShuffleFilter {
 /// Equivalent to `bshuf_trans_bit_byte_scal` from the reference C
 /// implementation on little-endian targets (the `u64` read + `TRANS_BIT_8X8`
 /// + strided scatter pattern).
+#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+    // x86-64-v4
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+    // x86-64-v3
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+    // x86-64-v2
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+)))]
 fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     let n_per_plane = n_full / 8;
     let bit_row_skip = typesize * n_per_plane; // = B * G
@@ -246,6 +254,14 @@ fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
 ///
 /// Equivalent to `bshuf_trans_bitrow_eight` in the reference, itself a
 /// specialisation of `bshuf_trans_elem(lda=8, ldb=B, elem_size=G)`.
+#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+    // x86-64-v4
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+    // x86-64-v3
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+    // x86-64-v2
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+)))]
 fn trans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     let n_per_plane = n_full / 8;
     for i in 0..8 {
@@ -262,6 +278,14 @@ fn trans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize
 ///
 /// `(B, 8, G) -> (8, B, G)` byte-level outer-axis swap. Pure data movement in
 /// length-`G` runs; reads and writes are just the encode-side roles flipped.
+#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+    // x86-64-v4
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+    // x86-64-v3
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+    // x86-64-v2
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+)))]
 fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     let n_per_plane = n_full / 8;
     for b in 0..typesize {
@@ -282,6 +306,14 @@ fn untrans_bitrow_eight(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usi
 /// `(b, g)`, in bit-transposed form. Applying [`transpose8x8`] again - which
 /// is self-inverse - restores the original element-major 8-byte group, which
 /// we then write contiguously at `dst[b * N + g * 8 .. b * N + g * 8 + 8]`.
+#[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
+    // x86-64-v4
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+    // x86-64-v3
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave",
+    // x86-64-v2
+    "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b",
+)))]
 fn untrans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
     let n_per_plane = n_full / 8;
     let bit_row_skip = typesize * n_per_plane;
