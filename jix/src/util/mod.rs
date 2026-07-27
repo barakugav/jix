@@ -15,6 +15,9 @@ pub(crate) use arr_ext::*;
 mod nd_copy;
 pub(crate) use nd_copy::*;
 
+mod bitmap;
+pub(crate) use bitmap::*;
+
 use std::mem::MaybeUninit;
 
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray};
@@ -392,14 +395,21 @@ impl<'a> AlternatingBuffers<'a> {
     }
 }
 
-/// Compile-time toggle between the two read-tile scaling strategies used by [`scale_read_shape`].
+/// Master compile-time toggle for the read-shape-hint feature on the *consumption* side.
 ///
-/// `false` (default) runs the balanced strategy: cap all dims to a common shrinking bound, giving
-/// near-square tiles. `true` runs the priority strategy that fully covers the highest-priority
-/// (broadcast/reduction) dims first. The priority strategy wins only when the covered axis is
-/// contiguous; it regresses the common row-major / block-compressed case (block-orthogonal reads),
-/// so it is parked here until the heuristic is made stride/block-aware. `element_cost` and
-/// `read_shape_scale_order` are propagated by the ops regardless of this flag.
+/// When `true`, read tiles are steered by the propagated `read_shape_scale_order`: [`scale_read_shape`]
+/// runs the priority strategy (fully cover the highest-priority broadcast/reduction dims first), and
+/// every consumer - the read heuristic / subset scaling (`read_shape_scale_dims`), the compaction
+/// read path, and reductions - consults that order.
+///
+/// When `false` (default) the order is ignored everywhere: [`scale_read_shape`] runs the balanced
+/// strategy (cap all dims to a common shrinking bound -> near-square tiles) and every consumer scales
+/// in fixed C-order (inner dim first), reproducing the pre-hint behavior. The priority strategy wins
+/// only when the covered axis is contiguous; it regresses the common row-major / block-compressed
+/// case (block-orthogonal reads), so it is parked until the heuristic is made stride/block-aware.
+///
+/// `element_cost` and `read_shape_scale_order` are still *propagated* through the ops regardless;
+/// this flag only controls whether the scaling functions *consume* them.
 pub(crate) const USE_NEW_READ_SCALING: bool = false;
 
 /// Choose a read tile from a block-shape seed, steered by a per-dim coverage priority.

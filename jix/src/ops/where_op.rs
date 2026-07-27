@@ -109,32 +109,14 @@ where
         let x_spec = x.spec();
         let y_spec = y.spec();
         let (element_cost, read_shape_scale_order) = combine_elementwise_hints(&[
-            (
-                c_spec.element_cost(),
-                c_spec.read_shape_scale_order().as_slice(),
-            ),
-            (
-                x_spec.element_cost(),
-                x_spec.read_shape_scale_order().as_slice(),
-            ),
-            (
-                y_spec.element_cost(),
-                y_spec.read_shape_scale_order().as_slice(),
-            ),
+            (c_spec.element_cost(), c_spec.read_shape_scale_order()),
+            (x_spec.element_cost(), x_spec.read_shape_scale_order()),
+            (y_spec.element_cost(), y_spec.read_shape_scale_order()),
         ]);
         let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
-            (
-                c_spec.block_shape().as_slice(),
-                c_spec.block_shape_fixed_dims(),
-            ),
-            (
-                x_spec.block_shape().as_slice(),
-                x_spec.block_shape_fixed_dims(),
-            ),
-            (
-                y_spec.block_shape().as_slice(),
-                y_spec.block_shape_fixed_dims(),
-            ),
+            (c_spec.block_shape(), c_spec.block_shape_fixed_dims()),
+            (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
+            (y_spec.block_shape(), y_spec.block_shape_fixed_dims()),
         ]);
         let mut spec = x_spec.dynamic().clone();
         spec.block_shape = block_shape;

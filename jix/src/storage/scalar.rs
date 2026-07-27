@@ -4,10 +4,10 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{ArraySpec, ArrayStorage, ArrayStorageInfo, DimBitmap, OutBuf, ReadData, Ty};
+use crate::storage::{ArraySpec, ArrayStorage, ArrayStorageInfo, OutBuf, ReadData, Ty};
 use crate::util::cast_slice_mut;
 use crate::util::iter::NdIter;
-use crate::{ArrayParams, Dimension, ElementType, IntoDimension};
+use crate::{ArrayParams, DimBitmap, Dimension, ElementType, IntoDimension};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///

@@ -69,7 +69,6 @@ pub use plain::*;
 
 pub(crate) mod params;
 pub use params::ArraySpec;
-pub(crate) use params::DimBitmap;
 
 mod any;
 pub use any::*;

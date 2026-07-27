@@ -9,21 +9,57 @@ use crate::common::create_compact;
 
 fn bench_compact_read(c: &mut Criterion) {
     let mut rng = Rng::with_seed(0xfacc5ed5f7466613);
-    let read_shapes = [[1, 1], [4, 4], [1, 32], [32, 1], [32, 32]];
-    for read_shape in read_shapes {
+    let configs: [(_, &[(_, _)]); _] = [
+        (
+            // read_shape
+            [1, 1],
+            &[
+                // (array_shape, block_shape)
+                ([600, 32], [1, 32]),
+                ([600, 32], [32, 1]),
+                ([600, 32], [32, 32]),
+                ([11_000, 460], [32, 32]),
+            ],
+        ),
+        (
+            // read_shape
+            [1, 32],
+            &[
+                // (array_shape, block_shape)
+                ([600, 32], [1, 32]),
+                ([600, 32], [32, 1]),
+                ([600, 32], [32, 32]),
+            ],
+        ),
+        (
+            // read_shape
+            [32, 1],
+            &[
+                // (array_shape, block_shape)
+                ([600, 32], [1, 32]),
+                ([600, 32], [32, 1]),
+                ([600, 32], [32, 32]),
+            ],
+        ),
+        (
+            // read_shape
+            [128, 32],
+            &[
+                // (array_shape, block_shape)
+                ([600, 32], [1, 32]),
+                ([600, 32], [32, 1]),
+                ([600, 32], [32, 32]),
+                ([11_000, 460], [32, 32]),
+            ],
+        ),
+    ];
+
+    for (read_shape, shape_cfgs) in configs {
         let mut group = c.benchmark_group(format!("compact_read {:?}", read_shape));
         group.sample_size(40);
 
-        let configs = [
-            // (array_shape, block_shape)
-            ([600, 32], [4, 4]),
-            ([600, 32], [1, 32]),
-            ([600, 32], [32, 1]),
-            ([600, 32], [32, 32]),
-            ([11_000, 460], [32, 32]),
-        ];
-        for (shape, block_shape) in configs {
-            let array = create_compact(&shape, block_shape.as_slice(), None, &mut rng);
+        for (shape, block_shape) in shape_cfgs {
+            let array = create_compact(shape, block_shape.as_slice(), None, &mut rng);
             let ndim = array.shape().len();
 
             let mut regions: Vec<Vec<Range<u64>>> = vec![vec![]];
