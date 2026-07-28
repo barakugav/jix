@@ -138,7 +138,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             }
         });
 
-        let iter = NdIter::builder(iter_shape)
+        let iter = NdIter::<'_, S::Dimension, _>::builder(iter_shape.as_ref())
             .with_strides_offset_ext(src_ptr_strides.as_ref(), 0)
             .build();
         let nd_copy = NdCopier::new(self.dtype());

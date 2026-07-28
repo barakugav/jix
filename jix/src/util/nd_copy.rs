@@ -492,7 +492,8 @@ impl<'a> NdCopier<'a> {
         n_contiguous_items: usize,
         copy_1d_row: Copy1dRowFn,
     ) {
-        let iter = NdIter::builder(D::vec(outer_shape.len(), |i| outer_shape[i] as u64))
+        let outer_shape_u64 = D::vec(outer_shape.len(), |i| outer_shape[i] as u64);
+        let iter = NdIter::<'_, D, _>::builder(outer_shape_u64.as_ref())
             .with_strides_offset_ext(outer_src_strides, 0)
             .with_strides_offset_ext(outer_dst_strides, 0)
             .build();

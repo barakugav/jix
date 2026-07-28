@@ -328,7 +328,7 @@ where
                 where
                     T: Dtyped,
                 {
-                    let iter = NdIter::builder(read_shape)
+                    let iter = NdIter::<'_, D, _>::builder(read_shape.as_ref())
                         .with_strides_ptr_mut_ext(strides, buf.as_mut_ptr())
                         .build();
                     for (offset, (_, dst)) in iter.enumerate() {

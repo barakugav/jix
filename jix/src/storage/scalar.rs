@@ -117,7 +117,7 @@ where
             // Strided: write the scalar to each strided output position.
             Some(strides) => {
                 let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
-                let iter = NdIter::builder(read_shape)
+                let iter = NdIter::<'_, D, _>::builder(read_shape.as_ref())
                     .with_strides_ptr_mut_ext(strides, buf.as_mut_ptr())
                     .build();
                 for (_, dst) in iter {

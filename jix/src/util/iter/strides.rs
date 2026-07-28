@@ -167,7 +167,8 @@ mod tests {
         let mut data = [0u8; 8];
         let base = data.as_mut_ptr();
         let ext = NdIterExtStridesPtrMut::new(&[1usize], base);
-        let iter = NdIter::new(dv(&[8u64]), ext);
+        let shape = [8u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
@@ -183,7 +184,8 @@ mod tests {
         let stride = 8usize;
         let strides = [stride];
         let ext = NdIterExtStridesPtrMut::new(&strides, base);
-        let iter = NdIter::new(dv(&[8u64]), ext);
+        let shape = [8u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         for (i, (_, ptr)) in iter.enumerate() {
             assert_eq!(ptr, unsafe { base.add(i * stride) }, "step {i}");
         }
@@ -198,7 +200,8 @@ mod tests {
         let base = data.as_mut_ptr();
         let strides = [cols * elem, elem];
         let ext = NdIterExtStridesPtrMut::new(&strides, base);
-        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
+        let shape = [rows as u64, cols as u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut flat = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat * elem) }, "flat index {flat}");
@@ -217,7 +220,8 @@ mod tests {
         let base = data.as_mut_ptr();
         let strides = [1, rows];
         let ext = NdIterExtStridesPtrMut::new(&strides, base);
-        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
+        let shape = [rows as u64, cols as u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         // Iteration order is row-major by *index*, but pointer jumps follow column-major layout:
         // [0,0]=0, [0,1]=2, [0,2]=4, [1,0]=1, [1,1]=3, [1,2]=5
         let expected_offsets: &[usize] = &[0, 2, 4, 1, 3, 5];
@@ -238,7 +242,8 @@ mod tests {
         let base = data.as_mut_ptr();
         let start = unsafe { base.add(4 + 1) };
         let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], start);
-        let iter = NdIter::new_with_begin(dv(&[1u64, 1]), dv(&[3u64, 3]), ext);
+        let end = [3u64, 3];
+        let iter = NdIter::new_with_begin(dv(&[1u64, 1]), &end, ext);
         let expected: &[usize] = &[5, 6, 9, 10];
         let mut i = 0;
         for (_, ptr) in iter {
@@ -252,7 +257,8 @@ mod tests {
     fn strides_ptr_mut_empty_range_yields_no_pointers() {
         let mut data = [0u8; 16];
         let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], data.as_mut_ptr());
-        let mut iter = NdIter::new_with_begin(dv(&[2u64, 2]), dv(&[2u64, 5]), ext);
+        let end = [2u64, 5];
+        let mut iter = NdIter::new_with_begin(dv(&[2u64, 2]), &end, ext);
         assert!(iter.next().is_none());
     }
 
@@ -261,7 +267,8 @@ mod tests {
         let data = [0u8; 8];
         let base = data.as_ptr();
         let ext = NdIterExtStridesPtr::new(&[1usize], base);
-        let iter = NdIter::new(dv(&[8u64]), ext);
+        let shape = [8u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) });
@@ -278,7 +285,8 @@ mod tests {
         let base = data.as_ptr();
         let strides = [cols, 1];
         let ext = NdIterExtStridesPtr::new(&strides, base);
-        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
+        let shape = [rows as u64, cols as u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut flat = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat) });
@@ -299,7 +307,8 @@ mod tests {
         let base = data.as_ptr();
         let base_byte = base as usize;
         let ext = NdIterExtStridesPtr::new(&[1usize], base);
-        let iter = NdIter::new(dv(&[4u64]), ext);
+        let shape = [4u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
@@ -323,7 +332,8 @@ mod tests {
         let base = data.as_mut_ptr();
         let strides = [cols, 1];
         let ext = NdIterExtStridesPtrMut::new(&strides, base);
-        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
+        let shape = [rows as u64, cols as u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut flat = 0u32;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat as usize) }, "flat index {flat}");
@@ -345,7 +355,8 @@ mod tests {
         let base = data.as_mut_ptr();
         let strides = [1usize, rows];
         let ext = NdIterExtStridesPtrMut::new(&strides, base);
-        let iter = NdIter::new(dv(&[rows as u64, cols as u64]), ext);
+        let shape = [rows as u64, cols as u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let expected_offsets: &[usize] = &[0, 2, 4, 1, 3, 5];
         let mut i = 0usize;
         for (_, ptr) in iter {
@@ -363,7 +374,8 @@ mod tests {
         let base = data.as_mut_ptr();
         let start = unsafe { base.add(4 + 1) };
         let ext = NdIterExtStridesPtrMut::new(&[4usize, 1], start);
-        let iter = NdIter::new_with_begin(dv(&[1u64, 1]), dv(&[3u64, 3]), ext);
+        let end = [3u64, 3];
+        let iter = NdIter::new_with_begin(dv(&[1u64, 1]), &end, ext);
         let expected: &[usize] = &[5, 6, 9, 10];
         let mut i = 0;
         for (_, ptr) in iter {
@@ -391,7 +403,8 @@ mod tests {
         let base = data.as_ptr();
         let base_byte = base as usize;
         let ext = NdIterExtStridesPtr::new(&[1usize], base);
-        let iter = NdIter::new(dv(&[5u64]), ext);
+        let shape = [5u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
@@ -413,7 +426,8 @@ mod tests {
         let mut data = [0u8; 8];
         let base = data.as_mut_ptr();
         let ext = NdIterExtStridesPtrMut::new(&[1usize], base);
-        let iter = NdIter::<Dim<1>, _>::new([8u64], ext);
+        let shape = [8u64];
+        let iter = NdIter::<Dim<1>, _>::new(&shape, ext);
         let mut i = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i) }, "step {i}");
@@ -431,7 +445,8 @@ mod tests {
         let base = data.as_mut_ptr();
         let strides = [cols * elem, elem];
         let ext = NdIterExtStridesPtrMut::new(&strides, base);
-        let iter = NdIter::<Dim<2>, _>::new([rows as u64, cols as u64], ext);
+        let shape = [rows as u64, cols as u64];
+        let iter = NdIter::<Dim<2>, _>::new(&shape, ext);
         let mut flat = 0usize;
         for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(flat * elem) }, "flat index {flat}");

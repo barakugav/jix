@@ -14,9 +14,9 @@ use crate::{DimVec, Dimension};
 /// The iterator notifies the extension on each index change, allowing extensions to track derived
 /// state (e.g. a pointer into a strided buffer) without recomputing it from scratch.
 #[derive(Clone)]
-pub(crate) struct NdIter<D: Dimension, E> {
+pub(crate) struct NdIter<'a, D: Dimension, E> {
     begin: D::Vec<u64>,
-    end: D::Vec<u64>,
+    end: &'a [u64],
     current_idx: D::Vec<u64>,
     status: IterStatus,
     pub(crate) extensions: E,
@@ -67,46 +67,37 @@ impl IterStatus {
     }
 }
 
-impl<D, E> NdIter<D, E>
+impl<'a, D, E> NdIter<'a, D, E>
 where
     D: Dimension,
     E: NdIterExtension,
 {
     /// Creates an iterator over `[0, shape)` in every dimension.
     #[inline]
-    pub(crate) fn new<V>(shape: V, extensions: E) -> Self
-    where
-        D: Dimension<Vec<u64> = V>,
-        V: DimVec<u64, Dimension = D>,
-    {
-        let begin = V::Dimension::vec(shape.as_ref().len(), |_| 0u64);
+    pub(crate) fn new(shape: &'a [u64], extensions: E) -> Self {
+        let begin = D::vec(shape.len(), |_| 0u64);
         Self::new_with_begin(begin, shape, extensions)
     }
 
     /// Creates an iterator over `[begin, end)` in every dimension.
     #[inline]
-    pub(crate) fn new_with_begin<V>(begin: V, end: V, extensions: E) -> Self
+    pub(crate) fn new_with_begin<V>(begin: V, end: &'a [u64], extensions: E) -> Self
     where
         D: Dimension<Vec<u64> = V>,
         V: DimVec<u64, Dimension = D>,
     {
         let begin_slice = begin.as_ref();
-        let end_slice = end.as_ref();
         let ndim = begin_slice.len();
         assert!(
-            begin_slice.len() == ndim
-                && end_slice.len() == ndim
+            end.len() == ndim
                 && extensions.check_ndim(ndim)
-                && begin_slice
-                    .iter()
-                    .zip(end_slice.iter())
-                    .all(|(&b, &e)| b <= e)
+                && begin_slice.iter().zip(end.iter()).all(|(&b, &e)| b <= e)
         );
         let current_idx = begin.clone();
 
         let nitems = begin_slice
             .iter()
-            .zip(end_slice)
+            .zip(end)
             .map(|(&b, &e)| e - b)
             .product::<u64>();
         let status = IterStatus::new(nitems);
@@ -132,7 +123,7 @@ where
         self.status.len()
     }
 }
-impl<D, E> Iterator for NdIter<D, E>
+impl<D, E> Iterator for NdIter<'_, D, E>
 where
     D: Dimension,
     E: NdIterExtension,
@@ -155,7 +146,7 @@ where
         }
 
         debug_assert!(self.status.is_in_progress());
-        let end = self.end.as_ref();
+        let end = self.end;
         let ndim = end.len();
         for dim in (0..ndim).rev() {
             let advanced_idx = self.current_idx[dim] + 1;
@@ -224,19 +215,15 @@ pub(crate) trait NdIterExtension {
 
 /// A plain index-only iterator; a thin wrapper around [`NdIter`] with a `()` extension.
 #[allow(unused)]
-pub(crate) struct IdxIter<D: Dimension>(NdIter<D, ()>);
+pub(crate) struct IdxIter<'a, D: Dimension>(NdIter<'a, D, ()>);
 
 #[allow(unused)]
-impl<D> IdxIter<D>
+impl<'a, D> IdxIter<'a, D>
 where
     D: Dimension,
 {
     #[inline]
-    pub(crate) fn new<V>(shape: V) -> Self
-    where
-        D: Dimension<Vec<u64> = V>,
-        V: DimVec<u64, Dimension = D>,
-    {
+    pub(crate) fn new(shape: &'a [u64]) -> Self {
         Self(NdIter::new(shape, ()))
     }
 
@@ -389,21 +376,17 @@ pub(crate) use impl_merge_extension;
 /// Start from [`NdIter::builder`] (or [`NdIter::builder_with_begin`]) with an empty extension list
 /// (`E = ()`), chain any number of `with_*_ext` calls - each appends one extension and advances the
 /// `E` type via [`NdIterExtension::MergeExtension`] - then call [`build`](NdIterBuilder::build).
-pub(crate) struct NdIterBuilder<D: Dimension, E: NdIterExtension> {
+pub(crate) struct NdIterBuilder<'a, D: Dimension, E: NdIterExtension> {
     begin: D::Vec<u64>,
-    end: D::Vec<u64>,
+    end: &'a [u64],
     extensions: E,
 }
 
-impl<D: Dimension> NdIter<D, ()> {
+impl<'a, D: Dimension> NdIter<'a, D, ()> {
     /// Starts a builder iterating `[0, shape)` in every dimension, with no extensions.
     #[inline]
-    pub(crate) fn builder<V>(shape: V) -> NdIterBuilder<D, ()>
-    where
-        D: Dimension<Vec<u64> = V>,
-        V: DimVec<u64, Dimension = D>,
-    {
-        let begin = V::Dimension::vec(shape.as_ref().len(), |_| 0u64);
+    pub(crate) fn builder(shape: &'a [u64]) -> NdIterBuilder<'a, D, ()> {
+        let begin = D::vec(shape.len(), |_| 0u64);
         NdIterBuilder {
             begin,
             end: shape,
@@ -413,7 +396,7 @@ impl<D: Dimension> NdIter<D, ()> {
 
     /// Starts a builder iterating `[begin, end)` in every dimension, with no extensions.
     #[inline]
-    pub(crate) fn builder_with_begin<V>(begin: V, end: V) -> NdIterBuilder<D, ()>
+    pub(crate) fn builder_with_begin<V>(begin: V, end: &'a [u64]) -> NdIterBuilder<'a, D, ()>
     where
         D: Dimension<Vec<u64> = V>,
         V: DimVec<u64, Dimension = D>,
@@ -426,14 +409,14 @@ impl<D: Dimension> NdIter<D, ()> {
     }
 }
 
-impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
+impl<'a, D: Dimension, E: NdIterExtension> NdIterBuilder<'a, D, E> {
     /// Adds a [`NdIterExtStridesPtr`]  extension.
     #[inline]
-    pub(crate) fn with_strides_ptr_ext<'a, T, S>(
+    pub(crate) fn with_strides_ptr_ext<'s, T, S>(
         self,
-        strides: &'a [S],
+        strides: &'s [S],
         initial_ptr: *const T,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtr<'a, T, S>>>
+    ) -> NdIterBuilder<'a, D, E::MergeExtension<NdIterExtStridesPtr<'s, T, S>>>
     where
         S: Idx,
     {
@@ -447,11 +430,11 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 
     /// Adds a [`NdIterExtStridesPtrMut`] extension.
     #[inline]
-    pub(crate) fn with_strides_ptr_mut_ext<'a, T, S>(
+    pub(crate) fn with_strides_ptr_mut_ext<'s, T, S>(
         self,
-        strides: &'a [S],
+        strides: &'s [S],
         initial_ptr: *mut T,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtrMut<'a, T, S>>>
+    ) -> NdIterBuilder<'a, D, E::MergeExtension<NdIterExtStridesPtrMut<'s, T, S>>>
     where
         S: Idx,
     {
@@ -465,11 +448,11 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 
     /// Adds a [`NdIterExtStridesOffset`] extension.
     #[inline]
-    pub(crate) fn with_strides_offset_ext<'a, S: Idx>(
+    pub(crate) fn with_strides_offset_ext<'s, S: Idx>(
         self,
-        strides: &'a [S],
+        strides: &'s [S],
         initial_offset: S,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<'a, S>>> {
+    ) -> NdIterBuilder<'a, D, E::MergeExtension<NdIterExtStridesOffset<'s, S>>> {
         let ext = NdIterExtStridesOffset::<S>::new(strides, initial_offset);
         NdIterBuilder {
             begin: self.begin,
@@ -481,10 +464,10 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
     /// Adds a [`NdIterExtStridesOffset`] extension that tracks the global logical (row-major) index,
     /// given the pre-computed `logical_strides` of the iterated shape.
     #[inline]
-    pub(crate) fn with_logical_global_index_ext<'a>(
+    pub(crate) fn with_logical_global_index_ext<'s>(
         self,
-        logical_strides: &'a [u64],
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<'a, u64>>> {
+        logical_strides: &'s [u64],
+    ) -> NdIterBuilder<'a, D, E::MergeExtension<NdIterExtStridesOffset<'s, u64>>> {
         let ext = nd_iter_ext_logical_global_index(logical_strides, self.begin.as_ref());
         NdIterBuilder {
             begin: self.begin,
@@ -495,12 +478,12 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 
     /// Adds a [`NdIterExtBlockOffsetSize`] extension.
     #[inline]
-    pub(crate) fn with_block_offset_size_ext<'a>(
+    pub(crate) fn with_block_offset_size_ext<'s>(
         self,
         begin: &[u64],
         end: &[u64],
-        block_shape: &'a [u64],
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtBlockOffsetSize<'a, D>>> {
+        block_shape: &'s [u64],
+    ) -> NdIterBuilder<'a, D, E::MergeExtension<NdIterExtBlockOffsetSize<'s, D>>> {
         let ext = NdIterExtBlockOffsetSize::<D>::new(begin, end, block_shape);
         NdIterBuilder {
             begin: self.begin,
@@ -510,7 +493,7 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
     }
 
     #[inline]
-    pub(crate) fn build(self) -> NdIter<D, E> {
+    pub(crate) fn build(self) -> NdIter<'a, D, E> {
         NdIter::new_with_begin(self.begin, self.end, self.extensions)
     }
 }
@@ -577,31 +560,31 @@ mod tests {
     #[test]
     fn idx_iter_0d_yields_one_empty_index() {
         // A 0-D iterator has no dimensions; it should yield exactly one empty index.
-        assert_eq!(collect_idx(IdxIter::<Dim<0>>::new([])), vec![vec![]]);
+        assert_eq!(collect_idx(IdxIter::<Dim<0>>::new(&[])), vec![vec![]]);
     }
 
     #[test]
     fn idx_iter_1d() {
         assert_eq!(
-            collect_idx(IdxIter::<Dim<1>>::new([4u64])),
+            collect_idx(IdxIter::<Dim<1>>::new(&[4u64])),
             vec![vec![0], vec![1], vec![2], vec![3]],
         );
     }
 
     #[test]
     fn idx_iter_1d_size_1() {
-        assert_eq!(collect_idx(IdxIter::<Dim<1>>::new([1u64])), vec![vec![0]]);
+        assert_eq!(collect_idx(IdxIter::<Dim<1>>::new(&[1u64])), vec![vec![0]]);
     }
 
     #[test]
     fn idx_iter_1d_size_0() {
-        assert!(collect_idx(IdxIter::<Dim<1>>::new([0u64])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<1>>::new(&[0u64])).is_empty());
     }
 
     #[test]
     fn idx_iter_2d_row_major_order() {
         assert_eq!(
-            collect_idx(IdxIter::<Dim<2>>::new([2u64, 3])),
+            collect_idx(IdxIter::<Dim<2>>::new(&[2u64, 3])),
             vec![
                 vec![0, 0],
                 vec![0, 1],
@@ -615,7 +598,7 @@ mod tests {
 
     #[test]
     fn idx_iter_3d_row_major_order() {
-        let got = collect_idx(IdxIter::<Dim<3>>::new([2u64, 3, 2]));
+        let got = collect_idx(IdxIter::<Dim<3>>::new(&[2u64, 3, 2]));
         let expected: Vec<Vec<u64>> = (0..2)
             .flat_map(|i| (0..3).flat_map(move |j| (0..2).map(move |k| vec![i, j, k])))
             .collect();
@@ -626,7 +609,7 @@ mod tests {
     fn idx_iter_total_count_equals_shape_product() {
         let shape: [u64; 4] = [2, 3, 4, 5];
         assert_eq!(
-            collect_idx(IdxIter::<Dim<4>>::new(shape)).len(),
+            collect_idx(IdxIter::<Dim<4>>::new(&shape)).len(),
             2 * 3 * 4 * 5
         );
     }
@@ -637,27 +620,28 @@ mod tests {
 
     #[test]
     fn idx_iter_zero_in_first_dim_is_empty() {
-        assert!(collect_idx(IdxIter::<Dim<2>>::new([0u64, 3])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<2>>::new(&[0u64, 3])).is_empty());
     }
 
     #[test]
     fn idx_iter_zero_in_last_dim_is_empty() {
-        assert!(collect_idx(IdxIter::<Dim<2>>::new([3u64, 0])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<2>>::new(&[3u64, 0])).is_empty());
     }
 
     #[test]
     fn idx_iter_zero_in_middle_dim_is_empty() {
-        assert!(collect_idx(IdxIter::<Dim<3>>::new([3u64, 0, 4])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<3>>::new(&[3u64, 0, 4])).is_empty());
     }
 
     #[test]
     fn idx_iter_zero_1d_is_empty() {
-        assert!(collect_idx(IdxIter::<Dim<1>>::new([0u64])).is_empty());
+        assert!(collect_idx(IdxIter::<Dim<1>>::new(&[0u64])).is_empty());
     }
 
     #[test]
     fn idx_iter_returns_none_repeatedly_after_exhaustion() {
-        let mut iter = IdxIter::<Dim<1>>::new([2u64]);
+        let shape = [2u64];
+        let mut iter = IdxIter::<Dim<1>>::new(&shape);
         iter.next();
         iter.next();
         assert!(iter.next().is_none());
@@ -680,7 +664,7 @@ mod tests {
     #[test]
     fn new_with_begin_1d_offset() {
         assert_eq!(
-            collect_indices(NdIter::<Dim<1>, _>::new_with_begin([2u64], [5u64], ())),
+            collect_indices(NdIter::<Dim<1>, _>::new_with_begin([2u64], &[5u64], ())),
             vec![vec![2], vec![3], vec![4]],
         );
     }
@@ -689,7 +673,7 @@ mod tests {
     fn new_with_begin_2d_offset() {
         let got = collect_indices(NdIter::<Dim<2>, _>::new_with_begin(
             [1u64, 2],
-            [3u64, 4],
+            &[3u64, 4],
             (),
         ));
         let expected: Vec<Vec<u64>> = (1..3)
@@ -702,7 +686,7 @@ mod tests {
     fn new_with_begin_count_matches_range_product() {
         let got = collect_indices(NdIter::<Dim<3>, _>::new_with_begin(
             [1u64, 2, 0],
-            [4u64, 5, 3],
+            &[4u64, 5, 3],
             (),
         ));
         assert_eq!(got.len(), (4 - 1) * (5 - 2) * 3);
@@ -713,7 +697,7 @@ mod tests {
         // begin[0] == end[0] -> no elements even though other dims are non-empty
         assert!(collect_indices(NdIter::<Dim<2>, _>::new_with_begin(
             [2u64, 0],
-            [2u64, 5],
+            &[2u64, 5],
             ()
         ))
         .is_empty());
@@ -722,16 +706,16 @@ mod tests {
     #[test]
     fn new_with_begin_empty_when_all_dims_degenerate() {
         assert!(
-            collect_indices(NdIter::<Dim<1>, _>::new_with_begin([3u64], [3u64], ())).is_empty()
+            collect_indices(NdIter::<Dim<1>, _>::new_with_begin([3u64], &[3u64], ())).is_empty()
         );
     }
 
     #[test]
     fn new_with_begin_begin_equals_zero_matches_new() {
-        let via_new = collect_indices(NdIter::<Dim<2>, _>::new([3u64, 4], ()));
+        let via_new = collect_indices(NdIter::<Dim<2>, _>::new(&[3u64, 4], ()));
         let via_begin = collect_indices(NdIter::<Dim<2>, _>::new_with_begin(
             [0u64, 0],
-            [3u64, 4],
+            &[3u64, 4],
             (),
         ));
         assert_eq!(via_new, via_begin);
@@ -740,14 +724,14 @@ mod tests {
     #[test]
     fn new_with_begin_1d_offset_dyn() {
         assert_eq!(
-            collect_indices(NdIter::new_with_begin(dv(&[2u64]), dv(&[5u64]), ())),
+            collect_indices(NdIter::new_with_begin(dv(&[2u64]), &[5u64], ())),
             vec![vec![2], vec![3], vec![4]],
         );
     }
 
     #[test]
     fn new_with_begin_2d_offset_dyn() {
-        let got = collect_indices(NdIter::new_with_begin(dv(&[1u64, 2]), dv(&[3u64, 4]), ()));
+        let got = collect_indices(NdIter::new_with_begin(dv(&[1u64, 2]), &[3u64, 4], ()));
         let expected: Vec<Vec<u64>> = (1..3)
             .flat_map(|r| (2..4).map(move |c| vec![r, c]))
             .collect();
@@ -760,7 +744,8 @@ mod tests {
 
     #[test]
     fn on_change_not_called_on_first_step() {
-        let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ChangeLog::new());
+        let shape = [3u64, 4];
+        let mut iter = NdIter::<Dim<2>, _>::new(&shape, ChangeLog::new());
         let (_, n_changes) = iter.next().unwrap();
         assert_eq!(n_changes, 0, "no changes on the very first step");
     }
@@ -768,7 +753,8 @@ mod tests {
     #[test]
     fn on_change_called_once_for_innermost_advance() {
         // [0,0] -> [0,1]: only dim 1 changes
-        let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ChangeLog::new());
+        let shape = [3u64, 4];
+        let mut iter = NdIter::<Dim<2>, _>::new(&shape, ChangeLog::new());
         iter.next(); // emit [0,0] - no changes
         let before = iter.extensions.log.len();
         iter.next(); // emit [0,1]
@@ -779,7 +765,8 @@ mod tests {
     #[test]
     fn on_change_called_twice_on_row_wrap() {
         // At [0,3] -> [1,0]: dim 0 increments then dim 1 resets.
-        let mut iter = NdIter::<Dim<2>, _>::new([3u64, 4], ChangeLog::new());
+        let shape = [3u64, 4];
+        let mut iter = NdIter::<Dim<2>, _>::new(&shape, ChangeLog::new());
         for _ in 0..4 {
             iter.next();
         } // reach end of first row
@@ -792,7 +779,8 @@ mod tests {
     #[test]
     fn on_change_all_smaller_dims_reset_in_order() {
         // Shape [2,3,4]: when dim 0 increments, dims 1 and 2 both reset, in order.
-        let mut iter = NdIter::<Dim<3>, _>::new([2u64, 3, 4], ChangeLog::new());
+        let shape = [2u64, 3, 4];
+        let mut iter = NdIter::<Dim<3>, _>::new(&shape, ChangeLog::new());
         for _ in 0..(3 * 4) {
             iter.next();
         } // reach [0,2,3]
@@ -805,7 +793,8 @@ mod tests {
     #[test]
     fn on_change_reset_targets_begin_not_zero() {
         // begin=[1,2], end=[3,5]: when dim 0 wraps, dim 1 should reset to 2 (begin), not 0.
-        let mut iter = NdIter::<Dim<2>, _>::new_with_begin([1u64, 2], [3u64, 5], ChangeLog::new());
+        let end = [3u64, 5];
+        let mut iter = NdIter::<Dim<2>, _>::new_with_begin([1u64, 2], &end, ChangeLog::new());
         // advance to [1,4] - last element of first row
         for _ in 0..3 {
             iter.next();
@@ -827,7 +816,8 @@ mod tests {
         // or 2 changes for a row-carry. There are (R-1) row-carries and (R*(C-1)) plain advances.
         // Total = (R-1)*2 + R*(C-1)*1.
         let (r, c): (u64, u64) = (4, 5);
-        let mut iter = NdIter::<Dim<2>, _>::new([r, c], ChangeLog::new());
+        let shape = [r, c];
+        let mut iter = NdIter::<Dim<2>, _>::new(&shape, ChangeLog::new());
         while iter.next().is_some() {}
         let expected = ((r - 1) * 2 + r * (c - 1)) as usize;
         assert_eq!(iter.extensions.log.len(), expected);
@@ -840,7 +830,8 @@ mod tests {
     #[test]
     fn tuple_1_extension_delegates() {
         let ext = ChangeLog::new();
-        let mut iter = NdIter::new(dv(&[3u64, 3]), (ext,));
+        let shape = [3u64, 3];
+        let mut iter = NdIter::<DimDyn, _>::new(&shape, (ext,));
         while iter.next().is_some() {}
         // Behaviour should be identical to a bare ChangeLog
         assert!(!iter.extensions.0.log.is_empty());
@@ -856,7 +847,8 @@ mod tests {
             NdIterExtStridesPtrMut::new(&[3usize, 1], base_a),
             NdIterExtStridesPtrMut::new(&[6usize, 2], base_b),
         );
-        let iter = NdIter::new(dv(&[2u64, 3]), ext);
+        let shape = [2u64, 3];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut flat = 0usize;
         for (_, (pa, pb)) in iter {
             assert_eq!(pa, unsafe { base_a.add(flat) }, "a step {flat}");
@@ -874,7 +866,8 @@ mod tests {
             NdIterExtStridesPtrMut::new(&[1usize], base),
             ChangeLog::new(),
         );
-        let mut iter = NdIter::new(dv(&[4u64]), ext);
+        let shape = [4u64];
+        let mut iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut ptrs: Vec<*mut u8> = Vec::new();
         for (_, (ptr, _)) in iter.by_ref() {
             ptrs.push(ptr);
@@ -896,7 +889,8 @@ mod tests {
             NdIterExtStridesPtrMut::new(&[1usize], b.as_mut_ptr()),
             NdIterExtStridesPtrMut::new(&[1usize], c.as_mut_ptr()),
         );
-        let iter = NdIter::new(dv(&[4u64]), ext);
+        let shape = [4u64];
+        let iter = NdIter::<DimDyn, _>::new(&shape, ext);
         let mut count = 0usize;
         for (_, (pa, pb, pc)) in iter {
             let off_a = unsafe { pa.offset_from(a.as_ptr()) };
@@ -915,7 +909,8 @@ mod tests {
 
     #[test]
     fn unit_extension_yields_unit_items() {
-        let iter = NdIter::<Dim<2>, _>::new([2u64, 2], ());
+        let shape = [2u64, 2];
+        let iter = NdIter::<Dim<2>, _>::new(&shape, ());
         for (_, item) in iter {
             let _: () = item;
         }
@@ -927,16 +922,16 @@ mod tests {
 
     #[test]
     fn builder_no_ext_matches_new() {
-        let via_builder = collect_indices(NdIter::builder(dv(&[2u64, 3])).build());
-        let via_new = collect_indices(NdIter::new(dv(&[2u64, 3]), ()));
+        let via_builder = collect_indices(NdIter::<DimDyn, _>::builder(&[2u64, 3]).build());
+        let via_new = collect_indices(NdIter::<DimDyn, _>::new(&[2u64, 3], ()));
         assert_eq!(via_builder, via_new);
     }
 
     #[test]
     fn builder_with_begin_no_ext_matches_new_with_begin() {
         let via_builder =
-            collect_indices(NdIter::builder_with_begin(dv(&[1u64, 2]), dv(&[3u64, 4])).build());
-        let via_new = collect_indices(NdIter::new_with_begin(dv(&[1u64, 2]), dv(&[3u64, 4]), ()));
+            collect_indices(NdIter::builder_with_begin(dv(&[1u64, 2]), &[3u64, 4]).build());
+        let via_new = collect_indices(NdIter::new_with_begin(dv(&[1u64, 2]), &[3u64, 4], ()));
         assert_eq!(via_builder, via_new);
     }
 
@@ -946,7 +941,8 @@ mod tests {
         // `ptr` below binds directly to `*mut u8` with no tuple destructuring.
         let mut data = [0u8; 6];
         let base = data.as_mut_ptr();
-        let iter = NdIter::builder(dv(&[2u64, 3]))
+        let shape = [2u64, 3];
+        let iter = NdIter::<DimDyn, _>::builder(&shape)
             .with_strides_ptr_mut_ext(&[3usize, 1], base)
             .build();
         let mut flat = 0usize;
@@ -964,7 +960,8 @@ mod tests {
         let mut dst = [0u8; 12]; // dst has stride 2
         let base_src = src.as_mut_ptr();
         let base_dst = dst.as_mut_ptr();
-        let iter = NdIter::builder(dv(&[2u64, 3]))
+        let shape = [2u64, 3];
+        let iter = NdIter::<DimDyn, _>::builder(&shape)
             .with_strides_ptr_ext(&[3usize, 1], base_src.cast_const())
             .with_strides_ptr_mut_ext(&[6usize, 2], base_dst)
             .build();
@@ -986,14 +983,14 @@ mod tests {
         let base_a = a.as_ptr();
         let base_b = b.as_mut_ptr();
         // The same two extensions, once via the builder and once via a manual tuple constructor.
-        let built: Vec<(*const u8, *mut u8)> = NdIter::builder(dv(&[2u64, 3]))
+        let built: Vec<(*const u8, *mut u8)> = NdIter::<DimDyn, _>::builder(&[2u64, 3])
             .with_strides_ptr_ext(&[3usize, 1], base_a)
             .with_strides_ptr_mut_ext(&[3usize, 1], base_b)
             .build()
             .map(|(_, pair)| pair)
             .collect();
-        let manual: Vec<(*const u8, *mut u8)> = NdIter::new(
-            dv(&[2u64, 3]),
+        let manual: Vec<(*const u8, *mut u8)> = NdIter::<DimDyn, _>::new(
+            &[2u64, 3],
             (
                 NdIterExtStridesPtr::new(&[3usize, 1], base_a),
                 NdIterExtStridesPtrMut::new(&[3usize, 1], base_b),
@@ -1009,7 +1006,8 @@ mod tests {
         let mut a = [0u8; 4];
         let mut b = [0u8; 4];
         let mut c = [0u8; 4];
-        let iter = NdIter::builder(dv(&[4u64]))
+        let shape = [4u64];
+        let iter = NdIter::<DimDyn, _>::builder(&shape)
             .with_strides_ptr_mut_ext(&[1usize], a.as_mut_ptr())
             .with_strides_ptr_mut_ext(&[1usize], b.as_mut_ptr())
             .with_strides_ptr_mut_ext(&[1usize], c.as_mut_ptr())

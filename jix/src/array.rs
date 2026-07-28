@@ -454,7 +454,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
                 let (out_buf, out_strides) = buf.get_strided_mut::<D>(index, self.dtype());
 
-                let iter = NdIter::builder(read_shape)
+                let iter = NdIter::<'_, D, _>::builder(read_shape.as_ref())
                     .with_strides_ptr_mut_ext(out_strides.as_ref(), out_buf.as_mut_ptr())
                     .build();
                 for (idx, dst) in iter {
@@ -831,7 +831,7 @@ impl<S: ArrayStorage> Array<S> {
             calc_block_end(index[dim].start, index[dim].end, read_shape[dim])
         });
         // NdIter that yields blocks of size <= read_shape
-        let block_iter = NdIter::builder_with_begin(block_begin, block_end)
+        let block_iter = NdIter::builder_with_begin(block_begin, block_end.as_ref())
             .with_block_offset_size_ext(
                 S::Dimension::vec(ndim, |dim| index[dim].start).as_ref(),
                 S::Dimension::vec(ndim, |dim| index[dim].end).as_ref(),
@@ -1133,7 +1133,7 @@ impl<S: ArrayStorage> Array<S> {
 
         // Outer loop over chunks. The extension yields each chunk's active element extent, clamped
         // to the array at the high boundary.
-        let chunk_iter = NdIter::builder(chunk_grid_shape)
+        let chunk_iter = NdIter::<'_, S::Dimension, _>::builder(chunk_grid_shape.as_ref())
             .with_block_offset_size_ext(zeros.as_ref(), shape, chunk_shape.as_ref())
             .build();
         for (chunk_idx, (chunk_inner_offset, chunk_size)) in chunk_iter {
@@ -1157,15 +1157,17 @@ impl<S: ArrayStorage> Array<S> {
                 .sum::<u64>();
 
             // Inner loop over the target blocks within the chunk.
-            let block_iter = NdIter::builder(S::Dimension::vec(ndim, |dim| {
+            let inner_block_grid_shape = S::Dimension::vec(ndim, |dim| {
                 chunk_size[dim].div_ceil(block_shape[dim] as u64)
-            }))
-            .with_block_offset_size_ext(
-                zeros.as_ref(),
-                chunk_size.as_ref(),
-                block_shape_u64.as_ref(),
-            )
-            .build();
+            });
+            let block_iter =
+                NdIter::<'_, S::Dimension, _>::builder(inner_block_grid_shape.as_ref())
+                    .with_block_offset_size_ext(
+                        zeros.as_ref(),
+                        chunk_size.as_ref(),
+                        block_shape_u64.as_ref(),
+                    )
+                    .build();
             for (block_in_chunk_idx, (block_inner_offset, block_active_size)) in block_iter {
                 debug_assert!(block_inner_offset.as_ref().iter().all(|&off| off == 0));
                 // Logical (C-order) index of this block in the full grid.

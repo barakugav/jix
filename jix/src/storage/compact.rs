@@ -434,7 +434,7 @@ where
             ActualD::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
         let block_grid_logical_strides = default_logical_strides_slice(block_grid_shape.as_ref());
 
-        let block_iter = NdIter::builder_with_begin(block_begin, block_end)
+        let block_iter = NdIter::builder_with_begin(block_begin, block_end.as_ref())
             .with_logical_global_index_ext(block_grid_logical_strides.as_ref())
             .with_block_offset_size_ext(
                 ActualD::vec(ndim, |dim| index[dim].start).as_ref(),

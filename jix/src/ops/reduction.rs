@@ -407,7 +407,7 @@ where
         (0..inner_ndim).all(|d| !is_reduced[d] || bulk_grid_end[d] - bulk_grid_begin[d] <= 1),
         "reduced dim must produce at most one bulk-block",
     );
-    let bulk_iter = NdIter::builder_with_begin(bulk_grid_begin, bulk_grid_end)
+    let bulk_iter = NdIter::builder_with_begin(bulk_grid_begin, bulk_grid_end.as_ref())
         .with_block_offset_size_ext(
             InnerD::vec(inner_ndim, |dim| inner_range_full[dim].start).as_ref(),
             InnerD::vec(inner_ndim, |dim| inner_range_full[dim].end).as_ref(),
@@ -457,7 +457,7 @@ where
                 .all(|d| { is_reduced[d] || tile_grid_end[d] - tile_grid_begin[d] <= 1 }),
             "non-reduced dim must produce at most one tile per bulk",
         );
-        let tile_iter = NdIter::builder_with_begin(tile_grid_begin, tile_grid_end)
+        let tile_iter = NdIter::builder_with_begin(tile_grid_begin, tile_grid_end.as_ref())
             .with_block_offset_size_ext(
                 bulk_begin.as_ref(),
                 bulk_end.as_ref(),
@@ -619,7 +619,7 @@ where
         bulk_base_item_idx,
     } = args;
 
-    let out_iter = NdIter::builder(tile_out_shape)
+    let out_iter = NdIter::<'_, D, _>::builder(tile_out_shape.as_ref())
         .with_strides_ptr_ext(items_buf_strides, items_buf)
         .with_strides_ptr_mut_ext(state_buf_strides, state_buf)
         .build();
@@ -756,7 +756,7 @@ where
 
     if state_initialized {
         // CAREFUL: state_ptr and out_ptr may alias
-        let out_iter = NdIter::builder(out_shape)
+        let out_iter = NdIter::<'_, D, _>::builder(out_shape.as_ref())
             .with_strides_ptr_mut_ext(state_buf_strides, state_buf)
             .with_strides_ptr_mut_ext(out_buf_strides, out_buf)
             .build();
@@ -771,7 +771,7 @@ where
         }
     } else {
         // Empty reduction: write the empty-stream result to every output.
-        let out_iter = NdIter::builder(out_shape)
+        let out_iter = NdIter::<'_, D, _>::builder(out_shape.as_ref())
             .with_strides_ptr_mut_ext(out_buf_strides, out_buf)
             .build();
         // debug_assert!( // TODO

@@ -139,11 +139,17 @@ mod tests {
     use crate::util::iter::NdIter;
     use crate::SliceExt;
 
-    fn make_iter<'a>(
-        begin: &[u64],
-        end: &[u64],
-        block: &'a [u64],
-    ) -> NdIter<DimDyn, NdIterExtBlockOffsetSize<'a, DimDyn>> {
+    #[derive(Debug, PartialEq)]
+    struct BlocksIterItemOwned {
+        block_idx: Vec<u64>,
+        inner_offset: Vec<u64>,
+        block_size: Vec<u64>,
+    }
+
+    /// Builds the block iterator for `[begin, end)` with the given `block` shape and collects its
+    /// yielded items. The iterator borrows the block-space `end` (a local here), so building and
+    /// draining it in one function keeps that borrow alive for the whole traversal.
+    fn collect_blocks(begin: &[u64], end: &[u64], block: &[u64]) -> Vec<BlocksIterItemOwned> {
         let ext = NdIterExtBlockOffsetSize::<DimDyn>::new(begin, end, block);
         let (block_begin, block_end) = begin
             .iter()
@@ -152,23 +158,11 @@ mod tests {
             .map(|((&b, &e), &c)| (b / c, calc_block_end(b, e, c)))
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
-        NdIter::new_with_begin(
+        let iter = NdIter::new_with_begin(
             block_begin.to_dim_vec::<DimDyn>(),
-            block_end.to_dim_vec::<DimDyn>(),
+            block_end.as_slice(),
             ext,
-        )
-    }
-
-    #[derive(Debug, PartialEq)]
-    struct BlocksIterItemOwned {
-        block_idx: Vec<u64>,
-        inner_offset: Vec<u64>,
-        block_size: Vec<u64>,
-    }
-
-    fn collect(
-        iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<'_, DimDyn>>,
-    ) -> Vec<BlocksIterItemOwned> {
+        );
         let mut out = Vec::new();
         for (block_idx, (inner_offset, block_size)) in iter {
             out.push(BlocksIterItemOwned {
@@ -191,7 +185,7 @@ mod tests {
     #[test]
     fn full_1d_one_block() {
         assert_eq!(
-            collect(make_iter(&[0], &[4], &[4])),
+            collect_blocks(&[0], &[4], &[4]),
             vec![item(&[0], &[0], &[4])],
         );
     }
@@ -199,7 +193,7 @@ mod tests {
     #[test]
     fn full_1d_two_blocks() {
         assert_eq!(
-            collect(make_iter(&[0], &[6], &[3])),
+            collect_blocks(&[0], &[6], &[3]),
             vec![item(&[0], &[0], &[3]), item(&[1], &[0], &[3])],
         );
     }
@@ -207,7 +201,7 @@ mod tests {
     #[test]
     fn full_1d_three_blocks() {
         assert_eq!(
-            collect(make_iter(&[0], &[9], &[3])),
+            collect_blocks(&[0], &[9], &[3]),
             vec![
                 item(&[0], &[0], &[3]),
                 item(&[1], &[0], &[3]),
@@ -219,7 +213,7 @@ mod tests {
     #[test]
     fn single_block_full() {
         assert_eq!(
-            collect(make_iter(&[0], &[3], &[3])),
+            collect_blocks(&[0], &[3], &[3]),
             vec![item(&[0], &[0], &[3])],
         );
     }
@@ -227,7 +221,7 @@ mod tests {
     #[test]
     fn single_block_offset_start() {
         assert_eq!(
-            collect(make_iter(&[1], &[3], &[3])),
+            collect_blocks(&[1], &[3], &[3]),
             vec![item(&[0], &[1], &[2])],
         );
     }
@@ -235,7 +229,7 @@ mod tests {
     #[test]
     fn single_block_interior_slice() {
         assert_eq!(
-            collect(make_iter(&[1], &[2], &[3])),
+            collect_blocks(&[1], &[2], &[3]),
             vec![item(&[0], &[1], &[1])],
         );
     }
@@ -243,7 +237,7 @@ mod tests {
     #[test]
     fn single_block_in_middle_of_array() {
         assert_eq!(
-            collect(make_iter(&[3], &[5], &[3])),
+            collect_blocks(&[3], &[5], &[3]),
             vec![item(&[1], &[0], &[2])],
         );
     }
@@ -251,7 +245,7 @@ mod tests {
     #[test]
     fn single_block_mid_offset_in_middle_of_array() {
         assert_eq!(
-            collect(make_iter(&[4], &[5], &[3])),
+            collect_blocks(&[4], &[5], &[3]),
             vec![item(&[1], &[1], &[1])],
         );
     }
@@ -259,7 +253,7 @@ mod tests {
     #[test]
     fn non_aligned_start_two_blocks() {
         assert_eq!(
-            collect(make_iter(&[1], &[6], &[3])),
+            collect_blocks(&[1], &[6], &[3]),
             vec![item(&[0], &[1], &[2]), item(&[1], &[0], &[3])],
         );
     }
@@ -267,7 +261,7 @@ mod tests {
     #[test]
     fn non_aligned_start_three_blocks() {
         assert_eq!(
-            collect(make_iter(&[2], &[9], &[3])),
+            collect_blocks(&[2], &[9], &[3]),
             vec![
                 item(&[0], &[2], &[1]),
                 item(&[1], &[0], &[3]),
@@ -279,7 +273,7 @@ mod tests {
     #[test]
     fn start_at_block_boundary() {
         assert_eq!(
-            collect(make_iter(&[3], &[9], &[3])),
+            collect_blocks(&[3], &[9], &[3]),
             vec![item(&[1], &[0], &[3]), item(&[2], &[0], &[3])],
         );
     }
@@ -287,7 +281,7 @@ mod tests {
     #[test]
     fn non_aligned_end_two_blocks() {
         assert_eq!(
-            collect(make_iter(&[0], &[5], &[3])),
+            collect_blocks(&[0], &[5], &[3]),
             vec![item(&[0], &[0], &[3]), item(&[1], &[0], &[2])],
         );
     }
@@ -295,7 +289,7 @@ mod tests {
     #[test]
     fn non_aligned_end_three_blocks() {
         assert_eq!(
-            collect(make_iter(&[0], &[10], &[4])),
+            collect_blocks(&[0], &[10], &[4]),
             vec![
                 item(&[0], &[0], &[4]),
                 item(&[1], &[0], &[4]),
@@ -307,7 +301,7 @@ mod tests {
     #[test]
     fn end_aligned_to_block_boundary_within_array() {
         assert_eq!(
-            collect(make_iter(&[0], &[6], &[3])),
+            collect_blocks(&[0], &[6], &[3]),
             vec![item(&[0], &[0], &[3]), item(&[1], &[0], &[3])],
         );
     }
@@ -315,7 +309,7 @@ mod tests {
     #[test]
     fn non_aligned_both_two_blocks() {
         assert_eq!(
-            collect(make_iter(&[1], &[5], &[3])),
+            collect_blocks(&[1], &[5], &[3]),
             vec![item(&[0], &[1], &[2]), item(&[1], &[0], &[2])],
         );
     }
@@ -323,7 +317,7 @@ mod tests {
     #[test]
     fn non_aligned_both_three_blocks() {
         assert_eq!(
-            collect(make_iter(&[1], &[7], &[3])),
+            collect_blocks(&[1], &[7], &[3]),
             vec![
                 item(&[0], &[1], &[2]),
                 item(&[1], &[0], &[3]),
@@ -335,7 +329,7 @@ mod tests {
     #[test]
     fn non_aligned_both_four_blocks() {
         assert_eq!(
-            collect(make_iter(&[1], &[11], &[4])),
+            collect_blocks(&[1], &[11], &[4]),
             vec![
                 item(&[0], &[1], &[3]),
                 item(&[1], &[0], &[4]),
@@ -347,7 +341,7 @@ mod tests {
     #[test]
     fn block_larger_than_range() {
         assert_eq!(
-            collect(make_iter(&[2], &[6], &[8])),
+            collect_blocks(&[2], &[6], &[8]),
             vec![item(&[0], &[2], &[4])],
         );
     }
@@ -355,7 +349,7 @@ mod tests {
     #[test]
     fn full_2d_aligned() {
         assert_eq!(
-            collect(make_iter(&[0, 0], &[6, 4], &[3, 2])),
+            collect_blocks(&[0, 0], &[6, 4], &[3, 2]),
             vec![
                 item(&[0, 0], &[0, 0], &[3, 2]),
                 item(&[0, 1], &[0, 0], &[3, 2]),
@@ -368,7 +362,7 @@ mod tests {
     #[test]
     fn full_2d_asymmetric_blocks() {
         assert_eq!(
-            collect(make_iter(&[0, 0], &[4, 9], &[2, 3])),
+            collect_blocks(&[0, 0], &[4, 9], &[2, 3]),
             vec![
                 item(&[0, 0], &[0, 0], &[2, 3]),
                 item(&[0, 1], &[0, 0], &[2, 3]),
@@ -383,7 +377,7 @@ mod tests {
     #[test]
     fn non_aligned_start_2d() {
         assert_eq!(
-            collect(make_iter(&[1, 1], &[6, 4], &[3, 2])),
+            collect_blocks(&[1, 1], &[6, 4], &[3, 2]),
             vec![
                 item(&[0, 0], &[1, 1], &[2, 1]),
                 item(&[0, 1], &[1, 0], &[2, 2]),
@@ -396,7 +390,7 @@ mod tests {
     #[test]
     fn non_aligned_start_2d_asymmetric() {
         assert_eq!(
-            collect(make_iter(&[1, 2], &[9, 9], &[3, 3])),
+            collect_blocks(&[1, 2], &[9, 9], &[3, 3]),
             vec![
                 item(&[0, 0], &[1, 2], &[2, 1]),
                 item(&[0, 1], &[1, 0], &[2, 3]),
@@ -414,7 +408,7 @@ mod tests {
     #[test]
     fn non_aligned_both_2d() {
         assert_eq!(
-            collect(make_iter(&[1, 1], &[7, 7], &[3, 3])),
+            collect_blocks(&[1, 1], &[7, 7], &[3, 3]),
             vec![
                 item(&[0, 0], &[1, 1], &[2, 2]),
                 item(&[0, 1], &[1, 0], &[2, 3]),
@@ -431,7 +425,7 @@ mod tests {
 
     #[test]
     fn full_3d_aligned() {
-        let got = collect(make_iter(&[0, 0, 0], &[4, 6, 8], &[2, 3, 4]));
+        let got = collect_blocks(&[0, 0, 0], &[4, 6, 8], &[2, 3, 4]);
         let expected = (0..2)
             .flat_map(|i| {
                 (0..2).flat_map(move |j| {
