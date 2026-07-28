@@ -495,16 +495,12 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 
     /// Adds a [`NdIterExtBlockOffsetSize`] extension.
     #[inline]
-    pub(crate) fn with_block_offset_size_ext<V>(
+    pub(crate) fn with_block_offset_size_ext<'a>(
         self,
-        begin: &V,
-        end: &V,
-        block_shape: V,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtBlockOffsetSize<D>>>
-    where
-        D: Dimension<Vec<u64> = V>,
-        V: DimVec<u64, Dimension = D>,
-    {
+        begin: &[u64],
+        end: &[u64],
+        block_shape: &'a [u64],
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtBlockOffsetSize<'a, D>>> {
         let ext = NdIterExtBlockOffsetSize::<D>::new(begin, end, block_shape);
         NdIterBuilder {
             begin: self.begin,

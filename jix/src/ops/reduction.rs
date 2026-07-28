@@ -10,8 +10,8 @@ use crate::storage::{ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, scale_read_shape, DimArray, USE_NEW_READ_SCALING};
 use crate::{
-    array_from_fn_inline, default_strides_cast, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
-    IterExt, Ty,
+    array_from_fn_inline, default_strides_cast, Array, ArrayExt, ArrayStorage, Dimension, IterExt,
+    Ty,
 };
 
 pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
@@ -409,9 +409,9 @@ where
     );
     let bulk_iter = NdIter::builder_with_begin(bulk_grid_begin, bulk_grid_end)
         .with_block_offset_size_ext(
-            &InnerD::vec(inner_ndim, |dim| inner_range_full[dim].start),
-            &InnerD::vec(inner_ndim, |dim| inner_range_full[dim].end),
-            bulk_shape.clone(),
+            InnerD::vec(inner_ndim, |dim| inner_range_full[dim].start).as_ref(),
+            InnerD::vec(inner_ndim, |dim| inner_range_full[dim].end).as_ref(),
+            bulk_shape.as_ref(),
         )
         .build();
 
@@ -459,9 +459,9 @@ where
         );
         let tile_iter = NdIter::builder_with_begin(tile_grid_begin, tile_grid_end)
             .with_block_offset_size_ext(
-                &bulk_begin,
-                &bulk_end,
-                InnerD::vec(inner_ndim, |d| tile_shape[d]), // TODO: clone
+                bulk_begin.as_ref(),
+                bulk_end.as_ref(),
+                tile_shape.as_slice(),
             )
             .build();
 

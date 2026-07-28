@@ -19,7 +19,7 @@ use crate::util::{
 };
 use crate::{
     default_logical_strides, default_strides_cast, ArrayAny, ArrayParams, ArrayStorage, DimDyn,
-    DimVec, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
+    Dimension, ElementType, IntoDimension, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -833,9 +833,9 @@ impl<S: ArrayStorage> Array<S> {
         // NdIter that yields blocks of size <= read_shape
         let block_iter = NdIter::builder_with_begin(block_begin, block_end)
             .with_block_offset_size_ext(
-                &S::Dimension::vec(ndim, |dim| index[dim].start),
-                &S::Dimension::vec(ndim, |dim| index[dim].end),
-                S::Dimension::vec(ndim, |dim| read_shape[dim]), // TODO: clone
+                S::Dimension::vec(ndim, |dim| index[dim].start).as_ref(),
+                S::Dimension::vec(ndim, |dim| index[dim].end).as_ref(),
+                read_shape.as_slice(),
             )
             .build();
 
@@ -1128,14 +1128,13 @@ impl<S: ArrayStorage> Array<S> {
         let mut tmp_block_compressed = AlignedBytes::new_padded(alignment);
         let mut builder = builder_init(nblocks, block_shape.as_ref(), decoder_cfg)?;
 
+        let block_shape_u64 = S::Dimension::vec(ndim, |dim| block_shape[dim] as u64);
+        let zeros = S::Dimension::vec(ndim, |_| 0u64);
+
         // Outer loop over chunks. The extension yields each chunk's active element extent, clamped
         // to the array at the high boundary.
         let chunk_iter = NdIter::builder(chunk_grid_shape)
-            .with_block_offset_size_ext(
-                &S::Dimension::vec(ndim, |_| 0),
-                &S::Dimension::vec(ndim, |dim| shape[dim]),
-                chunk_shape.clone(),
-            )
+            .with_block_offset_size_ext(zeros.as_ref(), shape, chunk_shape.as_ref())
             .build();
         for (chunk_idx, (chunk_inner_offset, chunk_size)) in chunk_iter {
             debug_assert!(chunk_inner_offset.as_ref().iter().all(|&off| off == 0));
@@ -1162,9 +1161,9 @@ impl<S: ArrayStorage> Array<S> {
                 chunk_size[dim].div_ceil(block_shape[dim] as u64)
             }))
             .with_block_offset_size_ext(
-                &S::Dimension::vec(ndim, |_| 0),
-                &chunk_size,
-                S::Dimension::vec(ndim, |dim| block_shape[dim] as u64),
+                zeros.as_ref(),
+                chunk_size.as_ref(),
+                block_shape_u64.as_ref(),
             )
             .build();
             for (block_in_chunk_idx, (block_inner_offset, block_active_size)) in block_iter {

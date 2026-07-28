@@ -22,7 +22,7 @@ use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, NdCopier};
 use crate::{
     default_logical_strides_slice, default_strides_cast, ArrayParams, ArrayStorage, Dim, DimDyn,
-    DimVec, Dimension,
+    Dimension,
 };
 
 /// Heap-allocated, block-compressed nd-array storage.
@@ -437,9 +437,9 @@ where
         let block_iter = NdIter::builder_with_begin(block_begin, block_end)
             .with_logical_global_index_ext(block_grid_logical_strides.as_ref())
             .with_block_offset_size_ext(
-                &ActualD::vec(ndim, |dim| index[dim].start),
-                &ActualD::vec(ndim, |dim| index[dim].end),
-                block_shape_u64.clone(),
+                ActualD::vec(ndim, |dim| index[dim].start).as_ref(),
+                ActualD::vec(ndim, |dim| index[dim].end).as_ref(),
+                block_shape_u64.as_ref(),
             )
             .build();
         for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {

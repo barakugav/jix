@@ -17,9 +17,9 @@ use crate::{DimVec, Dimension};
 /// `inner_offset` and `block_size` are per-dimension slices describing which elements of the
 /// current block fall inside the requested range. Interior blocks (fully covered) always have
 /// `inner_offset = 0` and `block_size = block_shape`; border blocks carry their partial values.
-pub(crate) struct NdIterExtBlockOffsetSize<D: Dimension> {
+pub(crate) struct NdIterExtBlockOffsetSize<'a, D: Dimension> {
     /// The size of a full block in each dimension.
-    block_shape: D::Vec<u64>,
+    block_shape: &'a [u64],
     /// Low and high border descriptors for each dimension.
     borders: D::Vec<(BlocksIterBorder, BlocksIterBorder)>,
 
@@ -37,18 +37,14 @@ struct BlocksIterBorder {
     /// The number of elements from this block that fall inside the requested range.
     length: u64,
 }
-impl<D> NdIterExtBlockOffsetSize<D>
+impl<'a, D> NdIterExtBlockOffsetSize<'a, D>
 where
     D: Dimension,
 {
     #[inline]
-    pub(crate) fn new<V>(begin: &V, end: &V, block_shape: V) -> Self
-    where
-        D: Dimension<Vec<u64> = V>,
-        V: DimVec<u64, Dimension = D>,
-    {
-        let ndim = begin.as_ref().len();
-        assert!(ndim == end.as_ref().len() && ndim == block_shape.as_ref().len());
+    pub(crate) fn new(begin: &[u64], end: &[u64], block_shape: &'a [u64]) -> Self {
+        let ndim = begin.len();
+        assert!(ndim == end.len() && ndim == block_shape.len());
 
         let borders = D::vec(ndim, |dim| {
             assert!(begin[dim] <= end[dim]);
@@ -88,7 +84,7 @@ where
         }
     }
 }
-impl<D> NdIterExtension for NdIterExtBlockOffsetSize<D>
+impl<D> NdIterExtension for NdIterExtBlockOffsetSize<'_, D>
 where
     D: Dimension,
 {
@@ -126,7 +122,7 @@ where
 
     #[inline(always)]
     fn check_ndim(&self, ndim: usize) -> bool {
-        self.block_shape.as_ref().len() == ndim
+        self.block_shape.len() == ndim
             && self.borders.as_ref().len() == ndim
             && self.inner_offset.as_ref().len() == ndim
             && self.current_block_size.as_ref().len() == ndim
@@ -143,16 +139,12 @@ mod tests {
     use crate::util::iter::NdIter;
     use crate::SliceExt;
 
-    fn make_iter(
+    fn make_iter<'a>(
         begin: &[u64],
         end: &[u64],
-        block: &[u64],
-    ) -> NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>> {
-        let ext = NdIterExtBlockOffsetSize::new(
-            &begin.to_dim_vec::<DimDyn>(),
-            &end.to_dim_vec::<DimDyn>(),
-            block.to_dim_vec::<DimDyn>(),
-        );
+        block: &'a [u64],
+    ) -> NdIter<DimDyn, NdIterExtBlockOffsetSize<'a, DimDyn>> {
+        let ext = NdIterExtBlockOffsetSize::<DimDyn>::new(begin, end, block);
         let (block_begin, block_end) = begin
             .iter()
             .zip(end)
@@ -174,7 +166,9 @@ mod tests {
         block_size: Vec<u64>,
     }
 
-    fn collect(iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<DimDyn>>) -> Vec<BlocksIterItemOwned> {
+    fn collect(
+        iter: NdIter<DimDyn, NdIterExtBlockOffsetSize<'_, DimDyn>>,
+    ) -> Vec<BlocksIterItemOwned> {
         let mut out = Vec::new();
         for (block_idx, (inner_offset, block_size)) in iter {
             out.push(BlocksIterItemOwned {
