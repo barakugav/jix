@@ -224,8 +224,8 @@ fn read_data_impl<InnerD, OuterD>(
     kernel_state_sizeof: usize,
     kernel_state_alignof: Alignment,
     is_reduced: &InnerD::Vec<bool>,
-    reduce_tile_fn: &dyn Fn(ReduceTileArgs<OuterD>),
-    finalize_state_fn: &dyn Fn(FinalizeStateArgs<OuterD>),
+    reduce_tile_fn: &dyn Fn(ReduceTileArgs<'_, OuterD>),
+    finalize_state_fn: &dyn Fn(FinalizeStateArgs<'_, OuterD>),
     index: &[Range<u64>],
     buf: &mut OutBuf,
     context: &ReadContext,
@@ -549,9 +549,9 @@ where
             reduce_tile_fn(ReduceTileArgs {
                 tile_out_shape,
                 items_buf: items_buf.as_ptr(),
-                items_buf_strides: items_buf_strides_for_out_iter,
+                items_buf_strides: items_buf_strides_for_out_iter.as_ref(),
                 state_buf: tile_state_base,
-                state_buf_strides: state_strides.clone(),
+                state_buf_strides: state_strides.as_ref(),
                 merge_into_existing: bulk_initialized,
                 tile_reduction_size,
                 bulk_base_item_idx,
@@ -581,9 +581,9 @@ where
     finalize_state_fn(FinalizeStateArgs {
         out_shape,
         state_buf: state_ptr,
-        state_buf_strides: state_strides,
+        state_buf_strides: state_strides.as_ref(),
         out_buf: out_ptr,
-        out_buf_strides: out_strides,
+        out_buf_strides: out_strides.as_ref(),
         reduction_size_overall,
         state_initialized,
     });
@@ -592,17 +592,17 @@ where
     Ok(())
 }
 
-struct ReduceTileArgs<D: Dimension> {
+struct ReduceTileArgs<'a, D: Dimension> {
     tile_out_shape: D::Vec<u64>,
     items_buf: *const u8,
-    items_buf_strides: D::Vec<usize>,
+    items_buf_strides: &'a [usize],
     state_buf: *mut u8,
-    state_buf_strides: D::Vec<usize>,
+    state_buf_strides: &'a [usize],
     merge_into_existing: bool,
     tile_reduction_size: usize,
     bulk_base_item_idx: u64,
 }
-fn reduce_tile<T, K, D>(kernel: &K, args: ReduceTileArgs<D>)
+fn reduce_tile<T, K, D>(kernel: &K, args: ReduceTileArgs<'_, D>)
 where
     T: Dtyped,
     K: ReductionOpKernel<T, Output: Dtyped>,
@@ -730,16 +730,16 @@ where
     unsafe { states[0].assume_init_read() }
 }
 
-struct FinalizeStateArgs<D: Dimension> {
+struct FinalizeStateArgs<'a, D: Dimension> {
     out_shape: D::Vec<u64>,
     state_buf: *mut u8,
-    state_buf_strides: D::Vec<usize>,
+    state_buf_strides: &'a [usize],
     out_buf: *mut u8,
-    out_buf_strides: D::Vec<usize>,
+    out_buf_strides: &'a [usize],
     reduction_size_overall: u64,
     state_initialized: bool,
 }
-fn finalize_states<T, K, D>(kernel: &K, args: FinalizeStateArgs<D>)
+fn finalize_states<T, K, D>(kernel: &K, args: FinalizeStateArgs<'_, D>)
 where
     K: ReductionOpKernel<T>,
     D: Dimension,

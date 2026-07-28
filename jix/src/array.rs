@@ -455,7 +455,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 let (out_buf, out_strides) = buf.get_strided_mut::<D>(index, self.dtype());
 
                 let iter = NdIter::builder(read_shape)
-                    .with_strides_ptr_mut_ext(out_strides, out_buf.as_mut_ptr())
+                    .with_strides_ptr_mut_ext(out_strides.as_ref(), out_buf.as_mut_ptr())
                     .build();
                 for (idx, dst) in iter {
                     let value = (self.f)(D::from_slice(idx.as_ref()).to_index());

@@ -323,7 +323,7 @@ where
                     data: &mut impl ReadData<T>,
                     buf: &mut [u8],
                     read_shape: D::Vec<u64>,
-                    strides: D::Vec<usize>,
+                    strides: &[usize],
                 ) -> Result<()>
                 where
                     T: Dtyped,
@@ -338,7 +338,6 @@ where
                     Ok(())
                 }
 
-                let strides = D::vec(index.len(), |d| strides[d]);
                 let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
                 // this is a compile time check, the compiler knows the value of LANES
                 let read_fn = match <T as LanesInfo>::LANES {

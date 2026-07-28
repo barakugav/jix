@@ -429,15 +429,15 @@ impl<D: Dimension> NdIter<D, ()> {
 impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
     /// Adds a [`NdIterExtStridesPtr`]  extension.
     #[inline]
-    pub(crate) fn with_strides_ptr_ext<T, S>(
+    pub(crate) fn with_strides_ptr_ext<'a, T, S>(
         self,
-        strides: D::Vec<S>,
+        strides: &'a [S],
         initial_ptr: *const T,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtr<D, T, S>>>
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtr<'a, T, S>>>
     where
         S: Idx,
     {
-        let ext = NdIterExtStridesPtr::<D, T, S>::new(strides, initial_ptr);
+        let ext = NdIterExtStridesPtr::<T, S>::new(strides, initial_ptr);
         NdIterBuilder {
             begin: self.begin,
             end: self.end,
@@ -447,15 +447,15 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 
     /// Adds a [`NdIterExtStridesPtrMut`] extension.
     #[inline]
-    pub(crate) fn with_strides_ptr_mut_ext<T, S>(
+    pub(crate) fn with_strides_ptr_mut_ext<'a, T, S>(
         self,
-        strides: D::Vec<S>,
+        strides: &'a [S],
         initial_ptr: *mut T,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtrMut<D, T, S>>>
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtrMut<'a, T, S>>>
     where
         S: Idx,
     {
-        let ext = NdIterExtStridesPtrMut::<D, T, S>::new(strides, initial_ptr);
+        let ext = NdIterExtStridesPtrMut::<T, S>::new(strides, initial_ptr);
         NdIterBuilder {
             begin: self.begin,
             end: self.end,
@@ -465,12 +465,12 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 
     /// Adds a [`NdIterExtStridesOffset`] extension.
     #[inline]
-    pub(crate) fn with_strides_offset_ext<S: Idx>(
+    pub(crate) fn with_strides_offset_ext<'a, S: Idx>(
         self,
-        strides: D::Vec<S>,
+        strides: &'a [S],
         initial_offset: S,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D, S>>> {
-        let ext = NdIterExtStridesOffset::<D, S>::new(strides, initial_offset);
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<'a, S>>> {
+        let ext = NdIterExtStridesOffset::<S>::new(strides, initial_offset);
         NdIterBuilder {
             begin: self.begin,
             end: self.end,
@@ -478,13 +478,14 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
         }
     }
 
-    /// Adds a [`NdIterExtStridesOffset`] extension.
+    /// Adds a [`NdIterExtStridesOffset`] extension that tracks the global logical (row-major) index,
+    /// given the pre-computed `logical_strides` of the iterated shape.
     #[inline]
-    pub(crate) fn with_logical_global_index_ext(
+    pub(crate) fn with_logical_global_index_ext<'a>(
         self,
-        shape: &[u64],
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<D, u64>>> {
-        let ext = nd_iter_ext_logical_global_index::<D>(shape, self.begin.as_ref());
+        logical_strides: &'a [u64],
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffset<'a, u64>>> {
+        let ext = nd_iter_ext_logical_global_index(logical_strides, self.begin.as_ref());
         NdIterBuilder {
             begin: self.begin,
             end: self.end,
@@ -856,8 +857,8 @@ mod tests {
         let base_a = a.as_mut_ptr();
         let base_b = b.as_mut_ptr();
         let ext = (
-            NdIterExtStridesPtrMut::new(dv(&[3usize, 1]), base_a),
-            NdIterExtStridesPtrMut::new(dv(&[6usize, 2]), base_b),
+            NdIterExtStridesPtrMut::new(&[3usize, 1], base_a),
+            NdIterExtStridesPtrMut::new(&[6usize, 2], base_b),
         );
         let iter = NdIter::new(dv(&[2u64, 3]), ext);
         let mut flat = 0usize;
@@ -874,7 +875,7 @@ mod tests {
         let mut data = [0u8; 4];
         let base = data.as_mut_ptr();
         let ext = (
-            NdIterExtStridesPtrMut::new(dv(&[1usize]), base),
+            NdIterExtStridesPtrMut::new(&[1usize], base),
             ChangeLog::new(),
         );
         let mut iter = NdIter::new(dv(&[4u64]), ext);
@@ -895,9 +896,9 @@ mod tests {
         let mut b = [0u8; 4];
         let mut c = [0u8; 4];
         let ext = (
-            NdIterExtStridesPtrMut::new(dv(&[1usize]), a.as_mut_ptr()),
-            NdIterExtStridesPtrMut::new(dv(&[1usize]), b.as_mut_ptr()),
-            NdIterExtStridesPtrMut::new(dv(&[1usize]), c.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(&[1usize], a.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(&[1usize], b.as_mut_ptr()),
+            NdIterExtStridesPtrMut::new(&[1usize], c.as_mut_ptr()),
         );
         let iter = NdIter::new(dv(&[4u64]), ext);
         let mut count = 0usize;
@@ -950,7 +951,7 @@ mod tests {
         let mut data = [0u8; 6];
         let base = data.as_mut_ptr();
         let iter = NdIter::builder(dv(&[2u64, 3]))
-            .with_strides_ptr_mut_ext(dv(&[3usize, 1]), base)
+            .with_strides_ptr_mut_ext(&[3usize, 1], base)
             .build();
         let mut flat = 0usize;
         for (_, ptr) in iter {
@@ -968,8 +969,8 @@ mod tests {
         let base_src = src.as_mut_ptr();
         let base_dst = dst.as_mut_ptr();
         let iter = NdIter::builder(dv(&[2u64, 3]))
-            .with_strides_ptr_ext(dv(&[3usize, 1]), base_src.cast_const())
-            .with_strides_ptr_mut_ext(dv(&[6usize, 2]), base_dst)
+            .with_strides_ptr_ext(&[3usize, 1], base_src.cast_const())
+            .with_strides_ptr_mut_ext(&[6usize, 2], base_dst)
             .build();
         let mut flat = 0usize;
         for (_, (sp, dp)) in iter {
@@ -990,16 +991,16 @@ mod tests {
         let base_b = b.as_mut_ptr();
         // The same two extensions, once via the builder and once via a manual tuple constructor.
         let built: Vec<(*const u8, *mut u8)> = NdIter::builder(dv(&[2u64, 3]))
-            .with_strides_ptr_ext(dv(&[3usize, 1]), base_a)
-            .with_strides_ptr_mut_ext(dv(&[3usize, 1]), base_b)
+            .with_strides_ptr_ext(&[3usize, 1], base_a)
+            .with_strides_ptr_mut_ext(&[3usize, 1], base_b)
             .build()
             .map(|(_, pair)| pair)
             .collect();
         let manual: Vec<(*const u8, *mut u8)> = NdIter::new(
             dv(&[2u64, 3]),
             (
-                NdIterExtStridesPtr::new(dv(&[3usize, 1]), base_a),
-                NdIterExtStridesPtrMut::new(dv(&[3usize, 1]), base_b),
+                NdIterExtStridesPtr::new(&[3usize, 1], base_a),
+                NdIterExtStridesPtrMut::new(&[3usize, 1], base_b),
             ),
         )
         .map(|(_, pair)| pair)
@@ -1013,9 +1014,9 @@ mod tests {
         let mut b = [0u8; 4];
         let mut c = [0u8; 4];
         let iter = NdIter::builder(dv(&[4u64]))
-            .with_strides_ptr_mut_ext(dv(&[1usize]), a.as_mut_ptr())
-            .with_strides_ptr_mut_ext(dv(&[1usize]), b.as_mut_ptr())
-            .with_strides_ptr_mut_ext(dv(&[1usize]), c.as_mut_ptr())
+            .with_strides_ptr_mut_ext(&[1usize], a.as_mut_ptr())
+            .with_strides_ptr_mut_ext(&[1usize], b.as_mut_ptr())
+            .with_strides_ptr_mut_ext(&[1usize], c.as_mut_ptr())
             .build();
         let mut count = 0usize;
         for (_, (pa, pb, pc)) in iter {

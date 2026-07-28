@@ -3,7 +3,7 @@ use std::ptr;
 use crate::arrayvec::ArrayVec;
 use crate::dtype::{Dtype, Itemsize};
 use crate::iter::NdIter;
-use crate::{dim_arr, Dim, DimArray, Dimension, SliceExt};
+use crate::{dim_arr, Dim, DimArray, Dimension};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.
@@ -493,8 +493,8 @@ impl<'a> NdCopier<'a> {
         copy_1d_row: Copy1dRowFn,
     ) {
         let iter = NdIter::builder(D::vec(outer_shape.len(), |i| outer_shape[i] as u64))
-            .with_strides_offset_ext(outer_src_strides.to_dim_vec::<D>(), 0)
-            .with_strides_offset_ext(outer_dst_strides.to_dim_vec::<D>(), 0)
+            .with_strides_offset_ext(outer_src_strides, 0)
+            .with_strides_offset_ext(outer_dst_strides, 0)
             .build();
         for (_, (src_off, dst_off)) in iter {
             unsafe {

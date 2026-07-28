@@ -20,7 +20,10 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ElementType, OutBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, default_strides, NdCopier};
-use crate::{default_strides_cast, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension};
+use crate::{
+    default_logical_strides_slice, default_strides_cast, ArrayParams, ArrayStorage, Dim, DimDyn,
+    DimVec, Dimension,
+};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -429,9 +432,10 @@ where
         });
         let block_grid_shape =
             ActualD::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
+        let block_grid_logical_strides = default_logical_strides_slice(block_grid_shape.as_ref());
 
         let block_iter = NdIter::builder_with_begin(block_begin, block_end)
-            .with_logical_global_index_ext(block_grid_shape.as_ref())
+            .with_logical_global_index_ext(block_grid_logical_strides.as_ref())
             .with_block_offset_size_ext(
                 &ActualD::vec(ndim, |dim| index[dim].start),
                 &ActualD::vec(ndim, |dim| index[dim].end),
