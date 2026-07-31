@@ -122,37 +122,25 @@ jobs:
 
       ############ Linters ############
       - name: Clippy jix-schema
-        uses: auguwu/clippy-action@1.5.0
+        run: cargo clippy --all-features
+        working-directory: jix/schema
         env:
           RUSTFLAGS: "-D warnings"
-        with:
-          working-directory: jix/schema
-          check-args: --all-features
-          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix-macros
-        uses: auguwu/clippy-action@1.5.0
+        run: cargo clippy --all-features
+        working-directory: jix-macros
         env:
           RUSTFLAGS: "-D warnings"
-        with:
-          working-directory: jix-macros
-          check-args: --all-features
-          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix
-        uses: auguwu/clippy-action@1.5.0
+        run: cargo clippy --all-features
+        working-directory: jix
         env:
           RUSTFLAGS: "-D warnings"
-        with:
-          working-directory: jix
-          check-args: --all-features
-          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Clippy jix-py
-        uses: auguwu/clippy-action@1.5.0
+        run: cargo clippy --all-features
+        working-directory: jix-py
         env:
           RUSTFLAGS: "-D warnings"
-        with:
-          working-directory: jix-py
-          check-args: --all-features
-          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Ruff jix-py
         uses: astral-sh/ruff-action@v3
         with:
@@ -239,13 +227,10 @@ jobs:
         env:
           RUSTFLAGS: "-D warnings"
       - name: cargo clippy jix
-        uses: auguwu/clippy-action@1.5.0
+        run: cargo clippy --all-features
+        working-directory: jix
         env:
           RUSTFLAGS: "-D warnings"
-        with:
-          working-directory: jix
-          check-args: --all-features
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: cargo check jix-py
         run: cargo check --all-features
@@ -253,10 +238,7 @@ jobs:
         env:
           RUSTFLAGS: "-D warnings"
       - name: cargo clippy jix-py
-        uses: auguwu/clippy-action@1.5.0
+        run: cargo clippy --all-features
+        working-directory: jix-py
         env:
           RUSTFLAGS: "-D warnings"
-        with:
-          working-directory: jix-py
-          check-args: --all-features
-          token: ${{ secrets.GITHUB_TOKEN }}
