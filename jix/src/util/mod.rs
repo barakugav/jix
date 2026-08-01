@@ -626,6 +626,20 @@ impl<T> SliceExt<T> for [T] {
     }
 }
 
+pub(crate) trait PtrExt<T> {
+    fn read_maybe_aligned<const ALIGNED: bool>(self) -> T;
+}
+impl<T> PtrExt<T> for *const T {
+    #[inline(always)]
+    fn read_maybe_aligned<const ALIGNED: bool>(self) -> T {
+        if ALIGNED {
+            unsafe { self.read() }
+        } else {
+            unsafe { self.read_unaligned() }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

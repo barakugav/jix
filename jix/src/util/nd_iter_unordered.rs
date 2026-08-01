@@ -1,4 +1,6 @@
+use crate::dtype::Dtyped;
 use crate::util::iter::NdIter;
+use crate::util::PtrExt;
 use crate::{dim_arr, DimArray};
 
 /// Drive an inner loop Fn over every element of `N_OPERANDS` identically-shaped strided n-d regions,
@@ -130,6 +132,98 @@ pub(crate) struct NdApplyInnerFlags<'a> {
 
     pub(crate) aligned: &'a [bool],
     pub(crate) contiguous: &'a [bool],
+}
+
+pub(crate) fn nd_iter_unordered_op0<T, U>(
+    shape: &[usize],
+    data_ptr: *mut T,
+    strides: &[usize],
+    mut kernel: impl FnMut(T) -> U,
+) where
+    T: Dtyped,
+    U: Dtyped,
+{
+    let (itemsize, alignment) = (size_of::<T>(), align_of::<T>());
+    assert!(itemsize == size_of::<U>() && alignment <= align_of::<U>());
+
+    nd_iter_unordered(shape, [strides], [(itemsize, alignment)], |flags| {
+        let aligned = flags.aligned[0] && data_ptr.is_aligned();
+        let inner_loop_fn = match (aligned, flags.contiguous[0]) {
+            (true, true) => inner_loop::<T, U, 1, true, true>,
+            (true, false) => inner_loop::<T, U, 1, true, false>,
+            (false, true) => inner_loop::<T, U, 1, false, true>,
+            (false, false) => inner_loop::<T, U, 1, false, false>,
+        };
+        move |offsets, inner_len, inner_strides| {
+            let [offset] = offsets;
+            let data_ptr = unsafe { data_ptr.cast::<u8>().add(offset).cast::<T>() };
+            let [inner_stride] = inner_strides;
+            inner_loop_fn(data_ptr, inner_len, inner_stride, &mut kernel)
+        }
+    });
+
+    #[inline(never)]
+    fn inner_loop<T, U, const LANES: usize, const ALIGNED: bool, const CONTIGUOUS: bool>(
+        data_ptr: *mut T,
+        len: usize,
+        inner_stride: usize,
+        kernel: &mut impl FnMut(T) -> U,
+    ) where
+        T: Dtyped,
+        U: Dtyped,
+    {
+        assert_eq!(size_of::<T>(), size_of::<U>());
+        let data_ptr = data_ptr.cast::<T>();
+        if CONTIGUOUS {
+            debug_assert_eq!(inner_stride, size_of::<T>());
+        }
+        let write = |j: usize, val: U| {
+            let dst = data_ptr.cast::<U>();
+            let elm = if CONTIGUOUS {
+                unsafe { dst.add(j) }
+            } else {
+                unsafe { dst.cast::<u8>().add(j * inner_stride).cast::<U>() }
+            };
+            if ALIGNED {
+                unsafe { elm.write(val) };
+            } else {
+                unsafe { elm.write_unaligned(val) };
+            }
+        };
+        let mut i = 0;
+        if CONTIGUOUS && len >= LANES {
+            while i <= len - LANES {
+                let chunk = unsafe {
+                    data_ptr
+                        .add(i)
+                        .cast::<[T; LANES]>()
+                        .read_maybe_aligned::<ALIGNED>()
+                };
+                for k in 0..LANES {
+                    write(i + k, kernel(chunk[k]));
+                }
+                i += LANES;
+            }
+
+            while i < len {
+                let val = unsafe { data_ptr.add(i).read_maybe_aligned::<ALIGNED>() };
+                write(i, kernel(val));
+                i += 1;
+            }
+        } else {
+            while i < len {
+                let val = unsafe {
+                    data_ptr
+                        .cast::<u8>()
+                        .add(i * inner_stride)
+                        .cast::<T>()
+                        .read_maybe_aligned::<ALIGNED>()
+                };
+                write(i, kernel(val));
+                i += 1;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -539,6 +633,233 @@ mod tests {
                 prop_assert!(run.visited.is_empty());
                 prop_assert!(run.flags.is_none());
                 prop_assert_eq!(run.inner_calls, 0);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    // ---------------------------------------------------------------------------
+    // nd_iter_unordered_op0 - in-place strided map over operand 0
+    // ---------------------------------------------------------------------------
+
+    use crate::dtype::Dtyped;
+
+    // Deterministic kernels used both to drive the function and to build the reference. Fn pointers
+    // are `Copy`, so the same value serves both roles.
+    fn kmul_u32(x: u32) -> u32 {
+        x.wrapping_mul(0x9E37_79B1).wrapping_add(1)
+    }
+    fn kmul_u16(x: u16) -> u16 {
+        x.wrapping_mul(3).wrapping_add(7)
+    }
+    fn k_i32_to_u32(x: i32) -> u32 {
+        (x as u32) ^ 0xABCD_1234
+    }
+
+    // Bytes needed to hold every element of `shape` at the given byte strides (0 for empty regions).
+    fn buf_len(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
+        if shape.contains(&0) {
+            return 0;
+        }
+        let max_off: usize = shape
+            .iter()
+            .zip(strides)
+            .map(|(&s, &st)| (s - 1) * st)
+            .sum();
+        max_off + itemsize
+    }
+
+    /// Run `nd_iter_unordered_op0` as an in-place map and assert it byte-matches a naive reference
+    /// that maps every in-region element and leaves the gaps (bytes no element covers) untouched.
+    ///
+    /// `strides` are byte strides and MUST give every element a distinct offset (no broadcast / no
+    /// overlap): an in-place map over overlapping elements is order-dependent, and the walk order is
+    /// deliberately unspecified. Returns the `(aligned, contiguous)` flags the walk reported (i.e.
+    /// which of the four inner-loop specializations ran), or `None` for an empty region.
+    #[track_caller]
+    fn check_op0<T, U>(
+        shape: &[usize],
+        strides: &[usize],
+        kernel: fn(T) -> U,
+    ) -> Option<(bool, bool)>
+    where
+        T: Dtyped,
+        U: Dtyped,
+    {
+        let itemsize = size_of::<T>();
+        assert_eq!(itemsize, size_of::<U>());
+
+        // Observe which specialization this layout selects, so callers can pin it down.
+        let observed = run(shape, [strides], [(itemsize, align_of::<T>())])
+            .flags
+            .map(|f| (f.aligned[0], f.contiguous[0]));
+
+        let len = buf_len(shape, strides, itemsize);
+        let initial: Vec<u8> = (0..len)
+            .map(|i| (i as u8).wrapping_mul(37).wrapping_add(11))
+            .collect();
+
+        // Reference: map each in-region element in place, reading from the pristine initial bytes
+        // (offsets are distinct, so no element is read after another has overwritten it).
+        let mut expected = initial.clone();
+        for [off] in reference::<1>(shape, [strides]) {
+            let t = unsafe { initial.as_ptr().add(off).cast::<T>().read_unaligned() };
+            unsafe {
+                expected
+                    .as_mut_ptr()
+                    .add(off)
+                    .cast::<U>()
+                    .write_unaligned(kernel(t))
+            };
+        }
+
+        // Actual: seed an 8-byte-aligned buffer with the same bytes (so the aligned inner-loop path
+        // is sound whenever the walk selects it), then run the in-place map over it.
+        let mut backing = vec![0u64; len.div_ceil(8) + 1];
+        let base = backing.as_mut_ptr().cast::<u8>();
+        unsafe { base.copy_from_nonoverlapping(initial.as_ptr(), len) };
+        nd_iter_unordered_op0::<T, U>(shape, base.cast::<T>(), strides, kernel);
+        let actual = unsafe { std::slice::from_raw_parts(base, len) };
+        assert_eq!(
+            actual,
+            expected.as_slice(),
+            "shape={shape:?} strides={strides:?}"
+        );
+
+        observed
+    }
+
+    // The four inner-loop specializations, keyed on (aligned, contiguous). `aligned` reflects every
+    // byte stride being a multiple of the element alignment; `contiguous` reflects the innermost run
+    // having stride == element size. Each case is constructed to select exactly one specialization.
+
+    #[test]
+    fn op0_aligned_contiguous() {
+        // Fully contiguous u32 run: strides multiple of align 4, inner stride == size 4.
+        assert_eq!(
+            check_op0::<u32, u32>(&[3, 4], &[16, 4], kmul_u32),
+            Some((true, true))
+        );
+    }
+
+    #[test]
+    fn op0_aligned_not_contiguous() {
+        // Stride 8 is a multiple of align 4 (aligned) but not equal to size 4 (not contiguous).
+        assert_eq!(
+            check_op0::<u32, u32>(&[3], &[8], kmul_u32),
+            Some((true, false))
+        );
+    }
+
+    #[test]
+    fn op0_not_aligned_contiguous() {
+        // u16 (align 2): the inner axis stays contiguous (stride 2 == size 2) while the odd outer
+        // stride 7 makes the walk not-aligned - so contiguous chunk reads go through the unaligned
+        // intrinsics.
+        assert_eq!(
+            check_op0::<u16, u16>(&[2, 3], &[7, 2], kmul_u16),
+            Some((false, true))
+        );
+    }
+
+    #[test]
+    fn op0_not_aligned_not_contiguous() {
+        // u16 with an odd inner stride 3: neither a multiple of align 2 nor equal to size 2.
+        assert_eq!(
+            check_op0::<u16, u16>(&[3], &[3], kmul_u16),
+            Some((false, false))
+        );
+    }
+
+    #[test]
+    fn op0_multidim_coalesces_to_one_run() {
+        // C-order [2,3,4] u32 collapses to a single contiguous run of 24 elements.
+        assert_eq!(
+            check_op0::<u32, u32>(&[2, 3, 4], &[48, 16, 4], kmul_u32),
+            Some((true, true))
+        );
+    }
+
+    #[test]
+    fn op0_strided_outer_drives_the_outer_walk() {
+        // Outer stride 20 != inner span 12, so the axes stay split and the outer NdIter drives the
+        // inner run twice - exercising op0's per-outer-position offset add.
+        assert_eq!(
+            check_op0::<u32, u32>(&[2, 3], &[20, 4], kmul_u32),
+            Some((true, true))
+        );
+    }
+
+    #[test]
+    fn op0_size_one_axes_are_dropped() {
+        assert_eq!(
+            check_op0::<u32, u32>(&[1, 4, 1], &[400, 4, 200], kmul_u32),
+            Some((true, true))
+        );
+    }
+
+    #[test]
+    fn op0_scalar_single_element() {
+        assert_eq!(
+            check_op0::<u32, u32>(&[], &[], kmul_u32),
+            Some((true, true))
+        );
+        assert_eq!(
+            check_op0::<u32, u32>(&[1, 1], &[8, 4], kmul_u32),
+            Some((true, true))
+        );
+    }
+
+    #[test]
+    fn op0_empty_region_is_a_noop() {
+        // A zero-length axis short-circuits before the factory runs: nothing is mapped.
+        assert_eq!(check_op0::<u32, u32>(&[0], &[4], kmul_u32), None);
+        assert_eq!(
+            check_op0::<u32, u32>(&[2, 0, 3], &[24, 8, 4], kmul_u32),
+            None
+        );
+    }
+
+    #[test]
+    fn op0_type_changing_kernel() {
+        // T and U differ but share size and alignment (i32 -> u32); the reference reads i32 bytes
+        // and writes u32 bytes at the same offsets, matching the in-place transform.
+        assert_eq!(
+            check_op0::<i32, u32>(&[5], &[4], k_i32_to_u32),
+            Some((true, true))
+        );
+    }
+
+    #[test]
+    fn prop_op0_matches_reference() {
+        // Contiguous-with-gaps u32 layouts over ranks 0..=4: the inner axis is contiguous or strided
+        // depending on the multipliers, covering the aligned contiguous/non-contiguous paths, the
+        // coalescing merge, and the scalar / outer-walk shapes.
+        let strategy = (0usize..=4).prop_flat_map(|ndim| {
+            (
+                prop::collection::vec(1usize..=4, ndim),
+                prop::collection::vec(1usize..=3, ndim),
+            )
+        });
+        runner(0x0F0)
+            .run(&strategy, |(shape, mult)| {
+                let strides = strided_strides(&shape, &mult, size_of::<u32>());
+                check_op0::<u32, u32>(&shape, &strides, kmul_u32);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn prop_op0_unaligned_outer_stride() {
+        // u16 with a contiguous inner axis behind a forced-odd outer stride: every draw is
+        // not-aligned-but-contiguous, so this fuzzes the unaligned chunk-read path across shapes.
+        // Both extents are >= 2 so neither axis is dropped as size-1 (which would revive alignment).
+        runner(0xF00D)
+            .run(&(2usize..=4, 2usize..=4, 0usize..=3), |(a, b, k)| {
+                let strides = [2 * b + (2 * k + 1), 2]; // outer odd and > inner span 2*b
+                let flags = check_op0::<u16, u16>(&[a, b], &strides, kmul_u16).unwrap();
+                prop_assert_eq!(flags, (false, true));
                 Ok(())
             })
             .unwrap();
