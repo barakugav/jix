@@ -1,7 +1,7 @@
 use crate::dtype::Dtyped;
 use crate::util::iter::NdIter;
 use crate::util::PtrExt;
-use crate::{dim_arr, DimArray};
+use crate::{dim_arr, ArrayExt, Dim, DimArray, DimDyn, Dimension};
 
 /// Drive an inner loop Fn over every element of `N_OPERANDS` identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
@@ -32,7 +32,7 @@ pub(crate) fn nd_iter_unordered<
     const N_OPERANDS: usize,
     F: FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
 >(
-    shape: &[usize],
+    mut shape: &[usize],
     strides: [&[usize]; N_OPERANDS],
     layouts: [(usize, usize); N_OPERANDS], // (size, alignment) per operand, in its stride unit
     inner_loop_factory: impl FnOnce(NdApplyInnerFlags) -> F,
@@ -54,10 +54,23 @@ pub(crate) fn nd_iter_unordered<
             dim_perm.push(d);
         }
     }
-    dim_perm.sort_by_key(|&d| std::cmp::Reverse(key(d)));
-    let apply_dim_permutation = |arr: &[usize]| dim_arr(dim_perm.len(), |d| arr[dim_perm[d]]);
-    let shape = apply_dim_permutation(shape);
-    let strides: [_; N_OPERANDS] = std::array::from_fn(|i| apply_dim_permutation(strides[i]));
+    let shape_storage;
+    let strides_storage: [_; N_OPERANDS];
+    let need_sort = dim_perm.windows(2).any(|w| key(w[0]) < key(w[1]));
+    let (shape, strides) = if dim_perm.len() != shape.len() || need_sort {
+        if need_sort {
+            dim_perm.sort_by_key(|&d| std::cmp::Reverse(key(d)));
+        }
+        let apply_dim_permutation = |arr: &[usize]| dim_arr(dim_perm.len(), |d| arr[dim_perm[d]]);
+        shape_storage = apply_dim_permutation(shape);
+        strides_storage = std::array::from_fn(|i| apply_dim_permutation(strides[i]));
+        (
+            shape_storage.as_slice(),
+            strides_storage.each_ref().map(|s| s.as_slice()),
+        )
+    } else {
+        (shape, strides)
+    };
 
     // (2) Coalesce adjacent contiguous axes into groups. After the permutation the axes run
     // outermost (index 0) -> innermost, so a group spanning post-permutation axes [lo..=hi]
@@ -78,58 +91,99 @@ pub(crate) fn nd_iter_unordered<
         }
     }
     let apply_merge = |arr: &[usize]| dim_arr(group_inner.len(), |g| arr[group_inner[g]]);
-    let strides: [_; N_OPERANDS] = std::array::from_fn(|i| apply_merge(&strides[i]));
-    let shape = group_len;
+    let mut strides: [_; N_OPERANDS] = std::array::from_fn(|i| apply_merge(&strides[i]));
+    let mut shape = group_len;
 
     // (3) Build the inner-run closure from the innermost-axis flags, then drive it once per outer
     // position with the running per-operand byte offsets.
-    let ndim = shape.len();
+    let mut ndim = shape.len();
     let sizes: [_; N_OPERANDS] = std::array::from_fn(|i| layouts[i].0);
+    let is_aligned;
+    let is_contiguous;
     if ndim == 0 {
-        // The whole region is a single element.
-        let mut inner_loop = inner_loop_factory(NdApplyInnerFlags {
-            inner_len: 1,
-            aligned: &[true; N_OPERANDS],
-            contiguous: &[true; N_OPERANDS],
+        // The whole region is a single element. Treat as 1-d with length 1.
+        shape.push(1);
+        ndim = 1;
+        for i in 0..N_OPERANDS {
+            strides[i].push(sizes[i]);
+        }
+        is_aligned = [true; N_OPERANDS];
+        is_contiguous = [true; N_OPERANDS];
+    } else {
+        is_aligned = std::array::from_fn::<_, N_OPERANDS, _>(|i| {
+            let alignment = layouts[i].1;
+            strides[i].iter().all(|s| s.is_multiple_of(alignment))
         });
-        inner_loop([0; N_OPERANDS], 1, sizes);
-        return;
+        is_contiguous =
+            std::array::from_fn::<_, N_OPERANDS, _>(|i| strides[i][ndim - 1] == sizes[i]);
     }
-
     let inner = ndim - 1;
     let inner_len = shape[inner];
     let inner_strides: [_; N_OPERANDS] = std::array::from_fn(|i| strides[i][inner]);
 
-    let mut inner_run = inner_loop_factory(NdApplyInnerFlags {
+    let mut inner_loop = inner_loop_factory(NdApplyInnerFlags {
         inner_len,
-        aligned: &std::array::from_fn::<_, N_OPERANDS, _>(|i| {
-            let alignment = layouts[i].1;
-            strides[i].iter().all(|s| s.is_multiple_of(alignment))
-        }),
-        contiguous: &std::array::from_fn::<_, N_OPERANDS, _>(|i| inner_strides[i] == sizes[i]),
+        aligned: &is_aligned,
+        contiguous: &is_contiguous,
     });
 
     if ndim == 1 {
-        inner_run([0; N_OPERANDS], inner_len, inner_strides);
+        inner_loop([0; N_OPERANDS], inner_len, inner_strides);
+    } else {
+        let strides = strides.each_ref();
+        let strides = strides.map(|s| s.as_slice());
+        let nd_walk_fn = match ndim {
+            2 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<1>>,
+            3 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<2>>,
+            4 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<3>>,
+            _ => nd_iter_unordered_nd_walk::<N_OPERANDS, DimDyn>,
+        };
+        nd_walk_fn(&shape, strides, &mut inner_loop);
+    }
+}
+#[inline(never)]
+fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, D: Dimension>(
+    shape: &[usize],
+    strides: [&[usize]; N_OPERANDS],
+    mut inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
+) {
+    let ndim = shape.len();
+    let inner_len = shape[ndim - 1];
+    let inner_strides = std::array::from_fn(|i| strides[i][ndim - 1]);
+
+    if D::NDIM == Some(1) {
+        // Special case for 2D: the outer `NdIter` is just a single loop over the outer axis, and
+        // and inner loop is a flat 1-d run.
+
+        let outer_len = shape[0];
+        let outer_strides: [_; N_OPERANDS] = std::array::from_fn(|i| [strides[i][0]]);
+        let mut offsets = [0usize; N_OPERANDS];
+        for i in 0..outer_len {
+            if i > 0 {
+                for op_i in 0..N_OPERANDS {
+                    offsets[op_i] += outer_strides[op_i][0];
+                }
+            }
+            inner_loop(offsets, inner_len, inner_strides);
+        }
     } else {
         // Flat inner 1-d run over the innermost axis [ndim-1]; the outer `NdIter` walks the outer
         // axes and yields all `N_OPERANDS` running byte offsets at once.
-        let outer_shape = dim_arr(ndim - 1, |k| shape[k] as u64);
+
+        let outer_shape = D::vec(ndim - 1, |k| shape[k] as u64);
         let outer_strides: [_; N_OPERANDS] =
-            std::array::from_fn(|i| dim_arr(ndim - 1, |k| strides[i][k]));
+            std::array::from_fn(|i| D::vec(ndim - 1, |k| strides[i][k]));
         let iter = NdIter::builder(outer_shape)
             .with_strides_offset_multi_ext(outer_strides, [0usize; N_OPERANDS])
             .build();
         for (_, offsets) in iter {
-            inner_run(offsets, inner_len, inner_strides);
+            inner_loop(offsets, inner_len, inner_strides);
         }
     }
 }
 
 pub(crate) struct NdApplyInnerFlags<'a> {
-    #[allow(unused)]
     pub(crate) inner_len: usize,
-
     pub(crate) aligned: &'a [bool],
     pub(crate) contiguous: &'a [bool],
 }
