@@ -1,6 +1,6 @@
 [package]
 name = "jix"
-version = "0.0.3"
+version = "0.0.4"
 authors = ["Barak Ugav <barakugav@gmail.com>"]
 edition = "2024"
 rust-version = "1.89.0"
@@ -20,7 +20,7 @@ include = [
 ]
 
 [dependencies]
-jix-macros = { path = "../jix-macros", version = "=0.0.3" }
+jix-macros = { path = "../jix-macros", version = "=0.0.4" }
 ndarray = ">=0.16,<0.18"
 memmap2 = "0.9"
 num-traits = "0.2" # TODO make it optional
