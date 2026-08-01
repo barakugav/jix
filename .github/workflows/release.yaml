@@ -95,7 +95,7 @@ jobs:
             target: ppc64le
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
       - name: Build wheels
@@ -127,7 +127,7 @@ jobs:
             target: armv7
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
       - name: Build wheels
@@ -181,7 +181,7 @@ jobs:
             artifact-suffix: "-freethreaded"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ join(matrix.platform.python-version, fromJSON('"\n"')) }}
           architecture: ${{ matrix.platform.python_arch }}
@@ -209,7 +209,7 @@ jobs:
             target: aarch64
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: |
             3.10
@@ -252,7 +252,7 @@ jobs:
     if: ${{ inputs.publish-py }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         # Do not change this to uv, as the build of the bindings require CPython libraries to be available
         with:
           python-version: 3.13
