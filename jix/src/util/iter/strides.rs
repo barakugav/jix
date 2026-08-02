@@ -174,6 +174,57 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
     impl_merge_extension!();
 }
 
+/// An nd-iterator extension that tracks `N` offsets into `N` strided arrays simultaneously.
+///
+/// Like [`NdIterExtStridesOffset`] but for a fixed number of operands sharing one index walk: on
+/// each dimension change every offset is advanced by `(after - before) * strides[operand][dim]`, and
+/// [`value`](NdIterExtension::value) yields `[S; N]`.
+pub(crate) struct NdIterExtStridesOffsetMulti<D: Dimension, S, const N: usize> {
+    strides: [D::Vec<S>; N],
+    offsets: [S; N],
+}
+impl<D: Dimension, S: Idx, const N: usize> NdIterExtStridesOffsetMulti<D, S, N> {
+    #[inline]
+    pub fn new(strides: [D::Vec<S>; N], initial_offsets: [S; N]) -> Self {
+        Self {
+            strides,
+            offsets: initial_offsets,
+        }
+    }
+}
+impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
+    for NdIterExtStridesOffsetMulti<D, S, N>
+{
+    type Item = [S; N];
+
+    #[inline(always)]
+    fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+        let diff = S::from_u64(diff);
+        for i in 0..N {
+            self.offsets[i] += diff * self.strides[i][dim];
+        }
+    }
+    #[inline(always)]
+    fn on_decrease(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+        let diff = S::from_u64(diff);
+        for i in 0..N {
+            self.offsets[i] -= diff * self.strides[i][dim];
+        }
+    }
+
+    #[inline(always)]
+    fn value(&self) -> [S; N] {
+        self.offsets
+    }
+
+    #[inline(always)]
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.strides.iter().all(|s| s.as_ref().len() == ndim)
+    }
+
+    impl_merge_extension!();
+}
+
 #[inline]
 pub(crate) fn nd_iter_ext_logical_global_index<D: Dimension>(
     shape: &[u64],

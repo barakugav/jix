@@ -56,7 +56,7 @@ fn bench_compact_read(c: &mut Criterion) {
 
     for (read_shape, shape_cfgs) in configs {
         let mut group = c.benchmark_group(format!("compact_read {:?}", read_shape));
-        group.sample_size(40);
+        group.sample_size(20);
 
         for (shape, block_shape) in shape_cfgs {
             let array = create_compact(shape, block_shape.as_slice(), None, &mut rng);

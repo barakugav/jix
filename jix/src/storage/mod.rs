@@ -53,10 +53,9 @@ use crate::dtype::Dtyped;
 use crate::error::{check_buffer_aligned, check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
-use crate::util::iter::NdIter;
 use crate::{
-    array_from_fn_inline, assert_unchecked_eq, ArrayExt, ArrayStorage, Dimension, ElementType, Ty,
-    TypeDyn,
+    array_from_fn_inline, assert_unchecked_eq, default_logical_strides_slice, dim_arr,
+    nd_iter_unordered, ArrayExt, ArrayStorage, Dimension, ElementType, Ty, TypeDyn,
 };
 
 pub(crate) mod core_trait;
@@ -261,102 +260,21 @@ where
         T: Dtyped,
         Self: Sized,
     {
-        let dtype = T::DTYPE;
-        let (out, strides) = buf.get_mut(self.len(), &dtype);
-
-        match strides {
-            None => {
-                #[inline(never)]
-                unsafe fn read_to_buf_impl<T, const LANES: usize>(
-                    data: &mut impl ReadData<T>,
-                    buf: &mut [u8],
-                ) -> Result<()>
-                where
-                    T: Dtyped,
-                {
-                    let nitems = data.len();
-                    let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
-                    assert_eq!(buf.len(), nitems);
-                    let mut offset = 0;
-                    while offset + LANES <= nitems {
-                        let chunk = data.read_bulk::<LANES>(offset);
-                        buf[offset..LANES + offset].copy_from_slice(&chunk);
-                        offset += LANES;
-                    }
-                    while offset < nitems {
-                        let item = data.read_bulk::<1>(offset)[0];
-                        buf[offset] = item;
-                        offset += 1;
-                    }
-                    Ok(())
-                }
-
-                let nitems = self.len();
-                let required_size = nitems * size_of::<T>();
-                let buf_len = out.len();
-                ensure!(
-                    buf_len == required_size,
-                    InvalidBufferSize,
-                    "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
-                );
-                check_buffer_aligned(out.as_ptr(), &dtype)?;
-
-                // this is a compile time check, the compiler knows the value of LANES
-                let read_fn = match <T as LanesInfo>::LANES {
-                    1 => read_to_buf_impl::<T, 1>,
-                    2 => read_to_buf_impl::<T, 2>,
-                    4 => read_to_buf_impl::<T, 4>,
-                    8 => read_to_buf_impl::<T, 8>,
-                    16 => read_to_buf_impl::<T, 16>,
-                    32 => read_to_buf_impl::<T, 32>,
-                    64 => read_to_buf_impl::<T, 64>,
-                    128 => read_to_buf_impl::<T, 128>,
-                    256 => read_to_buf_impl::<T, 256>,
-                    512 => read_to_buf_impl::<T, 512>,
-                    _ => read_to_buf_impl::<T, 1024>,
-                };
-                unsafe { read_fn(self, out) }
-            }
-            Some(strides) => {
-                #[inline(never)]
-                unsafe fn read_to_buf_impl_strided<T, D: Dimension, const LANES: usize>(
-                    data: &mut impl ReadData<T>,
-                    buf: &mut [u8],
-                    read_shape: D::Vec<u64>,
-                    strides: D::Vec<usize>,
-                ) -> Result<()>
-                where
-                    T: Dtyped,
-                {
-                    let iter = NdIter::builder(read_shape)
-                        .with_strides_ptr_mut_ext(strides, buf.as_mut_ptr())
-                        .build();
-                    for (offset, (_, dst)) in iter.enumerate() {
-                        let item = data.read_bulk::<1>(offset)[0];
-                        unsafe { dst.cast::<T>().write(item) };
-                    }
-                    Ok(())
-                }
-
-                let strides = D::vec(index.len(), |d| strides[d]);
-                let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
-                // this is a compile time check, the compiler knows the value of LANES
-                let read_fn = match <T as LanesInfo>::LANES {
-                    1 => read_to_buf_impl_strided::<T, D, 1>,
-                    2 => read_to_buf_impl_strided::<T, D, 2>,
-                    4 => read_to_buf_impl_strided::<T, D, 4>,
-                    8 => read_to_buf_impl_strided::<T, D, 8>,
-                    16 => read_to_buf_impl_strided::<T, D, 16>,
-                    32 => read_to_buf_impl_strided::<T, D, 32>,
-                    64 => read_to_buf_impl_strided::<T, D, 64>,
-                    128 => read_to_buf_impl_strided::<T, D, 128>,
-                    256 => read_to_buf_impl_strided::<T, D, 256>,
-                    512 => read_to_buf_impl_strided::<T, D, 512>,
-                    _ => read_to_buf_impl_strided::<T, D, 1024>,
-                };
-                unsafe { read_fn(self, out, read_shape, strides) }
-            }
-        }
+        let read_fn = match <T as LanesInfo>::LANES {
+            1 => read_data_to_buf::<T, 1>,
+            2 => read_data_to_buf::<T, 2>,
+            4 => read_data_to_buf::<T, 4>,
+            8 => read_data_to_buf::<T, 8>,
+            16 => read_data_to_buf::<T, 16>,
+            32 => read_data_to_buf::<T, 32>,
+            64 => read_data_to_buf::<T, 64>,
+            128 => read_data_to_buf::<T, 128>,
+            256 => read_data_to_buf::<T, 256>,
+            512 => read_data_to_buf::<T, 512>,
+            _ => read_data_to_buf::<T, 1024>,
+        };
+        let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+        read_fn(self, buf, &shape)
     }
 
     #[inline(always)]
@@ -485,4 +403,164 @@ where
     R: ReadData<T>,
     T: Copy + Send + Sync + Sized + 'static,
 {
+}
+
+#[inline(always)]
+fn read_data_to_buf<T, const LANES: usize>(
+    data: &mut impl ReadData<T>,
+    buf: &mut OutBuf,
+    shape: &[usize],
+) -> Result<()>
+where
+    T: Dtyped,
+{
+    let dtype = T::DTYPE;
+    let (out, strides) = buf.get_mut(data.len(), &dtype);
+
+    match strides {
+        None => read_data_to_buf_contiguous::<T, LANES>(data, out),
+        Some(strides) => read_data_to_buf_strided::<T, LANES>(data, out, strides, shape),
+    }
+}
+
+#[inline(never)]
+fn read_data_to_buf_contiguous<T, const LANES: usize>(
+    data: &mut impl ReadData<T>,
+    out: &mut [u8],
+) -> Result<()>
+where
+    T: Dtyped,
+{
+    let dtype = T::DTYPE;
+    let nitems = data.len();
+    let required_size = nitems * size_of::<T>();
+    let buf_len = out.len();
+    ensure!(
+        buf_len == required_size,
+        InvalidBufferSize,
+        "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
+    );
+    check_buffer_aligned(out.as_ptr(), &dtype)?;
+
+    let buf = unsafe { cast_slice_mut::<u8, T>(out) };
+    assert_eq!(buf.len(), nitems);
+    let mut offset = 0;
+    while offset + LANES <= nitems {
+        let chunk = data.read_bulk::<LANES>(offset);
+        buf[offset..LANES + offset].copy_from_slice(&chunk);
+        offset += LANES;
+    }
+    while offset < nitems {
+        let item = data.read_bulk::<1>(offset)[0];
+        buf[offset] = item;
+        offset += 1;
+    }
+    Ok(())
+}
+
+fn read_data_to_buf_strided<T, const LANES: usize>(
+    data: &mut impl ReadData<T>,
+    out: &mut [u8],
+    strides: &[usize],
+    shape: &[usize],
+) -> Result<()>
+where
+    T: Dtyped,
+{
+    let itemsize = size_of::<T>();
+    // The source is read straight from `data` via `read_bulk`, indexed in *elements*
+    // over the region's row-major logical order - so operand 1's strides and offsets
+    // are element counts with layout (1, 1).
+    let src_offset_strides = default_logical_strides_slice(shape);
+
+    // Operand 0 is the destination byte buffer (`out`); operand 1 is the source, read
+    // via `read_bulk` and indexed in elements.
+    nd_iter_unordered(
+        shape,
+        [strides, src_offset_strides.as_ref()],
+        [(itemsize, align_of::<T>()), (1, 1)],
+        |flags| {
+            debug_assert!(flags.aligned[1]);
+            let aligned = flags.aligned[0] && out.as_ptr().cast::<T>().is_aligned();
+            let contiguous = [flags.contiguous[0], flags.contiguous[1]];
+            let inner_loop_fn = match (aligned, contiguous) {
+                (true, [true, true]) => inner_loop::<T, LANES, true, true, true>,
+                (true, [true, false]) => inner_loop::<T, LANES, true, true, false>,
+                (true, [false, true]) => inner_loop::<T, LANES, true, false, true>,
+                (true, [false, false]) => inner_loop::<T, LANES, true, false, false>,
+                (false, [true, true]) => inner_loop::<T, LANES, false, true, true>,
+                (false, [true, false]) => inner_loop::<T, LANES, false, true, false>,
+                (false, [false, true]) => inner_loop::<T, LANES, false, false, true>,
+                (false, [false, false]) => inner_loop::<T, LANES, false, false, false>,
+            };
+            let dst_base = out.as_mut_ptr();
+            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| {
+                let dst = unsafe { dst_base.add(dst_offset) };
+                inner_loop_fn(&mut *data, dst, src_offset, len, dst_stride, src_stride)
+            }
+        },
+    );
+
+    // One inner 1-d run: read `len` elements from `data` starting at logical element
+    // `src_index` (stepping `src_stride` elements) and scatter them into `dst`
+    // (stepping `dst_stride` bytes). A contiguous source pulls `LANES` consecutive
+    // elements per `read_bulk`; otherwise it reads one at a time.
+    #[inline(never)]
+    fn inner_loop<
+        T: Copy,
+        const LANES: usize,
+        const ALIGNED: bool,
+        const DST_CONTIGUOUS: bool,
+        const SRC_CONTIGUOUS: bool,
+    >(
+        data: &mut impl ReadData<T>,
+        dst: *mut u8,
+        src_index: usize,
+        len: usize,
+        dst_stride: usize,
+        src_stride: usize,
+    ) {
+        let dst = dst.cast::<T>();
+        if DST_CONTIGUOUS {
+            debug_assert_eq!(dst_stride, size_of::<T>());
+        }
+        if SRC_CONTIGUOUS {
+            debug_assert_eq!(src_stride, 1);
+        }
+        let write = |j: usize, val: T| {
+            let elm = if DST_CONTIGUOUS {
+                unsafe { dst.add(j) }
+            } else {
+                unsafe { dst.cast::<u8>().add(j * dst_stride).cast::<T>() }
+            };
+            if ALIGNED {
+                unsafe { elm.write(val) };
+            } else {
+                unsafe { elm.write_unaligned(val) };
+            }
+        };
+        let mut i = 0;
+        if SRC_CONTIGUOUS {
+            while i + LANES <= len {
+                let chunk = data.read_bulk::<LANES>(src_index + i);
+                #[allow(clippy::needless_range_loop)]
+                for k in 0..LANES {
+                    write(i + k, chunk[k]);
+                }
+                i += LANES;
+            }
+
+            while i < len {
+                write(i, data.read_bulk::<1>(src_index + i)[0]);
+                i += 1;
+            }
+        } else {
+            while i < len {
+                write(i, data.read_bulk::<1>(src_index + i * src_stride)[0]);
+                i += 1;
+            }
+        }
+    }
+
+    Ok(())
 }

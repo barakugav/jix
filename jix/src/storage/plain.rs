@@ -703,4 +703,24 @@ mod tests {
             .unwrap();
         assert_eq!(got, array![6i64, 15]);
     }
+
+    // Force the strided read/scatter path (`nd_iter_unordered` in storage/mod.rs): a tiny read window plus
+    // an inner dim wider than it makes the read split so each block lands strided in the output.
+    // Unique element values mean any mis-scatter (wrong dst position) shows up as a mismatch.
+    #[test]
+    fn strided_scatter_path_negation() {
+        use std::ops::Neg;
+
+        use crate::ArrayParams;
+
+        let vals = (0..4 * 10).collect::<Vec<i32>>();
+        let nd = ArrayD::from_shape_vec(vec![4, 10], vals).unwrap();
+        let mut params = ArrayParams::new();
+        params.read_size((16, 32)); // for i32: a 4..8 item window, narrower than the 10-wide inner dim
+        let a = Array::plain_ndarray_with(nd.clone(), params).unwrap();
+
+        let got = a.as_ref().neg().to_ndarray().unwrap();
+        let expected = nd.mapv(|x: i32| -x);
+        assert_eq!(got, expected);
+    }
 }

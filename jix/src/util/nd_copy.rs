@@ -2,8 +2,7 @@ use std::ptr;
 
 use crate::arrayvec::ArrayVec;
 use crate::dtype::{Dtype, Itemsize};
-use crate::iter::NdIter;
-use crate::{dim_arr, Dim, DimArray, Dimension, SliceExt};
+use crate::nd_iter_unordered;
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.
@@ -12,7 +11,8 @@ use crate::{dim_arr, Dim, DimArray, Dimension, SliceExt};
 /// monomorphized scalar copy for the common power-of-two `(itemsize, alignment)` pairs, a
 /// field-by-field copy for structs that decompose into at most four scalar fields, or a generic
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
-/// walking `shape` with an [`NdIter`] and copying the appropriate number of bytes at each element.
+/// driving [`nd_iter_unordered`] over `shape` (which sorts, coalesces and walks the axes) and
+/// copying one contiguous-or-strided inner loop at each visited position.
 pub(crate) struct NdCopier<'a>(NdCopierInner<'a>);
 enum NdCopierInner<'a> {
     Simple(NdCopyFn),
@@ -90,7 +90,7 @@ impl<'a> NdCopier<'a> {
         Self(if let Some(struct_copier) = struct_copier {
             NdCopierInner::Struct(struct_copier)
         } else {
-            NdCopierInner::Simple(Self::copy_dynamic)
+            NdCopierInner::Simple(Self::copy_untyped)
         })
     }
 
@@ -119,27 +119,8 @@ impl<'a> NdCopier<'a> {
         if shape.contains(&0) {
             return;
         }
-        // Reorder axes (largest stride outermost, smallest - most contiguous - innermost) and drop
-        // size-1 axes, ranking each axis by a write-weighted stride key. This turns a scattered-write
-        // transpose into a sequential-write copy and lets the coalescing scans below merge more runs;
-        // it is a no-op for the already-C-order layouts that dominate.
-        let dim_perm = compute_dim_permutation(shape, src_strides, dst_strides);
-        let shape_permuted;
-        let src_strides_permuted;
-        let dst_strides_permuted;
-        let (shape, src_strides, dst_strides) = if let Some(dim_perm) = dim_perm {
-            shape_permuted = apply_dim_permutation(shape, &dim_perm);
-            src_strides_permuted = apply_dim_permutation(src_strides, &dim_perm);
-            dst_strides_permuted = apply_dim_permutation(dst_strides, &dim_perm);
-            (
-                shape_permuted.as_slice(),
-                src_strides_permuted.as_slice(),
-                dst_strides_permuted.as_slice(),
-            )
-        } else {
-            (shape, src_strides, dst_strides)
-        };
-
+        // Axis ordering, size-1-axis dropping and contiguous-run coalescing all happen inside
+        // `nd_iter_unordered` (see `scalar_fn` / `copy_untyped`); here we just dispatch by dtype.
         let args = NdCopyArgs {
             src,
             dst,
@@ -172,232 +153,81 @@ impl<'a> NdCopier<'a> {
             src,
             dst,
             shape,
-            src_strides, // TODO accept Option<>,
+            src_strides,
             dst_strides,
             dtype,
         } = args;
         debug_assert_eq!(size_of::<T>(), dtype.itemsize() as usize);
         debug_assert_eq!(align_of::<T>(), dtype.alignment().as_usize());
 
-        // Collapse the axes: drop size-1 axes, merge stride-compatible neighbors, and peel the
-        // trailing both-contiguous run as `n_contiguous_items`. What remains are strided axes.
-        let (shape, src_strides, dst_strides, n_contiguous_items) =
-            merge_dims(shape, src_strides, dst_strides, size_of::<T>());
+        // Operand 0 is the destination (write; sort-primary), operand 1 the source (read). Both are
+        // byte-addressed with element layout `(size_of::<T>(), align_of::<T>())`.
+        nd_iter_unordered(
+            shape,
+            [dst_strides, src_strides],
+            [(size_of::<T>(), align_of::<T>()); 2],
+            |flags| {
+                // `nd_iter_unordered`'s aligned flags only cover the strides; AND-in the base
+                // pointers so the aligned `read`/`write` path runs only when the data really is.
+                let aligned = (flags.aligned[0] && dst.as_ptr().cast::<T>().is_aligned())
+                    && (flags.aligned[1] && src.as_ptr().cast::<T>().is_aligned());
+                let (src_contiguous, dst_contiguous) = (flags.contiguous[1], flags.contiguous[0]);
 
-        unsafe {
-            Self::copy_after_dim_merge::<T>(
-                shape.as_slice(),
-                src_strides.as_slice(),
-                dst_strides.as_slice(),
-                src,
-                dst,
-                n_contiguous_items,
-            )
-        }
+                // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
+                // (branchless); longer runs fall through to `copy_nonoverlapping`.
+                let inner_loop = if src_contiguous && dst_contiguous {
+                    match (flags.inner_len, aligned) {
+                        (1, true) => Self::inner_loop_contiguous_const_len::<T, 1, true>,
+                        (1, false) => Self::inner_loop_contiguous_const_len::<T, 1, false>,
+                        (2, true) => Self::inner_loop_contiguous_const_len::<T, 2, true>,
+                        (2, false) => Self::inner_loop_contiguous_const_len::<T, 2, false>,
+                        (4, true) => Self::inner_loop_contiguous_const_len::<T, 4, true>,
+                        (4, false) => Self::inner_loop_contiguous_const_len::<T, 4, false>,
+                        (8, true) => Self::inner_loop_contiguous_const_len::<T, 8, true>,
+                        (8, false) => Self::inner_loop_contiguous_const_len::<T, 8, false>,
+                        (16, true) => Self::inner_loop_contiguous_const_len::<T, 16, true>,
+                        (16, false) => Self::inner_loop_contiguous_const_len::<T, 16, false>,
+                        (32, true) if size_of::<T>() <= 8 => {
+                            Self::inner_loop_contiguous_const_len::<T, 32, true>
+                        }
+                        (32, false) if size_of::<T>() <= 8 => {
+                            Self::inner_loop_contiguous_const_len::<T, 32, false>
+                        }
+                        (64, true) if size_of::<T>() <= 4 => {
+                            Self::inner_loop_contiguous_const_len::<T, 64, true>
+                        }
+                        (64, false) if size_of::<T>() <= 4 => {
+                            Self::inner_loop_contiguous_const_len::<T, 64, false>
+                        }
+                        (_, true) => Self::inner_loop::<T, true, true, true>,
+                        (_, false) => Self::inner_loop::<T, false, true, true>,
+                    }
+                } else {
+                    match (aligned, [src_contiguous, dst_contiguous]) {
+                        (_, [true, true]) => unreachable!(),
+                        (true, [true, false]) => Self::inner_loop::<T, true, true, false>,
+                        (false, [true, false]) => Self::inner_loop::<T, false, true, false>,
+                        (true, [false, true]) => Self::inner_loop::<T, true, false, true>,
+                        (false, [false, true]) => Self::inner_loop::<T, false, false, true>,
+                        (true, [false, false]) => Self::inner_loop::<T, true, false, false>,
+                        (false, [false, false]) => Self::inner_loop::<T, false, false, false>,
+                    }
+                };
+
+                move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
+                    inner_loop(
+                        src.get_unchecked(src_offset..),
+                        dst.get_unchecked_mut(dst_offset..),
+                        len,
+                        src_stride,
+                        dst_stride,
+                    )
+                }
+            },
+        );
     }
 
-    #[inline]
-    unsafe fn copy_after_dim_merge<T: Copy>(
-        shape: &[usize],
-        src_strides: &[usize],
-        dst_strides: &[usize],
-        src: &[u8],
-        dst: &mut [u8],
-        n_contiguous_items: usize,
-    ) {
-        let ndim = shape.len();
-        let aligned = src.as_ptr().cast::<T>().is_aligned()
-            && dst.as_ptr().cast::<T>().is_aligned()
-            && src_strides
-                .iter()
-                .all(|s| s.is_multiple_of(align_of::<T>()))
-            && dst_strides
-                .iter()
-                .all(|s| s.is_multiple_of(align_of::<T>()));
-
-        // The peeled innermost axis (a single contiguous run when `ndim == 0`).
-        let (inner_len, inner_src_stride, inner_dst_stride) = if ndim == 0 {
-            (1, 0, 0)
-        } else {
-            (
-                shape[ndim - 1],
-                src_strides[ndim - 1],
-                dst_strides[ndim - 1],
-            )
-        };
-        let run_bytes = size_of::<T>() * n_contiguous_items;
-        let src_contiguous = inner_len <= 1 || inner_src_stride == run_bytes;
-        let dst_contiguous = inner_len <= 1 || inner_dst_stride == run_bytes;
-
-        macro_rules! match_contiguous {
-            ($f:ident $(, $extra_generics:literal)?) => {
-                match (src_contiguous, dst_contiguous) {
-                    (true, true) => Self::$f::<T $(, $extra_generics)?, true, true>,
-                    (true, false) => Self::$f::<T $(, $extra_generics)?, true, false>,
-                    (false, true) => Self::$f::<T $(, $extra_generics)?, false, true>,
-                    (false, false) => Self::$f::<T $(, $extra_generics)?, false, false>,
-                }
-            };
-        }
-
-        let copy_1d_row: Copy1dRowFn = if aligned {
-            match n_contiguous_items {
-                1 => match_contiguous!(copy_1d_row_aligned, 1),
-                2 => match_contiguous!(copy_1d_row_aligned, 2),
-                4 => match_contiguous!(copy_1d_row_aligned, 4),
-                8 => match_contiguous!(copy_1d_row_aligned, 8),
-                16 => match_contiguous!(copy_1d_row_aligned, 16),
-                32 if size_of::<T>() <= 8 => match_contiguous!(copy_1d_row_aligned, 32),
-                64 if size_of::<T>() <= 4 => match_contiguous!(copy_1d_row_aligned, 64),
-                _ => match_contiguous!(copy_1d_unsized, true),
-            }
-        } else {
-            match n_contiguous_items {
-                1 => Self::copy_1d_row_unaligned::<T, 1>,
-                2 => Self::copy_1d_row_unaligned::<T, 2>,
-                4 => Self::copy_1d_row_unaligned::<T, 4>,
-                8 => Self::copy_1d_row_unaligned::<T, 8>,
-                16 => Self::copy_1d_row_unaligned::<T, 16>,
-                32 if size_of::<T>() <= 8 => Self::copy_1d_row_unaligned::<T, 32>,
-                64 if size_of::<T>() <= 4 => Self::copy_1d_row_unaligned::<T, 64>,
-                _ => match_contiguous!(copy_1d_unsized, false),
-            }
-        };
-
-        if ndim <= 1 {
-            unsafe {
-                copy_1d_row(
-                    src,
-                    dst,
-                    inner_len,
-                    inner_src_stride,
-                    inner_dst_stride,
-                    n_contiguous_items,
-                )
-            };
-            return;
-        }
-
-        let outer_shape = &shape[..ndim - 1];
-        let outer_src_strides = &src_strides[..ndim - 1];
-        let outer_dst_strides = &dst_strides[..ndim - 1];
-        let walk = match outer_shape.len() {
-            1 => Self::copy_nd_walk::<Dim<1>>,
-            2 => Self::copy_nd_walk::<Dim<2>>,
-            3 => Self::copy_nd_walk::<Dim<3>>,
-            4 => Self::copy_nd_walk::<Dim<4>>,
-            5 => Self::copy_nd_walk::<Dim<5>>,
-            6 => Self::copy_nd_walk::<Dim<6>>,
-            7 => Self::copy_nd_walk::<Dim<7>>,
-            _ => unimplemented!(),
-        };
-        unsafe {
-            walk(
-                src,
-                dst,
-                outer_shape,
-                outer_src_strides,
-                outer_dst_strides,
-                inner_len,
-                inner_src_stride,
-                inner_dst_stride,
-                n_contiguous_items,
-                copy_1d_row,
-            )
-        }
-    }
-
-    unsafe fn copy_1d_row_aligned<
-        T: Copy,
-        const N: usize,
-        const SRC_CONTIGUOUS: bool,
-        const DST_CONTIGUOUS: bool,
-    >(
-        src: &[u8],
-        dst: &mut [u8],
-        len: usize,
-        src_stride: usize,
-        dst_stride: usize,
-        n_contiguous_items: usize,
-    ) {
-        debug_assert_eq!(n_contiguous_items, N);
-        let src = src.as_ptr();
-        let dst = dst.as_mut_ptr();
-        unsafe {
-            if SRC_CONTIGUOUS && DST_CONTIGUOUS {
-                ptr::copy_nonoverlapping::<[T; N]>(src.cast(), dst.cast(), len);
-            } else if SRC_CONTIGUOUS {
-                let src = src.cast::<[T; N]>();
-                for i in 0..len {
-                    let s = src.add(i);
-                    let d = dst.add(i * dst_stride).cast::<[T; N]>();
-                    d.write(s.read());
-                }
-            } else if DST_CONTIGUOUS {
-                let dst = dst.cast::<[T; N]>();
-                for i in 0..len {
-                    let s = src.add(i * src_stride).cast::<[T; N]>();
-                    let d = dst.add(i);
-                    d.write(s.read());
-                }
-            } else {
-                for i in 0..len {
-                    let s = src.add(i * src_stride).cast::<[T; N]>();
-                    let d = dst.add(i * dst_stride).cast::<[T; N]>();
-                    d.write(s.read());
-                }
-            }
-        }
-    }
-
-    unsafe fn copy_1d_row_unaligned<T: Copy, const N: usize>(
-        src: &[u8],
-        dst: &mut [u8],
-        len: usize,
-        src_stride: usize,
-        dst_stride: usize,
-        n_contiguous_items: usize,
-    ) {
-        debug_assert_eq!(n_contiguous_items, N);
-        let src = src.as_ptr();
-        let dst = dst.as_mut_ptr();
-
-        let run_bytes = size_of::<T>() * n_contiguous_items;
-        let src_c = len <= 1 || src_stride == run_bytes;
-        let dst_c = len <= 1 || dst_stride == run_bytes;
-
-        unsafe {
-            if src_c && dst_c {
-                let src = src.cast::<[T; N]>();
-                let dst = dst.cast::<[T; N]>();
-                for i in 0..len {
-                    dst.add(i).write_unaligned(src.add(i).read_unaligned());
-                }
-            } else if src_c {
-                let src = src.cast::<[T; N]>();
-                for i in 0..len {
-                    let s = src.add(i);
-                    let d = dst.add(i * dst_stride).cast::<[T; N]>();
-                    d.write_unaligned(s.read_unaligned());
-                }
-            } else if dst_c {
-                let dst = dst.cast::<[T; N]>();
-                for i in 0..len {
-                    let s = src.add(i * src_stride).cast::<[T; N]>();
-                    let d = dst.add(i);
-                    d.write_unaligned(s.read_unaligned());
-                }
-            } else {
-                for i in 0..len {
-                    let s = src.add(i * src_stride).cast::<[T; N]>();
-                    let d = dst.add(i * dst_stride).cast::<[T; N]>();
-                    d.write_unaligned(s.read_unaligned());
-                }
-            }
-        }
-    }
-
-    unsafe fn copy_1d_unsized<
+    unsafe fn inner_loop<
         T: Copy,
         const ALIGNED: bool,
         const SRC_CONTIGUOUS: bool,
@@ -408,105 +238,95 @@ impl<'a> NdCopier<'a> {
         len: usize,
         src_stride: usize,
         dst_stride: usize,
-        n_contiguous_items: usize,
     ) {
-        let src = src.as_ptr();
-        let dst = dst.as_mut_ptr();
-
+        if SRC_CONTIGUOUS {
+            debug_assert_eq!(src_stride, size_of::<T>());
+        }
+        if DST_CONTIGUOUS {
+            debug_assert_eq!(dst_stride, size_of::<T>());
+        }
+        let src = src.as_ptr().cast::<T>();
+        let dst = dst.as_mut_ptr().cast::<T>();
         unsafe {
             if SRC_CONTIGUOUS && DST_CONTIGUOUS {
                 if ALIGNED {
-                    ptr::copy_nonoverlapping::<T>(
-                        src.cast::<T>(),
-                        dst.cast::<T>(),
-                        len * n_contiguous_items,
-                    );
+                    ptr::copy_nonoverlapping::<T>(src, dst, len);
                 } else {
                     ptr::copy_nonoverlapping::<u8>(
-                        src,
-                        dst,
-                        len * n_contiguous_items * size_of::<T>(),
+                        src.cast::<u8>(),
+                        dst.cast::<u8>(),
+                        len * size_of::<T>(),
                     );
-                }
-            } else if SRC_CONTIGUOUS {
-                let src = src.cast::<T>();
-                for i in 0..len {
-                    let s = src.add(i * n_contiguous_items);
-                    let d = dst.add(i * dst_stride).cast::<T>();
-                    if ALIGNED {
-                        ptr::copy_nonoverlapping::<T>(s, d, n_contiguous_items);
-                    } else {
-                        ptr::copy_nonoverlapping::<u8>(
-                            s.cast::<u8>(),
-                            d.cast::<u8>(),
-                            n_contiguous_items * size_of::<T>(),
-                        );
-                    }
-                }
-            } else if DST_CONTIGUOUS {
-                let dst = dst.cast::<T>();
-                for i in 0..len {
-                    let s = src.add(i * src_stride).cast::<T>();
-                    let d = dst.add(i * n_contiguous_items);
-                    if ALIGNED {
-                        ptr::copy_nonoverlapping::<T>(s, d, n_contiguous_items);
-                    } else {
-                        ptr::copy_nonoverlapping::<u8>(
-                            s.cast::<u8>(),
-                            d.cast::<u8>(),
-                            n_contiguous_items * size_of::<T>(),
-                        );
-                    }
                 }
             } else {
                 for i in 0..len {
-                    let s = src.add(i * src_stride).cast::<T>();
-                    let d = dst.add(i * dst_stride).cast::<T>();
-                    if ALIGNED {
-                        ptr::copy_nonoverlapping::<T>(s, d, n_contiguous_items);
+                    let s = if SRC_CONTIGUOUS {
+                        src.add(i)
                     } else {
-                        ptr::copy_nonoverlapping::<u8>(
-                            s.cast::<u8>(),
-                            d.cast::<u8>(),
-                            n_contiguous_items * size_of::<T>(),
-                        );
+                        src.cast::<u8>().add(i * src_stride).cast::<T>()
+                    };
+                    let d = if DST_CONTIGUOUS {
+                        dst.add(i)
+                    } else {
+                        dst.cast::<u8>().add(i * dst_stride).cast::<T>()
+                    };
+                    if ALIGNED {
+                        d.write(s.read());
+                    } else {
+                        d.write_unaligned(s.read_unaligned());
                     }
                 }
             }
         }
     }
 
-    /// Walk the OUTER axes (static rank `D`) with an [`NdIter`], calling the pre-resolved
-    /// `copy_1d_row` pointer at each peeled-row base.
-    #[inline(never)]
-    #[allow(clippy::too_many_arguments)]
-    unsafe fn copy_nd_walk<D: Dimension>(
+    /// One inner run where both operands are contiguous and its length is the compile-time `N`:
+    /// a single `[T; N]` load/store (branchless), the common small-run fast path.
+    unsafe fn inner_loop_contiguous_const_len<T: Copy, const LEN: usize, const ALIGNED: bool>(
         src: &[u8],
         dst: &mut [u8],
-        outer_shape: &[usize],
-        outer_src_strides: &[usize],
-        outer_dst_strides: &[usize],
-        inner_len: usize,
-        inner_src_stride: usize,
-        inner_dst_stride: usize,
-        n_contiguous_items: usize,
-        copy_1d_row: Copy1dRowFn,
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
     ) {
-        let iter = NdIter::builder(D::vec(outer_shape.len(), |i| outer_shape[i] as u64))
-            .with_strides_offset_ext(outer_src_strides.to_dim_vec::<D>(), 0)
-            .with_strides_offset_ext(outer_dst_strides.to_dim_vec::<D>(), 0)
-            .build();
-        for (_, (src_off, dst_off)) in iter {
-            unsafe {
-                copy_1d_row(
-                    src.get_unchecked(src_off..),
-                    dst.get_unchecked_mut(dst_off..),
-                    inner_len,
-                    inner_src_stride,
-                    inner_dst_stride,
-                    n_contiguous_items,
-                )
-            };
+        debug_assert_eq!(len, LEN);
+        debug_assert_eq!(src_stride, size_of::<T>());
+        debug_assert_eq!(dst_stride, size_of::<T>());
+        let src = src.as_ptr().cast::<[T; LEN]>();
+        let dst = dst.as_mut_ptr().cast::<[T; LEN]>();
+        unsafe {
+            if ALIGNED {
+                dst.write(src.read());
+            } else {
+                dst.write_unaligned(src.read_unaligned());
+            }
+        }
+    }
+
+    unsafe fn inner_loop_untyped<const SRC_DST_CONTIGUOUS: bool>(
+        src: &[u8],
+        dst: &mut [u8],
+        len: usize,
+        src_stride: usize,
+        dst_stride: usize,
+        itemsize: usize,
+    ) {
+        if SRC_DST_CONTIGUOUS {
+            debug_assert_eq!(src_stride, itemsize);
+            debug_assert_eq!(dst_stride, itemsize);
+        }
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
+        unsafe {
+            if SRC_DST_CONTIGUOUS {
+                ptr::copy_nonoverlapping(src, dst, len * itemsize);
+            } else {
+                for i in 0..len {
+                    let s = src.add(i * src_stride);
+                    let d = dst.add(i * dst_stride);
+                    ptr::copy_nonoverlapping(s, d, itemsize);
+                }
+            }
         }
     }
 
@@ -538,7 +358,7 @@ impl<'a> NdCopier<'a> {
         }
     }
 
-    fn copy_dynamic(args: NdCopyArgs) {
+    fn copy_untyped(args: NdCopyArgs) {
         let NdCopyArgs {
             src,
             dst,
@@ -547,124 +367,34 @@ impl<'a> NdCopier<'a> {
             dst_strides,
             dtype,
         } = args;
-
         let itemsize = dtype.itemsize() as usize;
 
-        // Collapse the axes: drop size-1 axes, merge stride-compatible neighbors, and peel the
-        // trailing both-contiguous run as `n_contiguous_items`. What remains are strided axes.
-        let (shape, src_strides, dst_strides, n_contiguous_items) =
-            merge_dims(shape, src_strides, dst_strides, itemsize);
-
-        unsafe {
-            Self::copy_after_dim_merge::<u8>(
-                shape.as_slice(),
-                src_strides.as_slice(),
-                dst_strides.as_slice(),
-                src,
-                dst,
-                n_contiguous_items * itemsize,
-            )
-        }
+        // Byte-wise fallback: each element is `itemsize` opaque bytes copied via `copy_nonoverlapping`
+        // (always the unaligned `u8` path). Operand 0 is the destination, operand 1 the source.
+        nd_iter_unordered(
+            shape,
+            [dst_strides, src_strides],
+            [(itemsize, 1); 2],
+            |flags| {
+                let contiguous = flags.contiguous[0] && flags.contiguous[1];
+                let copy_fn = match contiguous {
+                    true => Self::inner_loop_untyped::<true>,
+                    false => Self::inner_loop_untyped::<false>,
+                };
+                move |offsets: [usize; 2], len, strides: [usize; 2]| unsafe {
+                    copy_fn(
+                        src.get_unchecked(offsets[1]..),
+                        dst.get_unchecked_mut(offsets[0]..),
+                        len,
+                        strides[1],
+                        strides[0],
+                        itemsize,
+                    )
+                }
+            },
+        );
     }
 }
-
-/// Collapse a copy region to the fewest axes: drop size-1 axes (they contribute offset 0), merge
-/// any adjacent pair that is contiguous with respect to itself on BOTH src and dst
-/// (`stride_outer == stride_inner * extent_inner`), then peel the innermost surviving axis as the
-/// contiguous run when its stride equals `itemsize` on both sides.
-#[inline]
-fn merge_dims(
-    shape: &[usize],
-    src_strides: &[usize],
-    dst_strides: &[usize],
-    itemsize: usize,
-) -> (DimArray<usize>, DimArray<usize>, DimArray<usize>, usize) {
-    debug_assert!(shape.len() == src_strides.len() && shape.len() == dst_strides.len());
-    // Coalesce right-to-left. arrays are reversed at the end.
-    let mut new_shape = DimArray::new();
-    let mut new_src_strides = DimArray::new();
-    let mut new_dst_strides = DimArray::new();
-    for d in (0..shape.len()).rev() {
-        let len = shape[d];
-        if len <= 1 {
-            continue; // drop axis
-        }
-        let (src_stride, dst_stride) = (src_strides[d], dst_strides[d]);
-        if let Some(cur) = new_shape.len().checked_sub(1)
-            && src_stride == new_src_strides[cur] * new_shape[cur]
-            && dst_stride == new_dst_strides[cur] * new_shape[cur]
-        {
-            // Merge into the last axis.
-            new_shape[cur] *= len;
-            continue;
-        }
-        new_shape.push(len);
-        new_src_strides.push(src_stride);
-        new_dst_strides.push(dst_stride);
-    }
-    new_shape.reverse();
-    new_src_strides.reverse();
-    new_dst_strides.reverse();
-
-    let mut n_contiguous_items = 1;
-    let ndim = new_shape.len();
-    // Peel the innermost group as the contiguous run iff it is unit-stride on both sides.
-    if ndim > 0 && new_src_strides[ndim - 1] == itemsize && new_dst_strides[ndim - 1] == itemsize {
-        n_contiguous_items = new_shape[ndim - 1];
-        new_shape.truncate(ndim - 1);
-        new_src_strides.truncate(ndim - 1);
-        new_dst_strides.truncate(ndim - 1);
-    }
-
-    (
-        new_shape,
-        new_src_strides,
-        new_dst_strides,
-        n_contiguous_items,
-    )
-}
-
-/// Choose the axis order for the copy loop.
-///
-/// Drops size-1 axes and permute the dims such that strides of the dst buffer are non-increasing.
-#[inline]
-fn compute_dim_permutation(
-    shape: &[usize],
-    src_strides: &[usize],
-    dst_strides: &[usize],
-) -> Option<DimArray<usize>> {
-    // Rank each axis by its write stride (weight 64) over its read stride (weight 1)
-    let key = |d: usize| -> u64 { dst_strides[d] as u64 * 64 + src_strides[d] as u64 };
-
-    let ndim = shape.len();
-    // Fast path: nothing to drop and the keys are already non-increasing -> identity, no reorder.
-    if shape.iter().all(|&len| len > 1) && (1..ndim).all(|d| key(d - 1) >= key(d)) {
-        return None;
-    }
-
-    let mut perm = DimArray::new();
-    for (d, &len) in shape.iter().enumerate() {
-        debug_assert!(len > 0);
-        if len > 1 {
-            perm.push(d);
-        }
-    }
-    perm.sort_by_key(|&d| std::cmp::Reverse(key(d)));
-    Some(perm)
-}
-#[inline]
-fn apply_dim_permutation<T: Copy>(arr: &[T], perm: &[usize]) -> DimArray<T> {
-    dim_arr(perm.len(), |d| arr[perm[d]])
-}
-
-type Copy1dRowFn = unsafe fn(
-    src: &[u8],
-    dst: &mut [u8],
-    len: usize,
-    src_stride: usize,
-    dst_stride: usize,
-    n_contiguous_items: usize,
-);
 
 #[cfg(test)]
 mod tests {
@@ -957,7 +687,7 @@ mod tests {
     // the coalescing scan treats it as contiguous whatever stride it carries and never lets it block
     // neighboring axes from merging. Each layout gives a unit axis a stride that would otherwise halt
     // the scan (a broadcast `0` and an arbitrary multiple), with contiguous axes around it, covering
-    // both the scalar (`scalar_fn`) and byte-wise (`copy_dynamic`) coalescing routes.
+    // both the scalar (`scalar_fn`) and byte-wise (`copy_untyped`) coalescing routes.
     fn check_unit_axis<T: Dtyped>() {
         let is = T::DTYPE.itemsize() as usize;
         for unit in [0, 5 * is] {
@@ -974,7 +704,7 @@ mod tests {
     fn copy_unit_axis() {
         check_unit_axis::<u32>(); // scalar route
         check_unit_axis::<u64>();
-        check_unit_axis::<[i32; 3]>(); // byte-wise copy_dynamic route
+        check_unit_axis::<[i32; 3]>(); // byte-wise copy_untyped route
         check_unit_axis::<[u8; 3]>();
     }
 
@@ -984,9 +714,9 @@ mod tests {
     // otherwise). Folding needs *both* strides to match, so at most one side reaches this path
     // contiguous with `len > 1`. An inner run of `inner` behind a strided outer axis pins each arm; a
     // power-of-two `inner` routes through the const-generic `copy_1d`, others through
-    // `copy_1d_unsized`. Each combo runs aligned and misaligned so the misaligned arm reaches every
+    // `inner_loop_untyped`. Each combo runs aligned and misaligned so the misaligned arm reaches every
     // per-side contiguity case - in particular the neither-side-contiguous + unaligned branch of
-    // `copy_1d_unsized`, which no other deterministic test pins (only the randomized `fuzz` does).
+    // `inner_loop_untyped`, which no other deterministic test pins (only the randomized `fuzz` does).
     fn check_1d_sides<T: Dtyped>(inner: usize) {
         let is = T::DTYPE.itemsize() as usize;
         let cont = [inner * is, is]; // outer stride == inner run -> that side contiguous
@@ -1005,13 +735,13 @@ mod tests {
     #[test]
     fn copy_1d_sides() {
         check_1d_sides::<u32>(8); // power-of-two run -> const-generic copy_1d arms
-        check_1d_sides::<u32>(3); // other run length -> copy_1d_unsized
+        check_1d_sides::<u32>(3); // other run length -> inner_loop_untyped
         check_1d_sides::<u64>(8); // wider element type
         check_1d_sides::<u64>(3);
     }
 
     // Struct dtype (the `copy_struct` field-by-field route) and non-scalar array dtypes (the
-    // `copy_dynamic` byte-wise fallback): array-of-scalar dtypes carry an inner shape, so they miss
+    // `copy_untyped` byte-wise fallback): array-of-scalar dtypes carry an inner shape, so they miss
     // every specialized `(itemsize, alignment)` case and are not decomposed as structs - `[i32; 3]`
     // gives itemsize 12, `[u8; 3]` an odd itemsize (3) with no power-of-two run.
     #[test]
@@ -1047,59 +777,5 @@ mod tests {
         fuzz::<crate::scalar::Complex<f64>>();
         fuzz::<StructNoPad>();
         fuzz::<[u8; 3]>();
-    }
-
-    // Direct tests for the axis-ordering helper. It uses `shape` only to decide which axes to drop
-    // (size-1) and ranks the survivors by the key `dst_stride * 64 + src_stride`; the strides are
-    // plain sort keys here, not tied to any itemsize.
-
-    // Already-optimal layouts return `None`, letting the caller skip the reorder entirely.
-    #[test]
-    fn dim_perm_already_ordered_is_none() {
-        // C-order, no size-1 axis: keys already non-increasing.
-        assert!(compute_dim_permutation(&[4, 8], &[8, 1], &[8, 1]).is_none());
-        // A single axis and the 0-D scalar are trivially ordered.
-        assert!(compute_dim_permutation(&[5], &[1], &[1]).is_none());
-        assert!(compute_dim_permutation(&[], &[], &[]).is_none());
-    }
-
-    // A transposed write (dst strides increasing inward) moves the larger-stride axis outermost.
-    #[test]
-    fn dim_perm_transpose_reorders() {
-        assert_eq!(
-            compute_dim_permutation(&[4, 8], &[1, 4], &[1, 4]).as_deref(),
-            Some([1usize, 0].as_slice())
-        );
-    }
-
-    // Size-1 axes are dropped from the permutation; surviving axes keep their relative order.
-    #[test]
-    fn dim_perm_drops_size_1_axes() {
-        // Interior size-1 axis dropped; axes 0 and 2 stay in place (already sorted).
-        assert_eq!(
-            compute_dim_permutation(&[4, 1, 8], &[8, 0, 1], &[8, 0, 1]).as_deref(),
-            Some([0usize, 2].as_slice())
-        );
-        // Every axis size-1 -> empty permutation (the copy degenerates to a single element).
-        assert_eq!(
-            compute_dim_permutation(&[1, 1], &[9, 9], &[9, 9]).as_deref(),
-            Some(&[] as &[usize])
-        );
-    }
-
-    // The write (dst) stride is weighted 64x the read (src) stride in the ranking key.
-    #[test]
-    fn dim_perm_write_stride_dominates_read() {
-        // Write order says d1 outermost (3 > 2); read order says d0 (50 > 1). The 64x write weight
-        // beats a read gap of 49, so the write order wins.
-        assert_eq!(
-            compute_dim_permutation(&[4, 5], &[50, 1], &[2, 3]).as_deref(),
-            Some([1usize, 0].as_slice())
-        );
-        // With equal write strides, the read stride breaks the tie (larger read outermost).
-        assert_eq!(
-            compute_dim_permutation(&[4, 5], &[1, 5], &[2, 2]).as_deref(),
-            Some([1usize, 0].as_slice())
-        );
     }
 }

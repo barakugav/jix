@@ -6,6 +6,7 @@ pub use arr_sequence::*;
 
 pub(crate) mod arrayvec;
 pub(crate) mod cpu_cache;
+pub(crate) mod hint;
 
 pub(crate) mod iter;
 
@@ -14,6 +15,9 @@ pub(crate) use arr_ext::*;
 
 mod nd_copy;
 pub(crate) use nd_copy::*;
+
+mod nd_iter_unordered;
+pub(crate) use nd_iter_unordered::*;
 
 mod bitmap;
 pub(crate) use bitmap::*;
@@ -620,6 +624,20 @@ impl<T> SliceExt<T> for [T] {
         T: Clone,
     {
         D::vec(self.len(), |i| self[i].clone())
+    }
+}
+
+pub(crate) trait PtrExt<T> {
+    fn read_maybe_aligned<const ALIGNED: bool>(self) -> T;
+}
+impl<T> PtrExt<T> for *const T {
+    #[inline(always)]
+    fn read_maybe_aligned<const ALIGNED: bool>(self) -> T {
+        if ALIGNED {
+            unsafe { self.read() }
+        } else {
+            unsafe { self.read_unaligned() }
+        }
     }
 }
 

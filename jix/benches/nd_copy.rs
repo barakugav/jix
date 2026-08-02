@@ -13,6 +13,39 @@ fn bench_nd_copy(c: &mut Criterion) {
     }
 
     let cases = vec![
+        // --- tiny per-call-overhead cases (mirror the compact_read block scatter, which issues
+        // many small copies). These are latency/fixed-overhead bound, not bandwidth bound. ---
+        Case {
+            name: "tiny single 1x1",
+            shape: &[1, 1],
+            src_strides: default_strides(&[1, 1], size_of::<i32>()),
+            dst_strides: default_strides(&[1, 1], size_of::<i32>()),
+        },
+        Case {
+            name: "tiny 1x32",
+            shape: &[1, 32],
+            src_strides: default_strides(&[1, 32], size_of::<i32>()),
+            dst_strides: default_strides(&[1, 32], size_of::<i32>()),
+        },
+        Case {
+            name: "tiny 32x1",
+            shape: &[32, 1],
+            src_strides: default_strides(&[32, 1], size_of::<i32>()),
+            dst_strides: default_strides(&[32, 1], size_of::<i32>()),
+        },
+        Case {
+            name: "tiny 32x32",
+            shape: &[32, 32],
+            src_strides: default_strides(&[32, 32], size_of::<i32>()),
+            dst_strides: default_strides(&[32, 32], size_of::<i32>()),
+        },
+        // tiny copy into a strided (row-padded) destination, like a block scattered into a wider out
+        Case {
+            name: "tiny 32x32 gapped-dst",
+            shape: &[32, 32],
+            src_strides: default_strides(&[32, 32], size_of::<i32>()),
+            dst_strides: vec![64 * size_of::<i32>(), size_of::<i32>()],
+        },
         // nice, easy, contiguous.
         Case {
             name: "contiguous 4096x64",

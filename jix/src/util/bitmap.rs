@@ -73,6 +73,7 @@ impl DimBitmap {
 
     /// Inserts a new dimension at position `pos`, shifting higher dimensions up by one, and
     /// grows the length by one. The inserted dimension takes `value`.
+    #[inline]
     pub(crate) fn insert(&mut self, pos: usize, value: bool) {
         assert!(pos <= self.len() && self.len() < NDIM_MAX);
         let low_mask = Self::low_mask(pos);
@@ -83,6 +84,7 @@ impl DimBitmap {
 }
 
 impl FromIterator<bool> for DimBitmap {
+    #[inline]
     fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
         let mut bitmap = Self { bits: 0, len: 0 };
         for value in iter {
