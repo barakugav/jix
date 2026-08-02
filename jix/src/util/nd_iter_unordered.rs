@@ -3,11 +3,11 @@ use crate::util::iter::NdIter;
 use crate::util::PtrExt;
 use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension};
 
-/// Drive an inner loop Fn over every element of `N_OPERANDS` identically-shaped strided n-d regions,
+/// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
-/// `(size, alignment)`. This function owns no buffers: it computes the element visitation order and
-/// hands the caller an offset per operand, leaving the caller in full control of the actual
-/// reads/writes (aliasing, alignment, element type).
+/// `(size, alignment)`. It owns no buffers: it computes the element visitation order and hands the
+/// caller an offset per operand, leaving the caller in full control of the actual reads/writes
+/// (aliasing, alignment, element type).
 ///
 /// `strides`, the offsets it yields, and each operand's `(size, alignment)` are all in the *same
 /// per-operand unit*: pass byte strides with `(itemsize, alignment)` to walk a byte buffer, or
@@ -21,125 +21,182 @@ use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension};
 ///   3. split into an outer walk (via [`NdIter`] with a stride-offset extension) over all-but-inner
 ///      axes plus a flat inner 1-d run.
 ///
-/// `inner_loop_factory` is called once with the [`NdApplyInnerFlags`] describing the innermost 1-d run
-/// (its length, and whether each operand is contiguous / suitably aligned - i.e. its inner stride
-/// equals `size` / every stride is a multiple of `alignment`), and returns the closure that performs
-/// each run. That closure is invoked once per outer position as
+/// [`new`](Self::new) performs steps (1) and (2) and computes the innermost-run description; the
+/// caller inspects it via [`inner_len`](Self::inner_len), [`is_aligned`](Self::is_aligned) and
+/// [`is_contiguous`](Self::is_contiguous) - each operand's inner stride equals `size` / every stride
+/// is a multiple of `alignment` - to pick a specialized inner loop, then calls
+/// [`foreach_inner_1d`](Self::foreach_inner_1d) to drive that loop once per outer position as
 /// `inner_loop(offsets, inner_len, inner_strides)`, where `offsets`/`inner_strides` are
 /// `[_; N_OPERANDS]` indexed like the input `strides`/`layouts`.
-#[inline(never)]
-pub(crate) fn nd_iter_unordered<
-    const N_OPERANDS: usize,
-    F: FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
->(
-    shape: &[usize],
-    strides: [&[usize]; N_OPERANDS],
-    layouts: [(usize, usize); N_OPERANDS], // (size, alignment) per operand, in its stride unit
-    inner_loop_factory: impl FnOnce(NdApplyInnerFlags) -> F,
-) {
-    for s in strides {
-        assert_eq!(s.len(), shape.len());
-    }
+pub(crate) struct NdIterUnordered<const N_OPERANDS: usize> {
+    /// Post-permutation, post-coalescing shape; always rank >= 1 (a scalar region becomes `[1]`, an
+    /// empty region `[0]`).
+    shape: DimArray<usize>,
+    /// Per-operand strides aligned with `shape`, each in its operand's own stride unit.
+    strides: [DimArray<usize>; N_OPERANDS],
+    /// Per-operand: every stride is a multiple of the operand's alignment.
+    is_aligned: [bool; N_OPERANDS],
+    /// Per-operand: the innermost run is contiguous (inner stride == element size).
+    is_contiguous: [bool; N_OPERANDS],
+}
 
-    // (1) Order the axes (per-operand strides non-increasing, size-1 axes dropped). The sort key is
-    // the array of an axis's per-operand strides, compared lexicographically (operand 0 first), so
-    // `[usize; N_OPERANDS]`'s derived `Ord` gives exactly the ranking we want.
-    let key = |d: usize| -> [usize; N_OPERANDS] { std::array::from_fn(|i| strides[i][d]) };
-    let mut dim_perm = DimArray::new();
-    for (d, &len) in shape.iter().enumerate() {
-        if len == 0 {
-            return; // empty region
+impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
+    /// Order and coalesce the axes and compute the innermost-run flags. An empty region (any axis of
+    /// length 0) yields an iterator whose [`foreach_inner_1d`](Self::foreach_inner_1d) visits nothing.
+    #[inline(never)]
+    pub(crate) fn new(
+        shape: &[usize],
+        strides: [&[usize]; N_OPERANDS],
+        layouts: [(usize, usize); N_OPERANDS], // (size, alignment) per operand, in its stride unit
+    ) -> Self {
+        for s in strides {
+            assert_eq!(s.len(), shape.len());
         }
-        if len > 1 {
-            dim_perm.push(d);
-        }
-    }
-    let shape_storage;
-    let strides_storage: [_; N_OPERANDS];
-    let need_sort = dim_perm.windows(2).any(|w| key(w[0]) < key(w[1]));
-    let (shape, strides) = if dim_perm.len() != shape.len() || need_sort {
-        if need_sort {
-            dim_perm.sort_by_key(|&d| std::cmp::Reverse(key(d)));
-        }
-        let apply_dim_permutation = |arr: &[usize]| dim_arr(dim_perm.len(), |d| arr[dim_perm[d]]);
-        shape_storage = apply_dim_permutation(shape);
-        strides_storage = std::array::from_fn(|i| apply_dim_permutation(strides[i]));
-        (
-            shape_storage.as_slice(),
-            strides_storage.each_ref().map(|s| s.as_slice()),
-        )
-    } else {
-        (shape, strides)
-    };
 
-    // (2) Coalesce adjacent contiguous axes into groups. After the permutation the axes run
-    // outermost (index 0) -> innermost, so a group spanning post-permutation axes [lo..=hi]
-    // takes its stride from the innermost axis `hi` and its length from the product of the
-    // group's shapes.
-    let mut group_inner = DimArray::new(); // post-perm index of each group's inner axis
-    let mut group_len = DimArray::new(); // product of the group's shapes
-    #[allow(clippy::needless_range_loop)]
-    for d in 0..shape.len() {
-        let m = group_inner.len();
-        if m > 0
-            && (0..N_OPERANDS).all(|i| strides[i][group_inner[m - 1]] == strides[i][d] * shape[d])
-        {
-            group_inner[m - 1] = d; // the group now reaches down to axis `d`
-            group_len[m - 1] *= shape[d];
+        // (1) Order the axes (per-operand strides non-increasing, size-1 axes dropped). The sort key
+        // is the array of an axis's per-operand strides, compared lexicographically (operand 0
+        // first), so `[usize; N_OPERANDS]`'s derived `Ord` gives exactly the ranking we want.
+        let key = |d: usize| -> [usize; N_OPERANDS] { std::array::from_fn(|i| strides[i][d]) };
+        let mut dim_perm = DimArray::new();
+        for (d, &len) in shape.iter().enumerate() {
+            if len == 0 {
+                return Self::empty(); // nothing to iterate
+            }
+            if len > 1 {
+                dim_perm.push(d);
+            }
+        }
+        let shape_storage;
+        let strides_storage: [_; N_OPERANDS];
+        let need_sort = dim_perm.windows(2).any(|w| key(w[0]) < key(w[1]));
+        let (shape, strides) = if dim_perm.len() != shape.len() || need_sort {
+            if need_sort {
+                dim_perm.sort_by_key(|&d| std::cmp::Reverse(key(d)));
+            }
+            let apply_dim_permutation =
+                |arr: &[usize]| dim_arr(dim_perm.len(), |d| arr[dim_perm[d]]);
+            shape_storage = apply_dim_permutation(shape);
+            strides_storage = std::array::from_fn(|i| apply_dim_permutation(strides[i]));
+            (
+                shape_storage.as_slice(),
+                strides_storage.each_ref().map(|s| s.as_slice()),
+            )
         } else {
-            group_inner.push(d);
-            group_len.push(shape[d]);
-        }
-    }
-    let mut strides: [_; N_OPERANDS] =
-        std::array::from_fn(|i| dim_arr(group_inner.len(), |g| strides[i][group_inner[g]]));
-    let mut shape = group_len;
-
-    // (3) Build the inner-run closure from the innermost-axis flags, then drive it once per outer
-    // position with the running per-operand byte offsets.
-    let mut ndim = shape.len();
-    let sizes: [_; N_OPERANDS] = std::array::from_fn(|i| layouts[i].0);
-    let is_aligned;
-    let is_contiguous;
-    if ndim == 0 {
-        // The whole region is a single element. Treat as 1-d with length 1.
-        shape.push(1);
-        ndim = 1;
-        for i in 0..N_OPERANDS {
-            strides[i].push(sizes[i]);
-        }
-        is_aligned = [true; N_OPERANDS];
-        is_contiguous = [true; N_OPERANDS];
-    } else {
-        is_aligned = std::array::from_fn::<_, N_OPERANDS, _>(|i| {
-            let alignment = layouts[i].1;
-            strides[i].iter().all(|s| s.is_multiple_of(alignment))
-        });
-        is_contiguous =
-            std::array::from_fn::<_, N_OPERANDS, _>(|i| strides[i][ndim - 1] == sizes[i]);
-    }
-    let inner = ndim - 1;
-    let inner_len = shape[inner];
-    let inner_strides: [_; N_OPERANDS] = std::array::from_fn(|i| strides[i][inner]);
-
-    let mut inner_loop = inner_loop_factory(NdApplyInnerFlags {
-        inner_len,
-        aligned: &is_aligned,
-        contiguous: &is_contiguous,
-    });
-
-    if crate::hint::likely(ndim == 1) {
-        inner_loop([0; N_OPERANDS], inner_len, inner_strides);
-    } else {
-        let strides = strides.each_ref();
-        let strides = strides.map(|s| s.as_slice());
-        let nd_walk_fn = match ndim {
-            2 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<1>>,
-            3 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<2>>,
-            4 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<3>>,
-            _ => nd_iter_unordered_nd_walk::<N_OPERANDS, DimDyn>,
+            (shape, strides)
         };
-        nd_walk_fn(&shape, strides, &mut inner_loop);
+
+        // (2) Coalesce adjacent contiguous axes into groups. After the permutation the axes run
+        // outermost (index 0) -> innermost, so a group spanning post-permutation axes [lo..=hi]
+        // takes its stride from the innermost axis `hi` and its length from the product of the
+        // group's shapes.
+        let mut group_inner = DimArray::new(); // post-perm index of each group's inner axis
+        let mut group_len = DimArray::new(); // product of the group's shapes
+        for d in 0..shape.len() {
+            let m = group_inner.len();
+            if m > 0
+                && (0..N_OPERANDS)
+                    .all(|i| strides[i][group_inner[m - 1]] == strides[i][d] * shape[d])
+            {
+                group_inner[m - 1] = d; // the group now reaches down to axis `d`
+                group_len[m - 1] *= shape[d];
+            } else {
+                group_inner.push(d);
+                group_len.push(shape[d]);
+            }
+        }
+        let mut strides: [DimArray<usize>; N_OPERANDS] =
+            std::array::from_fn(|i| dim_arr(group_inner.len(), |g| strides[i][group_inner[g]]));
+        let mut shape = group_len;
+
+        // (3) Compute the innermost-run flags (length, and per-operand alignment / contiguity).
+        let sizes: [_; N_OPERANDS] = std::array::from_fn(|i| layouts[i].0);
+        let is_aligned;
+        let is_contiguous;
+        if shape.is_empty() {
+            // The whole region is a single element. Treat as 1-d with length 1.
+            shape.push(1);
+            for i in 0..N_OPERANDS {
+                strides[i].push(sizes[i]);
+            }
+            is_aligned = [true; N_OPERANDS];
+            is_contiguous = [true; N_OPERANDS];
+        } else {
+            let ndim = shape.len();
+            is_aligned = std::array::from_fn::<_, N_OPERANDS, _>(|i| {
+                let alignment = layouts[i].1;
+                strides[i].iter().all(|s| s.is_multiple_of(alignment))
+            });
+            is_contiguous =
+                std::array::from_fn::<_, N_OPERANDS, _>(|i| strides[i][ndim - 1] == sizes[i]);
+        }
+
+        Self {
+            shape,
+            strides,
+            is_aligned,
+            is_contiguous,
+        }
+    }
+
+    /// A canonical iterator over an empty region: a single zero-length axis with stride 0. Its
+    /// innermost run has length 0, so [`foreach_inner_1d`](Self::foreach_inner_1d) invokes the inner
+    /// loop once with `inner_len == 0` - a no-op that visits nothing. The flags honestly describe that
+    /// stride-0 run: aligned (0 is a multiple of any alignment) but not contiguous (0 != element
+    /// size), so the caller does not pick a contiguous fast path that assumes `inner_stride == size`.
+    #[inline(never)]
+    fn empty() -> Self {
+        let mut shape = DimArray::new();
+        shape.push(0);
+        let strides = std::array::from_fn(|_| {
+            let mut s = DimArray::new();
+            s.push(0);
+            s
+        });
+        Self {
+            shape,
+            strides,
+            is_aligned: [true; N_OPERANDS],
+            is_contiguous: [false; N_OPERANDS],
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn inner_len(&self) -> usize {
+        self.shape[self.shape.len() - 1]
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_aligned(&self) -> [bool; N_OPERANDS] {
+        self.is_aligned
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_contiguous(&self) -> [bool; N_OPERANDS] {
+        self.is_contiguous
+    }
+
+    /// Drive `inner_loop` once per outer position, as `inner_loop(offsets, inner_len, inner_strides)`
+    /// (all `[_; N_OPERANDS]`, indexed like the `strides`/`layouts` passed to [`new`](Self::new)).
+    #[inline]
+    pub(crate) fn foreach_inner_1d(
+        &self,
+        mut inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
+    ) {
+        let ndim = self.shape.len();
+        let inner_len = self.shape[ndim - 1];
+        let inner_strides: [_; N_OPERANDS] = std::array::from_fn(|i| self.strides[i][ndim - 1]);
+        if crate::hint::likely(ndim == 1) {
+            inner_loop([0; N_OPERANDS], inner_len, inner_strides);
+        } else {
+            let nd_walk_fn = match ndim {
+                2 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<1>>,
+                3 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<2>>,
+                4 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<3>>,
+                _ => nd_iter_unordered_nd_walk::<N_OPERANDS, DimDyn>,
+            };
+            let strides = self.strides.each_ref().map(|s| s.as_slice());
+            nd_walk_fn(&self.shape, strides, &mut inner_loop);
+        }
     }
 }
 #[inline(never)]
@@ -183,12 +240,6 @@ fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, D: Dimension>(
     }
 }
 
-pub(crate) struct NdApplyInnerFlags<'a> {
-    pub(crate) inner_len: usize,
-    pub(crate) aligned: &'a [bool],
-    pub(crate) contiguous: &'a [bool],
-}
-
 #[allow(unused)] // TODO
 pub(crate) fn nd_iter_unordered_op0<T, U>(
     shape: &[usize],
@@ -202,20 +253,17 @@ pub(crate) fn nd_iter_unordered_op0<T, U>(
     let (itemsize, alignment) = (size_of::<T>(), align_of::<T>());
     assert!(itemsize == size_of::<U>() && alignment <= align_of::<U>());
 
-    nd_iter_unordered(shape, [strides], [(itemsize, alignment)], |flags| {
-        let aligned = flags.aligned[0] && data_ptr.is_aligned();
-        let inner_loop_fn = match (aligned, flags.contiguous[0]) {
-            (true, true) => inner_loop::<T, U, 1, true, true>,
-            (true, false) => inner_loop::<T, U, 1, true, false>,
-            (false, true) => inner_loop::<T, U, 1, false, true>,
-            (false, false) => inner_loop::<T, U, 1, false, false>,
-        };
-        move |offsets, inner_len, inner_strides| {
-            let [offset] = offsets;
-            let data_ptr = unsafe { data_ptr.cast::<u8>().add(offset).cast::<T>() };
-            let [inner_stride] = inner_strides;
-            inner_loop_fn(data_ptr, inner_len, inner_stride, &mut kernel)
-        }
+    let iter = NdIterUnordered::new(shape, [strides], [(itemsize, alignment)]);
+    let aligned = iter.is_aligned()[0] && data_ptr.is_aligned();
+    let inner_loop_fn = match (aligned, iter.is_contiguous()[0]) {
+        (true, true) => inner_loop::<T, U, 1, true, true>,
+        (true, false) => inner_loop::<T, U, 1, true, false>,
+        (false, true) => inner_loop::<T, U, 1, false, true>,
+        (false, false) => inner_loop::<T, U, 1, false, false>,
+    };
+    iter.foreach_inner_1d(|[offset], inner_len, [inner_stride]| {
+        let data_ptr = unsafe { data_ptr.cast::<u8>().add(offset).cast::<T>() };
+        inner_loop_fn(data_ptr, inner_len, inner_stride, &mut kernel)
     });
 
     #[inline(never)]
@@ -285,34 +333,33 @@ pub(crate) fn nd_iter_unordered_op0<T, U>(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
-
     use super::*;
 
     // ---------------------------------------------------------------------------
     // Harness
     // ---------------------------------------------------------------------------
 
-    /// The flags `nd_iter_unordered` reports to the inner-loop factory, captured by value.
+    /// The innermost-run flags an [`NdIterUnordered`] reports, captured by value.
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct Flags<const N: usize> {
         inner_len: usize,
-        aligned: [bool; N],
-        contiguous: [bool; N],
+        is_aligned: [bool; N],
+        is_contiguous: [bool; N],
     }
 
-    /// Everything a single `nd_iter_unordered` call reveals to its caller.
+    /// Everything a single [`NdIterUnordered`] walk reveals to its caller.
     struct Run<const N: usize> {
         /// The per-operand offset tuple for every element visited, in visitation order (each inner
         /// run expanded to one entry per element).
         visited: Vec<[usize; N]>,
-        /// The flags handed to the factory, or `None` if the factory was never called (empty region).
+        /// The innermost-run flags the iterator reports; always populated (an empty region reports
+        /// unused placeholders).
         flags: Option<Flags<N>>,
         /// How many times the inner-loop closure was invoked (one per outer position).
         inner_calls: usize,
     }
 
-    /// Drive `nd_iter_unordered` and record the offsets it visits, the flags it reports, and how
+    /// Build an [`NdIterUnordered`] and record the offsets it visits, the flags it reports, and how
     /// many inner runs it performs. The inner loop reconstructs each element's offset from the run
     /// base + `k * inner_stride`, so `visited` is exactly the set of offsets the caller would read.
     fn run<const N: usize>(
@@ -320,32 +367,29 @@ mod tests {
         strides: [&[usize]; N],
         layouts: [(usize, usize); N],
     ) -> Run<N> {
-        let visited: RefCell<Vec<[usize; N]>> = RefCell::new(Vec::new());
-        let flags: RefCell<Option<Flags<N>>> = RefCell::new(None);
-        let inner_calls = Cell::new(0usize);
+        let mut visited: Vec<[usize; N]> = Vec::new();
+        let mut inner_calls = 0usize;
 
-        // Capture shared references (which are `Copy`) so both the `move` inner closure and the
-        // factory can hold them without moving the owners out of this function.
-        let (visited_ref, flags_ref, calls_ref) = (&visited, &flags, &inner_calls);
-        nd_iter_unordered(shape, strides, layouts, move |f| {
-            *flags_ref.borrow_mut() = Some(Flags {
-                inner_len: f.inner_len,
-                aligned: std::array::from_fn(|i| f.aligned[i]),
-                contiguous: std::array::from_fn(|i| f.contiguous[i]),
-            });
-            move |offsets: [usize; N], len: usize, inner_strides: [usize; N]| {
-                calls_ref.set(calls_ref.get() + 1);
-                let mut v = visited_ref.borrow_mut();
+        let iter = NdIterUnordered::new(shape, strides, layouts);
+        let flags = Flags {
+            inner_len: iter.inner_len(),
+            is_aligned: iter.is_aligned(),
+            is_contiguous: iter.is_contiguous(),
+        };
+        iter.foreach_inner_1d(
+            |offsets: [usize; N], len: usize, inner_strides: [usize; N]| {
+                inner_calls += 1;
                 for k in 0..len {
-                    v.push(std::array::from_fn(|i| offsets[i] + k * inner_strides[i]));
+                    visited.push(std::array::from_fn(|i| offsets[i] + k * inner_strides[i]));
                 }
-            }
-        });
+            },
+        );
 
+        // An empty region visits nothing (`inner_calls == 0`); the reported flags are placeholders.
         Run {
-            visited: visited.into_inner(),
-            flags: flags.into_inner(),
-            inner_calls: inner_calls.into_inner(),
+            visited,
+            flags: Some(flags),
+            inner_calls,
         }
     }
 
@@ -424,8 +468,8 @@ mod tests {
         let run = assert_visits(&[5], [&[1]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 5);
-        assert_eq!(flags.contiguous, [true]);
-        assert_eq!(flags.aligned, [true]);
+        assert_eq!(flags.is_contiguous, [true]);
+        assert_eq!(flags.is_aligned, [true]);
         assert_eq!(run.inner_calls, 1);
         assert_eq!(run.visited, [[0], [1], [2], [3], [4]]);
     }
@@ -436,8 +480,8 @@ mod tests {
         let run = assert_visits(&[4], [&[2]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 4);
-        assert_eq!(flags.contiguous, [false]);
-        assert_eq!(flags.aligned, [true]); // every stride is a multiple of alignment 1
+        assert_eq!(flags.is_contiguous, [false]);
+        assert_eq!(flags.is_aligned, [true]); // every stride is a multiple of alignment 1
         assert_eq!(run.visited, [[0], [2], [4], [6]]);
     }
 
@@ -451,7 +495,7 @@ mod tests {
         let run = assert_visits(&[3, 4], [&[4, 1]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 12);
-        assert_eq!(flags.contiguous, [true]);
+        assert_eq!(flags.is_contiguous, [true]);
         assert_eq!(run.inner_calls, 1);
     }
 
@@ -462,7 +506,7 @@ mod tests {
         let run = assert_visits(&[3, 4], [&[1, 3]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 12);
-        assert_eq!(flags.contiguous, [true]);
+        assert_eq!(flags.is_contiguous, [true]);
         assert_eq!(run.inner_calls, 1);
     }
 
@@ -473,7 +517,7 @@ mod tests {
         let run = assert_visits(&[2, 3], [&[10, 1]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 3);
-        assert_eq!(flags.contiguous, [true]); // inner stride 1 == element size 1
+        assert_eq!(flags.is_contiguous, [true]); // inner stride 1 == element size 1
         assert_eq!(run.inner_calls, 2);
         // The full offset set is still exactly the naive walk (checked by assert_visits).
     }
@@ -485,7 +529,7 @@ mod tests {
         let run = assert_visits(&[1, 4, 1], [&[100, 1, 50]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 4);
-        assert_eq!(flags.contiguous, [true]);
+        assert_eq!(flags.is_contiguous, [true]);
         assert_eq!(run.inner_calls, 1);
         let mut got = run.visited.clone();
         got.sort_unstable();
@@ -501,8 +545,8 @@ mod tests {
         let run = assert_visits(&[1, 1], [&[7, 3]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 1);
-        assert_eq!(flags.contiguous, [true]);
-        assert_eq!(flags.aligned, [true]);
+        assert_eq!(flags.is_contiguous, [true]);
+        assert_eq!(flags.is_aligned, [true]);
         assert_eq!(run.inner_calls, 1);
         assert_eq!(run.visited, [[0]]);
     }
@@ -518,20 +562,18 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // Empty regions: the factory is never called
+    // Empty regions: nothing is visited
     // ---------------------------------------------------------------------------
 
     #[test]
-    fn zero_length_axis_skips_the_whole_walk() {
+    fn empty_region_visits_nothing() {
         for shape in [vec![0], vec![0, 3], vec![2, 0, 3], vec![2, 3, 0]] {
             let strides: Vec<usize> = (0..shape.len()).map(|d| d + 1).collect();
             let run = run(&shape, [strides.as_slice()], [(1, 1)]);
+            // The empty sentinel reports a zero-length inner run, so nothing is visited (the inner
+            // loop may still run once with `len == 0`, a no-op).
             assert!(run.visited.is_empty(), "shape={shape:?}");
-            assert!(
-                run.flags.is_none(),
-                "factory must not run for shape={shape:?}"
-            );
-            assert_eq!(run.inner_calls, 0, "shape={shape:?}");
+            assert_eq!(run.flags.unwrap().inner_len, 0, "shape={shape:?}");
         }
     }
 
@@ -544,15 +586,15 @@ mod tests {
         // Stride 5 is not a multiple of alignment 4 -> not aligned; 5 != size 4 -> not contiguous.
         let run = assert_visits(&[3], [&[5]], [(4, 4)]);
         let flags = run.flags.unwrap();
-        assert_eq!(flags.aligned, [false]);
-        assert_eq!(flags.contiguous, [false]);
+        assert_eq!(flags.is_aligned, [false]);
+        assert_eq!(flags.is_contiguous, [false]);
         assert_eq!(run.visited, [[0], [5], [10]]);
 
         // Stride 8 is a multiple of alignment 4 -> aligned; but 8 != size 4 -> still not contiguous.
         let run = assert_visits(&[3], [&[8]], [(4, 4)]);
         let flags = run.flags.unwrap();
-        assert_eq!(flags.aligned, [true]);
-        assert_eq!(flags.contiguous, [false]);
+        assert_eq!(flags.is_aligned, [true]);
+        assert_eq!(flags.is_contiguous, [false]);
     }
 
     // ---------------------------------------------------------------------------
@@ -566,8 +608,8 @@ mod tests {
         let run = assert_visits(&[2, 3], [&[0, 0]], [(1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 6);
-        assert_eq!(flags.contiguous, [false]);
-        assert_eq!(flags.aligned, [true]); // 0 is a multiple of any alignment
+        assert_eq!(flags.is_contiguous, [false]);
+        assert_eq!(flags.is_aligned, [true]); // 0 is a multiple of any alignment
         assert_eq!(run.visited, [[0]; 6]);
     }
 
@@ -583,8 +625,8 @@ mod tests {
         let run = assert_visits(&[2, 3], [&[12, 4], &[3, 1]], [(4, 4), (1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 6);
-        assert_eq!(flags.contiguous, [true, true]);
-        assert_eq!(flags.aligned, [true, true]);
+        assert_eq!(flags.is_contiguous, [true, true]);
+        assert_eq!(flags.is_aligned, [true, true]);
         assert_eq!(run.inner_calls, 1);
         assert_eq!(
             run.visited,
@@ -600,8 +642,8 @@ mod tests {
         let run = assert_visits(&[2, 3], [&[12, 4], &[1, 2]], [(4, 4), (1, 1)]);
         let flags = run.flags.unwrap();
         assert_eq!(flags.inner_len, 3);
-        assert_eq!(flags.contiguous, [true, false]);
-        assert_eq!(flags.aligned, [true, true]);
+        assert_eq!(flags.is_contiguous, [true, false]);
+        assert_eq!(flags.is_aligned, [true, true]);
         assert_eq!(run.inner_calls, 2);
     }
 
@@ -673,9 +715,8 @@ mod tests {
     }
 
     #[test]
-    fn prop_empty_region_never_calls_the_factory() {
-        // Any shape containing a zero-length axis is an empty region: nothing is visited and the
-        // inner-loop factory is never constructed.
+    fn prop_empty_region_visits_nothing() {
+        // Any shape containing a zero-length axis is an empty region: no element is visited.
         let strategy = (1usize..=4)
             .prop_flat_map(|ndim| {
                 (
@@ -688,8 +729,6 @@ mod tests {
             .run(&strategy, |(shape, s0)| {
                 let run = run(&shape, [s0.as_slice()], [(1, 1)]);
                 prop_assert!(run.visited.is_empty());
-                prop_assert!(run.flags.is_none());
-                prop_assert_eq!(run.inner_calls, 0);
                 Ok(())
             })
             .unwrap();
@@ -746,10 +785,13 @@ mod tests {
         let itemsize = size_of::<T>();
         assert_eq!(itemsize, size_of::<U>());
 
-        // Observe which specialization this layout selects, so callers can pin it down.
-        let observed = run(shape, [strides], [(itemsize, align_of::<T>())])
-            .flags
-            .map(|f| (f.aligned[0], f.contiguous[0]));
+        // Observe which specialization this layout selects, so callers can pin it down. An empty
+        // region visits nothing; report `None` for it.
+        let r = run(shape, [strides], [(itemsize, align_of::<T>())]);
+        let observed = (!r.visited.is_empty()).then(|| {
+            let f = r.flags.unwrap();
+            (f.is_aligned[0], f.is_contiguous[0])
+        });
 
         let len = buf_len(shape, strides, itemsize);
         let initial: Vec<u8> = (0..len)
@@ -869,7 +911,7 @@ mod tests {
 
     #[test]
     fn op0_empty_region_is_a_noop() {
-        // A zero-length axis short-circuits before the factory runs: nothing is mapped.
+        // A zero-length axis yields an empty walk: nothing is mapped.
         assert_eq!(check_op0::<u32, u32>(&[0], &[4], kmul_u32), None);
         assert_eq!(
             check_op0::<u32, u32>(&[2, 0, 3], &[24, 8, 4], kmul_u32),

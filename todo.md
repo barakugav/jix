@@ -12,3 +12,4 @@
 - add read benchmark of the whole array, also for low entropy data
 - add `out` arg to `Array.numpy()`
 - array.transmute_items
+- Array::reduce_unordered

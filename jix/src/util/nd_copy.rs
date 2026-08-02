@@ -2,7 +2,7 @@ use std::ptr;
 
 use crate::arrayvec::ArrayVec;
 use crate::dtype::{Dtype, Itemsize};
-use crate::nd_iter_unordered;
+use crate::NdIterUnordered;
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.
@@ -11,7 +11,7 @@ use crate::nd_iter_unordered;
 /// monomorphized scalar copy for the common power-of-two `(itemsize, alignment)` pairs, a
 /// field-by-field copy for structs that decompose into at most four scalar fields, or a generic
 /// byte-wise fallback for everything else. Each [`copy`](Self::copy) then moves one region by
-/// driving [`nd_iter_unordered`] over `shape` (which sorts, coalesces and walks the axes) and
+/// driving an [`NdIterUnordered`] over `shape` (which sorts, coalesces and walks the axes) and
 /// copying one contiguous-or-strided inner loop at each visited position.
 pub(crate) struct NdCopier<'a>(NdCopierInner<'a>);
 enum NdCopierInner<'a> {
@@ -162,67 +162,68 @@ impl<'a> NdCopier<'a> {
 
         // Operand 0 is the destination (write; sort-primary), operand 1 the source (read). Both are
         // byte-addressed with element layout `(size_of::<T>(), align_of::<T>())`.
-        nd_iter_unordered(
+        let iter = NdIterUnordered::new(
             shape,
             [dst_strides, src_strides],
             [(size_of::<T>(), align_of::<T>()); 2],
-            |flags| {
-                // `nd_iter_unordered`'s aligned flags only cover the strides; AND-in the base
-                // pointers so the aligned `read`/`write` path runs only when the data really is.
-                let aligned = (flags.aligned[0] && dst.as_ptr().cast::<T>().is_aligned())
-                    && (flags.aligned[1] && src.as_ptr().cast::<T>().is_aligned());
-                let (src_contiguous, dst_contiguous) = (flags.contiguous[1], flags.contiguous[0]);
+        );
+        // The iterator's aligned flags only cover the strides; AND-in the base pointers so the
+        // aligned `read`/`write` path runs only when the data really is.
+        let [dst_aligned, src_aligned] = iter.is_aligned();
+        let aligned = (dst_aligned && dst.as_ptr().cast::<T>().is_aligned())
+            && (src_aligned && src.as_ptr().cast::<T>().is_aligned());
+        let [dst_contiguous, src_contiguous] = iter.is_contiguous();
 
-                // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
-                // (branchless); longer runs fall through to `copy_nonoverlapping`.
-                let inner_loop = if src_contiguous && dst_contiguous {
-                    match (flags.inner_len, aligned) {
-                        (1, true) => Self::inner_loop_contiguous_const_len::<T, 1, true>,
-                        (1, false) => Self::inner_loop_contiguous_const_len::<T, 1, false>,
-                        (2, true) => Self::inner_loop_contiguous_const_len::<T, 2, true>,
-                        (2, false) => Self::inner_loop_contiguous_const_len::<T, 2, false>,
-                        (4, true) => Self::inner_loop_contiguous_const_len::<T, 4, true>,
-                        (4, false) => Self::inner_loop_contiguous_const_len::<T, 4, false>,
-                        (8, true) => Self::inner_loop_contiguous_const_len::<T, 8, true>,
-                        (8, false) => Self::inner_loop_contiguous_const_len::<T, 8, false>,
-                        (16, true) => Self::inner_loop_contiguous_const_len::<T, 16, true>,
-                        (16, false) => Self::inner_loop_contiguous_const_len::<T, 16, false>,
-                        (32, true) if size_of::<T>() <= 8 => {
-                            Self::inner_loop_contiguous_const_len::<T, 32, true>
-                        }
-                        (32, false) if size_of::<T>() <= 8 => {
-                            Self::inner_loop_contiguous_const_len::<T, 32, false>
-                        }
-                        (64, true) if size_of::<T>() <= 4 => {
-                            Self::inner_loop_contiguous_const_len::<T, 64, true>
-                        }
-                        (64, false) if size_of::<T>() <= 4 => {
-                            Self::inner_loop_contiguous_const_len::<T, 64, false>
-                        }
-                        (_, true) => Self::inner_loop::<T, true, true, true>,
-                        (_, false) => Self::inner_loop::<T, false, true, true>,
-                    }
-                } else {
-                    match (aligned, [src_contiguous, dst_contiguous]) {
-                        (_, [true, true]) => unreachable!(),
-                        (true, [true, false]) => Self::inner_loop::<T, true, true, false>,
-                        (false, [true, false]) => Self::inner_loop::<T, false, true, false>,
-                        (true, [false, true]) => Self::inner_loop::<T, true, false, true>,
-                        (false, [false, true]) => Self::inner_loop::<T, false, false, true>,
-                        (true, [false, false]) => Self::inner_loop::<T, true, false, false>,
-                        (false, [false, false]) => Self::inner_loop::<T, false, false, false>,
-                    }
-                };
-
-                move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
-                    inner_loop(
-                        src.get_unchecked(src_offset..),
-                        dst.get_unchecked_mut(dst_offset..),
-                        len,
-                        src_stride,
-                        dst_stride,
-                    )
+        // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
+        // (branchless); longer runs fall through to `copy_nonoverlapping`.
+        let inner_loop_fn = if src_contiguous && dst_contiguous {
+            match (iter.inner_len(), aligned) {
+                (1, true) => Self::inner_loop_contiguous_const_len::<T, 1, true>,
+                (1, false) => Self::inner_loop_contiguous_const_len::<T, 1, false>,
+                (2, true) => Self::inner_loop_contiguous_const_len::<T, 2, true>,
+                (2, false) => Self::inner_loop_contiguous_const_len::<T, 2, false>,
+                (4, true) => Self::inner_loop_contiguous_const_len::<T, 4, true>,
+                (4, false) => Self::inner_loop_contiguous_const_len::<T, 4, false>,
+                (8, true) => Self::inner_loop_contiguous_const_len::<T, 8, true>,
+                (8, false) => Self::inner_loop_contiguous_const_len::<T, 8, false>,
+                (16, true) => Self::inner_loop_contiguous_const_len::<T, 16, true>,
+                (16, false) => Self::inner_loop_contiguous_const_len::<T, 16, false>,
+                (32, true) if size_of::<T>() <= 8 => {
+                    Self::inner_loop_contiguous_const_len::<T, 32, true>
                 }
+                (32, false) if size_of::<T>() <= 8 => {
+                    Self::inner_loop_contiguous_const_len::<T, 32, false>
+                }
+                (64, true) if size_of::<T>() <= 4 => {
+                    Self::inner_loop_contiguous_const_len::<T, 64, true>
+                }
+                (64, false) if size_of::<T>() <= 4 => {
+                    Self::inner_loop_contiguous_const_len::<T, 64, false>
+                }
+                (_, true) => Self::inner_loop::<T, true, true, true>,
+                (_, false) => Self::inner_loop::<T, false, true, true>,
+            }
+        } else {
+            match (aligned, [src_contiguous, dst_contiguous]) {
+                (_, [true, true]) => unreachable!(),
+                (true, [true, false]) => Self::inner_loop::<T, true, true, false>,
+                (false, [true, false]) => Self::inner_loop::<T, false, true, false>,
+                (true, [false, true]) => Self::inner_loop::<T, true, false, true>,
+                (false, [false, true]) => Self::inner_loop::<T, false, false, true>,
+                (true, [false, false]) => Self::inner_loop::<T, true, false, false>,
+                (false, [false, false]) => Self::inner_loop::<T, false, false, false>,
+            }
+        };
+
+        iter.foreach_inner_1d(
+            |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
+                inner_loop_fn(
+                    src.get_unchecked(src_offset..),
+                    dst.get_unchecked_mut(dst_offset..),
+                    len,
+                    src_stride,
+                    dst_stride,
+                )
             },
         );
     }
@@ -371,26 +372,22 @@ impl<'a> NdCopier<'a> {
 
         // Byte-wise fallback: each element is `itemsize` opaque bytes copied via `copy_nonoverlapping`
         // (always the unaligned `u8` path). Operand 0 is the destination, operand 1 the source.
-        nd_iter_unordered(
-            shape,
-            [dst_strides, src_strides],
-            [(itemsize, 1); 2],
-            |flags| {
-                let contiguous = flags.contiguous[0] && flags.contiguous[1];
-                let copy_fn = match contiguous {
-                    true => Self::inner_loop_untyped::<true>,
-                    false => Self::inner_loop_untyped::<false>,
-                };
-                move |offsets: [usize; 2], len, strides: [usize; 2]| unsafe {
-                    copy_fn(
-                        src.get_unchecked(offsets[1]..),
-                        dst.get_unchecked_mut(offsets[0]..),
-                        len,
-                        strides[1],
-                        strides[0],
-                        itemsize,
-                    )
-                }
+        let iter = NdIterUnordered::new(shape, [dst_strides, src_strides], [(itemsize, 1); 2]);
+        let [dst_contiguous, src_contiguous] = iter.is_contiguous();
+        let inner_loop_fn = match dst_contiguous && src_contiguous {
+            true => Self::inner_loop_untyped::<true>,
+            false => Self::inner_loop_untyped::<false>,
+        };
+        iter.foreach_inner_1d(
+            |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
+                inner_loop_fn(
+                    src.get_unchecked(src_offset..),
+                    dst.get_unchecked_mut(dst_offset..),
+                    len,
+                    src_stride,
+                    dst_stride,
+                    itemsize,
+                )
             },
         );
     }
