@@ -6,8 +6,7 @@ use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ArrayStorage, ArrayStorageInfo, OutBuf, ReadData, Ty};
 use crate::util::cast_slice_mut;
-use crate::util::iter::NdIter;
-use crate::{ArrayParams, DimBitmap, Dimension, ElementType, IntoDimension};
+use crate::{cast_slice, ArrayParams, DimBitmap, Dimension, ElementType, IntoDimension, NdCopier};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -116,14 +115,22 @@ where
             }
             // Strided: write the scalar to each strided output position.
             Some(strides) => {
-                let strides = D::vec(index.len(), |d| strides[d]);
-                let read_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
-                let iter = NdIter::builder(read_shape)
-                    .with_strides_ptr_mut_ext(strides, buf.as_mut_ptr())
-                    .build();
-                for (_, dst) in iter {
-                    unsafe { dst.cast::<T>().write(self.data) };
-                }
+                let nd_copier = NdCopier::new(&dtype);
+                let src = [self.data];
+                let src = unsafe { cast_slice::<T, u8>(src.as_slice()) };
+                let src_strides = D::vec(index.len(), |_| 0);
+                let dst_strides = D::vec(index.len(), |d| strides[d]);
+                let read_shape = D::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+                unsafe {
+                    nd_copier.copy(
+                        src,
+                        buf,
+                        read_shape.as_ref(),
+                        src_strides.as_ref(),
+                        dst_strides.as_ref(),
+                        &dtype,
+                    )
+                };
             }
         }
         Ok(())
