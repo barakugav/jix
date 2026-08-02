@@ -84,8 +84,18 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
     #[inline]
     #[track_caller]
     pub fn push(&mut self, element: T) {
+        assert!(self.len() < Self::CAPACITY);
+        unsafe { self.push_unchecked(element) };
+    }
+
+    /// Push `element` to the end of the vector without checking for capacity.
+    ///
+    /// The caller must ensure the vector is not full.
+    #[inline]
+    pub unsafe fn push_unchecked(&mut self, element: T) {
         let len = self.len();
-        assert!(len < Self::CAPACITY);
+        debug_assert!(len < Self::CAPACITY);
+        unsafe { std::hint::assert_unchecked(len < Self::CAPACITY) };
         unsafe { ptr::write(self.as_mut_ptr().add(len), element) };
         unsafe { self.set_len(len + 1) };
     }

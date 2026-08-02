@@ -588,8 +588,14 @@ pub(crate) type DimArray<T> = crate::util::arrayvec::ArrayVec<T, NDIM_MAX>;
 ///
 /// Panics if `ndim > NDIM_MAX`.
 #[inline(always)]
-pub(crate) fn dim_arr<T>(ndim: usize, f: impl FnMut(usize) -> T) -> DimArray<T> {
-    (0..ndim).map(f).collect()
+pub(crate) fn dim_arr<T>(ndim: usize, mut f: impl FnMut(usize) -> T) -> DimArray<T> {
+    assert!(ndim <= NDIM_MAX);
+    let mut arr = DimArray::new();
+    for i in 0..ndim {
+        // TODO: use push_unchecked. Somehow it run slower, due to stack spilling
+        arr.push(f(i));
+    }
+    arr
 }
 
 /// Build a [`DimArray`] by applying a fallible `f` to each axis index `0..ndim`.
