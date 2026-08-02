@@ -1,7 +1,7 @@
 use crate::dtype::Dtyped;
 use crate::util::iter::NdIter;
 use crate::util::PtrExt;
-use crate::{dim_arr, ArrayExt, Dim, DimArray, DimDyn, Dimension};
+use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension};
 
 /// Drive an inner loop Fn over every element of `N_OPERANDS` identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
@@ -32,7 +32,7 @@ pub(crate) fn nd_iter_unordered<
     const N_OPERANDS: usize,
     F: FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
 >(
-    mut shape: &[usize],
+    shape: &[usize],
     strides: [&[usize]; N_OPERANDS],
     layouts: [(usize, usize); N_OPERANDS], // (size, alignment) per operand, in its stride unit
     inner_loop_factory: impl FnOnce(NdApplyInnerFlags) -> F,
@@ -78,6 +78,7 @@ pub(crate) fn nd_iter_unordered<
     // group's shapes.
     let mut group_inner = DimArray::new(); // post-perm index of each group's inner axis
     let mut group_len = DimArray::new(); // product of the group's shapes
+    #[allow(clippy::needless_range_loop)]
     for d in 0..shape.len() {
         let m = group_inner.len();
         if m > 0
@@ -90,8 +91,8 @@ pub(crate) fn nd_iter_unordered<
             group_len.push(shape[d]);
         }
     }
-    let apply_merge = |arr: &[usize]| dim_arr(group_inner.len(), |g| arr[group_inner[g]]);
-    let mut strides: [_; N_OPERANDS] = std::array::from_fn(|i| apply_merge(&strides[i]));
+    let mut strides: [_; N_OPERANDS] =
+        std::array::from_fn(|i| dim_arr(group_inner.len(), |g| strides[i][group_inner[g]]));
     let mut shape = group_len;
 
     // (3) Build the inner-run closure from the innermost-axis flags, then drive it once per outer
@@ -188,6 +189,7 @@ pub(crate) struct NdApplyInnerFlags<'a> {
     pub(crate) contiguous: &'a [bool],
 }
 
+#[allow(unused)] // TODO
 pub(crate) fn nd_iter_unordered_op0<T, U>(
     shape: &[usize],
     data_ptr: *mut T,
@@ -245,14 +247,15 @@ pub(crate) fn nd_iter_unordered_op0<T, U>(
             }
         };
         let mut i = 0;
-        if CONTIGUOUS && len >= LANES {
-            while i <= len - LANES {
+        if CONTIGUOUS {
+            while i + LANES <= len {
                 let chunk = unsafe {
                     data_ptr
                         .add(i)
                         .cast::<[T; LANES]>()
                         .read_maybe_aligned::<ALIGNED>()
                 };
+                #[allow(clippy::needless_range_loop)]
                 for k in 0..LANES {
                     write(i + k, kernel(chunk[k]));
                 }

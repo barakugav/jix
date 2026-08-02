@@ -261,17 +261,17 @@ where
         Self: Sized,
     {
         let read_fn = match <T as LanesInfo>::LANES {
-            1 => read_data_to_buf::<T, Self, 1>,
-            2 => read_data_to_buf::<T, Self, 2>,
-            4 => read_data_to_buf::<T, Self, 4>,
-            8 => read_data_to_buf::<T, Self, 8>,
-            16 => read_data_to_buf::<T, Self, 16>,
-            32 => read_data_to_buf::<T, Self, 32>,
-            64 => read_data_to_buf::<T, Self, 64>,
-            128 => read_data_to_buf::<T, Self, 128>,
-            256 => read_data_to_buf::<T, Self, 256>,
-            512 => read_data_to_buf::<T, Self, 512>,
-            _ => read_data_to_buf::<T, Self, 1024>,
+            1 => read_data_to_buf::<T, 1>,
+            2 => read_data_to_buf::<T, 2>,
+            4 => read_data_to_buf::<T, 4>,
+            8 => read_data_to_buf::<T, 8>,
+            16 => read_data_to_buf::<T, 16>,
+            32 => read_data_to_buf::<T, 32>,
+            64 => read_data_to_buf::<T, 64>,
+            128 => read_data_to_buf::<T, 128>,
+            256 => read_data_to_buf::<T, 256>,
+            512 => read_data_to_buf::<T, 512>,
+            _ => read_data_to_buf::<T, 1024>,
         };
         let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         read_fn(self, buf, &shape)
@@ -406,21 +406,20 @@ where
 }
 
 #[inline(always)]
-fn read_data_to_buf<T, R, const LANES: usize>(
-    data: &mut R,
+fn read_data_to_buf<T, const LANES: usize>(
+    data: &mut impl ReadData<T>,
     buf: &mut OutBuf,
     shape: &[usize],
 ) -> Result<()>
 where
     T: Dtyped,
-    R: ReadData<T>,
 {
     let dtype = T::DTYPE;
     let (out, strides) = buf.get_mut(data.len(), &dtype);
 
     match strides {
         None => read_data_to_buf_contiguous::<T, LANES>(data, out),
-        Some(strides) => read_data_to_buf_strided::<T, R, LANES>(data, out, strides, shape),
+        Some(strides) => read_data_to_buf_strided::<T, LANES>(data, out, strides, shape),
     }
 }
 
@@ -459,15 +458,14 @@ where
     Ok(())
 }
 
-fn read_data_to_buf_strided<T, R, const LANES: usize>(
-    data: &mut R,
+fn read_data_to_buf_strided<T, const LANES: usize>(
+    data: &mut impl ReadData<T>,
     out: &mut [u8],
     strides: &[usize],
     shape: &[usize],
 ) -> Result<()>
 where
     T: Dtyped,
-    R: ReadData<T>,
 {
     let itemsize = size_of::<T>();
     // The source is read straight from `data` via `read_bulk`, indexed in *elements*
@@ -486,19 +484,17 @@ where
             let aligned = flags.aligned[0] && out.as_ptr().cast::<T>().is_aligned();
             let contiguous = [flags.contiguous[0], flags.contiguous[1]];
             let inner_loop_fn = match (aligned, contiguous) {
-                (true, [true, true]) => inner_loop::<T, R, LANES, true, true, true>,
-                (true, [true, false]) => inner_loop::<T, R, LANES, true, true, false>,
-                (true, [false, true]) => inner_loop::<T, R, LANES, true, false, true>,
-                (true, [false, false]) => inner_loop::<T, R, LANES, true, false, false>,
-                (false, [true, true]) => inner_loop::<T, R, LANES, false, true, true>,
-                (false, [true, false]) => inner_loop::<T, R, LANES, false, true, false>,
-                (false, [false, true]) => inner_loop::<T, R, LANES, false, false, true>,
-                (false, [false, false]) => inner_loop::<T, R, LANES, false, false, false>,
+                (true, [true, true]) => inner_loop::<T, LANES, true, true, true>,
+                (true, [true, false]) => inner_loop::<T, LANES, true, true, false>,
+                (true, [false, true]) => inner_loop::<T, LANES, true, false, true>,
+                (true, [false, false]) => inner_loop::<T, LANES, true, false, false>,
+                (false, [true, true]) => inner_loop::<T, LANES, false, true, true>,
+                (false, [true, false]) => inner_loop::<T, LANES, false, true, false>,
+                (false, [false, true]) => inner_loop::<T, LANES, false, false, true>,
+                (false, [false, false]) => inner_loop::<T, LANES, false, false, false>,
             };
             let dst_base = out.as_mut_ptr();
-            move |offsets: [usize; 2], len, inner_strides: [usize; 2]| {
-                let [dst_offset, src_offset] = offsets;
-                let [dst_stride, src_stride] = inner_strides;
+            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| {
                 let dst = unsafe { dst_base.add(dst_offset) };
                 inner_loop_fn(&mut *data, dst, src_offset, len, dst_stride, src_stride)
             }
@@ -512,13 +508,12 @@ where
     #[inline(never)]
     fn inner_loop<
         T: Copy,
-        R: ReadData<T>,
         const LANES: usize,
         const ALIGNED: bool,
         const DST_CONTIGUOUS: bool,
         const SRC_CONTIGUOUS: bool,
     >(
-        data: &mut R,
+        data: &mut impl ReadData<T>,
         dst: *mut u8,
         src_index: usize,
         len: usize,
@@ -545,8 +540,8 @@ where
             }
         };
         let mut i = 0;
-        if SRC_CONTIGUOUS && len >= LANES {
-            while i <= len - LANES {
+        if SRC_CONTIGUOUS {
+            while i + LANES <= len {
                 let chunk = data.read_bulk::<LANES>(src_index + i);
                 #[allow(clippy::needless_range_loop)]
                 for k in 0..LANES {

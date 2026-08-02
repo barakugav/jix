@@ -10,6 +10,7 @@ pub(crate) const fn likely(b: bool) -> bool {
 }
 
 // https://docs.rs/likely_stable/
+#[allow(unused)]
 #[inline(always)]
 pub(crate) const fn unlikely(b: bool) -> bool {
     #[allow(clippy::needless_bool)]
