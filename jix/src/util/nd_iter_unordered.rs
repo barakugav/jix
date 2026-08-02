@@ -127,7 +127,7 @@ pub(crate) fn nd_iter_unordered<
         contiguous: &is_contiguous,
     });
 
-    if ndim == 1 {
+    if crate::hint::likely(ndim == 1) {
         inner_loop([0; N_OPERANDS], inner_len, inner_strides);
     } else {
         let strides = strides.each_ref();

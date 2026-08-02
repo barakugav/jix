@@ -6,6 +6,7 @@ pub use arr_sequence::*;
 
 pub(crate) mod arrayvec;
 pub(crate) mod cpu_cache;
+pub(crate) mod hint;
 
 pub(crate) mod iter;
 
