@@ -14,12 +14,12 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_get_range, check_ndim, Result};
+use crate::error::{check_buffer_aligned, check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{ArraySpec, ElementType, OutBuf};
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, default_strides, NdCopier};
+use crate::util::{calc_block_end, NdCopier};
 use crate::{default_strides_cast, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
@@ -294,9 +294,9 @@ where
         let shape = self.shape();
         check_get_range(shape, index)?;
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-        let out_shape = D::vec(shape.len(), |d| (index[d].end - index[d].start) as usize);
-        let mut cbuf = buf.get_contiguous_mut(out_shape.as_ref(), self.blocks.dtype(), context)?;
-        let buf = cbuf.as_mut_slice();
+        let dtype = self.blocks.dtype();
+        let is_strided = buf.strides().is_some();
+        let (buf, out_strides) = buf.get_strided_mut::<D>(index, dtype);
         if nitems == 0 {
             return Ok(());
         }
@@ -325,17 +325,16 @@ where
             })
         });
 
-        // Fast path for aligned single-block read
+        // Fast path for an aligned single-block read into a contiguous destination
         if let Some(single_block_idx) = single_block_idx
             && is_aligned
+            && !is_strided
         {
+            check_buffer_aligned(buf.as_ptr(), dtype)?;
             self.blocks.read_block(single_block_idx, buf, context)?;
         } else {
-            self.read_data_slow(index, buf, context, single_block_idx)?;
+            self.read_data_slow(index, buf, out_strides.as_ref(), context, single_block_idx)?;
         }
-
-        let out_shape = D::vec(ndim, |d| (index[d].end - index[d].start) as usize);
-        cbuf.finalize(out_shape.as_ref(), self.blocks.dtype());
         Ok(())
     }
 
@@ -343,6 +342,7 @@ where
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
+        out_strides: &[usize],
         context: &ReadContext,
         single_block_idx: Option<u64>,
     ) -> Result<()>
@@ -354,7 +354,6 @@ where
             Self::read_data_slow_impl::<D>
         } else {
             match self.shape().len() {
-                0 => Self::read_data_slow_impl::<Dim<0>>,
                 1 => Self::read_data_slow_impl::<Dim<1>>,
                 2 => Self::read_data_slow_impl::<Dim<2>>,
                 3 => Self::read_data_slow_impl::<Dim<3>>,
@@ -362,7 +361,7 @@ where
                 _ => Self::read_data_slow_impl::<DimDyn>,
             }
         };
-        read_fn(self, index, buf, context, single_block_idx)
+        read_fn(self, index, buf, out_strides, context, single_block_idx)
     }
 
     #[inline(never)]
@@ -370,6 +369,7 @@ where
         &self,
         index: &[Range<u64>],
         buf: &mut [u8],
+        out_strides: &[usize],
         context: &ReadContext,
         single_block_idx: Option<u64>,
     ) -> Result<()>
@@ -385,7 +385,6 @@ where
         let dtype = self.blocks.dtype();
         let itemsize = dtype.itemsize() as usize;
         let out_shape = ActualD::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let out_strides = default_strides(&out_shape, itemsize);
         let block_shape_u64 = ActualD::vec(ndim, |dim| block_shape[dim] as u64);
         let block_strides = default_strides_cast(&block_shape_u64, itemsize);
         let copier = NdCopier::new(dtype);
@@ -415,7 +414,7 @@ where
                     buf,
                     out_shape.as_ref(),
                     block_strides.as_ref(),
-                    out_strides.as_ref(),
+                    out_strides,
                     dtype,
                 )
             };
@@ -463,7 +462,7 @@ where
                     dst,
                     ActualD::vec(ndim, |dim| block_size[dim] as usize).as_ref(),
                     block_strides.as_ref(),
-                    out_strides.as_ref(),
+                    out_strides,
                     dtype,
                 )
             };
@@ -500,5 +499,120 @@ where
             shape,
             spec: self.spec,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Range;
+
+    use crate::storage::OutBuf;
+    use crate::{Array, ArrayParams, ArrayStorage};
+
+    /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
+    /// *strided* destination whose inner spacing is doubled (a one-element gap between consecutive
+    /// slots, propagated outward). Assert the strided slots match the contiguous read exactly and
+    /// that the gap elements are left untouched - i.e. `read_data` scatters straight into the
+    /// caller's byte-strides instead of staging through a contiguous scratch and scattering at the
+    /// end.
+    fn check_strided_matches_contiguous(
+        shape: &[usize],
+        block_shape: &[u32],
+        index: &[Range<u64>],
+    ) {
+        let n: usize = shape.iter().product();
+        let nd = ndarray::ArrayD::from_shape_vec(
+            shape.to_vec(),
+            (0..n as i32).map(|x| x * 7 - 11).collect(),
+        )
+        .unwrap();
+        let mut params = ArrayParams::new();
+        params.block_shape(block_shape);
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let ctx = za.read_ctx();
+        let storage = za.into_storage();
+
+        let ndim = index.len();
+        let out_shape: Vec<usize> = index.iter().map(|r| (r.end - r.start) as usize).collect();
+        let nitems: usize = out_shape.iter().product();
+
+        // Reference: a plain contiguous read.
+        let mut expected = vec![0i32; nitems.max(1)];
+        {
+            let bytes = unsafe {
+                std::slice::from_raw_parts_mut(expected.as_mut_ptr().cast::<u8>(), nitems * 4)
+            };
+            let mut out = OutBuf::new(bytes);
+            storage.read_data(index, &mut out, &ctx).unwrap();
+        }
+
+        // Strided destination: element strides with a doubled inner spacing so every other element
+        // is an untouched gap. Backed by a `Vec<i32>` for 4-alignment.
+        let mut el_strides = vec![0usize; ndim];
+        if ndim > 0 {
+            el_strides[ndim - 1] = 2;
+            for d in (0..ndim - 1).rev() {
+                el_strides[d] = el_strides[d + 1] * out_shape[d + 1];
+            }
+        }
+        let span = (0..ndim)
+            .map(|d| out_shape[d].saturating_sub(1) * el_strides[d])
+            .sum::<usize>()
+            + 1;
+        const SENTINEL: i32 = i32::MIN;
+        let mut backing = vec![SENTINEL; span.max(1)];
+        let byte_strides: Vec<usize> = el_strides.iter().map(|&s| s * 4).collect();
+        {
+            let bytes = unsafe {
+                std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), backing.len() * 4)
+            };
+            let mut out = unsafe { OutBuf::new_strided(bytes, &byte_strides) };
+            storage.read_data(index, &mut out, &ctx).unwrap();
+        }
+
+        // Compare every logical output element to its strided slot, tracking which backing
+        // elements are slots so the rest can be asserted untouched.
+        let mut is_slot = vec![false; backing.len()];
+        let mut coord = vec![0usize; ndim];
+        for flat in 0..nitems {
+            let mut rem = flat;
+            for d in (0..ndim).rev() {
+                coord[d] = rem % out_shape[d];
+                rem /= out_shape[d];
+            }
+            let slot = (0..ndim).map(|d| coord[d] * el_strides[d]).sum::<usize>();
+            assert_eq!(backing[slot], expected[flat], "coord {coord:?}");
+            is_slot[slot] = true;
+        }
+        for (i, &v) in backing.iter().enumerate() {
+            if !is_slot[i] {
+                assert_eq!(v, SENTINEL, "gap at element {i} was overwritten");
+            }
+        }
+    }
+
+    #[test]
+    fn read_into_strided_output_multi_block() {
+        // A full read spanning many blocks -> the general (multi-block) path scatters each block
+        // into the strided destination at its own `out_start`.
+        check_strided_matches_contiguous(&[6, 8], &[3, 2], &[0..6, 0..8]);
+    }
+
+    #[test]
+    fn read_into_strided_output_unaligned_single_block() {
+        // A sub-region inside a single block -> the single-block slow branch scatters once.
+        check_strided_matches_contiguous(&[4, 4], &[4, 4], &[1..3, 1..3]);
+    }
+
+    #[test]
+    fn read_into_strided_output_aligned_single_block() {
+        // An aligned single block whose destination is strided: the direct `read_block` fast path
+        // (which needs a contiguous buffer) is skipped and the slow branch scatters instead.
+        check_strided_matches_contiguous(&[4, 4], &[2, 2], &[0..2, 0..2]);
+    }
+
+    #[test]
+    fn read_into_strided_output_3d_multi_block() {
+        check_strided_matches_contiguous(&[4, 4, 4], &[2, 2, 2], &[0..4, 0..4, 0..4]);
     }
 }
