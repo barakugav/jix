@@ -628,15 +628,34 @@ impl<T> SliceExt<T> for [T] {
 }
 
 pub(crate) trait PtrExt<T> {
-    fn read_maybe_aligned<const ALIGNED: bool>(self) -> T;
+    unsafe fn read_maybe_aligned<const ALIGNED: bool>(self) -> T;
 }
 impl<T> PtrExt<T> for *const T {
     #[inline(always)]
-    fn read_maybe_aligned<const ALIGNED: bool>(self) -> T {
+    unsafe fn read_maybe_aligned<const ALIGNED: bool>(self) -> T {
         if ALIGNED {
             unsafe { self.read() }
         } else {
             unsafe { self.read_unaligned() }
+        }
+    }
+}
+impl<T> PtrExt<T> for *mut T {
+    #[inline(always)]
+    unsafe fn read_maybe_aligned<const ALIGNED: bool>(self) -> T {
+        unsafe { self.cast_const().read_maybe_aligned::<ALIGNED>() }
+    }
+}
+pub(crate) trait PtrMutExt<T> {
+    unsafe fn write_maybe_aligned<const ALIGNED: bool>(self, val: T);
+}
+impl<T> PtrMutExt<T> for *mut T {
+    #[inline(always)]
+    unsafe fn write_maybe_aligned<const ALIGNED: bool>(self, val: T) {
+        if ALIGNED {
+            unsafe { self.write(val) }
+        } else {
+            unsafe { self.write_unaligned(val) }
         }
     }
 }

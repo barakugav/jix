@@ -55,7 +55,7 @@ use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
 use crate::{
     array_from_fn_inline, assert_unchecked_eq, default_logical_strides_slice, dim_arr, ArrayExt,
-    ArrayStorage, Dimension, ElementType, NdIterUnordered, Ty, TypeDyn,
+    ArrayStorage, Dimension, ElementType, NdIterUnordered, PtrMutExt, Ty, TypeDyn,
 };
 
 pub(crate) mod core_trait;
@@ -530,11 +530,7 @@ where
             } else {
                 unsafe { dst.cast::<u8>().add(j * dst_stride).cast::<T>() }
             };
-            if ALIGNED {
-                unsafe { elm.write(val) };
-            } else {
-                unsafe { elm.write_unaligned(val) };
-            }
+            unsafe { elm.write_maybe_aligned::<ALIGNED>(val) };
         };
         let mut i = 0;
         if SRC_CONTIGUOUS {

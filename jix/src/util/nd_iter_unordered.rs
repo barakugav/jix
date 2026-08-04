@@ -1,7 +1,7 @@
 use crate::dtype::Dtyped;
 use crate::util::iter::NdIter;
 use crate::util::PtrExt;
-use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension};
+use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension, PtrMutExt};
 
 /// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
@@ -288,11 +288,7 @@ pub(crate) fn nd_iter_unordered_op0<T, U>(
             } else {
                 unsafe { dst.cast::<u8>().add(j * inner_stride).cast::<U>() }
             };
-            if ALIGNED {
-                unsafe { elm.write(val) };
-            } else {
-                unsafe { elm.write_unaligned(val) };
-            }
+            unsafe { elm.write_maybe_aligned::<ALIGNED>(val) };
         };
         let mut i = 0;
         if CONTIGUOUS {

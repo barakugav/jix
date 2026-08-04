@@ -2,7 +2,7 @@ use std::ptr;
 
 use crate::arrayvec::ArrayVec;
 use crate::dtype::{Dtype, Itemsize};
-use crate::NdIterUnordered;
+use crate::{NdIterUnordered, PtrExt, PtrMutExt};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.
@@ -271,11 +271,8 @@ impl<'a> NdCopier<'a> {
                     } else {
                         dst.cast::<u8>().add(i * dst_stride).cast::<T>()
                     };
-                    if ALIGNED {
-                        d.write(s.read());
-                    } else {
-                        d.write_unaligned(s.read_unaligned());
-                    }
+                    let val = s.read_maybe_aligned::<ALIGNED>();
+                    d.write_maybe_aligned::<ALIGNED>(val);
                 }
             }
         }
@@ -295,13 +292,8 @@ impl<'a> NdCopier<'a> {
         debug_assert_eq!(dst_stride, size_of::<T>());
         let src = src.as_ptr().cast::<[T; LEN]>();
         let dst = dst.as_mut_ptr().cast::<[T; LEN]>();
-        unsafe {
-            if ALIGNED {
-                dst.write(src.read());
-            } else {
-                dst.write_unaligned(src.read_unaligned());
-            }
-        }
+        let val = unsafe { src.read_maybe_aligned::<ALIGNED>() };
+        unsafe { dst.write_maybe_aligned::<ALIGNED>(val) };
     }
 
     unsafe fn inner_loop_untyped<const SRC_DST_CONTIGUOUS: bool>(
