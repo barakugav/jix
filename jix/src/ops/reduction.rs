@@ -239,9 +239,9 @@ where
 
     check_get_range(outer_shape, index)?;
     // Write results straight into the caller's destination using its own byte-strides (the
-    // C-order strides over the read shape when it is contiguous). Unlike `get_contiguous_mut`,
-    // a genuinely-strided destination is scattered into directly as each output is finalized -
-    // there is no contiguous staging buffer and no extra scatter copy at the end.
+    // C-order strides over the read shape when it is contiguous). A genuinely-strided destination
+    // is scattered into directly as each output is finalized - there is no contiguous staging
+    // buffer and no extra scatter copy at the end.
     let (out_buf, out_strides) = buf.get_strided_mut::<OuterD>(index, output_dtype);
     check_buffer_aligned(out_buf.as_ptr(), output_dtype)?;
 

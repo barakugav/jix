@@ -13,3 +13,4 @@
 - add `out` arg to `Array.numpy()`
 - array.transmute_items
 - Array::reduce_unordered
+- benchmark LANES of {32/64/128/256} / itemsize on x86
