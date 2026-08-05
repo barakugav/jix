@@ -238,10 +238,6 @@ where
     // of kernel, dimension, dtype, and backing storage.
 
     check_get_range(outer_shape, index)?;
-    // Write results straight into the caller's destination using its own byte-strides (the
-    // C-order strides over the read shape when it is contiguous). A genuinely-strided destination
-    // is scattered into directly as each output is finalized - there is no contiguous staging
-    // buffer and no extra scatter copy at the end.
     let (out_buf, out_strides) = buf.get_strided_mut::<OuterD>(index, output_dtype);
     check_buffer_aligned(out_buf.as_ptr(), output_dtype)?;
 
@@ -431,30 +427,20 @@ where
     let mut tmp_state_buf;
     // CAREFUL: state_buf and out_ptr may alias
     let (state_buf, state_strides) = if state_in_out_buf {
-        // Reuse the output bytes as the state buffer: state and output slots are the same size
-        // and alias the same bytes, so the state adopts the caller's (possibly strided) layout.
-        // Span the whole `out_buf` (not just `out_nitems * state_size`) so the slice's provenance
-        // covers every strided slot, including the gaps of a non-contiguous destination.
+        // Reuse the output bytes as the state buffer
         let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
         (state_buf, out_strides.clone())
     } else {
-        // A fresh contiguous (row-major) scratch buffer, independent of the output layout.
         tmp_state_buf = context.tmp_buf(out_nitems * kernel_state_sizeof, kernel_state_alignof);
         (
             tmp_state_buf.as_mut_slice(),
             default_strides_cast(&out_shape, kernel_state_sizeof),
         )
     };
-    // Each slot is written through an aligned `MaybeUninit` reference, so every strided slot must
-    // land on the kernel-state alignment. This holds because a strided destination carries
-    // itemsize-multiple strides (it describes a typed nd sub-region) and the base is checked above.
-    debug_assert!(
-        state_strides
-            .as_ref()
-            .iter()
-            .all(|&s| s.is_multiple_of(kernel_state_alignof.as_usize())),
-        "state strides must be a multiple of the kernel-state alignment",
-    );
+    debug_assert!(state_strides
+        .as_ref()
+        .iter()
+        .all(|&s| s.is_multiple_of(kernel_state_alignof.as_usize())));
     let mut state_initialized = false;
 
     let mut items_buf = context.tmp_buf(0, item_dtype.alignment());

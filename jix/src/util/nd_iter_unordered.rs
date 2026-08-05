@@ -60,7 +60,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         let mut dim_perm = DimArray::new();
         for (d, &len) in shape.iter().enumerate() {
             if len == 0 {
-                return Self::empty(); // nothing to iterate
+                return Self::empty(layouts); // nothing to iterate
             }
             if len > 1 {
                 dim_perm.push(d);
@@ -91,6 +91,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         // group's shapes.
         let mut group_inner = DimArray::new(); // post-perm index of each group's inner axis
         let mut group_len = DimArray::new(); // product of the group's shapes
+        #[allow(clippy::needless_range_loop)]
         for d in 0..shape.len() {
             let m = group_inner.len();
             if m > 0
@@ -138,25 +139,19 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         }
     }
 
-    /// A canonical iterator over an empty region: a single zero-length axis with stride 0. Its
-    /// innermost run has length 0, so [`foreach_inner_1d`](Self::foreach_inner_1d) invokes the inner
-    /// loop once with `inner_len == 0` - a no-op that visits nothing. The flags honestly describe that
-    /// stride-0 run: aligned (0 is a multiple of any alignment) but not contiguous (0 != element
-    /// size), so the caller does not pick a contiguous fast path that assumes `inner_stride == size`.
-    #[inline(never)]
-    fn empty() -> Self {
+    fn empty(layouts: [(usize, usize); N_OPERANDS]) -> Self {
         let mut shape = DimArray::new();
         shape.push(0);
-        let strides = std::array::from_fn(|_| {
+        let strides = std::array::from_fn(|op_i| {
             let mut s = DimArray::new();
-            s.push(0);
+            s.push(layouts[op_i].0);
             s
         });
         Self {
             shape,
             strides,
             is_aligned: [true; N_OPERANDS],
-            is_contiguous: [false; N_OPERANDS],
+            is_contiguous: [true; N_OPERANDS],
         }
     }
 
@@ -176,7 +171,6 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     }
 
     /// Drive `inner_loop` once per outer position, as `inner_loop(offsets, inner_len, inner_strides)`
-    /// (all `[_; N_OPERANDS]`, indexed like the `strides`/`layouts` passed to [`new`](Self::new)).
     #[inline]
     pub(crate) fn foreach_inner_1d(
         &self,
