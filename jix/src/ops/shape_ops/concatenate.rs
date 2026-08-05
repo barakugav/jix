@@ -4,8 +4,8 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_shape_overflow, ensure, Result};
 use crate::storage::params::{combine_block_layout, combine_select_hints, ArraySpecDynamic};
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{ArraySequence, DimArray};
+use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
+use crate::util::{default_strides, ArraySequence, DimArray};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
@@ -185,43 +185,39 @@ where
     /// strides - no temporary buffer. When `buf` is contiguous and all dimensions before `concat_axis`
     /// have size <= 1, each sub-array's region is itself contiguous and is read into a plain contiguous
     /// slice (the `inner_contiguous` fast path).
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
-
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
-        if nitems == 0 {
-            buf.materialize(0, dtype);
-            return Ok(());
-        }
+        check_out_buf(out.as_deref(), self.shape())?;
 
         let itemsize = dtype.itemsize() as usize;
         let output_shape = Self::Dimension::vec(index.len(), |dim| {
             (index[dim].end - index[dim].start) as usize
         });
-        // Write straight into the (possibly strided) destination, using its own strides. The
-        // `inner_contiguous` fast path (reading a sub-array directly into a contiguous slice of `buf`) is
-        // only valid when `buf` is itself contiguous; a strided destination always scatters.
-        let is_strided = buf.strides().is_some();
-        let (dst, output_strides) = buf.get_strided_mut::<Self::Dimension>(index, dtype);
-        let concat_stride = output_strides[self.concat_axis];
-        // When `buf` is contiguous and all dims before concat_axis have size <=1, each array's
-        // data is contiguous in buf.
-        let inner_contiguous = !is_strided
+        let mut out = materialize_out_buf(out, context, output_shape.as_ref(), dtype);
+        if output_shape.as_ref().contains(&0) {
+            return Ok(out);
+        }
+
+        // When the destination is contiguous and all dims before concat_axis have size <=1, each
+        // array's data is a contiguous run in the destination.
+        let inner_contiguous = out.is_contiguous(output_shape.as_ref(), dtype)
             && output_shape
                 .as_ref()
                 .iter()
                 .take(self.concat_axis)
                 .all(|&s| s <= 1);
+        let (out_buf, output_strides) = out.data_mut();
+        let concat_stride = output_strides[self.concat_axis];
         let req_start = index[self.concat_axis].start;
         let req_end = index[self.concat_axis].end;
 
-        // Find the first sub-array whose end exceeds req_start (i.e. the first that may overlap).
+        // Find the first sub-array whose end exceeds req_start (the first that may overlap).
         const BINARY_SEARCH_THRESHOLD: usize = 32;
         let first_arr = if self.borders.len() < BINARY_SEARCH_THRESHOLD {
             self.borders
@@ -259,16 +255,24 @@ where
             let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
             let buf_offset = buf_concat_offset * concat_stride;
 
-            let mut out = if inner_contiguous {
-                OutBuf::new(&mut dst[buf_offset..buf_offset + sub_size_bytes])
+            let mut sub = if inner_contiguous {
+                let sub_c = default_strides(&sub_shape, itemsize);
+                // SAFETY: contiguous destination; array `arr`'s bytes pack into this slot.
+                unsafe {
+                    StridedBuf::from_slice_mut(
+                        &mut out_buf[buf_offset..buf_offset + sub_size_bytes],
+                        sub_c.as_ref(),
+                    )
+                }
             } else {
-                unsafe { OutBuf::new_strided(&mut dst[buf_offset..], output_strides.as_ref()) }
+                // SAFETY: `output_strides` describe `dest`; the slot at `buf_offset` is within it.
+                unsafe { StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], output_strides) }
             };
             self.arrays
-                .read_data(arr, sub_index.as_ref(), &mut out, context)?;
+                .read_data(arr, sub_index.as_ref(), context, Some(&mut sub))?;
         }
 
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]

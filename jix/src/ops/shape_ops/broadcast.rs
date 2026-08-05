@@ -4,8 +4,8 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
-use crate::util::{default_strides, dim_arr, DimArray, NdCopier};
+use crate::storage::{check_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf};
+use crate::util::{dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
@@ -51,9 +51,6 @@ pub struct Broadcast<S: ArrayStorage> {
     array: S,
     /// `is_broadcast[d]` is `true` when output dim `d` was expanded from length 1.
     is_broadcast: <S::Dimension as Dimension>::Vec<bool>,
-    /// `true` when `new_shape == input_shape` - no dimension was actually broadcast.
-    /// In this case `read_data` forwards directly to the inner storage with no extra work.
-    is_identity: bool,
 
     new_shape: S::Dimension,
     spec: ArraySpecDynamic,
@@ -92,7 +89,6 @@ where
                 );
             }
         }
-        let is_identity = is_broadcast.as_ref().iter().all(|&b| !b);
 
         let new_shape = S::Dimension::from_slice(new_shape);
 
@@ -138,7 +134,6 @@ where
         Ok(Self {
             array,
             is_broadcast,
-            is_identity,
             new_shape,
             spec,
         })
@@ -155,25 +150,16 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
     type Dimension = S::Dimension;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
-        // Fast path: no dimension was actually broadcast - forward directly.
-        if self.is_identity {
-            return self.array.read_data(index, buf, context);
-        }
-
-        let dtype = self.dtype();
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-
+        check_out_buf(out.as_deref(), self.shape())?;
         let ndim = self.is_broadcast.as_ref().len();
-        let itemsize = dtype.itemsize() as usize;
 
-        // Read from inner with broadcast dims collapsed to 0..1.
-        // tmp_buf is C-contiguous over inner_read_shape.
         let inner_index = S::Dimension::vec(ndim, |dim| {
             if self.is_broadcast[dim] {
                 0..1
@@ -181,39 +167,35 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
                 index[dim].clone()
             }
         });
-        let inner_read_shape = S::Dimension::vec(ndim, |dim| {
-            (inner_index[dim].end - inner_index[dim].start) as usize
-        });
-        let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array
-            .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
-        let tmp_buf = tmp_buf.as_slice().unwrap();
+        let inner = self.array.read_data(inner_index.as_ref(), context, None)?;
 
-        // Source strides over tmp_buf, with broadcast dims set to 0.
-        // A zero stride means advancing along that output axis always reads the same src byte,
-        // which is exactly the repeat-element semantics of broadcasting.
-        let mut src_strides = default_strides(&inner_read_shape, itemsize);
-        for dim in 0..ndim {
+        let inner_strides = inner.strides();
+        let broadcasted_strides = S::Dimension::vec(ndim, |dim| {
             if self.is_broadcast[dim] {
-                src_strides[dim] = 0;
+                0
+            } else {
+                inner_strides[dim]
+            }
+        });
+
+        match out {
+            None => Ok(unsafe { inner.with_strides(broadcasted_strides.as_ref()) }),
+            Some(out) => {
+                let out_shape =
+                    S::Dimension::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+                let (src, _) = inner.data();
+                // SAFETY: `src_strides` are the inner view's strides with broadcast axes zeroed
+                unsafe {
+                    out.copy_from(
+                        src,
+                        broadcasted_strides.as_ref(),
+                        out_shape.as_ref(),
+                        self.dtype(),
+                    )
+                };
+                Ok(out.view_mut())
             }
         }
-
-        let out_shape = S::Dimension::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
-
-        let copier = NdCopier::new(dtype);
-        unsafe {
-            copier.copy(
-                tmp_buf,
-                dst,
-                out_shape.as_ref(),
-                src_strides.as_ref(),
-                dst_strides.as_ref(),
-                dtype,
-            )
-        };
-        Ok(())
     }
 
     #[inline(always)]
@@ -248,7 +230,6 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         Ok(Broadcast {
             array: self.array.dimension_change()?,
             is_broadcast,
-            is_identity: self.is_identity,
             new_shape,
             spec: self.spec,
         })
@@ -262,7 +243,6 @@ impl<S: ArrayStorage> ArrayStorage for Broadcast<S> {
         Ok(Broadcast {
             array: self.array.element_type_change()?,
             is_broadcast: self.is_broadcast,
-            is_identity: self.is_identity,
             new_shape: self.new_shape,
             spec: self.spec,
         })
@@ -404,49 +384,6 @@ mod tests {
             .to_ndarray_sub(&[0..2, 2..5], &ReadContext::default())
             .unwrap();
         assert_eq!(got, array![[0, 0, 0], [1, 1, 1]]);
-    }
-
-    // -----------------------------------------------------------------------
-    // Identity fast path
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn identity_flag_set_when_no_broadcast() {
-        let a = make(arange(12), &[3, 4]);
-        let b = super::Broadcast::new_array(a.as_ref(), &[3, 4])
-            .unwrap()
-            .into_storage();
-        assert!(b.is_identity);
-    }
-
-    #[test]
-    fn identity_flag_not_set_when_broadcast() {
-        let a = make(arange(4), &[1, 4]);
-        let b = super::Broadcast::new_array(a.as_ref(), &[3, 4])
-            .unwrap()
-            .into_storage();
-        assert!(!b.is_identity);
-    }
-
-    #[test]
-    fn identity_full_read_correct() {
-        let got = make(arange(12), &[3, 4])
-            .broadcast(&[3, 4])
-            .to_ndarray()
-            .unwrap();
-        assert_eq!(
-            got,
-            ndarray::Array::from_shape_vec([3, 4], arange(12)).unwrap()
-        );
-    }
-
-    #[test]
-    fn identity_sub_read_correct() {
-        let got = make(arange(12), &[3, 4])
-            .broadcast(&[3, 4])
-            .to_ndarray_sub(&[1..3, 1..3], &ReadContext::default())
-            .unwrap();
-        assert_eq!(got, array![[5, 6], [9, 10]]);
     }
 
     // -----------------------------------------------------------------------

@@ -439,7 +439,7 @@ mod tests {
     /// `mult` all ones is fully contiguous (maximal coalescing); any `mult[d] > 1` leaves gaps.
     fn strided_strides(shape: &[usize], mult: &[usize], itemsize: usize) -> Vec<usize> {
         let ndim = shape.len();
-        let backing: Vec<usize> = (0..ndim).map(|d| shape[d] * mult[d]).collect();
+        let backing = (0..ndim).map(|d| shape[d] * mult[d]).collect::<Vec<_>>();
         let mut cstr = vec![0usize; ndim];
         let mut acc = itemsize;
         for d in (0..ndim).rev() {
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn empty_region_visits_nothing() {
         for shape in [vec![0], vec![0, 3], vec![2, 0, 3], vec![2, 3, 0]] {
-            let strides: Vec<usize> = (0..shape.len()).map(|d| d + 1).collect();
+            let strides = (0..shape.len()).map(|d| d + 1).collect::<Vec<_>>();
             let run = run(&shape, [strides.as_slice()], [(1, 1)]);
             // The empty sentinel reports a zero-length inner run, so nothing is visited (the inner
             // loop may still run once with `len == 0`, a no-op).
@@ -695,9 +695,9 @@ mod tests {
             .run(&strategy, |(base_shape, m0, m1, is0, is1, perm)| {
                 let phys0 = strided_strides(&base_shape, &m0, is0);
                 let phys1 = strided_strides(&base_shape, &m1, is1);
-                let shape: Vec<usize> = perm.iter().map(|&d| base_shape[d]).collect();
-                let s0: Vec<usize> = perm.iter().map(|&d| phys0[d]).collect();
-                let s1: Vec<usize> = perm.iter().map(|&d| phys1[d]).collect();
+                let shape = perm.iter().map(|&d| base_shape[d]).collect::<Vec<_>>();
+                let s0 = perm.iter().map(|&d| phys0[d]).collect::<Vec<_>>();
+                let s1 = perm.iter().map(|&d| phys1[d]).collect::<Vec<_>>();
                 assert_visits(&shape, [&s0, &s1], [(is0, is0), (is1, is1)]);
                 Ok(())
             })

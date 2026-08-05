@@ -6,11 +6,14 @@ use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
 use crate::error::{bail, check_buffer_aligned, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf};
+use crate::storage::{
+    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, StridedBuf,
+};
 use crate::util::iter::NdIter;
+use crate::util::SliceExt;
 use crate::util::{calc_block_end, scale_read_shape, DimArray, USE_NEW_READ_SCALING};
 use crate::{
-    array_from_fn_inline, default_strides_cast, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
+    array_from_fn_inline, default_strides, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
     IterExt, Ty,
 };
 
@@ -152,12 +155,12 @@ where
     type Dimension = D;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         read_data_impl::<S::Dimension, D>(
             &self.array,
             self.shape(),
@@ -170,8 +173,8 @@ where
                 finalize_states::<S::Item, K, D>(&self.kernel, args);
             },
             index,
-            buf,
             context,
+            out,
         )
     }
 
@@ -217,7 +220,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-fn read_data_impl<InnerD, OuterD>(
+fn read_data_impl<'a, InnerD, OuterD>(
     inner_array: &dyn ArrayStorage,
     outer_shape: &[u64],
     output_dtype: &Dtype,
@@ -227,9 +230,9 @@ fn read_data_impl<InnerD, OuterD>(
     reduce_tile_fn: &dyn Fn(ReduceTileArgs<OuterD>),
     finalize_state_fn: &dyn Fn(FinalizeStateArgs<OuterD>),
     index: &[Range<u64>],
-    buf: &mut OutBuf,
-    context: &ReadContext,
-) -> Result<()>
+    context: &'a ReadContext,
+    out: Option<&'a mut StridedBuf<'_>>,
+) -> Result<StridedBuf<'a>>
 where
     InnerD: Dimension,
     OuterD: Dimension,
@@ -238,7 +241,11 @@ where
     // of kernel, dimension, dtype, and backing storage.
 
     check_get_range(outer_shape, index)?;
-    let (out_buf, out_strides) = buf.get_strided_mut::<OuterD>(index, output_dtype);
+    check_out_buf(out.as_deref(), outer_shape)?;
+    let out_shape_usize = OuterD::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+    let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), output_dtype);
+    let (out_buf, out_strides) = out.data_mut();
+    let out_strides = out_strides.to_dim_vec::<OuterD>();
     check_buffer_aligned(out_buf.as_ptr(), output_dtype)?;
 
     // Streams the reduction over a two-level chunking of the inner array so peak scratch
@@ -431,10 +438,11 @@ where
         let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
         (state_buf, out_strides.clone())
     } else {
-        tmp_state_buf = context.tmp_buf(out_nitems * kernel_state_sizeof, kernel_state_alignof);
+        tmp_state_buf =
+            context.allocate_buf(out_nitems * kernel_state_sizeof, kernel_state_alignof);
         (
             tmp_state_buf.as_mut_slice(),
-            default_strides_cast(&out_shape, kernel_state_sizeof),
+            default_strides(&out_shape, kernel_state_sizeof),
         )
     };
     debug_assert!(state_strides
@@ -443,7 +451,7 @@ where
         .all(|&s| s.is_multiple_of(kernel_state_alignof.as_usize())));
     let mut state_initialized = false;
 
-    let mut items_buf = context.tmp_buf(0, item_dtype.alignment());
+    let mut items_buf = context.allocate_buf(0, item_dtype.alignment());
     for (bulk_idx, (bulk_inner_offset, bulk_size)) in bulk_iter {
         // The bulk's absolute element range, used as the tile iterator's universe.
         let bulk_begin = InnerD::vec(inner_ndim, |dim| {
@@ -509,25 +517,17 @@ where
                     }
                 }
             }
-            // Identity when the reduced dims are already the innermost source dims: the
-            // permuted layout equals the natural row-major one, so skip the scatter.
-            let reduced_is_suffix = (0..inner_ndim)
-                .find(|&d| is_reduced[d])
-                .is_none_or(|f| (f..inner_ndim).all(|d| is_reduced[d]));
-
             items_buf.set_len(
                 (tile_size.as_ref().iter().product::<u64>() * item_dtype.itemsize() as u64)
                     as usize,
             );
             let items_buf = items_buf.as_mut_slice();
-            let mut inner_out_buf = if reduced_is_suffix {
-                OutBuf::new(items_buf)
-            } else {
-                // SAFETY: `perm_strides` describes the tile's `(output, reduced)`
-                // sub-region within `items_buf`, which is sized to the full tile.
-                unsafe { OutBuf::new_strided(items_buf, perm_strides.as_ref()) }
-            };
-            inner_array.read_data(tile.as_ref(), &mut inner_out_buf, context)?;
+            // Read the tile into its `(output, reduced)` permuted layout.
+            // SAFETY: `perm_strides` describes the tile's `(output, reduced)` sub-region within
+            // `items_buf`, which is sized to the full tile.
+            let mut inner_out_buf =
+                unsafe { StridedBuf::from_slice_mut(items_buf, perm_strides.as_ref()) };
+            inner_array.read_data(tile.as_ref(), context, Some(&mut inner_out_buf))?;
             drop(inner_out_buf);
 
             // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
@@ -593,7 +593,7 @@ where
         reduction_size_overall,
         state_initialized,
     });
-    Ok(())
+    Ok(out)
 }
 
 struct ReduceTileArgs<D: Dimension> {
@@ -3367,8 +3367,15 @@ pub(crate) mod tests {
                     n_out * size_of::<i64>(),
                 )
             };
-            let mut out = crate::storage::OutBuf::new(bytes);
-            storage.read_data(&full_index, &mut out, &ctx).unwrap();
+            let sh = full_index
+                .iter()
+                .map(|r| (r.end - r.start) as usize)
+                .collect::<Vec<_>>();
+            let c = crate::util::default_strides_slice(&sh, size_of::<i64>());
+            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            storage
+                .read_data(&full_index, &ctx, Some(&mut out))
+                .unwrap();
         }
 
         let expected = ndarray_reduce(&nd, axes, |v| v.iter().map(|&x| x as i64).sum::<i64>());
@@ -3424,7 +3431,7 @@ pub(crate) mod tests {
         // the i64 output, so the state buffer aliases the strided output and adopts its layout.
         // Small blocks + read_size force multiple bulks/tiles, so the strided `state_offset`
         // (base slot of each bulk's output block) is exercised with a non-trivial 2D stride.
-        use crate::storage::OutBuf;
+        use crate::storage::StridedBuf;
         use crate::ArrayStorage;
 
         // [4, 4, 4] i8, reduce the middle axis -> [4, 4] i64.
@@ -3448,8 +3455,13 @@ pub(crate) mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(expected.as_mut_ptr().cast::<u8>(), 16 * 8)
             };
-            let mut out = OutBuf::new(bytes);
-            storage.read_data(&index, &mut out, &ctx).unwrap();
+            let sh = index
+                .iter()
+                .map(|r| (r.end - r.start) as usize)
+                .collect::<Vec<_>>();
+            let c = crate::util::default_strides_slice(&sh, size_of::<i64>());
+            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            storage.read_data(&index, &ctx, Some(&mut out)).unwrap();
         }
 
         // Strided destination: element strides [8, 2] (bytes [64, 16]), so slot (r, c) lands at
@@ -3463,8 +3475,8 @@ pub(crate) mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 32 * 8)
             };
-            let mut out = unsafe { OutBuf::new_strided(bytes, &byte_strides) };
-            storage.read_data(&index, &mut out, &ctx).unwrap();
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            storage.read_data(&index, &ctx, Some(&mut out)).unwrap();
         }
 
         let mut is_slot = [false; 32];
@@ -3487,7 +3499,7 @@ pub(crate) mod tests {
         // false: the state lives in a separate contiguous scratch and `finalize_states` scatters
         // each result into the strided destination. Check that scatter honors the caller's strides
         // and matches a contiguous read exactly (identical compute order -> bit-identical).
-        use crate::storage::OutBuf;
+        use crate::storage::StridedBuf;
         use crate::ArrayStorage;
 
         let nd = ndarray::ArrayD::from_shape_vec(vec![3usize, 4], (0..12i32).collect()).unwrap();
@@ -3501,8 +3513,9 @@ pub(crate) mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(expected.as_mut_ptr().cast::<u8>(), 3 * 8)
             };
-            let mut out = OutBuf::new(bytes);
-            storage.read_data(&[0..3], &mut out, &ctx).unwrap();
+            let c = crate::util::default_strides_slice(&[3usize], size_of::<f64>());
+            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            storage.read_data(&[0..3], &ctx, Some(&mut out)).unwrap();
         }
 
         // Strided destination: byte stride 16 (element stride 2), so slot i is at element 2*i and
@@ -3513,8 +3526,8 @@ pub(crate) mod tests {
         {
             let bytes =
                 unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 6 * 8) };
-            let mut out = unsafe { OutBuf::new_strided(bytes, &byte_strides) };
-            storage.read_data(&[0..3], &mut out, &ctx).unwrap();
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            storage.read_data(&[0..3], &ctx, Some(&mut out)).unwrap();
         }
 
         for i in 0..3 {
@@ -3738,8 +3751,17 @@ pub(crate) mod tests {
 
         let mut buf = vec![0u8; n_out.max(1)];
         {
-            let mut out = crate::storage::OutBuf::new(&mut buf[..n_out]);
-            storage.read_data(&full_index, &mut out, &ctx).unwrap();
+            let sh = full_index
+                .iter()
+                .map(|r| (r.end - r.start) as usize)
+                .collect::<Vec<_>>();
+            let c = crate::util::default_strides_slice(&sh, size_of::<u8>());
+            let mut out = unsafe {
+                crate::storage::StridedBuf::from_slice_mut(&mut buf[..n_out], c.as_ref())
+            };
+            storage
+                .read_data(&full_index, &ctx, Some(&mut out))
+                .unwrap();
         }
 
         let expected = ndarray_reduce(&nd, axes, |v| v.iter().cloned().reduce(xor).unwrap());
@@ -3868,17 +3890,17 @@ pub(crate) mod tests {
         axes.sort_unstable();
         axes.dedup();
 
-        let out_shape: Vec<usize> = array
+        let out_shape = array
             .shape()
             .iter()
             .enumerate()
             .filter(|(i, _)| !axes.contains(i))
             .map(|(_, &s)| s)
-            .collect();
+            .collect::<Vec<_>>();
 
-        let values: Vec<O> = ndarray_reduction_iter(array, &axes)
+        let values = ndarray_reduction_iter(array, &axes)
             .map(|(_, view)| f(&view))
-            .collect();
+            .collect::<Vec<_>>();
 
         ndarray::ArrayD::from_shape_vec(out_shape, values).unwrap()
     }
@@ -3900,16 +3922,19 @@ pub(crate) mod tests {
 
         // Kept axes = all axes not being reduced
         let ndim = array.ndim();
-        let kept_axes: Vec<usize> = (0..ndim).filter(|i| !axes.contains(i)).collect();
+        let kept_axes = (0..ndim).filter(|i| !axes.contains(i)).collect::<Vec<_>>();
 
         // Shape of the kept axes - this is what we iterate over
-        let kept_shape: Vec<usize> = kept_axes.iter().map(|&ax| array.shape()[ax]).collect();
+        let kept_shape = kept_axes
+            .iter()
+            .map(|&ax| array.shape()[ax])
+            .collect::<Vec<_>>();
         let total: usize = kept_shape.iter().product();
 
         (0..total).map(move |flat_idx| {
             // Convert flat index to multi-index over the kept axes
             let mut remaining = flat_idx;
-            let mut kept_indices: Vec<usize> = Vec::with_capacity(kept_axes.len());
+            let mut kept_indices = Vec::with_capacity(kept_axes.len());
             for &dim_size in kept_shape.iter().rev() {
                 kept_indices.push(remaining % dim_size);
                 remaining /= dim_size;

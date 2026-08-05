@@ -267,7 +267,7 @@ impl<'a> Decoder<'a> {
         } else {
             tmp_buf = self
                 .context
-                .tmp_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap());
+                .allocate_buf(dst.len(), Alignment::new(CACHE_LINE_SIZE).unwrap());
             let tmp_buf = tmp_buf.as_mut_slice();
 
             let dst_ptr = dst.as_mut_ptr();
@@ -306,7 +306,7 @@ impl<'a> Decoder<'a> {
         // Apply filters in reverse order
         for filter in self.filters.iter().rev() {
             let (data, buf) = buffers.as_mut().unwrap().edit();
-            filter.decode(data, buf, self.dtype, &self.context.tmp_buffers);
+            filter.decode(data, buf, self.dtype, &self.context.buffer_pool);
         }
 
         Ok(nbytes)
@@ -359,9 +359,9 @@ impl<'a> Decoder<'a> {
 /// A single `ReadContext` can be passed to multiple successive reads. Reusing it avoids
 /// reinitializing the decompressor and keeps the scratch buffer allocations warm:
 pub struct ReadContext {
-    tmp_buffers: BufferPool,
     #[cfg(not(miri))]
     decompressor: UnsafeCell<zstd::bulk::Decompressor<'static>>,
+    buffer_pool: BufferPool,
 }
 impl ReadContext {
     /// Creates a new `ReadContext` configured with the given decoder parameters.
@@ -370,9 +370,9 @@ impl ReadContext {
     /// automatically uses the decoder parameters that match the array's stored codec configuration.
     pub(crate) fn new(#[allow(unused)] decoder_params: &DecoderParams) -> Result<Self> {
         Ok(Self {
-            tmp_buffers: BufferPool::new(),
             #[cfg(not(miri))]
             decompressor: UnsafeCell::new(zstd::bulk::Decompressor::new().unwrap()),
+            buffer_pool: BufferPool::new(),
         })
     }
 
@@ -382,19 +382,11 @@ impl ReadContext {
     }
 
     #[inline]
-    pub(crate) fn tmp_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
-        self.tmp_buffers.get(size, alignment)
-    }
-
-    #[allow(unused)]
-    #[inline]
-    pub(crate) fn tmp_buf_typed<T>(&self, nitems: usize) -> PoolBuf<'_> {
-        self.tmp_buffers
-            .get(nitems * size_of::<T>(), Alignment::of::<T>())
+    pub(crate) fn allocate_buf(&self, size: usize, alignment: Alignment) -> PoolBuf<'_> {
+        self.buffer_pool.get(size, alignment)
     }
 }
 impl Default for ReadContext {
-    /// Creates a `ReadContext` with the default configuration.
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()
     }

@@ -3,8 +3,9 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{ensure, Result};
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::{Array, ArrayStorage, ElementType, Ty, TypeDyn};
+use crate::storage::{check_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
+use crate::util::default_strides;
+use crate::{Array, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
 where
@@ -118,48 +119,54 @@ where
     type Dimension = S::Dimension;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        check_out_buf(out.as_deref(), self.shape())?;
         let src_dtype = self.array.dtype();
         let dst_dtype = self.element_type.dtype();
         let (src_align, dst_align) = (
             src_dtype.alignment().as_usize(),
             dst_dtype.alignment().as_usize(),
         );
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
 
-        // `buf` is aligned to the destination dtype, but the inner read expects the source dtype's alignment.
-        // That is a problem only for a *contiguous* caller buffer whose source alignment exceeds its
-        // (weaker) destination alignment - a strided buffer carries no alignment precondition, and a
-        // lazy buffer is pool-allocated to a cache line (over-aligned for any dtype). In that one case,
-        // read through a source-aligned scratch buffer and copy the bytes across afterwards.
-        let mut scratch = (src_align > dst_align
-            && buf.strides().is_none()
-            && matches!(buf.as_slice(), Some(s) if !(s.as_ptr() as usize).is_multiple_of(src_align)))
-        .then(|| context.tmp_buf(nitems * src_dtype.itemsize() as usize, src_dtype.alignment()));
-        let (bytes, strides) = match scratch.as_mut() {
-            Some(scratch) => (scratch.as_mut_slice(), None),
-            None => buf.get_mut(nitems, dst_dtype),
+        let Some(out) = out else {
+            return self.array.read_data(index, context, None);
         };
 
-        {
-            let mut dst = match strides {
-                Some(strides) => unsafe { OutBuf::new_strided(bytes, strides) },
-                None => OutBuf::new(bytes),
-            };
-            self.array.read_data(index, &mut dst, context)?;
+        // `out` is aligned to the destination dtype, but the inner read expects the source dtype's
+        // alignment. That is a problem only for a *contiguous* destination whose source alignment
+        // exceeds its (weaker) destination alignment - a strided destination carries no alignment
+        // precondition. In that one case, stage through a source-aligned scratch and copy across.
+        let out_shape =
+            S::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let needs_scratch = src_align > dst_align
+            && out.is_contiguous(out_shape.as_ref(), dst_dtype)
+            && !(out.data().0.as_ptr() as usize).is_multiple_of(src_align);
+
+        if !needs_scratch {
+            return self.array.read_data(index, context, Some(out));
         }
 
-        // If we staged, copy the identically-sized bytes back into the caller's buffer.
-        if let Some(scratch) = scratch {
-            let (dst, _) = buf.get_mut(nitems, dst_dtype);
-            dst.copy_from_slice(scratch.as_slice());
-        }
-        Ok(())
+        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let mut scratch = context.allocate_buf(
+            nitems * src_dtype.itemsize() as usize,
+            src_dtype.alignment(),
+        );
+        let c = default_strides(&out_shape, src_dtype.itemsize() as usize);
+        // SAFETY: C-order strides for a source-aligned scratch sized to `nitems`.
+        let mut scratch_out =
+            unsafe { StridedBuf::from_slice_mut(scratch.as_mut_slice(), c.as_ref()) };
+        self.array
+            .read_data(index, context, Some(&mut scratch_out))?;
+        drop(scratch_out);
+        // Copy the identically-sized bytes into the caller's (weaker-aligned) destination.
+        let (out_buf, _) = out.data_mut();
+        out_buf.copy_from_slice(scratch.as_slice());
+        Ok(out.view_mut())
     }
 
     #[inline(always)]
@@ -203,7 +210,7 @@ where
 mod tests {
     use super::Transmute;
     use crate::dtype::Dtyped;
-    use crate::storage::{OutBuf, ReadData};
+    use crate::storage::{ReadData, StridedBuf};
     use crate::{Array, ArrayParams, ArrayStorage, Ty};
 
     /// Build a single-block `Compact` array from a 1-D `u32` ndarray, so a full read hits the
@@ -271,9 +278,13 @@ mod tests {
 
         let (mut backing, off) = misaligned_backing(16, 4);
         let dst = &mut backing[off..off + 16];
-        t.storage()
-            .read_data(&[0..4], &mut OutBuf::new(dst), &ctx)
-            .unwrap();
+        {
+            // C-order byte strides for a [4]-shape of `[u8; 4]` (itemsize 4).
+            let mut out = unsafe { StridedBuf::from_slice_mut(&mut *dst, &[4usize]) };
+            t.storage()
+                .read_data(&[0..4], &ctx, Some(&mut out))
+                .unwrap();
+        }
 
         // Little-endian: u32 0x01020304 -> bytes [04, 03, 02, 01].
         assert_eq!(&dst[0..4], &[0x04, 0x03, 0x02, 0x01]);

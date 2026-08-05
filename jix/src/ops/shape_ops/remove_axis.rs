@@ -5,7 +5,9 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf, ReadData};
+use crate::storage::{
+    check_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo, ReadData, StridedBuf,
+};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
@@ -184,28 +186,33 @@ where
     type Dimension = D;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
-        let inner_index = self.transform_index(index)?;
-        let dtype = self.dtype();
-        let itemsize = dtype.itemsize() as usize;
-        let out_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
-        let out_strides = buf.strides_or_default::<D>(&out_shape, itemsize);
-        // Inner dim `axes_mapping[i]` gets output dim i's stride; removed inner dims keep a dummy 0.
-        let mut inner_strides = S::Dimension::vec(inner_index.as_ref().len(), |_| 0usize);
-        for (i, &axis) in self.axes_mapping.as_ref().iter().enumerate() {
-            inner_strides[axis as usize] = out_strides[i];
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        check_out_buf(out.as_deref(), self.shape())?;
+        unsafe {
+            read_data_and_map_strides(
+                &self.array,
+                self.transform_index(index)?.as_ref(),
+                context,
+                out,
+                |inner_strides| {
+                    dim_arr(index.len(), |i| {
+                        inner_strides[self.axes_mapping[i] as usize]
+                    })
+                },
+                |out_strides| {
+                    let mut s = dim_arr(self.array.shape().len(), |_| 0usize);
+                    for (i, &axis) in self.axes_mapping.as_ref().iter().enumerate() {
+                        s[axis as usize] = out_strides[i];
+                    }
+                    s
+                },
+            )
         }
-        let nitems = out_shape.as_ref().iter().product::<u64>() as usize;
-        // SAFETY: `inner_strides` reindexes `buf`'s output strides onto the kept inner axes (removed
-        // axes have extent 1 and are never stepped), addressing bytes `buf` already spans.
-        let mut inner_buf = unsafe { buf.with_strides(nitems, dtype, inner_strides.as_ref()) };
-        self.array
-            .read_data(inner_index.as_ref(), &mut inner_buf, context)
     }
 
     #[inline(always)]
@@ -493,13 +500,13 @@ mod tests {
         #[test]
         fn proptest_remove_axes((nd, za, axes) in remove_axes_strategy::<i32>()) {
             // Oracle: removing size-1 axes is a pure reshape - flat order is unchanged.
-            let expected_shape: Vec<usize> = nd
+            let expected_shape = nd
                 .shape()
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !axes.contains(i))
                 .map(|(_, &s)| s)
-                .collect();
+                .collect::<Vec<_>>();
             let expected = ndarray::ArrayD::from_shape_vec(
                 expected_shape,
                 nd.iter().cloned().collect::<Vec<_>>(),

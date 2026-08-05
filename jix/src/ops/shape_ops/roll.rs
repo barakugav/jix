@@ -3,8 +3,8 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, ensure, Result};
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
+use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Rolls elements along an axis, wrapping around at the boundary, returned by
 /// [`Array::roll`](crate::Array::roll).
@@ -73,13 +73,14 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
+        check_out_buf(out.as_deref(), self.shape())?;
 
         let k = self.axis;
         let shift = self.shift;
@@ -101,28 +102,26 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
                     index[d].clone()
                 }
             });
-            return self.array.read_data(inner_index.as_ref(), buf, context);
+            return self.array.read_data(inner_index.as_ref(), context, out);
         }
 
-        // Wrap: split the output along axis k into two regions and read each separately.
+        // Wrap: split the output along axis k into two regions and gather each into the destination.
         //   Region 1 (output axis-k [0, len1)):   input axis-k [s + L - shift, L), length len1.
         //   Region 2 (output axis-k [len1, end)): input axis-k [0, e - shift),     length len2.
         let len1 = shift - s;
         let len2 = e - shift;
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
-        if nitems == 0 {
-            buf.materialize(0, dtype);
-            return Ok(());
+        let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        if out_shape.as_ref().contains(&0) {
+            return Ok(out);
         }
-        // Forward the (possibly strided) destination's own strides so each region scatters directly
-        // into `buf`
-        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
-
+        let (out_buf, out_strides) = out.data_mut();
         let mut read_region = |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
-            let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
-            let mut out =
-                unsafe { OutBuf::new_strided(&mut dst[dst_byte_offset..], dst_strides.as_ref()) };
-            self.array.read_data(inner_index, &mut out, context)
+            let dst_byte_offset = dst_axis_k_offset as usize * out_strides[k];
+            let mut sub =
+                unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
+            self.array.read_data(inner_index, context, Some(&mut sub))?;
+            Ok(())
         };
 
         let inner_index_r1 = S::Dimension::vec(ndim, |d| {
@@ -138,7 +137,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
             S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
         read_region(inner_index_r2.as_ref(), len1)?;
 
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]

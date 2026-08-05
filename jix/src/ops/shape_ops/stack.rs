@@ -4,8 +4,10 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::params::{combine_block_layout, combine_select_hints, ArraySpecDynamic};
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
-use crate::util::{ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray};
+use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
+use crate::util::{
+    default_strides, ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray,
+};
 use crate::{Array, ArrayStorage, Dimension, IterExt};
 
 /// Joins a sequence of arrays along a new axis. See [`Stack`] for details and examples.
@@ -159,19 +161,21 @@ where
     type ElementType = ArraysT::ElementType;
     type Dimension = <ArraysT::Dimension as crate::Dimension>::Larger;
 
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         let shape = self.shape();
         let dtype = self.dtype();
         check_get_range(shape, index)?;
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>();
-        if nitems == 0 {
-            buf.materialize(0, dtype);
-            return Ok(());
+        check_out_buf(out.as_deref(), shape)?;
+        let output_shape =
+            Self::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let mut out = materialize_out_buf(out, context, output_shape.as_ref(), dtype);
+        if output_shape.as_ref().contains(&0) {
+            return Ok(out);
         }
 
         let arr_ndim = shape.len() - 1;
@@ -187,14 +191,13 @@ where
         let arr_size_bytes = arr_range_shape.as_ref().iter().product::<usize>() * itemsize;
         let n_stack = (index[self.stack_axis].end - index[self.stack_axis].start) as usize;
 
-        // Write straight into the (possibly strided) destination using its own strides. The
-        // in_place fast path (each sub-array a contiguous chunk of buf) is valid only when buf is
-        // contiguous; a strided destination always scatters with the destination's strides.
-        let is_strided = buf.strides().is_some();
-        let (dst, out_strides) = buf.get_strided_mut::<Self::Dimension>(index, dtype);
-        // Stride of the stack axis in the output buffer (offset between consecutive sub-arrays).
+        // In-place fast path (each sub-array a contiguous chunk) is valid only when the destination
+        // is contiguous and all dims before stack_axis have size <=1; else scatter.
+        let in_place = out.is_contiguous(output_shape.as_ref(), dtype)
+            && shape.iter().take(self.stack_axis).all(|&s| s <= 1);
+        let (out_buf, out_strides) = out.data_mut();
+        // Stride of the stack axis in the output (offset between consecutive sub-arrays).
         let stack_axis_stride = out_strides[self.stack_axis];
-        let in_place = !is_strided && shape.iter().take(self.stack_axis).all(|&s| s <= 1);
         // Per-sub-array strides = the output strides with the stack axis removed.
         let out_of_place_strides = in_place.not().then(|| {
             ArraysT::Dimension::vec(arr_ndim, |dim| {
@@ -207,22 +210,27 @@ where
         });
 
         for arr_idx in 0..n_stack {
-            // In-place: each array occupies a contiguous chunk in buf.
-            // Out-of-place: each array starts at its column offset within buf.
             let buf_offset = arr_idx * stack_axis_stride;
             let arr = index[self.stack_axis].start as usize + arr_idx;
-            let mut out = if in_place {
-                let sub = &mut dst[buf_offset..buf_offset + arr_size_bytes];
-                OutBuf::new(sub)
+            let mut sub = if in_place {
+                let sub_c = default_strides(&arr_range_shape, itemsize);
+                // SAFETY: contiguous destination; array `arr` packs into this contiguous chunk.
+                unsafe {
+                    StridedBuf::from_slice_mut(
+                        &mut out_buf[buf_offset..buf_offset + arr_size_bytes],
+                        sub_c.as_ref(),
+                    )
+                }
             } else {
                 let strides = out_of_place_strides.as_ref().unwrap().as_ref();
-                unsafe { OutBuf::new_strided(&mut dst[buf_offset..], strides) }
+                // SAFETY: `strides` are the output strides minus the stack axis; the sub-region
+                // at `buf_offset` is within `dest`.
+                unsafe { StridedBuf::from_slice_mut(&mut out_buf[buf_offset..], strides) }
             };
             self.arrays
-                .read_data(arr, arr_range.as_ref(), &mut out, context)?;
+                .read_data(arr, arr_range.as_ref(), context, Some(&mut sub))?;
         }
-
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]

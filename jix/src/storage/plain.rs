@@ -4,8 +4,10 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{ArraySpec, ArrayStorageInfo, ElementType, OutBuf, Ty, TypeDyn};
-use crate::util::{strided_span_bytes, DimArray, NdCopier, SendSyncPtr};
+use crate::storage::{
+    check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
+};
+use crate::util::{strided_span_bytes, DimArray, SendSyncPtr};
 use crate::{dim_arr, Array, ArrayParams, ArrayStorage, DimBitmap, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
@@ -441,18 +443,18 @@ where
     type Dimension = D;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        _context: &ReadContext,
-    ) -> Result<()> {
+        _context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         let dtype = self.dtype();
         check_get_range(self.shape(), index)?;
+        check_out_buf(out.as_deref(), self.shape())?;
 
         let ndim = self.shape.ndim();
         let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let src_strides = D::vec(ndim, |dim| self.strides[dim]);
 
         let in_offset = (0..ndim)
             .map(|dim| index[dim].start as usize * self.strides[dim])
@@ -460,23 +462,16 @@ where
         let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
 
         let itemsize = dtype.itemsize() as usize;
-        let src_span = strided_span_bytes(out_shape.as_ref(), src_strides.as_ref(), itemsize);
+        let src_span = strided_span_bytes(out_shape.as_ref(), self.strides.as_ref(), itemsize);
         let src = unsafe { std::slice::from_raw_parts(src_ptr, src_span) };
 
-        let (dst, dst_strides) = buf.get_strided_mut::<D>(index, dtype);
-
-        let copier = NdCopier::new(dtype);
-        unsafe {
-            copier.copy(
-                src,
-                dst,
-                out_shape.as_ref(),
-                src_strides.as_ref(),
-                dst_strides.as_ref(),
-                dtype,
-            )
-        };
-        Ok(())
+        match out {
+            None => Ok(unsafe { StridedBuf::from_slice(src, self.strides.as_ref()) }),
+            Some(out) => {
+                unsafe { out.copy_from(src, self.strides.as_ref(), out_shape.as_ref(), dtype) };
+                Ok(out.view_mut())
+            }
+        }
     }
 
     #[inline(always)]

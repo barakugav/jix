@@ -6,7 +6,8 @@ use crate::error::{check_dtype, ensure, Result};
 use crate::ops::common::define_array_op2_method;
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
-    ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
+    check_out_buf, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, ReadData, ReadDataExt,
+    StridedBuf,
 };
 use crate::util::assert_unchecked_eq;
 use crate::{Array, ArrayStorage, Ty};
@@ -64,14 +65,15 @@ where
     type Dimension = S1::Dimension;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        check_out_buf(out.as_deref(), self.shape())?;
         self.read_data_typed::<K::Output>(index, context)?
-            .to_buf::<Self::Dimension>(buf, index)
+            .to_buf::<Self::Dimension>(index, context, out)
     }
 
     #[inline(always)]

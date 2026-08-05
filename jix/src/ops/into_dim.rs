@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtyped;
 use crate::error::{ensure, Result};
-use crate::storage::{ArrayStorageInfo, OutBuf, ReadData};
+use crate::storage::{ArrayStorageInfo, ReadData, StridedBuf};
 use crate::util::assert_unchecked_eq;
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -82,16 +82,16 @@ where
     type Dimension = D;
 
     #[inline(always)]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         if let Some(ndim) = D::NDIM {
             unsafe { assert_unchecked_eq!(ndim, self.inner.shape().len()) };
         }
-        self.inner.read_data(index, buf, context)
+        self.inner.read_data(index, context, out)
     }
 
     #[inline(always)]

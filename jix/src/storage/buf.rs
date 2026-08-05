@@ -2,257 +2,327 @@ use std::ops::Range;
 
 use crate::buf_pool::PoolBuf;
 use crate::dtype::Dtype;
-use crate::util::default_strides_cast;
-use crate::{default_strides_from_iter, Dimension, ReadContext, SliceExt};
+use crate::error::{ensure, Result};
+use crate::util::{default_strides_slice, strided_span_bytes, DimArray, SliceExt};
+use crate::{ArrayStorage, DimDyn, NdCopier, ReadContext};
 
-/// Destination for a [`read_data`](crate::ArrayStorage::read_data) call.
+/// A borrowed, strided view over a region of array bytes - the value produced and consumed by
+/// [`ArrayStorage::read_data`](crate::ArrayStorage::read_data).
 ///
-/// One of:
-/// - a caller-provided contiguous byte buffer ([`OutBuf::new`]),
-/// - a lazily-allocated pooled buffer (`OutBuf::new_lazy`),
-/// - a caller-provided *strided* byte buffer (`OutBuf::new_strided`) - a rectangular sub-region of some
-///   larger destination, described by per-dimension byte strides.
-pub struct OutBuf<'a> {
-    data: OutBufData<'a>,
-    strides: Option<&'a [usize]>,
+/// A `StridedBuf` pairs a block of bytes with one byte stride per dimension. Element
+/// `(i0, i1, ..., in)` of the read region lives at byte offset
+/// `i0*strides[0] + i1*strides[1] + ... + in*strides[n]` from the start of the buffer. The struct
+/// carries no shape, dtype, or length of its own: those come from the read request (the index ranges
+/// and the array's dtype), and it is the caller's job to interpret the bytes accordingly.
+///
+/// Generally speaking, the data is NOT guaranteed to be aligned. Specific methods may restrict the
+/// input/output buffers.
+///
+/// # Examples
+///
+/// Build a strided view over a caller-owned buffer and read it back through the strides:
+///
+/// ```
+/// use jix::storage::StridedBuf;
+///
+/// // Four contiguous i32 values: 4 elements, one dimension, a 4-byte stride.
+/// let values = [10i32, 20, 30, 40];
+/// let buf = unsafe { StridedBuf::from_raw_parts(values.as_ptr().cast::<u8>(), &[4], &[4], 4) };
+/// assert_eq!(buf.strides(), &[4]);
+///
+/// // Element `i` lives at `data_ptr() + i * strides[0]`.
+/// let base = buf.data_ptr();
+/// let stride = buf.strides()[0];
+/// for i in 0..4 {
+///     let elem = unsafe { base.add(i * stride).cast::<i32>().read() };
+///     assert_eq!(elem, values[i]);
+/// }
+/// ```
+pub struct StridedBuf<'a> {
+    data: StridedBufData<'a>,
+    /// Byte stride per dimension of the read region.
+    strides: DimArray<usize>,
 }
 
-/// Internal representation of an [`OutBuf`].
-pub(crate) enum OutBufData<'a> {
-    Slice(&'a mut [u8]),
+enum StridedBufData<'a> {
+    Slice(&'a [u8]),
+    SliceMut(&'a mut [u8]),
     PoolBuf(PoolBuf<'a>),
-    Lazy(&'a ReadContext),
 }
 
-impl<'a> OutBuf<'a> {
-    /// Write into a caller-provided contiguous buffer.
-    #[inline(always)]
-    pub fn new(buf: &'a mut [u8]) -> Self {
-        Self {
-            data: OutBufData::Slice(buf),
-            strides: None,
-        }
-    }
-
-    /// Defer allocation: the storage allocates a pooled buffer from `context` on the first demand for
-    /// a mutable slice.
-    #[inline(always)]
-    pub(crate) fn new_lazy(context: &'a ReadContext) -> Self {
-        Self {
-            data: OutBufData::Lazy(context),
-            strides: None,
-        }
-    }
-
-    /// Write into a caller-provided *strided* buffer.
-    ///
-    /// `buf` is the destination byte buffer and `strides` gives the per-dimension byte stride of the
-    /// region being written (row-major over the read `index`, but embedded in a larger buffer).
+impl<'a> StridedBuf<'a> {
+    /// Build a read-only [`StridedBuf`] from a raw base pointer and byte `strides`.
     ///
     /// # Safety
     ///
-    /// The length of `buf` is **not** checked against `strides` (nor against the read `index` it will
-    /// later be used with). The caller must ensure `buf` is valid for every strided write.
-    #[inline(always)]
-    pub(crate) unsafe fn new_strided(buf: &'a mut [u8], strides: &'a [usize]) -> Self {
-        Self {
-            data: OutBufData::Slice(buf),
-            strides: Some(strides),
-        }
-    }
-
-    /// The writable destination bytes plus its byte-strides if it is strided (`None` when contiguous,
-    /// in which case the slice is exactly the row-major output). A lazy buffer is materialized first.
+    /// `data` must be valid for reads according to the `shape`, `strides` and `itemsize`, and it
+    /// must remain valid for the lifetime `'a`
     #[inline]
-    pub(crate) fn get_mut<'b>(
-        &'b mut self,
-        nitems: usize,
-        dtype: &Dtype,
-    ) -> (&'b mut [u8], Option<&'b [usize]>) {
-        self.materialize(nitems, dtype);
-        let data = match &mut self.data {
-            OutBufData::Slice(buf) => buf,
-            OutBufData::PoolBuf(tmp) => tmp.as_mut_slice(),
-            OutBufData::Lazy(_) => unreachable!(),
-        };
-        (data, self.strides)
-    }
-
-    /// Like [`get_mut`](Self::get_mut) but always returns concrete byte-strides: the buffer's own
-    /// strides if it is strided, otherwise the C-order strides over the read shape.
-    #[inline]
-    pub(crate) fn get_strided_mut<'b, D: Dimension>(
-        &'b mut self,
-        index: &[Range<u64>],
-        dtype: &Dtype,
-    ) -> (&'b mut [u8], D::Vec<usize>) {
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-        let (buf, strides) = self.get_mut(nitems, dtype);
-        let strides = match strides {
-            Some(strides) => strides.to_dim_vec::<D>(),
-            None => {
-                let shape = index.iter().map(|r| (r.end - r.start) as usize);
-                default_strides_from_iter::<D, _>(index.len(), shape, dtype.itemsize() as usize)
-            }
-        };
-        (buf, strides)
-    }
-
-    /// Returns the buffer contents, or `None` for a not-yet-materialized lazy `OutBuf` or a strided
-    /// `OutBuf` (neither has a single contiguous view).
-    #[inline(always)]
-    pub(crate) fn as_slice(&self) -> Option<&[u8]> {
-        let data = match &self.data {
-            OutBufData::Slice(buf) => buf,
-            OutBufData::PoolBuf(tmp) => tmp.as_slice(),
-            OutBufData::Lazy(_) => return None,
-        };
-        self.strides.is_none().then_some(data)
-    }
-
-    #[track_caller]
-    #[inline(always)]
-    pub(crate) fn unwrap_tmp(self) -> PoolBuf<'a> {
-        assert!(self.strides.is_none());
-        match self.data {
-            OutBufData::PoolBuf(tmp) => tmp,
-            _ => unreachable!(),
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn strides(&self) -> Option<&[usize]> {
-        self.strides
-    }
-
-    /// The output byte-strides for a read whose output shape is `out_shape`: this buffer's own
-    /// strides if it is strided, otherwise the C-order strides over `out_shape` for `itemsize`. Lets
-    /// a shape op derive the strides to forward without branching on the buffer variant.
-    #[inline]
-    pub(crate) fn strides_or_default<D: Dimension>(
-        &self,
-        out_shape: &D::Vec<u64>,
+    pub unsafe fn from_raw_parts(
+        data: *const u8,
+        shape: &[usize],
+        strides: &[usize],
         itemsize: usize,
-    ) -> D::Vec<usize> {
-        match self.strides() {
-            Some(strides) => strides.to_dim_vec::<D>(),
-            None => default_strides_cast(out_shape, itemsize),
-        }
+    ) -> Self {
+        let span = strided_span_bytes(shape, strides, itemsize);
+        let slice = unsafe { std::slice::from_raw_parts(data, span) };
+        unsafe { Self::from_slice(slice, strides) }
     }
 
-    /// Re-wrap this buffer's bytes as a *strided* destination with `new_strides`, for a shape op that
-    /// forwards its (single) output buffer to an inner read after remapping axes. A lazy buffer is
-    /// first materialized (see [`materialize`](Self::materialize)) so there is always a concrete
-    /// buffer to point at; this lets shape ops take one unified path whether or not the incoming
-    /// buffer was already strided.
+    /// Build a writable [`StridedBuf`] from a raw base pointer and byte `strides`.
     ///
     /// # Safety
     ///
-    /// Same contract as [`new_strided`](Self::new_strided): the length of the underlying buffer is
-    /// **not** checked against `new_strides`. The caller must ensure it is valid for every strided
-    /// write implied by `new_strides` and the read `index`.
-    #[inline(always)]
-    pub(crate) unsafe fn with_strides<'b>(
-        &'b mut self,
-        nitems: usize,
-        dtype: &Dtype,
-        new_strides: &'b [usize],
-    ) -> OutBuf<'b> {
-        self.materialize(nitems, dtype);
-        OutBuf {
-            data: match &mut self.data {
-                OutBufData::Slice(buf) => OutBufData::Slice(buf),
-                OutBufData::PoolBuf(tmp) => OutBufData::Slice(tmp.as_mut_slice()),
-                OutBufData::Lazy(_) => unreachable!(),
-            },
-            strides: Some(new_strides),
+    /// `data` must be valid for reads and writes according to the `shape`, `strides` and
+    /// `itemsize`, and it must remain valid for the lifetime `'a`.
+    /// The caller should ensure there are no two different indices that result in the same byte
+    /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
+    #[inline]
+    pub unsafe fn from_raw_parts_mut(
+        data: *mut u8,
+        shape: &[usize],
+        strides: &[usize],
+        itemsize: usize,
+    ) -> Self {
+        let span = strided_span_bytes(shape, strides, itemsize);
+        let slice = unsafe { std::slice::from_raw_parts_mut(data, span) };
+        unsafe { Self::from_slice_mut(slice, strides) }
+    }
+
+    /// Create a read-only view into `data` with the given (byte) `strides`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure every strided access implied by `strides` (and the read shape it will
+    /// be used with) stays in bounds of `data`.
+    #[inline]
+    pub(crate) unsafe fn from_slice(data: &'a [u8], strides: &[usize]) -> Self {
+        Self {
+            data: StridedBufData::Slice(data),
+            strides: strides.to_dim_vec::<DimDyn>(),
         }
     }
 
-    /// Materialize a lazy buffer into a pooled `LazyAllocated` in place, so it has a concrete backing
-    /// slice. No-op for the already-materialized (borrowed / tmp) variants. Uses the lazy variant's
-    /// own stored context.
+    /// Creates a writable view into `data` with the given (byte) `strides`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure every strided access implied by `strides` (and the read shape it will
+    /// be used with) stays in bounds of `data`.
+    /// The caller should ensure there are no two different indices that result in the same byte
+    /// offset (i.e. the strides must not alias, broadcasted dimensions are not allowed).
     #[inline]
-    pub(crate) fn materialize(&mut self, nitems: usize, dtype: &Dtype) {
-        let ctx = match &self.data {
-            OutBufData::Lazy(ctx) => *ctx,
-            _ => return,
+    pub(crate) unsafe fn from_slice_mut(data: &'a mut [u8], strides: &[usize]) -> Self {
+        Self {
+            data: StridedBufData::SliceMut(data),
+            strides: strides.to_dim_vec::<DimDyn>(),
+        }
+    }
+
+    /// Create a writable view into a pooled buffer with the given (byte) `strides`.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`from_slice_mut`](Self::from_slice_mut).
+    #[inline]
+    pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: &[usize]) -> Self {
+        Self {
+            data: StridedBufData::PoolBuf(buf),
+            strides: strides.to_dim_vec::<DimDyn>(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn is_writable(&self) -> bool {
+        !matches!(self.data, StridedBufData::Slice(_))
+    }
+
+    /// The byte stride of each dimension.
+    #[inline]
+    pub fn strides(&self) -> &[usize] {
+        self.strides.as_ref()
+    }
+
+    /// A raw pointer to the first byte of the buffer.
+    ///
+    /// Access it using the strides.
+    #[inline]
+    pub fn data_ptr(&self) -> *const u8 {
+        self.data().0.as_ptr()
+    }
+
+    /// A mutable raw pointer to the first byte of the buffer.
+    ///
+    /// `None` if this is a read-only view. Access it using the strides.
+    #[inline]
+    pub fn data_ptr_mut(&mut self) -> Option<*mut u8> {
+        self.is_writable().then(|| self.data_mut().0.as_mut_ptr())
+    }
+
+    #[inline]
+    pub(crate) fn data(&self) -> (&[u8], &[usize]) {
+        let data = match &self.data {
+            StridedBufData::Slice(s) => *s,
+            StridedBufData::SliceMut(s) => &**s,
+            StridedBufData::PoolBuf(p) => p.as_slice(),
         };
-        self.data =
-            OutBufData::PoolBuf(ctx.tmp_buf(nitems * dtype.itemsize() as usize, dtype.alignment()));
+        (data, self.strides.as_ref())
+    }
+
+    #[inline]
+    pub(crate) fn data_mut(&mut self) -> (&mut [u8], &[usize]) {
+        let strides = self.strides.as_ref();
+        let data = match &mut self.data {
+            StridedBufData::SliceMut(s) => &mut **s,
+            StridedBufData::PoolBuf(p) => p.as_mut_slice(),
+            StridedBufData::Slice(_) => panic!("data_mut on a read-only StridedBuf view"),
+        };
+        (data, strides)
+    }
+
+    #[inline]
+    pub(crate) fn is_contiguous(&self, shape: &[usize], dtype: &Dtype) -> bool {
+        let (data, strides) = self.data();
+        strides == default_strides_slice(shape, dtype.itemsize() as usize).as_ref()
+            && (data.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize())
+    }
+
+    /// Consume and re-label with `strides`, keeping the same backing bytes.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`from_slice_mut`](Self::from_slice_mut).
+    #[inline]
+    pub(crate) unsafe fn with_strides(mut self, strides: &[usize]) -> Self {
+        self.strides = strides.to_dim_vec::<DimDyn>();
+        self
+    }
+
+    /// Copy `src` - laid out at `src_strides` over `shape` - into this destination, honoring this
+    /// buffer's own strides.
+    ///
+    /// # Safety
+    ///
+    /// `src_strides` and this buffer's strides must both describe in-bounds `shape`-sized regions of
+    /// `src` and the destination bytes respectively, and both must have length `shape.len()`.
+    #[inline]
+    pub(crate) unsafe fn copy_from(
+        &mut self,
+        src: &[u8],
+        src_strides: &[usize],
+        shape: &[usize],
+        dtype: &Dtype,
+    ) {
+        let (dst, dst_strides) = self.data_mut();
+        let copier = NdCopier::new(dtype);
+        unsafe { copier.copy(src, dst, shape, src_strides, dst_strides, dtype) };
+    }
+
+    #[allow(unused)]
+    #[inline]
+    pub(crate) fn view(&self) -> StridedBuf<'_> {
+        let (data, _) = self.data();
+        StridedBuf {
+            data: StridedBufData::Slice(data),
+            strides: self.strides.clone(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn view_mut(&mut self) -> StridedBuf<'_> {
+        let strides = self.strides.clone();
+        let (data, _) = self.data_mut();
+        StridedBuf {
+            data: StridedBufData::SliceMut(data),
+            strides,
+        }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::OutBuf;
-    use crate::dtype::{Dtype, Dtyped};
-    use crate::{DimDyn, ReadContext};
+pub(crate) fn check_out_buf(out: Option<&StridedBuf>, array_shape: &[u64]) -> Result<()> {
+    let Some(out) = out else { return Ok(()) };
+    ensure!(
+        out.strides().len() == array_shape.len(),
+        InvalidArgument,
+        "out buffer has {} strides but array has {} dimensions",
+        out.strides().len(),
+        array_shape.len()
+    );
+    ensure!(
+        out.is_writable(),
+        InvalidArgument,
+        "out buffer must be a writable destination, not a read-only view"
+    );
+    Ok(())
+}
 
-    fn i32_dtype() -> Dtype {
-        <i32 as Dtyped>::DTYPE
-    }
-
-    /// View a mutable `i32` slice as bytes (and thus `i32`-aligned).
-    fn as_bytes_mut(v: &mut [i32]) -> &mut [u8] {
-        unsafe {
-            std::slice::from_raw_parts_mut(v.as_mut_ptr().cast::<u8>(), std::mem::size_of_val(v))
+#[inline]
+pub(crate) fn materialize_out_buf<'a>(
+    out: Option<&'a mut StridedBuf<'_>>,
+    context: &'a ReadContext,
+    out_shape: &[usize],
+    dtype: &Dtype,
+) -> StridedBuf<'a> {
+    match out {
+        Some(out) => out.view_mut(),
+        None => {
+            let itemsize = dtype.itemsize() as usize;
+            let buf = context.allocate_buf(
+                out_shape.iter().product::<usize>() * itemsize,
+                dtype.alignment(),
+            );
+            let strides = default_strides_slice(out_shape, itemsize);
+            // SAFETY: C-order strides for a pooled buffer sized to `out_shape`.
+            unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
         }
     }
+}
 
-    /// A contiguous destination has no strides of its own, so `get_strided_mut` synthesizes the
-    /// C-order (row-major) byte strides over the read shape.
-    #[test]
-    fn get_strided_mut_synthesizes_c_order_strides_for_contiguous() {
-        let dtype = i32_dtype();
-        let mut backing = vec![0i32; 6];
-        let mut ob = OutBuf::new(as_bytes_mut(&mut backing));
-        let (buf, strides) = ob.get_strided_mut::<DimDyn>(&[0..2, 0..3], &dtype);
-        assert_eq!(buf.len(), 24);
-        assert_eq!(strides.as_ref(), [12, 4]); // [3 * 4, 4]
-    }
+/// Read a stride-remapping forwarder's inner region once, honoring the caller's `out=` mode.
+///
+/// A forwarder like `PermuteAxes`/`InsertAxis`/`RemoveAxis` relates its output axes to its inner
+/// axes by a fixed per-axis correspondence. The inner read is the same either way; only the
+/// direction of the stride remap differs:
+/// - pull (`out=None`): read the inner as a view and relabel its strides into output order with
+///   `inner2outer_strides_fn(inner_strides) -> output_strides`.
+/// - push (`out=Some`): re-stride the destination into inner order with
+///   `outer2inner_strides_fn(output_strides) -> inner_strides` and forward it down, so the inner
+///   storage writes in place.
+///
+/// # Safety
+///
+/// The caller should ensure the created strides are valid.
+#[inline]
+pub(crate) unsafe fn read_data_and_map_strides<'a>(
+    inner: &'a impl ArrayStorage,
+    inner_index: &[Range<u64>],
+    context: &'a ReadContext,
+    mut out: Option<&'a mut StridedBuf<'_>>,
+    inner2outer_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
+    outer2inner_strides_fn: impl FnOnce(&[usize]) -> DimArray<usize>,
+) -> Result<StridedBuf<'a>> {
+    // This function does an unsafe dance of extending lifetimes, with the goal to have a single
+    // call to inner.read_data() for better inlining of ops pipelines.
 
-    /// A strided destination reports its own strides verbatim - `read_data` writes each element
-    /// straight to its final address rather than staging through a contiguous scratch.
-    #[test]
-    fn get_strided_mut_reports_own_strides_for_strided() {
-        let dtype = i32_dtype();
-        // Row stride 16 bytes (one i32 gap per row) instead of the C-order 12.
-        let strides = [16usize, 4];
-        let mut backing = vec![0i32; 8];
-        let mut ob = unsafe { OutBuf::new_strided(as_bytes_mut(&mut backing), &strides) };
-        let (_buf, got) = ob.get_strided_mut::<DimDyn>(&[0..2, 0..3], &dtype);
-        assert_eq!(got.as_ref(), strides);
-    }
+    let is_push = out.is_some();
+    let mut inner_out = out.as_deref_mut().map(|o| {
+        let (data, strides) = o.data_mut();
+        let inner_strides = outer2inner_strides_fn(strides);
+        unsafe { StridedBuf::from_slice_mut(data, inner_strides.as_ref()) }
+    });
 
-    /// A lazy destination is materialized on demand into a pooled buffer sized for the read, and
-    /// reports C-order strides like any other contiguous buffer.
-    #[test]
-    fn get_strided_mut_materializes_lazy() {
-        let dtype = i32_dtype();
-        let ctx = ReadContext::default();
-        let mut ob = OutBuf::new_lazy(&ctx);
-        assert!(ob.as_slice().is_none()); // not yet materialized
-        let (buf, strides) = ob.get_strided_mut::<DimDyn>(&[0..2, 0..3], &dtype);
-        assert_eq!(buf.len(), 24);
-        assert_eq!(strides.as_ref(), [12, 4]);
-        assert_eq!(ob.as_slice().map(<[u8]>::len), Some(24));
-    }
+    let inner_buf = inner.read_data(inner_index, context, inner_out.as_mut())?;
 
-    /// `with_strides` re-points a buffer at new strides (what a shape op does when it forwards its
-    /// output buffer to an inner read after remapping axes), whatever variant it started as.
-    #[test]
-    fn with_strides_repoints_any_variant() {
-        let dtype = i32_dtype();
-        let remapped = [4usize, 8]; // e.g. a transposed view of a [2, 2] i32 region
-        let mut backing = vec![0i32; 4];
-        let mut ob = OutBuf::new(as_bytes_mut(&mut backing));
-        let inner = unsafe { ob.with_strides(4, &dtype, &remapped) };
-        assert_eq!(inner.strides(), Some(remapped.as_slice()));
-
-        let ctx = ReadContext::default();
-        let mut lazy = OutBuf::new_lazy(&ctx);
-        let inner = unsafe { lazy.with_strides(4, &dtype, &remapped) };
-        assert_eq!(inner.strides(), Some(remapped.as_slice()));
+    if is_push {
+        // The inner storage wrote into `out` through `inner_out`
+        drop(inner_buf);
+        drop(inner_out);
+        Ok(out.unwrap().view_mut())
+    } else {
+        // SAFETY: `inner_buf` does not borrow the local `inner_out` (which was `None`) - its data
+        // lives for 'a - so extending its lifetime to 'a is sound.
+        let inner_buf = unsafe { std::mem::transmute::<StridedBuf<'_>, StridedBuf<'a>>(inner_buf) };
+        let out_strides = inner2outer_strides_fn(inner_buf.strides());
+        Ok(unsafe { inner_buf.with_strides(out_strides.as_ref()) })
     }
 }

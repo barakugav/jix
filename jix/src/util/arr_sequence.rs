@@ -4,7 +4,7 @@ use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{ArraySpec, ArrayStorageTyped, OutBuf, ReadData};
+use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData, StridedBuf};
 use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, Dimension, ElementType};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
@@ -60,13 +60,13 @@ pub trait ArraySequence: ArraySequenceImpl {}
 /// Private implementation trait for [`ArraySequence`]. Not part of the public API.
 pub(crate) trait ArraySequenceImpl {
     fn narrays(&self) -> usize;
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()>;
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>>;
     fn shape(&self, arr: usize) -> &[u64];
     fn dtype(&self, arr: usize) -> &Dtype;
     fn spec(&self, arr: usize) -> ArraySpec<'_>;
@@ -153,14 +153,14 @@ where
     }
 
     #[inline(always)]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
-        self[arr].storage.read_data(index, buf, context)
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        self[arr].storage.read_data(index, context, out)
     }
 
     #[inline(always)]
@@ -248,14 +248,14 @@ where
     }
 
     #[inline(always)]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
-        self[arr].storage.read_data(index, buf, context)
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        self[arr].storage.read_data(index, context, out)
     }
 
     #[inline(always)]
@@ -342,14 +342,14 @@ where
     }
 
     #[inline(always)]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
-        self[arr].storage.read_data(index, buf, context)
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        self[arr].storage.read_data(index, context, out)
     }
 
     #[inline(always)]
@@ -450,14 +450,14 @@ where
     }
 
     #[inline(always)]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         arr: usize,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
-        self[arr].storage.read_data(index, buf, context)
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        self[arr].storage.read_data(index, context, out)
     }
 
     #[inline(always)]
@@ -564,15 +564,15 @@ macro_rules! impl_array_sequence_for_tuple {
             }
 
             #[inline(always)]
-            fn read_data(
-                &self,
+            fn read_data<'read>(
+                &'read self,
                 arr: usize,
                 index: &[Range<u64>],
-                buf: &mut OutBuf,
-                context: &ReadContext,
-            ) -> Result<()> {
+                context: &'read ReadContext,
+                out: Option<&'read mut StridedBuf<'_>>,
+            ) -> Result<StridedBuf<'read>> {
                 match arr {
-                    $($idx => self.$idx.storage.read_data(index, buf, context),)+
+                    $($idx => self.$idx.storage.read_data(index, context, out),)+
                     _ => out_of_bounds_array_index(arr),
                 }
             }
