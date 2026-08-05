@@ -48,7 +48,7 @@ pub(crate) trait ReductionOpKernel<T> {
     /// accuracy): it collapses the interleaved lane accumulators of a single cell, and continues
     /// a cell's accumulator across the bulks of a large reduced axis. The two subsets never
     /// overlap and together cover the folded elements exactly once.
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State;
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State;
 
     /// Produce the final result. `nitems` is the total number of stream elements that
     /// were folded into `state`, so `nitems == 0` exactly when the reduction was empty.
@@ -642,7 +642,7 @@ where
             // read the state out before writing the merged result back into the
             // same bytes.
             let prev = unsafe { slot.assume_init_read() };
-            slot.write(kernel.merge(prev, cell_state));
+            slot.write(kernel.merge_states(prev, cell_state));
         } else {
             slot.write(cell_state);
         }
@@ -728,7 +728,7 @@ where
         for j in 0..width {
             let a = unsafe { states[j].assume_init_read() };
             let b = unsafe { states[j + width].assume_init_read() };
-            states[j].write(kernel.merge(a, b));
+            states[j].write(kernel.merge_states(a, b));
         }
     }
     unsafe { states[0].assume_init_read() }
@@ -1030,7 +1030,7 @@ pub(crate) mod _traits {
         /// Fold `item` into the running sum.
         fn update(state: Self::Output, item: Self) -> Self::Output;
         /// Combine two partial sums (used to merge interleaved lane accumulators).
-        fn merge(a: Self::Output, b: Self::Output) -> Self::Output;
+        fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output;
     }
 
     macro_rules! impl_sum {
@@ -1047,7 +1047,7 @@ pub(crate) mod _traits {
                     state + <_ as crate::scalar::Cast<Self::Output>>::cast(item)
                 }
                 #[inline(always)]
-                fn merge(a: Self::Output, b: Self::Output) -> Self::Output {
+                fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output {
                     a + b
                 }
             }
@@ -1084,7 +1084,7 @@ pub(crate) mod _traits {
         /// Fold `item` into the running product.
         fn update(state: Self::Output, item: Self) -> Self::Output;
         /// Combine two partial products (used to merge interleaved lane accumulators).
-        fn merge(a: Self::Output, b: Self::Output) -> Self::Output;
+        fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output;
     }
     macro_rules! impl_product {
         ($item_ty:ty, $output_ty:ty) => {
@@ -1100,7 +1100,7 @@ pub(crate) mod _traits {
                     state * <_ as crate::scalar::Cast<Self::Output>>::cast(item)
                 }
                 #[inline(always)]
-                fn merge(a: Self::Output, b: Self::Output) -> Self::Output {
+                fn merge_states(a: Self::Output, b: Self::Output) -> Self::Output {
                     a * b
                 }
             }
@@ -1141,7 +1141,7 @@ pub(crate) mod _traits {
         /// Fold `item` into the running sum.
         fn update(state: Self::State, item: Self) -> Self::State;
         /// Combine two partial sums (used to merge interleaved lane accumulators).
-        fn merge(a: Self::State, b: Self::State) -> Self::State;
+        fn merge_states(a: Self::State, b: Self::State) -> Self::State;
         /// Finalize `state` into the mean. Returns `None` if `nitems == 0`; otherwise
         /// returns `state / nitems` (cast to the output domain).
         fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output>;
@@ -1161,8 +1161,8 @@ pub(crate) mod _traits {
                     <Self as Sum>::update(state, item)
                 }
                 #[inline(always)]
-                fn merge(a: Self::State, b: Self::State) -> Self::State {
-                    <Self as Sum>::merge(a, b)
+                fn merge_states(a: Self::State, b: Self::State) -> Self::State {
+                    <Self as Sum>::merge_states(a, b)
                 }
                 #[inline(always)]
                 fn finalize(state: Self::State, nitems: u64) -> Option<Self::Output> {
@@ -1197,7 +1197,8 @@ pub(crate) mod _traits {
 
     /// Welford accumulator used by [`Variance`]. The count of folded items is tracked
     /// **inside** this struct (`count`) so each interleaved lane accumulator counts only
-    /// the items it saw and [`Variance::merge`] can recombine lanes with Chan's algorithm.
+    /// the items it saw and [`Variance::merge_states`] can recombine lanes with Chan's
+    /// algorithm.
     #[derive(Clone, Copy)]
     pub struct VarianceState<M> {
         /// Running mean in the type-specific accumulator domain.
@@ -1231,7 +1232,7 @@ pub(crate) mod _traits {
         fn update(state: Self::State, item: Self, idx: u64) -> Self::State;
         /// Combine two Welford accumulators computed over disjoint subsets (Chan's parallel
         /// algorithm). Associative + commutative up to float error.
-        fn merge(a: Self::State, b: Self::State) -> Self::State;
+        fn merge_states(a: Self::State, b: Self::State) -> Self::State;
         /// Finalize `state` into the variance using `ddof` degrees-of-freedom correction.
         /// `nitems` is the total number of elements folded in.
         ///
@@ -1263,7 +1264,7 @@ pub(crate) mod _traits {
                     state
                 }
                 #[inline(always)]
-                fn merge(a: Self::State, b: Self::State) -> Self::State {
+                fn merge_states(a: Self::State, b: Self::State) -> Self::State {
                     if a.count == 0 {
                         return b;
                     }
@@ -1378,7 +1379,7 @@ where
         state.maximum(item)
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
         a.maximum(b)
     }
     #[inline(always)]
@@ -1445,7 +1446,7 @@ where
         state.minimum(item)
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
         a.minimum(b)
     }
     #[inline(always)]
@@ -1530,7 +1531,7 @@ where
         }
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
         // The larger value wins, and any `NaN` wins (propagating as in `update_state`). On an
         // exact value tie the *smaller* index wins - together with `update_state` keeping the
         // earlier index on ties, this makes argmax report the first occurrence of the maximum,
@@ -1634,7 +1635,7 @@ where
         }
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
         // The smaller value wins, and any `NaN` wins (propagating as in `update_state`). On an
         // exact value tie the *smaller* index wins - together with `update_state` keeping the
         // earlier index on ties, this makes argmin report the first occurrence of the minimum,
@@ -1738,8 +1739,8 @@ where
         <T as crate::scalar::Sum>::update(state, item)
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        <T as crate::scalar::Sum>::merge(a, b)
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
+        <T as crate::scalar::Sum>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1822,8 +1823,8 @@ where
         <T as crate::scalar::Product>::update(state, item)
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        <T as crate::scalar::Product>::merge(a, b)
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
+        <T as crate::scalar::Product>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -1895,8 +1896,8 @@ where
         <T as crate::scalar::Mean>::update(state, item)
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        <T as crate::scalar::Mean>::merge(a, b)
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
+        <T as crate::scalar::Mean>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -1974,8 +1975,8 @@ where
         <T as crate::scalar::Variance>::update(state, item, idx)
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        <T as crate::scalar::Variance>::merge(a, b)
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
+        <T as crate::scalar::Variance>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -2049,8 +2050,8 @@ where
         <T as crate::scalar::Variance>::update(state, item, idx)
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
-        <T as crate::scalar::Variance>::merge(a, b)
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
+        <T as crate::scalar::Variance>::merge_states(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
@@ -2116,7 +2117,7 @@ impl ReductionOpKernel<bool> for AllKernel {
         state && item
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
         a && b
     }
     #[inline(always)]
@@ -2182,7 +2183,7 @@ impl ReductionOpKernel<bool> for AnyKernel {
         state || item
     }
     #[inline(always)]
-    fn merge(&self, a: Self::State, b: Self::State) -> Self::State {
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
         a || b
     }
     #[inline(always)]
@@ -2195,80 +2196,74 @@ impl ReductionOpKernel<bool> for AnyKernel {
     }
 }
 
-// TODO
-/*
-/// Reduces one or more axes by repeatedly applying a user-supplied binary closure to the
-/// elements along those axes.
+/// Reduces one or more axes by combining the elements along those axes with a user-supplied
+/// binary closure, in an **unspecified order**.
 ///
-/// The output dtype is the same as the input dtype (`S::Item`). The closure has signature
-/// `Fn(S::Item, S::Item) -> S::Item` and is applied with the running accumulator on the
-/// left, mirroring [`Iterator::reduce`]: for a non-empty stream `x0, x1, ..., xn`, the
-/// result is `f(f(f(x0, x1), x2), ..., xn)`.
+/// The output dtype is the same as the input dtype (`S::Item`), and the closure has signature
+/// `Fn(S::Item, S::Item) -> S::Item`. There is no separate seed value: the first element each
+/// accumulator sees becomes its initial value. `f` is used for two distinct jobs, and cannot
+/// tell them apart:
 ///
-/// # Traversal order
+/// - folding one element into a running accumulator - `f(acc, x)`;
+/// - combining two accumulators built from *disjoint* subsets of the same output cell's
+///   elements - `f(acc_a, acc_b)`.
 ///
-/// - **Single reduced axis**: elements along that axis are visited in logical order (index
-///   `0` upward). The result is well-defined for non-commutative / non-associative closures.
-/// - **Multiple reduced axes**: elements are visited in an *implementation-defined* order
-///   driven by the storage's internal tiling. The order is not stable across array shapes,
-///   block sizes, or library versions. Closures used here MUST be both associative and
-///   commutative for the result to be well-defined.
+/// # The closure MUST be associative and commutative
+///
+/// Despite the name, this is **not** [`Iterator::reduce`]: it is not a left fold, and that
+/// holds even when a single axis is reduced. One output cell's elements are spread over multiple
+/// interleaved lane accumulators that are then collapsed by a pairwise tree, and when the
+/// reduced extent is larger than one read tile a cell's accumulator is merged across tiles.
+/// Which elements land in which accumulator, and in which order the accumulators are combined,
+/// is an implementation detail that shifts with the array shape, the block shape, the read
+/// window size, and the library version.
+///
+/// So `f` must be associative *and* commutative for the result to be well-defined - `min`,
+/// `max`, `+`, `*`, `&`, `|`, `^`, `gcd` all qualify. A non-commutative closure such as
+/// `|a, b| a - b` compiles and runs but yields an arbitrary value.
+///
+/// Float `+` / `*` are only associative up to rounding. That is fine and expected: the
+/// built-in [`Sum`] / [`Product`] reductions reassociate exactly the same way.
 ///
 /// # Empty reductions
 ///
-/// Empty reductions (any reduced dimension has length `0`) are **not supported**: there is
-/// no initial accumulator and no first element to seed it. Calling [`Array::reduce`] in
-/// that case panics at construction time, and [`Reduce::new`] returns an `Err`.
-/// Use [`Fold`] when an explicit empty-case value is needed.
+/// Empty reductions (any reduced dimension has length `0`) are **not supported**: with no seed
+/// value and no first element there is nothing to return. [`Reduce::new`] returns an
+/// `Err`, and [`Array::reduce_unordered`] panics at construction time.
 ///
 /// The result is a lazy view; no computation occurs until the array is read.
 ///
 /// This struct is the bare storage implementation; the operation is also available as
-/// [`Array::reduce()`](crate::Array::reduce).
+/// [`Array::reduce_unordered()`](crate::Array::reduce_unordered).
 ///
 /// # Examples
 ///
-/// Custom maximum over a single axis (closure is commutative and associative):
+/// Custom maximum over a single axis:
 /// ```
 /// use jix::Array;
 /// use ndarray::array;
 ///
 /// let nd = array![[1i32, 5, 3], [4, 2, 6]];
 /// let row_max = Array::compact_ndarray(&nd)?
-///     .reduce(1, |a, b| if a > b { a } else { b })
+///     .reduce_unordered(1, |a, b| if a > b { a } else { b })
 ///     .to_ndarray()?;
 /// assert_eq!(row_max.as_slice().unwrap(), &[5, 6]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 ///
-/// Single-axis subtraction: order matters, and a single reduced axis is guaranteed to be
-/// visited in logical order:
+/// Multi-axis reduction with a closure that has no built-in equivalent:
 /// ```
 /// use jix::Array;
 /// use ndarray::array;
 ///
-/// // (((1 - 2) - 3) - 4) = -8
-/// let nd = array![1i64, 2, 3, 4];
-/// let diff = Array::compact_ndarray(&nd)?
-///     .reduce(0, |a, b| a - b)
+/// let nd = array![[0b0011u8, 0b0101], [0b1001, 0b0001]];
+/// let xor = Array::compact_ndarray(&nd)?
+///     .reduce_unordered((0, 1), |a, b| a ^ b)
 ///     .to_ndarray()?;
-/// assert_eq!(diff[[]], -8);
+/// assert_eq!(xor[[]], 0b1110);
 /// # Ok::<(), jix::Error>(())
 /// ```
-///
-/// Multi-axis reduction (closure MUST be associative and commutative):
-/// ```
-/// use jix::Array;
-/// use ndarray::array;
-///
-/// let nd = array![[1i32, 2, 3], [4, 5, 6]];
-/// let total = Array::compact_ndarray(&nd)?
-///     .reduce((0, 1), |a, b| a + b)
-///     .to_ndarray()?;
-/// assert_eq!(total[[]], 21);
-/// # Ok::<(), jix::Error>(())
-/// ```
-pub struct Reduce<S: ArrayStorage, D, F>(ReductionOp<S, VanillaReduceKernel<F>, D>);
+pub struct Reduce<S: ArrayStorage, D, F>(ReductionOp<S, ReduceKernel<F>, D>);
 impl<S: ArrayStorage, D, F> Reduce<S, D, F> {
     /// Constructs a [`Reduce`] storage. See the struct docs for semantics and examples.
     pub fn new<Ax>(array: S, axes: Ax, f: F) -> Result<Self>
@@ -2278,7 +2273,7 @@ impl<S: ArrayStorage, D, F> Reduce<S, D, F> {
         F: Fn(S::Item, S::Item) -> S::Item,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
-        Ok(Self(ReductionOp::new(array, VanillaReduceKernel(f), axes)?))
+        Ok(Self(ReductionOp::new(array, ReduceKernel(f), axes)?))
     }
 
     /// Constructs an array with [`Reduce`] storage. See the storage struct docs for semantics and examples.
@@ -2292,8 +2287,8 @@ impl<S: ArrayStorage, D, F> Reduce<S, D, F> {
         Self::new(array.into_storage(), axes, f).map(Array::from_storage)
     }
 }
-struct VanillaReduceKernel<F>(F);
-impl<T, F> ReductionOpKernel<T> for VanillaReduceKernel<F>
+struct ReduceKernel<F>(F);
+impl<T, F> ReductionOpKernel<T> for ReduceKernel<F>
 where
     F: Fn(T, T) -> T,
 {
@@ -2301,12 +2296,16 @@ where
     type State = T;
 
     #[inline(always)]
-    fn init_state(&self, first: Option<T>) -> Self::State {
-        first.unwrap()
+    fn init_state(&self, init_item: Option<(T, u64)>) -> Self::State {
+        init_item.unwrap().0
     }
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
         (self.0)(state, item)
+    }
+    #[inline(always)]
+    fn merge_states(&self, a: Self::State, b: Self::State) -> Self::State {
+        (self.0)(a, b)
     }
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
@@ -2341,7 +2340,6 @@ where
 
     crate::ops::impl_element_type_change_default!();
 }
-*/
 
 /*
 /// Reduces one or more axes by folding the elements along those axes through a
@@ -2640,10 +2638,12 @@ where
         }
     );
 
-    /* TODO
     /// Applies the [`Reduce`] operation, see the op struct docs for details.
+    ///
+    /// `f` MUST be associative and commutative: the elements are visited in an unspecified
+    /// order, and `f` combines partial accumulators as well as single elements.
     #[track_caller]
-    pub fn reduce<F, Ax>(
+    pub fn reduce_unordered<F, Ax>(
         self,
         axes: Ax,
         f: F,
@@ -2656,6 +2656,7 @@ where
         Reduce::new_array(self, axes, f).unwrap()
     }
 
+    /* TODO
     /// Applies the [`Fold`] operation, see the op struct docs for details.
     #[track_caller]
     #[allow(clippy::type_complexity)]
@@ -2695,6 +2696,7 @@ pub(crate) mod tests {
 
     use proptest::prelude::*;
 
+    use super::Reduce;
     use crate::array::Array;
     use crate::storage::Compact;
     use crate::{DimDyn, Ty};
@@ -3521,62 +3523,239 @@ pub(crate) mod tests {
         }
     }
 
-    /* TODO(reduction-merge): reduce/fold tests removed along with the ops; restore later.
+    // --- Reduce ------------------------------------------------------------------
+
+    // Combiners for the `reduce_unordered` property tests. Each one is associative AND
+    // commutative, as the op requires - which is what lets a plain sequential fold serve as the
+    // reference for the op's unspecified order.
+    fn xor<T: std::ops::BitXor<Output = T>>(a: T, b: T) -> T {
+        a ^ b
+    }
+    fn maximum<T: PartialOrd>(a: T, b: T) -> T {
+        if a > b {
+            a
+        } else {
+            b
+        }
+    }
+    #[cfg(feature = "num-complex")]
+    fn add<T: std::ops::Add<Output = T>>(a: T, b: T) -> T {
+        a + b
+    }
+
+    /// Proptest driver for `reduce_unordered` over one dtype: the op must agree with a plain
+    /// sequential fold of the same combiner `$f`, for every shape/axes combination the shared
+    /// reduction strategy generates.
+    macro_rules! test_reduce_unordered_dtype {
+        ($f:path, $dtype:ident, $strategy:ident) => {
+            paste::paste! {
+                #[test]
+                fn [<reduce_unordered_ $dtype>]() {
+                    check_reduction::<$dtype>(
+                        proptest::strategy::Strategy::boxed(
+                            carray_strategy_for_reduction::<$dtype>(
+                                <$dtype as crate::util::ScalarStrategy>::$strategy()
+                            )
+                        ),
+                        |nd, za, axes| {
+                            let result = za.as_ref().reduce_unordered(axes, $f);
+                            let expected = ndarray_reduce(nd, axes, |arr| {
+                                arr.iter().cloned().reduce($f).unwrap()
+                            });
+                            assert_reduction_matches(&result, &expected);
+                        },
+                    );
+                }
+            }
+        };
+        ($f:path, [$($dtype:ident),+ $(,)?], $strategy:ident) => {
+            $(test_reduce_unordered_dtype!($f, $dtype, $strategy);)+
+        };
+    }
+
+    // `xor` is exact and has no built-in op counterpart, so it pins the whole custom-closure
+    // path (lane seeding, lane tree merge, cross-tile merge) without needing a tolerance.
+    test_reduce_unordered_dtype!(xor, [i8, i16, i32, i64], any_strategy);
+    test_reduce_unordered_dtype!(xor, [u8, u16, u32, u64, bool], any_strategy);
+    // Floats have no `xor`; `maximum` is the exact order-independent stand-in. `any_strategy`
+    // never yields `NaN` for floats, so `>` is a total order here and the reference agrees
+    // exactly (this is also the only group `f16` can join - see `ReductionCompare`).
+    test_reduce_unordered_dtype!(maximum, [f32, f64], any_strategy);
+    #[cfg(feature = "half")]
+    test_reduce_unordered_dtype!(maximum, [f16], any_strategy);
+    // Complex has no ordering, so use `add` and let the per-dtype approximate comparison absorb
+    // the reassociation (same deal as the built-in `sum` on floats).
+    #[cfg(feature = "num-complex")]
+    test_reduce_unordered_dtype!(add, [complex_f32, complex_f64], op_safe_strategy);
+
     #[test]
-    fn reduce_single_axis_in_logical_order() {
-        // A single reduced axis must be visited in logical (index-ascending) order, so
-        // non-commutative closures produce a well-defined result. Subtraction is the
-        // canonical witness: (((1 - 2) - 3) - 4) = -8.
-        let a = Array::compact_ndarray(&array![1i64, 2, 3, 4]).unwrap();
-        let r = a.as_ref().reduce(0, |a, b| a - b).to_ndarray().unwrap();
-        assert_eq!(r[[]], -8);
+    fn reduce_unordered_concrete() {
+        // Axis 0, axis 1 and all-axes, with a non-default block shape ([2, 2]) so both the
+        // reduced and the kept axis cross a block boundary.
+        let nd = array![[1i32, 5, 3], [4, 2, 6]];
+        let za = Array::compact_ndarray_with(&nd, crate::util::arr_params(&[2, 2])).unwrap();
+        // axis 0 (per column): max(1,4)=4; max(5,2)=5; max(3,6)=6.
+        crate::util::assert_array_matches(
+            &za.as_ref().reduce_unordered(0usize, maximum::<i32>),
+            &array![4, 5, 6],
+        );
+        // axis 1 (per row): max(1,5,3)=5; max(4,2,6)=6.
+        crate::util::assert_array_matches(
+            &za.as_ref().reduce_unordered(1usize, maximum::<i32>),
+            &array![5, 6],
+        );
+        // all axes -> scalar.
+        crate::util::assert_array_matches(
+            &za.as_ref().reduce_unordered((0, 1), maximum::<i32>),
+            &ndarray::arr0(6),
+        );
+        // A reduction over zero axes is a no-op copy: every cell is its own accumulator.
+        crate::util::assert_array_matches(
+            &za.as_ref()
+                .reduce_unordered([0usize; 0].as_slice(), maximum::<i32>),
+            &nd,
+        );
     }
 
     #[test]
-    fn reduce_single_axis_per_row() {
-        // Single axis on a 2D array: reduce axis 1 (columns). Each row is folded
-        // left-to-right with subtraction.
-        // row 0: ((10 - 1) - 2) = 7
-        // row 1: ((20 - 5) - 3) = 12
-        let a = Array::compact_ndarray(&array![[10i32, 1, 2], [20, 5, 3]]).unwrap();
-        let r = a.as_ref().reduce(1, |a, b| a - b).to_ndarray().unwrap();
-        assert_eq!(r.as_slice().unwrap(), &[7, 12]);
-    }
-
-    #[test]
-    fn reduce_multi_axis_sum() {
-        // Multi-axis reduction. The closure here is associative + commutative, which is
-        // required for the result to be well-defined (the traversal order across multiple
-        // reduced axes is implementation-defined).
-        let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
+    fn reduce_unordered_preserves_dtype() {
+        // The output dtype must equal the input dtype (no widening, unlike `sum`/`product`).
+        use crate::dtype::Dtyped;
+        let a = Array::compact_ndarray(&array![1i8, 2, 3]).unwrap();
         let r = a
             .as_ref()
-            .reduce((0, 1), |a, b| a + b)
-            .to_ndarray()
-            .unwrap();
-        assert_eq!(r[[]], 21);
+            .reduce_unordered(0usize, |a, b| a.wrapping_add(b));
+        assert_eq!(r.dtype(), &<i8 as Dtyped>::DTYPE);
+        assert_eq!(r.to_ndarray().unwrap()[[]], 6i8);
     }
 
     #[test]
-    fn reduce_preserves_dtype() {
-        // The output dtype must equal the input dtype.
-        use crate::dtype::Dtyped;
-        let a = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
-        let r = a.as_ref().reduce(0, |a, b| a + b);
-        assert_eq!(r.dtype(), &<i32 as Dtyped>::DTYPE);
-    }
-
-    #[test]
-    #[should_panic]
-    fn reduce_panics_on_empty_axis() {
-        // Reducing along an empty axis is unsupported: there's no first element to seed
-        // the accumulator. `Array::reduce` unwraps the construction error and panics.
+    fn reduce_unordered_errs_on_empty_axis() {
+        // With no seed value and no first element there is nothing to return, so construction
+        // fails (`supports_empty() == false`).
         use ndarray::Array2;
         let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
         let a = Array::compact_ndarray(&empty).unwrap();
-        let _ = a.as_ref().reduce(1, |a, b| a + b);
+        let err = Reduce::new_array(a.as_ref(), 1usize, |a: i32, b: i32| a + b)
+            .expect_err("empty reduced axis must be rejected");
+        assert!(
+            err.to_string().contains("empty dimension"),
+            "unexpected error: {err}"
+        );
+        // An empty *kept* axis is fine - the reduced axis is non-empty and the output is empty.
+        let empty: Array2<i32> = Array2::from_shape_vec((0, 2), vec![]).unwrap();
+        let a = Array::compact_ndarray(&empty).unwrap();
+        let r = a
+            .as_ref()
+            .reduce_unordered(1usize, |a, b| a + b)
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(r.shape(), &[0]);
     }
 
+    #[test]
+    #[should_panic(expected = "empty dimension")]
+    fn reduce_unordered_panics_on_empty_axis() {
+        // `Array::reduce_unordered` unwraps the construction error.
+        use ndarray::Array2;
+        let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
+        let a = Array::compact_ndarray(&empty).unwrap();
+        let _ = a.as_ref().reduce_unordered(1usize, |a, b| a + b);
+    }
+
+    #[test]
+    fn reduce_unordered_multi_bulk_multi_tile_2d_reduce_outer() {
+        // Same chunking scenarios as the `sum` bulk/tile tests, driven through the custom
+        // closure instead. Reduce axis 0: bulks split the reduced axis, tiles split the kept one.
+        check_reduce_unordered_divided(&[8, 6], &[2, 3], (32, 64), &[0]);
+    }
+
+    #[test]
+    fn reduce_unordered_multi_bulk_multi_tile_2d_reduce_inner() {
+        check_reduce_unordered_divided(&[6, 8], &[3, 2], (32, 64), &[1]);
+    }
+
+    #[test]
+    fn reduce_unordered_multi_bulk_multi_tile_3d_reduce_middle() {
+        check_reduce_unordered_divided(&[4, 4, 4], &[2, 2, 2], (32, 64), &[1]);
+    }
+
+    #[test]
+    fn reduce_unordered_multi_bulk_long_reduced_axis() {
+        // A long, prime-length reduced axis with a tiny read window: the axis is chopped into
+        // many bulks whose partial accumulators all have to be merged back together, and 137 is
+        // not a multiple of the block extent so the last bulk is a short one.
+        //
+        // (The *lane* interleaving inside a single tile - which needs a per-tile reduced extent
+        // of at least LANES - is covered by the 1D property-test shapes of 100..=1000 elements,
+        // which are read in one tile with the default read window.)
+        check_reduce_unordered_divided(&[137, 3], &[8, 1], (32, 64), &[0]);
+    }
+
+    /// Drives `reduce_unordered` through the two-level bulk/tile chunking (see
+    /// [`check_sum_divided`] for why `read_data` is called directly with the whole output range)
+    /// and checks two independent things:
+    ///
+    /// 1. **Value**: `xor` is associative, commutative and exact, so the result must equal a
+    ///    sequential reference fold no matter how the stream got partitioned.
+    /// 2. **Call count**: combining `n` elements into one accumulator is an `n`-leaf tree, which
+    ///    has exactly `n - 1` internal nodes - so the closure must be invoked exactly
+    ///    `n_out * (reduction_size - 1)` times. Counting them catches a dropped, duplicated or
+    ///    re-seeded element even when `xor` would happen to mask it (e.g. an element folded in
+    ///    twice cancels out).
+    fn check_reduce_unordered_divided(
+        shape: &[usize],
+        block_shape: &[u32],
+        read_size: (u64, u64),
+        axes: &[usize],
+    ) {
+        use std::cell::Cell;
+
+        use crate::ArrayStorage;
+
+        let n: usize = shape.iter().product();
+        let nd = ndarray::ArrayD::from_shape_vec(
+            shape.to_vec(),
+            (0..n as i32).map(|x| (x % 251) as u8).collect(),
+        )
+        .unwrap();
+
+        let mut params = crate::ArrayParams::new();
+        params.block_shape(block_shape);
+        params.read_size(read_size);
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+
+        let calls = Cell::new(0u64);
+        let reduced = za.as_ref().reduce_unordered(axes, |a: u8, b: u8| {
+            calls.set(calls.get() + 1);
+            xor(a, b)
+        });
+        let out_shape: Vec<u64> = reduced.shape().to_vec();
+        let full_index: Vec<std::ops::Range<u64>> = out_shape.iter().map(|&s| 0..s).collect();
+        let n_out: usize = out_shape.iter().product::<u64>() as usize;
+        let ctx = reduced.read_ctx();
+        let storage = reduced.into_storage();
+
+        let mut buf = vec![0u8; n_out.max(1)];
+        {
+            let mut out = crate::storage::OutBuf::new(&mut buf[..n_out]);
+            storage.read_data(&full_index, &mut out, &ctx).unwrap();
+        }
+
+        let expected = ndarray_reduce(&nd, axes, |v| v.iter().cloned().reduce(xor).unwrap());
+        assert_eq!(&buf[..n_out], expected.as_slice().unwrap());
+
+        let reduction_size = n / n_out;
+        assert_eq!(
+            calls.get(),
+            (n_out * (reduction_size - 1)) as u64,
+            "each output cell must combine its {reduction_size} elements with exactly \
+             {} closure calls",
+            reduction_size - 1
+        );
+    }
+
+    /* TODO(reduction-merge): fold tests removed along with the op; restore later.
     #[test]
     fn fold_single_axis_in_logical_order() {
         // Single-axis fold with a non-commutative closure (subtraction). Logical-order
