@@ -7,7 +7,7 @@ use fastrand::Rng;
 
 use crate::common::create_compact;
 
-fn bench_compact_read(c: &mut Criterion) {
+fn bench_compact_read_region(c: &mut Criterion) {
     let mut rng = Rng::with_seed(0xfacc5ed5f7466613);
     let configs: [(_, &[(_, _)]); _] = [
         (
@@ -102,5 +102,50 @@ fn bench_compact_read(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_compact_read);
+fn bench_compact_read_full(c: &mut Criterion) {
+    let mut rng = Rng::with_seed(0xcbcc8bc6101ce649);
+    let configs: [(_, &[_]); _] = [
+        // array_shape
+        (
+            [600, 32],
+            &[
+                //  block_shape
+                [32, 32],
+                [64, 8],
+            ],
+        ),
+        // array_shape
+        (
+            [11_000, 460],
+            &[
+                //  block_shape
+                [32, 32],
+                [32, 460],
+                [2000, 32],
+            ],
+        ),
+    ];
+
+    for (shape, block_shapes) in configs {
+        let mut group = c.benchmark_group(format!("compact_read_full {:?}", shape));
+        group.sample_size(20);
+
+        for block_shape in block_shapes {
+            let array = create_compact(&shape, block_shape.as_slice(), None, &mut rng);
+
+            group.bench_function(
+                BenchmarkId::from_parameter(format!("shape={shape:?}, block={block_shape:?}")),
+                move |b| {
+                    b.iter_batched(
+                        || (),
+                        |_| array.to_ndarray().unwrap(),
+                        criterion::BatchSize::SmallInput,
+                    );
+                },
+            );
+        }
+    }
+}
+
+criterion_group!(benches, bench_compact_read_region, bench_compact_read_full);
 criterion_main!(benches);

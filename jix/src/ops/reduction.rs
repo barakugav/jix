@@ -3,7 +3,7 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
-use crate::error::{bail, check_get_buffer_size, check_get_range, check_ndim, ensure, Result};
+use crate::error::{bail, check_buffer_aligned, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf};
@@ -238,10 +238,8 @@ where
     // of kernel, dimension, dtype, and backing storage.
 
     check_get_range(outer_shape, index)?;
-    let out_shape_usize = OuterD::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-    let mut contiguous_buf =
-        buf.get_contiguous_mut(out_shape_usize.as_ref(), output_dtype, context)?;
-    let buf = contiguous_buf.as_mut_slice();
+    let (out_buf, out_strides) = buf.get_strided_mut::<OuterD>(index, output_dtype);
+    check_buffer_aligned(out_buf.as_ptr(), output_dtype)?;
 
     // Streams the reduction over a two-level chunking of the inner array so peak scratch
     // memory stays bounded *and* each downstream `self.array.read_data` call is sized to
@@ -346,7 +344,7 @@ where
     // - At the end of each bulk, `bulk_base_item_idx == full_reduction_size` - i.e. the
     //   bulk folded its outputs over exactly the full reduced stream.
 
-    let out_nitems = check_get_buffer_size(index, output_dtype, buf)?;
+    let out_nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
 
     let inner_shape = inner_array.shape();
     let inner_ndim = inner_shape.len();
@@ -424,16 +422,25 @@ where
 
     let state_in_out_buf = kernel_state_sizeof == output_dtype.itemsize() as usize
         && kernel_state_alignof <= output_dtype.alignment();
-    let out_ptr = buf.as_mut_ptr();
+    let out_ptr = out_buf.as_mut_ptr();
+    let out_buf_len = out_buf.len();
     let mut tmp_state_buf;
     // CAREFUL: state_buf and out_ptr may alias
-    let state_buf = if state_in_out_buf {
-        unsafe { std::slice::from_raw_parts_mut(out_ptr, out_nitems * kernel_state_sizeof) }
+    let (state_buf, state_strides) = if state_in_out_buf {
+        // Reuse the output bytes as the state buffer
+        let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
+        (state_buf, out_strides.clone())
     } else {
         tmp_state_buf = context.tmp_buf(out_nitems * kernel_state_sizeof, kernel_state_alignof);
-        tmp_state_buf.as_mut_slice()
+        (
+            tmp_state_buf.as_mut_slice(),
+            default_strides_cast(&out_shape, kernel_state_sizeof),
+        )
     };
-    let state_strides = default_strides_cast(&out_shape, kernel_state_sizeof);
+    debug_assert!(state_strides
+        .as_ref()
+        .iter()
+        .all(|&s| s.is_multiple_of(kernel_state_alignof.as_usize())));
     let mut state_initialized = false;
 
     let mut items_buf = context.tmp_buf(0, item_dtype.alignment());
@@ -577,7 +584,6 @@ where
     let state_ptr = state_buf.as_mut_ptr();
     // From here on the state/output buffers are touched only through `state_ptr` and
     // `out_ptr`. Dont use `state_buf`.
-    let out_strides = default_strides_cast(&out_shape, output_dtype.itemsize() as usize);
     finalize_state_fn(FinalizeStateArgs {
         out_shape,
         state_buf: state_ptr,
@@ -587,8 +593,6 @@ where
         reduction_size_overall,
         state_initialized,
     });
-
-    contiguous_buf.finalize(out_shape_usize.as_ref(), output_dtype);
     Ok(())
 }
 
@@ -3408,6 +3412,113 @@ pub(crate) mod tests {
         // 3D, reduce the middle axis, tile == block == [2, 2, 2]. bulks split reduced axis 1
         // (4/2 = 2); tiles split the two non-reduced axes 0 and 2 ((4/2)*(4/2) = 4 tiles/bulk).
         check_sum_divided(&[4, 4, 4], &[2, 2, 2], (32, 64), &[1]);
+    }
+
+    #[test]
+    fn sum_into_strided_2d_output_multi_bulk() {
+        // A reduction must write straight into a *strided* (non-contiguous) destination using the
+        // caller's own byte-strides - not stage through a contiguous scratch and scatter. This
+        // exercises the `state_in_out_buf` path: the i64 sum state has the same size/alignment as
+        // the i64 output, so the state buffer aliases the strided output and adopts its layout.
+        // Small blocks + read_size force multiple bulks/tiles, so the strided `state_offset`
+        // (base slot of each bulk's output block) is exercised with a non-trivial 2D stride.
+        use crate::storage::OutBuf;
+        use crate::ArrayStorage;
+
+        // [4, 4, 4] i8, reduce the middle axis -> [4, 4] i64.
+        let nd = ndarray::ArrayD::from_shape_vec(
+            vec![4usize, 4, 4],
+            (0..64i32).map(|x| (x % 97) as i8).collect(),
+        )
+        .unwrap();
+        let mut params = crate::ArrayParams::new();
+        params.block_shape(&[2, 2, 2]);
+        params.read_size((32, 64));
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let reduced = za.as_ref().sum(1usize); // [4, 4] i64
+        let index = [0..4u64, 0..4];
+        let ctx = reduced.read_ctx();
+        let storage = reduced.into_storage();
+
+        // Reference: a plain contiguous read.
+        let mut expected = vec![0i64; 16];
+        {
+            let bytes = unsafe {
+                std::slice::from_raw_parts_mut(expected.as_mut_ptr().cast::<u8>(), 16 * 8)
+            };
+            let mut out = OutBuf::new(bytes);
+            storage.read_data(&index, &mut out, &ctx).unwrap();
+        }
+
+        // Strided destination: element strides [8, 2] (bytes [64, 16]), so slot (r, c) lands at
+        // element offset r*8 + c*2 and every other element is an untouched gap. Backed by a
+        // `Vec<i64>` so the base and every itemsize-multiple slot are 8-aligned.
+        const SENTINEL: i64 = i64::MIN;
+        let mut backing = vec![SENTINEL; 32];
+        let byte_strides = [64usize, 16];
+        let slot = |r: usize, c: usize| r * 8 + c * 2;
+        {
+            let bytes = unsafe {
+                std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 32 * 8)
+            };
+            let mut out = unsafe { OutBuf::new_strided(bytes, &byte_strides) };
+            storage.read_data(&index, &mut out, &ctx).unwrap();
+        }
+
+        let mut is_slot = [false; 32];
+        for r in 0..4 {
+            for c in 0..4 {
+                assert_eq!(backing[slot(r, c)], expected[r * 4 + c], "slot ({r},{c})");
+                is_slot[slot(r, c)] = true;
+            }
+        }
+        for (i, &v) in backing.iter().enumerate() {
+            if !is_slot[i] {
+                assert_eq!(v, SENTINEL, "gap at element {i} was overwritten");
+            }
+        }
+    }
+
+    #[test]
+    fn var_into_strided_output_non_aliasing_state() {
+        // The variance (Welford) state is larger than its f64 output, so `state_in_out_buf` is
+        // false: the state lives in a separate contiguous scratch and `finalize_states` scatters
+        // each result into the strided destination. Check that scatter honors the caller's strides
+        // and matches a contiguous read exactly (identical compute order -> bit-identical).
+        use crate::storage::OutBuf;
+        use crate::ArrayStorage;
+
+        let nd = ndarray::ArrayD::from_shape_vec(vec![3usize, 4], (0..12i32).collect()).unwrap();
+        let za = Array::compact_ndarray(&nd).unwrap();
+        let reduced = za.as_ref().var(1usize, 0.0); // [3] f64
+        let ctx = reduced.read_ctx();
+        let storage = reduced.into_storage();
+
+        let mut expected = vec![0f64; 3];
+        {
+            let bytes = unsafe {
+                std::slice::from_raw_parts_mut(expected.as_mut_ptr().cast::<u8>(), 3 * 8)
+            };
+            let mut out = OutBuf::new(bytes);
+            storage.read_data(&[0..3], &mut out, &ctx).unwrap();
+        }
+
+        // Strided destination: byte stride 16 (element stride 2), so slot i is at element 2*i and
+        // 2*i+1 is an untouched gap. Backed by `Vec<f64>` for 8-alignment.
+        const SENTINEL: f64 = -98765.0;
+        let mut backing = vec![SENTINEL; 6];
+        let byte_strides = [16usize];
+        {
+            let bytes =
+                unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 6 * 8) };
+            let mut out = unsafe { OutBuf::new_strided(bytes, &byte_strides) };
+            storage.read_data(&[0..3], &mut out, &ctx).unwrap();
+        }
+
+        for i in 0..3 {
+            assert_eq!(backing[i * 2], expected[i], "slot {i}");
+            assert_eq!(backing[i * 2 + 1], SENTINEL, "gap {i} was overwritten");
+        }
     }
 
     /* TODO(reduction-merge): reduce/fold tests removed along with the ops; restore later.

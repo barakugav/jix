@@ -54,8 +54,8 @@ use crate::error::{check_buffer_aligned, check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
 use crate::{
-    array_from_fn_inline, assert_unchecked_eq, default_logical_strides_slice, dim_arr,
-    nd_iter_unordered, ArrayExt, ArrayStorage, Dimension, ElementType, Ty, TypeDyn,
+    array_from_fn_inline, assert_unchecked_eq, default_logical_strides_slice, dim_arr, ArrayExt,
+    ArrayStorage, Dimension, ElementType, NdIterUnordered, PtrMutExt, Ty, TypeDyn,
 };
 
 pub(crate) mod core_trait;
@@ -475,31 +475,28 @@ where
 
     // Operand 0 is the destination byte buffer (`out`); operand 1 is the source, read
     // via `read_bulk` and indexed in elements.
-    nd_iter_unordered(
+    let iter = NdIterUnordered::new(
         shape,
         [strides, src_offset_strides.as_ref()],
         [(itemsize, align_of::<T>()), (1, 1)],
-        |flags| {
-            debug_assert!(flags.aligned[1]);
-            let aligned = flags.aligned[0] && out.as_ptr().cast::<T>().is_aligned();
-            let contiguous = [flags.contiguous[0], flags.contiguous[1]];
-            let inner_loop_fn = match (aligned, contiguous) {
-                (true, [true, true]) => inner_loop::<T, LANES, true, true, true>,
-                (true, [true, false]) => inner_loop::<T, LANES, true, true, false>,
-                (true, [false, true]) => inner_loop::<T, LANES, true, false, true>,
-                (true, [false, false]) => inner_loop::<T, LANES, true, false, false>,
-                (false, [true, true]) => inner_loop::<T, LANES, false, true, true>,
-                (false, [true, false]) => inner_loop::<T, LANES, false, true, false>,
-                (false, [false, true]) => inner_loop::<T, LANES, false, false, true>,
-                (false, [false, false]) => inner_loop::<T, LANES, false, false, false>,
-            };
-            let dst_base = out.as_mut_ptr();
-            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| {
-                let dst = unsafe { dst_base.add(dst_offset) };
-                inner_loop_fn(&mut *data, dst, src_offset, len, dst_stride, src_stride)
-            }
-        },
     );
+    let [dst_aligned, src_aligned] = iter.is_aligned();
+    debug_assert!(src_aligned);
+    let aligned = dst_aligned && out.as_ptr().cast::<T>().is_aligned();
+    let inner_loop_fn = match (aligned, iter.is_contiguous()) {
+        (true, [true, true]) => inner_loop::<T, LANES, true, true, true>,
+        (true, [true, false]) => inner_loop::<T, LANES, true, true, false>,
+        (true, [false, true]) => inner_loop::<T, LANES, true, false, true>,
+        (true, [false, false]) => inner_loop::<T, LANES, true, false, false>,
+        (false, [true, true]) => inner_loop::<T, LANES, false, true, true>,
+        (false, [true, false]) => inner_loop::<T, LANES, false, true, false>,
+        (false, [false, true]) => inner_loop::<T, LANES, false, false, true>,
+        (false, [false, false]) => inner_loop::<T, LANES, false, false, false>,
+    };
+    iter.foreach_inner_1d(|[dst_offset, src_offset], len, [dst_stride, src_stride]| {
+        let dst = unsafe { out.get_unchecked_mut(dst_offset..).as_mut_ptr() };
+        inner_loop_fn(&mut *data, dst, src_offset, len, dst_stride, src_stride)
+    });
 
     // One inner 1-d run: read `len` elements from `data` starting at logical element
     // `src_index` (stepping `src_stride` elements) and scatter them into `dst`
@@ -533,11 +530,7 @@ where
             } else {
                 unsafe { dst.cast::<u8>().add(j * dst_stride).cast::<T>() }
             };
-            if ALIGNED {
-                unsafe { elm.write(val) };
-            } else {
-                unsafe { elm.write_unaligned(val) };
-            }
+            unsafe { elm.write_maybe_aligned::<ALIGNED>(val) };
         };
         let mut i = 0;
         if SRC_CONTIGUOUS {
