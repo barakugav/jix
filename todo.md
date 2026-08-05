@@ -11,5 +11,4 @@
 - return strided buf from read_data
 - add read benchmark of the whole array, also for low entropy data
 - add `out` arg to `Array.numpy()`
-- array.transmute_items
 - benchmark LANES of {32/64/128/256} / itemsize on x86
