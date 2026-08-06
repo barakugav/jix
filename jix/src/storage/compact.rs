@@ -17,13 +17,10 @@ use crate::dtype::Dtype;
 use crate::error::{check_buffer_aligned, check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{ArraySpec, ElementType, OutBuf};
+use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{calc_block_end, NdCopier};
-use crate::{
-    default_strides, default_strides_cast, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec,
-    Dimension,
-};
+use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
 ///
@@ -128,13 +125,13 @@ macro_rules! impl_array_storage {
             type Dimension = D;
 
             #[inline(always)]
-            fn read_data(
-                &self,
+            fn read_data<'rd>(
+                &'rd self,
                 index: &[Range<u64>],
-                buf: &mut crate::storage::OutBuf,
-                context: &ReadContext,
-            ) -> Result<()> {
-                self.0.read_data(index, buf, context)
+                context: &'rd ReadContext,
+                out: Option<&'rd mut crate::storage::StridedBuf<'_>>,
+            ) -> Result<crate::storage::StridedBuf<'rd>> {
+                self.0.read_data(index, context, out)
             }
 
             #[inline(always)]
@@ -289,20 +286,28 @@ where
     ///    - Call `nd_copy` to scatter the active sub-region from `tmp_buf` into `buf`,
     ///      respecting both strides.
     #[inline]
-    fn read_data(&self, index: &[Range<u64>], buf: &mut OutBuf, context: &ReadContext) -> Result<()>
+    fn read_data<'rd>(
+        &'rd self,
+        index: &[Range<u64>],
+        context: &'rd ReadContext,
+        out: Option<&'rd mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'rd>>
     where
         ET: ElementType,
         D: Dimension,
     {
         let shape = self.shape();
         check_get_range(shape, index)?;
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        check_out_buf(out.as_deref(), shape)?;
         let dtype = self.blocks.dtype();
-        let is_strided = buf.strides().is_some();
-        let (buf, out_strides) = buf.get_strided_mut::<D>(index, dtype);
+        let out_shape = D::vec(shape.len(), |d| (index[d].end - index[d].start) as usize);
+        let nitems = out_shape.as_ref().iter().product::<usize>();
+        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
         if nitems == 0 {
-            return Ok(());
+            return Ok(out);
         }
+        let is_strided = !out.is_contiguous(out_shape.as_ref(), dtype);
+        let (out_buf, out_strides) = out.data_mut();
 
         let ndim = shape.len();
         let block_shape = self.block_shape();
@@ -333,12 +338,13 @@ where
             && is_aligned
             && !is_strided
         {
+            let buf = &mut out_buf[..nitems * dtype.itemsize() as usize];
             check_buffer_aligned(buf.as_ptr(), dtype)?;
             self.blocks.read_block(single_block_idx, buf, context)?;
         } else {
-            self.read_data_slow(index, buf, out_strides.as_ref(), context, single_block_idx)?;
+            self.read_data_slow(index, out_buf, out_strides, context, single_block_idx)?;
         }
-        Ok(())
+        Ok(out)
     }
 
     fn read_data_slow(
@@ -389,13 +395,13 @@ where
         let itemsize = dtype.itemsize() as usize;
         let out_shape = ActualD::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
         let block_shape_u64 = ActualD::vec(ndim, |dim| block_shape[dim] as u64);
-        let block_strides = default_strides_cast(&block_shape_u64, itemsize);
+        let block_strides = default_strides(&block_shape_u64, itemsize);
         let copier = NdCopier::new(dtype);
 
         // Pre-allocate a buffer large enough for a full block.
         let full_buf_len =
             block_shape_u64.as_ref().iter().copied().product::<u64>() as usize * itemsize;
-        let mut tmp_buf = context.tmp_buf(full_buf_len, dtype.alignment());
+        let mut tmp_buf = context.allocate_buf(full_buf_len, dtype.alignment());
         let tmp_buf = tmp_buf.as_mut_slice();
 
         // Fast path for (unaligned) single-block read
@@ -532,7 +538,7 @@ where
 mod tests {
     use std::ops::Range;
 
-    use crate::storage::OutBuf;
+    use crate::storage::StridedBuf;
     use crate::{Array, ArrayParams, ArrayStorage};
 
     /// Read `index` from a compact `i32` array both into a plain contiguous buffer and into a
@@ -559,7 +565,10 @@ mod tests {
         let storage = za.into_storage();
 
         let ndim = index.len();
-        let out_shape: Vec<usize> = index.iter().map(|r| (r.end - r.start) as usize).collect();
+        let out_shape = index
+            .iter()
+            .map(|r| (r.end - r.start) as usize)
+            .collect::<Vec<_>>();
         let nitems: usize = out_shape.iter().product();
 
         // Reference: a plain contiguous read.
@@ -568,8 +577,9 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(expected.as_mut_ptr().cast::<u8>(), nitems * 4)
             };
-            let mut out = OutBuf::new(bytes);
-            storage.read_data(index, &mut out, &ctx).unwrap();
+            let c = crate::util::default_strides_slice(&out_shape, 4);
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            storage.read_data(index, &ctx, Some(&mut out)).unwrap();
         }
 
         // Strided destination: element strides with a doubled inner spacing so every other element
@@ -587,13 +597,13 @@ mod tests {
             + 1;
         const SENTINEL: i32 = i32::MIN;
         let mut backing = vec![SENTINEL; span.max(1)];
-        let byte_strides: Vec<usize> = el_strides.iter().map(|&s| s * 4).collect();
+        let byte_strides = el_strides.iter().map(|&s| s * 4).collect::<Vec<_>>();
         {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), backing.len() * 4)
             };
-            let mut out = unsafe { OutBuf::new_strided(bytes, &byte_strides) };
-            storage.read_data(index, &mut out, &ctx).unwrap();
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            storage.read_data(index, &ctx, Some(&mut out)).unwrap();
         }
 
         // Compare every logical output element to its strided slot, tracking which backing
@@ -660,7 +670,10 @@ mod tests {
         let storage = za.into_storage();
 
         let ndim = index.len();
-        let out_shape: Vec<usize> = index.iter().map(|r| (r.end - r.start) as usize).collect();
+        let out_shape = index
+            .iter()
+            .map(|r| (r.end - r.start) as usize)
+            .collect::<Vec<_>>();
         let nitems: usize = out_shape.iter().product();
 
         let mut got = vec![0i32; nitems.max(1)];
@@ -668,8 +681,9 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(got.as_mut_ptr().cast::<u8>(), nitems * 4)
             };
-            let mut out = OutBuf::new(bytes);
-            storage.read_data(index, &mut out, &ctx).unwrap();
+            let c = crate::util::default_strides_slice(&out_shape, 4);
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, c.as_ref()) };
+            storage.read_data(index, &ctx, Some(&mut out)).unwrap();
         }
 
         // Expected: the source values over `index`, in row-major order.
@@ -680,9 +694,9 @@ mod tests {
                 coord[d] = rem % out_shape[d];
                 rem /= out_shape[d];
             }
-            let nd_idx: Vec<usize> = (0..ndim)
+            let nd_idx = (0..ndim)
                 .map(|d| coord[d] + index[d].start as usize)
-                .collect();
+                .collect::<Vec<_>>();
             assert_eq!(g, nd[ndarray::IxDyn(&nd_idx)], "coord {coord:?}");
         }
     }
@@ -765,9 +779,9 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 32 * 4)
             };
-            let mut out = unsafe { OutBuf::new_strided(bytes, &byte_strides) };
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
             storage
-                .read_data(&[0..1, 0..8, 0..4], &mut out, &ctx)
+                .read_data(&[0..1, 0..8, 0..4], &ctx, Some(&mut out))
                 .unwrap();
         }
         let expected: Vec<i32> = (0..32).map(|x| x * 3 - 5).collect();
@@ -799,8 +813,10 @@ mod tests {
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), backing.len() * 4)
             };
-            let mut out = unsafe { OutBuf::new_strided(bytes, &byte_strides) };
-            storage.read_data(&[0..2, 0..3], &mut out, &ctx).unwrap();
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &byte_strides) };
+            storage
+                .read_data(&[0..2, 0..3], &ctx, Some(&mut out))
+                .unwrap();
         }
         assert_eq!(&backing[..6], &[1, 2, 3, 4, 5, 6]);
         assert_eq!(&backing[6..], &[SENTINEL, SENTINEL], "wrote past the block");

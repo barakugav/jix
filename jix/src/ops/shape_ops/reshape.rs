@@ -5,7 +5,9 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
+use crate::storage::{
+    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
+};
 use crate::util::iter::NdIter;
 use crate::util::{DimArray, IterExt};
 use crate::{
@@ -186,12 +188,12 @@ where
     type ElementType = S::ElementType;
     type Dimension = D;
 
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         // -----------------------------------------------------------------------
         // Core concept
         // -----------------------------------------------------------------------
@@ -276,20 +278,22 @@ where
         //
         //          dst_byte_offset = sum_{unmatched new dim d} idx[d] * dst_strides[d]
         //
-        //      The read targets a strided `OutBuf` over `buf[dst_byte_offset..]` whose
+        //      The read targets a strided destination over `dst[dst_byte_offset..]` whose
         //      strides (expressed in original axis order) place each matched element at
-        //      its C-order position in `buf`, so no temporary buffer or extra copy is
+        //      its C-order position in `dst`, so no temporary buffer or extra copy is
         //      needed.
         // -----------------------------------------------------------------------
         check_get_range(self.shape(), index)?;
+        check_out_buf(out.as_deref(), self.shape())?;
         let dtype = self.dtype();
-        if index.iter().any(|r| r.start >= r.end) {
-            buf.materialize(0, dtype);
-            return Ok(());
+        let out_shape =
+            Self::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        if out_shape.as_ref().contains(&0) {
+            return Ok(out);
         }
-        // Write straight into the (possibly strided) destination, using its own strides: each inner
-        // read scatters directly into `buf` at the unmatched dims' byte offset.
-        let (dst, dst_strides) = buf.get_strided_mut::<D>(index, dtype);
+        // Gather each matched-dims block into its unmatched-dims byte offset in the destination.
+        let (out_buf, out_strides) = out.data_mut();
 
         let orig_shape = S::Dimension::from_slice(self.array.shape());
         let new_shape = self.new_shape.as_slice();
@@ -349,7 +353,7 @@ where
         // shape): a matched orig dim reuses its new dim's output stride; an unmatched orig dim has
         // extent 1 and is never stepped, so its stride is a dummy 0.
         let orig_strides = S::Dimension::vec(orig_ndim, |dim| match same_logical_stride_inv[dim] {
-            Some(new_dim) => dst_strides[new_dim as usize],
+            Some(new_dim) => out_strides[new_dim as usize],
             None => 0,
         });
 
@@ -378,18 +382,19 @@ where
             });
 
             // Read this matched-dims block straight into `buf` at the unmatched dims' byte offset;
-            // the strided OutBuf places each element at its C-order position in `buf`.
+            // the strided destination places each element at its C-order position in `dst`.
             let dst_byte_offset: usize = (0..ndim)
                 .filter(|&dim| same_logical_stride[dim].is_none())
-                .map(|dim| idx[dim] as usize * dst_strides[dim])
+                .map(|dim| idx[dim] as usize * out_strides[dim])
                 .sum();
-            let mut out =
-                unsafe { OutBuf::new_strided(&mut dst[dst_byte_offset..], orig_strides.as_ref()) };
+            let mut sub = unsafe {
+                StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], orig_strides.as_ref())
+            };
             self.array
-                .read_data(read_range.as_ref(), &mut out, context)?;
+                .read_data(read_range.as_ref(), context, Some(&mut sub))?;
         }
 
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]

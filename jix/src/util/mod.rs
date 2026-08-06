@@ -5,6 +5,7 @@ mod arr_sequence;
 pub use arr_sequence::*;
 
 pub(crate) mod arrayvec;
+pub(crate) mod buf_pool;
 pub(crate) mod cpu_cache;
 pub(crate) mod hint;
 
@@ -49,10 +50,6 @@ pub(crate) trait Idx:
     const ZERO: Self;
     const ONE: Self;
 
-    fn usize(self) -> usize;
-    fn from_usize(n: usize) -> Self;
-
-    #[allow(unused)]
     fn u64(self) -> u64;
     fn from_u64(n: u64) -> Self;
 
@@ -76,15 +73,6 @@ macro_rules! impl_idx_for_primitive {
         impl Idx for $t {
             const ZERO: Self = 0;
             const ONE: Self = 1;
-
-            #[inline(always)]
-            fn usize(self) -> usize {
-                self as usize
-            }
-            #[inline(always)]
-            fn from_usize(n: usize) -> Self {
-                n as $t
-            }
 
             #[inline(always)]
             fn u64(self) -> u64 {
@@ -112,14 +100,6 @@ impl_idx_for_primitive!(u16);
 impl_idx_for_primitive!(u32);
 impl_idx_for_primitive!(u64);
 
-#[inline(always)]
-pub(crate) fn default_strides<V, Ix: Idx>(shape: &V, itemsize: Ix) -> V
-where
-    V: DimVec<Ix>,
-{
-    let shape = shape.as_ref();
-    default_strides_from_iter::<V::Dimension, Ix>(shape.len(), shape.iter().copied(), itemsize)
-}
 /// Compute the largest byte offset of a region accessed by `shape` and `strides`.
 #[inline]
 pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
@@ -134,7 +114,7 @@ pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: u
 }
 
 #[inline(always)]
-pub(crate) fn default_strides_cast<V, IxIn: Idx, IxOut: Idx>(
+pub(crate) fn default_strides<V, IxIn: Idx, IxOut: Idx>(
     shape: &V,
     itemsize: IxOut,
 ) -> <V::Dimension as Dimension>::Vec<IxOut>
@@ -144,7 +124,7 @@ where
     let shape = shape.as_ref();
     default_strides_from_iter::<V::Dimension, IxOut>(
         shape.len(),
-        shape.iter().copied().map(|s| IxOut::from_usize(s.usize())),
+        shape.iter().copied().map(|s| IxOut::from_u64(s.u64())),
         itemsize,
     )
 }

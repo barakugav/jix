@@ -5,7 +5,10 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf, ReadData};
+use crate::storage::{
+    check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,
+    ReadData, StridedBuf,
+};
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
 
@@ -196,33 +199,39 @@ where
     type Dimension = D;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
-        let Some(inner_index) = self.transform_index(index)? else {
-            // Empty read (some requested range is empty): just ensure a lazy buffer is materialized.
-            buf.materialize(0, self.dtype());
-            return Ok(());
-        };
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        check_out_buf(out.as_deref(), self.shape())?;
         let dtype = self.dtype();
-        let itemsize = dtype.itemsize() as usize;
-        let out_shape = D::vec(index.len(), |d| index[d].end - index[d].start);
-        let out_strides = buf.strides_or_default::<D>(&out_shape, itemsize);
-        // Inserting a length-1 axis is a pure stride remap: inner dim d maps to output dim
-        // `original_dims[d]` (the inserted axes just drop out; the byte layout is unchanged). Forward
-        // `buf` to the inner read with the gathered strides.
-        let inner_strides = S::Dimension::vec(self.original_dims.as_ref().len(), |d| {
-            out_strides[self.original_dims[d] as usize]
-        });
-        let nitems = out_shape.as_ref().iter().product::<u64>() as usize;
-        // SAFETY: `inner_strides` gathers a subset of `buf`'s output strides, addressing bytes `buf`
-        // already spans.
-        let mut inner_buf = unsafe { buf.with_strides(nitems, dtype, inner_strides.as_ref()) };
-        self.array
-            .read_data(inner_index.as_ref(), &mut inner_buf, context)
+        let Some(inner_index) = self.transform_index(index)? else {
+            // Empty read
+            let out_shape = D::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+            return Ok(materialize_out_buf(out, context, out_shape.as_ref(), dtype));
+        };
+        unsafe {
+            read_data_and_map_strides(
+                &self.array,
+                inner_index.as_ref(),
+                context,
+                out,
+                |inner_strides| {
+                    let mut s = dim_arr(index.len(), |_| 0usize);
+                    for (d, &o) in self.original_dims.as_ref().iter().enumerate() {
+                        s[o as usize] = inner_strides[d];
+                    }
+                    s
+                },
+                |out_strides| {
+                    dim_arr(self.original_dims.as_ref().len(), |d| {
+                        out_strides[self.original_dims[d] as usize]
+                    })
+                },
+            )
+        }
     }
 
     #[inline(always)]
@@ -540,7 +549,7 @@ mod tests {
             // Oracle: inserting size-1 axes is a pure reshape - flat order is unchanged.
             let mut sorted_axes = axes.clone();
             sorted_axes.sort_unstable();
-            let mut expected_shape: Vec<usize> = nd.shape().to_vec();
+            let mut expected_shape= nd.shape().to_vec();
             for (i, &gap) in sorted_axes.iter().enumerate() {
                 expected_shape.insert(gap + i, 1);
             }

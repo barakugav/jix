@@ -410,7 +410,7 @@ mod tests {
     // the strided (non-coalesced) path - including a strided innermost axis.
     fn strided_strides(shape: &[usize], mult: &[usize], itemsize: usize) -> Vec<usize> {
         let ndim = shape.len();
-        let backing: Vec<usize> = (0..ndim).map(|d| shape[d] * mult[d]).collect();
+        let backing = (0..ndim).map(|d| shape[d] * mult[d]).collect::<Vec<_>>();
         let mut cstr = vec![0usize; ndim];
         let mut acc = itemsize;
         for d in (0..ndim).rev() {

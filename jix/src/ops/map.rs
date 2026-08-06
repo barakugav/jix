@@ -4,7 +4,9 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
-use crate::storage::{ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt};
+use crate::storage::{
+    check_out_buf, ArrayStorageInfo, ArrayStorageTyped, ReadData, ReadDataExt, StridedBuf,
+};
 use crate::{
     array_from_fn_inline, Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped,
     ArrayStorage, ReadContext, ReadDataTuple, Ty,
@@ -311,14 +313,15 @@ where
     type Dimension = ArraysT::Dimension;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
+        check_out_buf(out.as_deref(), self.shape())?;
         self.read_data_typed::<O>(index, context)?
-            .to_buf::<Self::Dimension>(buf, index)
+            .to_buf::<Self::Dimension>(index, context, out)
     }
 
     #[inline(always)]

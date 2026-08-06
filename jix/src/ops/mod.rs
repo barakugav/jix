@@ -131,6 +131,9 @@ pub use where_op::*;
 mod sub_dtype;
 pub use sub_dtype::*;
 
+mod transmute;
+pub use transmute::*;
+
 #[cfg(feature = "num-complex")]
 mod complex;
 #[cfg(feature = "num-complex")]

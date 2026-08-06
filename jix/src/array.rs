@@ -9,8 +9,8 @@ use crate::ops::MaybeCompact;
 use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
-    ArrayBlockTableStorageBase, ArrayStorageAny, ArrayStorageInfo, ArrayStorageTyped, BlockSize,
-    Compact, OutBuf, Plain, Ref,
+    check_out_buf, materialize_out_buf, ArrayBlockTableStorageBase, ArrayStorageAny,
+    ArrayStorageInfo, ArrayStorageTyped, BlockSize, Compact, Plain, Ref, StridedBuf,
 };
 use crate::util::iter::NdIter;
 use crate::util::{
@@ -18,8 +18,8 @@ use crate::util::{
     NdCopier, USE_NEW_READ_SCALING,
 };
 use crate::{
-    default_logical_strides, default_strides_cast, ArrayAny, ArrayParams, ArrayStorage, DimDyn,
-    DimVec, Dimension, ElementType, IntoDimension, Ty, TypeDyn,
+    default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, DimDyn, DimVec,
+    Dimension, ElementType, IntoDimension, SliceExt, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -444,24 +444,28 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
             type Dimension = D;
 
             #[inline]
-            fn read_data(
-                &self,
+            fn read_data<'a>(
+                &'a self,
                 index: &[Range<u64>],
-                buf: &mut OutBuf,
-                _context: &ReadContext,
-            ) -> Result<()> {
+                context: &'a ReadContext,
+                out: Option<&'a mut StridedBuf<'_>>,
+            ) -> Result<StridedBuf<'a>> {
+                check_out_buf(out.as_deref(), self.shape())?;
                 let ndim = self.shape().len();
                 let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
-                let (out_buf, out_strides) = buf.get_strided_mut::<D>(index, self.dtype());
-
+                let read_shape_usize = D::vec(ndim, |dim| read_shape[dim] as usize);
+                let mut out =
+                    materialize_out_buf(out, context, read_shape_usize.as_ref(), self.dtype());
+                let (out_buf, out_strides) = out.data_mut();
+                // TODO: nd_iter_unordered
                 let iter = NdIter::builder(read_shape)
-                    .with_strides_ptr_mut_ext(out_strides, out_buf.as_mut_ptr())
+                    .with_strides_ptr_mut_ext(out_strides.to_dim_vec::<D>(), out_buf.as_mut_ptr())
                     .build();
                 for (idx, dst) in iter {
                     let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
                     unsafe { dst.cast::<T>().write(value) };
                 }
-                Ok(())
+                Ok(out)
             }
 
             #[inline(always)]
@@ -801,8 +805,12 @@ impl<S: ArrayStorage> Array<S> {
         let (min_nitems, _) = spec.read_size().nitems(dtype.itemsize());
         let small_read = spec.flags().plain_read() || nitems as u64 <= min_nitems;
         if small_read {
-            self.storage
-                .read_data(index, &mut OutBuf::new(buf), context)?;
+            let out_shape =
+                S::Dimension::vec(shape.len(), |d| (index[d].end - index[d].start) as usize);
+            let strides = default_strides(&out_shape, dtype.itemsize() as usize);
+            // SAFETY: `buf` is the caller's contiguous buffer of exactly `nitems` elements; C-order.
+            let mut out = unsafe { StridedBuf::from_slice_mut(buf, strides.as_ref()) };
+            self.storage.read_data(index, context, Some(&mut out))?;
             return Ok(());
         }
 
@@ -840,33 +848,23 @@ impl<S: ArrayStorage> Array<S> {
             .build();
 
         let itemsize = dtype.itemsize() as usize;
-        let out_strides = default_strides_cast(&out_shape, itemsize);
+        let out_strides = default_strides(&out_shape, itemsize);
 
-        // If the read_shape spans the full output width in every dimension (other then the first)
-        // it lands as a single contiguous run in `buf`, decode straight into that destination slice.
-        // Otherwise the block is a strided sub-region of `buf`: hand `read_data` a strided OutBuf so
-        // it scatters into `buf` in a single copy, instead of staging through a separate tmp here.
-        let read_to_out_buf = (1..ndim).all(|dim| read_shape[dim] >= out_shape[dim]);
         for (block_idx, (block_inner_offset, block_size)) in block_iter {
             let inner_index = S::Dimension::vec(ndim, |dim| {
                 let start = block_idx[dim] * read_shape[dim] + block_inner_offset[dim];
                 let end = start + block_size[dim];
                 start..end
             });
-            let read_nitems = block_size.as_ref().iter().product::<u64>() as usize;
 
             let out_offset = (0..ndim)
                 .map(|dim| (inner_index[dim].start - index[dim].start) as usize * out_strides[dim])
                 .sum::<usize>();
 
-            let mut out = if read_to_out_buf {
-                debug_assert!((1..ndim).all(|dim| block_size[dim] == out_shape[dim]));
-                OutBuf::new(&mut buf[out_offset..out_offset + read_nitems * itemsize])
-            } else {
-                unsafe { OutBuf::new_strided(&mut buf[out_offset..], out_strides.as_ref()) }
-            };
+            let mut out =
+                unsafe { StridedBuf::from_slice_mut(&mut buf[out_offset..], out_strides.as_ref()) };
             self.storage
-                .read_data(inner_index.as_ref(), &mut out, context)?;
+                .read_data(inner_index.as_ref(), context, Some(&mut out))?;
         }
         Ok(())
     }
@@ -1081,7 +1079,7 @@ impl<S: ArrayStorage> Array<S> {
         let itemsize = encoder.dtype.itemsize() as usize;
         let alignment = encoder.dtype.alignment().as_usize();
         let block_size_bytes = block_size as usize * itemsize;
-        let block_strides = default_strides_cast(&block_shape, itemsize);
+        let block_strides = default_strides(&block_shape, itemsize);
         let block_compressed_bound = encoder.encode_bound(block_size_bytes);
         let copier = NdCopier::new(dtype);
 
@@ -1147,12 +1145,14 @@ impl<S: ArrayStorage> Array<S> {
             chunk_buf.clear();
             chunk_buf.reserve(chunk_bytes);
             unsafe { chunk_buf.set_len(chunk_bytes) };
+            let chunk_strides = default_strides(&chunk_size, itemsize);
             self.storage.read_data(
                 read_range.as_ref(),
-                &mut OutBuf::new(chunk_buf.as_mut_slice()),
                 context,
+                Some(&mut unsafe {
+                    StridedBuf::from_slice_mut(chunk_buf.as_mut_slice(), chunk_strides.as_ref())
+                }),
             )?;
-            let chunk_strides = default_strides_cast(&chunk_size, itemsize);
             let chunk_offset_base = (0..ndim)
                 .map(|dim| chunk_idx[dim] * chunk_shape_in_blocks[dim] * block_grid_lstrides[dim])
                 .sum::<u64>();

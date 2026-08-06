@@ -4,7 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
+use crate::storage::{
+    check_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo, StridedBuf,
+};
 use crate::util::dim_arr;
 use crate::{Array, ArrayStorage, Dimension};
 
@@ -123,32 +125,25 @@ impl<S: ArrayStorage> ArrayStorage for PermuteAxes<S> {
     type Dimension = S::Dimension;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
-        let dtype = self.dtype();
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-
+        check_out_buf(out.as_deref(), self.shape())?;
         let ndim = self.axes.as_ref().len();
-        let itemsize = dtype.itemsize() as usize;
-
-        // Build the index into the underlying (un-permuted) storage.
-        // Output dim i reads from input dim axes[i], so input dim d = inv_axes[output dim] needs
-        // the range that was requested for output dim inv_axes[d].
-        let input_index = S::Dimension::vec(ndim, |d| index[self.inv_axes[d] as usize].clone());
-
-        let out_shape = S::Dimension::vec(ndim, |i| index[i].end - index[i].start);
-        let out_strides = buf.strides_or_default::<S::Dimension>(&out_shape, itemsize);
-        let inner_strides = S::Dimension::vec(ndim, |d| out_strides[self.inv_axes[d] as usize]);
-        let nitems = out_shape.as_ref().iter().product::<u64>() as usize;
-        // SAFETY: `inner_strides` is a permutation of `buf`'s output strides, so it addresses exactly
-        // the bytes `buf` already spans - just visited in input-axis order.
-        let mut inner_buf = unsafe { buf.with_strides(nitems, dtype, inner_strides.as_ref()) };
-        self.array
-            .read_data(input_index.as_ref(), &mut inner_buf, context)
+        unsafe {
+            read_data_and_map_strides(
+                &self.array,
+                S::Dimension::vec(ndim, |d| index[self.inv_axes[d] as usize].clone()).as_ref(),
+                context,
+                out,
+                |inner_strides| dim_arr(ndim, |i| inner_strides[self.axes[i] as usize]),
+                |out_strides| dim_arr(ndim, |d| out_strides[self.inv_axes[d] as usize]),
+            )
+        }
     }
 
     #[inline(always)]

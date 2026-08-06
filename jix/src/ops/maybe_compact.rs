@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{ArrayStorageInfo, Compact, OutBuf};
+use crate::storage::{ArrayStorageInfo, Compact, StridedBuf};
 use crate::{Array, ArrayParams, ArrayStorage, Dimension, ElementType};
 
 /// Storage adaptor that guarantees the wrapped array is always in compact
@@ -63,15 +63,15 @@ where
     type Dimension = S::Dimension;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         match &self.0 {
-            ToCompactInner::Original(s) => s.read_data(index, buf, context),
-            ToCompactInner::Compact(c) => c.read_data(index, buf, context),
+            ToCompactInner::Original(s) => s.read_data(index, context, out),
+            ToCompactInner::Compact(c) => c.read_data(index, context, out),
         }
     }
 

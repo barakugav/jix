@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
+use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{try_dim_arr, DimArray};
 use crate::{Array, ArrayStorage, Dimension};
@@ -132,12 +132,12 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         // # Read behaviour
         //
         // When all dimensions have `step == 1` (`no_steps` fast path), each read translates the
@@ -151,6 +151,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // Each inner read goes straight into its strided sub-region of `buf` - no temporary buffer.
 
         check_get_range(self.shape(), index)?;
+        check_out_buf(out.as_deref(), self.shape())?;
 
         // -----------------------------------------------------------------------
         // Fast path: all dims have step == 1.
@@ -164,7 +165,7 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
                 let off = self.slice[dim].start;
                 (index[dim].start + off)..(index[dim].end + off)
             });
-            return self.array.read_data(inner_index.as_ref(), buf, context);
+            return self.array.read_data(inner_index.as_ref(), context, out);
         }
 
         // -----------------------------------------------------------------------
@@ -203,14 +204,12 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // -----------------------------------------------------------------------
         let dtype = self.dtype();
         let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
+        let out_shape_usize = S::Dimension::vec(ndim, |dim| out_shape[dim] as usize);
+        let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), dtype);
         if out_shape.as_ref().contains(&0) {
-            buf.materialize(0, dtype);
-            return Ok(());
+            return Ok(out);
         }
-        // Forward the (possibly strided) destination's own strides so each inner read scatters
-        // directly into `buf`.
-        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
-
+        let (out_buf, out_strides) = out.data_mut();
         // iter_shape: out_shape for strided dims, 1 for non-strided dims.
         let iter_shape = S::Dimension::vec(ndim, |dim| {
             if self.slice[dim].is_contiguous() {
@@ -232,14 +231,14 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
             });
             let dst_byte_offset = (0..ndim)
                 .filter(|&dim| !self.slice[dim].is_contiguous())
-                .map(|dim| idx[dim] as usize * dst_strides[dim])
+                .map(|dim| idx[dim] as usize * out_strides[dim])
                 .sum::<usize>();
-            let mut out =
-                unsafe { OutBuf::new_strided(&mut dst[dst_byte_offset..], dst_strides.as_ref()) };
+            let mut sub =
+                unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
             self.array
-                .read_data(inner_index.as_ref(), &mut out, context)?;
+                .read_data(inner_index.as_ref(), context, Some(&mut sub))?;
         }
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::storage::params::ArraySpecPtr;
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
+use crate::storage::{ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::{ArrayStorage, DimDyn, Dimension, ElementType, TypeDyn, NDIM_MAX};
 
 /// A type-erased array storage backend that wraps any dynamically-typed storage via `Arc<dyn ArrayStorage>`.
@@ -42,13 +42,13 @@ impl ArrayStorage for ArrayStorageAny {
     type Dimension = DimDyn;
 
     #[inline(always)]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<(), crate::Error> {
-        self.inner.read_data(index, buf, context)
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>, crate::Error> {
+        self.inner.read_data(index, context, out)
     }
 
     #[inline(always)]

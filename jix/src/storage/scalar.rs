@@ -4,9 +4,12 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
-use crate::storage::{ArraySpec, ArrayStorage, ArrayStorageInfo, OutBuf, ReadData, Ty};
-use crate::util::cast_slice_mut;
-use crate::{cast_slice, ArrayParams, DimBitmap, Dimension, ElementType, IntoDimension, NdCopier};
+use crate::storage::{
+    check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, ReadData, StridedBuf, Ty,
+};
+use crate::{
+    cast_slice, cast_slice_mut, ArrayParams, DimBitmap, Dimension, ElementType, IntoDimension,
+};
 
 /// Storage type that broadcasts a single scalar value across an arbitrary shape.
 ///
@@ -95,45 +98,45 @@ where
     type Dimension = D;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        _context: &ReadContext,
-    ) -> Result<()> {
+        _context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        check_out_buf(out.as_deref(), self.shape())?;
+        let ndim = index.len();
         let dtype = T::DTYPE;
-        let (buf, strides) = buf.get_mut(nitems, &dtype);
-        match strides {
-            // Contiguous: fill the whole buffer in one tight loop.
+
+        match out {
+            // Lend a single-element view with all-zero strides: every position reads the same byte.
             None => {
-                let buf = unsafe { cast_slice_mut::<u8, T>(buf) };
-                for item in buf.iter_mut().take(nitems) {
-                    *item = self.data;
-                }
+                let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
+                Ok(unsafe {
+                    StridedBuf::from_slice(src, Self::Dimension::vec(ndim, |_| 0usize).as_ref())
+                })
             }
-            // Strided: write the scalar to each strided output position.
-            Some(strides) => {
-                let nd_copier = NdCopier::new(&dtype);
-                let src = [self.data];
-                let src = unsafe { cast_slice::<T, u8>(src.as_slice()) };
-                let src_strides = D::vec(index.len(), |_| 0);
-                let dst_strides = D::vec(index.len(), |d| strides[d]);
-                let read_shape = D::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-                unsafe {
-                    nd_copier.copy(
-                        src,
-                        buf,
-                        read_shape.as_ref(),
-                        src_strides.as_ref(),
-                        dst_strides.as_ref(),
-                        &dtype,
-                    )
-                };
+            Some(out) => {
+                let read_shape =
+                    Self::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+                if out.is_contiguous(read_shape.as_ref(), &dtype) {
+                    // Fill the whole buffer in one tight loop.
+                    let (out_buf, _) = out.data_mut();
+                    for item in unsafe { cast_slice_mut::<u8, T>(out_buf) } {
+                        *item = self.data;
+                    }
+                } else {
+                    // Write the scalar to each strided output position
+                    let src = unsafe { cast_slice::<T, u8>(std::slice::from_ref(&self.data)) };
+                    let src_strides = Self::Dimension::vec(ndim, |_| 0usize);
+                    unsafe {
+                        out.copy_from(src, src_strides.as_ref(), read_shape.as_ref(), &dtype)
+                    };
+                }
+                Ok(out.view_mut())
             }
         }
-        Ok(())
     }
 
     #[inline(always)]

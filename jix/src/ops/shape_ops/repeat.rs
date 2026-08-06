@@ -4,9 +4,11 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
+use crate::storage::{
+    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
+};
 use crate::util::calc_block_end;
-use crate::{default_strides, Array, ArrayStorage, DimArray, Dimension, NdCopier, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimArray, Dimension, NdCopier, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
@@ -113,22 +115,24 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-
-        // Empty output (any zero-length range, including repeats == 0) is a no-op.
-        if index.iter().any(|r| r.start >= r.end) {
-            // ensure buffer is allocated for empty read
-            buf.materialize(0, self.dtype());
-            return Ok(());
-        }
+        check_out_buf(out.as_deref(), self.shape())?;
 
         let ndim = self.new_shape.ndim();
+        let dtype = self.dtype();
+        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
+
+        // Empty output (any zero-length range, including repeats == 0) is a no-op.
+        if out_shape.as_ref().contains(&0) {
+            return Ok(materialize_out_buf(out, context, out_shape.as_ref(), dtype));
+        }
+
         let k = self.axis;
         let n = self.repeats; // n > 0
         let s = index[k].start;
@@ -136,7 +140,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         let g_start = s / n;
         let g_end = calc_block_end(s, e, n);
 
-        // Read the inner sub-region with axis k collapsed to [g_start..g_end).
+        // Read the inner sub-region with axis k collapsed to [g_start..g_end) as a view.
         let inner_index = S::Dimension::vec(ndim, |d| {
             if d == k {
                 g_start..g_end
@@ -144,20 +148,11 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
                 index[d].clone()
             }
         });
-        let inner_shape = S::Dimension::vec(ndim, |d| {
-            (inner_index[d].end - inner_index[d].start) as usize
-        });
-        let dtype = self.dtype();
-        let itemsize = dtype.itemsize() as usize;
-        let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array
-            .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
-        let tmp_buf = tmp_buf.as_slice().unwrap();
-        // Write straight into the (possibly strided) destination, using its own strides
-        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
-        // Output shape over the requested sub-range, all `ndim` axes.
-        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
-        let inner_strides_bytes = default_strides(&inner_shape, itemsize);
+        let inner_buf = self.array.read_data(inner_index.as_ref(), context, None)?;
+        let (inner_buf, inner_strides) = inner_buf.data();
+
+        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        let (out_buf, out_strides) = out.data_mut();
         let copier = NdCopier::new(dtype);
 
         // Issue one nd_copy for a (g_range, p_range) region.
@@ -181,20 +176,20 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             // src strides: itemsize-strides over inner_shape, with the within-group
             // (p) axis stride = 0 (the repeat trick).
             let mut src_strides = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
-            src_strides[..k + 1].copy_from_slice(&inner_strides_bytes[..k + 1]);
+            src_strides[..k + 1].copy_from_slice(&inner_strides[..k + 1]);
             src_strides[k + 1] = 0;
-            src_strides[k + 2..].copy_from_slice(&inner_strides_bytes[k + 1..]);
+            src_strides[k + 2..].copy_from_slice(&inner_strides[k + 1..]);
 
             // dst strides: from `dst_strides`, with axis k split into
             // (n * dst_strides[k], dst_strides[k]).
             let mut dst_strides_split = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |_| 0);
-            dst_strides_split[..k].copy_from_slice(&dst_strides[..k]);
-            dst_strides_split[k] = dst_strides[k] * n as usize;
-            dst_strides_split[k + 1..].copy_from_slice(&dst_strides[k..]);
+            dst_strides_split[..k].copy_from_slice(&out_strides[..k]);
+            dst_strides_split[k] = out_strides[k] * n as usize;
+            dst_strides_split[k + 1..].copy_from_slice(&out_strides[k..]);
 
             // src slice: tmp_buf from (g_range.start) along the inner k axis to its end.
-            let src_byte_offset = (g_range.start as usize) * inner_strides_bytes[k];
-            let src = unsafe { tmp_buf.get_unchecked(src_byte_offset..) };
+            let src_byte_offset = (g_range.start as usize) * inner_strides[k];
+            let src = unsafe { inner_buf.get_unchecked(src_byte_offset..) };
 
             // dst slice: buf from the first output position of this region to its end.
             // First output k-position = g_start*n + g_range.start*n + p_range.start.
@@ -202,8 +197,8 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             let first_out_k = g_start * n + g_range.start * n + p_range.start;
             debug_assert!(first_out_k >= s);
             let dst_k_offset_units = first_out_k - s;
-            let dst_byte_offset = (dst_k_offset_units as usize) * dst_strides[k];
-            let dst = unsafe { dst.get_unchecked_mut(dst_byte_offset..) };
+            let dst_byte_offset = (dst_k_offset_units as usize) * out_strides[k];
+            let dst = unsafe { out_buf.get_unchecked_mut(dst_byte_offset..) };
 
             unsafe {
                 copier.copy(
@@ -243,7 +238,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             }
         }
 
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]
@@ -659,7 +654,7 @@ mod tests {
         repeats: u64,
         axis: usize,
     ) -> ndarray::ArrayD<T> {
-        let mut out_shape: Vec<usize> = nd.shape().to_vec();
+        let mut out_shape = nd.shape().to_vec();
         out_shape[axis] *= repeats as usize;
         let mut out = ndarray::ArrayD::<T>::from_elem(out_shape.as_slice(), T::default());
         if repeats == 0 || nd.is_empty() {

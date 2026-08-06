@@ -5,8 +5,10 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, error, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{ArraySpec, ArrayStorageInfo, BlockSize, OutBuf};
-use crate::util::{default_strides, NdCopier};
+use crate::storage::{
+    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
+};
+use crate::util::NdCopier;
 use crate::{Array, ArrayStorage, DimArray, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
@@ -127,24 +129,29 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-
-        if index.iter().any(|r| r.start >= r.end) {
-            // ensure buffer is allocated for empty read
-            buf.materialize(0, self.dtype());
-            return Ok(());
-        }
+        check_out_buf(out.as_deref(), self.shape())?;
 
         let ndim = index.len();
-        let k = self.axis;
+        let out_shape_usize =
+            Self::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
         let dtype = self.dtype();
-        let itemsize = dtype.itemsize() as usize;
+        if out_shape_usize.as_ref().contains(&0) {
+            return Ok(materialize_out_buf(
+                out,
+                context,
+                out_shape_usize.as_ref(),
+                dtype,
+            ));
+        }
+
+        let k = self.axis;
         let l = self.array.shape()[k];
         let s = index[k].start;
         let e = index[k].end;
@@ -154,7 +161,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let s_in = s % l;
 
         // Case A - single read, no wrap: the requested output range maps to one contiguous
-        // input range along axis k. Read directly into `buf` (no tmp_buf, no nd_copy).
+        // input range along axis k. Forward directly.
         if s_in + total <= l {
             let inner_index = S::Dimension::vec(ndim, |d| {
                 if d == k {
@@ -163,29 +170,29 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                     index[d].clone()
                 }
             });
-            return self.array.read_data(inner_index.as_ref(), buf, context);
+            return self.array.read_data(inner_index.as_ref(), context, out);
         }
 
-        // Write straight into the (possibly strided) destination, using its own strides - each copy
-        // scatters directly into `buf`.
-        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
+        // Cases B and C gather/replicate into a destination.
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
+        let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), dtype);
+        let (out_buf, out_strides) = out.data_mut();
         let copier = NdCopier::new(dtype);
 
-        // Case B - two reads, single wrap (total <= L): split the request into two contiguous input
-        // ranges along axis k and read each straight into `buf` at the right axis-k offset (via a
-        // strided OutBuf).
         if total <= l {
+            // Case B - two reads, single wrap: split into two contiguous input ranges along
+            // axis k, gathering each into its axis-k offset in the destination.
             let len1 = l - s_in;
             let len2 = total - len1;
 
             let mut read_region =
                 |inner_index: &[Range<u64>], dst_axis_k_offset: u64| -> Result<()> {
-                    let dst_byte_offset = dst_axis_k_offset as usize * dst_strides[k];
-                    let mut out = unsafe {
-                        OutBuf::new_strided(&mut dst[dst_byte_offset..], dst_strides.as_ref())
+                    let dst_byte_offset = dst_axis_k_offset as usize * out_strides[k];
+                    let mut sub = unsafe {
+                        StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides)
                     };
-                    self.array.read_data(inner_index, &mut out, context)
+                    self.array.read_data(inner_index, context, Some(&mut sub))?;
+                    Ok(())
                 };
             let inner_r1 =
                 S::Dimension::vec(ndim, |d| if d == k { s_in..l } else { index[d].clone() });
@@ -194,64 +201,50 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             let inner_r2 =
                 S::Dimension::vec(ndim, |d| if d == k { 0..len2 } else { index[d].clone() });
             read_region(inner_r2.as_ref(), len1)?;
-
-            return Ok(());
+            return Ok(out);
         }
-
-        // Case C - span > L: read the full period [0, L) along axis k into tmp_buf once,
-        // then memcpy chunks into `buf`. Layout along axis k:
-        //   head:   tmp[s_in..L]      -> buf[0..head_len)
-        //   middle: tmp[0..L] x F      -> buf[head_len..head_len + F*L)   (F = num_full)
-        //   tail:   tmp[0..tail_len]   -> buf[head_len + F*L..total)
+        // Case C - span > L: read the full period [0, L) along axis k once, then memcpy
+        // chunks into the destination. Layout along axis k:
+        //   head:   tmp[s_in..L]     -> dst[0..head_len)
+        //   middle: tmp[0..L] x F    -> dst[head_len..head_len + F*L)   (F = num_full)
+        //   tail:   tmp[0..tail_len] -> dst[head_len + F*L..total)
         let inner_full = S::Dimension::vec(ndim, |d| if d == k { 0..l } else { index[d].clone() });
-        let period_shape = S::Dimension::vec(ndim, |d| {
-            if d == k {
-                l as usize
-            } else {
-                out_shape[d] as usize
-            }
-        });
-        let mut tmp = OutBuf::new_lazy(context);
-        self.array
-            .read_data(inner_full.as_ref(), &mut tmp, context)?;
-        let tmp = tmp.as_slice().unwrap();
-
-        let src_strides = default_strides(&period_shape, itemsize);
+        let tmp = self.array.read_data(inner_full.as_ref(), context, None)?;
+        // Use the period view's own strides - it may be a lent (strided) view, not contiguous.
+        let (tmp, src_strides) = tmp.data();
 
         let head_len = l - s_in; // 0 < head_len <= L
         let remaining = total - head_len; // > 0 since total > L
         let num_full = remaining / l;
         let tail_len = remaining % l;
 
-        // Head: tmp[s_in..L] -> buf[0..head_len)
-        {
-            let copy_shape = S::Dimension::vec(ndim, |d| {
-                if d == k {
-                    head_len as usize
-                } else {
-                    out_shape[d] as usize
-                }
-            });
-            let src_off = s_in as usize * src_strides[k];
-            let src = unsafe { tmp.get_unchecked(src_off..) };
-            unsafe {
-                copier.copy(
-                    src,
-                    dst,
-                    copy_shape.as_ref(),
-                    src_strides.as_ref(),
-                    dst_strides.as_ref(),
-                    dtype,
-                )
-            };
-        }
+        // Head: tmp[s_in..L] -> dst[0..head_len)
+        let copy_shape = S::Dimension::vec(ndim, |d| {
+            if d == k {
+                head_len as usize
+            } else {
+                out_shape[d] as usize
+            }
+        });
+        let src_off = s_in as usize * src_strides[k];
+        let src = unsafe { tmp.get_unchecked(src_off..) };
+        unsafe {
+            copier.copy(
+                src,
+                out_buf,
+                copy_shape.as_ref(),
+                src_strides,
+                out_strides,
+                dtype,
+            )
+        };
 
         // Middle: replicate tmp[0..L] num_full times using the stride-0 trick on a
         // synthesized tile axis inserted at position k.
         if num_full > 0 {
-            // The synthesized tile axis makes this copy (ndim + 1)-dimensional: axis k is split
-            // into (num_full, L) at positions k and k+1.
-            // `src_axis` maps an output axis back to its pre-split source axis.
+            // The synthesized tile axis makes this copy (ndim + 1)-dimensional: axis k is
+            // split into (num_full, L) at positions k and k+1. `src_axis` maps an output
+            // axis back to its pre-split source axis.
             let src_axis = |i: usize| if i < k { i } else { i - 1 };
             let copy_shape = <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| {
                 let s = if i < k {
@@ -265,7 +258,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 };
                 s as usize
             });
-            // Stride 0 on the synthesized axis (position k) replicates the period `num_full` times.
+            // Stride 0 on the synthesized axis (position k) replicates the period.
             let src_strides_split =
                 <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| match i.cmp(&k) {
                     Ordering::Less => src_strides[src_axis(i)],
@@ -274,13 +267,12 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 });
             let dst_strides_split =
                 <S::Dimension as Dimension>::Larger::vec(ndim + 1, |i| match i.cmp(&k) {
-                    Ordering::Less => dst_strides[src_axis(i)],
-                    Ordering::Equal => l as usize * dst_strides[k],
-                    Ordering::Greater => dst_strides[src_axis(i)],
+                    Ordering::Less => out_strides[src_axis(i)],
+                    Ordering::Equal => l as usize * out_strides[k],
+                    Ordering::Greater => out_strides[src_axis(i)],
                 });
-            let dst_off = head_len as usize * dst_strides[k];
-            let dst = unsafe { dst.get_unchecked_mut(dst_off..) };
-            let copier = NdCopier::new(dtype);
+            let dst_off = head_len as usize * out_strides[k];
+            let dst = unsafe { out_buf.get_unchecked_mut(dst_off..) };
             unsafe {
                 copier.copy(
                     tmp,
@@ -293,7 +285,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             };
         }
 
-        // Tail: tmp[0..tail_len] -> buf[head_len + num_full * L..total)
+        // Tail: tmp[0..tail_len] -> dst[head_len + num_full * L..total)
         if tail_len > 0 {
             let copy_shape = S::Dimension::vec(ndim, |d| {
                 if d == k {
@@ -302,21 +294,20 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                     out_shape[d] as usize
                 }
             });
-            let dst_off = (head_len + num_full * l) as usize * dst_strides[k];
-            let dst = unsafe { dst.get_unchecked_mut(dst_off..) };
+            let dst_off = (head_len + num_full * l) as usize * out_strides[k];
+            let dst = unsafe { out_buf.get_unchecked_mut(dst_off..) };
             unsafe {
                 copier.copy(
                     tmp,
                     dst,
                     copy_shape.as_ref(),
-                    src_strides.as_ref(),
-                    dst_strides.as_ref(),
+                    src_strides,
+                    out_strides,
                     dtype,
                 )
             };
         }
-
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]
@@ -769,7 +760,7 @@ mod tests {
         repeats: u64,
         axis: usize,
     ) -> ndarray::ArrayD<T> {
-        let mut out_shape: Vec<usize> = nd.shape().to_vec();
+        let mut out_shape = nd.shape().to_vec();
         out_shape[axis] *= repeats as usize;
         let mut out = ndarray::ArrayD::<T>::from_elem(out_shape.as_slice(), T::default());
         let l = nd.shape()[axis];

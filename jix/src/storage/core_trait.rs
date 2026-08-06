@@ -1,10 +1,11 @@
 use std::ops::Range;
 
-use crate::codec::{ReadContext, TmpBuf};
+use crate::buf_pool::PoolBuf;
+use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, OutBuf, ReadData};
-use crate::util::assert_unchecked_eq;
+use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, ReadData, StridedBuf};
+use crate::util::{assert_unchecked_eq, default_strides};
 use crate::{Dimension, ElementType};
 
 /// The backing data source of an [`Array<S>`](crate::Array).
@@ -83,30 +84,43 @@ pub trait ArrayStorage {
     where
         Self: Sized;
 
-    /// Read a sub-region of the array into a caller-supplied byte buffer.
+    /// Read a sub-region of the array and return it as a [`StridedBuf`](crate::storage::StridedBuf).
     ///
     /// This is the single I/O method that every storage backend must implement.
     /// All higher-level read operations (`to_ndarray`, `to_ndarray_sub`, etc.) bottom
     /// out here.
+    ///
+    /// The two modes mirror NumPy's `out=`:
+    /// - **pull** (`out` is `None`): the impl returns the cheapest buffer it can - a borrowed view
+    ///   into its own memory (possibly with broadcast/stride-0 axes), or a freshly materialized one -
+    ///   and picks the strides. The bytes are only contiguous if the strides say so.
+    /// - **push** (`out` is `Some(dst)`): the region must be written into `dst` at `dst`'s own strides,
+    ///   and the returned `StridedBuf` is a view of `dst`. `dst` must be writable and have one stride
+    ///   per array dimension.
     ///
     /// # Arguments
     ///
     /// - `index` - one half-open range per dimension (`start..end`).
     ///   The number of ranges must equal `self.shape().len()`.
     ///   Ranges must be within the array shape bounds; empty ranges are allowed.
-    /// - `buf` - destination: a caller-provided contiguous buffer, a lazily-allocated one, or a
-    ///   strided sub-region of a larger buffer (see [`OutBuf`](crate::storage::OutBuf)). A contiguous
-    ///   caller buffer must be aligned to `dtype.alignment()` and be exactly
-    ///   `index.iter().map(|r| r.len()).product() * dtype.itemsize()` bytes; on success its elements
-    ///   are written in row-major (C-contiguous) order. A strided destination receives the same
-    ///   elements written at its per-dimension byte strides.
     /// - `context` - read context carrying the decoder state.
-    fn read_data(
-        &self,
+    /// - `out` - optional destination, as described above.
+    ///
+    /// # Returns
+    ///
+    /// A [`StridedBuf`](crate::storage::StridedBuf) with the region's bytes.
+    ///
+    /// # Alignment
+    ///
+    /// A buffer the impl materializes for a pull read is aligned to the element dtype. A lent view or
+    /// a caller-supplied `out` destination is only as aligned as its backing bytes, so nothing beyond
+    /// the alignment the caller provided may be assumed when reinterpreting the bytes as a typed value.
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf<'_>,
-        context: &ReadContext,
-    ) -> Result<()>;
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>>;
 
     /// Read a sub-region of the array as a typed `ReadData<T>`.
     ///
@@ -132,13 +146,20 @@ pub trait ArrayStorage {
     {
         check_dtype(&T::DTYPE, self.dtype())?;
 
-        let mut out = OutBuf::new_lazy(context);
-        self.read_data(index, &mut out, context)?;
-        let buf = out.unwrap_tmp();
         let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+        let dtype = self.dtype();
+        let mut buf = context.allocate_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
+        {
+            let shape =
+                Self::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+            let strides = default_strides(&shape, dtype.itemsize() as usize);
+            let mut out =
+                unsafe { StridedBuf::from_slice_mut(buf.as_mut_slice(), strides.as_ref()) };
+            self.read_data(index, context, Some(&mut out))?;
+        }
 
         struct DefaultReadData<'a, T> {
-            buf: TmpBuf<'a>,
+            buf: PoolBuf<'a>,
             len_: usize,
             _phantom: std::marker::PhantomData<T>,
         }

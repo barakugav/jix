@@ -4,9 +4,9 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::{ArraySpec, ArrayStorageInfo, OutBuf};
+use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::iter::NdIter;
-use crate::{default_strides_cast, Array, ArrayStorage, Dimension, NdCopier};
+use crate::{Array, ArrayStorage, Dimension, NdCopier};
 
 /// Reverses the order of elements along one or more axes, returned by
 /// [`Array::flip`](crate::Array::flip).
@@ -77,25 +77,20 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
     type ElementType = S::ElementType;
     type Dimension = S::Dimension;
 
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
-
-        if index.iter().any(|r| r.start >= r.end) {
-            // ensure buffer is allocated for empty read
-            buf.materialize(0, self.dtype());
-            return Ok(());
-        }
+        check_out_buf(out.as_deref(), self.shape())?;
 
         let ndim = index.len();
         let dtype = self.dtype();
-        let itemsize = dtype.itemsize() as usize;
-        let shape = self.shape();
+        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
 
+        let shape = self.shape();
         // For each flipped axis d with requested output range [s, e), the inner range is
         // [shape[d]-e, shape[d]-s) (same length, reversed position). Non-flipped axes pass through.
         let inner_index = S::Dimension::vec(ndim, |d| {
@@ -106,15 +101,14 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
             }
         });
 
-        let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
-        let mut tmp_buf = OutBuf::new_lazy(context);
-        self.array
-            .read_data(inner_index.as_ref(), &mut tmp_buf, context)?;
-        let tmp_buf = tmp_buf.as_slice().unwrap();
-        // tmp_buf is C-contiguous over out_shape (sub_shape_in == out_shape).
-        let src_strides = default_strides_cast(&out_shape, itemsize);
-        // Write straight into the (possibly strided) destination
-        let (dst, dst_strides) = buf.get_strided_mut::<S::Dimension>(index, dtype);
+        // Read the (unreversed) inner region as a view, then mirror-copy slabs into the destination.
+        let tmp = self.array.read_data(inner_index.as_ref(), context, None)?;
+        let (tmp_buf, src_strides) = tmp.data();
+        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        if out_shape.as_ref().contains(&0) {
+            return Ok(out);
+        }
+        let (out_buf, out_strides) = out.data_mut();
 
         // Iterate one slab at a time. Each slab is a single combination of indices on the
         // flipped axes; non-flipped axes are copied contiguously via nd_copy per slab.
@@ -128,8 +122,7 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let slab_shape =
             S::Dimension::vec(ndim, |d| if self.is_flipped[d] { 1 } else { out_shape[d] });
 
-        // src strides ext: forward strides on flipped axes over tmp; 0 elsewhere (non-flipped axes
-        // are iter_shape=1 so they don't step regardless, but 0 keeps it explicit).
+        // Step src through the inner view on flipped axes; 0 on non-flipped (iter_shape=1 there).
         let src_ptr_strides = S::Dimension::vec(ndim, |d| {
             if self.is_flipped[d] {
                 src_strides[d]
@@ -141,28 +134,27 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         let iter = NdIter::builder(iter_shape)
             .with_strides_offset_ext(src_ptr_strides, 0)
             .build();
-        let nd_copy = NdCopier::new(self.dtype());
+        let nd_copy = NdCopier::new(dtype);
         for (idx, src_off) in iter {
-            // The output position on a flipped axis mirrors the tmp (source) position:
-            // out_idx = L-1 - src_idx. Compute the destination byte offset in the destination's
-            // own strides (which may differ from tmp's row-major strides).
+            // The output position on a flipped axis mirrors the source position:
+            // out_idx = L-1 - src_idx, placed at the destination's own strides.
             let dst_off = (0..ndim)
                 .filter(|&d| self.is_flipped[d])
-                .map(|d| (out_shape[d] - 1 - idx[d] as usize) * dst_strides[d])
+                .map(|d| (out_shape[d] - 1 - idx[d] as usize) * out_strides[d])
                 .sum::<usize>();
 
             unsafe {
                 nd_copy.copy(
                     tmp_buf.get_unchecked(src_off..),
-                    dst.get_unchecked_mut(dst_off..),
+                    out_buf.get_unchecked_mut(dst_off..),
                     slab_shape.as_ref(),
-                    src_strides.as_ref(),
-                    dst_strides.as_ref(),
-                    self.dtype(),
+                    src_strides,
+                    out_strides,
+                    dtype,
                 )
             };
         }
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]
@@ -284,7 +276,7 @@ mod tests {
 
     #[test]
     fn input_form_slice_dynamic() {
-        let axes: Vec<usize> = vec![0, 1];
+        let axes = vec![0, 1];
         let got = make(arange(6), &[3u64, 2])
             .flip(axes.as_slice())
             .to_ndarray()
@@ -554,7 +546,7 @@ mod tests {
             // Random subset of axes 0..ndim
             let axes_mask = proptest::collection::vec(any::<bool>(), ndim);
             (array_strat, axes_mask).prop_map(|((nd, za), mask)| {
-                let axes: Vec<usize> = mask
+                let axes = mask
                     .into_iter()
                     .enumerate()
                     .filter_map(|(i, b)| if b { Some(i) } else { None })

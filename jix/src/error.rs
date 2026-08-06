@@ -44,7 +44,7 @@ impl Error {
     }
 }
 
-/// Categorises errors returned by this crate.
+/// Categories errors returned by this crate.
 ///
 /// Match on this to distinguish failure modes programmatically; the human-readable
 /// description is available via [`Error::message`] or the [`Display`](fmt::Display) impl.

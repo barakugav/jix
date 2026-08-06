@@ -2,8 +2,9 @@
 //!
 //! Every `Array<S>` is backed by a storage type `S: ArrayStorage`, which exposes three things:
 //! the array's shape, its element dtype, and [`read_data`](ArrayStorage::read_data)
-//! which reads any rectangular sub-region into a caller-supplied byte buffer.
-//! All higher-level operations are built on top of these three methods.
+//! which reads any rectangular sub-region and returns it as a
+//! [`StridedBuf`] - either a borrowed strided view or bytes written into
+//! a caller-supplied destination. All higher-level operations are built on top of these three methods.
 //!
 //! # Storage implementations
 //!
@@ -49,13 +50,15 @@
 
 use std::ops::Range;
 
+use crate::codec::ReadContext;
 use crate::dtype::Dtyped;
 use crate::error::{check_buffer_aligned, check_dtype, ensure, Result};
 use crate::ops::LanesInfo;
 use crate::util::cast_slice_mut;
 use crate::{
-    array_from_fn_inline, assert_unchecked_eq, default_logical_strides_slice, dim_arr, ArrayExt,
-    ArrayStorage, Dimension, ElementType, NdIterUnordered, PtrMutExt, Ty, TypeDyn,
+    array_from_fn_inline, assert_unchecked_eq, default_logical_strides_slice, default_strides,
+    dim_arr, ArrayExt, ArrayStorage, Dimension, ElementType, NdIterUnordered, PtrMutExt, Ty,
+    TypeDyn,
 };
 
 pub(crate) mod core_trait;
@@ -142,13 +145,13 @@ impl ArrayStorage for &dyn ArrayStorage {
     type Dimension = crate::DimDyn;
 
     #[inline(always)]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut crate::storage::OutBuf<'_>,
-        context: &crate::codec::ReadContext,
-    ) -> crate::error::Result<()> {
-        (**self).read_data(index, buf, context)
+        context: &'a crate::codec::ReadContext,
+        out: Option<&'a mut crate::storage::StridedBuf<'_>>,
+    ) -> crate::error::Result<crate::storage::StridedBuf<'a>> {
+        (**self).read_data(index, context, out)
     }
 
     #[inline(always)]
@@ -181,13 +184,13 @@ macro_rules! impl_array_storage_forward {
 
     ($lifetime:tt, $generic:ident, <$($generics:tt),* $(,)?>) => {
         #[inline(always)]
-        fn read_data(
-            &self,
+        fn read_data<'rd>(
+            &'rd self,
             index: &[::core::ops::Range<u64>],
-            buf: &mut crate::storage::OutBuf,
-            context: &crate::codec::ReadContext,
-        ) -> crate::error::Result<()> {
-            self.0.read_data(index, buf, context)
+            context: &'rd crate::codec::ReadContext,
+            out: Option<&'rd mut crate::storage::StridedBuf<'_>>,
+        ) -> crate::error::Result<crate::storage::StridedBuf<'rd>> {
+            self.0.read_data(index, context, out)
         }
 
         #[allow(refining_impl_trait)]
@@ -249,13 +252,14 @@ pub(crate) trait ReadDataExt<T>: ReadData<T>
 where
     T: Copy + Send + Sync + Sized + 'static,
 {
-    /// Write all `self.len()` items into `buf` for the read region `index`.
-    ///
-    /// A contiguous destination (see [`OutBuf`]) is filled with a bulk copy; a strided destination
-    /// receives each item scattered to its position. `D` is the dimension used to walk a strided
-    /// destination.
+    /// Read all `self.len()` items for the read region `index`.
     #[inline(never)]
-    fn to_buf<D: Dimension>(&mut self, buf: &mut OutBuf, index: &[Range<u64>]) -> Result<()>
+    fn to_buf<'a, D: Dimension>(
+        &mut self,
+        index: &[Range<u64>],
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>>
     where
         T: Dtyped,
         Self: Sized,
@@ -273,8 +277,28 @@ where
             512 => read_data_to_buf::<T, 512>,
             _ => read_data_to_buf::<T, 1024>,
         };
+        let dtype = T::DTYPE;
+        let itemsize = dtype.itemsize() as usize;
         let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
-        read_fn(self, buf, &shape)
+        match out {
+            None => {
+                let mut buf = context.allocate_buf(self.len() * itemsize, dtype.alignment());
+                read_fn(self, buf.as_mut_slice(), None, shape.as_ref())?;
+                let c = default_strides(&shape, itemsize);
+                Ok(unsafe { StridedBuf::from_pool(buf, c.as_ref()) })
+            }
+            Some(out) => {
+                let contiguous = out.is_contiguous(shape.as_ref(), &dtype);
+                let (out_buf, out_strides) = out.data_mut();
+                read_fn(
+                    self,
+                    out_buf,
+                    (!contiguous).then_some(out_strides),
+                    shape.as_ref(),
+                )?;
+                Ok(out.view_mut())
+            }
+        }
     }
 
     #[inline(always)]
@@ -408,18 +432,16 @@ where
 #[inline(always)]
 fn read_data_to_buf<T, const LANES: usize>(
     data: &mut impl ReadData<T>,
-    buf: &mut OutBuf,
+    dst: &mut [u8],
+    strides: Option<&[usize]>,
     shape: &[usize],
 ) -> Result<()>
 where
     T: Dtyped,
 {
-    let dtype = T::DTYPE;
-    let (out, strides) = buf.get_mut(data.len(), &dtype);
-
     match strides {
-        None => read_data_to_buf_contiguous::<T, LANES>(data, out),
-        Some(strides) => read_data_to_buf_strided::<T, LANES>(data, out, strides, shape),
+        None => read_data_to_buf_contiguous::<T, LANES>(data, dst),
+        Some(strides) => read_data_to_buf_strided::<T, LANES>(data, dst, strides, shape),
     }
 }
 
@@ -436,10 +458,11 @@ where
     let required_size = nitems * size_of::<T>();
     let buf_len = out.len();
     ensure!(
-        buf_len == required_size,
+        buf_len >= required_size,
         InvalidBufferSize,
         "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
     );
+    let out = &mut out[..required_size];
     check_buffer_aligned(out.as_ptr(), &dtype)?;
 
     let buf = unsafe { cast_slice_mut::<u8, T>(out) };

@@ -5,10 +5,11 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, ensure, Result};
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
-    ArraySpec, ArrayStorageInfo, ArrayStorageTyped, OutBuf, ReadData, ReadDataExt,
+    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, ReadData,
+    ReadDataExt, StridedBuf,
 };
 use crate::util::cast_slice;
-use crate::{default_strides, Array, ArrayStorage, Dimension, NdIterUnordered};
+use crate::{Array, ArrayStorage, Dimension, NdIterUnordered};
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
 /// examples.
@@ -147,46 +148,34 @@ where
     type Dimension = SC::Dimension;
 
     #[inline]
-    fn read_data(
-        &self,
+    fn read_data<'a>(
+        &'a self,
         index: &[Range<u64>],
-        buf: &mut OutBuf,
-        context: &ReadContext,
-    ) -> Result<()> {
+        context: &'a ReadContext,
+        out: Option<&'a mut StridedBuf<'_>>,
+    ) -> Result<StridedBuf<'a>> {
         check_get_range(self.shape(), index)?;
+        check_out_buf(out.as_deref(), self.shape())?;
         let out_shape = <Self::Dimension as Dimension>::vec(index.len(), |d| {
             (index[d].end - index[d].start) as usize
         });
         let dtype = self.dtype();
         let (itemsize, alignment) = (dtype.itemsize() as usize, dtype.alignment().as_usize());
 
-        let mut condition_buf = OutBuf::new_lazy(context);
-        let mut y_buf = OutBuf::new_lazy(context);
-        self.condition
-            .read_data(index, &mut condition_buf, context)?;
+        let condition_view = self.condition.read_data(index, context, None)?;
+        let y_view = self.y.read_data(index, context, None)?;
+        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        self.x.read_data(index, context, Some(&mut out))?;
 
-        let (out_buf, out_strides) = buf.get_strided_mut::<Self::Dimension>(index, dtype);
-        // read x directly into the output buffer
-        {
-            let mut x_buf = unsafe { OutBuf::new_strided(&mut *out_buf, out_strides.as_ref()) };
-            self.x.read_data(index, &mut x_buf, context)?;
-        }
-        self.y.read_data(index, &mut y_buf, context)?;
-
-        let condition = unsafe { cast_slice::<_, bool>(condition_buf.as_slice().unwrap()) };
-        let y_buf = y_buf.as_slice().unwrap();
+        let (out_buf, out_strides) = out.data_mut();
+        let (condition, condition_strides) = condition_view.data();
+        let condition = unsafe { cast_slice::<_, bool>(condition) };
+        let (y_buf, y_strides) = y_view.data();
 
         // Operand 0 is the output buffer, `x`, operand 1 the condition mask and operand 2 `y`.
-        // The latter two were just read into contiguous buffers, so they have default strides.
-        let condition_strides = default_strides(&out_shape, size_of::<bool>());
-        let y_strides = default_strides(&out_shape, itemsize);
         let iter = NdIterUnordered::new(
             out_shape.as_ref(),
-            [
-                out_strides.as_ref(),
-                condition_strides.as_ref(),
-                y_strides.as_ref(),
-            ],
+            [out_strides, condition_strides, y_strides],
             [(itemsize, alignment), (1, 1), (itemsize, alignment)],
         );
         let [x_aligned, _cond_aligned, y_aligned] = iter.is_aligned();
@@ -314,7 +303,7 @@ where
             }
         }
 
-        Ok(())
+        Ok(out)
     }
 
     #[inline(always)]
@@ -718,7 +707,7 @@ mod tests {
         T: Dtyped + Copy + Debug + PartialEq,
         InD: ndarray::Dimension + crate::IntoDimension,
     {
-        use crate::storage::OutBuf;
+        use crate::storage::StridedBuf;
         use crate::ArrayStorage;
 
         const SENTINEL: u8 = 0xA5;
@@ -759,8 +748,8 @@ mod tests {
         bytes.fill(SENTINEL);
         {
             let dst = &mut bytes[base_offset..];
-            let mut out = unsafe { OutBuf::new_strided(dst, &byte_strides) };
-            storage.read_data(&index, &mut out, &ctx).unwrap();
+            let mut out = unsafe { StridedBuf::from_slice_mut(dst, &byte_strides) };
+            storage.read_data(&index, &ctx, Some(&mut out)).unwrap();
         }
 
         // Every logical element must sit in its slot, and every byte outside a slot must still hold
