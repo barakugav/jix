@@ -133,11 +133,20 @@ where
         let out_shape = S::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
 
         let tmp = self.array.read_data(index, context, None)?;
-        let (tmp_buf, src_strides) = tmp.data();
+
+        let empty_read = out_shape.as_ref().contains(&0);
+        if out.is_none() {
+            if empty_read {
+                return Ok(tmp);
+            }
+            return Ok(unsafe { tmp.with_offset(self.sub_field_offset as usize) });
+        }
+
         let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dst_dtype);
-        if out_shape.as_ref().contains(&0) {
+        if empty_read {
             return Ok(out);
         }
+        let (tmp_buf, src_strides) = tmp.data();
         let src = unsafe { tmp_buf.get_unchecked(self.sub_field_offset as usize..) };
 
         let (out_buf, out_strides) = out.data_mut();
@@ -225,6 +234,39 @@ mod tests {
             .unwrap();
         assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
         assert_eq!(ys.as_slice().unwrap(), &[10, 20, 30]);
+    }
+
+    #[test]
+    fn pull_returns_zero_copy_field_view() {
+        use crate::codec::ReadContext;
+        use crate::ArrayStorage;
+
+        let pts = ndarray::array![
+            Pair { x: 1, y: 10 },
+            Pair { x: 2, y: 20 },
+            Pair { x: 3, y: 30 },
+        ];
+        let za = Array::compact_ndarray(&pts).unwrap();
+        let field = za.dtype_sub_field::<i32>("y");
+        let ctx = ReadContext::default();
+
+        // Pull path (out = None) must return a strided view of the parent buffer, not a copy.
+        let view = field.storage().read_data(&[0..3], &ctx, None).unwrap();
+        // The give-away that it is zero-copy: the stride is the parent struct's stride (8 bytes),
+        // not the field-packed stride (4) that a materialized copy would carry.
+        assert_eq!(view.strides(), &[std::mem::size_of::<Pair>()]);
+
+        // Reading each element through the stride yields the `y` field.
+        let base = view.data_ptr();
+        let stride = view.strides()[0];
+        let ys: Vec<i32> = (0..3)
+            .map(|i| unsafe { base.add(i * stride).cast::<i32>().read_unaligned() })
+            .collect();
+        assert_eq!(ys, vec![10, 20, 30]);
+
+        // An empty pull must not panic on the sub-field shift.
+        let empty = field.storage().read_data(&[0..0], &ctx, None).unwrap();
+        assert_eq!(empty.strides().len(), 1);
     }
 
     #[test]
