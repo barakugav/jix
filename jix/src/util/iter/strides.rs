@@ -1,5 +1,5 @@
 use crate::util::iter::{impl_merge_extension, NdIterExtension};
-use crate::util::Idx;
+use crate::util::{Idx, OperandsArray};
 use crate::Dimension;
 use crate::{default_logical_strides_slice, DimVec};
 
@@ -35,7 +35,10 @@ where
     D: Dimension,
     S: Idx,
 {
-    type Item = *const T;
+    type Item<'a>
+        = *const T
+    where
+        Self: 'a;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
@@ -47,7 +50,7 @@ where
     }
 
     #[inline(always)]
-    fn value(&self) -> *const T {
+    fn value(&self) -> Self::Item<'_> {
         <NdIterExtStridesPtrMut<D, T, S> as NdIterExtension>::value(&self.0).cast_const()
     }
 
@@ -100,7 +103,10 @@ where
     D: Dimension,
     S: Idx,
 {
-    type Item = *mut T;
+    type Item<'a>
+        = *mut T
+    where
+        Self: 'a;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
@@ -116,7 +122,7 @@ where
     }
 
     #[inline(always)]
-    fn value(&self) -> *mut T {
+    fn value(&self) -> Self::Item<'_> {
         self.current_ptr
     }
 
@@ -150,7 +156,10 @@ impl<D: Dimension, S: Idx> NdIterExtStridesOffset<D, S> {
     }
 }
 impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
-    type Item = S;
+    type Item<'a>
+        = S
+    where
+        Self: 'a;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
@@ -162,7 +171,7 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
     }
 
     #[inline(always)]
-    fn value(&self) -> S {
+    fn value(&self) -> Self::Item<'_> {
         self.offset
     }
 
@@ -178,7 +187,8 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
 ///
 /// Like [`NdIterExtStridesOffset`] but for a fixed number of operands sharing one index walk: on
 /// each dimension change every offset is advanced by `(after - before) * strides[operand][dim]`, and
-/// [`value`](NdIterExtension::value) yields `[S; N]`.
+/// [`value`](NdIterExtension::value) yields `[S; N]`. Since that item does not borrow, an `NdIter`
+/// carrying this extension is a plain [`Iterator`].
 pub(crate) struct NdIterExtStridesOffsetMulti<D: Dimension, S, const N: usize> {
     strides: [D::Vec<S>; N],
     offsets: [S; N],
@@ -195,7 +205,10 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtStridesOffsetMulti<D, S, N> 
 impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
     for NdIterExtStridesOffsetMulti<D, S, N>
 {
-    type Item = [S; N];
+    type Item<'a>
+        = [S; N]
+    where
+        Self: 'a;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
@@ -213,8 +226,67 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
     }
 
     #[inline(always)]
-    fn value(&self) -> [S; N] {
+    fn value(&self) -> Self::Item<'_> {
         self.offsets
+    }
+
+    #[inline(always)]
+    fn check_ndim(&self, ndim: usize) -> bool {
+        self.strides.iter().all(|s| s.as_ref().len() == ndim)
+    }
+
+    impl_merge_extension!();
+}
+
+/// The runtime-length sibling of [`NdIterExtStridesOffsetMulti`], for callers whose operand count is
+/// not known at compile time.
+///
+/// The count lives in an [`OperandsArray`] rather than a const generic, so one instantiation serves
+/// every caller. [`value`](NdIterExtension::value) hands back a borrowed `&[S]` - the reason
+/// [`NdIterExtension::Item`] carries a lifetime - which also means an `NdIter` carrying this
+/// extension is *not* an [`Iterator`] and must be driven with [`NdIter::next`].
+// TODO: reached only from `nd_iter_unordered_nd_walk_dyn`, which has no non-test caller yet.
+#[allow(dead_code)]
+pub(crate) struct NdIterExtStridesOffsetMultiDyn<D: Dimension, S> {
+    strides: OperandsArray<D::Vec<S>>,
+    offsets: OperandsArray<S>,
+}
+#[allow(dead_code)]
+impl<D: Dimension, S: Idx> NdIterExtStridesOffsetMultiDyn<D, S> {
+    #[inline]
+    pub fn new(strides: OperandsArray<D::Vec<S>>, initial_offsets: OperandsArray<S>) -> Self {
+        assert_eq!(strides.len(), initial_offsets.len());
+        Self {
+            strides,
+            offsets: initial_offsets,
+        }
+    }
+}
+impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffsetMultiDyn<D, S> {
+    /// The current offset of each operand, in the order the strides were given.
+    type Item<'a>
+        = &'a [S]
+    where
+        Self: 'a;
+
+    #[inline(always)]
+    fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+        let diff = S::from_u64(diff);
+        for (offset, strides) in self.offsets.iter_mut().zip(self.strides.iter()) {
+            *offset += diff * strides[dim];
+        }
+    }
+    #[inline(always)]
+    fn on_decrease(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+        let diff = S::from_u64(diff);
+        for (offset, strides) in self.offsets.iter_mut().zip(self.strides.iter()) {
+            *offset -= diff * strides[dim];
+        }
+    }
+
+    #[inline(always)]
+    fn value(&self) -> Self::Item<'_> {
+        &self.offsets
     }
 
     #[inline(always)]
@@ -274,9 +346,12 @@ mod tests {
         let stride = 8usize;
         let ext = NdIterExtStridesPtrMut::new(dv(&[stride]), base);
         let iter = NdIter::new(dv(&[8u64]), ext);
-        for (i, (_, ptr)) in iter.enumerate() {
+        let mut i = 0usize;
+        for (_, ptr) in iter {
             assert_eq!(ptr, unsafe { base.add(i * stride) }, "step {i}");
+            i += 1;
         }
+        assert_eq!(i, 8);
     }
 
     #[test]

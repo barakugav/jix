@@ -28,7 +28,7 @@
 //!   `S::ElementType`. This is either [`Ty<T>`] (the concrete scalar type `T` is known at
 //!   compile time) or [`TypeDyn`] (only known at runtime, e.g. for arrays loaded from disk).
 //!
-//! - **[`Dimension`]** - the compile-time dimension, accessible via
+//! - **[`Dimension`](crate::Dimension)** - the compile-time dimension, accessible via
 //!   `S::Dimension`. Either [`Dim<N>`](crate::Dim) (known statically) or
 //!   [`DimDyn`](crate::DimDyn) (runtime only).
 //!
@@ -50,16 +50,8 @@
 
 use std::ops::Range;
 
-use crate::codec::ReadContext;
 use crate::dtype::Dtyped;
-use crate::error::{check_buffer_aligned, check_dtype, ensure, Result};
-use crate::ops::LanesInfo;
-use crate::util::cast_slice_mut;
-use crate::{
-    array_from_fn_inline, assert_unchecked_eq, default_logical_strides_slice, default_strides,
-    dim_arr, ArrayExt, ArrayStorage, Dimension, ElementType, NdIterUnordered, PtrMutExt, Ty,
-    TypeDyn,
-};
+use crate::{ArrayStorage, ElementType, Ty, TypeDyn};
 
 pub(crate) mod core_trait;
 
@@ -82,6 +74,9 @@ pub(crate) mod scalar;
 
 mod buf;
 pub use buf::*;
+
+mod elementwise_pipeline;
+pub use elementwise_pipeline::*;
 
 mod info;
 pub use info::*;
@@ -195,15 +190,15 @@ macro_rules! impl_array_storage_forward {
 
         #[allow(refining_impl_trait)]
         #[inline(always)]
-        fn read_data_typed<$lifetime, $generic>(
+        fn read_as_elementwise_pipeline<$lifetime, $generic>(
             &$lifetime self,
             index: &[::core::ops::Range<u64>],
             context: &$lifetime crate::codec::ReadContext,
-        ) -> crate::error::Result<impl crate::storage::ReadData<$generic> + use<$lifetime, $generic, $($generics),*>>
+        ) -> crate::error::Result<impl crate::storage::ElementwisePipeline<$generic> + use<$lifetime, $generic, $($generics),*>>
         where
             $generic: crate::dtype::Dtyped,
         {
-            self.0.read_data_typed(index, context)
+            self.0.read_as_elementwise_pipeline(index, context)
         }
 
         #[inline(always)]
@@ -227,356 +222,3 @@ macro_rules! impl_array_storage_forward {
     };
 }
 pub(crate) use impl_array_storage_forward;
-
-/// An interface trait for reading items from an `ArrayStorage` in bulk.
-///
-/// Returned by [`ArrayStorage::read_data_typed`], used by element-wise operations.
-pub trait ReadData<T> {
-    /// The total number of items available to read.
-    fn len(&self) -> usize;
-
-    /// Returns `true` if there are no items to read.
-    #[inline(always)]
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Read a contiguous chunk of `N` items starting from the given offset.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `offset + N > self.len()`.
-    fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N];
-}
-pub(crate) trait ReadDataExt<T>: ReadData<T>
-where
-    T: Copy + Send + Sync + Sized + 'static,
-{
-    /// Read all `self.len()` items for the read region `index`.
-    #[inline(never)]
-    fn to_buf<'a, D: Dimension>(
-        &mut self,
-        index: &[Range<u64>],
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>>
-    where
-        T: Dtyped,
-        Self: Sized,
-    {
-        let read_fn = match <T as LanesInfo>::LANES {
-            1 => read_data_to_buf::<T, 1>,
-            2 => read_data_to_buf::<T, 2>,
-            4 => read_data_to_buf::<T, 4>,
-            8 => read_data_to_buf::<T, 8>,
-            16 => read_data_to_buf::<T, 16>,
-            32 => read_data_to_buf::<T, 32>,
-            64 => read_data_to_buf::<T, 64>,
-            128 => read_data_to_buf::<T, 128>,
-            256 => read_data_to_buf::<T, 256>,
-            512 => read_data_to_buf::<T, 512>,
-            _ => read_data_to_buf::<T, 1024>,
-        };
-        let dtype = T::DTYPE;
-        let itemsize = dtype.itemsize() as usize;
-        let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
-        match out {
-            None => {
-                let mut buf = context.allocate_buf(self.len() * itemsize, dtype.alignment());
-                read_fn(self, buf.as_mut_slice(), None, shape.as_ref())?;
-                let c = default_strides(&shape, itemsize);
-                Ok(unsafe { StridedBuf::from_pool(buf, c.as_ref()) })
-            }
-            Some(out) => {
-                let contiguous = out.is_contiguous(shape.as_ref(), &dtype);
-                let (out_buf, out_strides) = out.data_mut();
-                read_fn(
-                    self,
-                    out_buf,
-                    (!contiguous).then_some(out_strides),
-                    shape.as_ref(),
-                )?;
-                Ok(out.view_mut())
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn map_items<U, F: FnMut(T) -> U>(self, f: F) -> impl ReadData<U>
-    where
-        Self: Sized,
-    {
-        struct Map<T, U, R, F> {
-            inner: R,
-            f: F,
-            _phantom: std::marker::PhantomData<(T, U)>,
-        }
-        impl<T, U, R, F> ReadData<U> for Map<T, U, R, F>
-        where
-            R: ReadData<T>,
-            F: FnMut(T) -> U,
-        {
-            #[inline(always)]
-            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [U; N] {
-                self.inner.read_bulk::<N>(offset).map_inline(&mut self.f)
-            }
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.inner.len()
-            }
-        }
-        Map {
-            inner: self,
-            f,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-
-    #[inline(always)]
-    fn zip_items<U, R>(self, other: R) -> impl ReadData<(T, U)>
-    where
-        Self: Sized,
-        R: ReadData<U>,
-        U: Copy + Send + Sync + Sized + 'static,
-    {
-        assert_eq!(self.len(), other.len());
-
-        struct Zip<T, U, R1, R2> {
-            left: R1,
-            right: R2,
-            _phantom: std::marker::PhantomData<(T, U)>,
-        }
-        impl<T, U, R1, R2> ReadData<(T, U)> for Zip<T, U, R1, R2>
-        where
-            R1: ReadData<T>,
-            R2: ReadData<U>,
-            T: Copy + Send + Sync + Sized + 'static,
-            U: Copy + Send + Sync + Sized + 'static,
-        {
-            #[inline(always)]
-            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [(T, U); N] {
-                let left = self.left.read_bulk::<N>(offset);
-                let right = self.right.read_bulk::<N>(offset);
-                array_from_fn_inline(|i| (left[i], right[i]))
-            }
-            #[inline(always)]
-            fn len(&self) -> usize {
-                unsafe { assert_unchecked_eq!(self.left.len(), self.right.len()) };
-                self.left.len()
-            }
-        }
-        Zip {
-            left: self,
-            right: other,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-
-    #[inline(always)]
-    fn transmute_items<U>(self) -> Result<impl ReadData<U>>
-    where
-        Self: Sized,
-        T: Dtyped,
-        U: Dtyped,
-    {
-        check_dtype(&T::DTYPE, &U::DTYPE)?;
-        // SAFETY: We checked that `T` has the same dtype as `K::Output`
-        Ok(unsafe { self.transmute_items_unsafe() })
-    }
-
-    #[inline(always)]
-    unsafe fn transmute_items_unsafe<U>(self) -> impl ReadData<U>
-    where
-        Self: Sized,
-        U: Copy + Send + Sync + Sized + 'static,
-    {
-        struct Transmute<T, U, R> {
-            inner: R,
-            _phantom: std::marker::PhantomData<(T, U)>,
-        }
-        impl<T, U, R> ReadData<U> for Transmute<T, U, R>
-        where
-            R: ReadData<T>,
-            T: Copy + Send + Sync + Sized + 'static,
-            U: Copy + Send + Sync + Sized + 'static,
-        {
-            #[inline(always)]
-            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [U; N] {
-                const {
-                    assert!(
-                        size_of::<T>() == size_of::<U>(),
-                        "T and U must have equal size to reinterpret",
-                    );
-                }
-                let chunk: [T; N] = self.inner.read_bulk::<N>(offset);
-                unsafe { std::mem::transmute_copy::<[T; N], [U; N]>(&chunk) }
-            }
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.inner.len()
-            }
-        }
-        Transmute {
-            inner: self,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-}
-impl<T, R> ReadDataExt<T> for R
-where
-    R: ReadData<T>,
-    T: Copy + Send + Sync + Sized + 'static,
-{
-}
-
-#[inline(always)]
-fn read_data_to_buf<T, const LANES: usize>(
-    data: &mut impl ReadData<T>,
-    dst: &mut [u8],
-    strides: Option<&[usize]>,
-    shape: &[usize],
-) -> Result<()>
-where
-    T: Dtyped,
-{
-    match strides {
-        None => read_data_to_buf_contiguous::<T, LANES>(data, dst),
-        Some(strides) => read_data_to_buf_strided::<T, LANES>(data, dst, strides, shape),
-    }
-}
-
-#[inline(never)]
-fn read_data_to_buf_contiguous<T, const LANES: usize>(
-    data: &mut impl ReadData<T>,
-    out: &mut [u8],
-) -> Result<()>
-where
-    T: Dtyped,
-{
-    let dtype = T::DTYPE;
-    let nitems = data.len();
-    let required_size = nitems * size_of::<T>();
-    let buf_len = out.len();
-    ensure!(
-        buf_len >= required_size,
-        InvalidBufferSize,
-        "Unexpected buffer size {buf_len} requested {nitems:?} nitems with dtype {dtype} (required size: {required_size})",
-    );
-    let out = &mut out[..required_size];
-    check_buffer_aligned(out.as_ptr(), &dtype)?;
-
-    let buf = unsafe { cast_slice_mut::<u8, T>(out) };
-    assert_eq!(buf.len(), nitems);
-    let mut offset = 0;
-    while offset + LANES <= nitems {
-        let chunk = data.read_bulk::<LANES>(offset);
-        buf[offset..LANES + offset].copy_from_slice(&chunk);
-        offset += LANES;
-    }
-    while offset < nitems {
-        let item = data.read_bulk::<1>(offset)[0];
-        buf[offset] = item;
-        offset += 1;
-    }
-    Ok(())
-}
-
-fn read_data_to_buf_strided<T, const LANES: usize>(
-    data: &mut impl ReadData<T>,
-    out: &mut [u8],
-    strides: &[usize],
-    shape: &[usize],
-) -> Result<()>
-where
-    T: Dtyped,
-{
-    let itemsize = size_of::<T>();
-    // The source is read straight from `data` via `read_bulk`, indexed in *elements*
-    // over the region's row-major logical order - so operand 1's strides and offsets
-    // are element counts with layout (1, 1).
-    let src_offset_strides = default_logical_strides_slice(shape);
-
-    // Operand 0 is the destination byte buffer (`out`); operand 1 is the source, read
-    // via `read_bulk` and indexed in elements.
-    let iter = NdIterUnordered::new(
-        shape,
-        [strides, src_offset_strides.as_ref()],
-        [(itemsize, align_of::<T>()), (1, 1)],
-    );
-    let [dst_aligned, src_aligned] = iter.is_aligned();
-    debug_assert!(src_aligned);
-    let aligned = dst_aligned && out.as_ptr().cast::<T>().is_aligned();
-    let inner_loop_fn = match (aligned, iter.is_contiguous()) {
-        (true, [true, true]) => inner_loop::<T, LANES, true, true, true>,
-        (true, [true, false]) => inner_loop::<T, LANES, true, true, false>,
-        (true, [false, true]) => inner_loop::<T, LANES, true, false, true>,
-        (true, [false, false]) => inner_loop::<T, LANES, true, false, false>,
-        (false, [true, true]) => inner_loop::<T, LANES, false, true, true>,
-        (false, [true, false]) => inner_loop::<T, LANES, false, true, false>,
-        (false, [false, true]) => inner_loop::<T, LANES, false, false, true>,
-        (false, [false, false]) => inner_loop::<T, LANES, false, false, false>,
-    };
-    iter.foreach_inner_1d(|[dst_offset, src_offset], len, [dst_stride, src_stride]| {
-        let dst = unsafe { out.get_unchecked_mut(dst_offset..).as_mut_ptr() };
-        inner_loop_fn(&mut *data, dst, src_offset, len, dst_stride, src_stride)
-    });
-
-    // One inner 1-d run: read `len` elements from `data` starting at logical element
-    // `src_index` (stepping `src_stride` elements) and scatter them into `dst`
-    // (stepping `dst_stride` bytes). A contiguous source pulls `LANES` consecutive
-    // elements per `read_bulk`; otherwise it reads one at a time.
-    #[inline(never)]
-    fn inner_loop<
-        T: Copy,
-        const LANES: usize,
-        const ALIGNED: bool,
-        const DST_CONTIGUOUS: bool,
-        const SRC_CONTIGUOUS: bool,
-    >(
-        data: &mut impl ReadData<T>,
-        dst: *mut u8,
-        src_index: usize,
-        len: usize,
-        dst_stride: usize,
-        src_stride: usize,
-    ) {
-        let dst = dst.cast::<T>();
-        if DST_CONTIGUOUS {
-            debug_assert_eq!(dst_stride, size_of::<T>());
-        }
-        if SRC_CONTIGUOUS {
-            debug_assert_eq!(src_stride, 1);
-        }
-        let write = |j: usize, val: T| {
-            let elm = if DST_CONTIGUOUS {
-                unsafe { dst.add(j) }
-            } else {
-                unsafe { dst.cast::<u8>().add(j * dst_stride).cast::<T>() }
-            };
-            unsafe { elm.write_maybe_aligned::<ALIGNED>(val) };
-        };
-        let mut i = 0;
-        if SRC_CONTIGUOUS {
-            while i + LANES <= len {
-                let chunk = data.read_bulk::<LANES>(src_index + i);
-                #[allow(clippy::needless_range_loop)]
-                for k in 0..LANES {
-                    write(i + k, chunk[k]);
-                }
-                i += LANES;
-            }
-
-            while i < len {
-                write(i, data.read_bulk::<1>(src_index + i)[0]);
-                i += 1;
-            }
-        } else {
-            while i < len {
-                write(i, data.read_bulk::<1>(src_index + i * src_stride)[0]);
-                i += 1;
-            }
-        }
-    }
-
-    Ok(())
-}

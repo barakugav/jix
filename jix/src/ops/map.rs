@@ -5,11 +5,12 @@ use crate::error::{check_dtype, ensure, Result};
 use crate::ops::{Op1, Op2};
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
-    check_out_buf, ArrayStorageInfo, ArrayStorageTyped, ReadData, ReadDataExt, StridedBuf,
+    check_out_buf, ArrayStorageInfo, ArrayStorageTyped, ElementwisePipeline,
+    ElementwisePipelineImpl, Operand, StridedBuf,
 };
 use crate::{
     array_from_fn_inline, Array, ArraySequence, ArraySequenceDimension, ArraySequenceTyped,
-    ArrayStorage, ReadContext, ReadDataTuple, Ty,
+    ArrayStorage, ElementwisePipelineTuple, ReadContext, Ty,
 };
 
 impl<S> Array<S>
@@ -320,51 +321,71 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        self.read_data_typed::<O>(index, context)?
-            .to_buf::<Self::Dimension>(index, context, out)
+        self.read_as_elementwise_pipeline::<O>(index, context)?
+            .to_buf(index, context, out)
     }
 
-    #[inline(always)]
-    fn read_data_typed<'a, T>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadData<T> + use<'a, T, ArraysT, O, F>>
+    ) -> Result<impl ElementwisePipeline<T> + use<'a, T, ArraysT, O, F>>
     where
         T: Dtyped,
     {
         check_dtype(&T::DTYPE, &O::DTYPE)?;
-        let data = self.arrays.read_data_typed(index, context)?;
+        let inner = self.arrays.read_as_elementwise_pipeline(index, context)?;
 
-        struct ReadDataImpl<'a, ArraysT, D, F> {
-            data: D,
+        struct MapMultiplePipeline<'a, ArraysT, D, F> {
+            inner: D,
             f: &'a F,
             phantom: std::marker::PhantomData<ArraysT>,
         }
-        impl<'a, ArraysT, F, O, D> ReadData<O> for ReadDataImpl<'a, ArraysT, D, F>
+        impl<ArraysT, F, O, T, D> ElementwisePipelineImpl<T> for MapMultiplePipeline<'_, ArraysT, D, F>
         where
             ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
             F: Fn(ArraysT::ItemSequence<'_>) -> O,
             O: Dtyped,
-            D: ReadDataTuple<ArraysT>,
+            T: Dtyped,
+            D: ElementwisePipelineTuple<ArraysT>,
         {
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.data.len()
+            const N_OPERANDS: Option<usize> = D::N_OPERANDS;
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.inner.operands()
             }
 
             #[inline(always)]
-            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [O; N] {
-                let mut data_itr = self.data.read_bulk_as_iter::<N>(offset);
-                array_from_fn_inline(|_| (self.f)(data_itr.next().unwrap()))
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+                // The iterator is consumed here and dropped before the next call, as
+                // `read_bulk_as_iter` requires.
+                let mut items = unsafe { self.inner.read_bulk_as_iter::<N, CONTIGUOUS>() };
+                array_from_fn_inline(|_| {
+                    let x = (self.f)(items.next().unwrap());
+
+                    const { assert!(size_of::<O>() == size_of::<T>()) };
+                    // SAFETY: the caller checked `T` and `O` are the same dtype.
+                    unsafe { std::mem::transmute_copy::<O, T>(&x) }
+                })
             }
         }
-        ReadDataImpl {
-            data,
+        impl<ArraysT, F, O, T, D> ElementwisePipeline<T> for MapMultiplePipeline<'_, ArraysT, D, F>
+        where
+            ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
+            F: Fn(ArraysT::ItemSequence<'_>) -> O,
+            O: Dtyped,
+            T: Dtyped,
+            D: ElementwisePipelineTuple<ArraysT>,
+        {
+        }
+
+        Ok(MapMultiplePipeline {
+            inner,
             f: &self.map_fn,
             phantom: std::marker::PhantomData,
-        }
-        .transmute_items::<T>()
+        })
     }
 
     #[inline(always)]

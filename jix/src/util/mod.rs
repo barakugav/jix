@@ -20,6 +20,9 @@ pub(crate) use nd_copy::*;
 mod nd_iter_unordered;
 pub(crate) use nd_iter_unordered::*;
 
+mod nd_iter_unordered_dyn;
+pub(crate) use nd_iter_unordered_dyn::*;
+
 mod bitmap;
 pub(crate) use bitmap::*;
 
@@ -100,17 +103,17 @@ impl_idx_for_primitive!(u16);
 impl_idx_for_primitive!(u32);
 impl_idx_for_primitive!(u64);
 
-/// Compute the largest byte offset of a region accessed by `shape` and `strides`.
+/// Compute the byte span of a region accessed by `shape` and `strides`.
 #[inline]
 pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
-    let mut span = itemsize;
+    let mut biggest_offset = 0;
     for (&len, &stride) in shape.iter().zip(strides) {
         if len == 0 {
             return 0;
         }
-        span += stride * (len - 1);
+        biggest_offset += stride * (len - 1);
     }
-    span
+    biggest_offset + itemsize
 }
 
 #[inline(always)]
@@ -595,6 +598,21 @@ pub(crate) trait SliceExt<T> {
     where
         D: Dimension,
         T: Clone;
+
+    /// Copy a slice whose length is already known to be `N` into a `[T; N]`.
+    ///
+    /// The unchecked counterpart of `slice.try_into().unwrap()`, for slices that are only dynamic
+    /// because they crossed a de-monomorphized boundary while the caller knew the length all along.
+    /// Both the length check and the panic path fold away, leaving plain loads.
+    ///
+    /// # Safety
+    ///
+    /// `self.len()` must be exactly `N`.
+    // TODO: only the runtime-count `foreach_inner_1d_dyn` needs this, which has no non-test caller yet.
+    #[allow(dead_code)]
+    unsafe fn copy_to_array_unchecked<const N: usize>(&self) -> [T; N]
+    where
+        T: Copy;
 }
 impl<T> SliceExt<T> for [T] {
     #[inline]
@@ -604,6 +622,17 @@ impl<T> SliceExt<T> for [T] {
         T: Clone,
     {
         D::vec(self.len(), |i| self[i].clone())
+    }
+
+    #[inline(always)]
+    unsafe fn copy_to_array_unchecked<const N: usize>(&self) -> [T; N]
+    where
+        T: Copy,
+    {
+        // The `assert_unchecked` is load-bearing: without it LLVM keeps the `len == N` compare and
+        // branch around the loads even though `unwrap_unchecked` makes the other arm unreachable.
+        unsafe { assert_unchecked_eq!(self.len(), N) };
+        unsafe { self.try_into().unwrap_unchecked() }
     }
 }
 
@@ -875,6 +904,55 @@ mod tests {
         assert_eq!(read_shape[0], 7, "unlisted dim is left exactly as seeded");
         // dim 1 grows in seed-multiples toward the budget: 7 * floor(200 / 7^2) = 7 * 4 = 28.
         assert_eq!(read_shape[1], 28, "listed dim scales toward the budget");
+    }
+
+    /// `strided_span_bytes` sizes the slices behind `StridedBuf`, so it has to cover the *furthest*
+    /// element - reached by stepping every axis at once, i.e. the sum of the per-axis spans rather
+    /// than the largest of them.
+    #[test]
+    fn strided_span_bytes_covers_the_furthest_element() {
+        #[track_caller]
+        fn check(shape: &[usize], strides: &[usize], itemsize: usize) {
+            // Brute-force the furthest byte any element of the region touches.
+            let mut furthest = 0;
+            let mut idx = vec![0usize; shape.len()];
+            loop {
+                let offset: usize = idx.iter().zip(strides).map(|(i, s)| i * s).sum();
+                furthest = furthest.max(offset + itemsize);
+                let mut d = shape.len();
+                loop {
+                    if d == 0 {
+                        assert_eq!(
+                            super::strided_span_bytes(shape, strides, itemsize),
+                            furthest,
+                            "shape={shape:?} strides={strides:?} itemsize={itemsize}"
+                        );
+                        return;
+                    }
+                    d -= 1;
+                    idx[d] += 1;
+                    if idx[d] < shape[d] {
+                        break;
+                    }
+                    idx[d] = 0;
+                }
+            }
+        }
+
+        // A single axis: the span is just that axis's reach.
+        check(&[4], &[1], 1);
+        check(&[3], &[8], 4);
+        // Several axes at once: only the sum reaches element (1, 1) at offset 11.
+        check(&[2, 2], &[10, 1], 1);
+        check(&[3, 4], &[16, 4], 4);
+        check(&[2, 3, 4], &[48, 16, 4], 4);
+        // Gaps, broadcast axes and unit axes.
+        check(&[2, 3], &[100, 4], 4);
+        check(&[2, 3], &[0, 4], 4);
+        check(&[1, 5, 1], &[400, 4, 200], 4);
+        // A zero-length axis makes the region empty.
+        assert_eq!(super::strided_span_bytes(&[0], &[4], 4), 0);
+        assert_eq!(super::strided_span_bytes(&[2, 0, 3], &[24, 8, 4], 4), 0);
     }
 }
 

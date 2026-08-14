@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use crate::buf_pool::PoolBuf;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, Result};
-use crate::storage::{ArraySpec, ArrayStorageInfo, CompactBorrowed, ReadData, StridedBuf};
-use crate::util::{assert_unchecked_eq, default_strides};
+use crate::storage::{
+    ArraySpec, ArrayStorageInfo, CompactBorrowed, ElementwisePipeline, OperandTyped, StridedBuf,
+};
 use crate::{Dimension, ElementType};
 
 /// The backing data source of an [`Array<S>`](crate::Array).
@@ -122,71 +122,36 @@ pub trait ArrayStorage {
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>>;
 
-    /// Read a sub-region of the array as a typed `ReadData<T>`.
+    /// Read a sub-region as an element-wise pipeline over `T`.
+    ///
+    /// Where [`read_data`](Self::read_data) materializes a region, this hands back a *tree*: the
+    /// storage chain's leaves become `Operand`s the pipeline reads through cursors, and each op in
+    /// the chain a node that combines its children. The whole tree then runs in one pass in
+    /// `ElementwisePipelineImpl::to_buf`, which picks the visitation order.
+    ///
+    /// The default treats `self` as a single leaf: read the region once, present it as one operand.
+    /// The read is a pull (`out = None`), so a backend that can lend a view of its own memory does
+    /// not copy at all, and its strides - broadcast axes included - are handed straight to the walk.
+    /// Ops that decompose - `Op1`, `Op2` - override this to keep their inputs separate leaves so
+    /// the whole chain fuses into one pass.
     ///
     /// # Arguments
     ///
-    /// - `index` - one half-open range per dimension (`start..end`).
-    ///   The number of ranges must equal `self.shape().len()`.
-    ///   Ranges must be within the array shape bounds; empty ranges are allowed.
-    /// - `context` - read context carrying the decoder state.
-    ///
-    /// # Returns
-    ///
-    /// A `ReadData<T>` that can be used to read the requested region as typed elements.
-    #[inline(always)]
-    fn read_data_typed<'a, T>(
+    /// Same as [`read_data`](Self::read_data): one half-open range per dimension, and the read
+    /// context.
+    #[inline]
+    fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadData<T> + use<'a, T, Self>>
+    ) -> Result<impl ElementwisePipeline<T> + use<'a, T, Self>>
     where
         T: Dtyped,
         Self: Sized,
     {
         check_dtype(&T::DTYPE, self.dtype())?;
-
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-        let dtype = self.dtype();
-        let mut buf = context.allocate_buf(nitems * dtype.itemsize() as usize, dtype.alignment());
-        {
-            let shape =
-                Self::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-            let strides = default_strides(&shape, dtype.itemsize() as usize);
-            let mut out =
-                unsafe { StridedBuf::from_slice_mut(buf.as_mut_slice(), strides.as_ref()) };
-            self.read_data(index, context, Some(&mut out))?;
-        }
-
-        struct DefaultReadData<'a, T> {
-            buf: PoolBuf<'a>,
-            len_: usize,
-            _phantom: std::marker::PhantomData<T>,
-        }
-        impl<T> ReadData<T> for DefaultReadData<'_, T>
-        where
-            T: Dtyped,
-        {
-            #[inline(always)]
-            fn len(&self) -> usize {
-                let len = self.len_;
-                unsafe { assert_unchecked_eq!(self.buf.as_slice().len(), len * size_of::<T>()) };
-                len
-            }
-
-            #[inline(always)]
-            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N] {
-                let len = self.len();
-                assert!(offset + N <= len);
-                let ptr = self.buf.as_slice().as_ptr().cast::<T>();
-                unsafe { ptr.add(offset).cast::<[T; N]>().read() }
-            }
-        }
-        Ok(DefaultReadData {
-            len_: nitems,
-            buf,
-            _phantom: std::marker::PhantomData,
-        })
+        let data = self.read_data(index, context, None)?;
+        Ok(unsafe { OperandTyped::new(data, self.dtype()) })
     }
 
     /// Returns the shape of the array, one element per dimension.

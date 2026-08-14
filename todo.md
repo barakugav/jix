@@ -14,3 +14,5 @@
 - benchmark LANES of {32/64/128/256} / itemsize on x86
 - nd_copy
 - with_strides_ptr_mut_ext, keep only offsets
+- return error on Dtype with itemsize 0
+- remove alignment requirement from read_data

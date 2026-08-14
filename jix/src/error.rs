@@ -111,6 +111,7 @@ pub(crate) use {bail, ensure, error};
 
 #[inline]
 pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
+    #[cold]
     #[inline(never)]
     fn check_dim_fail<D: Dimension>(ndim: usize) -> Result<()> {
         if let Some(expected) = D::NDIM {
@@ -139,6 +140,7 @@ pub(crate) fn check_ndim<D: Dimension>(ndim: usize) -> Result<()> {
 #[inline]
 pub(crate) fn assert_dim<D: Dimension>(ndim: usize) {
     #[track_caller]
+    #[cold]
     #[inline(never)]
     fn assert_dim_fail<D: Dimension>(ndim: usize) -> ! {
         if let Some(expected) = D::NDIM {
@@ -159,6 +161,7 @@ pub(crate) fn assert_dim<D: Dimension>(ndim: usize) {
 #[inline(always)]
 pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
     if actual != expected {
+        #[cold]
         #[inline(never)]
         fn fail_check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
             bail!(
@@ -175,6 +178,7 @@ pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
 pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
     let product = shape.iter().cloned().chain([itemsize]).try_product();
     if product.is_none() {
+        #[cold]
         #[inline(never)]
         fn shape_overflow_fail(shape: &[u64], itemsize: u64) -> Result<()> {
             bail!(
@@ -190,6 +194,7 @@ pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
 #[inline]
 pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()> {
     if shape.len() != index.len() {
+        #[cold]
         #[inline(never)]
         fn get_range_fail_ndim(shape_ndim: usize, index_ndim: usize) -> Result<()> {
             bail!(
@@ -200,6 +205,7 @@ pub(crate) fn check_get_range(shape: &[u64], index: &[Range<u64>]) -> Result<()>
         return get_range_fail_ndim(shape.len(), index.len());
     }
     for (dim, (&dim_size, range)) in shape.iter().zip(index).enumerate() {
+        #[cold]
         #[inline(never)]
         fn check_range_fail(dim: usize, range: &Range<u64>, dim_size: u64) -> Result<()> {
             bail!(
@@ -225,6 +231,7 @@ pub(crate) fn check_get_buffer_size(
     let buf_len = buf.len();
 
     if buf_len != required_size {
+        #[cold]
         #[inline(never)]
         fn buffer_size_fail(
             buf_len: usize,
@@ -246,6 +253,7 @@ pub(crate) fn check_get_buffer_size(
 #[inline]
 pub(crate) fn check_buffer_aligned(buf: *const u8, dtype: &Dtype) -> Result<()> {
     if !(buf as usize).is_multiple_of(dtype.alignment().as_usize()) {
+        #[cold]
         #[inline(never)]
         fn buffer_alignment_fail(buf: *const u8, dtype: &Dtype) -> Result<()> {
             bail!(

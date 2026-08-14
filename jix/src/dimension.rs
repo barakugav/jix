@@ -82,6 +82,7 @@ pub trait Dimension:
     + Send
     + Sync
     + Debug
+    + 'static
 {
     /// The number of axes, if known at compile time.
     ///

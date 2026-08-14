@@ -3,9 +3,9 @@ use std::hint::unreachable_unchecked;
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{
     nd_iter_ext_logical_global_index, NdIterExtStridesOffset, NdIterExtStridesOffsetMulti,
-    NdIterExtStridesPtr, NdIterExtStridesPtrMut,
+    NdIterExtStridesOffsetMultiDyn, NdIterExtStridesPtr, NdIterExtStridesPtrMut,
 };
-use crate::util::Idx;
+use crate::util::{Idx, OperandsArray};
 use crate::{DimVec, Dimension};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
@@ -120,38 +120,38 @@ where
         }
     }
 
-    #[inline(always)]
-    fn get_current_and_advance_status(&mut self) -> (D::Vec<u64>, E::Item) {
-        self.status.advance();
-        (self.current_idx.clone(), self.extensions.value())
-    }
-
-    #[allow(unused)]
-    #[inline(always)]
-    pub(crate) fn len(&self) -> u64 {
-        self.status.len()
-    }
-}
-impl<D, E> Iterator for NdIter<D, E>
-where
-    D: Dimension,
-    E: NdIterExtension,
-{
-    type Item = (D::Vec<u64>, E::Item);
-
-    /// Advances to the next index in row-major order and returns `(current_index, extension_item)`.
+    /// Advances to the next index in row-major order and returns `(current_index, extension_item)`,
+    /// or `None` once every index has been yielded.
     ///
     /// On each step the rightmost dimension that has not yet reached its bound is incremented,
     /// and all dimensions to its right are reset to `begin`.
+    ///
+    /// This is the *lending* `next`: the item may borrow from the extension (see
+    /// [`NdIterExtension::Item`]). Extensions whose item does not borrow also get a plain
+    /// [`Iterator`] impl, so those can be driven with `for .. in iter` instead.
     #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.status.is_exhausted() {
+    #[allow(clippy::should_implement_trait)]
+    pub(crate) fn next(&mut self) -> Option<(D::Vec<u64>, E::Item<'_>)> {
+        // Advancing is split out so the borrow of `self` taken for the returned item starts after
+        // all mutation is done - borrowck rejects returning it from inside the branches below.
+        if !self.advance() {
             return None;
+        }
+        Some((self.current_idx.clone(), self.extensions.value()))
+    }
+
+    /// Move to the next index, returning `false` once exhausted. On `true`, `current_idx` and the
+    /// extensions hold the values to yield.
+    #[inline(always)]
+    fn advance(&mut self) -> bool {
+        if self.status.is_exhausted() {
+            return false;
         }
 
         if self.status.is_not_started() {
             self.status.start();
-            return Some(self.get_current_and_advance_status());
+            self.status.advance();
+            return true;
         }
 
         debug_assert!(self.status.is_in_progress());
@@ -173,10 +173,43 @@ where
                     );
                     self.current_idx[smaller_dim] = begin;
                 }
-                return Some(self.get_current_and_advance_status());
+                self.status.advance();
+                return true;
             }
         }
         unsafe { unreachable_unchecked() }
+    }
+
+    #[allow(unused)]
+    #[inline(always)]
+    pub(crate) fn len(&self) -> u64 {
+        self.status.len()
+    }
+}
+
+/// `NdIter` is a real [`Iterator`] whenever its extension's item does not borrow from it.
+///
+/// `for<'a> NdIterExtension<Item<'a> = I>` says exactly that: one `I` serves every lifetime, so the
+/// item can outlive the `&self` that produced it and fit [`Iterator::Item`], which has no lifetime
+/// of its own. An extension that does borrow (e.g. [`NdIterExtStridesOffsetMultiDyn`], which lends
+/// a slice of per-operand offsets) has an `Item<'a>` that genuinely varies with `'a`, no single `I`
+/// exists, and this impl simply does not apply - those must use the lending
+/// [`next`](NdIter::next).
+///
+/// The `E: 'static` is forced by the `where Self: 'a` that Rust requires on any GAT returned from
+/// `&self`: without it the `for<'a>` above would quantify over lifetimes for which `E` is not even
+/// valid. Every extension owns its state (dimension vectors, raw pointers, indices), so this costs
+/// nothing in practice.
+impl<D, E, I> Iterator for NdIter<D, E>
+where
+    D: Dimension,
+    E: 'static + for<'a> NdIterExtension<Item<'a> = I>,
+{
+    type Item = (D::Vec<u64>, I);
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        NdIter::next(self)
     }
 
     #[inline(always)]
@@ -194,7 +227,14 @@ where
 /// return the current derived value via [`value`](NdIterExtension::value).
 pub(crate) trait NdIterExtension {
     /// The derived value produced at each iteration step.
-    type Item;
+    ///
+    /// Borrows from the extension, so an extension holding a runtime-sized amount of state (e.g.
+    /// [`NdIterExtStridesOffsetMultiDyn`], one offset per operand) can hand out a slice instead of
+    /// copying into a fixed-size array. Extensions whose value is a plain `Copy` scalar just ignore
+    /// the lifetime.
+    type Item<'a>
+    where
+        Self: 'a;
 
     /// Called when dimension `dim` changes from `before` to `after`.
     ///
@@ -204,7 +244,7 @@ pub(crate) trait NdIterExtension {
     fn on_decrease(&mut self, dim: usize, before: u64, after: u64, diff: u64);
 
     /// Returns the current derived value after all index changes have been applied.
-    fn value(&self) -> Self::Item;
+    fn value(&self) -> Self::Item<'_>;
 
     fn check_ndim(&self, ndim: usize) -> bool;
 
@@ -253,7 +293,7 @@ where
 // ---------------------------------------------------------------------------
 
 impl NdIterExtension for () {
-    type Item = ();
+    type Item<'a> = ();
     #[inline(always)]
     fn on_increase(&mut self, _dim: usize, _before: u64, _after: u64, _diff: u64) {}
     #[inline(always)]
@@ -277,7 +317,10 @@ impl<T1> NdIterExtension for (T1,)
 where
     T1: NdIterExtension,
 {
-    type Item = (T1::Item,);
+    type Item<'a>
+        = (T1::Item<'a>,)
+    where
+        Self: 'a;
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
         self.0.on_increase(dim, before, after, diff);
@@ -287,7 +330,7 @@ where
         self.0.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn value(&self) -> (T1::Item,) {
+    fn value(&self) -> Self::Item<'_> {
         (self.0.value(),)
     }
     #[inline(always)]
@@ -306,7 +349,10 @@ where
     T1: NdIterExtension,
     T2: NdIterExtension,
 {
-    type Item = (T1::Item, T2::Item);
+    type Item<'a>
+        = (T1::Item<'a>, T2::Item<'a>)
+    where
+        Self: 'a;
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
         self.0.on_increase(dim, before, after, diff);
@@ -318,7 +364,7 @@ where
         self.1.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn value(&self) -> (T1::Item, T2::Item) {
+    fn value(&self) -> Self::Item<'_> {
         (self.0.value(), self.1.value())
     }
     #[inline(always)]
@@ -338,7 +384,10 @@ where
     T2: NdIterExtension,
     T3: NdIterExtension,
 {
-    type Item = (T1::Item, T2::Item, T3::Item);
+    type Item<'a>
+        = (T1::Item<'a>, T2::Item<'a>, T3::Item<'a>)
+    where
+        Self: 'a;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
@@ -353,7 +402,7 @@ where
         self.2.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn value(&self) -> (T1::Item, T2::Item, T3::Item) {
+    fn value(&self) -> Self::Item<'_> {
         (self.0.value(), self.1.value(), self.2.value())
     }
     #[inline(always)]
@@ -493,6 +542,21 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
         }
     }
 
+    /// Adds a [`NdIterExtStridesOffsetMultiDyn`] extension tracking one offset per operand.
+    #[inline]
+    pub(crate) fn with_strides_offset_multi_dyn_ext<S: Idx>(
+        self,
+        strides: OperandsArray<D::Vec<S>>,
+        initial_offsets: OperandsArray<S>,
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffsetMultiDyn<D, S>>> {
+        let ext = NdIterExtStridesOffsetMultiDyn::<D, S>::new(strides, initial_offsets);
+        NdIterBuilder {
+            begin: self.begin,
+            end: self.end,
+            extensions: self.extensions.merge_extension(ext),
+        }
+    }
+
     /// Adds a [`NdIterExtStridesOffset`] extension.
     #[inline]
     pub(crate) fn with_logical_global_index_ext(
@@ -572,7 +636,8 @@ mod tests {
         }
     }
     impl NdIterExtension for ChangeLog {
-        type Item = usize; // number of on_increase/decrease calls so far when value() is called
+        // number of on_increase/decrease calls so far when value() is called
+        type Item<'a> = usize;
         fn on_increase(&mut self, dim: usize, before: u64, after: u64, _diff: u64) {
             self.log.push((dim, before, after));
         }
@@ -687,9 +752,11 @@ mod tests {
     // NdIter with new_with_begin
     // ---------------------------------------------------------------------------
 
-    fn collect_indices<D: Dimension, E: NdIterExtension>(iter: NdIter<D, E>) -> Vec<Vec<u64>> {
+    /// Generic over an abstract `E`, so the `Iterator` impl (which needs a single concrete item
+    /// type for every lifetime) does not apply here - drive the lending `next` instead.
+    fn collect_indices<D: Dimension, E: NdIterExtension>(mut iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
-        for (idx, _) in iter {
+        while let Some((idx, _)) = iter.next() {
             out.push(idx.as_ref().to_vec());
         }
         out

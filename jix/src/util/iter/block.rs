@@ -92,7 +92,10 @@ impl<D> NdIterExtension for NdIterExtBlockOffsetSize<D>
 where
     D: Dimension,
 {
-    type Item = (D::Vec<u64>, D::Vec<u64>);
+    type Item<'a>
+        = (D::Vec<u64>, D::Vec<u64>)
+    where
+        Self: 'a;
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, _before: u64, after: u64, _diff: u64) {
         let (low, high) = &self.borders[dim];
@@ -120,7 +123,7 @@ where
     }
 
     #[inline(always)]
-    fn value(&self) -> Self::Item {
+    fn value(&self) -> Self::Item<'_> {
         (self.inner_offset.clone(), self.current_block_size.clone())
     }
 

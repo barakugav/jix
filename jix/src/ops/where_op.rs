@@ -5,11 +5,11 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, ensure, Result};
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
-    check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, ReadData,
-    ReadDataExt, StridedBuf,
+    check_out_buf, materialize_out_buf, n_operands_sum, ArraySpec, ArrayStorageInfo,
+    ArrayStorageTyped, ElementwisePipeline, ElementwisePipelineImpl, Operand, StridedBuf,
 };
 use crate::util::cast_slice;
-use crate::{Array, ArrayStorage, Dimension, NdIterUnordered};
+use crate::{array_from_fn_inline, Array, ArrayStorage, Dimension, NdIterUnordered};
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
 /// examples.
@@ -306,22 +306,62 @@ where
         Ok(out)
     }
 
-    #[inline(always)]
-    fn read_data_typed<'a, T>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadData<T> + use<'a, T, SC, SX, SY>>
+    ) -> Result<impl ElementwisePipeline<T> + use<'a, T, SC, SX, SY>>
     where
         T: Dtyped,
     {
-        let condition = self.condition.read_data_typed::<bool>(index, context)?;
-        let x = self.x.read_data_typed::<T>(index, context)?;
-        let y = self.y.read_data_typed::<T>(index, context)?;
+        let condition = self
+            .condition
+            .read_as_elementwise_pipeline::<bool>(index, context)?;
+        let x = self.x.read_as_elementwise_pipeline::<T>(index, context)?;
+        let y = self.y.read_as_elementwise_pipeline::<T>(index, context)?;
 
-        Ok(condition
-            .zip_items(x.zip_items(y))
-            .map_items(|(cond, (x, y))| if cond { x } else { y }))
+        struct WherePipeline<PC, PX, PY> {
+            condition: PC,
+            x: PX,
+            y: PY,
+        }
+        impl<T, PC, PX, PY> ElementwisePipelineImpl<T> for WherePipeline<PC, PX, PY>
+        where
+            PC: ElementwisePipelineImpl<bool>,
+            PX: ElementwisePipelineImpl<T>,
+            PY: ElementwisePipelineImpl<T>,
+            T: Copy,
+        {
+            const N_OPERANDS: Option<usize> =
+                n_operands_sum(&[PC::N_OPERANDS, PX::N_OPERANDS, PY::N_OPERANDS]);
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.condition
+                    .operands()
+                    .chain(self.x.operands())
+                    .chain(self.y.operands())
+            }
+
+            #[inline(always)]
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+                let condition = unsafe { self.condition.read_bulk::<N, CONTIGUOUS>() };
+                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS>() };
+                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS>() };
+                array_from_fn_inline(|i| if condition[i] { x[i] } else { y[i] })
+            }
+        }
+        impl<T, PC, PX, PY> ElementwisePipeline<T> for WherePipeline<PC, PX, PY>
+        where
+            PC: ElementwisePipelineImpl<bool>,
+            PX: ElementwisePipelineImpl<T>,
+            PY: ElementwisePipelineImpl<T>,
+            T: Copy,
+        {
+        }
+
+        Ok(WherePipeline { condition, x, y })
     }
 
     #[inline(always)]

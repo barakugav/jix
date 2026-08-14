@@ -5,7 +5,8 @@ use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_dtype, check_get_range, check_ndim, Result};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, ReadData, StridedBuf, Ty,
+    check_out_buf, ArraySpec, ArrayStorage, ArrayStorageInfo, ElementwisePipeline,
+    ElementwisePipelineImpl, Operand, StridedBuf, Ty,
 };
 use crate::{
     cast_slice, cast_slice_mut, ArrayParams, DimBitmap, Dimension, ElementType, IntoDimension,
@@ -139,46 +140,38 @@ where
         }
     }
 
-    #[inline(always)]
-    fn read_data_typed<'a, T2>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a, T2>(
         &'a self,
         index: &[Range<u64>],
         _context: &'a ReadContext,
-    ) -> Result<impl ReadData<T2> + use<'a, T2, T, D>>
+    ) -> Result<impl ElementwisePipeline<T2> + use<'a, T2, T, D>>
     where
         T2: Dtyped,
     {
         check_dtype(&T2::DTYPE, &T::DTYPE)?;
         check_get_range(self.shape(), index)?;
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-        struct ScalarReadData<T2> {
-            value: T2,
-            len_: usize,
-        }
-        impl<T2> ReadData<T2> for ScalarReadData<T2>
-        where
-            T2: Dtyped,
-        {
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.len_
-            }
-
-            #[inline(always)]
-            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T2; N] {
-                let len = self.len();
-                assert!(offset + N <= len);
-                [self.value; N]
-            }
-        }
-
-        // SAFETY: we checked that T and T2 have the same dtype
+        // SAFETY: `check_dtype` accepted `T` and `T2` as the same dtype.
         let value = unsafe { std::mem::transmute_copy::<T, T2>(&self.data) };
 
-        Ok(ScalarReadData {
-            value,
-            len_: nitems,
-        })
+        struct Constant<T>(T);
+        impl<T: Dtyped> ElementwisePipelineImpl<T> for Constant<T> {
+            // The value lives in the node, so there is nothing to walk.
+            const N_OPERANDS: Option<usize> = Some(0);
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                std::iter::empty()
+            }
+
+            #[inline(always)]
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+                [self.0; N]
+            }
+        }
+        impl<T: Dtyped> ElementwisePipeline<T> for Constant<T> {}
+
+        Ok(Constant(value))
     }
 
     #[inline(always)]

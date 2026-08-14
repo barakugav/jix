@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::Dtyped;
 use crate::error::{check_dtype, Result};
-use crate::storage::{ArrayStorageInfo, ReadData, StridedBuf};
+use crate::storage::{ArrayStorageInfo, ElementwisePipeline, StridedBuf};
 use crate::util::assert_unchecked_eq;
 use crate::{Array, ArrayStorage, ElementType};
 
@@ -97,18 +97,18 @@ where
     }
 
     #[inline(always)]
-    fn read_data_typed<'a, T>(
+    fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadData<T> + use<'a, T, S, ET>>
+    ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S, ET>>
     where
         T: Dtyped,
     {
         if let Some(dtype) = ET::DTYPE {
             unsafe { assert_unchecked_eq!(self.inner.dtype(), &dtype) };
         }
-        self.inner.read_data_typed(index, context)
+        self.inner.read_as_elementwise_pipeline(index, context)
     }
 
     #[inline(always)]

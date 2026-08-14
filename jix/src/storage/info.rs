@@ -20,7 +20,7 @@ impl<'a> ArrayStorageInfo<'a> {
     }
     #[inline]
     fn new_deps_inline(name: &'a str, deps: &[&'a dyn ArrayStorage]) -> Self {
-        debug_assert!(deps.len() <= 4);
+        debug_assert!(deps.len() <= INLINE_DEPS_CAPACITY);
         let mut deps_vec = ArrayVec::new();
         for dep in deps.iter() {
             deps_vec.push(*dep);
@@ -32,7 +32,7 @@ impl<'a> ArrayStorageInfo<'a> {
     }
     #[inline]
     pub(crate) fn new_deps<const N: usize>(name: &'a str, deps: [&'a dyn ArrayStorage; N]) -> Self {
-        if N <= 4 {
+        if N <= INLINE_DEPS_CAPACITY {
             Self::new_deps_inline(name, &deps)
         } else {
             Self {
@@ -44,7 +44,7 @@ impl<'a> ArrayStorageInfo<'a> {
 
     #[inline]
     pub(crate) fn new_deps_dyn(name: &'a str, deps: Vec<&'a dyn ArrayStorage>) -> Self {
-        if deps.len() <= 4 {
+        if deps.len() <= INLINE_DEPS_CAPACITY {
             Self::new_deps_inline(name, &deps)
         } else {
             Self {
@@ -68,6 +68,7 @@ impl<'a> ArrayStorageInfo<'a> {
     }
 }
 pub(crate) enum ArrayDependencies<'a> {
-    Inline(ArrayVec<&'a dyn ArrayStorage, 4>),
+    Inline(ArrayVec<&'a dyn ArrayStorage, INLINE_DEPS_CAPACITY>),
     Vec(Vec<&'a dyn ArrayStorage>),
 }
+const INLINE_DEPS_CAPACITY: usize = 2;
