@@ -81,8 +81,7 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
     /// * `shape` - number of elements along each dimension.
     /// * `strides` - byte distance between adjacent elements along each
     ///   dimension. Must have the same length as `shape`.
-    /// * `dtype` - element type descriptor; used for itemsize and alignment
-    ///   checks.
+    /// * `dtype` - element type descriptor; used for itemsize.
     /// * `params` - this arg never change how the plain buffer is stored - a `Plain` array is always an
     ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
     ///   storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
@@ -90,12 +89,16 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
     ///   [`read_size`](ArrayParams::read_size), which is honored when materializing operations even
     ///   though the plain data itself is never decompressed. See [`ArrayParams`] for the full list.
     ///
+    /// `data` and `strides` need not be aligned to `dtype.alignment()`: a `Plain` read lends a view
+    /// of the caller's own bytes, and per the [`read_data`](ArrayStorage::read_data) contract a lent
+    /// view is only as aligned as the bytes behind it. Consumers that need alignment stage the
+    /// region themselves.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
     /// * `shape.len()` exceeds the maximum supported number of dimensions.
     /// * `strides.len() != shape.len()`.
-    /// * `data` or any stride is not aligned to `dtype.alignment()`.
     ///
     /// # Safety
     ///
@@ -127,17 +130,6 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
             strides.len()
         );
         let strides = D::vec(ndim, |d| strides[d]);
-
-        let alignment = dtype.alignment().as_usize();
-        ensure!(
-            (data as usize).is_multiple_of(alignment)
-                && strides
-                    .as_ref()
-                    .iter()
-                    .all(|&s| s.is_multiple_of(alignment)),
-            InvalidArgument,
-            "Data pointer or strides are not aligned to required alignment {alignment}"
-        );
 
         if params.block_shape_fixed_dims.is_none() {
             // A plain view is a strided copy, so no dimension is a fixed block boundary.
@@ -398,7 +390,7 @@ impl<ET, D: Dimension> Array<Plain<&(), ET, D>> {
     /// * `data_ptr` - pointer to the first element.
     /// * `shape` - number of elements along each dimension.
     /// * `strides` - the array element strides in **bytes units**. Must have the same length as `shape`.
-    /// * `dtype` - element type descriptor; used for itemsize and alignment checks.
+    /// * `dtype` - element type descriptor; used for itemsize.
     /// * `params` - this arg never change how the plain buffer is stored - a `Plain` array is always an
     ///   uncompressed, zero-copy view over the ndarray's allocation. They are recorded in the array's
     ///   storage spec, where they (a) seed arrays derived from this one (e.g. the block shape and
@@ -412,7 +404,6 @@ impl<ET, D: Dimension> Array<Plain<&(), ET, D>> {
     /// * `data_ptr` is a valid, non-dangling pointer for the lifetime of the returned `Array`.
     /// * The memory region reachable via `data_ptr` and `strides` is valid to read for all index combinations in
     ///   `0..shape[d]` on each dimension `d`.
-    /// * `data_ptr` and all strides are aligned to `dtype.alignment()`.
     /// * Elements accessed by the data pointer must be valid for the specified `dtype`.
     pub unsafe fn plain_ndarray_ptr<Sh>(
         data_ptr: *const u8,
@@ -717,5 +708,109 @@ mod tests {
         let got = a.as_ref().neg().to_ndarray().unwrap();
         let expected = nd.mapv(|x: i32| -x);
         assert_eq!(got, expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // Under-aligned views
+    // -----------------------------------------------------------------------
+
+    /// A `Plain` view may start off its dtype's alignment: a read lends the caller's own bytes, and
+    /// every consumer either re-strides the view without reading it or copies it through `NdCopier`,
+    /// which handles unaligned source and destination. This walks a deliberately 1-byte-offset
+    /// `i32` view through each of those consumers - Miri checks the alignment of every access.
+    #[test]
+    fn misaligned_view_reads_through_every_consumer() {
+        let (rows, cols) = (4usize, 5);
+        let nitems = rows * cols;
+        let itemsize = size_of::<i32>();
+        let expected = (0..nitems).map(|k| k as i32 * 3 - 7).collect::<Vec<i32>>();
+
+        // An over-aligned backing buffer with element 0 one byte in, so neither the base pointer
+        // nor `base + k * itemsize` is 4-byte aligned.
+        let mut backing = vec![0u64; (nitems * itemsize + 1).div_ceil(8) + 1];
+        let base = unsafe { backing.as_mut_ptr().cast::<u8>().add(1) };
+        assert!(!(base as usize).is_multiple_of(itemsize));
+        for (k, &v) in expected.iter().enumerate() {
+            unsafe { base.add(k * itemsize).cast::<i32>().write_unaligned(v) };
+        }
+
+        let strides = [cols * itemsize, itemsize];
+        let make = || unsafe {
+            Array::plain_ndarray_ptr(
+                base.cast_const(),
+                &[rows as u64, cols as u64],
+                &strides,
+                <i32 as crate::dtype::Dtyped>::DTYPE,
+                crate::ArrayParams::default(),
+            )
+            .unwrap()
+        };
+        fn as_vec<D: ndarray::Dimension>(nd: ndarray::Array<i32, D>) -> Vec<i32> {
+            nd.iter().copied().collect()
+        }
+        /// The `rows x cols` sub-block of a row-major `all`, in row-major order.
+        fn sub(
+            all: &[i32],
+            cols: usize,
+            rows: std::ops::Range<usize>,
+            cs: std::ops::Range<usize>,
+        ) -> Vec<i32> {
+            rows.flat_map(|r| cs.clone().map(move |c| all[r * cols + c]))
+                .collect()
+        }
+
+        // Straight materialization, and a sub-range of it.
+        let arr = make();
+        let ctx = arr.read_ctx();
+        assert_eq!(as_vec(arr.to_ndarray().unwrap()), expected);
+        assert_eq!(
+            as_vec(arr.to_ndarray_sub(&[1..3, 1..4], &ctx).unwrap()),
+            sub(&expected, cols, 1..3, 1..4)
+        );
+
+        // Shape ops: a re-strided lend (slice), a broadcast, and a copying one (flip).
+        assert_eq!(
+            as_vec(make().slice((.., 1..3)).to_ndarray().unwrap()),
+            sub(&expected, cols, 0..rows, 1..3)
+        );
+        assert_eq!(
+            as_vec(make().flip(0).to_ndarray().unwrap()),
+            (0..rows)
+                .rev()
+                .flat_map(|r| sub(&expected, cols, r..r + 1, 0..cols))
+                .collect::<Vec<i32>>()
+        );
+
+        // An elementwise op chain, which walks the view through the pipeline.
+        use core::ops::{Add, Neg};
+        assert_eq!(
+            as_vec(make().neg().add(make()).to_ndarray().unwrap()),
+            vec![0i32; nitems]
+        );
+
+        // A reduction, which pushes tiles of the view into its own scratch.
+        let row_sums = (0..rows)
+            .map(|r| {
+                (0..cols)
+                    .map(|c| expected[r * cols + c] as i64)
+                    .sum::<i64>()
+            })
+            .collect::<Vec<i64>>();
+        assert_eq!(
+            make()
+                .sum(1)
+                .to_ndarray()
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<Vec<i64>>(),
+            row_sums
+        );
+
+        // And compressing it, which reads the view chunk by chunk into aligned block buffers.
+        assert_eq!(
+            as_vec(make().compact().unwrap().to_ndarray().unwrap()),
+            expected
+        );
     }
 }
