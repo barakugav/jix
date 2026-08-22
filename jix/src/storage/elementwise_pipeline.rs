@@ -9,8 +9,8 @@ use crate::error::{ensure, Result};
 use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::{
-    array_from_fn_inline, dim_arr, DimArray, DimDyn, NdCopier, NdIterUnorderedDyn, OperandsArray,
-    SliceExt, N_OPERANDS_MAX,
+    array_from_fn_inline, dim_arr, DimArray, DimDyn, NdCopier, NdIterUnordered, NdIterUnorderedDyn,
+    OperandsArray, SliceExt, N_OPERANDS_MAX,
 };
 
 /// A lazily-evaluated read of one rectangular region, driven operand-first.
@@ -72,9 +72,6 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     {
         use crate::storage::materialize_out_buf;
 
-        /// Elements of one operand a scratch buffer holds, i.e. how far a single chunk reaches.
-        const CHUNK_LEN: usize = 8192;
-
         let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let output_dtype = T::DTYPE;
         // The destination is described by `output_dtype` but written as `T`, so the two layouts
@@ -84,209 +81,361 @@ pub(crate) trait ElementwisePipelineImpl<T> {
             return Ok(out); // empty region
         }
 
-        // Take the destination's layout before its pointer, and from here on touch it only through
-        // `out_ptr`: a later shared reborrow of `out` would invalidate the pointer we write through.
-        let out_strides = out.strides().to_dim_vec::<DimDyn>();
-        let out_ptr = out.data_ptr_mut().unwrap();
-
-        // ---- operand table ---------------------------------------------------------------
-        // One slot goes to the destination, so the pipeline itself gets `N_OPERANDS_MAX - 1`. A
-        // pipeline whose operand count is known statically is checked here, at monomorphization,
-        // and the per-operand check below folds away.
-        ensure!(
-            self.operands().count() < N_OPERANDS_MAX,
-            InvalidArgument,
-            "a read pipeline is limited to {} operands",
-            N_OPERANDS_MAX,
-        );
-
-        let mut dtypes = OperandsArray::<&Dtype>::new();
-        let mut strides = OperandsArray::<DimArray<usize>>::new();
-        let mut operands = OperandsArray::<&Operand<'_>>::new();
-        dtypes.push(&output_dtype);
-        strides.push(out_strides);
-        for operand in self.operands() {
-            dtypes.push(operand.dtype);
-            strides.push(operand.original_data.strides().to_dim_vec::<DimDyn>());
-            operands.push(operand);
-        }
-        debug_assert!(
-            Self::N_OPERANDS.is_none_or(|n| n == operands.len()),
-            "N_OPERANDS promised {:?} operands but the pipeline yielded {}",
-            Self::N_OPERANDS,
-            operands.len(),
-        );
-        let layouts = dtypes
-            .iter()
-            .map(|dtype| (dtype.itemsize() as usize, dtype.alignment().as_usize()))
-            .collect::<OperandsArray<_>>();
-        let stride_refs = strides
-            .iter()
-            .map(|s| s.as_ref())
-            .collect::<OperandsArray<&[usize]>>();
-
-        let iter = NdIterUnorderedDyn::new(shape.as_ref(), &stride_refs, &layouts);
-        let inner_len = iter.inner_len();
-        let chunk_len = CHUNK_LEN.min(inner_len);
-
-        // ---- scratch buffers for the operands that are not naturally aligned ---------------
-        // TODO: staging is driven purely by alignment. Gathering a *strided* operand into scratch
-        // as well would trade a copy for a contiguous inner loop; worth measuring.
-        struct Staging<'a> {
-            buf: PoolBuf<'a>,
-            copier: NdCopier<'a>,
-        }
-        let mut staging = OperandsArray::<Option<Staging>>::new();
-        for (i, &dtype) in dtypes.iter().enumerate() {
-            // The iterator only vouches for the strides; AND-in the base pointer so an operand is
-            // left unstaged only when every element it yields really is aligned.
-            let base_ptr = match i {
-                0 => out_ptr,
-                _ => operands[i - 1].original_data.data_ptr(),
+        let to_buf_fn = const {
+            let n_operands = match Self::N_OPERANDS {
+                Some(n_operands) => Some(1 + n_operands), // +1 for output
+                None => None,
             };
-            let aligned = iter.is_aligned()[i] && (base_ptr as usize).is_multiple_of(layouts[i].1);
-            staging.push((!aligned).then(|| Staging {
-                buf: context.allocate_buf(chunk_len * layouts[i].0, dtype.alignment()),
-                copier: NdCopier::new(dtype),
-            }));
-        }
 
-        // A staged operand is read (or written) straight out of its scratch buffer, so it is
-        // contiguous whatever its own strides say.
-        let contiguous = (0..dtypes.len()).all(|i| iter.is_contiguous()[i] || staging[i].is_some());
-        type InnerLoopFn<T, R> = fn(&R, *mut T, usize, usize);
-        fn pick_inner_loop<T, R, const CONTIGUOUS: bool>() -> InnerLoopFn<T, R>
-        where
-            T: Dtyped,
-            R: ElementwisePipelineImpl<T>,
-        {
-            match <T as LanesInfo>::LANES {
-                1 => inner_loop::<T, R, 1, CONTIGUOUS>,
-                2 => inner_loop::<T, R, 2, CONTIGUOUS>,
-                4 => inner_loop::<T, R, 4, CONTIGUOUS>,
-                8 => inner_loop::<T, R, 8, CONTIGUOUS>,
-                16 => inner_loop::<T, R, 16, CONTIGUOUS>,
-                32 => inner_loop::<T, R, 32, CONTIGUOUS>,
-                64 => inner_loop::<T, R, 64, CONTIGUOUS>,
-                128 => inner_loop::<T, R, 128, CONTIGUOUS>,
-                256 => inner_loop::<T, R, 256, CONTIGUOUS>,
-                512 => inner_loop::<T, R, 512, CONTIGUOUS>,
-                _ => inner_loop::<T, R, 1024, CONTIGUOUS>,
+            let mut to_buf_fn: Option<
+                fn(Self, &[usize], &mut StridedBuf<'_>, &ReadContext) -> Result<()>,
+            > = None;
+
+            if let Some(n_operands) = n_operands {
+                to_buf_fn = match n_operands {
+                    1 => Some(to_buf_impl::<_, 1>),
+                    2 => Some(to_buf_impl::<_, 2>),
+                    3 => Some(to_buf_impl::<_, 3>),
+                    4 => Some(to_buf_impl::<_, 4>),
+                    5 => Some(to_buf_impl::<_, 5>),
+                    6 => Some(to_buf_impl::<_, 6>),
+                    7 => Some(to_buf_impl::<_, 7>),
+                    8 => Some(to_buf_impl::<_, 8>),
+                    9 => Some(to_buf_impl::<_, 9>),
+                    10 => Some(to_buf_impl::<_, 10>),
+                    11 => Some(to_buf_impl::<_, 11>),
+                    12 => Some(to_buf_impl::<_, 12>),
+                    _ => None,
+                }
+            };
+
+            match to_buf_fn {
+                Some(to_buf_fn) => to_buf_fn,
+                None => to_buf_impl_dyn,
             }
-        }
-        let inner_loop_fn = if contiguous {
-            pick_inner_loop::<T, Self, true>()
-        } else {
-            pick_inner_loop::<T, Self, false>()
         };
 
-        // ---- walk ------------------------------------------------------------------------
-        let (out_itemsize, _) = layouts[0];
-        iter.foreach_inner_1d(|offsets, len, inner_strides| {
-            let mut pos = 0;
-            while pos < len {
-                let n = chunk_len.min(len - pos);
-
-                // Point every operand at this chunk, gathering it into scratch where needed.
-                for (op_i, operand) in operands.iter().enumerate() {
-                    let i = op_i + 1;
-                    let (itemsize, _) = layouts[i];
-                    let src = operand.original_data.data().0;
-                    let src = &src[offsets[i] + pos * inner_strides[i]..];
-                    match &mut staging[i] {
-                        None => {
-                            operand.current_ptr.set(src.as_ptr());
-                            operand.inner_stride.set(inner_strides[i]);
-                        }
-                        Some(staging) => {
-                            // SAFETY: `src` spans the rest of the operand's region, so it covers this
-                            // chunk; the scratch buffer holds `chunk_len >= n` elements; and the
-                            // two are distinct allocations.
-                            unsafe {
-                                staging.copier.copy(
-                                    src,
-                                    staging.buf.as_mut_slice(),
-                                    &[n],
-                                    &[inner_strides[i]],
-                                    &[itemsize],
-                                    dtypes[i],
-                                )
-                            };
-                            operand.current_ptr.set(staging.buf.as_slice().as_ptr());
-                            operand.inner_stride.set(itemsize);
-                        }
-                    }
-                }
-
-                let dst_offset = offsets[0] + pos * inner_strides[0];
-                let (dst, dst_stride) = match &mut staging[0] {
-                    // SAFETY: the walk only yields offsets inside the destination region.
-                    None => (unsafe { out_ptr.add(dst_offset) }, inner_strides[0]),
-                    Some(staging) => (staging.buf.as_mut_slice().as_mut_ptr(), out_itemsize),
-                };
-                inner_loop_fn(&self, dst.cast::<T>(), dst_stride, n);
-
-                if let Some(staging) = &mut staging[0] {
-                    let span = n.saturating_sub(1) * inner_strides[0] + out_itemsize;
-                    // SAFETY: `out_ptr` is the destination's base, and `dst_offset + span` stays
-                    // inside the region the walk was built from.
-                    let dst =
-                        unsafe { std::slice::from_raw_parts_mut(out_ptr.add(dst_offset), span) };
-                    // SAFETY: as above, plus the scratch buffer holds the `n` elements just
-                    // written and is a distinct allocation from the destination.
-                    unsafe {
-                        staging.copier.copy(
-                            staging.buf.as_slice(),
-                            dst,
-                            &[n],
-                            &[out_itemsize],
-                            &[inner_strides[0]],
-                            &output_dtype,
-                        )
-                    };
-                }
-
-                pos += n;
-            }
-        });
+        to_buf_fn(self, shape.as_ref(), &mut out, context)?;
 
         Ok(out)
     }
 }
 
-/// One already-read input region of a pipeline, plus the cursor the pipeline reads it through.
-///
-/// An operand holds the bytes it was read into (`original_data`) but never decides *where* in them
-/// to read: [`to_buf`](ElementwisePipelineImpl::to_buf) owns the iteration order. Before each run of
-/// [`read_bulk`](ElementwisePipelineImpl::read_bulk) calls it points `current_ptr` at the run's
-/// first element and sets `inner_stride` to the byte step between consecutive elements; the operand
-/// then reads straight off those two fields, advancing the cursor as it goes.
-pub(crate) struct Operand<'a> {
-    /// The whole region this operand was read into, at its own byte strides - one per dimension of
-    /// the read region, 0 on a broadcast axis.
-    original_data: StridedBuf<'a>,
-    /// The element type of `original_data`, which need not be the pipeline's output type.
-    dtype: &'a Dtype,
+/// Elements of one operand a scratch buffer holds, i.e. how far a single chunk reaches.
+const CHUNK_LEN: usize = 8192;
 
-    /// The next element to read: null until `to_buf` positions it, then advanced by `read_bulk`.
-    pub(crate) current_ptr: Cell<*const u8>,
-    /// Byte step between consecutive elements of the current run.
-    pub(crate) inner_stride: Cell<usize>,
+/// The walk, with the operand count known at compile time.
+///
+/// Deliberately a near-copy of [`to_buf_impl_dyn`]: same tables, same staging, same order of
+/// operations. What differs is that every per-operand table is a plain `[_; N_OPERANDS]` and the
+/// iterator is monomorphized over the count, so the loops over operands unroll and the offsets stay
+/// in registers. Keep the two in step.
+fn to_buf_impl<T, const N_OPERANDS: usize>(
+    pipeline: impl ElementwisePipelineImpl<T>,
+    shape: &[usize],
+    out: &mut StridedBuf<'_>,
+    context: &ReadContext,
+) -> Result<()>
+where
+    T: Dtyped,
+{
+    let output_dtype = T::DTYPE;
+
+    // ---- operand table ---------------------------------------------------------------
+    // The destination joins the pipeline's own operands as operand 0: all of them cover the same
+    // logical region, each at its own byte strides and element type, and the walk orders and
+    // coalesces the axes over the whole set. The only thing that sets the destination apart is
+    // that its cursor is written through rather than read, which is what `is_output_operand`
+    // marks below.
+    //
+    // `N_OPERANDS` counts that slot too, so it is one more than the pipeline's own count - which is
+    // what `to_buf` instantiated this with, so the iterator below is exhausted exactly. Nothing
+    // here caps the count: the tables are sized by the instantiation rather than by
+    // `N_OPERANDS_MAX`.
+    let out_operand = Operand::destination(out, &output_dtype);
+    let is_output_operand = |i: usize| i == 0;
+    let mut operand_iter = std::iter::once(&out_operand).chain(pipeline.operands());
+    let operands: [_; N_OPERANDS] = array_from_fn_inline(|_| operand_iter.next().unwrap());
+    debug_assert!(operand_iter.next().is_none());
+    let layouts: [_; N_OPERANDS] = array_from_fn_inline(|i| {
+        let dtype = operands[i].dtype;
+        (dtype.itemsize() as usize, dtype.alignment().as_usize())
+    });
+    let strides: [_; N_OPERANDS] = array_from_fn_inline(|i| operands[i].strides());
+
+    let iter = NdIterUnordered::new(shape, strides, layouts);
+    let chunk_len_max = CHUNK_LEN.min(iter.inner_len());
+
+    // ---- scratch buffers for the operands that are not naturally aligned ---------------
+    // TODO: staging is driven purely by alignment. Gathering a *strided* operand into scratch
+    // as well would trade a copy for a contiguous inner loop; worth measuring.
+    let mut staging: [_; N_OPERANDS] = array_from_fn_inline(|i| {
+        let operand = operands[i];
+        let aligned =
+            iter.is_aligned()[i] && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1);
+        (!aligned).then(|| Staging {
+            buf: context.allocate_buf(chunk_len_max * layouts[i].0, operand.dtype.alignment()),
+            copier: NdCopier::new(operand.dtype),
+        })
+    });
+
+    // A staged operand is read (or written) straight out of its scratch buffer, so it is
+    // contiguous whatever its own strides say.
+    let contiguous = (0..N_OPERANDS).all(|i| iter.is_contiguous()[i] || staging[i].is_some());
+    let inner_loop_fn = if contiguous {
+        pick_inner_loop::<_, _, true>()
+    } else {
+        pick_inner_loop::<_, _, false>()
+    };
+
+    iter.foreach_inner_1d(|offsets, len, inner_strides| {
+        for pos in (0..len).step_by(chunk_len_max) {
+            let chunk_len = chunk_len_max.min(len - pos);
+
+            // Point every cursor at this chunk: straight at the operand's own bytes, or at its
+            // scratch buffer, which an input is gathered into on the way.
+            for (i, operand) in operands.iter().enumerate() {
+                // SAFETY: the walk only yields offsets inside every operand's region.
+                let chunk_src =
+                    unsafe { operand.base_ptr().add(offsets[i] + pos * inner_strides[i]) };
+                match &mut staging[i] {
+                    None => operand.set_cursor(chunk_src, inner_strides[i]),
+                    Some(staging) => {
+                        if !is_output_operand(i) {
+                            unsafe {
+                                staging.gather(
+                                    chunk_src,
+                                    chunk_len,
+                                    inner_strides[i],
+                                    operand.dtype,
+                                )
+                            };
+                        }
+                        operand.set_cursor(staging.buf.as_mut_slice().as_mut_ptr(), layouts[i].0);
+                    }
+                }
+            }
+
+            // The destination's cursor is the one the pipeline's output goes to. It carries write
+            // provenance - `Operand::destination` took it from a writable buffer - and points at
+            // `n` elements of `T`, either in the destination itself or in its scratch buffer.
+            let dst = out_operand.current_ptr.get().cast_mut().cast::<T>();
+            inner_loop_fn(&pipeline, dst, out_operand.inner_stride.get(), chunk_len);
+
+            // Scatter the chunk just written back out of the destination's scratch buffer.
+            if let Some(staging) = &staging[0] {
+                let offset = offsets[0] + pos * inner_strides[0];
+                // SAFETY: the walk only yields offsets inside the destination region, and the
+                // scratch buffer holds the `n` elements the inner loop just wrote.
+                unsafe {
+                    staging.scatter(
+                        out_operand.base_ptr().add(offset),
+                        chunk_len,
+                        inner_strides[0],
+                        &output_dtype,
+                    )
+                };
+            }
+        }
+    });
+
+    Ok(())
 }
 
-impl<'a> Operand<'a> {
-    /// Wrap an already-read region as a pipeline operand.
-    #[inline]
-    pub(crate) fn new(original_data: StridedBuf<'a>, dtype: &'a Dtype) -> Self {
-        Self {
-            // Both cursor fields are set by `to_buf` before every run; there is nothing to read
-            // here until then.
-            current_ptr: Cell::new(std::ptr::null()),
-            inner_stride: Cell::new(0),
-            original_data,
-            dtype,
+/// The walk, for a pipeline whose operand count is only known at runtime.
+///
+/// The twin of [`to_buf_impl`], which runs whenever the count is a compile-time constant. Here the
+/// per-operand tables are [`OperandsArray`]s, so the count is capped at [`N_OPERANDS_MAX`].
+fn to_buf_impl_dyn<T>(
+    pipeline: impl ElementwisePipelineImpl<T>,
+    shape: &[usize],
+    out: &mut StridedBuf<'_>,
+    context: &ReadContext,
+) -> Result<()>
+where
+    T: Dtyped,
+{
+    let output_dtype = T::DTYPE;
+
+    // ---- operand table ---------------------------------------------------------------
+    // The destination joins the pipeline's own operands as operand 0: all of them cover the same
+    // logical region, each at its own byte strides and element type, and the walk orders and
+    // coalesces the axes over the whole set. The only thing that sets the destination apart is
+    // that its cursor is written through rather than read, which is what `is_output_operand`
+    // marks below.
+    //
+    // That one slot leaves `N_OPERANDS_MAX - 1` for the pipeline itself. For a pipeline whose
+    // operand count is known statically the check folds away at monomorphization.
+    ensure!(
+        pipeline.operands().count() < N_OPERANDS_MAX,
+        InvalidArgument,
+        "a read pipeline is limited to {} operands",
+        N_OPERANDS_MAX,
+    );
+    let out_operand = Operand::destination(out, &output_dtype);
+    let is_output_operand = |i: usize| i == 0;
+    let operands = std::iter::once(&out_operand)
+        .chain(pipeline.operands())
+        .collect::<OperandsArray<&Operand<'_>>>();
+    let layouts = operands
+        .iter()
+        .map(|operand| {
+            let dtype = operand.dtype;
+            (dtype.itemsize() as usize, dtype.alignment().as_usize())
+        })
+        .collect::<OperandsArray<_>>();
+    let strides = operands
+        .iter()
+        .map(|operand| operand.strides())
+        .collect::<OperandsArray<&[usize]>>();
+
+    let iter = NdIterUnorderedDyn::new(shape, &strides, &layouts);
+    let chunk_len_max = CHUNK_LEN.min(iter.inner_len());
+
+    // ---- scratch buffers for the operands that are not naturally aligned ---------------
+    // TODO: staging is driven purely by alignment. Gathering a *strided* operand into scratch
+    // as well would trade a copy for a contiguous inner loop; worth measuring.
+    let mut staging = operands
+        .iter()
+        .enumerate()
+        .map(|(i, operand)| {
+            let aligned =
+                iter.is_aligned()[i] && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1);
+            (!aligned).then(|| Staging {
+                buf: context.allocate_buf(chunk_len_max * layouts[i].0, operand.dtype.alignment()),
+                copier: NdCopier::new(operand.dtype),
+            })
+        })
+        .collect::<OperandsArray<_>>();
+
+    // A staged operand is read (or written) straight out of its scratch buffer, so it is
+    // contiguous whatever its own strides say.
+    let contiguous = (0..operands.len()).all(|i| iter.is_contiguous()[i] || staging[i].is_some());
+    let inner_loop_fn = if contiguous {
+        pick_inner_loop::<_, _, true>()
+    } else {
+        pick_inner_loop::<_, _, false>()
+    };
+
+    iter.foreach_inner_1d(|offsets, len, inner_strides| {
+        for pos in (0..len).step_by(chunk_len_max) {
+            let chunk_len = chunk_len_max.min(len - pos);
+
+            // Point every cursor at this chunk: straight at the operand's own bytes, or at its
+            // scratch buffer, which an input is gathered into on the way.
+            for (i, operand) in operands.iter().enumerate() {
+                // SAFETY: the walk only yields offsets inside every operand's region.
+                let chunk_src =
+                    unsafe { operand.base_ptr().add(offsets[i] + pos * inner_strides[i]) };
+                match &mut staging[i] {
+                    None => operand.set_cursor(chunk_src, inner_strides[i]),
+                    Some(staging) => {
+                        if !is_output_operand(i) {
+                            unsafe {
+                                staging.gather(
+                                    chunk_src,
+                                    chunk_len,
+                                    inner_strides[i],
+                                    operand.dtype,
+                                )
+                            };
+                        }
+                        operand.set_cursor(staging.buf.as_mut_slice().as_mut_ptr(), layouts[i].0);
+                    }
+                }
+            }
+
+            // The destination's cursor is the one the pipeline's output goes to. It carries write
+            // provenance - `Operand::destination` took it from a writable buffer - and points at
+            // `n` elements of `T`, either in the destination itself or in its scratch buffer.
+            let dst = out_operand.current_ptr.get().cast_mut().cast::<T>();
+            inner_loop_fn(&pipeline, dst, out_operand.inner_stride.get(), chunk_len);
+
+            // Scatter the chunk just written back out of the destination's scratch buffer.
+            if let Some(staging) = &staging[0] {
+                let offset = offsets[0] + pos * inner_strides[0];
+                // SAFETY: the walk only yields offsets inside the destination region, and the
+                // scratch buffer holds the `n` elements the inner loop just wrote.
+                unsafe {
+                    staging.scatter(
+                        out_operand.base_ptr().add(offset),
+                        chunk_len,
+                        inner_strides[0],
+                        &output_dtype,
+                    )
+                };
+            }
         }
+    });
+
+    Ok(())
+}
+
+/// The aligned scratch buffer standing in for one operand whose own bytes are not.
+///
+/// `read_bulk` loads and stores whole elements with no unaligned fallback, so an operand that would
+/// not be aligned is walked through this instead: an input's chunk is gathered in before the run,
+/// the destination's is scattered back out after it, and in between the pipeline sees a contiguous,
+/// aligned run either way.
+struct Staging<'a> {
+    buf: PoolBuf<'a>,
+    copier: NdCopier<'a>,
+}
+
+impl Staging<'_> {
+    /// Copy an input's chunk of `n` elements into the scratch buffer.
+    ///
+    /// # Safety
+    ///
+    /// `src` must point at the chunk's first element with `n` elements at `stride` in bounds behind
+    /// it, in an allocation distinct from the scratch buffer, and the buffer must hold `n` elements
+    /// of `dtype`.
+    #[inline]
+    unsafe fn gather(&mut self, src: *const u8, n: usize, stride: usize, dtype: &Dtype) {
+        let itemsize = dtype.itemsize() as usize;
+        // SAFETY: the caller vouches for `n` elements at `stride` behind `src`.
+        let src = unsafe { std::slice::from_raw_parts(src, chunk_span(n, stride, itemsize)) };
+        // SAFETY: the two buffers are distinct allocations, per the caller.
+        unsafe {
+            self.copier.copy(
+                src,
+                self.buf.as_mut_slice(),
+                &[n],
+                &[stride],
+                &[itemsize],
+                dtype,
+            )
+        };
     }
+
+    /// Copy the `n` elements the pipeline just wrote out of the scratch buffer and into `dst`.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`gather`](Self::gather), with `dst` in place of `src`.
+    #[inline]
+    unsafe fn scatter(&self, dst: *mut u8, n: usize, stride: usize, dtype: &Dtype) {
+        let itemsize = dtype.itemsize() as usize;
+        // SAFETY: the caller vouches for `n` elements at `stride` behind `dst`.
+        let dst = unsafe { std::slice::from_raw_parts_mut(dst, chunk_span(n, stride, itemsize)) };
+        // SAFETY: the two buffers are distinct allocations, per the caller.
+        unsafe {
+            self.copier.copy(
+                self.buf.as_slice(),
+                dst,
+                &[n],
+                &[itemsize],
+                &[stride],
+                dtype,
+            )
+        };
+    }
+}
+
+/// The bytes a run of `n` elements `stride` apart spans, counting only up to the last one's end.
+#[inline]
+fn chunk_span(n: usize, stride: usize, itemsize: usize) -> usize {
+    n.saturating_sub(1) * stride + itemsize
 }
 
 /// One flat run of `len` elements: pull them through the pipeline `LANES` at a time and write them
@@ -296,14 +445,13 @@ impl<'a> Operand<'a> {
 /// aligned (`to_buf` stages any operand that would not be), so the reads and writes are plain
 /// aligned accesses.
 #[inline(never)]
-fn inner_loop<T, R, const LANES: usize, const CONTIGUOUS: bool>(
-    data: &R,
+fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
+    pipeline: &impl ElementwisePipelineImpl<T>,
     dst: *mut T,
     dst_stride: usize,
     len: usize,
 ) where
     T: Dtyped,
-    R: ElementwisePipelineImpl<T>,
 {
     if CONTIGUOUS {
         debug_assert_eq!(dst_stride, size_of::<T>());
@@ -311,7 +459,7 @@ fn inner_loop<T, R, const LANES: usize, const CONTIGUOUS: bool>(
     debug_assert!(dst.is_aligned());
     let mut i = 0;
     while i + LANES <= len {
-        let chunk = unsafe { data.read_bulk::<LANES, CONTIGUOUS>() };
+        let chunk = unsafe { pipeline.read_bulk::<LANES, CONTIGUOUS>() };
         if CONTIGUOUS {
             let elms = unsafe { dst.add(i).cast::<[T; LANES]>() };
             unsafe { elms.write(chunk) };
@@ -325,7 +473,7 @@ fn inner_loop<T, R, const LANES: usize, const CONTIGUOUS: bool>(
         i += LANES;
     }
     while i < len {
-        let [val] = unsafe { data.read_bulk::<1, CONTIGUOUS>() };
+        let [val] = unsafe { pipeline.read_bulk::<1, CONTIGUOUS>() };
         let elm = if CONTIGUOUS {
             unsafe { dst.add(i) }
         } else {
@@ -333,6 +481,124 @@ fn inner_loop<T, R, const LANES: usize, const CONTIGUOUS: bool>(
         };
         unsafe { elm.write(val) };
         i += 1;
+    }
+}
+
+type InnerLoopFn<T, P> = fn(&P, *mut T, usize, usize);
+fn pick_inner_loop<T, P, const CONTIGUOUS: bool>() -> InnerLoopFn<T, P>
+where
+    T: Dtyped,
+    P: ElementwisePipelineImpl<T>,
+{
+    match <T as LanesInfo>::LANES {
+        1 => inner_loop::<_, 1, CONTIGUOUS>,
+        2 => inner_loop::<_, 2, CONTIGUOUS>,
+        4 => inner_loop::<_, 4, CONTIGUOUS>,
+        8 => inner_loop::<_, 8, CONTIGUOUS>,
+        16 => inner_loop::<_, 16, CONTIGUOUS>,
+        32 => inner_loop::<_, 32, CONTIGUOUS>,
+        64 => inner_loop::<_, 64, CONTIGUOUS>,
+        128 => inner_loop::<_, 128, CONTIGUOUS>,
+        256 => inner_loop::<_, 256, CONTIGUOUS>,
+        512 => inner_loop::<_, 512, CONTIGUOUS>,
+        _ => inner_loop::<_, 1024, CONTIGUOUS>,
+    }
+}
+
+/// One region a pipeline reads - or writes - plus the cursor it is walked through.
+///
+/// An operand holds the whole region it covers but never decides *where* in it to read:
+/// [`to_buf`](ElementwisePipelineImpl::to_buf) owns the iteration order. Before each run of
+/// [`read_bulk`](ElementwisePipelineImpl::read_bulk) calls it points `current_ptr` at the run's
+/// first element and sets `inner_stride` to the byte step between consecutive elements; the operand
+/// then reads straight off those two fields, advancing the cursor as it goes.
+///
+/// The read destination is an operand too - operand 0 of the walk - and works the same way, except
+/// that its cursor is written through rather than read.
+pub(crate) struct Operand<'a> {
+    data: OperandData<'a>,
+    /// The element type of the region, which need not be the pipeline's output type.
+    dtype: &'a Dtype,
+
+    /// The next element to read: null until `to_buf` positions it, then advanced by `read_bulk`.
+    pub(crate) current_ptr: Cell<*const u8>,
+    /// Byte step between consecutive elements of the current run.
+    pub(crate) inner_stride: Cell<usize>,
+}
+
+/// The region behind an [`Operand`]: bytes to read, or bytes to write.
+enum OperandData<'a> {
+    /// A region already read out of a storage, owned here so a materialized read stays alive for
+    /// as long as the pipeline. Its bytes are reached by reborrowing it, one chunk at a time.
+    Read(StridedBuf<'a>),
+    /// The caller's destination, as the write pointer to walk it through plus its byte strides.
+    ///
+    /// Held raw rather than as the [`StridedBuf`] it came from because a reborrow of that buffer -
+    /// even a shared one, even just moving it - invalidates the pointer being written through.
+    Write {
+        base_ptr: *mut u8,
+        strides: DimArray<usize>,
+    },
+}
+
+impl<'a> Operand<'a> {
+    /// Wrap an already-read region as an operand the pipeline reads through its cursor.
+    #[inline]
+    pub(crate) fn new(original_data: StridedBuf<'a>, dtype: &'a Dtype) -> Self {
+        Self::from_data(OperandData::Read(original_data), dtype)
+    }
+
+    /// Wrap a write destination as the operand the pipeline's output is written through.
+    ///
+    /// `out` stays borrowed for as long as the operand lives, because from here on the bytes are
+    /// only reachable through the pointer taken below.
+    #[inline]
+    fn destination(out: &'a mut StridedBuf<'_>, dtype: &'a Dtype) -> Self {
+        // The layout before the pointer: a later shared reborrow of `out` would invalidate it.
+        let strides = out.strides().to_dim_vec::<DimDyn>();
+        let base_ptr = out.data_ptr_mut().expect("a read destination is writable");
+        Self::from_data(OperandData::Write { base_ptr, strides }, dtype)
+    }
+
+    #[inline]
+    fn from_data(data: OperandData<'a>, dtype: &'a Dtype) -> Self {
+        Self {
+            // Both cursor fields are set by `to_buf` before every run; there is nothing to read
+            // here until then.
+            current_ptr: Cell::new(std::ptr::null()),
+            inner_stride: Cell::new(0),
+            data,
+            dtype,
+        }
+    }
+
+    /// The byte strides of the whole region, one per dimension of the read region, 0 on a
+    /// broadcast axis.
+    #[inline]
+    fn strides(&self) -> &[usize] {
+        match &self.data {
+            OperandData::Read(data) => data.strides(),
+            OperandData::Write { strides, .. } => strides.as_ref(),
+        }
+    }
+
+    /// The first byte of the region.
+    ///
+    /// Only a destination operand's pointer carries write provenance; the one a read operand hands
+    /// back must never be written through.
+    #[inline]
+    fn base_ptr(&self) -> *mut u8 {
+        match &self.data {
+            OperandData::Read(data) => data.data_ptr().cast_mut(),
+            OperandData::Write { base_ptr, .. } => *base_ptr,
+        }
+    }
+
+    /// Point the cursor at the first of a run of elements `inner_stride` bytes apart.
+    #[inline]
+    fn set_cursor(&self, ptr: *const u8, inner_stride: usize) {
+        self.current_ptr.set(ptr);
+        self.inner_stride.set(inner_stride);
     }
 }
 
@@ -939,7 +1205,7 @@ mod tests {
         ];
         let operand_ptrs = pipeline
             .operands()
-            .map(|operand| operand.original_data.data_ptr() as usize)
+            .map(|operand| operand.base_ptr() as usize)
             .collect::<Vec<_>>();
         assert_eq!(operand_ptrs.len(), 2);
         for (&ptr, &src) in operand_ptrs.iter().zip(&sources) {
@@ -1238,6 +1504,30 @@ mod tests {
 
         let above = borrowed.neg().add(compact());
         assert_eq!(operand_counts::<_, i32>(&above.storage, &index), (None, 4));
+    }
+
+    #[test]
+    fn wide_static_sequence() {
+        // Ten leaves plus the destination is eleven operands, past `N_OPERANDS_MAX`. A statically
+        // counted pipeline is walked by `to_buf_impl`, whose tables are sized by the instantiation
+        // rather than by that cap, so a chain this wide goes through in one pass.
+        let arrays = std::array::from_fn::<_, 10, _>(|k| {
+            let nd = ndarray::Array1::from_shape_fn(6, |i| (i + k) as i32);
+            crate::Array::compact_ndarray(&nd).unwrap()
+        });
+        let index = full_index(&[6u64]);
+        assert_eq!(
+            operand_counts::<_, i32>(&arrays[0].storage, &index),
+            (Some(1), 1)
+        );
+
+        let mapped = crate::ops::map_multiple(arrays, |xs: [i32; 10]| xs.iter().sum::<i32>());
+        let out = mapped.to_ndarray().unwrap();
+        // Array `k` holds `i + k`, so element `i` sums to `10 * i + 45`.
+        assert_eq!(
+            out.iter().copied().collect::<Vec<i32>>(),
+            vec![45, 55, 65, 75, 85, 95]
+        );
     }
 
     // TODO
