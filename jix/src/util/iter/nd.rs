@@ -5,7 +5,7 @@ use crate::util::iter::strides::{
     nd_iter_ext_logical_global_index, NdIterExtStridesOffset, NdIterExtStridesOffsetMulti,
     NdIterExtStridesOffsetMultiDyn, NdIterExtStridesPtr, NdIterExtStridesPtrMut,
 };
-use crate::util::{Idx, OperandsArray};
+use crate::util::Idx;
 use crate::{DimVec, Dimension};
 
 /// A multi-dimensional iterator that advances indices in row-major (C) order.
@@ -546,8 +546,8 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
     #[inline]
     pub(crate) fn with_strides_offset_multi_dyn_ext<S: Idx>(
         self,
-        strides: OperandsArray<D::Vec<S>>,
-        initial_offsets: OperandsArray<S>,
+        strides: Vec<D::Vec<S>>,
+        initial_offsets: Vec<S>,
     ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffsetMultiDyn<D, S>>> {
         let ext = NdIterExtStridesOffsetMultiDyn::<D, S>::new(strides, initial_offsets);
         NdIterBuilder {

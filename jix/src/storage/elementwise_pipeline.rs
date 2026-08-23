@@ -5,12 +5,12 @@ use std::ops::Range;
 use crate::buf_pool::PoolBuf;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{ensure, Result};
+use crate::error::Result;
 use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::{
     array_from_fn_inline, dim_arr, DimArray, DimDyn, NdCopier, NdIterUnordered, NdIterUnorderedDyn,
-    OperandsArray, SliceExt, N_OPERANDS_MAX,
+    SliceExt,
 };
 
 /// A lazily-evaluated read of one rectangular region, driven operand-first.
@@ -149,9 +149,7 @@ where
     // marks below.
     //
     // `N_OPERANDS` counts that slot too, so it is one more than the pipeline's own count - which is
-    // what `to_buf` instantiated this with, so the iterator below is exhausted exactly. Nothing
-    // here caps the count: the tables are sized by the instantiation rather than by
-    // `N_OPERANDS_MAX`.
+    // what `to_buf` instantiated this with, so the iterator below is exhausted exactly.
     let out_operand = Operand::destination(out, &output_dtype);
     let is_output_operand = |i: usize| i == 0;
     let mut operand_iter = std::iter::once(&out_operand).chain(pipeline.operands());
@@ -245,7 +243,8 @@ where
 /// The walk, for a pipeline whose operand count is only known at runtime.
 ///
 /// The twin of [`to_buf_impl`], which runs whenever the count is a compile-time constant. Here the
-/// per-operand tables are [`OperandsArray`]s, so the count is capped at [`N_OPERANDS_MAX`].
+/// per-operand tables are heap-allocated instead of sized by the instantiation, which is what lets
+/// one copy of this serve any count.
 fn to_buf_impl_dyn<T>(
     pipeline: impl ElementwisePipelineImpl<T>,
     shape: &[usize],
@@ -263,31 +262,22 @@ where
     // coalesces the axes over the whole set. The only thing that sets the destination apart is
     // that its cursor is written through rather than read, which is what `is_output_operand`
     // marks below.
-    //
-    // That one slot leaves `N_OPERANDS_MAX - 1` for the pipeline itself. For a pipeline whose
-    // operand count is known statically the check folds away at monomorphization.
-    ensure!(
-        pipeline.operands().count() < N_OPERANDS_MAX,
-        InvalidArgument,
-        "a read pipeline is limited to {} operands",
-        N_OPERANDS_MAX,
-    );
     let out_operand = Operand::destination(out, &output_dtype);
     let is_output_operand = |i: usize| i == 0;
     let operands = std::iter::once(&out_operand)
         .chain(pipeline.operands())
-        .collect::<OperandsArray<&Operand<'_>>>();
+        .collect::<Vec<&Operand<'_>>>();
     let layouts = operands
         .iter()
         .map(|operand| {
             let dtype = operand.dtype;
             (dtype.itemsize() as usize, dtype.alignment().as_usize())
         })
-        .collect::<OperandsArray<_>>();
+        .collect::<Vec<_>>();
     let strides = operands
         .iter()
         .map(|operand| operand.strides())
-        .collect::<OperandsArray<&[usize]>>();
+        .collect::<Vec<&[usize]>>();
 
     let iter = NdIterUnorderedDyn::new(shape, &strides, &layouts);
     let chunk_len_max = CHUNK_LEN.min(iter.inner_len());
@@ -306,7 +296,7 @@ where
                 copier: NdCopier::new(operand.dtype),
             })
         })
-        .collect::<OperandsArray<_>>();
+        .collect::<Vec<_>>();
 
     // A staged operand is read (or written) straight out of its scratch buffer, so it is
     // contiguous whatever its own strides say.
@@ -490,18 +480,20 @@ where
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
 {
-    match <T as LanesInfo>::LANES {
-        1 => inner_loop::<_, 1, CONTIGUOUS>,
-        2 => inner_loop::<_, 2, CONTIGUOUS>,
-        4 => inner_loop::<_, 4, CONTIGUOUS>,
-        8 => inner_loop::<_, 8, CONTIGUOUS>,
-        16 => inner_loop::<_, 16, CONTIGUOUS>,
-        32 => inner_loop::<_, 32, CONTIGUOUS>,
-        64 => inner_loop::<_, 64, CONTIGUOUS>,
-        128 => inner_loop::<_, 128, CONTIGUOUS>,
-        256 => inner_loop::<_, 256, CONTIGUOUS>,
-        512 => inner_loop::<_, 512, CONTIGUOUS>,
-        _ => inner_loop::<_, 1024, CONTIGUOUS>,
+    const {
+        match <T as LanesInfo>::LANES {
+            1 => inner_loop::<_, 1, CONTIGUOUS>,
+            2 => inner_loop::<_, 2, CONTIGUOUS>,
+            4 => inner_loop::<_, 4, CONTIGUOUS>,
+            8 => inner_loop::<_, 8, CONTIGUOUS>,
+            16 => inner_loop::<_, 16, CONTIGUOUS>,
+            32 => inner_loop::<_, 32, CONTIGUOUS>,
+            64 => inner_loop::<_, 64, CONTIGUOUS>,
+            128 => inner_loop::<_, 128, CONTIGUOUS>,
+            256 => inner_loop::<_, 256, CONTIGUOUS>,
+            512 => inner_loop::<_, 512, CONTIGUOUS>,
+            _ => inner_loop::<_, 1024, CONTIGUOUS>,
+        }
     }
 }
 
@@ -1508,9 +1500,9 @@ mod tests {
 
     #[test]
     fn wide_static_sequence() {
-        // Ten leaves plus the destination is eleven operands, past `N_OPERANDS_MAX`. A statically
-        // counted pipeline is walked by `to_buf_impl`, whose tables are sized by the instantiation
-        // rather than by that cap, so a chain this wide goes through in one pass.
+        // Ten leaves plus the destination is eleven operands: past the twelve-arm dispatch table
+        // is where `to_buf` falls back to `to_buf_impl_dyn`, and below it every count gets its own
+        // instantiation.
         let arrays = std::array::from_fn::<_, 10, _>(|k| {
             let nd = ndarray::Array1::from_shape_fn(6, |i| (i + k) as i32);
             crate::Array::compact_ndarray(&nd).unwrap()
@@ -1530,17 +1522,26 @@ mod tests {
         );
     }
 
-    // TODO
-    // #[test]
-    // fn wide_sequence() {
-    //     let n = 100usize;
-    //     let arrays = (0..n)
-    //         .map(|k| {
-    //             let nd = ndarray::Array1::from_shape_fn(6, |i| (i + k) as i32);
-    //             crate::Array::compact_ndarray(&nd).unwrap()
-    //         })
-    //         .collect::<Vec<_>>();
-    //     let mapped = crate::ops::map_multiple(arrays, |xs: &[i32]| xs.iter().sum::<i32>());
-    //     assert!(mapped.to_ndarray().is_ok());
-    // }
+    #[test]
+    fn wide_sequence() {
+        // A `Vec` of arrays has no compile-time count, so the chain is walked by `to_buf_impl_dyn`,
+        // which is unbounded: a hundred leaves plus the destination is a hundred and one operands.
+        let n = 100usize;
+        let arrays = (0..n)
+            .map(|k| {
+                let nd = ndarray::Array1::from_shape_fn(6, |i| (i + k) as i32);
+                crate::Array::compact_ndarray(&nd).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mapped = crate::ops::map_multiple(arrays, |xs: &[i32]| xs.iter().sum::<i32>());
+        let index = full_index(mapped.storage.shape());
+        assert_eq!(operand_counts::<_, i32>(&mapped.storage, &index), (None, n));
+
+        let out = mapped.to_ndarray().unwrap();
+        // Array `k` holds `i + k`, so element `i` sums to `100 * i + 4950`.
+        assert_eq!(
+            out.iter().copied().collect::<Vec<i32>>(),
+            (0..6).map(|i| 100 * i + 4950).collect::<Vec<i32>>()
+        );
+    }
 }

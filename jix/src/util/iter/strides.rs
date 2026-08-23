@@ -1,5 +1,5 @@
 use crate::util::iter::{impl_merge_extension, NdIterExtension};
-use crate::util::{Idx, OperandsArray};
+use crate::util::Idx;
 use crate::Dimension;
 use crate::{default_logical_strides_slice, DimVec};
 
@@ -241,20 +241,18 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
 /// The runtime-length sibling of [`NdIterExtStridesOffsetMulti`], for callers whose operand count is
 /// not known at compile time.
 ///
-/// The count lives in an [`OperandsArray`] rather than a const generic, so one instantiation serves
-/// every caller. [`value`](NdIterExtension::value) hands back a borrowed `&[S]` - the reason
-/// [`NdIterExtension::Item`] carries a lifetime - which also means an `NdIter` carrying this
-/// extension is *not* an [`Iterator`] and must be driven with [`NdIter::next`].
-// TODO: reached only from `nd_iter_unordered_nd_walk_dyn`, which has no non-test caller yet.
-#[allow(dead_code)]
+/// The count lives in a [`Vec`] rather than a const generic, so one instantiation serves every
+/// caller and there is no bound on the number of operands. [`value`](NdIterExtension::value) hands
+/// back a borrowed `&[S]` - the reason [`NdIterExtension::Item`] carries a lifetime - which also
+/// means an `NdIter` carrying this extension is *not* an [`Iterator`] and must be driven with
+/// [`NdIter::next`].
 pub(crate) struct NdIterExtStridesOffsetMultiDyn<D: Dimension, S> {
-    strides: OperandsArray<D::Vec<S>>,
-    offsets: OperandsArray<S>,
+    strides: Vec<D::Vec<S>>,
+    offsets: Vec<S>,
 }
-#[allow(dead_code)]
 impl<D: Dimension, S: Idx> NdIterExtStridesOffsetMultiDyn<D, S> {
     #[inline]
-    pub fn new(strides: OperandsArray<D::Vec<S>>, initial_offsets: OperandsArray<S>) -> Self {
+    pub fn new(strides: Vec<D::Vec<S>>, initial_offsets: Vec<S>) -> Self {
         assert_eq!(strides.len(), initial_offsets.len());
         Self {
             strides,
