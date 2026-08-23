@@ -187,8 +187,7 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
 ///
 /// Like [`NdIterExtStridesOffset`] but for a fixed number of operands sharing one index walk: on
 /// each dimension change every offset is advanced by `(after - before) * strides[operand][dim]`, and
-/// [`value`](NdIterExtension::value) yields `[S; N]`. Since that item does not borrow, an `NdIter`
-/// carrying this extension is a plain [`Iterator`].
+/// [`value`](NdIterExtension::value) yields `[S; N]`.
 pub(crate) struct NdIterExtStridesOffsetMulti<D: Dimension, S, const N: usize> {
     strides: [D::Vec<S>; N],
     offsets: [S; N],
@@ -240,12 +239,6 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
 
 /// The runtime-length sibling of [`NdIterExtStridesOffsetMulti`], for callers whose operand count is
 /// not known at compile time.
-///
-/// The count lives in a [`Vec`] rather than a const generic, so one instantiation serves every
-/// caller and there is no bound on the number of operands. [`value`](NdIterExtension::value) hands
-/// back a borrowed `&[S]` - the reason [`NdIterExtension::Item`] carries a lifetime - which also
-/// means an `NdIter` carrying this extension is *not* an [`Iterator`] and must be driven with
-/// [`NdIter::next`].
 pub(crate) struct NdIterExtStridesOffsetMultiDyn<D: Dimension, S> {
     strides: Vec<D::Vec<S>>,
     offsets: Vec<S>,

@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::util::iter::NdIter;
 use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, Dimension};
 
@@ -80,22 +82,16 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
             let strides = array_from_fn_inline(|i| DimArray::from_slice(&[strides[i][d]]).unwrap());
             (shape, strides)
         } else {
-            let stride_cmp = |d1: &usize, d2: &usize| {
+            axes_sort_by(&mut dim_perm, |d1: usize, d2: usize| {
                 for strides in strides.iter() {
-                    match strides[*d1].cmp(&strides[*d2]) {
+                    match strides[d1].cmp(&strides[d2]) {
                         std::cmp::Ordering::Less => return std::cmp::Ordering::Greater,
                         std::cmp::Ordering::Equal => {}
                         std::cmp::Ordering::Greater => return std::cmp::Ordering::Less,
                     }
                 }
                 std::cmp::Ordering::Equal
-            };
-            let need_sort = dim_perm
-                .windows(2)
-                .any(|w| stride_cmp(&w[0], &w[1]).is_gt());
-            if need_sort {
-                dim_perm.sort_by(stride_cmp);
-            }
+            });
 
             // (2) Coalesce adjacent contiguous axes into groups. `dim_perm` lists the axes to visit,
             // outermost first, so a group takes its stride from the innermost axis it reaches down to
@@ -235,6 +231,24 @@ fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, D: Dimension>(
             .build();
         for (_, offsets) in iter {
             inner_loop(offsets, inner_len, inner_strides);
+        }
+    }
+}
+
+#[inline]
+pub(super) fn axes_sort_by(arr: &mut [usize], mut compare: impl FnMut(usize, usize) -> Ordering) {
+    for i in 1..arr.len() {
+        let mut insertion_idx = i;
+        for i1 in (0..i).rev() {
+            if compare(arr[i], arr[i1]).is_ge() {
+                break;
+            }
+            insertion_idx = i1;
+        }
+        if insertion_idx != i {
+            let tmp = arr[i];
+            arr.copy_within(insertion_idx..i, insertion_idx + 1);
+            arr[insertion_idx] = tmp;
         }
     }
 }
@@ -640,5 +654,76 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    // ---------------------------------------------------------------------------
+    // axes_sort_by
+    // ---------------------------------------------------------------------------
+
+    /// Sort by the axis indices themselves, ascending.
+    fn sorted(mut axes: Vec<usize>) -> Vec<usize> {
+        axes_sort_by(&mut axes, |a, b| a.cmp(&b));
+        axes
+    }
+
+    #[test]
+    fn axes_sort_by_orders_ascending() {
+        assert_eq!(sorted(vec![]), Vec::<usize>::new());
+        assert_eq!(sorted(vec![7]), vec![7]);
+        assert_eq!(sorted(vec![1, 2, 3]), vec![1, 2, 3]); // already ordered
+        assert_eq!(sorted(vec![3, 2, 1]), vec![1, 2, 3]); // fully reversed
+        assert_eq!(sorted(vec![2, 0, 3, 1]), vec![0, 1, 2, 3]);
+        assert_eq!(sorted(vec![5, 4, 5, 4]), vec![4, 4, 5, 5]); // duplicates
+    }
+
+    #[test]
+    fn axes_sort_by_is_stable() {
+        // Rank by `d % 3` alone, so the three axes in each rank compare `Equal` to each other and
+        // only a stable sort keeps them in the order they came in.
+        let mut axes = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
+        axes_sort_by(&mut axes, |a, b| (a % 3).cmp(&(b % 3)));
+        assert_eq!(axes, vec![0, 3, 6, 1, 4, 7, 2, 5, 8]);
+    }
+
+    #[test]
+    fn axes_sort_by_compares_elements_not_positions() {
+        // The comparator is handed the *elements* - axis indices - never their positions in `arr`.
+        // Every element here is >= 10, so a comparator fed positions would hit the panic.
+        let rank = |axis: usize| match axis {
+            10 => 2usize,
+            11 => 0,
+            12 => 1,
+            other => panic!("comparator got {other}, which is a position, not an element"),
+        };
+        let mut axes = vec![10, 11, 12];
+        axes_sort_by(&mut axes, |a, b| rank(a).cmp(&rank(b)));
+        assert_eq!(axes, vec![11, 12, 10]);
+    }
+
+    #[test]
+    fn axes_sort_by_ranks_axes_by_descending_stride() {
+        // How both walks use it: rank an axis by its per-operand strides, operand 0 most
+        // significant, with the comparison reversed so the largest stride ends up outermost.
+        fn sort_by_strides(strides: &[&[usize]], axes: &mut [usize]) {
+            axes_sort_by(axes, |d1, d2| {
+                for s in strides {
+                    match s[d1].cmp(&s[d2]) {
+                        Ordering::Less => return Ordering::Greater,
+                        Ordering::Equal => {}
+                        Ordering::Greater => return Ordering::Less,
+                    }
+                }
+                Ordering::Equal
+            });
+        }
+
+        let mut axes = [0, 1, 2];
+        sort_by_strides(&[&[4, 400, 40], &[1, 100, 10]], &mut axes);
+        assert_eq!(axes, [1, 2, 0]);
+
+        // Operand 0 has the same stride on both axes, so operand 1 breaks the tie.
+        let mut axes = [0, 1];
+        sort_by_strides(&[&[8, 8], &[1, 2]], &mut axes);
+        assert_eq!(axes, [1, 0]);
     }
 }

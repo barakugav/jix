@@ -124,16 +124,11 @@ pub trait ArrayStorage {
 
     /// Read a sub-region as an element-wise pipeline over `T`.
     ///
-    /// Where [`read_data`](Self::read_data) materializes a region, this hands back a *tree*: the
-    /// storage chain's leaves become `Operand`s the pipeline reads through cursors, and each op in
-    /// the chain a node that combines its children. The whole tree then runs in one pass in
-    /// `ElementwisePipelineImpl::to_buf`, which picks the visitation order.
-    ///
-    /// The default treats `self` as a single leaf: read the region once, present it as one operand.
-    /// The read is a pull (`out = None`), so a backend that can lend a view of its own memory does
-    /// not copy at all, and its strides - broadcast axes included - are handed straight to the walk.
-    /// Ops that decompose - `Op1`, `Op2` - override this to keep their inputs separate leaves so
-    /// the whole chain fuses into one pass.
+    /// Compare to [`read_data`](Self::read_data), which materializes the region into a single
+    /// buffer, this method hands back a pipeline that build a tree of operations in which the
+    /// leaves are operands and inner nodes are ops. The default implementation of this method
+    /// reads the region in a leaf buffer, but ops override it to build a tree recursively from
+    /// their inner storages dependencies.
     ///
     /// # Arguments
     ///
@@ -151,7 +146,7 @@ pub trait ArrayStorage {
     {
         check_dtype(&T::DTYPE, self.dtype())?;
         let data = self.read_data(index, context, None)?;
-        Ok(unsafe { OperandTyped::new(data, self.dtype()) })
+        Ok(unsafe { OperandTyped::new_input(data, self.dtype()) })
     }
 
     /// Returns the shape of the array, one element per dimension.

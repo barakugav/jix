@@ -131,17 +131,13 @@ where
     /// [`Iterator`] impl, so those can be driven with `for .. in iter` instead.
     #[inline(always)]
     #[allow(clippy::should_implement_trait)]
-    pub(crate) fn next(&mut self) -> Option<(D::Vec<u64>, E::Item<'_>)> {
-        // Advancing is split out so the borrow of `self` taken for the returned item starts after
-        // all mutation is done - borrowck rejects returning it from inside the branches below.
+    pub(crate) fn advance_and_get(&mut self) -> Option<(D::Vec<u64>, E::Item<'_>)> {
         if !self.advance() {
             return None;
         }
         Some((self.current_idx.clone(), self.extensions.value()))
     }
 
-    /// Move to the next index, returning `false` once exhausted. On `true`, `current_idx` and the
-    /// extensions hold the values to yield.
     #[inline(always)]
     fn advance(&mut self) -> bool {
         if self.status.is_exhausted() {
@@ -187,29 +183,17 @@ where
     }
 }
 
-/// `NdIter` is a real [`Iterator`] whenever its extension's item does not borrow from it.
-///
-/// `for<'a> NdIterExtension<Item<'a> = I>` says exactly that: one `I` serves every lifetime, so the
-/// item can outlive the `&self` that produced it and fit [`Iterator::Item`], which has no lifetime
-/// of its own. An extension that does borrow (e.g. [`NdIterExtStridesOffsetMultiDyn`], which lends
-/// a slice of per-operand offsets) has an `Item<'a>` that genuinely varies with `'a`, no single `I`
-/// exists, and this impl simply does not apply - those must use the lending
-/// [`next`](NdIter::next).
-///
-/// The `E: 'static` is forced by the `where Self: 'a` that Rust requires on any GAT returned from
-/// `&self`: without it the `for<'a>` above would quantify over lifetimes for which `E` is not even
-/// valid. Every extension owns its state (dimension vectors, raw pointers, indices), so this costs
-/// nothing in practice.
 impl<D, E, I> Iterator for NdIter<D, E>
 where
     D: Dimension,
+    // `NdIter` is a real [`Iterator`] whenever its extension's item does not borrow from it.
     E: 'static + for<'a> NdIterExtension<Item<'a> = I>,
 {
     type Item = (D::Vec<u64>, I);
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        NdIter::next(self)
+        NdIter::advance_and_get(self)
     }
 
     #[inline(always)]
@@ -226,12 +210,7 @@ where
 /// [`on_decrease`](NdIterExtension::on_decrease) notifications and
 /// return the current derived value via [`value`](NdIterExtension::value).
 pub(crate) trait NdIterExtension {
-    /// The derived value produced at each iteration step.
-    ///
-    /// Borrows from the extension, so an extension holding a runtime-sized amount of state (e.g.
-    /// [`NdIterExtStridesOffsetMultiDyn`], one offset per operand) can hand out a slice instead of
-    /// copying into a fixed-size array. Extensions whose value is a plain `Copy` scalar just ignore
-    /// the lifetime.
+    /// The derived value produced at each iteration step, borrows from the extension.
     type Item<'a>
     where
         Self: 'a;
@@ -756,7 +735,7 @@ mod tests {
     /// type for every lifetime) does not apply here - drive the lending `next` instead.
     fn collect_indices<D: Dimension, E: NdIterExtension>(mut iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
-        while let Some((idx, _)) = iter.next() {
+        while let Some((idx, _)) = iter.advance_and_get() {
             out.push(idx.as_ref().to_vec());
         }
         out

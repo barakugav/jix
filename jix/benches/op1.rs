@@ -26,7 +26,7 @@ fn bench_op1_impl<S: ArrayStorageTyped<Item = i32>>(
 ) {
     for size in [4000, 40_000, 400_000, 2_000_000] {
         let shape = [size, 64];
-        group.bench_function(&format!("op1 {shape:?}"), |b| {
+        group.bench_function(&format!("{shape:?}"), |b| {
             let data = create_data::<i32>(Profile::Smooth, &shape, 0x7e5352cebf8b6db2);
             let array = create_array(data);
             b.iter_batched(
@@ -47,24 +47,30 @@ fn bench_op1_plain_transposed(c: &mut Criterion) {
         let data = data.t();
         let array = Array::plain_ndarray_ref(&data).unwrap();
 
-        let nitems = shape.iter().product::<u64>() as usize;
-        let index = [0..shape[0], 0..shape[1]];
-        let neg = array.as_ref().neg();
-        let ctx = neg.read_ctx();
+        for output_transpose in [true, false] {
+            let neg = array.as_ref().neg();
+            let neg = if output_transpose {
+                neg.transpose() // transpose
+            } else {
+                neg.permute_axes(&(0..shape.len()).collect::<Vec<_>>()) // no-op
+            };
 
-        let neg = neg.as_ref().transpose();
+            let index = neg.shape().iter().map(|&n| 0..n).collect::<Vec<_>>();
+            let nitems = neg.shape().iter().product::<u64>() as usize;
+            let ctx = neg.read_ctx();
 
-        let id = format!("{shape:?}");
-        group.bench_function(&id, |b| {
-            let mut out = vec![0i32; nitems];
-            b.iter(|| {
-                let buf = unsafe {
-                    std::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<u8>(), nitems * 4)
-                };
-                neg.to_ndarray_buf(&index, buf, &ctx).unwrap();
-                out[0]
+            let id = format!("{shape:?} output_transpose={output_transpose}");
+            group.bench_function(&id, |b| {
+                let mut out = vec![0i32; nitems];
+                b.iter(|| {
+                    let buf = unsafe {
+                        std::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<u8>(), nitems * 4)
+                    };
+                    neg.to_ndarray_buf(&index, buf, &ctx).unwrap();
+                    out[0]
+                });
             });
-        });
+        }
     }
     group.finish();
 }

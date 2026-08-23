@@ -598,21 +598,6 @@ pub(crate) trait SliceExt<T> {
     where
         D: Dimension,
         T: Clone;
-
-    /// Copy a slice whose length is already known to be `N` into a `[T; N]`.
-    ///
-    /// The unchecked counterpart of `slice.try_into().unwrap()`, for slices that are only dynamic
-    /// because they crossed a de-monomorphized boundary while the caller knew the length all along.
-    /// Both the length check and the panic path fold away, leaving plain loads.
-    ///
-    /// # Safety
-    ///
-    /// `self.len()` must be exactly `N`.
-    // TODO: only the runtime-count `foreach_inner_1d_dyn` needs this, which has no non-test caller yet.
-    #[allow(dead_code)]
-    unsafe fn copy_to_array_unchecked<const N: usize>(&self) -> [T; N]
-    where
-        T: Copy;
 }
 impl<T> SliceExt<T> for [T] {
     #[inline]
@@ -622,17 +607,6 @@ impl<T> SliceExt<T> for [T] {
         T: Clone,
     {
         D::vec(self.len(), |i| self[i].clone())
-    }
-
-    #[inline(always)]
-    unsafe fn copy_to_array_unchecked<const N: usize>(&self) -> [T; N]
-    where
-        T: Copy,
-    {
-        // The `assert_unchecked` is load-bearing: without it LLVM keeps the `len == N` compare and
-        // branch around the loads even though `unwrap_unchecked` makes the other arm unreachable.
-        unsafe { assert_unchecked_eq!(self.len(), N) };
-        unsafe { self.try_into().unwrap_unchecked() }
     }
 }
 

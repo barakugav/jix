@@ -134,12 +134,6 @@ pub(crate) trait ArraySequenceTypedImpl<ArraysT: ArraySequenceTyped + ?Sized = S
 }
 
 /// One element drawn from each array of the sequence, grouped by position.
-///
-/// It is not itself an [`ElementwisePipeline`](crate::storage::ElementwisePipeline): its item is an
-/// [`ItemSequence`](ArraySequenceTyped::ItemSequence), which for a runtime-length sequence is a
-/// *slice* borrowed from the reader rather than a value. A consumer like
-/// [`MapMultiple`](crate::ops::MapMultiple) collapses it to one element per position and only then
-/// has a pipeline.
 pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> {
     /// How many operands [`operands`](Self::operands) yields across the whole sequence, if that is
     /// known at compile time.
@@ -148,8 +142,7 @@ pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> 
     /// `&[Array<_>]`), or one whose arrays are themselves pipelines with an unknown operand count.
     const N_OPERANDS: Option<usize>;
 
-    /// Every operand across every array of the sequence, in a fixed order that does not change
-    /// between calls.
+    /// The leaf operands the pipeline reads from.
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's;
 
     /// Read the next `N` positions through the operand cursors and advance them, yielding one
@@ -446,7 +439,6 @@ impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
                 let tmp_buf = unsafe { &mut *self.tmp_buf.get() };
                 tmp_buf.clear();
                 tmp_buf.reserve(narrays * M);
-                // SAFETY: `S::Item` is `Copy` and every slot is written below before it is read.
                 #[allow(clippy::uninit_vec)]
                 unsafe {
                     tmp_buf.set_len(narrays * M)
@@ -565,7 +557,6 @@ impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
                 let tmp_buf = unsafe { &mut *self.tmp_buf.get() };
                 tmp_buf.clear();
                 tmp_buf.reserve(narrays * M);
-                // SAFETY: `S::Item` is `Copy` and every slot is written below before it is read.
                 #[allow(clippy::uninit_vec)]
                 unsafe {
                     tmp_buf.set_len(narrays * M)

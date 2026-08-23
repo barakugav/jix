@@ -90,6 +90,7 @@ where
 
     /// Returns a lazy view of the array with its axes reversed. See [`PermuteAxes`] for details
     /// and examples.
+    #[track_caller]
     pub fn transpose(self) -> Array<PermuteAxes<S>> {
         let ndim = self.ndim();
         let axes = S::Dimension::vec(ndim, |i| ndim - 1 - i);
