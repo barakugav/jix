@@ -35,7 +35,7 @@ mod tile;
 pub use tile::*;
 
 use crate::ops::AxesArg;
-use crate::{Array, ArrayStorage, IntoDimension};
+use crate::{Array, ArrayStorage, Dimension, IntoDimension};
 
 impl<S> Array<S>
 where
@@ -86,6 +86,14 @@ where
     #[track_caller]
     pub fn permute_axes(self, axes: &[usize]) -> Array<PermuteAxes<S>> {
         PermuteAxes::new_array(self, axes).unwrap()
+    }
+
+    /// Returns a lazy view of the array with its axes reversed. See [`PermuteAxes`] for details
+    /// and examples.
+    pub fn transpose(self) -> Array<PermuteAxes<S>> {
+        let ndim = self.ndim();
+        let axes = S::Dimension::vec(ndim, |i| ndim - 1 - i);
+        PermuteAxes::new_array(self, axes.as_ref()).unwrap()
     }
 
     /// Returns a lazy view with each element repeated `repeats` times along `axis`.

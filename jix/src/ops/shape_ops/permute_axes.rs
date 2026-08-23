@@ -293,6 +293,31 @@ mod tests {
         let _ = za.permute_axes(&[0, 0]);
     }
 
+    #[test]
+    fn test_transpose_2d() {
+        let a = array![[1i32, 2, 3], [4, 5, 6]];
+        let za = Array::compact_ndarray(&a).unwrap();
+        let actual = za.transpose().to_ndarray().unwrap();
+        let expected = a.t().as_standard_layout().into_owned();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_transpose_3d_reverses_all_axes() {
+        let a = ndarray::Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as i32);
+        let za = Array::compact_ndarray(&a).unwrap();
+        let actual = za.transpose().to_ndarray().unwrap();
+        let expected = a.t().as_standard_layout().into_owned();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_transpose_1d_is_identity() {
+        let a = array![1i32, 2, 3];
+        let za = Array::compact_ndarray(&a).unwrap();
+        assert_eq!(za.transpose().to_ndarray().unwrap(), a);
+    }
+
     // -----------------------------------------------------------------------
     // Proptest: arbitrary ndim, arbitrary permutation, verified against ndarray
     // -----------------------------------------------------------------------
