@@ -1,5 +1,5 @@
 use crate::util::iter::NdIter;
-use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension, SliceExt};
+use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension};
 
 /// Drive a 1-d inner loop over every element of a set of identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
@@ -53,16 +53,92 @@ impl NdIterUnorderedDyn {
         layouts: &[(usize, usize)], // (size, alignment) per operand, in its stride unit
     ) -> Self {
         assert_eq!(strides.len(), layouts.len());
-        let mut shape = shape.to_dim_vec::<DimDyn>();
-        let mut strides = strides
-            .iter()
-            .map(|s| s.to_dim_vec::<DimDyn>())
-            .collect::<Vec<_>>();
-        let sizes = layouts.iter().map(|&(size, _)| size).collect::<Vec<_>>();
-        if rearrange_axes_by_operand_strides(&mut shape, &mut strides, &sizes).is_none() {
-            return Self::empty(layouts); // nothing to iterate
+        for s in strides {
+            assert_eq!(s.len(), shape.len());
         }
 
+        // (1) Order the axes (per-operand strides non-increasing, size-1 axes dropped). The sort key
+        // is the array of an axis's per-operand strides, compared lexicographically (operand 0
+        // first), so ranking by it gives exactly the order we want.
+        let mut dim_perm = DimArray::new();
+        for (d, &len) in shape.iter().enumerate() {
+            if len == 0 {
+                return Self::empty(layouts); // nothing to iterate
+            }
+            if len > 1 {
+                dim_perm.push(d);
+            }
+        }
+        if dim_perm.is_empty() {
+            // The whole region is a single element. Treat as 1-d with length 1.
+            return Self {
+                shape: DimArray::from_slice(&[1]).unwrap(),
+                strides: layouts
+                    .iter()
+                    .map(|&(size, _)| DimArray::from_slice(&[size]).unwrap())
+                    .collect(),
+                is_aligned: vec![true; strides.len()],
+                is_contiguous: vec![true; strides.len()],
+            };
+        }
+        let (shape, strides) = if dim_perm.len() == 1 {
+            // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
+            let d = dim_perm[0];
+            let shape = DimArray::from_slice(&[shape[d]]).unwrap();
+            let strides = strides
+                .iter()
+                .map(|s| DimArray::from_slice(&[s[d]]).unwrap())
+                .collect::<Vec<_>>();
+            (shape, strides)
+        } else {
+            let stride_cmp = |d1: &usize, d2: &usize| {
+                for strides in strides.iter() {
+                    match strides[*d1].cmp(&strides[*d2]) {
+                        std::cmp::Ordering::Less => return std::cmp::Ordering::Greater,
+                        std::cmp::Ordering::Equal => {}
+                        std::cmp::Ordering::Greater => return std::cmp::Ordering::Less,
+                    }
+                }
+                std::cmp::Ordering::Equal
+            };
+            let need_sort = dim_perm
+                .windows(2)
+                .any(|w| stride_cmp(&w[0], &w[1]).is_gt());
+            if need_sort {
+                dim_perm.sort_by(stride_cmp);
+            }
+
+            // (2) Coalesce adjacent contiguous axes into groups. `dim_perm` lists the axes to visit,
+            // outermost first, so a group takes its stride from the innermost axis it reaches down to
+            // and its length from the product of the group's shapes. Reading the caller's shape and
+            // strides through `dim_perm` leaves the permutation implicit: nothing is materialized until
+            // the groups are known, and then only once.
+            let mut group_inner = DimArray::new(); // input axis of each group's inner axis
+            let mut group_len = DimArray::new(); // product of the group's shapes
+            for &d in dim_perm.iter() {
+                let m = group_inner.len();
+                if m > 0
+                    && strides
+                        .iter()
+                        .all(|s| s[group_inner[m - 1]] == s[d] * shape[d])
+                {
+                    group_inner[m - 1] = d; // the group now reaches down to axis `d`
+                    group_len[m - 1] *= shape[d];
+                } else {
+                    group_inner.push(d);
+                    group_len.push(shape[d]);
+                }
+            }
+            let shape = group_len;
+            let strides = strides
+                .iter()
+                .map(|s| dim_arr(group_inner.len(), |g| s[group_inner[g]]))
+                .collect::<Vec<_>>();
+            (shape, strides)
+        };
+
+        // (3) Compute the innermost-run flags (length, and per-operand alignment / contiguity).
+        debug_assert!(!shape.is_empty());
         let ndim = shape.len();
         let is_aligned = strides
             .iter()
@@ -71,8 +147,8 @@ impl NdIterUnorderedDyn {
             .collect();
         let is_contiguous = strides
             .iter()
-            .zip(&sizes)
-            .map(|(s, &size)| s[ndim - 1] == size)
+            .zip(layouts)
+            .map(|(s, &(size, _))| s[ndim - 1] == size)
             .collect();
 
         Self {
@@ -192,110 +268,10 @@ fn nd_iter_unordered_nd_walk<D: Dimension>(
     }
 }
 
-#[inline]
-pub(crate) fn rearrange_axes_by_operand_strides(
-    shape: &mut DimArray<usize>,
-    strides: &mut [DimArray<usize>],
-    itemsize: &[usize],
-) -> Option<()> {
-    for s in strides.iter() {
-        assert_eq!(s.len(), shape.len());
-    }
-
-    // (1) Order the axes (per-operand strides non-increasing, size-1 axes dropped). The sort key
-    // is the array of an axis's per-operand strides, compared lexicographically (operand 0
-    // first), so `[usize; N_OPERANDS]`'s derived `Ord` gives exactly the ranking we want.
-    let mut dim_perm = DimArray::new();
-    for (d, &len) in shape.iter().enumerate() {
-        if len == 0 {
-            return None; // nothing to iterate
-        }
-        if len > 1 {
-            dim_perm.push(d);
-        }
-    }
-    if dim_perm.is_empty() {
-        // The whole region is a single element. Treat as 1-d with length 1.
-        shape.clear();
-        shape.push(1);
-        for (s, &itemsize) in strides.iter_mut().zip(itemsize) {
-            s.clear();
-            s.push(itemsize);
-        }
-        return Some(());
-    }
-
-    let stride_cmp = |d1: &usize, d2: &usize| {
-        for strides in strides.iter() {
-            match strides[*d1].cmp(&strides[*d2]) {
-                std::cmp::Ordering::Less => return std::cmp::Ordering::Greater,
-                std::cmp::Ordering::Equal => {}
-                std::cmp::Ordering::Greater => return std::cmp::Ordering::Less,
-            }
-        }
-        std::cmp::Ordering::Equal
-    };
-    let need_sort = dim_perm
-        .windows(2)
-        .any(|w| stride_cmp(&w[0], &w[1]).is_gt());
-    if dim_perm.len() != shape.len() || need_sort {
-        if need_sort {
-            dim_perm.sort_by(stride_cmp);
-        }
-        let mut tmp_buf = dim_arr(dim_perm.len(), |_| 0);
-        let mut apply_dim_permutation = |arr: &mut DimArray<usize>| {
-            for d in 0..dim_perm.len() {
-                tmp_buf[d] = arr[dim_perm[d]];
-            }
-            *arr = tmp_buf.clone();
-        };
-        apply_dim_permutation(shape);
-        for strides in strides.iter_mut() {
-            apply_dim_permutation(strides);
-        }
-    }
-
-    // (2) Coalesce adjacent contiguous axes into groups. After the permutation the axes run
-    // outermost (index 0) -> innermost, so a group spanning post-permutation axes [lo..=hi]
-    // takes its stride from the innermost axis `hi` and its length from the product of the
-    // group's shapes.
-    if shape.len() > 1 {
-        let mut group_inner = DimArray::new(); // post-perm index of each group's inner axis
-        let mut group_len = DimArray::new(); // product of the group's shapes
-        #[allow(clippy::needless_range_loop)]
-        for d in 0..shape.len() {
-            let m = group_inner.len();
-            if m > 0
-                && strides
-                    .iter()
-                    .all(|s| s[group_inner[m - 1]] == s[d] * shape[d])
-            {
-                group_inner[m - 1] = d; // the group now reaches down to axis `d`
-                group_len[m - 1] *= shape[d];
-            } else {
-                group_inner.push(d);
-                group_len.push(shape[d]);
-            }
-        }
-        {
-            let mut tmp_buf = dim_arr(group_inner.len(), |_| 0);
-            for strides in strides.iter_mut() {
-                for g in 0..group_inner.len() {
-                    tmp_buf[g] = strides[group_inner[g]];
-                }
-                *strides = tmp_buf.clone();
-            }
-        }
-        *shape = group_len;
-    }
-
-    debug_assert!(!shape.is_empty());
-    Some(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::SliceExt;
 
     // ---------------------------------------------------------------------------
     // Harness

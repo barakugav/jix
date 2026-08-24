@@ -1,5 +1,5 @@
 use crate::util::iter::NdIter;
-use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension};
+use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, Dimension};
 
 /// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
@@ -67,77 +67,74 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
             // The whole region is a single element. Treat as 1-d with length 1.
             return Self {
                 shape: DimArray::from_slice(&[1]).unwrap(),
-                strides: std::array::from_fn(|i| DimArray::from_slice(&[layouts[i].0]).unwrap()),
+                strides: array_from_fn_inline(|i| DimArray::from_slice(&[layouts[i].0]).unwrap()),
                 is_aligned: [true; N_OPERANDS],
                 is_contiguous: [true; N_OPERANDS],
             };
         }
 
-        let shape_storage;
-        let strides_storage: [_; N_OPERANDS];
-        let stride_cmp = |d1: &usize, d2: &usize| {
-            for strides in strides.iter() {
-                match strides[*d1].cmp(&strides[*d2]) {
-                    std::cmp::Ordering::Less => return std::cmp::Ordering::Greater,
-                    std::cmp::Ordering::Equal => {}
-                    std::cmp::Ordering::Greater => return std::cmp::Ordering::Less,
+        let (shape, strides) = if dim_perm.len() == 1 {
+            // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
+            let d = dim_perm[0];
+            let shape = DimArray::from_slice(&[shape[d]]).unwrap();
+            let strides = array_from_fn_inline(|i| DimArray::from_slice(&[strides[i][d]]).unwrap());
+            (shape, strides)
+        } else {
+            let stride_cmp = |d1: &usize, d2: &usize| {
+                for strides in strides.iter() {
+                    match strides[*d1].cmp(&strides[*d2]) {
+                        std::cmp::Ordering::Less => return std::cmp::Ordering::Greater,
+                        std::cmp::Ordering::Equal => {}
+                        std::cmp::Ordering::Greater => return std::cmp::Ordering::Less,
+                    }
                 }
-            }
-            std::cmp::Ordering::Equal
-        };
-        let need_sort = dim_perm
-            .windows(2)
-            .any(|w| stride_cmp(&w[0], &w[1]).is_gt());
-        let (shape, strides) = if dim_perm.len() != shape.len() || need_sort {
+                std::cmp::Ordering::Equal
+            };
+            let need_sort = dim_perm
+                .windows(2)
+                .any(|w| stride_cmp(&w[0], &w[1]).is_gt());
             if need_sort {
                 dim_perm.sort_by(stride_cmp);
             }
-            let apply_dim_permutation =
-                |arr: &[usize]| dim_arr(dim_perm.len(), |d| arr[dim_perm[d]]);
-            shape_storage = apply_dim_permutation(shape);
-            strides_storage = std::array::from_fn(|i| apply_dim_permutation(strides[i]));
-            (
-                shape_storage.as_slice(),
-                strides_storage.each_ref().map(|s| s.as_slice()),
-            )
-        } else {
+
+            // (2) Coalesce adjacent contiguous axes into groups. `dim_perm` lists the axes to visit,
+            // outermost first, so a group takes its stride from the innermost axis it reaches down to
+            // and its length from the product of the group's shapes. Reading the caller's shape and
+            // strides through `dim_perm` leaves the permutation implicit: nothing is materialized until
+            // the groups are known, and then only once.
+            let mut group_inner = DimArray::new(); // input axis of each group's inner axis
+            let mut group_len = DimArray::new(); // product of the group's shapes
+            for &d in dim_perm.iter() {
+                let m = group_inner.len();
+                if m > 0
+                    && strides
+                        .iter()
+                        .all(|s| s[group_inner[m - 1]] == s[d] * shape[d])
+                {
+                    group_inner[m - 1] = d; // the group now reaches down to axis `d`
+                    group_len[m - 1] *= shape[d];
+                } else {
+                    group_inner.push(d);
+                    group_len.push(shape[d]);
+                }
+            }
+            let shape = group_len;
+            let strides = array_from_fn_inline::<_, N_OPERANDS>(|i| {
+                dim_arr(group_inner.len(), |g| strides[i][group_inner[g]])
+            });
             (shape, strides)
         };
 
-        // (2) Coalesce adjacent contiguous axes into groups. After the permutation the axes run
-        // outermost (index 0) -> innermost, so a group spanning post-permutation axes [lo..=hi]
-        // takes its stride from the innermost axis `hi` and its length from the product of the
-        // group's shapes.
-        let mut group_inner = DimArray::new(); // post-perm index of each group's inner axis
-        let mut group_len = DimArray::new(); // product of the group's shapes
-        #[allow(clippy::needless_range_loop)]
-        for d in 0..shape.len() {
-            let m = group_inner.len();
-            if m > 0
-                && (0..N_OPERANDS)
-                    .all(|i| strides[i][group_inner[m - 1]] == strides[i][d] * shape[d])
-            {
-                group_inner[m - 1] = d; // the group now reaches down to axis `d`
-                group_len[m - 1] *= shape[d];
-            } else {
-                group_inner.push(d);
-                group_len.push(shape[d]);
-            }
-        }
-        let strides: [DimArray<usize>; N_OPERANDS] =
-            std::array::from_fn(|i| dim_arr(group_inner.len(), |g| strides[i][group_inner[g]]));
-        let shape = group_len;
-
         // (3) Compute the innermost-run flags (length, and per-operand alignment / contiguity).
         debug_assert!(!shape.is_empty());
-        let sizes: [_; N_OPERANDS] = std::array::from_fn(|i| layouts[i].0);
+        let sizes = array_from_fn_inline::<_, N_OPERANDS>(|i| layouts[i].0);
         let ndim = shape.len();
-        let is_aligned = std::array::from_fn::<_, N_OPERANDS, _>(|i| {
+        let is_aligned = array_from_fn_inline::<_, N_OPERANDS>(|i| {
             let alignment = layouts[i].1;
             strides[i].iter().all(|s| s.is_multiple_of(alignment))
         });
         let is_contiguous =
-            std::array::from_fn::<_, N_OPERANDS, _>(|i| strides[i][ndim - 1] == sizes[i]);
+            array_from_fn_inline::<_, N_OPERANDS>(|i| strides[i][ndim - 1] == sizes[i]);
 
         Self {
             shape,
@@ -150,7 +147,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     fn empty(layouts: [(usize, usize); N_OPERANDS]) -> Self {
         let mut shape = DimArray::new();
         shape.push(0);
-        let strides = std::array::from_fn(|op_i| {
+        let strides = array_from_fn_inline(|op_i| {
             let mut s = DimArray::new();
             s.push(layouts[op_i].0);
             s
@@ -186,7 +183,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     ) {
         let ndim = self.shape.len();
         let inner_len = self.shape[ndim - 1];
-        let inner_strides: [_; N_OPERANDS] = std::array::from_fn(|i| self.strides[i][ndim - 1]);
+        let inner_strides = array_from_fn_inline::<_, N_OPERANDS>(|i| self.strides[i][ndim - 1]);
         if crate::hint::likely(ndim == 1) {
             inner_loop([0; N_OPERANDS], inner_len, inner_strides);
         } else {
