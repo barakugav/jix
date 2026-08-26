@@ -820,6 +820,13 @@ impl Dtype {
     /// The product of the shape dimensions must not exceed [`Itemsize::MAX`].
     ///
     /// The itemsize will be updated to `itemsize *= new_shape.product() / old_shape.product()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidArgument` if the new shape has more than [`DTYPE_MAX_NDIM`] dimensions,
+    /// contains a zero dimension, or overflows [`Itemsize`]. Also errors when the dtype's *current*
+    /// shape has zero elements (only `<[T; 0]>::DTYPE`), since the per-element itemsize can no
+    /// longer be divided back out.
     pub fn set_shape(&mut self, shape: &[Itemsize]) -> Result<()> {
         let shape = DtypeShape::from_slice(shape).ok_or_else(|| {
             error!(
@@ -838,6 +845,15 @@ impl Dtype {
             "Dtype shape has zero elements"
         );
         let current_shape_size = self.shape().iter().cloned().product::<Itemsize>();
+        // A zero-element current shape leaves no way to recover the per-element itemsize (it was
+        // multiplied by zero). Only `[T; 0]` builds such a dtype - every other constructor rejects
+        // a zero shape dim - so bail instead of guessing.
+        ensure!(
+            current_shape_size != 0,
+            InvalidArgument,
+            "Cannot set the shape of a dtype whose current shape has zero elements: {:?}",
+            self.shape()
+        );
         assert!(self.itemsize().is_multiple_of(current_shape_size));
         let base_itemsize = self.itemsize() / current_shape_size;
         *self.itemsize_mut() = base_itemsize
@@ -1632,5 +1648,89 @@ mod tests {
     fn set_shape_overflow_errors() {
         let mut d = u8::DTYPE;
         assert!(d.set_shape(&[Itemsize::MAX, Itemsize::MAX]).is_err());
+    }
+
+    // `[T; 0]` is the only dtype whose *current* shape contains a zero, so it is the only input
+    // for which the old itemsize cannot be divided back out. It must error, not divide by zero.
+    #[test]
+    fn set_shape_on_zero_element_shape_errors() {
+        let mut d = <[i32; 0] as Dtyped>::DTYPE;
+        assert_eq!(d.shape(), &[0]);
+        assert_eq!(d.itemsize(), 0);
+        assert!(d.set_shape(&[2]).is_err());
+        assert!(d.set_shape(&[]).is_err());
+        // The dtype is left untouched by the failed calls.
+        assert_eq!(d.shape(), &[0]);
+        assert_eq!(d.itemsize(), 0);
+    }
+
+    // ---- Zero-itemsize dtypes ----
+
+    #[test]
+    fn empty_struct_has_zero_itemsize() {
+        let d = Dtype::from_fields(vec![]).unwrap();
+        assert_eq!(d.itemsize(), 0);
+        assert_eq!(d.alignment().as_usize(), 1);
+        assert_eq!(d.shape(), &[] as &[Itemsize]);
+        assert_eq!(d.fields().unwrap(), &[]);
+        assert!(d.is_aligned());
+        assert_eq!(d.scalar_kind(), None);
+    }
+
+    #[test]
+    fn empty_struct_new_struct_matches_from_fields() {
+        let explicit = Dtype::new_struct(Vec::new(), &[], 0, Alignment::new(1).unwrap()).unwrap();
+        assert_eq!(explicit.itemsize(), 0);
+        assert_eq!(explicit, Dtype::from_fields(vec![]).unwrap());
+    }
+
+    #[test]
+    fn empty_struct_with_inner_shape() {
+        // itemsize 0 is a multiple of any shape product, so an inner shape is still allowed.
+        let d = Dtype::new_struct(Vec::new(), &[3, 4], 0, Alignment::new(1).unwrap()).unwrap();
+        assert_eq!(d.itemsize(), 0);
+        assert_eq!(d.shape(), &[3, 4]);
+    }
+
+    #[test]
+    fn set_shape_keeps_empty_struct_at_zero_itemsize() {
+        let mut d = Dtype::from_fields(vec![]).unwrap();
+        d.set_shape(&[2, 3]).unwrap();
+        assert_eq!(d.shape(), &[2, 3]);
+        assert_eq!(d.itemsize(), 0);
+    }
+
+    #[test]
+    fn zero_size_array_dtype() {
+        let d = <[i32; 0] as Dtyped>::DTYPE;
+        assert_eq!(d.itemsize(), 0);
+        assert_eq!(d.shape(), &[0]);
+        assert_eq!(d.alignment().as_usize(), 4);
+        assert_eq!(d.scalar_kind(), Some(ScalarKind::I32));
+    }
+
+    #[test]
+    fn zero_size_field_does_not_affect_parent_layout() {
+        let empty = Dtype::from_fields(vec![]).unwrap();
+        let d = Dtype::from_fields(vec![
+            ("e".to_string(), 0, empty),
+            ("x".to_string(), 0, i32::DTYPE),
+        ])
+        .unwrap();
+        assert_eq!(d.itemsize(), 4);
+        assert_eq!(d.alignment().as_usize(), 4);
+        assert_eq!(d.fields().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn derived_empty_struct_has_zero_itemsize() {
+        #[derive(Copy, Clone, Dtyped)]
+        #[repr(C)]
+        struct Empty {}
+
+        assert_eq!(Empty::DTYPE.itemsize(), 0);
+        assert_eq!(size_of::<Empty>(), 0);
+        assert_eq!(Empty::DTYPE.fields().unwrap(), &[]);
+        assert_eq!(Empty::DTYPE, Dtype::from_fields(vec![]).unwrap());
     }
 }
