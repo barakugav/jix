@@ -14,7 +14,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
-use crate::error::{check_buffer_aligned, check_get_range, check_ndim, Result};
+use crate::error::{check_get_range, check_ndim, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
@@ -306,7 +306,7 @@ where
         if nitems == 0 {
             return Ok(out);
         }
-        let is_contiguous_aligned = out.is_contiguous_aligned(out_shape.as_ref(), dtype);
+        let is_contiguous = out.is_contiguous(out_shape.as_ref(), dtype);
         let (out_buf, out_strides) = out.data_mut();
 
         let ndim = shape.len();
@@ -336,10 +336,9 @@ where
         // Fast path for an aligned single-block read into a contiguous destination
         if let Some(single_block_idx) = single_block_idx
             && is_block_aligned
-            && is_contiguous_aligned
+            && is_contiguous
         {
             let buf = &mut out_buf[..nitems * dtype.itemsize() as usize];
-            check_buffer_aligned(buf.as_ptr(), dtype)?;
             self.blocks.read_block(single_block_idx, buf, context)?;
         } else {
             self.read_data_slow(index, out_buf, out_strides, context, single_block_idx)?;
@@ -431,18 +430,16 @@ where
         }
 
         // A block can be decoded straight into `buf` - skipping `tmp_buf` and the
-        // `nd_copy` scatter - when the destination is C-contiguous and correctly aligned and the
-        // block is a single contiguous run there.
+        // `nd_copy` scatter - when the destination is C-contiguous and the block is a single
+        // contiguous run
         let read_into_out = {
             let c_strides = default_strides(&out_shape, itemsize);
             let out_buf_contiguous =
                 (0..ndim).all(|d| out_shape[d] == 1 || out_strides[d] == c_strides[d]);
-            let out_buf_aligned =
-                (buf.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize());
             let lead_dim = (0..ndim).find(|&d| block_shape[d] > 1);
             let inner_full_width = lead_dim
                 .is_none_or(|k| (k + 1..ndim).all(|d| out_shape[d] == block_shape[d] as usize));
-            out_buf_contiguous && out_buf_aligned && inner_full_width
+            out_buf_contiguous && inner_full_width
         };
 
         // Block-space begin/end for NdIter.
@@ -786,6 +783,43 @@ mod tests {
         }
         let expected: Vec<i32> = (0..32).map(|x| x * 3 - 5).collect();
         assert_eq!(backing, expected);
+    }
+
+    #[test]
+    fn single_block_read_into_misaligned_contiguous_buf() {
+        // Block decoding is byte-level, so a packed destination that is *not* aligned to the dtype
+        // still takes the direct `read_block` fast path. Miri checks the accesses.
+        use crate::ArrayStorage;
+
+        let nd =
+            ndarray::ArrayD::from_shape_vec(vec![2usize, 3], (0..6i32).map(|x| x + 1).collect())
+                .unwrap();
+        let mut params = ArrayParams::new();
+        params.block_shape(&[2, 3]); // single block covering the whole array
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+        let ctx = za.read_ctx();
+        let storage = za.into_storage();
+
+        // Byte buffer whose window starts one byte past a 4-aligned address.
+        let mut backing = vec![0u8; 6 * 4 + 4];
+        let off = backing.as_ptr().align_offset(4) + 1;
+        {
+            let bytes = &mut backing[off..off + 6 * 4];
+            let mut out = unsafe { StridedBuf::from_slice_mut(bytes, &[12, 4]) };
+            storage
+                .read_data(&[0..2, 0..3], &ctx, Some(&mut out))
+                .unwrap();
+        }
+        let got = (0..6)
+            .map(|i| unsafe {
+                backing
+                    .as_ptr()
+                    .add(off + i * 4)
+                    .cast::<i32>()
+                    .read_unaligned()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(got, [1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
