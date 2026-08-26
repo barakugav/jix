@@ -801,7 +801,7 @@ mod tests {
         let storage = za.into_storage();
 
         // Byte buffer whose window starts one byte past a 4-aligned address.
-        let mut backing = vec![0u8; 6 * 4 + 4];
+        let mut backing = [0u8; 6 * 4 + 4];
         let off = backing.as_ptr().align_offset(4) + 1;
         {
             let bytes = &mut backing[off..off + 6 * 4];
