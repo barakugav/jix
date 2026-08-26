@@ -457,13 +457,25 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 let mut out =
                     materialize_out_buf(out, context, read_shape_usize.as_ref(), self.dtype());
                 let (out_buf, out_strides) = out.data_mut();
+
+                let alignment = self.dtype().alignment().as_usize();
+                let dst_aligned = (out_buf.as_ptr() as usize).is_multiple_of(alignment)
+                    && (out_strides.iter().all(|s| s.is_multiple_of(alignment)));
+
                 // TODO: nd_iter_unordered
                 let iter = NdIter::builder(read_shape)
                     .with_strides_ptr_mut_ext(out_strides.to_dim_vec::<D>(), out_buf.as_mut_ptr())
                     .build();
-                for (idx, dst) in iter {
-                    let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
-                    unsafe { dst.cast::<T>().write(value) };
+                if dst_aligned {
+                    for (idx, dst) in iter {
+                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
+                        unsafe { dst.cast::<T>().write(value) };
+                    }
+                } else {
+                    for (idx, dst) in iter {
+                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
+                        unsafe { dst.cast::<T>().write_unaligned(value) };
+                    }
                 }
                 Ok(out)
             }
