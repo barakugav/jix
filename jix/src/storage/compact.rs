@@ -306,7 +306,7 @@ where
         if nitems == 0 {
             return Ok(out);
         }
-        let is_strided = !out.is_contiguous(out_shape.as_ref(), dtype);
+        let is_contiguous_aligned = out.is_contiguous_aligned(out_shape.as_ref(), dtype);
         let (out_buf, out_strides) = out.data_mut();
 
         let ndim = shape.len();
@@ -336,7 +336,7 @@ where
         // Fast path for an aligned single-block read into a contiguous destination
         if let Some(single_block_idx) = single_block_idx
             && is_block_aligned
-            && !is_strided
+            && is_contiguous_aligned
         {
             let buf = &mut out_buf[..nitems * dtype.itemsize() as usize];
             check_buffer_aligned(buf.as_ptr(), dtype)?;

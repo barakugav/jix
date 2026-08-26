@@ -180,10 +180,19 @@ impl<'a> StridedBuf<'a> {
         (data, strides)
     }
 
+    /// Whether the strides are exactly row-major packed for `shape` and `dtype`'s itemsize.
     #[inline]
     pub(crate) fn is_contiguous(&self, shape: &[usize], dtype: &Dtype) -> bool {
-        let (data, strides) = self.data();
+        let (_data, strides) = self.data();
         strides == default_strides_slice(shape, dtype.itemsize() as usize).as_ref()
+    }
+
+    /// Whether the strides are exactly row-major packed for `shape` and `dtype`'s itemsize, and
+    /// the base pointer is aligned to `dtype`'s alignment (and the strides).
+    #[inline]
+    pub(crate) fn is_contiguous_aligned(&self, shape: &[usize], dtype: &Dtype) -> bool {
+        let (data, _strides) = self.data();
+        self.is_contiguous(shape, dtype)
             && (data.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize())
     }
 

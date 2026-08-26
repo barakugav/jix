@@ -121,7 +121,7 @@ where
             Some(out) => {
                 let read_shape =
                     Self::Dimension::vec(ndim, |d| (index[d].end - index[d].start) as usize);
-                if out.is_contiguous(read_shape.as_ref(), &dtype) {
+                if out.is_contiguous_aligned(read_shape.as_ref(), &dtype) {
                     // Fill the whole buffer in one tight loop.
                     let (out_buf, _) = out.data_mut();
                     for item in unsafe { cast_slice_mut::<u8, T>(out_buf) } {
