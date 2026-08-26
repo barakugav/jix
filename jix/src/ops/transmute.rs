@@ -3,9 +3,8 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{ensure, Result};
-use crate::storage::{check_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
-use crate::util::default_strides;
-use crate::{Array, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
+use crate::storage::{ArraySpec, ArrayStorageInfo, StridedBuf};
+use crate::{Array, ArrayStorage, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
 where
@@ -118,55 +117,14 @@ where
     type ElementType = ET;
     type Dimension = S::Dimension;
 
-    #[inline]
+    #[inline(always)]
     fn read_data<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        check_out_buf(out.as_deref(), self.shape())?;
-        let src_dtype = self.array.dtype();
-        let dst_dtype = self.element_type.dtype();
-        let (src_align, dst_align) = (
-            src_dtype.alignment().as_usize(),
-            dst_dtype.alignment().as_usize(),
-        );
-
-        let Some(out) = out else {
-            return self.array.read_data(index, context, None);
-        };
-
-        // `out` is aligned to the destination dtype, but the inner read expects the source dtype's
-        // alignment. That is a problem only for a *contiguous* destination whose source alignment
-        // exceeds its (weaker) destination alignment - a strided destination carries no alignment
-        // precondition. In that one case, stage through a source-aligned scratch and copy across.
-        let out_shape =
-            S::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-        let needs_scratch = src_align > dst_align
-            && out.is_contiguous(out_shape.as_ref(), dst_dtype)
-            && !(out.data().0.as_ptr() as usize).is_multiple_of(src_align);
-
-        if !needs_scratch {
-            return self.array.read_data(index, context, Some(out));
-        }
-
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
-        let mut scratch = context.allocate_buf(
-            nitems * src_dtype.itemsize() as usize,
-            src_dtype.alignment(),
-        );
-        let c = default_strides(&out_shape, src_dtype.itemsize() as usize);
-        // SAFETY: C-order strides for a source-aligned scratch sized to `nitems`.
-        let mut scratch_out =
-            unsafe { StridedBuf::from_slice_mut(scratch.as_mut_slice(), c.as_ref()) };
-        self.array
-            .read_data(index, context, Some(&mut scratch_out))?;
-        drop(scratch_out);
-        // Copy the identically-sized bytes into the caller's (weaker-aligned) destination.
-        let (out_buf, _) = out.data_mut();
-        out_buf.copy_from_slice(scratch.as_slice());
-        Ok(out.view_mut())
+        self.array.read_data(index, context, out)
     }
 
     #[inline(always)]
@@ -209,137 +167,242 @@ where
 #[cfg(test)]
 mod tests {
     use super::Transmute;
+    use crate::codec::ReadContext;
     use crate::dtype::Dtyped;
-    use crate::storage::{ElementwisePipelineImpl, StridedBuf};
-    use crate::{Array, ArrayParams, ArrayStorage, Ty};
+    use crate::storage::StridedBuf;
+    use crate::util::assert_array_matches;
+    use crate::{Array, ArrayStorage, Ty};
 
-    /// Read `nitems` elements of `storage` lazily, through the element-wise pipeline.
-    fn read_lazy<S, T>(
-        storage: &S,
-        index: &[std::ops::Range<u64>],
-        context: &crate::ReadContext,
-        nitems: usize,
-    ) -> Vec<T>
-    where
-        S: ArrayStorage,
-        T: Dtyped,
-    {
-        let buf = storage
-            .read_as_elementwise_pipeline::<T>(index, context)
-            .unwrap()
-            .to_buf(index, context, None)
-            .unwrap();
-        (0..nitems)
-            .map(|i| unsafe { buf.data_ptr().cast::<T>().add(i).read() })
-            .collect()
+    /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not
+    /// just scalars.
+    #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+    #[repr(C)]
+    struct Pair {
+        x: i32,
+        y: i32,
     }
 
-    /// Build a single-block `Compact` array from a 1-D `u32` ndarray, so a full read hits the
-    /// contiguous single-block fast path (the one that enforces source-dtype buffer alignment).
-    fn compact_u32_single_block(data: &[u32]) -> Array<impl ArrayStorage<ElementType = Ty<u32>>> {
-        let mut params = ArrayParams::new();
-        params.block_shape(&[data.len() as u32]);
-        Array::compact_ndarray_with(&ndarray::Array1::from(data.to_vec()), params).unwrap()
-    }
+    // -----------------------------------------------------------------------
+    // Construction
+    // -----------------------------------------------------------------------
 
-    /// A byte window of length `len` whose start is deliberately *not* a multiple of `align`, so it
-    /// under-aligns any dtype whose alignment is `align`. Returns the backing buffer (keep it alive)
-    /// and the offset of the window within it.
-    fn misaligned_backing(len: usize, align: usize) -> (Vec<u8>, usize) {
-        let backing = vec![0u8; len + align];
-        let off = backing.as_ptr().align_offset(align) + 1;
-        assert!(!(backing.as_ptr() as usize + off).is_multiple_of(align));
-        assert!(off + len <= backing.len());
-        (backing, off)
-    }
-
-    /// `Transmute::new` requires the source and destination dtypes to have the same itemsize.
+    /// The one thing `Transmute::new` rejects: dtypes of different itemsize. The output element has
+    /// to occupy exactly the bytes the input element did, since nothing is copied or converted.
     #[test]
-    fn new_rejects_size_mismatch() {
-        let arr = compact_u32_single_block(&[1, 2, 3]);
-        // u32 (4 bytes) -> u16 (2 bytes): different itemsize, must be rejected.
-        let result = unsafe { Transmute::new(arr.into_storage(), Ty::<u16>::new()) };
-        assert!(result.is_err());
+    fn new_rejects_a_different_itemsize() {
+        let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
+        // u32 is 4 bytes, u16 is 2.
+        assert!(unsafe { Transmute::new(arr.into_storage(), Ty::<u16>::new()) }.is_err());
     }
 
-    /// Same itemsize, same alignment (`f32` <-> `u32`): the bytes are reinterpreted unchanged, so a
-    /// transmuted read yields each element's raw bit pattern.
+    /// Equal itemsize is the only requirement - the kinds may differ freely, and so may the
+    /// alignments (`u32` is 4-aligned, `[u8; 4]` is 1-aligned).
     #[test]
-    fn transmute_reinterprets_bits_when_alignment_matches() {
-        let arr = Array::compact_ndarray(&ndarray::array![1.0f32, -2.0, 0.5]).unwrap();
-        let bits = unsafe { arr.transmute_elements::<u32>() }
-            .to_ndarray()
-            .unwrap();
-        assert_eq!(bits[0], 1.0f32.to_bits());
-        assert_eq!(bits[1], (-2.0f32).to_bits());
-        assert_eq!(bits[2], 0.5f32.to_bits());
+    fn new_accepts_any_dtype_of_the_same_itemsize() {
+        let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
+        assert!(unsafe { Transmute::new(arr.as_ref().into_storage(), Ty::<i32>::new()) }.is_ok());
+        assert!(unsafe { Transmute::new(arr.as_ref().into_storage(), Ty::<f32>::new()) }.is_ok());
+        assert!(
+            unsafe { Transmute::new(arr.as_ref().into_storage(), Ty::<[u8; 4]>::new()) }.is_ok()
+        );
     }
 
-    /// `transmute_dyn` sets the runtime dtype while leaving shape and bytes untouched; the result can
-    /// be recovered as a typed array with the new dtype.
+    // -----------------------------------------------------------------------
+    // The bytes are relabelled, not converted
+    // -----------------------------------------------------------------------
+
+    /// `f32 -> u32` hands back each element's raw bit pattern rather than its numeric value - the
+    /// difference from [`Array::cast`], which would round 0.5 to 0.
     #[test]
-    fn transmute_dyn_sets_runtime_dtype() {
+    fn float_elements_read_back_as_their_bit_patterns() {
+        let src = ndarray::array![1.0f32, -2.0, 0.5, f32::INFINITY, f32::NAN];
+        let arr = Array::compact_ndarray(&src).unwrap();
+        let bits = unsafe { arr.transmute_elements::<u32>() };
+
+        let expected = src.mapv(f32::to_bits);
+        assert_array_matches(&bits, &expected);
+    }
+
+    /// Two's-complement bits survive `i32 -> u32`, including the sign bit.
+    #[test]
+    fn negative_integers_keep_their_two_s_complement_bits() {
+        let src = ndarray::array![-1i32, i32::MIN, 0, 7];
+        let arr = Array::compact_ndarray(&src).unwrap();
+        let bits = unsafe { arr.transmute_elements::<u32>() };
+
+        assert_array_matches(&bits, &ndarray::array![u32::MAX, 1 << 31, 0, 7]);
+    }
+
+    /// A struct dtype viewed as an equally-sized byte array exposes its in-memory layout: two
+    /// little-endian `i32` fields back to back.
+    #[test]
+    fn struct_elements_view_as_their_layout_bytes() {
+        let src = ndarray::array![Pair { x: 1, y: 2 }, Pair { x: -1, y: 256 }];
+        let arr = Array::compact_ndarray(&src).unwrap();
+        let bytes = unsafe { arr.transmute_elements::<[u8; 8]>() };
+
+        assert_array_matches(
+            &bytes,
+            &ndarray::arr1(&[
+                [1u8, 0, 0, 0, 2, 0, 0, 0],
+                [0xff, 0xff, 0xff, 0xff, 0, 1, 0, 0],
+            ]),
+        );
+    }
+
+    /// Transmuting there and back is the identity - the bytes were never touched, so the second
+    /// relabel restores the original element type and values.
+    #[test]
+    fn transmuting_back_restores_the_original_values() {
+        let src = ndarray::array![[1.5f64, -0.25], [1e300, 0.0]];
+        let arr = Array::compact_ndarray(&src).unwrap();
+        let there_and_back = unsafe {
+            arr.transmute_elements::<[u8; 8]>()
+                .transmute_elements::<f64>()
+        };
+
+        assert_array_matches(&there_and_back, &src);
+    }
+
+    // -----------------------------------------------------------------------
+    // Metadata
+    // -----------------------------------------------------------------------
+
+    /// Only the element type changes: shape, ndim and element count are the inner array's.
+    #[test]
+    fn shape_is_untouched_and_dtype_is_the_new_one() {
+        let arr = Array::compact_ndarray(&ndarray::Array3::<f32>::zeros((2, 3, 4))).unwrap();
+        let t = unsafe { arr.transmute_elements::<u32>() };
+
+        assert_eq!(t.shape(), &[2, 3, 4]);
+        assert_eq!(t.ndim(), 3);
+        assert_eq!(t.nitems(), 24);
+        assert_eq!(t.dtype(), &u32::DTYPE);
+    }
+
+    /// The `_dyn` variant takes the dtype at runtime and produces a type-erased array;
+    /// `into_typed` asserts the element type to get element-wise ops back.
+    #[test]
+    fn dyn_variant_sets_the_runtime_dtype() {
         let arr = Array::compact_ndarray(&ndarray::array![1i32, 2, 3]).unwrap();
         let t = unsafe { arr.transmute_elements_dyn(u32::DTYPE) };
         assert_eq!(t.dtype(), &u32::DTYPE);
-        assert_eq!(t.shape(), &[3]);
-        let vals = t.into_typed::<u32>().unwrap().to_ndarray().unwrap();
-        assert_eq!(vals.as_slice().unwrap(), &[1u32, 2, 3]);
+
+        // Recovering it as the wrong type is refused, as the right one succeeds.
+        assert!(t.as_ref().into_typed::<i32>().is_err());
+        assert_array_matches(
+            &t.into_typed::<u32>().unwrap(),
+            &ndarray::array![1u32, 2, 3],
+        );
     }
 
-    /// Transmuting to a *weaker*-aligned dtype (`u32` align 4 -> `[u8; 4]` align 1): the caller's
-    /// contiguous buffer only needs the destination alignment (1), so it can be under-aligned for the
-    /// source read. The single-block fast path of `Compact` rejects an under-aligned buffer, so the
-    /// transmute must stage the read through an aligned scratch buffer. Without that, this read fails.
+    // -----------------------------------------------------------------------
+    // Reads
+    // -----------------------------------------------------------------------
+
+    /// A pull read is forwarded straight to the inner storage, so it lends the inner bytes rather
+    /// than materializing anything: over a `Plain` array the returned buffer points at the source
+    /// ndarray's own allocation.
     #[test]
-    fn transmute_into_weaker_alignment_stages_misaligned_buffer() {
-        let arr = compact_u32_single_block(&[0x0102_0304, 0x0506_0708, 0x090a_0b0c, 0x0d0e_0f10]);
-        let t = unsafe { arr.transmute_elements::<[u8; 4]>() };
-        let ctx = t.read_ctx();
+    fn pull_read_lends_the_inner_bytes() {
+        let src = ndarray::array![1.0f32, 2.0, 3.0];
+        let arr = Array::plain_ndarray_ref(&src).unwrap();
+        let t = unsafe { arr.transmute_elements::<u32>() };
+        let ctx = ReadContext::default();
 
-        let (mut backing, off) = misaligned_backing(16, 4);
-        let dst = &mut backing[off..off + 16];
-        {
-            // C-order byte strides for a [4]-shape of `[u8; 4]` (itemsize 4).
-            let mut out = unsafe { StridedBuf::from_slice_mut(&mut *dst, &[4usize]) };
-            t.storage()
-                .read_data(&[0..4], &ctx, Some(&mut out))
-                .unwrap();
-        }
-
-        // Little-endian: u32 0x01020304 -> bytes [04, 03, 02, 01].
-        assert_eq!(&dst[0..4], &[0x04, 0x03, 0x02, 0x01]);
-        assert_eq!(&dst[4..8], &[0x08, 0x07, 0x06, 0x05]);
-        assert_eq!(&dst[8..12], &[0x0c, 0x0b, 0x0a, 0x09]);
-        assert_eq!(&dst[12..16], &[0x10, 0x0f, 0x0e, 0x0d]);
+        let view = t.storage().read_data(&[0..3], &ctx, None).unwrap();
+        assert_eq!(view.data_ptr(), src.as_ptr().cast::<u8>());
+        assert_eq!(view.strides(), &[size_of::<f32>()]);
     }
 
-    /// Lazy read through a transmute to a *stronger*-aligned dtype (`[u8; 4]` align 1 -> `u32`
-    /// align 4). The lazy output buffer is allocated from the pool, which over-aligns to a cache line
-    /// (larger than any dtype alignment), so the consumer's typed (aligned) `u32` read lands on a
-    /// well-aligned buffer. Checks the bytes reinterpret correctly. (`Plain` storage keeps this
-    /// runnable under Miri, which independently verifies the read alignment.)
+    /// A push read hands the caller's destination down unchanged, so the inner storage writes at
+    /// the caller's own strides - here a column-major layout, not the row-major one a copy would
+    /// produce.
     #[test]
-    fn transmute_into_stronger_alignment_lazy_read() {
-        let data: [[u8; 4]; 2] = [[0x04, 0x03, 0x02, 0x01], [0x08, 0x07, 0x06, 0x05]];
-        let arr = Array::plain_ndarray(ndarray::arr1(&data)).unwrap();
+    fn push_read_honors_the_destination_strides() {
+        let arr =
+            Array::compact_ndarray(&ndarray::array![[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]]).unwrap();
         let t = unsafe { arr.transmute_elements::<u32>() };
         let ctx = t.read_ctx();
 
-        let vals = read_lazy::<_, u32>(t.storage(), &[0..2], &ctx, 2);
-        assert_eq!(vals, [0x0102_0304u32, 0x0506_0708]);
+        // 4 bytes down a column, 8 bytes across a row, plus one slot of slack to catch a write
+        // that spills past the region.
+        const SENTINEL: u32 = 0xdead_beef;
+        let itemsize = size_of::<u32>();
+        let mut dst = [SENTINEL; 7];
+        {
+            let mut out = unsafe {
+                StridedBuf::from_raw_parts_mut(
+                    dst.as_mut_ptr().cast::<u8>(),
+                    &[2, 3],
+                    &[itemsize, 2 * itemsize],
+                    itemsize,
+                )
+            };
+            t.storage()
+                .read_data(&[0..2, 0..3], &ctx, Some(&mut out))
+                .unwrap();
+        }
+        assert_eq!(
+            &dst[..6],
+            &[1.0f32, 4.0, 2.0, 5.0, 3.0, 6.0].map(f32::to_bits),
+            "elements should land column by column"
+        );
+        assert_eq!(dst[6], SENTINEL, "wrote past the region");
     }
 
-    /// Lazy read through a transmute to a *weaker*-aligned dtype (`u32` align 4 -> `[u8; 4]` align 1).
-    /// A lazy buffer has no materialized slice, so it must be forwarded to the inner read rather than
-    /// routed through the contiguous-buffer staging path (which inspects the buffer's slice).
+    /// The read index is forwarded unchanged, so a windowed read of the transmuted array covers
+    /// exactly the corresponding window of the inner one.
     #[test]
-    fn transmute_into_weaker_alignment_lazy_read() {
-        let arr = compact_u32_single_block(&[0x0102_0304, 0x0506_0708]);
-        let t = unsafe { arr.transmute_elements::<[u8; 4]>() };
+    fn sub_region_reads_map_one_to_one() {
+        let src = ndarray::Array2::from_shape_fn((4, 5), |(r, c)| (r * 5 + c) as i32);
+        let arr = Array::compact_ndarray(&src).unwrap();
+        let t = unsafe { arr.transmute_elements::<u32>() };
         let ctx = t.read_ctx();
 
-        let vals = read_lazy::<_, [u8; 4]>(t.storage(), &[0..2], &ctx, 2);
-        assert_eq!(vals, [[0x04, 0x03, 0x02, 0x01], [0x08, 0x07, 0x06, 0x05]]);
+        let window = t.to_ndarray_sub(&[1..3, 2..5], &ctx).unwrap();
+        assert_eq!(
+            window,
+            src.slice(ndarray::s![1..3, 2..5]).mapv(|v| v as u32)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Composition
+    // -----------------------------------------------------------------------
+
+    /// A transmute is a lazy view like any other op, so it composes on both sides: reading the
+    /// exponent-and-sign half of an `f32` here means masking the transmuted bits, and the whole
+    /// chain still runs in one pass.
+    #[test]
+    fn composes_with_element_wise_ops() {
+        let src = ndarray::array![1.0f32, -1.0, 2.0, -2.0];
+        let arr = Array::compact_ndarray(&src).unwrap();
+        let sign_bits = unsafe { arr.transmute_elements::<u32>() }.map(|bits| bits >> 31);
+
+        assert_array_matches(&sign_bits, &ndarray::array![0u32, 1, 0, 1]);
+    }
+
+    /// A transmute of a shape view reads through both layers - the slice narrows the region and the
+    /// transmute relabels the bytes it yields.
+    #[test]
+    fn composes_with_shape_ops() {
+        let src = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+        let arr = Array::compact_ndarray(&src).unwrap();
+        let column = arr.slice((.., 1..2));
+        let bits = unsafe { column.transmute_elements::<u32>() };
+
+        assert_array_matches(&bits, &ndarray::array![[2u32], [5]]);
+    }
+
+    /// An empty read is a no-op, not a special case: zero elements out of a non-empty array.
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)]
+    fn empty_reads_are_fine() {
+        let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
+        let t = unsafe { arr.transmute_elements::<f32>() };
+        let ctx = t.read_ctx();
+
+        assert_eq!(t.to_ndarray_sub(&[1..1], &ctx).unwrap().len(), 0);
     }
 }
