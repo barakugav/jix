@@ -190,7 +190,7 @@ impl Array {
             ) -> Result<(), jix_core::Error> {
                 arr.into_dim::<D>()
                     .unwrap()
-                    .to_ndarray_buf(index, np_arr_data, context)
+                    .to_ndarray_slice(index, np_arr_data, context)
             }
             let to_ndarray_fn = match self.arr.ndim() {
                 1 => to_ndarray_impl::<_, Dim<1>>,

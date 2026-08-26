@@ -315,14 +315,14 @@ where
 
         let mut b_range = D::vec(ndim, |_| 0..0);
         let mut is_single_block = true; // every dimension touches exactly one block.
-        let mut is_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
+        let mut is_block_aligned = true; // the requested region starts and ends on block boundaries in every dimension.
         for dim in 0..ndim {
             let b = block_shape[dim] as u64;
             let (i_start, i_end) = (index[dim].start, index[dim].end);
             let (b_begin, b_end) = (i_start / b, calc_block_end(i_start, i_end, b));
             b_range[dim] = b_begin..b_end;
             is_single_block &= b_begin + 1 == b_end;
-            is_aligned &= i_start.is_multiple_of(b) && i_end.is_multiple_of(b);
+            is_block_aligned &= i_start.is_multiple_of(b) && i_end.is_multiple_of(b);
         }
 
         // Row-major-flattened 1D block index
@@ -335,7 +335,7 @@ where
 
         // Fast path for an aligned single-block read into a contiguous destination
         if let Some(single_block_idx) = single_block_idx
-            && is_aligned
+            && is_block_aligned
             && !is_strided
         {
             let buf = &mut out_buf[..nitems * dtype.itemsize() as usize];
