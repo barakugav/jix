@@ -772,8 +772,8 @@ impl<S: ArrayStorage> Array<S> {
     /// The raw I/O primitive underlying [`to_ndarray`](Array::to_ndarray) and
     /// [`to_ndarray_sub`](Array::to_ndarray_sub), and the contiguous-destination shorthand for
     /// [`to_ndarray_buf`](Array::to_ndarray_buf). `buf` must be exactly
-    /// `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes and aligned to
-    /// `self.dtype().alignment()`. Elements are written in row-major (C-contiguous) order.
+    /// `index.iter().map(|r| r.len()).product() * self.dtype().itemsize()` bytes; it needs no
+    /// particular alignment. Elements are written in row-major (C-contiguous) order.
     ///
     /// Use [`to_ndarray_buf`](Array::to_ndarray_buf) instead when the destination is strided rather
     /// than packed, or when you would rather let the array hand back a buffer of its own than
@@ -783,8 +783,6 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// - [`InvalidBufferSize`](crate::ErrorKind::InvalidBufferSize) - `buf` has the wrong
     ///   length for the requested range and dtype.
-    /// - [`InvalidArgument`](crate::ErrorKind::InvalidArgument) - `buf` is insufficiently
-    ///   aligned for the dtype.
     /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
     ///
     /// # Examples
@@ -2199,6 +2197,31 @@ mod tests {
             plain.to_ndarray().unwrap(),
             array![[11i32, 21, 31], [41, 51, 61]]
         );
+    }
+
+    #[test]
+    fn to_ndarray_slice_into_a_misaligned_buf() {
+        // A packed destination needs no particular alignment. Run under Miri to check the accesses.
+        let src = ndarray::Array2::from_shape_fn((3, 4), |(r, c)| (r * 4 + c) as i32);
+        let a = Array::compact_ndarray(&src).unwrap();
+        let ctx = a.read_ctx();
+
+        // A byte window starting one byte past a 4-aligned address.
+        let mut backing = [0u8; 12 * 4 + 4];
+        let off = backing.as_ptr().align_offset(4) + 1;
+        a.to_ndarray_slice(&[0..3, 0..4], &mut backing[off..off + 12 * 4], &ctx)
+            .unwrap();
+
+        let got = (0..12)
+            .map(|i| unsafe {
+                backing
+                    .as_ptr()
+                    .add(off + i * 4)
+                    .cast::<i32>()
+                    .read_unaligned()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(got, (0..12i32).collect::<Vec<_>>());
     }
 
     // -----------------------------------------------------------------------
