@@ -15,8 +15,9 @@ use crate::{ArrayStorage, DimDyn, NdCopier, ReadContext};
 /// carries no shape, dtype, or length of its own: those come from the read request (the index ranges
 /// and the array's dtype), and it is the caller's job to interpret the bytes accordingly.
 ///
-/// Generally speaking, the data is NOT guaranteed to be aligned. Specific methods may restrict the
-/// input/output buffers.
+/// The data is NOT guaranteed to be aligned to the element dtype - neither the base pointer nor the
+/// strides - so read and write elements through it with unaligned accesses. No method of this crate
+/// requires a `StridedBuf` to be aligned.
 ///
 /// # Examples
 ///
@@ -34,7 +35,7 @@ use crate::{ArrayStorage, DimDyn, NdCopier, ReadContext};
 /// let base = buf.data_ptr();
 /// let stride = buf.strides()[0];
 /// for i in 0..4 {
-///     let elem = unsafe { base.add(i * stride).cast::<i32>().read() };
+///     let elem = unsafe { base.add(i * stride).cast::<i32>().read_unaligned() };
 ///     assert_eq!(elem, values[i]);
 /// }
 /// ```

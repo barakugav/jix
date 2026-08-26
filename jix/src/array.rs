@@ -297,7 +297,7 @@ impl<D> Array<Compact<TypeDyn, D>> {
     ///
     /// # Arguments
     ///
-    /// - `ptr`: pointer to the beginning of the buffer. Must be aligned to `dtype.alignment()`.
+    /// - `ptr`: pointer to the beginning of the buffer. It needs no particular alignment.
     /// - `shape`: shape of the n-dimensional array. At most [`NDIM_MAX`](crate::NDIM_MAX)
     ///   dimensions are allowed.
     /// - `strides`: strides of the n-dimensional array, in bytes. Must be the same length as
@@ -844,9 +844,9 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// # Alignment
     ///
-    /// A buffer materialized for a pull read is aligned to the element dtype. A lent view, or a
-    /// destination you supplied yourself, is only as aligned as its backing bytes - assume nothing
-    /// beyond that when reinterpreting the bytes as typed values.
+    /// No alignment is required of `out`, and none is promised of the returned buffer: it is only
+    /// as aligned as its backing bytes happen to be. Reinterpret the bytes as typed values with
+    /// unaligned reads, or stage the region through a buffer of your own.
     ///
     /// # Errors
     ///

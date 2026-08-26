@@ -380,7 +380,7 @@ impl<ET, D: Dimension> Array<Plain<&(), ET, D>> {
     ///
     /// No element data is copied. The resulting array shares memory with the external allocation and is valid for its
     /// lifetime `'a`. The buffer may be laid out in any order (C-contiguous, Fortran-contiguous, transposed, sliced
-    /// with gaps, etc.) as long as elements are aligned.
+    /// with gaps, etc.), and neither `data_ptr` nor `strides` need be aligned to `dtype.alignment()`.
     ///
     /// A `Plain` storage does not compress the data, and is useful when you want to treat regular
     /// buffers as `Array`, for example to participate in math operations with compressed arrays.
