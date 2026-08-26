@@ -219,7 +219,7 @@ where
 
         // Find the first sub-array whose end exceeds req_start (the first that may overlap).
         const BINARY_SEARCH_THRESHOLD: usize = 32;
-        let first_arr = if self.borders.len() < BINARY_SEARCH_THRESHOLD {
+        let first_arr = if self.borders.len() <= BINARY_SEARCH_THRESHOLD {
             self.borders
                 .iter()
                 .position(|&b| b > req_start)
