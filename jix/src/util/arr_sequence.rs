@@ -1,10 +1,14 @@
+use std::cell::UnsafeCell;
 use std::ops::Range;
 
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::Result;
-use crate::storage::{ArraySpec, ArrayStorageTyped, ReadData, StridedBuf};
+use crate::storage::{
+    n_operands_mul, n_operands_sum, ArraySpec, ArrayStorageTyped, ElementwisePipelineImpl, Operand,
+    StridedBuf,
+};
 use crate::{array_from_fn_inline, ArrayExt, ArrayStorage, Dimension, ElementType};
 
 /// A sequence of arrays passed to multi-array operations such as [`stack`](crate::ops::stack)
@@ -118,28 +122,40 @@ pub trait ArraySequenceTyped: ArraySequence + ArraySequenceTypedImpl<Self> {
     type ItemSequence<'a>;
 }
 pub(crate) trait ArraySequenceTypedImpl<ArraysT: ArraySequenceTyped + ?Sized = Self> {
-    fn read_data_typed<'a>(
+    /// Read every array of the sequence as one element-wise pipeline.
+    ///
+    /// Each array contributes its own pipeline, so all their operands stay separate and the whole
+    /// sequence is walked in one pass.
+    fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadDataTuple<ArraysT> + use<'a, ArraysT, Self>>;
+    ) -> Result<impl ElementwisePipelineTuple<ArraysT> + use<'a, ArraysT, Self>>;
 }
 
-pub(crate) trait ReadDataTuple<ArraysT: ArraySequenceTyped + ?Sized> {
-    fn len(&self) -> usize;
+/// One element drawn from each array of the sequence, grouped by position.
+pub(crate) trait ElementwisePipelineTuple<ArraysT: ArraySequenceTyped + ?Sized> {
+    /// How many operands [`operands`](Self::operands) yields across the whole sequence, if that is
+    /// known at compile time.
+    ///
+    /// `None` for a sequence whose length is only known at runtime (`Vec<Array<_>>`,
+    /// `&[Array<_>]`), or one whose arrays are themselves pipelines with an unknown operand count.
+    const N_OPERANDS: Option<usize>;
 
-    #[allow(unused)]
-    #[inline(always)]
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+    /// The leaf operands the pipeline reads from.
+    fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's;
 
-    fn read_bulk_as_iter<'a, const N: usize>(
-        &'a mut self,
-        offset: usize,
-    ) -> impl Iterator<Item = ArraysT::ItemSequence<'a>> + 'a
-    where
-        Self: Sized;
+    /// Read the next `N` positions through the operand cursors and advance them, yielding one
+    /// `ItemSequence` per position.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`ElementwisePipelineImpl::read_bulk`]. In addition, the returned
+    /// iterator (and anything it yielded) must be dropped before the next call: a runtime-length
+    /// sequence groups each position through a scratch buffer that the next call overwrites.
+    unsafe fn read_bulk_as_iter<'s, const N: usize, const CONTIGUOUS: bool>(
+        &'s self,
+    ) -> impl Iterator<Item = ArraysT::ItemSequence<'s>> + 's;
 }
 
 impl<S: ArrayStorage, const N: usize> ArraySequence for [Array<S>; N] {}
@@ -194,46 +210,45 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for [Array<S>; N] 
     type ItemSequence<'a> = [S::Item; N];
 }
 impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for [Array<S>; N] {
-    #[inline(always)]
-    fn read_data_typed<'a>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadDataTuple<Self> + use<'a, S, N>> {
-        let data = self
-            .each_ref()
-            .try_map_inline(|arr| arr.storage.read_data_typed::<S::Item>(index, context))?;
-        struct ReadDataTupleImpl<D, const N: usize> {
-            data: [D; N],
+    ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, S, N>> {
+        let inners = self.each_ref().try_map_inline(|arr| {
+            arr.storage
+                .read_as_elementwise_pipeline::<S::Item>(index, context)
+        })?;
+        struct PipelineTupleImpl<D, const N: usize> {
+            inners: [D; N],
         }
-        impl<S, D, const N: usize> ReadDataTuple<[Array<S>; N]> for ReadDataTupleImpl<D, N>
+        impl<S, D, const N: usize> ElementwisePipelineTuple<[Array<S>; N]> for PipelineTupleImpl<D, N>
         where
             S: ArrayStorageTyped,
-            D: ReadData<S::Item>,
+            D: ElementwisePipelineImpl<S::Item>,
         {
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.data.first().map_or(0, |d| d.len())
+            const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.inners.iter().flat_map(|inner| inner.operands())
             }
 
             #[inline(always)]
-            fn read_bulk_as_iter<'a, const M: usize>(
-                &'a mut self,
-                offset: usize,
-            ) -> impl Iterator<Item = [S::Item; N]> + 'a
-            where
-                Self: Sized,
-            {
+            unsafe fn read_bulk_as_iter<'s, const M: usize, const CONTIGUOUS: bool>(
+                &'s self,
+            ) -> impl Iterator<Item = [S::Item; N]> + 's {
                 let items = self
-                    .data
-                    .each_mut()
-                    .map_inline(|data| data.read_bulk::<M>(offset));
+                    .inners
+                    .each_ref()
+                    .map_inline(|inner| unsafe { inner.read_bulk::<M, CONTIGUOUS>() });
                 (0..M).map(move |item_idx| {
                     array_from_fn_inline::<_, N>(|arr_idx| items[arr_idx][item_idx])
                 })
             }
         }
-        Ok(ReadDataTupleImpl { data })
+        Ok(PipelineTupleImpl { inners })
     }
 }
 
@@ -288,46 +303,45 @@ impl<S: ArrayStorageTyped, const N: usize> ArraySequenceTyped for &[Array<S>; N]
     type ItemSequence<'a> = [S::Item; N];
 }
 impl<'b, S: ArrayStorageTyped, const N: usize> ArraySequenceTypedImpl for &'b [Array<S>; N] {
-    #[inline(always)]
-    fn read_data_typed<'a>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadDataTuple<Self> + use<'a, 'b, S, N>> {
-        let data = self
-            .each_ref()
-            .try_map_inline(|arr| arr.storage.read_data_typed::<S::Item>(index, context))?;
-        struct ReadDataTupleImpl<D, const N: usize> {
-            data: [D; N],
+    ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, 'b, S, N>> {
+        let inners = self.each_ref().try_map_inline(|arr| {
+            arr.storage
+                .read_as_elementwise_pipeline::<S::Item>(index, context)
+        })?;
+        struct PipelineTupleImpl<D, const N: usize> {
+            inners: [D; N],
         }
-        impl<S, D, const N: usize> ReadDataTuple<&[Array<S>; N]> for ReadDataTupleImpl<D, N>
+        impl<S, D, const N: usize> ElementwisePipelineTuple<&[Array<S>; N]> for PipelineTupleImpl<D, N>
         where
             S: ArrayStorageTyped,
-            D: ReadData<S::Item>,
+            D: ElementwisePipelineImpl<S::Item>,
         {
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.data.first().map_or(0, |d| d.len())
+            const N_OPERANDS: Option<usize> = n_operands_mul(D::N_OPERANDS, N);
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.inners.iter().flat_map(|inner| inner.operands())
             }
 
             #[inline(always)]
-            fn read_bulk_as_iter<'a, const M: usize>(
-                &'a mut self,
-                offset: usize,
-            ) -> impl Iterator<Item = [S::Item; N]> + 'a
-            where
-                Self: Sized,
-            {
+            unsafe fn read_bulk_as_iter<'s, const M: usize, const CONTIGUOUS: bool>(
+                &'s self,
+            ) -> impl Iterator<Item = [S::Item; N]> + 's {
                 let items = self
-                    .data
-                    .each_mut()
-                    .map_inline(|data| data.read_bulk::<M>(offset));
+                    .inners
+                    .each_ref()
+                    .map_inline(|inner| unsafe { inner.read_bulk::<M, CONTIGUOUS>() });
                 (0..M).map(move |item_idx| {
                     array_from_fn_inline::<_, N>(|arr_idx| items[arr_idx][item_idx])
                 })
             }
         }
-        Ok(ReadDataTupleImpl { data })
+        Ok(PipelineTupleImpl { inners })
     }
 }
 
@@ -381,60 +395,70 @@ impl<S: ArrayStorageTyped> ArraySequenceTyped for Vec<Array<S>> {
     type ItemSequence<'a> = &'a [S::Item];
 }
 impl<S: ArrayStorageTyped> ArraySequenceTypedImpl for Vec<Array<S>> {
-    #[inline(always)]
-    fn read_data_typed<'a>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadDataTuple<Self> + use<'a, S>> {
-        let data = self
+    ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, S>> {
+        let inners = self
             .iter()
-            .map(|arr| arr.storage.read_data_typed::<S::Item>(index, context))
+            .map(|arr| {
+                arr.storage
+                    .read_as_elementwise_pipeline::<S::Item>(index, context)
+            })
             .collect::<Result<Vec<_>>>()?;
-        struct ReadDataTupleImpl<D, T> {
-            data: Vec<D>,
-            tmp_buf: Vec<T>,
+        struct PipelineTupleImpl<D, T> {
+            inners: Vec<D>,
+            /// One position's worth of elements per bulk slot, so each `ItemSequence` can be handed
+            /// out as a slice. `read_bulk_as_iter` takes `&self` - the operand cursors live in
+            /// `Cell`s - so the scratch needs interior mutability.
+            tmp_buf: UnsafeCell<Vec<T>>,
         }
-        impl<S, D> ReadDataTuple<Vec<Array<S>>> for ReadDataTupleImpl<D, S::Item>
+        impl<S, D> ElementwisePipelineTuple<Vec<Array<S>>> for PipelineTupleImpl<D, S::Item>
         where
             S: ArrayStorageTyped,
-            D: ReadData<S::Item>,
+            D: ElementwisePipelineImpl<S::Item>,
         {
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.data.first().map_or(0, |d| d.len())
+            // The number of arrays in the sequence is only known at runtime.
+            const N_OPERANDS: Option<usize> = None;
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.inners.iter().flat_map(|inner| inner.operands())
             }
 
             #[inline(always)]
-            fn read_bulk_as_iter<'a, const M: usize>(
-                &'a mut self,
-                offset: usize,
-            ) -> impl Iterator<Item = &'a [S::Item]> + 'a
-            where
-                Self: Sized,
-            {
-                let narrays = self.data.len();
-                self.tmp_buf.clear();
-                self.tmp_buf.reserve(narrays * M);
+            unsafe fn read_bulk_as_iter<'s, const M: usize, const CONTIGUOUS: bool>(
+                &'s self,
+            ) -> impl Iterator<Item = &'s [S::Item]> + 's {
+                let narrays = self.inners.len();
+                // SAFETY: the caller must have dropped everything the previous call yielded, so
+                // this is the only live reference to the scratch. It is downgraded to a shared
+                // slice below and never re-borrowed mutably within this call.
+                let tmp_buf = unsafe { &mut *self.tmp_buf.get() };
+                tmp_buf.clear();
+                tmp_buf.reserve(narrays * M);
                 #[allow(clippy::uninit_vec)]
                 unsafe {
-                    self.tmp_buf.set_len(narrays * M)
+                    tmp_buf.set_len(narrays * M)
                 };
-                let tmp_buf = self.tmp_buf.as_mut_slice();
 
-                for (arr, data) in self.data.iter_mut().enumerate() {
-                    for (item_idx, item) in data.read_bulk::<M>(offset).into_iter().enumerate() {
+                for (arr, inner) in self.inners.iter().enumerate() {
+                    let items = unsafe { inner.read_bulk::<M, CONTIGUOUS>() };
+                    for (item_idx, item) in items.into_iter().enumerate() {
                         tmp_buf[item_idx * narrays + arr] = item;
                     }
                 }
 
+                let tmp_buf: &'s [S::Item] = tmp_buf;
                 array_from_fn_inline::<_, M>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
                     .into_iter()
             }
         }
-        Ok(ReadDataTupleImpl {
-            data,
-            tmp_buf: Vec::new(),
+        Ok(PipelineTupleImpl {
+            inners,
+            tmp_buf: UnsafeCell::new(Vec::new()),
         })
     }
 }
@@ -489,60 +513,70 @@ impl<S: ArrayStorageTyped> ArraySequenceTyped for &[Array<S>] {
     type ItemSequence<'a> = &'a [S::Item];
 }
 impl<'b, S: ArrayStorageTyped> ArraySequenceTypedImpl for &'b [Array<S>] {
-    #[inline(always)]
-    fn read_data_typed<'a>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadDataTuple<Self> + use<'a, 'b, S>> {
-        let data = self
+    ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, 'b, S>> {
+        let inners = self
             .iter()
-            .map(|arr| arr.storage.read_data_typed::<S::Item>(index, context))
+            .map(|arr| {
+                arr.storage
+                    .read_as_elementwise_pipeline::<S::Item>(index, context)
+            })
             .collect::<Result<Vec<_>>>()?;
-        struct ReadDataTupleImpl<D, T> {
-            data: Vec<D>,
-            tmp_buf: Vec<T>,
+        struct PipelineTupleImpl<D, T> {
+            inners: Vec<D>,
+            /// One position's worth of elements per bulk slot, so each `ItemSequence` can be handed
+            /// out as a slice. `read_bulk_as_iter` takes `&self` - the operand cursors live in
+            /// `Cell`s - so the scratch needs interior mutability.
+            tmp_buf: UnsafeCell<Vec<T>>,
         }
-        impl<S, D> ReadDataTuple<&[Array<S>]> for ReadDataTupleImpl<D, S::Item>
+        impl<S, D> ElementwisePipelineTuple<&[Array<S>]> for PipelineTupleImpl<D, S::Item>
         where
             S: ArrayStorageTyped,
-            D: ReadData<S::Item>,
+            D: ElementwisePipelineImpl<S::Item>,
         {
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.data.first().map_or(0, |d| d.len())
+            // The number of arrays in the sequence is only known at runtime.
+            const N_OPERANDS: Option<usize> = None;
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.inners.iter().flat_map(|inner| inner.operands())
             }
 
             #[inline(always)]
-            fn read_bulk_as_iter<'a, const M: usize>(
-                &'a mut self,
-                offset: usize,
-            ) -> impl Iterator<Item = &'a [S::Item]> + 'a
-            where
-                Self: Sized,
-            {
-                let narrays = self.data.len();
-                self.tmp_buf.clear();
-                self.tmp_buf.reserve(narrays * M);
+            unsafe fn read_bulk_as_iter<'s, const M: usize, const CONTIGUOUS: bool>(
+                &'s self,
+            ) -> impl Iterator<Item = &'s [S::Item]> + 's {
+                let narrays = self.inners.len();
+                // SAFETY: the caller must have dropped everything the previous call yielded, so
+                // this is the only live reference to the scratch. It is downgraded to a shared
+                // slice below and never re-borrowed mutably within this call.
+                let tmp_buf = unsafe { &mut *self.tmp_buf.get() };
+                tmp_buf.clear();
+                tmp_buf.reserve(narrays * M);
                 #[allow(clippy::uninit_vec)]
                 unsafe {
-                    self.tmp_buf.set_len(narrays * M)
+                    tmp_buf.set_len(narrays * M)
                 };
-                let tmp_buf = self.tmp_buf.as_mut_slice();
 
-                for (arr, data) in self.data.iter_mut().enumerate() {
-                    for (item_idx, item) in data.read_bulk::<M>(offset).into_iter().enumerate() {
+                for (arr, inner) in self.inners.iter().enumerate() {
+                    let items = unsafe { inner.read_bulk::<M, CONTIGUOUS>() };
+                    for (item_idx, item) in items.into_iter().enumerate() {
                         tmp_buf[item_idx * narrays + arr] = item;
                     }
                 }
 
+                let tmp_buf: &'s [S::Item] = tmp_buf;
                 array_from_fn_inline::<_, M>(|item_idx| &tmp_buf[item_idx * narrays..][..narrays])
                     .into_iter()
             }
         }
-        Ok(ReadDataTupleImpl {
-            data,
-            tmp_buf: Vec::new(),
+        Ok(PipelineTupleImpl {
+            inners,
+            tmp_buf: UnsafeCell::new(Vec::new()),
         })
     }
 }
@@ -633,39 +667,41 @@ macro_rules! impl_array_sequence_for_tuple {
         where
             $($S: ArrayStorageTyped,)+
         {
-            #[inline(always)]
-            fn read_data_typed<'a>(
+            #[inline]
+            fn read_as_elementwise_pipeline<'a>(
                 &'a self,
                 index: &[Range<u64>],
                 context: &'a ReadContext,
-            ) -> Result<impl ReadDataTuple<Self> + use<'a, $($S),+>> {
-                struct ReadDataTupleImpl<$($D),+>($($D),+);
-                impl<$($S),+, $($D),+> ReadDataTuple<($(Array<$S>,)+)> for ReadDataTupleImpl<$($D),+>
+            ) -> Result<impl ElementwisePipelineTuple<Self> + use<'a, $($S),+>> {
+                struct PipelineTupleImpl<$($D),+>($($D),+);
+                impl<$($S),+, $($D),+> ElementwisePipelineTuple<($(Array<$S>,)+)> for PipelineTupleImpl<$($D),+>
                 where
                     $($S: ArrayStorageTyped,)+
-                    $($D: ReadData<$S::Item>,)+
+                    $($D: ElementwisePipelineImpl<$S::Item>,)+
                 {
+                    const N_OPERANDS: Option<usize> = n_operands_sum(&[$($D::N_OPERANDS),+]);
+
                     #[inline(always)]
-                    fn len(&self) -> usize {
-                        self.0.len()
+                    fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                        std::iter::empty()
+                            $(.chain(self.$idx.operands()))+
                     }
 
                     #[inline(always)]
-                    fn read_bulk_as_iter<'a, const N: usize>(&'a mut self, offset: usize) -> impl Iterator<Item = ($($S::Item,)+)> + 'a
-                    where
-                        Self: Sized,
-                    {
+                    unsafe fn read_bulk_as_iter<'s, const N: usize, const CONTIGUOUS: bool>(
+                        &'s self,
+                    ) -> impl Iterator<Item = ($($S::Item,)+)> + 's {
                         let items = ($(
-                            self.$idx.read_bulk::<N>(offset),
+                            unsafe { self.$idx.read_bulk::<N, CONTIGUOUS>() },
                         )+);
                         (0..N).map(move |item_idx| {
                             ($(items.$idx[item_idx],)+)
                         })
                     }
                 }
-                Ok(ReadDataTupleImpl (
+                Ok(PipelineTupleImpl (
                     $(
-                        self.$idx.storage.read_data_typed::<$S::Item>(index, context)?
+                        self.$idx.storage.read_as_elementwise_pipeline::<$S::Item>(index, context)?
                     ),+
                 ))
             }

@@ -1,12 +1,12 @@
 use std::ops::Range;
 
 use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped};
+use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
-    check_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo, ReadData, StridedBuf,
+    check_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo, StridedBuf,
 };
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
@@ -213,19 +213,6 @@ where
                 },
             )
         }
-    }
-
-    #[inline(always)]
-    fn read_data_typed<'a, T>(
-        &'a self,
-        index: &[Range<u64>],
-        context: &'a ReadContext,
-    ) -> Result<impl ReadData<T> + use<'a, T, S, D>>
-    where
-        T: Dtyped,
-    {
-        self.array
-            .read_data_typed(self.transform_index(index)?.as_ref(), context)
     }
 
     #[inline(always)]

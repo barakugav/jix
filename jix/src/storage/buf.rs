@@ -47,7 +47,7 @@ pub struct StridedBuf<'a> {
 enum StridedBufData<'a> {
     Slice(&'a [u8]),
     SliceMut(&'a mut [u8]),
-    PoolBuf(PoolBuf<'a>),
+    PoolBuf { buf: PoolBuf<'a>, offset: usize },
 }
 
 impl<'a> StridedBuf<'a> {
@@ -127,7 +127,7 @@ impl<'a> StridedBuf<'a> {
     #[inline]
     pub(crate) unsafe fn from_pool(buf: PoolBuf<'a>, strides: &[usize]) -> Self {
         Self {
-            data: StridedBufData::PoolBuf(buf),
+            data: StridedBufData::PoolBuf { buf, offset: 0 },
             strides: strides.to_dim_vec::<DimDyn>(),
         }
     }
@@ -164,7 +164,7 @@ impl<'a> StridedBuf<'a> {
         let data = match &self.data {
             StridedBufData::Slice(s) => *s,
             StridedBufData::SliceMut(s) => &**s,
-            StridedBufData::PoolBuf(p) => p.as_slice(),
+            StridedBufData::PoolBuf { buf, offset } => &buf.as_slice()[*offset..],
         };
         (data, self.strides.as_ref())
     }
@@ -174,7 +174,7 @@ impl<'a> StridedBuf<'a> {
         let strides = self.strides.as_ref();
         let data = match &mut self.data {
             StridedBufData::SliceMut(s) => &mut **s,
-            StridedBufData::PoolBuf(p) => p.as_mut_slice(),
+            StridedBufData::PoolBuf { buf, offset } => &mut buf.as_mut_slice()[*offset..],
             StridedBufData::Slice(_) => panic!("data_mut on a read-only StridedBuf view"),
         };
         (data, strides)
@@ -216,6 +216,25 @@ impl<'a> StridedBuf<'a> {
         let (dst, dst_strides) = self.data_mut();
         let copier = NdCopier::new(dtype);
         unsafe { copier.copy(src, dst, shape, src_strides, dst_strides, dtype) };
+    }
+
+    /// Create a new view into the same underlying bytes, offset by `n` bytes.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the resulting view is still valid for the same shape and strides.
+    #[inline]
+    pub(crate) unsafe fn with_offset(self, n: usize) -> Self {
+        let StridedBuf { data, strides } = self;
+        let data = match data {
+            StridedBufData::Slice(s) => StridedBufData::Slice(&s[n..]),
+            StridedBufData::SliceMut(s) => StridedBufData::SliceMut(&mut s[n..]),
+            StridedBufData::PoolBuf { buf, offset } => StridedBufData::PoolBuf {
+                buf,
+                offset: offset + n,
+            },
+        };
+        StridedBuf { data, strides }
     }
 
     #[allow(unused)]

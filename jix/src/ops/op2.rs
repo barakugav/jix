@@ -6,11 +6,11 @@ use crate::error::{check_dtype, ensure, Result};
 use crate::ops::common::define_array_op2_method;
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, ReadData, ReadDataExt,
-    StridedBuf,
+    check_out_buf, n_operands_sum, ArraySpec, ArrayStorageInfo, ArrayStorageTyped,
+    ElementwisePipeline, ElementwisePipelineImpl, Operand, StridedBuf,
 };
 use crate::util::assert_unchecked_eq;
-use crate::{Array, ArrayStorage, Ty};
+use crate::{array_from_fn_inline, Array, ArrayStorage, Ty};
 
 pub(crate) struct Op2<S1, S2, K> {
     pub(crate) a: S1,
@@ -72,25 +72,79 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        self.read_data_typed::<K::Output>(index, context)?
-            .to_buf::<Self::Dimension>(index, context, out)
+        self.read_as_elementwise_pipeline::<K::Output>(index, context)?
+            .to_buf(index, context, out)
     }
 
-    #[inline(always)]
-    fn read_data_typed<'a, T>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadData<T> + use<'a, T, S1, S2, K>>
+    ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S1, S2, K>>
     where
         T: Dtyped,
     {
         check_dtype(&T::DTYPE, &K::Output::DTYPE)?;
-        let a_data = self.a.read_data_typed(index, context)?;
-        let b_data = self.b.read_data_typed(index, context)?;
-        let data = a_data.zip_items(b_data);
-        data.map_items(|(a, b)| self.kernel.apply(a, b))
-            .transmute_items::<T>()
+        let a = self
+            .a
+            .read_as_elementwise_pipeline::<S1::Item>(index, context)?;
+        let b = self
+            .b
+            .read_as_elementwise_pipeline::<S2::Item>(index, context)?;
+
+        struct Op2Pipeline<'a, P1, P2, K, T1, T2> {
+            a: P1,
+            b: P2,
+            kernel: &'a K,
+            phantom: std::marker::PhantomData<(T1, T2)>,
+        }
+        impl<T1, T2, T, P1, P2, K> ElementwisePipelineImpl<T> for Op2Pipeline<'_, P1, P2, K, T1, T2>
+        where
+            P1: ElementwisePipelineImpl<T1>,
+            P2: ElementwisePipelineImpl<T2>,
+            K: Op2Kernel<T1, T2, Output: Dtyped>,
+            T1: Copy,
+            T2: Copy,
+            T: Dtyped,
+        {
+            const N_OPERANDS: Option<usize> = n_operands_sum(&[P1::N_OPERANDS, P2::N_OPERANDS]);
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.a.operands().chain(self.b.operands())
+            }
+
+            #[inline(always)]
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+                let a = unsafe { self.a.read_bulk::<N, CONTIGUOUS>() };
+                let b = unsafe { self.b.read_bulk::<N, CONTIGUOUS>() };
+                array_from_fn_inline(|i| {
+                    let x = self.kernel.apply(a[i], b[i]);
+
+                    const { assert!(size_of::<K::Output>() == size_of::<T>()) };
+                    // SAFETY: the caller checked `T` and `K::Output` are the same dtype.
+                    unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
+                })
+            }
+        }
+        impl<T1, T2, T, P1, P2, K> ElementwisePipeline<T> for Op2Pipeline<'_, P1, P2, K, T1, T2>
+        where
+            P1: ElementwisePipelineImpl<T1>,
+            P2: ElementwisePipelineImpl<T2>,
+            K: Op2Kernel<T1, T2, Output: Dtyped>,
+            T1: Copy,
+            T2: Copy,
+            T: Dtyped,
+        {
+        }
+
+        Ok(Op2Pipeline {
+            a,
+            b,
+            kernel: &self.kernel,
+            phantom: std::marker::PhantomData,
+        })
     }
     #[inline(always)]
     fn shape(&self) -> &[u64] {

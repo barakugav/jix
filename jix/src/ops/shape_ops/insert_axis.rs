@@ -1,13 +1,13 @@
 use std::ops::Range;
 
 use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped};
+use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
     check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,
-    ReadData, StridedBuf,
+    StridedBuf,
 };
 use crate::util::DimArray;
 use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
@@ -232,41 +232,6 @@ where
                 },
             )
         }
-    }
-
-    #[inline(always)]
-    fn read_data_typed<'a, T>(
-        &'a self,
-        index: &[Range<u64>],
-        context: &'a ReadContext,
-    ) -> Result<impl ReadData<T> + use<'a, T, S, D>>
-    where
-        T: Dtyped,
-    {
-        let data = self
-            .transform_index(index)?
-            .map(|inner_index| self.array.read_data_typed(inner_index.as_ref(), context))
-            .transpose()?;
-        struct ReadDataOptional<R>(Option<R>);
-        impl<T, R> ReadData<T> for ReadDataOptional<R>
-        where
-            R: ReadData<T>,
-        {
-            #[inline(always)]
-            fn len(&self) -> usize {
-                self.0.as_ref().map_or(0, |r| r.len())
-            }
-
-            #[inline(always)]
-            fn read_bulk<const N: usize>(&mut self, offset: usize) -> [T; N] {
-                if let Some(r) = &mut self.0 {
-                    r.read_bulk(offset)
-                } else {
-                    unimplemented!() // !(offset < self.len())
-                }
-            }
-        }
-        Ok(ReadDataOptional(data))
     }
 
     #[inline(always)]

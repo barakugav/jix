@@ -3,7 +3,7 @@ use std::hint::unreachable_unchecked;
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{
     nd_iter_ext_logical_global_index, NdIterExtStridesOffset, NdIterExtStridesOffsetMulti,
-    NdIterExtStridesPtr, NdIterExtStridesPtrMut,
+    NdIterExtStridesOffsetMultiDyn, NdIterExtStridesPtr, NdIterExtStridesPtrMut,
 };
 use crate::util::Idx;
 use crate::{DimVec, Dimension};
@@ -120,38 +120,34 @@ where
         }
     }
 
-    #[inline(always)]
-    fn get_current_and_advance_status(&mut self) -> (D::Vec<u64>, E::Item) {
-        self.status.advance();
-        (self.current_idx.clone(), self.extensions.value())
-    }
-
-    #[allow(unused)]
-    #[inline(always)]
-    pub(crate) fn len(&self) -> u64 {
-        self.status.len()
-    }
-}
-impl<D, E> Iterator for NdIter<D, E>
-where
-    D: Dimension,
-    E: NdIterExtension,
-{
-    type Item = (D::Vec<u64>, E::Item);
-
-    /// Advances to the next index in row-major order and returns `(current_index, extension_item)`.
+    /// Advances to the next index in row-major order and returns `(current_index, extension_item)`,
+    /// or `None` once every index has been yielded.
     ///
     /// On each step the rightmost dimension that has not yet reached its bound is incremented,
     /// and all dimensions to its right are reset to `begin`.
+    ///
+    /// This is the *lending* `next`: the item may borrow from the extension (see
+    /// [`NdIterExtension::Item`]). Extensions whose item does not borrow also get a plain
+    /// [`Iterator`] impl, so those can be driven with `for .. in iter` instead.
     #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.status.is_exhausted() {
+    #[allow(clippy::should_implement_trait)]
+    pub(crate) fn advance_and_get(&mut self) -> Option<(D::Vec<u64>, E::Item<'_>)> {
+        if !self.advance() {
             return None;
+        }
+        Some((self.current_idx.clone(), self.extensions.value()))
+    }
+
+    #[inline(always)]
+    fn advance(&mut self) -> bool {
+        if self.status.is_exhausted() {
+            return false;
         }
 
         if self.status.is_not_started() {
             self.status.start();
-            return Some(self.get_current_and_advance_status());
+            self.status.advance();
+            return true;
         }
 
         debug_assert!(self.status.is_in_progress());
@@ -173,10 +169,31 @@ where
                     );
                     self.current_idx[smaller_dim] = begin;
                 }
-                return Some(self.get_current_and_advance_status());
+                self.status.advance();
+                return true;
             }
         }
         unsafe { unreachable_unchecked() }
+    }
+
+    #[allow(unused)]
+    #[inline(always)]
+    pub(crate) fn len(&self) -> u64 {
+        self.status.len()
+    }
+}
+
+impl<D, E, I> Iterator for NdIter<D, E>
+where
+    D: Dimension,
+    // `NdIter` is a real [`Iterator`] whenever its extension's item does not borrow from it.
+    E: 'static + for<'a> NdIterExtension<Item<'a> = I>,
+{
+    type Item = (D::Vec<u64>, I);
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        NdIter::advance_and_get(self)
     }
 
     #[inline(always)]
@@ -193,8 +210,10 @@ where
 /// [`on_decrease`](NdIterExtension::on_decrease) notifications and
 /// return the current derived value via [`value`](NdIterExtension::value).
 pub(crate) trait NdIterExtension {
-    /// The derived value produced at each iteration step.
-    type Item;
+    /// The derived value produced at each iteration step, borrows from the extension.
+    type Item<'a>
+    where
+        Self: 'a;
 
     /// Called when dimension `dim` changes from `before` to `after`.
     ///
@@ -204,7 +223,7 @@ pub(crate) trait NdIterExtension {
     fn on_decrease(&mut self, dim: usize, before: u64, after: u64, diff: u64);
 
     /// Returns the current derived value after all index changes have been applied.
-    fn value(&self) -> Self::Item;
+    fn value(&self) -> Self::Item<'_>;
 
     fn check_ndim(&self, ndim: usize) -> bool;
 
@@ -253,7 +272,7 @@ where
 // ---------------------------------------------------------------------------
 
 impl NdIterExtension for () {
-    type Item = ();
+    type Item<'a> = ();
     #[inline(always)]
     fn on_increase(&mut self, _dim: usize, _before: u64, _after: u64, _diff: u64) {}
     #[inline(always)]
@@ -277,7 +296,10 @@ impl<T1> NdIterExtension for (T1,)
 where
     T1: NdIterExtension,
 {
-    type Item = (T1::Item,);
+    type Item<'a>
+        = (T1::Item<'a>,)
+    where
+        Self: 'a;
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
         self.0.on_increase(dim, before, after, diff);
@@ -287,7 +309,7 @@ where
         self.0.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn value(&self) -> (T1::Item,) {
+    fn value(&self) -> Self::Item<'_> {
         (self.0.value(),)
     }
     #[inline(always)]
@@ -306,7 +328,10 @@ where
     T1: NdIterExtension,
     T2: NdIterExtension,
 {
-    type Item = (T1::Item, T2::Item);
+    type Item<'a>
+        = (T1::Item<'a>, T2::Item<'a>)
+    where
+        Self: 'a;
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
         self.0.on_increase(dim, before, after, diff);
@@ -318,7 +343,7 @@ where
         self.1.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn value(&self) -> (T1::Item, T2::Item) {
+    fn value(&self) -> Self::Item<'_> {
         (self.0.value(), self.1.value())
     }
     #[inline(always)]
@@ -338,7 +363,10 @@ where
     T2: NdIterExtension,
     T3: NdIterExtension,
 {
-    type Item = (T1::Item, T2::Item, T3::Item);
+    type Item<'a>
+        = (T1::Item<'a>, T2::Item<'a>, T3::Item<'a>)
+    where
+        Self: 'a;
 
     #[inline(always)]
     fn on_increase(&mut self, dim: usize, before: u64, after: u64, diff: u64) {
@@ -353,7 +381,7 @@ where
         self.2.on_decrease(dim, before, after, diff);
     }
     #[inline(always)]
-    fn value(&self) -> (T1::Item, T2::Item, T3::Item) {
+    fn value(&self) -> Self::Item<'_> {
         (self.0.value(), self.1.value(), self.2.value())
     }
     #[inline(always)]
@@ -493,6 +521,21 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
         }
     }
 
+    /// Adds a [`NdIterExtStridesOffsetMultiDyn`] extension tracking one offset per operand.
+    #[inline]
+    pub(crate) fn with_strides_offset_multi_dyn_ext<S: Idx>(
+        self,
+        strides: Vec<D::Vec<S>>,
+        initial_offsets: Vec<S>,
+    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesOffsetMultiDyn<D, S>>> {
+        let ext = NdIterExtStridesOffsetMultiDyn::<D, S>::new(strides, initial_offsets);
+        NdIterBuilder {
+            begin: self.begin,
+            end: self.end,
+            extensions: self.extensions.merge_extension(ext),
+        }
+    }
+
     /// Adds a [`NdIterExtStridesOffset`] extension.
     #[inline]
     pub(crate) fn with_logical_global_index_ext(
@@ -572,7 +615,8 @@ mod tests {
         }
     }
     impl NdIterExtension for ChangeLog {
-        type Item = usize; // number of on_increase/decrease calls so far when value() is called
+        // number of on_increase/decrease calls so far when value() is called
+        type Item<'a> = usize;
         fn on_increase(&mut self, dim: usize, before: u64, after: u64, _diff: u64) {
             self.log.push((dim, before, after));
         }
@@ -687,9 +731,11 @@ mod tests {
     // NdIter with new_with_begin
     // ---------------------------------------------------------------------------
 
-    fn collect_indices<D: Dimension, E: NdIterExtension>(iter: NdIter<D, E>) -> Vec<Vec<u64>> {
+    /// Generic over an abstract `E`, so the `Iterator` impl (which needs a single concrete item
+    /// type for every lifetime) does not apply here - drive the lending `next` instead.
+    fn collect_indices<D: Dimension, E: NdIterExtension>(mut iter: NdIter<D, E>) -> Vec<Vec<u64>> {
         let mut out = Vec::new();
-        for (idx, _) in iter {
+        while let Some((idx, _)) = iter.advance_and_get() {
             out.push(idx.as_ref().to_vec());
         }
         out

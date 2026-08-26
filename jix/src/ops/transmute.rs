@@ -210,8 +210,29 @@ where
 mod tests {
     use super::Transmute;
     use crate::dtype::Dtyped;
-    use crate::storage::{ReadData, StridedBuf};
+    use crate::storage::{ElementwisePipelineImpl, StridedBuf};
     use crate::{Array, ArrayParams, ArrayStorage, Ty};
+
+    /// Read `nitems` elements of `storage` lazily, through the element-wise pipeline.
+    fn read_lazy<S, T>(
+        storage: &S,
+        index: &[std::ops::Range<u64>],
+        context: &crate::ReadContext,
+        nitems: usize,
+    ) -> Vec<T>
+    where
+        S: ArrayStorage,
+        T: Dtyped,
+    {
+        let buf = storage
+            .read_as_elementwise_pipeline::<T>(index, context)
+            .unwrap()
+            .to_buf(index, context, None)
+            .unwrap();
+        (0..nitems)
+            .map(|i| unsafe { buf.data_ptr().cast::<T>().add(i).read() })
+            .collect()
+    }
 
     /// Build a single-block `Compact` array from a 1-D `u32` ndarray, so a full read hits the
     /// contiguous single-block fast path (the one that enforces source-dtype buffer alignment).
@@ -305,9 +326,7 @@ mod tests {
         let t = unsafe { arr.transmute_elements::<u32>() };
         let ctx = t.read_ctx();
 
-        let mut read = t.storage().read_data_typed::<u32>(&[0..2], &ctx).unwrap();
-        assert_eq!(read.len(), 2);
-        let vals = read.read_bulk::<2>(0);
+        let vals = read_lazy::<_, u32>(t.storage(), &[0..2], &ctx, 2);
         assert_eq!(vals, [0x0102_0304u32, 0x0506_0708]);
     }
 
@@ -320,12 +339,7 @@ mod tests {
         let t = unsafe { arr.transmute_elements::<[u8; 4]>() };
         let ctx = t.read_ctx();
 
-        let mut read = t
-            .storage()
-            .read_data_typed::<[u8; 4]>(&[0..2], &ctx)
-            .unwrap();
-        assert_eq!(read.len(), 2);
-        let vals = read.read_bulk::<2>(0);
+        let vals = read_lazy::<_, [u8; 4]>(t.storage(), &[0..2], &ctx, 2);
         assert_eq!(vals, [[0x04, 0x03, 0x02, 0x01], [0x08, 0x07, 0x06, 0x05]]);
     }
 }

@@ -1,7 +1,7 @@
-use crate::dtype::Dtyped;
+use std::cmp::Ordering;
+
 use crate::util::iter::NdIter;
-use crate::util::PtrExt;
-use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension, PtrMutExt};
+use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, Dimension};
 
 /// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
@@ -56,7 +56,6 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         // (1) Order the axes (per-operand strides non-increasing, size-1 axes dropped). The sort key
         // is the array of an axis's per-operand strides, compared lexicographically (operand 0
         // first), so `[usize; N_OPERANDS]`'s derived `Ord` gives exactly the ranking we want.
-        let key = |d: usize| -> [usize; N_OPERANDS] { std::array::from_fn(|i| strides[i][d]) };
         let mut dim_perm = DimArray::new();
         for (d, &len) in shape.iter().enumerate() {
             if len == 0 {
@@ -66,70 +65,72 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
                 dim_perm.push(d);
             }
         }
-        let shape_storage;
-        let strides_storage: [_; N_OPERANDS];
-        let need_sort = dim_perm.windows(2).any(|w| key(w[0]) < key(w[1]));
-        let (shape, strides) = if dim_perm.len() != shape.len() || need_sort {
-            if need_sort {
-                dim_perm.sort_by_key(|&d| std::cmp::Reverse(key(d)));
-            }
-            let apply_dim_permutation =
-                |arr: &[usize]| dim_arr(dim_perm.len(), |d| arr[dim_perm[d]]);
-            shape_storage = apply_dim_permutation(shape);
-            strides_storage = std::array::from_fn(|i| apply_dim_permutation(strides[i]));
-            (
-                shape_storage.as_slice(),
-                strides_storage.each_ref().map(|s| s.as_slice()),
-            )
+        if dim_perm.is_empty() {
+            // The whole region is a single element. Treat as 1-d with length 1.
+            return Self {
+                shape: DimArray::from_slice(&[1]).unwrap(),
+                strides: array_from_fn_inline(|i| DimArray::from_slice(&[layouts[i].0]).unwrap()),
+                is_aligned: [true; N_OPERANDS],
+                is_contiguous: [true; N_OPERANDS],
+            };
+        }
+
+        let (shape, strides) = if dim_perm.len() == 1 {
+            // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
+            let d = dim_perm[0];
+            let shape = DimArray::from_slice(&[shape[d]]).unwrap();
+            let strides = array_from_fn_inline(|i| DimArray::from_slice(&[strides[i][d]]).unwrap());
+            (shape, strides)
         } else {
+            axes_sort_by(&mut dim_perm, |d1: usize, d2: usize| {
+                for strides in strides.iter() {
+                    match strides[d1].cmp(&strides[d2]) {
+                        std::cmp::Ordering::Less => return std::cmp::Ordering::Greater,
+                        std::cmp::Ordering::Equal => {}
+                        std::cmp::Ordering::Greater => return std::cmp::Ordering::Less,
+                    }
+                }
+                std::cmp::Ordering::Equal
+            });
+
+            // (2) Coalesce adjacent contiguous axes into groups. `dim_perm` lists the axes to visit,
+            // outermost first, so a group takes its stride from the innermost axis it reaches down to
+            // and its length from the product of the group's shapes. Reading the caller's shape and
+            // strides through `dim_perm` leaves the permutation implicit: nothing is materialized until
+            // the groups are known, and then only once.
+            let mut group_inner = DimArray::new(); // input axis of each group's inner axis
+            let mut group_len = DimArray::new(); // product of the group's shapes
+            for &d in dim_perm.iter() {
+                let m = group_inner.len();
+                if m > 0
+                    && strides
+                        .iter()
+                        .all(|s| s[group_inner[m - 1]] == s[d] * shape[d])
+                {
+                    group_inner[m - 1] = d; // the group now reaches down to axis `d`
+                    group_len[m - 1] *= shape[d];
+                } else {
+                    group_inner.push(d);
+                    group_len.push(shape[d]);
+                }
+            }
+            let shape = group_len;
+            let strides = array_from_fn_inline::<_, N_OPERANDS>(|i| {
+                dim_arr(group_inner.len(), |g| strides[i][group_inner[g]])
+            });
             (shape, strides)
         };
 
-        // (2) Coalesce adjacent contiguous axes into groups. After the permutation the axes run
-        // outermost (index 0) -> innermost, so a group spanning post-permutation axes [lo..=hi]
-        // takes its stride from the innermost axis `hi` and its length from the product of the
-        // group's shapes.
-        let mut group_inner = DimArray::new(); // post-perm index of each group's inner axis
-        let mut group_len = DimArray::new(); // product of the group's shapes
-        #[allow(clippy::needless_range_loop)]
-        for d in 0..shape.len() {
-            let m = group_inner.len();
-            if m > 0
-                && (0..N_OPERANDS)
-                    .all(|i| strides[i][group_inner[m - 1]] == strides[i][d] * shape[d])
-            {
-                group_inner[m - 1] = d; // the group now reaches down to axis `d`
-                group_len[m - 1] *= shape[d];
-            } else {
-                group_inner.push(d);
-                group_len.push(shape[d]);
-            }
-        }
-        let mut strides: [DimArray<usize>; N_OPERANDS] =
-            std::array::from_fn(|i| dim_arr(group_inner.len(), |g| strides[i][group_inner[g]]));
-        let mut shape = group_len;
-
         // (3) Compute the innermost-run flags (length, and per-operand alignment / contiguity).
-        let sizes: [_; N_OPERANDS] = std::array::from_fn(|i| layouts[i].0);
-        let is_aligned;
-        let is_contiguous;
-        if shape.is_empty() {
-            // The whole region is a single element. Treat as 1-d with length 1.
-            shape.push(1);
-            for i in 0..N_OPERANDS {
-                strides[i].push(sizes[i]);
-            }
-            is_aligned = [true; N_OPERANDS];
-            is_contiguous = [true; N_OPERANDS];
-        } else {
-            let ndim = shape.len();
-            is_aligned = std::array::from_fn::<_, N_OPERANDS, _>(|i| {
-                let alignment = layouts[i].1;
-                strides[i].iter().all(|s| s.is_multiple_of(alignment))
-            });
-            is_contiguous =
-                std::array::from_fn::<_, N_OPERANDS, _>(|i| strides[i][ndim - 1] == sizes[i]);
-        }
+        debug_assert!(!shape.is_empty());
+        let sizes = array_from_fn_inline::<_, N_OPERANDS>(|i| layouts[i].0);
+        let ndim = shape.len();
+        let is_aligned = array_from_fn_inline::<_, N_OPERANDS>(|i| {
+            let alignment = layouts[i].1;
+            strides[i].iter().all(|s| s.is_multiple_of(alignment))
+        });
+        let is_contiguous =
+            array_from_fn_inline::<_, N_OPERANDS>(|i| strides[i][ndim - 1] == sizes[i]);
 
         Self {
             shape,
@@ -142,7 +143,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     fn empty(layouts: [(usize, usize); N_OPERANDS]) -> Self {
         let mut shape = DimArray::new();
         shape.push(0);
-        let strides = std::array::from_fn(|op_i| {
+        let strides = array_from_fn_inline(|op_i| {
             let mut s = DimArray::new();
             s.push(layouts[op_i].0);
             s
@@ -178,7 +179,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     ) {
         let ndim = self.shape.len();
         let inner_len = self.shape[ndim - 1];
-        let inner_strides: [_; N_OPERANDS] = std::array::from_fn(|i| self.strides[i][ndim - 1]);
+        let inner_strides = array_from_fn_inline::<_, N_OPERANDS>(|i| self.strides[i][ndim - 1]);
         if crate::hint::likely(ndim == 1) {
             inner_loop([0; N_OPERANDS], inner_len, inner_strides);
         } else {
@@ -234,89 +235,20 @@ fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, D: Dimension>(
     }
 }
 
-#[allow(unused)] // TODO
-pub(crate) fn nd_iter_unordered_op0<T, U>(
-    shape: &[usize],
-    data_ptr: *mut T,
-    strides: &[usize],
-    mut kernel: impl FnMut(T) -> U,
-) where
-    T: Dtyped,
-    U: Dtyped,
-{
-    let (itemsize, alignment) = (size_of::<T>(), align_of::<T>());
-    assert!(itemsize == size_of::<U>() && alignment <= align_of::<U>());
-
-    let iter = NdIterUnordered::new(shape, [strides], [(itemsize, alignment)]);
-    let aligned = iter.is_aligned()[0] && data_ptr.is_aligned();
-    let inner_loop_fn = match (aligned, iter.is_contiguous()[0]) {
-        (true, true) => inner_loop::<T, U, 1, true, true>,
-        (true, false) => inner_loop::<T, U, 1, true, false>,
-        (false, true) => inner_loop::<T, U, 1, false, true>,
-        (false, false) => inner_loop::<T, U, 1, false, false>,
-    };
-    iter.foreach_inner_1d(|[offset], inner_len, [inner_stride]| {
-        let data_ptr = unsafe { data_ptr.cast::<u8>().add(offset).cast::<T>() };
-        inner_loop_fn(data_ptr, inner_len, inner_stride, &mut kernel)
-    });
-
-    #[inline(never)]
-    fn inner_loop<T, U, const LANES: usize, const ALIGNED: bool, const CONTIGUOUS: bool>(
-        data_ptr: *mut T,
-        len: usize,
-        inner_stride: usize,
-        kernel: &mut impl FnMut(T) -> U,
-    ) where
-        T: Dtyped,
-        U: Dtyped,
-    {
-        assert_eq!(size_of::<T>(), size_of::<U>());
-        let data_ptr = data_ptr.cast::<T>();
-        if CONTIGUOUS {
-            debug_assert_eq!(inner_stride, size_of::<T>());
+#[inline]
+pub(super) fn axes_sort_by(arr: &mut [usize], mut compare: impl FnMut(usize, usize) -> Ordering) {
+    for i in 1..arr.len() {
+        let mut insertion_idx = i;
+        for i1 in (0..i).rev() {
+            if compare(arr[i], arr[i1]).is_ge() {
+                break;
+            }
+            insertion_idx = i1;
         }
-        let write = |j: usize, val: U| {
-            let dst = data_ptr.cast::<U>();
-            let elm = if CONTIGUOUS {
-                unsafe { dst.add(j) }
-            } else {
-                unsafe { dst.cast::<u8>().add(j * inner_stride).cast::<U>() }
-            };
-            unsafe { elm.write_maybe_aligned::<ALIGNED>(val) };
-        };
-        let mut i = 0;
-        if CONTIGUOUS {
-            while i + LANES <= len {
-                let chunk = unsafe {
-                    data_ptr
-                        .add(i)
-                        .cast::<[T; LANES]>()
-                        .read_maybe_aligned::<ALIGNED>()
-                };
-                #[allow(clippy::needless_range_loop)]
-                for k in 0..LANES {
-                    write(i + k, kernel(chunk[k]));
-                }
-                i += LANES;
-            }
-
-            while i < len {
-                let val = unsafe { data_ptr.add(i).read_maybe_aligned::<ALIGNED>() };
-                write(i, kernel(val));
-                i += 1;
-            }
-        } else {
-            while i < len {
-                let val = unsafe {
-                    data_ptr
-                        .cast::<u8>()
-                        .add(i * inner_stride)
-                        .cast::<T>()
-                        .read_maybe_aligned::<ALIGNED>()
-                };
-                write(i, kernel(val));
-                i += 1;
-            }
+        if insertion_idx != i {
+            let tmp = arr[i];
+            arr.copy_within(insertion_idx..i, insertion_idx + 1);
+            arr[insertion_idx] = tmp;
         }
     }
 }
@@ -725,232 +657,73 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // nd_iter_unordered_op0 - in-place strided map over operand 0
+    // axes_sort_by
     // ---------------------------------------------------------------------------
 
-    use crate::dtype::Dtyped;
-
-    // Deterministic kernels used both to drive the function and to build the reference. Fn pointers
-    // are `Copy`, so the same value serves both roles.
-    fn kmul_u32(x: u32) -> u32 {
-        x.wrapping_mul(0x9E37_79B1).wrapping_add(1)
-    }
-    fn kmul_u16(x: u16) -> u16 {
-        x.wrapping_mul(3).wrapping_add(7)
-    }
-    fn k_i32_to_u32(x: i32) -> u32 {
-        (x as u32) ^ 0xABCD_1234
+    /// Sort by the axis indices themselves, ascending.
+    fn sorted(mut axes: Vec<usize>) -> Vec<usize> {
+        axes_sort_by(&mut axes, |a, b| a.cmp(&b));
+        axes
     }
 
-    // Bytes needed to hold every element of `shape` at the given byte strides (0 for empty regions).
-    fn buf_len(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
-        if shape.contains(&0) {
-            return 0;
-        }
-        let max_off: usize = shape
-            .iter()
-            .zip(strides)
-            .map(|(&s, &st)| (s - 1) * st)
-            .sum();
-        max_off + itemsize
+    #[test]
+    fn axes_sort_by_orders_ascending() {
+        assert_eq!(sorted(vec![]), Vec::<usize>::new());
+        assert_eq!(sorted(vec![7]), vec![7]);
+        assert_eq!(sorted(vec![1, 2, 3]), vec![1, 2, 3]); // already ordered
+        assert_eq!(sorted(vec![3, 2, 1]), vec![1, 2, 3]); // fully reversed
+        assert_eq!(sorted(vec![2, 0, 3, 1]), vec![0, 1, 2, 3]);
+        assert_eq!(sorted(vec![5, 4, 5, 4]), vec![4, 4, 5, 5]); // duplicates
     }
 
-    /// Run `nd_iter_unordered_op0` as an in-place map and assert it byte-matches a naive reference
-    /// that maps every in-region element and leaves the gaps (bytes no element covers) untouched.
-    ///
-    /// `strides` are byte strides and MUST give every element a distinct offset (no broadcast / no
-    /// overlap): an in-place map over overlapping elements is order-dependent, and the walk order is
-    /// deliberately unspecified. Returns the `(aligned, contiguous)` flags the walk reported (i.e.
-    /// which of the four inner-loop specializations ran), or `None` for an empty region.
-    #[track_caller]
-    fn check_op0<T, U>(
-        shape: &[usize],
-        strides: &[usize],
-        kernel: fn(T) -> U,
-    ) -> Option<(bool, bool)>
-    where
-        T: Dtyped,
-        U: Dtyped,
-    {
-        let itemsize = size_of::<T>();
-        assert_eq!(itemsize, size_of::<U>());
+    #[test]
+    fn axes_sort_by_is_stable() {
+        // Rank by `d % 3` alone, so the three axes in each rank compare `Equal` to each other and
+        // only a stable sort keeps them in the order they came in.
+        let mut axes = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
+        axes_sort_by(&mut axes, |a, b| (a % 3).cmp(&(b % 3)));
+        assert_eq!(axes, vec![0, 3, 6, 1, 4, 7, 2, 5, 8]);
+    }
 
-        // Observe which specialization this layout selects, so callers can pin it down. An empty
-        // region visits nothing; report `None` for it.
-        let r = run(shape, [strides], [(itemsize, align_of::<T>())]);
-        let observed = (!r.visited.is_empty()).then(|| {
-            let f = r.flags.unwrap();
-            (f.is_aligned[0], f.is_contiguous[0])
-        });
+    #[test]
+    fn axes_sort_by_compares_elements_not_positions() {
+        // The comparator is handed the *elements* - axis indices - never their positions in `arr`.
+        // Every element here is >= 10, so a comparator fed positions would hit the panic.
+        let rank = |axis: usize| match axis {
+            10 => 2usize,
+            11 => 0,
+            12 => 1,
+            other => panic!("comparator got {other}, which is a position, not an element"),
+        };
+        let mut axes = vec![10, 11, 12];
+        axes_sort_by(&mut axes, |a, b| rank(a).cmp(&rank(b)));
+        assert_eq!(axes, vec![11, 12, 10]);
+    }
 
-        let len = buf_len(shape, strides, itemsize);
-        let initial: Vec<u8> = (0..len)
-            .map(|i| (i as u8).wrapping_mul(37).wrapping_add(11))
-            .collect();
-
-        // Reference: map each in-region element in place, reading from the pristine initial bytes
-        // (offsets are distinct, so no element is read after another has overwritten it).
-        let mut expected = initial.clone();
-        for [off] in reference::<1>(shape, [strides]) {
-            let t = unsafe { initial.as_ptr().add(off).cast::<T>().read_unaligned() };
-            unsafe {
-                expected
-                    .as_mut_ptr()
-                    .add(off)
-                    .cast::<U>()
-                    .write_unaligned(kernel(t))
-            };
+    #[test]
+    fn axes_sort_by_ranks_axes_by_descending_stride() {
+        // How both walks use it: rank an axis by its per-operand strides, operand 0 most
+        // significant, with the comparison reversed so the largest stride ends up outermost.
+        fn sort_by_strides(strides: &[&[usize]], axes: &mut [usize]) {
+            axes_sort_by(axes, |d1, d2| {
+                for s in strides {
+                    match s[d1].cmp(&s[d2]) {
+                        Ordering::Less => return Ordering::Greater,
+                        Ordering::Equal => {}
+                        Ordering::Greater => return Ordering::Less,
+                    }
+                }
+                Ordering::Equal
+            });
         }
 
-        // Actual: seed an 8-byte-aligned buffer with the same bytes (so the aligned inner-loop path
-        // is sound whenever the walk selects it), then run the in-place map over it.
-        let mut backing = vec![0u64; len.div_ceil(8) + 1];
-        let base = backing.as_mut_ptr().cast::<u8>();
-        unsafe { base.copy_from_nonoverlapping(initial.as_ptr(), len) };
-        nd_iter_unordered_op0::<T, U>(shape, base.cast::<T>(), strides, kernel);
-        let actual = unsafe { std::slice::from_raw_parts(base, len) };
-        assert_eq!(
-            actual,
-            expected.as_slice(),
-            "shape={shape:?} strides={strides:?}"
-        );
+        let mut axes = [0, 1, 2];
+        sort_by_strides(&[&[4, 400, 40], &[1, 100, 10]], &mut axes);
+        assert_eq!(axes, [1, 2, 0]);
 
-        observed
-    }
-
-    // The four inner-loop specializations, keyed on (aligned, contiguous). `aligned` reflects every
-    // byte stride being a multiple of the element alignment; `contiguous` reflects the innermost run
-    // having stride == element size. Each case is constructed to select exactly one specialization.
-
-    #[test]
-    fn op0_aligned_contiguous() {
-        // Fully contiguous u32 run: strides multiple of align 4, inner stride == size 4.
-        assert_eq!(
-            check_op0::<u32, u32>(&[3, 4], &[16, 4], kmul_u32),
-            Some((true, true))
-        );
-    }
-
-    #[test]
-    fn op0_aligned_not_contiguous() {
-        // Stride 8 is a multiple of align 4 (aligned) but not equal to size 4 (not contiguous).
-        assert_eq!(
-            check_op0::<u32, u32>(&[3], &[8], kmul_u32),
-            Some((true, false))
-        );
-    }
-
-    #[test]
-    fn op0_not_aligned_contiguous() {
-        // u16 (align 2): the inner axis stays contiguous (stride 2 == size 2) while the odd outer
-        // stride 7 makes the walk not-aligned - so contiguous chunk reads go through the unaligned
-        // intrinsics.
-        assert_eq!(
-            check_op0::<u16, u16>(&[2, 3], &[7, 2], kmul_u16),
-            Some((false, true))
-        );
-    }
-
-    #[test]
-    fn op0_not_aligned_not_contiguous() {
-        // u16 with an odd inner stride 3: neither a multiple of align 2 nor equal to size 2.
-        assert_eq!(
-            check_op0::<u16, u16>(&[3], &[3], kmul_u16),
-            Some((false, false))
-        );
-    }
-
-    #[test]
-    fn op0_multidim_coalesces_to_one_run() {
-        // C-order [2,3,4] u32 collapses to a single contiguous run of 24 elements.
-        assert_eq!(
-            check_op0::<u32, u32>(&[2, 3, 4], &[48, 16, 4], kmul_u32),
-            Some((true, true))
-        );
-    }
-
-    #[test]
-    fn op0_strided_outer_drives_the_outer_walk() {
-        // Outer stride 20 != inner span 12, so the axes stay split and the outer NdIter drives the
-        // inner run twice - exercising op0's per-outer-position offset add.
-        assert_eq!(
-            check_op0::<u32, u32>(&[2, 3], &[20, 4], kmul_u32),
-            Some((true, true))
-        );
-    }
-
-    #[test]
-    fn op0_size_one_axes_are_dropped() {
-        assert_eq!(
-            check_op0::<u32, u32>(&[1, 4, 1], &[400, 4, 200], kmul_u32),
-            Some((true, true))
-        );
-    }
-
-    #[test]
-    fn op0_scalar_single_element() {
-        assert_eq!(
-            check_op0::<u32, u32>(&[], &[], kmul_u32),
-            Some((true, true))
-        );
-        assert_eq!(
-            check_op0::<u32, u32>(&[1, 1], &[8, 4], kmul_u32),
-            Some((true, true))
-        );
-    }
-
-    #[test]
-    fn op0_empty_region_is_a_noop() {
-        // A zero-length axis yields an empty walk: nothing is mapped.
-        assert_eq!(check_op0::<u32, u32>(&[0], &[4], kmul_u32), None);
-        assert_eq!(
-            check_op0::<u32, u32>(&[2, 0, 3], &[24, 8, 4], kmul_u32),
-            None
-        );
-    }
-
-    #[test]
-    fn op0_type_changing_kernel() {
-        // T and U differ but share size and alignment (i32 -> u32); the reference reads i32 bytes
-        // and writes u32 bytes at the same offsets, matching the in-place transform.
-        assert_eq!(
-            check_op0::<i32, u32>(&[5], &[4], k_i32_to_u32),
-            Some((true, true))
-        );
-    }
-
-    #[test]
-    fn prop_op0_matches_reference() {
-        // Contiguous-with-gaps u32 layouts over ranks 0..=4: the inner axis is contiguous or strided
-        // depending on the multipliers, covering the aligned contiguous/non-contiguous paths, the
-        // coalescing merge, and the scalar / outer-walk shapes.
-        let strategy = (0usize..=4).prop_flat_map(|ndim| {
-            (
-                prop::collection::vec(1usize..=4, ndim),
-                prop::collection::vec(1usize..=3, ndim),
-            )
-        });
-        runner(0x0F0)
-            .run(&strategy, |(shape, mult)| {
-                let strides = strided_strides(&shape, &mult, size_of::<u32>());
-                check_op0::<u32, u32>(&shape, &strides, kmul_u32);
-                Ok(())
-            })
-            .unwrap();
-    }
-
-    #[test]
-    fn prop_op0_unaligned_outer_stride() {
-        // u16 with a contiguous inner axis behind a forced-odd outer stride: every draw is
-        // not-aligned-but-contiguous, so this fuzzes the unaligned chunk-read path across shapes.
-        // Both extents are >= 2 so neither axis is dropped as size-1 (which would revive alignment).
-        runner(0xF00D)
-            .run(&(2usize..=4, 2usize..=4, 0usize..=3), |(a, b, k)| {
-                let strides = [2 * b + (2 * k + 1), 2]; // outer odd and > inner span 2*b
-                let flags = check_op0::<u16, u16>(&[a, b], &strides, kmul_u16).unwrap();
-                prop_assert_eq!(flags, (false, true));
-                Ok(())
-            })
-            .unwrap();
+        // Operand 0 has the same stride on both axes, so operand 1 breaks the tie.
+        let mut axes = [0, 1];
+        sort_by_strides(&[&[8, 8], &[1, 2]], &mut axes);
+        assert_eq!(axes, [1, 0]);
     }
 }

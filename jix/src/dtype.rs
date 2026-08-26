@@ -605,17 +605,16 @@ impl Dtype {
             .map(|(name, offset, dtype)| (Cow::Owned(name), offset, dtype))
             .collect::<Box<_>>();
 
-        let is_aligned;
-        if Self::is_aligned_struct(&fields, element_itemsize, alignment) {
-            is_aligned = true;
+        let is_aligned = if Self::is_aligned_struct(&fields, element_itemsize, alignment) {
+            true
         } else if Self::is_packed_struct(&fields, element_itemsize, alignment) {
-            is_aligned = false;
+            false
         } else {
             bail!(
                 InvalidArgument,
                 "field offsets are not in a valid packed or aligned layout"
             );
-        }
+        };
 
         Ok(Self(DtypeInner::StructOwned {
             fields,

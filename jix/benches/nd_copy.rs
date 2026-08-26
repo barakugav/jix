@@ -180,14 +180,14 @@ fn transposed_strides(shape: &[usize], itemsize: usize) -> Vec<usize> {
     strides
 }
 
-/// Compute the largest byte offset of a region accessed by `shape` and `strides`.
+/// Compute the byte span of a region accessed by `shape` and `strides`.
 fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
-    let mut span = itemsize;
+    let mut biggest_offset = 0;
     for (&len, &stride) in shape.iter().zip(strides) {
         if len == 0 {
             return 0;
         }
-        span += stride * (len - 1);
+        biggest_offset += stride * (len - 1);
     }
-    span
+    biggest_offset + itemsize
 }

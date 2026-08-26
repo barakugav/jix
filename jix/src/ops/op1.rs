@@ -7,10 +7,10 @@ use crate::error::{check_dtype, Result};
 use crate::ops::common::define_array_op1_method;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
-    check_out_buf, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, ReadData, ReadDataExt,
-    StridedBuf,
+    check_out_buf, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, ElementwisePipeline,
+    ElementwisePipelineImpl, Operand, StridedBuf,
 };
-use crate::{ArrayStorage, Ty};
+use crate::{ArrayExt, ArrayStorage, Ty};
 
 pub(crate) struct Op1<S, K> {
     pub(crate) array: S,
@@ -53,24 +53,67 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        self.read_data_typed::<K::Output>(index, context)?
-            .to_buf::<Self::Dimension>(index, context, out)
+        self.read_as_elementwise_pipeline::<K::Output>(index, context)?
+            .to_buf(index, context, out)
     }
 
-    #[inline(always)]
-    fn read_data_typed<'a, T>(
+    #[inline]
+    fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
         index: &[Range<u64>],
         context: &'a ReadContext,
-    ) -> Result<impl ReadData<T> + use<'a, T, S, K>>
+    ) -> Result<impl ElementwisePipeline<T> + use<'a, T, S, K>>
     where
         T: Dtyped,
     {
         check_dtype(&T::DTYPE, &K::Output::DTYPE)?;
-        self.array
-            .read_data_typed(index, context)?
-            .map_items(|x| self.kernel.apply(x))
-            .transmute_items::<T>()
+        let inner = self
+            .array
+            .read_as_elementwise_pipeline::<S::Item>(index, context)?;
+
+        struct Op1Pipeline<'a, P, K, TIn> {
+            inner: P,
+            kernel: &'a K,
+            phantom: std::marker::PhantomData<TIn>,
+        }
+        impl<TIn, T, P, K> ElementwisePipelineImpl<T> for Op1Pipeline<'_, P, K, TIn>
+        where
+            P: ElementwisePipelineImpl<TIn>,
+            K: Op1Kernel<TIn, Output: Dtyped>,
+            T: Dtyped,
+        {
+            const N_OPERANDS: Option<usize> = P::N_OPERANDS;
+
+            #[inline]
+            fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
+                self.inner.operands()
+            }
+
+            #[inline(always)]
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+                let xs = unsafe { self.inner.read_bulk::<N, CONTIGUOUS>() };
+                xs.map_inline(|x| {
+                    let x = self.kernel.apply(x);
+
+                    const { assert!(size_of::<K::Output>() == size_of::<T>()) };
+                    // SAFETY: the caller checked `T` and `K::Output` are the same dtype.
+                    unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
+                })
+            }
+        }
+        impl<TIn, T, P, K> ElementwisePipeline<T> for Op1Pipeline<'_, P, K, TIn>
+        where
+            P: ElementwisePipelineImpl<TIn>,
+            K: Op1Kernel<TIn, Output: Dtyped>,
+            T: Dtyped,
+        {
+        }
+
+        Ok(Op1Pipeline {
+            inner,
+            kernel: &self.kernel,
+            phantom: std::marker::PhantomData,
+        })
     }
 
     #[inline(always)]
