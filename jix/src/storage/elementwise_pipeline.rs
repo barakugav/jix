@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::cmp::Reverse;
 use std::marker::PhantomData;
 use std::ops::Range;
 
@@ -7,7 +8,8 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::Result;
 use crate::ops::LanesInfo;
-use crate::storage::{materialize_out_buf, StridedBuf};
+use crate::storage::StridedBuf;
+use crate::util::default_strides_slice;
 use crate::{
     array_from_fn_inline, dim_arr, ArrayExt, DimArray, DimDyn, NdCopier, NdIterUnordered,
     NdIterUnorderedDyn, SliceExt,
@@ -55,7 +57,20 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     {
         let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
         let output_dtype = T::DTYPE;
-        let mut out = materialize_out_buf(out, context, shape.as_ref(), &output_dtype);
+        let mut out = match out {
+            Some(out) => out.view_mut(),
+            None => {
+                let itemsize = output_dtype.itemsize() as usize;
+                let strides = pick_output_layout(self.operands(), shape.as_ref(), itemsize);
+                let buf = context.allocate_buf(
+                    shape.iter().product::<usize>() * itemsize,
+                    output_dtype.alignment(),
+                );
+                // SAFETY: `strides` describe a dense layout of `shape` - a permutation of C order -
+                // over a pooled buffer sized to hold exactly that.
+                unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
+            }
+        };
         if shape.contains(&0) {
             return Ok(out); // empty region
         }
@@ -564,6 +579,54 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
 }
 impl<T: Dtyped> ElementwisePipeline<T> for OperandTyped<'_, T> {}
 
+fn pick_output_layout<'s>(
+    operands: impl Iterator<Item = &'s Operand<'s>>,
+    shape: &[usize],
+    itemsize: usize,
+) -> DimArray<usize> {
+    fn pick_axis_order<'s>(
+        operands: impl Iterator<Item = &'s Operand<'s>>,
+        shape: &[usize],
+        itemsize: usize,
+    ) -> Option<DimArray<usize>> {
+        let ndim = shape.len();
+        if ndim <= 1 || shape.iter().product::<usize>() * itemsize <= 4096 {
+            return None;
+        }
+
+        let mut axis_order: Option<DimArray<usize>> = None;
+        for operand in operands {
+            let strides = operand.strides();
+            debug_assert_eq!(strides.len(), ndim);
+            let mut operand_order = dim_arr(ndim, |d| d);
+            operand_order.sort_by_key(|&d| {
+                let ignore_axis = shape[d] <= 1 || strides[d] == 0;
+                Reverse(if ignore_axis { usize::MAX } else { strides[d] })
+            });
+            match &axis_order {
+                None => axis_order = Some(operand_order),
+                Some(axis_order) if *axis_order == operand_order => {}
+                Some(_) => return None,
+            }
+        }
+        axis_order
+    }
+
+    let axis_order = pick_axis_order(operands, shape, itemsize);
+    match axis_order {
+        Some(axis_order) => {
+            let mut strides = dim_arr(shape.len(), |_| itemsize);
+            let mut stride = itemsize;
+            for &d in axis_order.iter().rev() {
+                strides[d] = stride;
+                stride *= shape[d];
+            }
+            strides
+        }
+        None => default_strides_slice(shape, itemsize),
+    }
+}
+
 pub(crate) const fn n_operands_sum(counts: &[Option<usize>]) -> Option<usize> {
     let mut total = 0;
     let mut i = 0;
@@ -778,8 +841,8 @@ mod tests {
             assert_eq!(got, expected, "shape={shape:?} strides={strides:?}");
         } else {
             let buf = node.to_buf(&index, &context, None).unwrap();
-            let c_strides = crate::util::default_strides_slice(shape, itemsize);
-            let got = offsets(shape, c_strides.as_ref())
+            // The buffer picks its own layout, so walk it by its own strides.
+            let got = offsets(shape, buf.strides())
                 .into_iter()
                 .map(|off| unsafe { buf.data_ptr().add(off).cast::<T>().read_unaligned() })
                 .collect::<Vec<T>>();
@@ -861,6 +924,101 @@ mod tests {
             check_add(&[0], [&[1]; 3], [0; 3], push);
             check_add(&[2, 0, 3], [&[1, 1, 1]; 3], [0; 3], push);
         }
+    }
+
+    #[test]
+    fn out_layout_follows_the_operands() {
+        type T = u32;
+        let itemsize = size_of::<T>();
+        let dtype = T::DTYPE;
+
+        // 64 * 64 * 4 = 16 KiB, comfortably over 4096.
+        let big = [64usize, 64];
+        let c_strides = crate::util::default_strides_slice(&big, itemsize);
+        let f_strides = [itemsize, itemsize * big[0]];
+        let data = vec![0u8; big[0] * big[1] * itemsize];
+        let operand = |strides: &[usize]| {
+            // SAFETY: both layouts are dense over `big`, and `data` is sized for exactly that.
+            let buf = unsafe { StridedBuf::from_raw_parts(data.as_ptr(), &big, strides, itemsize) };
+            Operand::new_input(buf, &dtype)
+        };
+
+        let pick =
+            |ops: &[Operand<'_>], shape: &[usize]| pick_output_layout(ops.iter(), shape, itemsize);
+
+        // Every operand F-ordered -> so is the output.
+        let f_ops = [operand(&f_strides), operand(&f_strides)];
+        assert_eq!(pick(&f_ops, &big).as_ref(), &f_strides);
+
+        // Every operand C-ordered -> C order, same as before the layout matching.
+        let c_ops = [operand(c_strides.as_ref()), operand(c_strides.as_ref())];
+        assert_eq!(pick(&c_ops, &big).as_ref(), c_strides.as_ref());
+
+        // Operands that disagree -> fall back to C order.
+        let mixed = [operand(c_strides.as_ref()), operand(&f_strides)];
+        assert_eq!(pick(&mixed, &big).as_ref(), c_strides.as_ref());
+
+        // No operands at all -> C order.
+        assert_eq!(pick(&[], &big).as_ref(), c_strides.as_ref());
+
+        // Small outputs stay C-ordered whatever the operands look like: 8 * 8 * 4 = 256 bytes.
+        let small = [8usize, 8];
+        let small_c = crate::util::default_strides_slice(&small, itemsize);
+        let small_f = [itemsize, itemsize * small[0]];
+        let small_data = vec![0u8; small[0] * small[1] * itemsize];
+        let small_op = |strides: &[usize]| {
+            // SAFETY: both layouts are dense over `small`, and `small_data` is sized for that.
+            let buf = unsafe {
+                StridedBuf::from_raw_parts(small_data.as_ptr(), &small, strides, itemsize)
+            };
+            Operand::new_input(buf, &dtype)
+        };
+        let small_ops = [small_op(&small_f), small_op(&small_f)];
+        assert_eq!(pick(&small_ops, &small).as_ref(), small_c.as_ref());
+    }
+
+    #[test]
+    fn out_layout_ignores_axes_the_operand_does_not_walk() {
+        type T = u32;
+        let itemsize = size_of::<T>();
+        let dtype = T::DTYPE;
+
+        let shape = [64usize, 64];
+        let c_strides = crate::util::default_strides_slice(&shape, itemsize);
+        let f_strides = [itemsize, itemsize * shape[0]];
+        let data = vec![0u8; shape[0] * shape[1] * itemsize];
+        let pick = |strides: &[usize]| {
+            // SAFETY: every layout used here stays inside `data`, sized for the full shape.
+            let buf =
+                unsafe { StridedBuf::from_raw_parts(data.as_ptr(), &shape, strides, itemsize) };
+            let ops = [Operand::new_input(buf, &dtype)];
+            pick_output_layout(ops.iter(), &shape, itemsize)
+        };
+
+        // Broadcast along axis 0. Axis 1 is the only one actually walked, so it belongs innermost -
+        // C order, not the F order a raw sort by stride would pick for a 0.
+        assert_eq!(pick(&[0, itemsize]).as_ref(), c_strides.as_ref());
+        // Broadcast along axis 1 instead: now axis 0 is the walked one, so it goes innermost.
+        assert_eq!(pick(&[itemsize, 0]).as_ref(), &f_strides);
+
+        // An extent-1 axis carries no preference either, whatever stride it happens to hold, so a
+        // junk stride there must not flip the layout of the axes that do matter.
+        let shape1 = [1usize, 64, 64];
+        let c_strides1 = crate::util::default_strides_slice(&shape1, itemsize);
+        // SAFETY: axis 0 has extent 1, so its stride is never stepped; the rest is dense in `data`.
+        let buf = unsafe {
+            StridedBuf::from_raw_parts(
+                data.as_ptr(),
+                &shape1,
+                &[1, itemsize * 64, itemsize],
+                itemsize,
+            )
+        };
+        let ops = [Operand::new_input(buf, &dtype)];
+        assert_eq!(
+            pick_output_layout(ops.iter(), &shape1, itemsize).as_ref(),
+            c_strides1.as_ref()
+        );
     }
 
     #[test]

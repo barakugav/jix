@@ -66,7 +66,7 @@ fn bench_op1_plain_transposed(c: &mut Criterion) {
                     let buf = unsafe {
                         std::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<u8>(), nitems * 4)
                     };
-                    neg.to_ndarray_buf(&index, buf, &ctx).unwrap();
+                    neg.to_ndarray_slice(&index, buf, &ctx).unwrap();
                     out[0]
                 });
             });

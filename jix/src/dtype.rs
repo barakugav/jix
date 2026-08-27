@@ -367,7 +367,7 @@ impl Dtype {
     /// assert_eq!(f64_dtype.alignment().as_usize(), 8);
     /// assert_eq!(f64_dtype.shape(), &[]);
     ///
-    /// # #[cfg(feature = "num-complex")] { use super::*;
+    /// # #[cfg(feature = "num-complex")] {
     /// let complex_f32_dtype = Dtype::new_scalar(ScalarKind::ComplexF32);
     /// assert_eq!(
     ///     complex_f32_dtype.scalar_kind(),

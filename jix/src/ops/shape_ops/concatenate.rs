@@ -219,7 +219,7 @@ where
 
         // Find the first sub-array whose end exceeds req_start (the first that may overlap).
         const BINARY_SEARCH_THRESHOLD: usize = 32;
-        let first_arr = if self.borders.len() < BINARY_SEARCH_THRESHOLD {
+        let first_arr = if self.borders.len() <= BINARY_SEARCH_THRESHOLD {
             self.borders
                 .iter()
                 .position(|&b| b > req_start)
@@ -252,11 +252,11 @@ where
             let sub_shape = Self::Dimension::vec(index.len(), |dim| {
                 (sub_index[dim].end - sub_index[dim].start) as usize
             });
-            let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
             let buf_offset = buf_concat_offset * concat_stride;
 
             let mut sub = if inner_contiguous {
                 let sub_c = default_strides(&sub_shape, itemsize);
+                let sub_size_bytes = sub_shape.as_ref().iter().product::<usize>() * itemsize;
                 // SAFETY: contiguous destination; array `arr`'s bytes pack into this slot.
                 unsafe {
                     StridedBuf::from_slice_mut(

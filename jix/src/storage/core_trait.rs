@@ -112,9 +112,9 @@ pub trait ArrayStorage {
     ///
     /// # Alignment
     ///
-    /// A buffer the impl materializes for a pull read is aligned to the element dtype. A lent view or
-    /// a caller-supplied `out` destination is only as aligned as its backing bytes, so nothing beyond
-    /// the alignment the caller provided may be assumed when reinterpreting the bytes as a typed value.
+    /// No alignment is required of `out`, and none is promised of the returned buffer: it is only
+    /// as aligned as its backing bytes happen to be. Reinterpret the bytes as typed values with
+    /// unaligned reads, or stage the region through a buffer of your own.
     fn read_data<'a>(
         &'a self,
         index: &[Range<u64>],

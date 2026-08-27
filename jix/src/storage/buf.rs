@@ -15,8 +15,9 @@ use crate::{ArrayStorage, DimDyn, NdCopier, ReadContext};
 /// carries no shape, dtype, or length of its own: those come from the read request (the index ranges
 /// and the array's dtype), and it is the caller's job to interpret the bytes accordingly.
 ///
-/// Generally speaking, the data is NOT guaranteed to be aligned. Specific methods may restrict the
-/// input/output buffers.
+/// The data is NOT guaranteed to be aligned to the element dtype - neither the base pointer nor the
+/// strides - so read and write elements through it with unaligned accesses. No method of this crate
+/// requires a `StridedBuf` to be aligned.
 ///
 /// # Examples
 ///
@@ -34,7 +35,7 @@ use crate::{ArrayStorage, DimDyn, NdCopier, ReadContext};
 /// let base = buf.data_ptr();
 /// let stride = buf.strides()[0];
 /// for i in 0..4 {
-///     let elem = unsafe { base.add(i * stride).cast::<i32>().read() };
+///     let elem = unsafe { base.add(i * stride).cast::<i32>().read_unaligned() };
 ///     assert_eq!(elem, values[i]);
 /// }
 /// ```
@@ -180,10 +181,19 @@ impl<'a> StridedBuf<'a> {
         (data, strides)
     }
 
+    /// Whether the strides are exactly row-major packed for `shape` and `dtype`'s itemsize.
     #[inline]
     pub(crate) fn is_contiguous(&self, shape: &[usize], dtype: &Dtype) -> bool {
-        let (data, strides) = self.data();
+        let (_data, strides) = self.data();
         strides == default_strides_slice(shape, dtype.itemsize() as usize).as_ref()
+    }
+
+    /// Whether the strides are exactly row-major packed for `shape` and `dtype`'s itemsize, and
+    /// the base pointer is aligned to `dtype`'s alignment (and the strides).
+    #[inline]
+    pub(crate) fn is_contiguous_aligned(&self, shape: &[usize], dtype: &Dtype) -> bool {
+        let (data, _strides) = self.data();
+        self.is_contiguous(shape, dtype)
             && (data.as_ptr() as usize).is_multiple_of(dtype.alignment().as_usize())
     }
 

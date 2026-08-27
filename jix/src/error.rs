@@ -246,23 +246,5 @@ pub(crate) fn check_get_buffer_size(
         }
         return buffer_size_fail(buf_len, required_size, index, dtype);
     }
-    check_buffer_aligned(buf.as_ptr(), dtype)?;
     Ok(nitems)
-}
-
-#[inline]
-pub(crate) fn check_buffer_aligned(buf: *const u8, dtype: &Dtype) -> Result<()> {
-    if !(buf as usize).is_multiple_of(dtype.alignment().as_usize()) {
-        #[cold]
-        #[inline(never)]
-        fn buffer_alignment_fail(buf: *const u8, dtype: &Dtype) -> Result<()> {
-            bail!(
-                InvalidArgument,
-                "Buffer pointer {buf:p} is not aligned to required alignment {} for dtype {dtype}",
-                dtype.alignment(),
-            );
-        }
-        return buffer_alignment_fail(buf, dtype);
-    }
-    Ok(())
 }

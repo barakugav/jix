@@ -116,7 +116,7 @@ pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: u
     biggest_offset + itemsize
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn default_strides<V, IxIn: Idx, IxOut: Idx>(
     shape: &V,
     itemsize: IxOut,
@@ -131,7 +131,7 @@ where
         itemsize,
     )
 }
-#[inline(always)]
+#[inline]
 pub(crate) fn default_strides_from_iter<D: Dimension, Ix: Idx>(
     ndim: usize,
     shape: impl DoubleEndedIterator<Item = Ix>,
@@ -146,14 +146,14 @@ pub(crate) fn default_strides_from_iter<D: Dimension, Ix: Idx>(
     }
     strides
 }
-#[inline(always)]
+#[inline]
 pub(crate) fn default_logical_strides<V, Ix: Idx>(shape: &V) -> V
 where
     V: DimVec<Ix>,
 {
     default_strides(shape, Ix::ONE)
 }
-#[inline(always)]
+#[inline]
 pub(crate) fn default_strides_slice<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<Ix> {
     let ndim = shape.len();
     let mut strides = dim_arr(ndim, |_| itemsize);
@@ -164,7 +164,7 @@ pub(crate) fn default_strides_slice<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimA
     }
     strides
 }
-#[inline(always)]
+#[inline]
 pub(crate) fn default_logical_strides_slice<Ix: Idx>(shape: &[Ix]) -> DimArray<Ix> {
     default_strides_slice(shape, Ix::ONE)
 }

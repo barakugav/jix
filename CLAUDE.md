@@ -73,9 +73,27 @@ uv pip install -r scripts/dev_requirements.txt   # maturin, pytest, pytest-xdist
 
 ### `Array<S: ArrayStorage>` - the generic core
 
-`ArrayStorage` (`jix/src/storage/core.rs`) exposes exactly three things: `shape()`, `dtype()`, and
-`read_data(index_ranges, buf, ctx)` which reads a rectangular sub-region into a caller buffer.
+`ArrayStorage` (`jix/src/storage/core_trait.rs`) exposes exactly three things: `shape()`, `dtype()`,
+and `read_data(index_ranges, ctx, out)` which reads a rectangular sub-region and returns it as a
+`StridedBuf` - a block of bytes plus one byte stride per dimension (`jix/src/storage/buf.rs`).
 **Everything** - arithmetic, slicing, reductions, serialization - is built on top of these three.
+
+`read_data` has two modes, mirroring NumPy's `out=`:
+
+- **pull** (`out` is `None`) - the impl returns the cheapest buffer it can, a borrowed view into its
+  own memory (possibly with broadcast 0-stride axes) or a freshly materialized one, and picks the
+  strides itself. Shape ops exploit this to hand back a re-strided view instead of copying.
+- **push** (`out` is `Some(dst)`) - the region is written into `dst` at `dst`'s own strides, and the
+  returned buffer is a view of `dst`. This is what lets a whole op pipeline write straight into the
+  caller's final destination.
+
+Impls start with `check_out_buf(...)` and then `materialize_out_buf(out, ctx, out_shape, dtype)`,
+which resolves the two modes into a single writable buffer - the caller's in push mode, a pooled
+allocation in pull mode.
+
+`Array::to_ndarray_buf(index, ctx, out)` is the array-level entry point: same two modes, plus a
+heuristic that cuts an oversized request into cache-sized pieces read one at a time.
+`Array::to_ndarray_slice(index, buf, ctx)` is the shorthand for a packed row-major destination.
 
 Storage carries two pieces of compile-time info as associated types:
 - **`ElementType`** - either `Ty<T>` (scalar type `T` known at compile time) or `TypeDyn`

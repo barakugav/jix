@@ -3,7 +3,7 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
-use crate::error::{bail, check_buffer_aligned, check_get_range, check_ndim, ensure, Result};
+use crate::error::{bail, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
@@ -246,7 +246,6 @@ where
     let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), output_dtype);
     let (out_buf, out_strides) = out.data_mut();
     let out_strides = out_strides.to_dim_vec::<OuterD>();
-    check_buffer_aligned(out_buf.as_ptr(), output_dtype)?;
 
     // Streams the reduction over a two-level chunking of the inner array so peak scratch
     // memory stays bounded *and* each downstream `self.array.read_data` call is sized to
@@ -427,8 +426,14 @@ where
         .map(|d| inner_range_full[d].end - inner_range_full[d].start)
         .product::<u64>();
 
+    let output_align = output_dtype.alignment().as_usize();
     let state_in_out_buf = kernel_state_sizeof == output_dtype.itemsize() as usize
-        && kernel_state_alignof <= output_dtype.alignment();
+        && kernel_state_alignof.as_usize() <= output_align
+        && (out_buf.as_ptr() as usize).is_multiple_of(output_align)
+        && out_strides
+            .as_ref()
+            .iter()
+            .all(|&s| s.is_multiple_of(output_align));
     let out_ptr = out_buf.as_mut_ptr();
     let out_buf_len = out_buf.len();
     let mut tmp_state_buf;
@@ -771,7 +776,7 @@ where
                 let state = unsafe { (&*state).assume_init_read() };
                 kernel.finalize_state(state, reduction_size_overall)
             };
-            unsafe { out_ptr.cast::<K::Output>().write(res) };
+            unsafe { out_ptr.cast::<K::Output>().write_unaligned(res) };
         }
     } else {
         // Empty reduction: write the empty-stream result to every output.
@@ -785,7 +790,7 @@ where
         for (_idx, out_ptr) in out_iter {
             let state = kernel.init_state(None);
             let res = kernel.finalize_state(state, 0);
-            unsafe { out_ptr.cast::<K::Output>().write(res) };
+            unsafe { out_ptr.cast::<K::Output>().write_unaligned(res) };
         }
     }
 }
@@ -3380,6 +3385,57 @@ pub(crate) mod tests {
 
         let expected = ndarray_reduce(&nd, axes, |v| v.iter().map(|&x| x as i64).sum::<i64>());
         assert_eq!(&buf[..n_out], expected.as_slice().unwrap());
+    }
+
+    /// The `out=` destination carries no alignment guarantee, and its strides need not be multiples
+    /// of the output dtype's alignment either. Both cases must fall back to a pooled state buffer
+    /// and unaligned output stores instead of reusing the output bytes as the state buffer. Run
+    /// under Miri to check the accesses.
+    ///
+    /// `extra_stride` is the byte gap added between consecutive outputs (0 = packed).
+    #[allow(clippy::single_range_in_vec_init)]
+    fn check_sum_into_misaligned_out(misalign: usize, extra_stride: usize) {
+        use crate::ArrayStorage;
+
+        let nd = ndarray::ArrayD::from_shape_vec(vec![3usize, 4], (0..12i32).collect()).unwrap();
+        let za = Array::compact_ndarray(&nd).unwrap();
+        let reduced = za.as_ref().sum([1usize]);
+        let ctx = reduced.read_ctx();
+        let storage = reduced.into_storage();
+
+        // 3 i64 outputs, at `stride` bytes apart, starting `misalign` bytes past an 8-aligned
+        // address inside an over-aligned byte buffer.
+        let stride = size_of::<i64>() + extra_stride;
+        let mut backing = vec![0u8; 3 * stride + 8 + misalign];
+        let off = backing.as_ptr().align_offset(8) + misalign;
+        {
+            let bytes = &mut backing[off..off + 2 * stride + size_of::<i64>()];
+            let mut out = unsafe { crate::storage::StridedBuf::from_slice_mut(bytes, &[stride]) };
+            storage.read_data(&[0..3], &ctx, Some(&mut out)).unwrap();
+        }
+
+        let got = (0..3)
+            .map(|i| unsafe {
+                backing
+                    .as_ptr()
+                    .add(off + i * stride)
+                    .cast::<i64>()
+                    .read_unaligned()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(got, [6, 22, 38]);
+    }
+
+    #[test]
+    fn sum_into_misaligned_out_buf() {
+        check_sum_into_misaligned_out(1, 0);
+    }
+
+    #[test]
+    fn sum_into_out_buf_with_unaligned_strides() {
+        // Base is aligned but the stride is not a multiple of 8, so most output slots are
+        // misaligned even though the first one is not.
+        check_sum_into_misaligned_out(0, 3);
     }
 
     #[test]
