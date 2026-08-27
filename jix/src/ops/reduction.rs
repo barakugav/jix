@@ -3,7 +3,7 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
-use crate::error::{bail, check_get_range, check_ndim, ensure, Result};
+use crate::error::{bail, check_dtype_size_nonzero, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
@@ -68,6 +68,7 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
         D: Dimension,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
+        check_dtype_size_nonzero(&K::Output::DTYPE)?;
         let input_ndim = array.shape().len();
         let mut is_reduced = S::Dimension::vec(input_ndim, |_| false);
         for i in 0..axes.len() {
@@ -4017,5 +4018,41 @@ pub(crate) mod tests {
 
             (kept_indices, view)
         })
+    }
+
+    #[test]
+    fn reduction_rejects_zero_itemsize_kernel_output() {
+        use crate::{Array, DimDyn};
+
+        // A reduction kernel picks its own output type, so it is another way a fresh dtype reaches an
+        // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `[i32; 0]`
+        // is a `Dtyped` type with itemsize 0.
+        //
+        // `Fold` is the user-facing op that exposes a caller-chosen accumulator, but it is commented
+        // out pending the reduction merge, so the kernel is spelled out here instead.
+        struct ZeroSizedOutputKernel;
+        impl super::ReductionOpKernel<i32> for ZeroSizedOutputKernel {
+            type Output = [i32; 0];
+            type State = ();
+            fn init_state(&self, _init_item: Option<(i32, u64)>) -> Self::State {}
+            fn update_state(&self, _state: Self::State, _item: i32, _idx: u64) -> Self::State {}
+            fn merge_states(&self, _a: Self::State, _b: Self::State) -> Self::State {}
+            fn finalize_state(&self, _state: Self::State, _nitems: u64) -> Self::Output {
+                []
+            }
+            fn supports_empty(&self) -> bool {
+                true
+            }
+        }
+
+        let za = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
+        let err = super::ReductionOp::<_, _, DimDyn>::new(
+            za.into_storage(),
+            ZeroSizedOutputKernel,
+            [0usize].as_slice(),
+        )
+        .map(|_| ())
+        .unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
     }
 }

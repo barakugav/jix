@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::dtype::{Dtype, Itemsize};
-use crate::error::{check_ndim, ensure, Result};
+use crate::error::{check_dtype_size_nonzero, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
 use crate::util::{scale_read_shape, DimArray, Idx, IterExt, SendSyncPtr, USE_NEW_READ_SCALING};
 use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension};
@@ -306,6 +306,7 @@ impl ArrayParams {
         let ndim = shape.len();
         check_ndim::<DimDyn>(ndim)?;
         let itemsize = dtype.itemsize() as u64;
+        check_dtype_size_nonzero(dtype)?;
 
         let cache_sizes = crate::util::cpu_cache::cache_sizes();
 
@@ -1440,6 +1441,87 @@ mod tests {
         assert!(
             small <= big,
             "expected {small} <= {big} as inner volume grows"
+        );
+    }
+
+    // ---- Zero-itemsize dtypes ----
+    //
+    // `Dtype` supports itemsize 0 (an empty struct, `[T; 0]`), but an array of such a dtype does
+    // not: the block layout is derived by dividing a byte budget by the itemsize. `tune` is the
+    // single gate every leaf storage passes through, so it is where the rejection belongs.
+
+    fn zero_itemsize_dtype() -> crate::dtype::Dtype {
+        let d = crate::dtype::Dtype::from_fields(vec![]).unwrap();
+        assert_eq!(d.itemsize(), 0);
+        d
+    }
+
+    #[test]
+    fn tune_rejects_zero_itemsize() {
+        let mut params = ArrayParams::new();
+        let err = params.tune(&[8], &zero_itemsize_dtype()).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+    }
+
+    #[test]
+    fn into_spec_rejects_zero_itemsize() {
+        let err = ArrayParams::new()
+            .into_spec(&[8], &zero_itemsize_dtype(), ArraySpecFlags::default())
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+    }
+
+    // The leaf storages, through their public entry points.
+
+    #[test]
+    fn compact_nd_ptr_rejects_zero_itemsize() {
+        let buf = [0u8; 8];
+        let result = unsafe {
+            Array::<crate::storage::Compact<crate::TypeDyn, crate::Dim<1>>>::compact_nd_ptr(
+                buf.as_ptr(),
+                [4u64],
+                &[0usize],
+                zero_itemsize_dtype(),
+                ArrayParams::new(),
+            )
+        };
+        assert_eq!(
+            result.unwrap_err().kind(),
+            crate::ErrorKind::UnsupportedDtype
+        );
+    }
+
+    #[test]
+    fn plain_ndarray_ptr_rejects_zero_itemsize() {
+        let buf = [0u8; 8];
+        let result = unsafe {
+            Array::<crate::storage::Plain<&(), crate::TypeDyn, crate::Dim<1>>>::plain_ndarray_ptr(
+                buf.as_ptr(),
+                [4u64],
+                &[0usize],
+                zero_itemsize_dtype(),
+                ArrayParams::new(),
+            )
+        };
+        assert_eq!(
+            result.unwrap_err().kind(),
+            crate::ErrorKind::UnsupportedDtype
+        );
+    }
+
+    // `[i32; 0]` is a `Dtyped` type with itemsize 0, so it reaches `tune` through `T::DTYPE`
+    // rather than through a caller-supplied runtime dtype.
+    #[test]
+    fn compact_fn_rejects_zero_itemsize_element() {
+        let result =
+            Array::<crate::storage::Compact<crate::Ty<[i32; 0]>, crate::Dim<1>>>::compact_fn(
+                [4u64],
+                |_| [],
+            );
+        assert_eq!(
+            result.unwrap_err().kind(),
+            crate::ErrorKind::UnsupportedDtype
         );
     }
 }
