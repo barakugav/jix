@@ -90,7 +90,10 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 
     let jix_crate = match proc_macro_crate::crate_name("jix").expect("jix crate not found") {
         proc_macro_crate::FoundCrate::Itself => quote::quote! { crate },
-        proc_macro_crate::FoundCrate::Name(name) => quote::quote! { ::#name },
+        proc_macro_crate::FoundCrate::Name(name) => {
+            let name = syn::Ident::new(&name, input.span());
+            quote::quote! { ::#name }
+        }
     };
     let struct_name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
@@ -202,7 +205,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                     FIELDS,
                     total_size,
                     alignment,
-                    #is_packed,
+                    /* is_aligned */ ! #is_packed,
                 ) };
 
                 assert!(dtype.itemsize() as usize == size_of::<Self>());

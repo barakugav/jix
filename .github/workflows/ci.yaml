@@ -164,6 +164,11 @@ jobs:
           pr_comment: false
 
       ############ Tests ############
+      - name: Test jix-macros
+        run: cargo test
+        working-directory: jix-macros
+        env:
+          RUSTFLAGS: "-D warnings"
       - name: Test jix
         run: cargo test --all-features
         working-directory: jix
