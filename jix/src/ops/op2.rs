@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, ensure, Result};
+use crate::error::{check_dtype, check_dtype_size_nonzero, ensure, Result};
 use crate::ops::common::define_array_op2_method;
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
@@ -29,6 +29,7 @@ impl<S1, S2, K> Op2<S1, S2, K> {
         S2: ArrayStorageTyped<Dimension = S1::Dimension>,
         K: Op2Kernel<S1::Item, S2::Item, Output: Dtyped>,
     {
+        check_dtype_size_nonzero(&K::Output::DTYPE)?;
         ensure!(
             a.shape() == b.shape(),
             InvalidArgument,
@@ -127,16 +128,6 @@ where
                     unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
                 })
             }
-        }
-        impl<T1, T2, T, P1, P2, K> ElementwisePipeline<T> for Op2Pipeline<'_, P1, P2, K, T1, T2>
-        where
-            P1: ElementwisePipelineImpl<T1>,
-            P2: ElementwisePipelineImpl<T2>,
-            K: Op2Kernel<T1, T2, Output: Dtyped>,
-            T1: Copy,
-            T2: Copy,
-            T: Dtyped,
-        {
         }
 
         Ok(Op2Pipeline {

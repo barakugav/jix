@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, ensure, Result};
+use crate::error::{check_dtype, check_dtype_size_nonzero, ensure, Result};
 use crate::ops::{Op1, Op2};
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
@@ -264,6 +264,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
         F: Fn(ArraysT::ItemSequence<'_>) -> O,
         O: Dtyped,
     {
+        check_dtype_size_nonzero(&O::DTYPE)?;
         let narrays = arrays.narrays();
         if narrays > 1 {
             let shape = arrays.shape(0);
@@ -370,15 +371,6 @@ where
                     unsafe { std::mem::transmute_copy::<O, T>(&x) }
                 })
             }
-        }
-        impl<ArraysT, F, O, T, D> ElementwisePipeline<T> for MapMultiplePipeline<'_, ArraysT, D, F>
-        where
-            ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
-            F: Fn(ArraysT::ItemSequence<'_>) -> O,
-            O: Dtyped,
-            T: Dtyped,
-            D: ElementwisePipelineTuple<ArraysT>,
-        {
         }
 
         Ok(MapMultiplePipeline {
@@ -768,5 +760,47 @@ mod tests {
             let expected = nd.mapv(|x| x as f64 * 0.5);
             crate::util::assert_array_matches(&za.map(|x: i32| x as f64 * 0.5), &expected);
         }
+    }
+
+    // ---- Zero-itemsize kernel output ----
+    //
+    // A mapping op is the one place an array's dtype comes from a caller-chosen type rather than
+    // from an input array, so the output dtype has to be checked here. Leaf storages are gated by
+    // `ArrayParams::tune`, but a lazy view never re-tunes. `[i32; 0]` is a `Dtyped` type with
+    // itemsize 0.
+
+    #[test]
+    fn map_rejects_zero_itemsize_output() {
+        use crate::ops::Map;
+
+        let za = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
+        let err = Map::new_array(za, |_: i32| -> [i32; 0] { [] })
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+    }
+
+    #[test]
+    fn map2_rejects_zero_itemsize_output() {
+        use crate::ops::Map2;
+
+        let a = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
+        let b = Array::compact_ndarray(&array![4i32, 5, 6]).unwrap();
+        let err = Map2::new_array(a, b, |_: i32, _: i32| -> [i32; 0] { [] })
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+    }
+
+    #[test]
+    fn map_multiple_rejects_zero_itemsize_output() {
+        use crate::ops::MapMultiple;
+
+        let a = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
+        let b = Array::compact_ndarray(&array![4i32, 5, 6]).unwrap();
+        let err = MapMultiple::new((a, b), |_| -> [i32; 0] { [] })
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
     }
 }

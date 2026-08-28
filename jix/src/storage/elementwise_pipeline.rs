@@ -115,6 +115,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         Ok(out)
     }
 }
+impl<P, T> ElementwisePipeline<T> for P where P: ElementwisePipelineImpl<T> {}
 
 fn to_buf_impl<T, const N_OPERANDS: usize>(
     pipeline: impl ElementwisePipelineImpl<T>,
@@ -577,7 +578,6 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
         }
     }
 }
-impl<T: Dtyped> ElementwisePipeline<T> for OperandTyped<'_, T> {}
 
 fn pick_output_layout<'s>(
     operands: impl Iterator<Item = &'s Operand<'s>>,
@@ -815,13 +815,6 @@ mod tests {
                 let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS>() };
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
-        }
-        impl<
-                T: Dtyped + std::ops::Add<Output = T>,
-                P1: ElementwisePipelineImpl<T>,
-                P2: ElementwisePipelineImpl<T>,
-            > ElementwisePipeline<T> for AddNode<P1, P2>
-        {
         }
         let node = AddNode {
             lhs: lhs_pipeline,

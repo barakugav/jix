@@ -174,6 +174,22 @@ pub(crate) fn check_dtype(actual: &Dtype, expected: &Dtype) -> Result<()> {
     Ok(())
 }
 
+#[inline(always)]
+pub(crate) fn check_dtype_size_nonzero(dtype: &Dtype) -> Result<()> {
+    if dtype.itemsize() == 0 {
+        #[cold]
+        #[inline(never)]
+        fn fail_check_dtype_size_nonzero(dtype: &Dtype) -> Result<()> {
+            bail!(
+                UnsupportedDtype,
+                "arrays of a zero-sized dtype are not supported: {dtype}"
+            );
+        }
+        return fail_check_dtype_size_nonzero(dtype);
+    }
+    Ok(())
+}
+
 #[inline]
 pub(crate) fn check_shape_overflow(shape: &[u64], itemsize: u64) -> Result<()> {
     let product = shape.iter().cloned().chain([itemsize]).try_product();

@@ -195,7 +195,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     }
 }
 #[inline(never)]
-fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, D: Dimension>(
+fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, OuterD: Dimension>(
     shape: &[usize],
     strides: [&[usize]; N_OPERANDS],
     mut inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
@@ -204,7 +204,7 @@ fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, D: Dimension>(
     let inner_len = shape[ndim - 1];
     let inner_strides = std::array::from_fn(|i| strides[i][ndim - 1]);
 
-    if D::NDIM == Some(1) {
+    if OuterD::NDIM == Some(1) {
         // Special case for 2D: the outer `NdIter` is just a single loop over the outer axis, and
         // and inner loop is a flat 1-d run.
 
@@ -223,9 +223,9 @@ fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, D: Dimension>(
         // Flat inner 1-d run over the innermost axis [ndim-1]; the outer `NdIter` walks the outer
         // axes and yields all `N_OPERANDS` running byte offsets at once.
 
-        let outer_shape = D::vec(ndim - 1, |k| shape[k] as u64);
+        let outer_shape = OuterD::vec(ndim - 1, |k| shape[k] as u64);
         let outer_strides: [_; N_OPERANDS] =
-            std::array::from_fn(|i| D::vec(ndim - 1, |k| strides[i][k]));
+            std::array::from_fn(|i| OuterD::vec(ndim - 1, |k| strides[i][k]));
         let iter = NdIter::builder(outer_shape)
             .with_strides_offset_multi_ext(outer_strides, [0usize; N_OPERANDS])
             .build();

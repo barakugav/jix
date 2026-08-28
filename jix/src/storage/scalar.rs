@@ -169,7 +169,6 @@ where
                 [self.0; N]
             }
         }
-        impl<T: Dtyped> ElementwisePipeline<T> for Constant<T> {}
 
         Ok(Constant(value))
     }

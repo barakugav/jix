@@ -3,9 +3,10 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Mutex;
 
+use jix_core::storage::StridedBuf;
 use jix_core::{Array as CoreArray, ArrayAny, ArrayStorage, Dim, DimDyn, Dimension, ReadContext};
 use jix_core::{Codec, Filter};
-use numpy::{PyArrayDescr, PyUntypedArray, PyUntypedArrayMethods};
+use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods};
@@ -15,7 +16,10 @@ use pyo3::types::PyAnyMethods;
 
 use crate::dtype::dtype_to_numpy;
 use crate::ops::asarray_simple;
-use crate::util::{maybe_detach, numpy_empty, DimArray, IntoPyResult, ItemOrSequence};
+use crate::util::{
+    default_strides, dim_arr, maybe_detach, numpy_empty, strided_span_bytes, DimArray,
+    IntoPyResult, ItemOrSequence,
+};
 
 /// A multi-dimensional compressed array.
 ///
@@ -169,45 +173,11 @@ impl Array {
         })
     }
 
-    #[inline]
-    fn to_buf<'py>(&self, py: Python<'py>, index: &[Range<u64>], buf: &mut [u8]) -> PyResult<()> {
-        let nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize
-            * self.arr.dtype().itemsize() as usize;
-        if nitems == 0 {
-            return Ok(());
-        }
-
-        let should_detach = !self.arr.storage().spec().flags().plain_read() || nitems > 4096;
-        maybe_detach(py, should_detach, || {
-            let context = self.read_ctx()?;
-            let context = context.as_ref();
-
-            fn to_ndarray_impl<S: ArrayStorage, D: Dimension>(
-                arr: jix_core::Array<S>,
-                index: &[std::ops::Range<u64>],
-                np_arr_data: &mut [u8],
-                context: &ReadContext,
-            ) -> Result<(), jix_core::Error> {
-                arr.into_dim::<D>()
-                    .unwrap()
-                    .to_ndarray_slice(index, np_arr_data, context)
-            }
-            let to_ndarray_fn = match self.arr.ndim() {
-                1 => to_ndarray_impl::<_, Dim<1>>,
-                2 => to_ndarray_impl::<_, Dim<2>>,
-                3 => to_ndarray_impl::<_, Dim<3>>,
-                4 => to_ndarray_impl::<_, Dim<4>>,
-                _ => to_ndarray_impl::<_, DimDyn>,
-            };
-
-            to_ndarray_fn(self.arr.as_ref(), index, buf, context).into_py_result()
-        })
-    }
-
+    #[allow(clippy::type_complexity)]
     fn parse_index<'py>(
         &self,
         index: Option<&Bound<'py, PyAny>>,
-    ) -> PyResult<(DimArray<Range<u64>>, DimArray<u64>)> {
+    ) -> PyResult<(DimArray<Range<u64>>, DimArray<u64>, DimArray<bool>)> {
         let arr_shape = self.arr.shape();
         let parsed = crate::ops::parse_basic_index(arr_shape, index)?;
 
@@ -217,7 +187,7 @@ impl Array {
             let start = item.start.unwrap() as u64;
             let end = item.end.unwrap() as u64;
             index.push(start..end);
-            if !parsed.drop_axes.contains(&axis) {
+            if !parsed.drop_axes[axis] {
                 out_shape.push(end - start);
             }
         }
@@ -237,7 +207,79 @@ impl Array {
                 )));
             }
         }
-        Ok((index, out_shape))
+        Ok((index, out_shape, parsed.drop_axes))
+    }
+
+    fn check_output_array(
+        &self,
+        py: Python<'_>,
+        out: &Bound<'_, PyUntypedArray>,
+        out_shape: &[u64],
+    ) -> PyResult<()> {
+        let expected_dtype = self.dtype(py)?;
+        let out_dtype = out.dtype();
+        if !out_dtype.is_equiv_to(&expected_dtype) {
+            return Err(PyValueError::new_err(format!(
+                "out has dtype {out_dtype}, expected {expected_dtype}"
+            )));
+        }
+        if out.ndim() != out_shape.len()
+            || out
+                .shape()
+                .iter()
+                .zip(out_shape)
+                .any(|(&a, &b)| a as u64 != b)
+        {
+            return Err(PyValueError::new_err(format!(
+                "out has shape {:?}, expected {out_shape:?}",
+                out.shape()
+            )));
+        }
+
+        let (flags, data) = unsafe {
+            let ptr = out.as_array_ptr();
+            ((*ptr).flags, (*ptr).data as usize)
+        };
+        if flags & numpy::npyffi::NPY_ARRAY_WRITEABLE == 0 {
+            return Err(PyValueError::new_err("out is not writeable"));
+        }
+        if out_shape.contains(&0) {
+            // numpy reports all-zero strides for an empty array, so the layout
+            // checks below will fail
+            return Ok(());
+        }
+
+        // A `StridedBuf` destination holds unsigned byte strides and must not map two different
+        // indices onto the same byte, which rules out reversed and broadcast views. Elements must
+        // also land on the dtype's alignment, so require it of the base and of every stride.
+        let alignment = self.arr.dtype().alignment().as_usize();
+        if !data.is_multiple_of(alignment) {
+            return Err(PyValueError::new_err(format!(
+                "out array is not aligned to {alignment} bytes"
+            )));
+        }
+        for (axis, (&stride, &extent)) in out.strides().iter().zip(out.shape()).enumerate() {
+            if extent <= 1 {
+                continue; // never stepped, so its stride is irrelevant
+            }
+            if stride < 0 {
+                return Err(PyValueError::new_err(format!(
+                    "out array has a negative stride {stride} on axis {axis}, unsupported"
+                )));
+            }
+            if stride == 0 {
+                return Err(PyValueError::new_err(format!(
+                    "out has a zero stride on axis {axis}, broadcast views cannot be written into"
+                )));
+            }
+            if !(stride as usize).is_multiple_of(alignment) {
+                return Err(PyValueError::new_err(format!(
+                    "out has stride {stride} on axis {axis}, which is not a multiple of the \
+                     dtype alignment {alignment}"
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -360,8 +402,8 @@ impl Array {
     ///
     /// This is the primary way to materialize a [`jix.Array`][jix.Array] into a form that ordinary Python
     /// and NumPy code can consume. It decodes the compressed block data, copies it into a
-    /// freshly-allocated NumPy array, and returns that array. The returned array is fully
-    /// independent: mutations to one do not affect the other.
+    /// NumPy array - freshly allocated unless you pass `out` - and returns that array. Mutations
+    /// to the result do not affect this array.
     ///
     /// Args:
     ///     index: Selects a sub-region to read. Accepts the same syntax Python uses inside
@@ -393,35 +435,170 @@ impl Array {
     ///         **Omitted trailing axes:** If the index covers fewer axes than the array has
     ///         dimensions, the remaining axes receive implicit full-range slices.
     ///
+    ///     out: An existing NumPy array to decode into, instead of allocating a new one. It must
+    ///         have the same dtype as `self` and exactly the shape the `index` selects, and it must
+    ///         be writeable.
+    ///
+    ///         The destination does not have to be C-contiguous - almost any strided view works.
+    ///         Two kinds of view are rejected: reversed ones (a negative stride, e.g. `big[::-1]`)
+    ///         and broadcast ones (a zero stride over an axis longer than 1). The destination must
+    ///         also be aligned to the dtype.
+    ///
+    ///         When `out` is given it is returned as-is, so `arr.numpy(out=dst) is dst`.
+    ///
+    ///         `out` must not share memory with a buffer this array reads from - see the warning
+    ///         below.
+    ///
+    /// Warning:
+    ///     **`out` must not overlap memory the array itself reads from.** jix does not check for
+    ///     this, and the result is undefined behavior - corrupted values, or a crash.
+    ///
+    ///     The overlap arises when the array, or anything in its lazy chain, was built by
+    ///     [`jix.asarray()`][jix.asarray] over the very NumPy array being passed as `out`:
+    ///     `asarray` wraps that buffer instead of copying it, so the read would be scattering
+    ///     decoded elements into the same bytes it is still reading from.
+    ///
+    ///     ```python
+    ///     x = np.arange(12, dtype=np.int32).reshape(3, 4)
+    ///     a = jix.asarray(x)      # a is a view of x's buffer - no copy
+    ///
+    ///     (a + 1).numpy(out=x)    # UNDEFINED - do not do this
+    ///     x[...] = (a + 1).numpy()  # do this instead
+    ///     ```
+    ///
     /// Returns:
-    ///     A NumPy array with the same dtype as `self`, shape determined by the `index`
-    ///         argument (or `self.shape` when no index is supplied), in C-contiguous (row-major)
-    ///         memory order. A brand-new allocation; the caller owns it outright.
+    ///     A NumPy array with the same dtype as `self`, and the shape determined by the `index`
+    ///         argument (or `self.shape` when no index is supplied). Without `out`, a brand-new
+    ///         C-contiguous (row-major) allocation the caller owns outright; with `out`, that same
+    ///         object.
     ///
     /// Raises:
     ///     IndexError: Integer index out of bounds, slice `start` or `stop` out of bounds,
     ///         more index items than array dimensions, or more than one ellipsis.
-    ///     ValueError: Slice step other than 1.
+    ///     ValueError: Slice step other than 1. Or `out` has the wrong dtype or shape, is not
+    ///         writeable, is not aligned to the dtype, or has a negative or zero stride on an
+    ///         axis longer than 1.
     ///     TypeError: Unsupported index item type (anything other than an integer, slice, `...`,
-    ///         or tuple of these).
-    #[pyo3(signature = (index=None))]
+    ///         or tuple of these). Or `out` is not a NumPy array.
+    ///
+    /// ```python
+    /// import jix
+    /// import numpy as np
+    ///
+    /// a = jix.compact(np.arange(12, dtype=np.int32).reshape(3, 4))
+    ///
+    /// # Decode into a buffer you own, instead of allocating a fresh one per read.
+    /// dst = np.empty((3, 4), dtype=np.int32)
+    /// assert a.numpy(out=dst) is dst
+    ///
+    /// # The destination may be a strided view of a larger array.
+    /// big = np.zeros((3, 8), dtype=np.int32)
+    /// a.numpy(out=big[:, ::2])
+    /// ```
+    #[pyo3(signature = (index=None, *, out=None))]
     #[inline]
     pub fn numpy<'py>(
         &self,
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
+        out: Option<Bound<'py, PyUntypedArray>>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        let (index, out_shape) = self.parse_index(index)?;
+        let (index, out_shape, drop_axes) = self.parse_index(index)?;
 
-        let np_arr = numpy_empty(self.dtype(py)?, &out_shape)?;
-        {
-            let np_arr_data_ptr = unsafe { (*np_arr.as_array_ptr()).data.cast::<u8>() };
-            let np_arr_data_size =
-                out_shape.iter().product::<u64>() as usize * self.arr.dtype().itemsize() as usize;
-            let np_arr_data =
-                unsafe { std::slice::from_raw_parts_mut(np_arr_data_ptr, np_arr_data_size) };
-            self.to_buf(py, &index, np_arr_data)?;
+        let itemsize = self.arr.dtype().itemsize() as usize;
+        let ndim = index.len();
+        let read_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
+
+        let (np_arr, strides) = match out {
+            None => {
+                let np_arr = numpy_empty(self.dtype(py)?, &out_shape)?;
+                let strides = default_strides(&read_shape, itemsize);
+                (np_arr, strides)
+            }
+            Some(np_arr) => {
+                self.check_output_array(py, &np_arr, &out_shape)?;
+
+                // `to_ndarray_buf` wants one stride per *array* dimension, but an integer index item drops
+                // its axis from `np_arr`. Put a stride back for each dropped axis.
+                let mut np_strides = np_arr.strides().iter().rev();
+                let mut strides = dim_arr(ndim, |_| 0usize);
+                for dim in (0..ndim).rev() {
+                    if drop_axes[dim] {
+                        strides[dim] = if dim + 1 < ndim {
+                            strides[dim + 1] * read_shape[dim + 1]
+                        } else {
+                            itemsize
+                        };
+                    } else {
+                        let stride = *np_strides.next().unwrap();
+                        strides[dim] = if stride >= 0 {
+                            stride as usize
+                        } else {
+                            // `check_output_array` rejected negative strides on axes longer than 1.
+                            // A shorter axis is never stepped, so NumPy reporting a negative stride
+                            // for it (`x[::-1]` where that axis has length 1) is harmless - use the
+                            // C-order value instead of casting a negative number to a huge `usize`.
+                            debug_assert!(read_shape[dim] <= 1);
+                            if dim + 1 < ndim {
+                                strides[dim + 1] * read_shape[dim + 1]
+                            } else {
+                                itemsize
+                            }
+                        };
+                    }
+                }
+
+                (np_arr, strides)
+            }
+        };
+
+        let nitems = read_shape.iter().product::<usize>();
+        if nitems == 0 {
+            return Ok(np_arr);
         }
+
+        let data_span = strided_span_bytes(&read_shape, &strides, itemsize);
+        // SAFETY: `np_arr` is a live NumPy array whose memory covers every element reachable
+        // through `strides` - it was either freshly allocated for `read_shape`, or checked by
+        // `check_out_array`.
+        let data = unsafe {
+            std::slice::from_raw_parts_mut((*np_arr.as_array_ptr()).data.cast::<u8>(), data_span)
+        };
+
+        let should_detach =
+            !self.arr.storage().spec().flags().plain_read() || nitems * itemsize > 4096;
+        maybe_detach(py, should_detach, || {
+            let context = self.read_ctx()?;
+            let context = context.as_ref();
+
+            fn to_ndarray_impl<S: ArrayStorage, D: Dimension>(
+                arr: jix_core::Array<S>,
+                index: &[std::ops::Range<u64>],
+                out: &mut StridedBuf<'_>,
+                context: &ReadContext,
+            ) -> Result<(), jix_core::Error> {
+                let arr = arr.into_dim::<D>().unwrap();
+                arr.to_ndarray_buf(index, context, Some(out))?;
+                Ok(())
+            }
+            let to_ndarray_fn = match self.arr.ndim() {
+                1 => to_ndarray_impl::<_, Dim<1>>,
+                2 => to_ndarray_impl::<_, Dim<2>>,
+                3 => to_ndarray_impl::<_, Dim<3>>,
+                4 => to_ndarray_impl::<_, Dim<4>>,
+                _ => to_ndarray_impl::<_, DimDyn>,
+            };
+
+            let mut out = unsafe {
+                StridedBuf::from_raw_parts_mut(
+                    data.as_mut_ptr(),
+                    read_shape.as_slice(),
+                    strides.as_slice(),
+                    itemsize,
+                )
+            };
+            to_ndarray_fn(self.arr.as_ref(), &index, &mut out, context).into_py_result()
+        })?;
 
         Ok(np_arr)
     }
@@ -471,7 +648,7 @@ impl Array {
         py: Python<'py>,
         index: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, Array>> {
-        let np_arr = self.numpy(py, index)?;
+        let np_arr = self.numpy(py, index, None)?;
         asarray_simple(&np_arr)
     }
 
@@ -489,7 +666,7 @@ impl Array {
         &self,
         index: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyUntypedArray>> {
-        self.numpy(index.py(), Some(index))
+        self.numpy(index.py(), Some(index), None)
     }
 
     /// Copies the data of an array into a new compact array by compressing it into new blocks. See [`jix.compact()`][jix.compact].
@@ -1445,7 +1622,7 @@ mod tests {
         // ndarray::Array -> jix_core::Array -> jix_python::Array -> numpy::PyArray -> ndarray::Array
         Python::attach(|py| {
             let py_arr = make_py_array(py, original);
-            let np = py_arr.get().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap();
             let typed = np.cast_into::<PyArrayDyn<T>>().unwrap();
             typed.to_owned_array().into_dimensionality().unwrap()
         })
@@ -1523,7 +1700,7 @@ mod tests {
                 .unwrap();
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap();
             assert_eq!(np.shape(), &[2usize, 3, 4]);
         });
     }
@@ -1534,7 +1711,7 @@ mod tests {
         let original = array![1.0f32, 2.0];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'f');
         });
@@ -1546,7 +1723,7 @@ mod tests {
         let original = array![1i32, 2, 3];
         Python::attach(|py| {
             let py_arr = make_py_array(py, &original);
-            let np = py_arr.get().numpy(py, None).unwrap();
+            let np = py_arr.get().numpy(py, None, None).unwrap();
             assert_eq!(np.dtype().itemsize(), 4);
             assert_eq!(np.dtype().kind() as char, 'i');
         });
@@ -1571,7 +1748,7 @@ mod tests {
     {
         Python::attach(|py| {
             py_arr
-                .numpy(py, None)
+                .numpy(py, None, None)
                 .unwrap()
                 .cast_into::<PyArrayDyn<T>>()
                 .unwrap()

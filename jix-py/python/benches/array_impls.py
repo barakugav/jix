@@ -9,6 +9,9 @@ ZSTD_LEVEL = 3
 NTHREADS = 1
 CODEC_DESC = f"zstd level {ZSTD_LEVEL}, byte-shuffle, {NTHREADS} thread (jix, blosc2, zarr matched)"
 
+blosc2.set_nthreads(NTHREADS)
+blosc2.nthreads = NTHREADS
+
 
 class AbstractArray:
     """Base implementation. Subclasses set `name` and implement the interface."""

@@ -3,7 +3,7 @@ use std::ops::{Not, Range};
 
 use crate::codec::ReadContext;
 use crate::dtype::{Alignment, Dtype, Dtyped, Itemsize};
-use crate::error::{bail, check_get_range, check_ndim, ensure, Result};
+use crate::error::{bail, check_dtype_size_nonzero, check_get_range, check_ndim, ensure, Result};
 use crate::ops::common::AxesArg;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
@@ -57,6 +57,22 @@ pub(crate) trait ReductionOpKernel<T> {
     /// were folded into `state`, so `nitems == 0` exactly when the reduction was empty.
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output;
 
+    /// Whether [`finalize_state`](Self::finalize_state) does any actual work.
+    ///
+    /// Returning `false` lets the caller skip the whole finalization pass and treat the state
+    /// bytes as the output bytes.
+    ///
+    /// # Safety
+    ///
+    /// Returning `false` is a promise that `finalize_state(state, nitems)` is the identity for
+    /// every `state` and `nitems`: [`Output`](Self::Output) must have the same layout as
+    /// [`State`](Self::State), and the returned value must be bit-identical to `state`. The caller
+    /// relies on this to reinterpret one buffer as the other without touching it.
+    #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        true
+    }
+
     fn supports_empty(&self) -> bool;
 }
 
@@ -68,6 +84,7 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
         D: Dimension,
         Ax: AxesArg<ReducedDimension<S::Dimension> = D>,
     {
+        check_dtype_size_nonzero(&K::Output::DTYPE)?;
         let input_ndim = array.shape().len();
         let mut is_reduced = S::Dimension::vec(input_ndim, |_| false);
         for i in 0..axes.len() {
@@ -279,17 +296,6 @@ where
     //     `(bulk, tile)` pair produces *one* `self.array.read_data` call, sized to land
     //     within the source's `read_size` `(min, max)` window.
     //
-    // `tile_shape` sizes each tile; it is chosen once per call by `reduction_tile_shape` (which keeps
-    // enough reduced-dim volume that the kernel's per-tile overhead is amortized). Setting
-    // `bulk_shape[non-reduced] = tile_shape[non-reduced]` then makes the inner read shape come out to
-    // `tile_shape` for every tile.
-    //
-    // Both iterators are driven by `NdIterExtBlockOffsetSize`. Each yields
-    // `(blk_idx, (inner_offset, blk_size))`: the absolute element start in dim `d` is
-    // `blk_idx[d] * block_shape[d] + inner_offset[d]`, length `blk_size[d]`. Interior
-    // blocks carry `inner_offset = 0, blk_size = block_shape`; border blocks carry the
-    // partial values produced by the iterator.
-    //
     // # Per-tile processing
     //
     // ```text
@@ -306,49 +312,7 @@ where
     //       The first tile of the bulk seeds the slot (K::init_state); later tiles merge.
     //     bulk_base_item_idx += reduction_size
     //     bulk_initialized = true
-    //   // assert bulk_base_item_idx == full_reduction_size (block fully reduced)
     // ```
-    //
-    // The first-seed vs. merge split is per-bulk: the *first* tile of a bulk takes the
-    // seed branch (`K::init_state` writes each slot it covers - and one non-reduced tile
-    // per bulk means it covers the bulk's whole output block); every later tile of the
-    // same bulk merges its partial fold into those slots via `K::merge`. `bulk_initialized`
-    // resets at the start of each bulk, so every output block is seeded exactly once, by
-    // its own bulk.
-    //
-    // # Finalization
-    //
-    // After all bulks (every output has been fully reduced within its bulk):
-    //   - If any output was written (`state_initialized`): finalize every state into `buf`
-    //     via `K::finalize_state(state, full_reduction_size)`. When `state_in_out_buf`,
-    //     the state and output pointers for each slot alias the same bytes, so each
-    //     iteration `assume_init_read`s the state *before* writing the result.
-    //   - Otherwise (empty reduction - only reachable when a reduced dim is empty and the
-    //     kernel supports empty - which produces zero bulks): write
-    //     `K::finalize_state(K::init_state(None), 0)` to every output.
-    //
-    // # Scratch buffers
-    //
-    // - `items_buf`: raw input elements for the current *tile*. Resized each tile.
-    // - `state_buf`: `out_nitems` slots of `MaybeUninit<K::State>`. Seeded one output
-    //   block at a time (the first tile of each bulk seeds that bulk's block); finalized
-    //   in the post-loop pass. When `K::State` matches `K::Output` in size and is no more
-    //   strictly aligned (`state_in_out_buf`), we skip the scratch allocation entirely and
-    //   reuse the caller's `buf` as the state buffer - `finalize_state` then reads each
-    //   slot and writes the output into the same byte range it just consumed. The
-    //   finalization loop reads the state out of each slot *before* writing the result
-    //   back, since state and output pointers alias in that mode (see the `CAREFUL`
-    //   comments).
-    //
-    // # Invariants (also enforced by `debug_assert!`s)
-    //
-    // - Reduced dims produce at most one bulk-block per call
-    //   (`bulk_shape[reduced] == inner_shape[reduced]`).
-    // - Each bulk has exactly one tile-along-non-reduced
-    //   (`tile_shape[non-reduced] == bulk_shape[non-reduced]`).
-    // - Every tile's absolute element range is contained in `inner_range_full`.
-    // - At the end of each bulk, `bulk_base_item_idx == full_reduction_size` - i.e. the
-    //   bulk folded its outputs over exactly the full reduced stream.
 
     let out_nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
 
@@ -764,6 +728,15 @@ where
     } = args;
 
     if state_initialized {
+        let state_in_out_buf = core::ptr::eq(state_buf, out_buf);
+        if !unsafe { kernel.needs_finalize() } && state_in_out_buf {
+            // SAFETY: `needs_finalize() == false` promises `finalize_state` is the identity and that
+            // `K::Output` has `K::State`'s layout. With `state_in_out_buf` the states were folded
+            // straight into the output buffer at the output strides, so those bytes already are the
+            // final output and there is nothing left to do.
+            return;
+        }
+
         // CAREFUL: state_ptr and out_ptr may alias
         let out_iter = NdIter::builder(out_shape)
             .with_strides_ptr_mut_ext(state_buf_strides, state_buf)
@@ -1392,6 +1365,10 @@ where
         state
     }
     #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        false
+    }
+    #[inline(always)]
     fn supports_empty(&self) -> bool {
         false
     }
@@ -1457,6 +1434,10 @@ where
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
+    }
+    #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        false
     }
     #[inline(always)]
     fn supports_empty(&self) -> bool {
@@ -1752,6 +1733,10 @@ where
         state
     }
     #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        false
+    }
+    #[inline(always)]
     fn supports_empty(&self) -> bool {
         true
     }
@@ -1834,6 +1819,10 @@ where
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
+    }
+    #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        false
     }
     #[inline(always)]
     fn supports_empty(&self) -> bool {
@@ -2130,6 +2119,10 @@ impl ReductionOpKernel<bool> for AllKernel {
         state
     }
     #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        false
+    }
+    #[inline(always)]
     fn supports_empty(&self) -> bool {
         true
     }
@@ -2194,6 +2187,10 @@ impl ReductionOpKernel<bool> for AnyKernel {
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
+    }
+    #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        false
     }
     #[inline(always)]
     fn supports_empty(&self) -> bool {
@@ -2315,6 +2312,10 @@ where
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
+    }
+    #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        false
     }
     #[inline(always)]
     fn supports_empty(&self) -> bool {
@@ -2477,17 +2478,18 @@ where
         }
         state
     }
-
     #[inline(always)]
     fn update_state(&self, state: Self::State, item: T, _idx: u64) -> Self::State {
         (self.f)(state, item)
     }
-
     #[inline(always)]
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-
+    #[inline(always)]
+    unsafe fn needs_finalize(&self) -> bool {
+        false
+    }
     #[inline(always)]
     fn supports_empty(&self) -> bool {
         true
@@ -4017,5 +4019,41 @@ pub(crate) mod tests {
 
             (kept_indices, view)
         })
+    }
+
+    #[test]
+    fn reduction_rejects_zero_itemsize_kernel_output() {
+        use crate::{Array, DimDyn};
+
+        // A reduction kernel picks its own output type, so it is another way a fresh dtype reaches an
+        // array without passing through `ArrayParams::tune` (a lazy view never re-tunes). `[i32; 0]`
+        // is a `Dtyped` type with itemsize 0.
+        //
+        // `Fold` is the user-facing op that exposes a caller-chosen accumulator, but it is commented
+        // out pending the reduction merge, so the kernel is spelled out here instead.
+        struct ZeroSizedOutputKernel;
+        impl super::ReductionOpKernel<i32> for ZeroSizedOutputKernel {
+            type Output = [i32; 0];
+            type State = ();
+            fn init_state(&self, _init_item: Option<(i32, u64)>) -> Self::State {}
+            fn update_state(&self, _state: Self::State, _item: i32, _idx: u64) -> Self::State {}
+            fn merge_states(&self, _a: Self::State, _b: Self::State) -> Self::State {}
+            fn finalize_state(&self, _state: Self::State, _nitems: u64) -> Self::Output {
+                []
+            }
+            fn supports_empty(&self) -> bool {
+                true
+            }
+        }
+
+        let za = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
+        let err = super::ReductionOp::<_, _, DimDyn>::new(
+            za.into_storage(),
+            ZeroSizedOutputKernel,
+            [0usize].as_slice(),
+        )
+        .map(|_| ())
+        .unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
     }
 }

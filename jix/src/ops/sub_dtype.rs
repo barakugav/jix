@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
-use crate::error::{check_get_range, ensure, Result};
+use crate::error::{check_dtype_size_nonzero, check_get_range, ensure, Result};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::NdCopier;
 use crate::{Array, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
@@ -97,6 +97,7 @@ where
             "dtype {src_dtype} does not have a field named '{sub_field}'"
         );
         let (offset, dtype) = sub_field_spec.unwrap();
+        check_dtype_size_nonzero(dtype)?;
 
         let dst_dtype = ET::from_dtype(dtype.clone())?;
         Ok(Self {
@@ -205,6 +206,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::dtype::Dtyped;
     use crate::{Array, TypeDyn};
 
     #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
@@ -303,5 +305,48 @@ mod tests {
             crate::util::assert_array_matches(&za.as_ref().dtype_sub_field::<i32>("x"), &expected_x);
             crate::util::assert_array_matches(&za.as_ref().dtype_sub_field::<i32>("y"), &expected_y);
         }
+    }
+
+    #[test]
+    fn zero_itemsize_field_is_rejected() {
+        // A struct may legally carry a zero-sized field, and `SubDtype` hands that field's dtype back
+        // verbatim. The resulting view reuses the parent's spec, so it never passes through
+        // `ArrayParams::tune` - the check has to live in `SubDtype::new`.
+        #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[repr(C)]
+        struct Empty {}
+
+        #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[repr(C)]
+        struct WithEmpty {
+            nothing: Empty,
+            value: i32,
+        }
+
+        assert_eq!(Empty::DTYPE.itemsize(), 0);
+        let items = ndarray::array![
+            WithEmpty {
+                nothing: Empty {},
+                value: 1
+            },
+            WithEmpty {
+                nothing: Empty {},
+                value: 2
+            },
+        ];
+        let za = Array::compact_ndarray(&items).unwrap();
+
+        let err = crate::ops::SubDtype::<_, TypeDyn>::new_array(za.as_ref(), "nothing")
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+
+        // The sibling field of a real size is still fine.
+        let values = za
+            .as_ref()
+            .dtype_sub_field::<i32>("value")
+            .to_ndarray()
+            .unwrap();
+        assert_eq!(values.as_slice().unwrap(), &[1, 2]);
     }
 }

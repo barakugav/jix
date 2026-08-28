@@ -352,14 +352,6 @@ where
                 array_from_fn_inline(|i| if condition[i] { x[i] } else { y[i] })
             }
         }
-        impl<T, PC, PX, PY> ElementwisePipeline<T> for WherePipeline<PC, PX, PY>
-        where
-            PC: ElementwisePipelineImpl<bool>,
-            PX: ElementwisePipelineImpl<T>,
-            PY: ElementwisePipelineImpl<T>,
-            T: Copy,
-        {
-        }
 
         Ok(WherePipeline { condition, x, y })
     }

@@ -411,10 +411,15 @@ where
             );
         }
 
+        let dtype = header
+            .dtype
+            .as_ref()
+            .ok_or_else(|| error!(InvalidArchive, "missing dtype in header"))
+            .and_then(Dtype::from_proto)?;
         let decoder_config = DecoderCodecConfig {
             codec,
             filters,
-            dtype: Dtype::from_proto(header.dtype.as_ref().unwrap()).unwrap(),
+            dtype,
         };
 
         Self::new(block_data, blocks_loc, nblocks, block_size, decoder_config)

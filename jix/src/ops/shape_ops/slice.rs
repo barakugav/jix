@@ -8,7 +8,7 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{try_dim_arr, DimArray};
-use crate::{Array, ArrayStorage, Dimension};
+use crate::{Array, ArrayStorage, Dimension, SliceExt};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -89,7 +89,7 @@ impl<S: ArrayStorage> Slice<S> {
         let slice = try_dim_arr(ndim, |dim| {
             DimSlice::resolve(&slice.slice[dim], input_shape[dim])
         })?;
-        let no_steps = slice.iter().all(|ds| ds.is_contiguous());
+        let no_steps = slice.iter().all(|ds| ds.step == 1);
 
         let slice = S::Dimension::vec(ndim, |dim| slice[dim].clone());
         let shape = S::Dimension::from_fn(ndim, |dim| slice[dim].len());
@@ -138,101 +138,68 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        // # Read behaviour
-        //
-        // When all dimensions have `step == 1` (`no_steps` fast path), each read translates the
-        // requested index ranges by the per-dimension `start` offsets and forwards directly to the inner
-        // storage - no temporary buffer is needed.
-        //
-        // When any dimension has `step > 1`, [`NdIter`] iterates over every combination of strided-dim
-        // output indices. For each step:
-        // * Strided dims use a single-element inner range for that step's position.
-        // * Non-strided dims use the full translated range.
-        // Each inner read goes straight into its strided sub-region of `buf` - no temporary buffer.
-
         check_get_range(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
-
-        // -----------------------------------------------------------------------
-        // Fast path: all dims have step == 1.
-        //
-        // Each requested output range [a, b) for dim maps to inner range
-        // [start + a, start + b). A single forwarded call suffices.
-        // -----------------------------------------------------------------------
         let ndim = self.slice.as_ref().len();
+
+        // Fast path: all dims have step == 1. Map index [a, b) to inner [start + a, start + b) and forward.
         if self.no_steps {
             let inner_index = S::Dimension::vec(ndim, |dim| {
-                let off = self.slice[dim].start;
-                (index[dim].start + off)..(index[dim].end + off)
+                let offset = self.slice[dim].start;
+                (index[dim].start + offset)..(index[dim].end + offset)
             });
             return self.array.read_data(inner_index.as_ref(), context, out);
         }
 
-        // -----------------------------------------------------------------------
-        // General path: one or more dims have step > 1.
-        //
-        // We iterate over all combinations of strided-dim output indices with
-        // NdIter. On each step we read from the inner storage (strided dims
-        // collapsed to a single-element range; non-strided dims as full ranges)
-        // straight into the matching strided sub-region of `buf`.
-        //
-        // Let:
-        //   strided dim     - dims[d].step > 1
-        //   non-strided dim - dims[d].step == 1
-        //
-        // For NdIter we define `iter_shape`:
-        //   iter_shape[d] = out_shape[d]   if strided       (iterate over each step)
-        //   iter_shape[d] = 1              if non-strided   (treated as a single block)
-        //
-        // For each NdIter step `idx`:
-        //   inner_index[d]:
-        //     strided:     let pos = dims[d].start + (index[d].start + idx[d]) * step[d]
-        //                  pos..(pos + 1)
-        //     non-strided: (dims[d].start + index[d].start)..(dims[d].start + index[d].end)
-        //
-        //   inner_read_shape[d]:
-        //     strided:     1
-        //     non-strided: index[d].end - index[d].start   (full range for this dim)
-        //
-        //   dst_byte_offset = sum_{strided d} idx[d] * dst_strides[d]
-        //   (non-strided dims contribute 0 since idx[d] == 0 for them in iter_shape)
-        //
-        // The inner read targets a strided OutBuf over `buf[dst_byte_offset..]` with
-        // `dst_strides` (the destination's own strides), so each non-strided dim's full
-        // range lands at its correct position in `buf` directly - no temporary buffer or
-        // copy. `dst_byte_offset` places the single strided-dim step at the right row/column.
-        // -----------------------------------------------------------------------
-        let dtype = self.dtype();
         let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
+
+        // Fast path: inner array is plain, read a contiguous bounding box and create a strided view over it.
+        if out.is_none()
+            && self.array.spec().flags().plain_read()
+            && !out_shape.as_ref().contains(&0)
+        {
+            let inner_box = S::Dimension::vec(ndim, |dim| {
+                let ds = &self.slice[dim];
+                let first = ds.start + index[dim].start * ds.step;
+                let last = ds.start + (index[dim].end - 1) * ds.step;
+                first..(last + 1)
+            });
+            let inner = self.array.read_data(inner_box.as_ref(), context, None)?;
+            let out_strides = S::Dimension::vec(ndim, |dim| {
+                inner.strides()[dim] * self.slice[dim].step as usize
+            });
+            return Ok(unsafe { inner.with_strides(out_strides.as_ref()) });
+        }
+
+        // General path: one or more dims have step > 1. nd-iter over the strided dims, and read
+        // each sub-region from the inner array.
+        let dtype = self.dtype();
         let out_shape_usize = S::Dimension::vec(ndim, |dim| out_shape[dim] as usize);
         let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), dtype);
         if out_shape.as_ref().contains(&0) {
             return Ok(out);
         }
         let (out_buf, out_strides) = out.data_mut();
-        // iter_shape: out_shape for strided dims, 1 for non-strided dims.
         let iter_shape = S::Dimension::vec(ndim, |dim| {
-            if self.slice[dim].is_contiguous() {
+            if self.slice[dim].step == 1 {
                 1
             } else {
                 out_shape[dim]
             }
         });
-        let iter = NdIter::builder(iter_shape).build();
-        for (idx, ()) in iter {
+        let iter = NdIter::builder(iter_shape)
+            .with_strides_offset_ext(out_strides.to_dim_vec::<S::Dimension>(), 0)
+            .build();
+        for (idx, dst_byte_offset) in iter {
             let inner_index = S::Dimension::vec(ndim, |dim| {
                 let ds = &self.slice[dim];
-                if ds.is_contiguous() {
+                if ds.step == 1 {
                     (ds.start + index[dim].start)..(ds.start + index[dim].end)
                 } else {
                     let pos = ds.start + (index[dim].start + idx[dim]) * ds.step;
                     pos..(pos + 1)
                 }
             });
-            let dst_byte_offset = (0..ndim)
-                .filter(|&dim| !self.slice[dim].is_contiguous())
-                .map(|dim| idx[dim] as usize * out_strides[dim])
-                .sum::<usize>();
             let mut sub =
                 unsafe { StridedBuf::from_slice_mut(&mut out_buf[dst_byte_offset..], out_strides) };
             self.array
@@ -459,11 +426,6 @@ impl DimSlice {
         debug_assert!(self.start <= self.end);
         (self.end - self.start).div_ceil(self.step)
     }
-
-    #[inline]
-    fn is_contiguous(&self) -> bool {
-        self.step == 1
-    }
 }
 
 #[cfg(test)]
@@ -591,6 +553,61 @@ mod tests {
             .to_ndarray()
             .unwrap();
         assert_eq!(got, array![[0, 1, 2, 3], [8, 9, 10, 11], [16, 17, 18, 19]]);
+    }
+
+    fn plain6x4() -> Array<crate::storage::Plain<Vec<i32>, Ty<i32>, Dim<2>>> {
+        Array::plain_ndarray(ndarray::Array::from_shape_vec((6, 4), arange(24)).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn stepped_slice_pull_returns_strided_view_plain() {
+        use crate::ArrayStorage;
+
+        // Plain-backed inner (`plain_read`), so a stepped slice lends a strided view.
+        let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
+        let ctx = s.read_ctx();
+        let view = s.storage().read_data(&[0..3, 0..4], &ctx, None).unwrap();
+        // Zero-copy: axis-0 stride is 2 * row-stride (2*16), not the packed 16 a copy would carry.
+        assert_eq!(view.strides(), &[2 * 16, 4]);
+
+        let base = view.data_ptr();
+        let st = view.strides();
+        let mut got = Vec::new();
+        for i in 0..3 {
+            for j in 0..4 {
+                got.push(unsafe {
+                    base.add(i * st[0] + j * st[1])
+                        .cast::<i32>()
+                        .read_unaligned()
+                });
+            }
+        }
+        assert_eq!(got, vec![0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19]);
+    }
+
+    #[test]
+    fn stepped_slice_pull_subregion_plain() {
+        use crate::ArrayStorage;
+
+        let s = plain6x4().slice((SliceItem::new(None, None, 2), ..)); // rows 0, 2, 4
+        let ctx = s.read_ctx();
+        // Output sub-region [1..3, 1..3] -> orig rows 2 & 4, cols 1 & 2.
+        let view = s.storage().read_data(&[1..3, 1..3], &ctx, None).unwrap();
+        assert_eq!(view.strides(), &[2 * 16, 4]);
+
+        let base = view.data_ptr();
+        let st = view.strides();
+        let mut got = Vec::new();
+        for i in 0..2 {
+            for j in 0..2 {
+                got.push(unsafe {
+                    base.add(i * st[0] + j * st[1])
+                        .cast::<i32>()
+                        .read_unaligned()
+                });
+            }
+        }
+        assert_eq!(got, vec![9, 10, 17, 18]);
     }
 
     #[test]

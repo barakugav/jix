@@ -134,6 +134,7 @@ pub trait ArrayStorage {
     ///
     /// Same as [`read_data`](Self::read_data): one half-open range per dimension, and the read
     /// context.
+    #[doc(hidden)]
     #[inline]
     fn read_as_elementwise_pipeline<'a, T>(
         &'a self,
@@ -188,6 +189,7 @@ pub trait ArrayStorage {
     /// concrete [`ErrorKind`](crate::ErrorKind) is backend-dependent
     /// ([`TooManyDimensions`](crate::ErrorKind::TooManyDimensions) for the concrete storage
     /// backends). Always succeeds for `NewD = DimDyn`.
+    #[doc(hidden)]
     fn dimension_change<NewD: Dimension>(self) -> Result<Self::DimensionChange<NewD>>
     where
         Self: Sized;
@@ -206,6 +208,7 @@ pub trait ArrayStorage {
     /// Returns [`ErrorKind::UnsupportedDtype`](crate::ErrorKind::UnsupportedDtype) if
     /// `NewET = Ty<T>` and the runtime dtype does not equal `T::DTYPE`. Always succeeds for
     /// `NewET = TypeDyn`.
+    #[doc(hidden)]
     fn element_type_change<NewET: ElementType>(self) -> Result<Self::ElementTypeChange<NewET>>
     where
         Self: Sized;

@@ -361,14 +361,6 @@ impl<ET> BlockTable<Owned, ET> {
         );
 
         let b_size_bytes = block_size as usize * itemsize as usize;
-
-        ensure!(
-            dtype.itemsize() > 0,
-            InvalidArgument,
-            "itemsize must be > 0"
-        );
-        ensure!(block_size > 0, InvalidArgument, "block_size must be > 0");
-        let b_size_bytes = block_size as usize * dtype.itemsize() as usize;
         let mut encoder = Encoder::new(encoder_params, dtype.clone())?;
         let max_blk_cdata_len = encoder.encode_bound(b_size_bytes);
 
@@ -376,7 +368,6 @@ impl<ET> BlockTable<Owned, ET> {
         let mut block_data = Vec::<u8>::new();
         let mut blocks_loc = vec![BlockLocation2::default(); (nblocks + 1) >> 1];
         for (block_idx, plain_data) in data.chunks(b_size_bytes).enumerate() {
-            let b_size_bytes = block_size as usize * dtype.itemsize() as usize;
             ensure!(
                 plain_data.len() == b_size_bytes,
                 InvalidArgument,

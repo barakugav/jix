@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::array::Array;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::{check_dtype, Result};
+use crate::error::{check_dtype, check_dtype_size_nonzero, Result};
 use crate::ops::common::define_array_op1_method;
 use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
@@ -27,6 +27,7 @@ impl<S, K> Op1<S, K> {
         S: ArrayStorageTyped,
         K: Op1Kernel<S::Item, Output: Dtyped>,
     {
+        check_dtype_size_nonzero(&K::Output::DTYPE)?;
         let mut spec = array.spec().dynamic().clone();
         spec.element_cost += 1.0;
         Ok(Self {
@@ -100,13 +101,6 @@ where
                     unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
                 })
             }
-        }
-        impl<TIn, T, P, K> ElementwisePipeline<T> for Op1Pipeline<'_, P, K, TIn>
-        where
-            P: ElementwisePipelineImpl<TIn>,
-            K: Op1Kernel<TIn, Output: Dtyped>,
-            T: Dtyped,
-        {
         }
 
         Ok(Op1Pipeline {

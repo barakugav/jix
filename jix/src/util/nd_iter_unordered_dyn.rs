@@ -184,7 +184,7 @@ impl NdIterUnorderedDyn {
 /// outer `NdIter` here is the lending kind.
 #[allow(clippy::type_complexity)]
 #[inline(never)]
-fn nd_iter_unordered_nd_walk<D: Dimension>(
+fn nd_iter_unordered_nd_walk<OuterD: Dimension>(
     shape: &[usize],
     strides: &[DimArray<usize>],
     inner_loop: &mut dyn FnMut(&[usize], usize, &[usize]),
@@ -194,7 +194,7 @@ fn nd_iter_unordered_nd_walk<D: Dimension>(
     let inner_strides = strides.iter().map(|s| s[ndim - 1]).collect::<Vec<_>>();
     let mut offsets = vec![0usize; strides.len()];
 
-    if D::NDIM == Some(1) {
+    if OuterD::NDIM == Some(1) {
         // Special case for 2D: the outer `NdIter` is just a single loop over the outer axis, and
         // and inner loop is a flat 1-d run.
 
@@ -212,10 +212,10 @@ fn nd_iter_unordered_nd_walk<D: Dimension>(
         // Flat inner 1-d run over the innermost axis [ndim-1]; the outer `NdIter` walks the outer
         // axes and yields every operand's running byte offset at once.
 
-        let outer_shape = D::vec(ndim - 1, |k| shape[k] as u64);
+        let outer_shape = OuterD::vec(ndim - 1, |k| shape[k] as u64);
         let outer_strides = strides
             .iter()
-            .map(|s| D::vec(ndim - 1, |k| s[k]))
+            .map(|s| OuterD::vec(ndim - 1, |k| s[k]))
             .collect::<Vec<_>>();
         let mut iter = NdIter::builder(outer_shape)
             .with_strides_offset_multi_dyn_ext(outer_strides, offsets)
