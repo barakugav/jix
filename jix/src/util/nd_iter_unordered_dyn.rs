@@ -65,14 +65,21 @@ impl NdIterUnorderedDyn {
             (shape, strides)
         } else {
             axes_sort_by(&mut dim_perm, |d1: usize, d2: usize| {
+                let mut compared = false;
                 for strides in strides.iter() {
+                    // A zero stride means this operand does not move along the axis at all, so it
+                    // has no opinion on where the axis belongs.
+                    if strides[d1] == 0 || strides[d2] == 0 {
+                        continue;
+                    }
+                    compared = true;
                     match strides[d1].cmp(&strides[d2]) {
-                        std::cmp::Ordering::Less => return std::cmp::Ordering::Greater,
+                        std::cmp::Ordering::Less => return Some(std::cmp::Ordering::Greater),
                         std::cmp::Ordering::Equal => {}
-                        std::cmp::Ordering::Greater => return std::cmp::Ordering::Less,
+                        std::cmp::Ordering::Greater => return Some(std::cmp::Ordering::Less),
                     }
                 }
-                std::cmp::Ordering::Equal
+                compared.then_some(std::cmp::Ordering::Equal)
             });
 
             // (2) Coalesce adjacent contiguous axes into groups. `dim_perm` lists the axes to visit,

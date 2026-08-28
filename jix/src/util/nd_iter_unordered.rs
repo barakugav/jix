@@ -43,11 +43,26 @@ pub(crate) struct NdIterUnordered<const N_OPERANDS: usize> {
 impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     /// Order and coalesce the axes and compute the innermost-run flags. An empty region (any axis of
     /// length 0) yields an iterator whose [`foreach_inner_1d`](Self::foreach_inner_1d) visits nothing.
-    #[inline(never)]
+    #[inline]
     pub(crate) fn new(
         shape: &[usize],
         strides: [&[usize]; N_OPERANDS],
         layouts: [(usize, usize); N_OPERANDS], // (size, alignment) per operand, in its stride unit
+    ) -> Self {
+        Self::new_with(shape, strides, layouts, [true; N_OPERANDS])
+    }
+
+    /// Like [`new`](Self::new), with control over which operands take part in the axis ordering.
+    ///
+    /// An operand whose `affects_dim_order` entry is `false` is skipped by the sort.
+    /// This lets the caller add an extra bookkeeping operand along without letting it perturb
+    /// the memory-access order.
+    #[inline(never)]
+    pub(crate) fn new_with(
+        shape: &[usize],
+        strides: [&[usize]; N_OPERANDS],
+        layouts: [(usize, usize); N_OPERANDS], // (size, alignment) per operand, in its stride unit
+        affects_dim_order: [bool; N_OPERANDS],
     ) -> Self {
         for s in strides {
             assert_eq!(s.len(), shape.len());
@@ -83,14 +98,24 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
             (shape, strides)
         } else {
             axes_sort_by(&mut dim_perm, |d1: usize, d2: usize| {
-                for strides in strides.iter() {
+                let mut compared = false;
+                for (op_i, strides) in strides.iter().enumerate() {
+                    if !affects_dim_order[op_i] {
+                        continue;
+                    }
+                    // A zero stride means this operand does not move along the axis at all, so it
+                    // has no opinion on where the axis belongs.
+                    if strides[d1] == 0 || strides[d2] == 0 {
+                        continue;
+                    }
+                    compared = true;
                     match strides[d1].cmp(&strides[d2]) {
-                        std::cmp::Ordering::Less => return std::cmp::Ordering::Greater,
-                        std::cmp::Ordering::Equal => {}
-                        std::cmp::Ordering::Greater => return std::cmp::Ordering::Less,
+                        Ordering::Less => return Some(Ordering::Greater),
+                        Ordering::Equal => {}
+                        Ordering::Greater => return Some(Ordering::Less),
                     }
                 }
-                std::cmp::Ordering::Equal
+                compared.then_some(Ordering::Equal)
             });
 
             // (2) Coalesce adjacent contiguous axes into groups. `dim_perm` lists the axes to visit,
@@ -171,6 +196,14 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         self.is_contiguous
     }
 
+    /// Each operand's stride along the innermost run, in its own stride unit. Constant across outer
+    /// positions, so a caller can pick its inner loop once instead of per run.
+    #[inline(always)]
+    pub(crate) fn inner_strides(&self) -> [usize; N_OPERANDS] {
+        let inner = self.shape.len() - 1;
+        array_from_fn_inline(|i| self.strides[i][inner])
+    }
+
     /// Drive `inner_loop` once per outer position, as `inner_loop(offsets, inner_len, inner_strides)`
     #[inline]
     pub(crate) fn foreach_inner_1d(
@@ -235,15 +268,23 @@ fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, OuterD: Dimension>(
     }
 }
 
+/// Stable insertion sort over axis indices, with a three-valued comparator.
+///
+/// `compare(d0, d1)` returns `None` when the two axes cannot be ordered relative to each other -
+/// no operand had anything to say about the pair.
 #[inline]
-pub(super) fn axes_sort_by(arr: &mut [usize], mut compare: impl FnMut(usize, usize) -> Ordering) {
+pub(super) fn axes_sort_by(
+    arr: &mut [usize],
+    mut compare: impl FnMut(usize, usize) -> Option<Ordering>,
+) {
     for i in 1..arr.len() {
         let mut insertion_idx = i;
         for i1 in (0..i).rev() {
-            if compare(arr[i], arr[i1]).is_ge() {
-                break;
+            match compare(arr[i], arr[i1]) {
+                Some(ord) if ord.is_ge() => break,
+                Some(_) => insertion_idx = i1,
+                None => {} // ambiguous: transparent, keep scanning outward
             }
-            insertion_idx = i1;
         }
         if insertion_idx != i {
             let tmp = arr[i];
@@ -289,10 +330,20 @@ mod tests {
         strides: [&[usize]; N],
         layouts: [(usize, usize); N],
     ) -> Run<N> {
+        run_with(shape, strides, layouts, [true; N])
+    }
+
+    /// [`run`], with control over which operands take part in the axis ordering.
+    fn run_with<const N: usize>(
+        shape: &[usize],
+        strides: [&[usize]; N],
+        layouts: [(usize, usize); N],
+        affects_dim_order: [bool; N],
+    ) -> Run<N> {
         let mut visited: Vec<[usize; N]> = Vec::new();
         let mut inner_calls = 0usize;
 
-        let iter = NdIterUnordered::new(shape, strides, layouts);
+        let iter = NdIterUnordered::new_with(shape, strides, layouts, affects_dim_order);
         let flags = Flags {
             inner_len: iter.inner_len(),
             is_aligned: iter.is_aligned(),
@@ -662,7 +713,7 @@ mod tests {
 
     /// Sort by the axis indices themselves, ascending.
     fn sorted(mut axes: Vec<usize>) -> Vec<usize> {
-        axes_sort_by(&mut axes, |a, b| a.cmp(&b));
+        axes_sort_by(&mut axes, |a, b| Some(a.cmp(&b)));
         axes
     }
 
@@ -681,7 +732,7 @@ mod tests {
         // Rank by `d % 3` alone, so the three axes in each rank compare `Equal` to each other and
         // only a stable sort keeps them in the order they came in.
         let mut axes = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
-        axes_sort_by(&mut axes, |a, b| (a % 3).cmp(&(b % 3)));
+        axes_sort_by(&mut axes, |a, b| Some((a % 3).cmp(&(b % 3))));
         assert_eq!(axes, vec![0, 3, 6, 1, 4, 7, 2, 5, 8]);
     }
 
@@ -696,7 +747,7 @@ mod tests {
             other => panic!("comparator got {other}, which is a position, not an element"),
         };
         let mut axes = vec![10, 11, 12];
-        axes_sort_by(&mut axes, |a, b| rank(a).cmp(&rank(b)));
+        axes_sort_by(&mut axes, |a, b| Some(rank(a).cmp(&rank(b))));
         assert_eq!(axes, vec![11, 12, 10]);
     }
 
@@ -708,12 +759,12 @@ mod tests {
             axes_sort_by(axes, |d1, d2| {
                 for s in strides {
                     match s[d1].cmp(&s[d2]) {
-                        Ordering::Less => return Ordering::Greater,
+                        Ordering::Less => return Some(Ordering::Greater),
                         Ordering::Equal => {}
-                        Ordering::Greater => return Ordering::Less,
+                        Ordering::Greater => return Some(Ordering::Less),
                     }
                 }
-                Ordering::Equal
+                Some(Ordering::Equal)
             });
         }
 
@@ -725,5 +776,72 @@ mod tests {
         let mut axes = [0, 1];
         sort_by_strides(&[&[8, 8], &[1, 2]], &mut axes);
         assert_eq!(axes, [1, 0]);
+    }
+
+    // ---------------------------------------------------------------------------
+    // `inner_strides`, `new_with` and the zero-stride sort rule
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn inner_strides_reports_the_innermost_run_stride_per_operand() {
+        // Axis 0 is outermost (operand 0's stride is larger), so axis 1 forms the inner run and
+        // each operand's inner stride is its own stride on axis 1. Operand 1's strides block the
+        // coalesce, so the inner run really is axis 1 and not the whole region.
+        let iter = NdIterUnordered::new(&[2, 3], [&[3, 1], &[1, 2]], [(1, 1); 2]);
+        assert_eq!(iter.inner_strides(), [1, 2]);
+        assert_eq!(iter.inner_len(), 3);
+    }
+
+    #[test]
+    fn zero_stride_abstains_instead_of_sorting_innermost() {
+        // Operand 0 has stride 0 on axis 0. Sorting `0` as the smallest stride would drag axis 0
+        // into the inner run and leave both operands non-contiguous there; abstaining hands the
+        // decision to operand 1, which puts the larger-stride axis 0 outermost and leaves axis 1 -
+        // contiguous for both operands - as the inner run.
+        let shape = [4, 5];
+        let iter = NdIterUnordered::new(&shape, [&[0, 8], &[40, 8]], [(8, 8); 2]);
+        assert_eq!(iter.inner_strides(), [8, 8]);
+        assert_eq!(iter.is_contiguous(), [true, true]);
+        assert_visits(&shape, [&[0, 8], &[40, 8]], [(8, 8); 2]);
+    }
+
+    #[test]
+    fn new_with_can_exclude_an_operand_from_the_dim_order() {
+        // Operand 0 ties on both axes, so operand 1 decides - it wants axis 1 outermost, leaving
+        // axis 0 (its stride 4) as the inner run.
+        let strides: [&[usize]; 2] = [&[8, 8], &[4, 100]];
+        let included = NdIterUnordered::new(&[4, 5], strides, [(4, 4); 2]);
+        assert_eq!(included.inner_strides(), [8, 4]);
+
+        // Excluded from the ordering, operand 1 no longer gets to flip the axes, so the input
+        // order stands and axis 1 (its stride 100) becomes the inner run instead.
+        let excluded = NdIterUnordered::new_with(&[4, 5], strides, [(4, 4); 2], [true, false]);
+        assert_eq!(excluded.inner_strides(), [8, 100]);
+    }
+
+    #[test]
+    fn new_with_still_coalesces_against_an_excluded_operand() {
+        // Operand 0 alone is fully contiguous and would coalesce both axes into one run of 6.
+        // Operand 1 is excluded from the *ordering* but must still constrain the *coalesce*: its
+        // stride 5 on axis 0 does not equal 1 * 3, so the axes stay separate.
+        let iter =
+            NdIterUnordered::new_with(&[2, 3], [&[3, 1], &[5, 1]], [(1, 1); 2], [true, false]);
+        assert_eq!(iter.inner_len(), 3);
+        let run = run_with(&[2, 3], [&[3, 1], &[5, 1]], [(1, 1); 2], [true, false]);
+        assert_eq!(run.inner_calls, 2);
+    }
+
+    #[test]
+    fn axes_sort_by_treats_an_ambiguous_comparison_as_transparent() {
+        // Axis 2 cannot be compared against axis 1, but it is decisively outermost of axis 0. An
+        // ambiguous neighbour must not stop the scan, or axis 2 never reaches the front.
+        let mut axes = vec![0, 1, 2];
+        axes_sort_by(&mut axes, |d0, d1| match (d0, d1) {
+            (2, 1) => None,
+            (2, 0) => Some(Ordering::Less),
+            (1, 0) => Some(Ordering::Greater),
+            other => panic!("unexpected comparison {other:?}"),
+        });
+        assert_eq!(axes, vec![2, 0, 1]);
     }
 }
