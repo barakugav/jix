@@ -266,6 +266,31 @@ pub(crate) trait IterExt: Iterator {
 }
 impl<I> IterExt for I where I: Iterator {}
 
+pub(crate) fn default_strides(shape: &[usize], itemsize: usize) -> DimArray<usize> {
+    let ndim = shape.len();
+    let mut strides = dim_arr(ndim, |_| itemsize);
+    if ndim > 1 {
+        for (i, s) in shape.iter().rev().take(ndim - 1).enumerate() {
+            let dim = ndim - i - 1;
+            strides[dim - 1] = strides[dim] * s;
+        }
+    }
+    strides
+}
+
+/// Compute the byte span of a region accessed by `shape` and `strides`.
+#[inline]
+pub(crate) fn strided_span_bytes(shape: &[usize], strides: &[usize], itemsize: usize) -> usize {
+    let mut biggest_offset = 0;
+    for (&len, &stride) in shape.iter().zip(strides) {
+        if len == 0 {
+            return 0;
+        }
+        biggest_offset += stride * (len - 1);
+    }
+    biggest_offset + itemsize
+}
+
 #[cfg(test)]
 mod tests {
     use pyo3::prelude::*;

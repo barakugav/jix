@@ -9,8 +9,8 @@
 - resolve TODOs across the repo
 - add likely/unlikely branch hints
 - add read benchmark of the whole array, also for low entropy data
-- add `out` arg to `Array.numpy()`
 - benchmark LANES of {32/64/128/256} / itemsize on x86
 - with_strides_ptr_mut_ext, keep only offsets
 - simplify NdIter state
 - fast path for 0-stride operands in ElementwisePipeline
+- u8 for DimIdx

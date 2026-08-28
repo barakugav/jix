@@ -177,10 +177,16 @@ pub fn slice<'py>(
     let sliced = jix_core::ops::Slice::new_array(arr, spec)
         .into_py_result()?
         .into_any();
-    let result = if parsed.drop_axes.is_empty() {
+    let drop_axes = parsed
+        .drop_axes
+        .into_iter()
+        .enumerate()
+        .filter_map(|(axis, drop)| drop.then_some(axis))
+        .collect::<DimArray<_>>();
+    let result = if drop_axes.is_empty() {
         sliced
     } else {
-        jix_core::ops::RemoveAxis::new_array(sliced, parsed.drop_axes.as_slice())
+        jix_core::ops::RemoveAxis::new_array(sliced, drop_axes.as_slice())
             .into_py_result()?
             .into_any()
     };
@@ -195,7 +201,8 @@ pub fn slice<'py>(
 ///
 /// Accepts an integer, a `slice`, `Ellipsis`, or a tuple of these. Slice steps other
 /// than 1 are rejected. Bounds are validated strictly (no numpy-style clamping).
-/// Returns one `SliceItem` per array dimension plus the list of integer-indexed axes.
+/// Returns one `SliceItem` per array dimension, plus one flag per dimension marking the
+/// integer-indexed ones.
 #[inline]
 pub(crate) fn parse_basic_index<'py>(
     shape: &[u64],
@@ -275,6 +282,7 @@ pub(crate) fn parse_basic_index<'py>(
                         end: Some(shape[axis_cursor] as i64),
                         step: 1,
                     });
+                    drop_axes.push(false);
                     axis_cursor += 1;
                 }
             }
@@ -291,7 +299,7 @@ pub(crate) fn parse_basic_index<'py>(
                     end: Some(i_resolved + 1),
                     step: 1,
                 });
-                drop_axes.push(axis_cursor);
+                drop_axes.push(true);
                 axis_cursor += 1;
             }
             RawIdxItem::Slice(s) => {
@@ -324,6 +332,7 @@ pub(crate) fn parse_basic_index<'py>(
                     end: Some(stop_norm),
                     step: 1,
                 });
+                drop_axes.push(false);
                 axis_cursor += 1;
             }
         }
@@ -334,6 +343,7 @@ pub(crate) fn parse_basic_index<'py>(
             end: Some(shape[axis_cursor] as i64),
             step: 1,
         });
+        drop_axes.push(false);
         axis_cursor += 1;
     }
 
@@ -343,14 +353,15 @@ pub(crate) fn parse_basic_index<'py>(
 /// Parsed result of a basic-indexing expression (`int`, `slice`, `...`, or tuple of these).
 ///
 /// Integer-indexed axes are kept in `items` as single-element slices (`start..start+1`)
-/// and listed in `drop_axes`; callers can remove those axes after slicing to recover
+/// and flagged in `drop_axes`; callers can remove those axes after slicing to recover
 /// numpy `arr[i]` semantics.
 pub(crate) struct ParsedBasicIndex {
     /// One resolved `SliceItem` per array dimension. `start` and `end` are absolute
     /// (non-negative) indices in the input shape; `step` is always 1.
     pub items: DimArray<SliceItem>,
-    /// Axes (0-based, increasing) that came from integer indices.
-    pub drop_axes: DimArray<usize>,
+    /// One flag per array dimension, `true` where the index item was an integer and the
+    /// axis should be dropped from the output. Always the same length as `items`.
+    pub drop_axes: DimArray<bool>,
 }
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape.

@@ -3,11 +3,10 @@ Tests for `jix.slice`: a lazy view-producing counterpart to `__getitem__` / `.nu
 
 Slicing here returns a new `jix.Array` rather than materializing to numpy. The
 parsing logic for the index (handled by `parse_basic_index` in shape_ops.rs) is
-shared with `.numpy()`, so most of the index-syntax surface is also exercised by
-the existing `test_array_indexing` block in test_array_ops.py / test_archive.py.
-This file focuses on the slice op itself: laziness, view semantics, axis
-dropping, and the strict-bounds errors introduced in the core `resolve` and the
-Python-side index parser.
+shared with `.numpy()`; test_getitem.py pins that shared surface against numpy
+for all three consumers. This file focuses on the slice op itself: laziness,
+view semantics, axis dropping, and the strict-bounds errors introduced in the
+core `resolve` and the Python-side index parser.
 """
 
 import numpy as np
