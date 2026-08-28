@@ -14,3 +14,5 @@
 - simplify NdIter state
 - fast path for 0-stride operands in ElementwisePipeline
 - u8 for DimIdx
+- replace array_from_fn_inline with map_enumerate
+- arrays_map, arrays_map_enumerate

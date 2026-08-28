@@ -7,6 +7,10 @@ use crate::{default_logical_strides_slice, DimVec};
 ///
 /// On each dimension change the pointer is adjusted by the difference in byte offsets:
 /// `ptr += (after - before) * stride[dim]`.
+// Its last production caller was the reduction's in-tile loop, which now walks with
+// `NdIterUnordered`. Kept as the read-only mirror of `NdIterExtStridesPtrMut` - still exercised by
+// this module's tests - rather than deleted along with that coverage.
+#[allow(dead_code)]
 pub(crate) struct NdIterExtStridesPtr<D: Dimension, T, S: Copy>(NdIterExtStridesPtrMut<D, T, S>);
 
 impl<D: Dimension, T, S: Copy> Clone for NdIterExtStridesPtr<D, T, S>
@@ -19,6 +23,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 impl<D: Dimension, T, S: Copy> NdIterExtStridesPtr<D, T, S> {
     /// Creates the extension starting at `initial_ptr` with the given per-dimension byte strides.
     #[inline]

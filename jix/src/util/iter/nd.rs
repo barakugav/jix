@@ -456,6 +456,7 @@ impl<D: Dimension> NdIter<D, ()> {
 
 impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
     /// Adds a [`NdIterExtStridesPtr`]  extension.
+    #[allow(dead_code)] // see the note on `NdIterExtStridesPtr`
     #[inline]
     pub(crate) fn with_strides_ptr_ext<T, S>(
         self,

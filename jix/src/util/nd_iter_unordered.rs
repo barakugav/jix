@@ -231,6 +231,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
 fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, OuterD: Dimension>(
     shape: &[usize],
     strides: [&[usize]; N_OPERANDS],
+    // TODO: accept &dyn FnMut
     mut inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
 ) {
     let ndim = shape.len();
