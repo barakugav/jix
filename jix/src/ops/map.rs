@@ -372,15 +372,6 @@ where
                 })
             }
         }
-        impl<ArraysT, F, O, T, D> ElementwisePipeline<T> for MapMultiplePipeline<'_, ArraysT, D, F>
-        where
-            ArraysT: ArraySequence + ArraySequenceDimension + ArraySequenceTyped,
-            F: Fn(ArraysT::ItemSequence<'_>) -> O,
-            O: Dtyped,
-            T: Dtyped,
-            D: ElementwisePipelineTuple<ArraysT>,
-        {
-        }
 
         Ok(MapMultiplePipeline {
             inner,

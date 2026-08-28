@@ -129,16 +129,6 @@ where
                 })
             }
         }
-        impl<T1, T2, T, P1, P2, K> ElementwisePipeline<T> for Op2Pipeline<'_, P1, P2, K, T1, T2>
-        where
-            P1: ElementwisePipelineImpl<T1>,
-            P2: ElementwisePipelineImpl<T2>,
-            K: Op2Kernel<T1, T2, Output: Dtyped>,
-            T1: Copy,
-            T2: Copy,
-            T: Dtyped,
-        {
-        }
 
         Ok(Op2Pipeline {
             a,
