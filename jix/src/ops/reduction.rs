@@ -14,7 +14,7 @@ use crate::util::SliceExt;
 use crate::util::{calc_block_end, scale_read_shape, DimArray, USE_NEW_READ_SCALING};
 use crate::{
     array_from_fn_inline, default_strides, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
-    IterExt, Ty,
+    NdIterUnordered, Ty,
 };
 
 pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
@@ -185,9 +185,9 @@ where
             size_of::<K::State>(),
             Alignment::of::<K::State>(),
             &self.is_reduced,
-            &|args| reduce_tile::<S::Item, K, D>(&self.kernel, args),
+            &|args| reduce_tile::<S::Item, K>(&self.kernel, args),
             &|args| {
-                finalize_states::<S::Item, K, D>(&self.kernel, args);
+                finalize_states::<S::Item, K>(&self.kernel, args);
             },
             index,
             context,
@@ -244,8 +244,8 @@ fn read_data_impl<'a, InnerD, OuterD>(
     kernel_state_sizeof: usize,
     kernel_state_alignof: Alignment,
     is_reduced: &InnerD::Vec<bool>,
-    reduce_tile_fn: &dyn Fn(ReduceTileArgs<OuterD>),
-    finalize_state_fn: &dyn Fn(FinalizeStateArgs<OuterD>),
+    reduce_tile_fn: &dyn Fn(ReduceTileArgs<'_>),
+    finalize_state_fn: &dyn Fn(FinalizeStateArgs<'_>),
     index: &[Range<u64>],
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
@@ -315,11 +315,13 @@ where
     // ```
 
     let out_nitems = index.iter().map(|r| r.end - r.start).product::<u64>() as usize;
+    if out_nitems == 0 {
+        return Ok(out);
+    }
 
     let inner_shape = inner_array.shape();
     let inner_ndim = inner_shape.len();
     let item_dtype = inner_array.dtype();
-    let out_ndim = index.len();
 
     let inner_range_full = {
         let mut out_dim = 0;
@@ -390,6 +392,22 @@ where
         .map(|d| inner_range_full[d].end - inner_range_full[d].start)
         .product::<u64>();
 
+    // Row-major strides over the reduced sub-shape, so an element's position in the reduced
+    // stream is the dot product of its coordinates with these. Zero on the non-reduced axes, which
+    // drops them from that dot product
+    let reduced_shape_logical_strides = {
+        let mut reduced_shape_logical_strides = InnerD::vec(inner_ndim, |_| 0usize);
+        let mut logical_stride = 1;
+        for d in (0..inner_ndim).rev() {
+            if is_reduced[d] {
+                reduced_shape_logical_strides[d] = logical_stride;
+                logical_stride *= (inner_range_full[d].end - inner_range_full[d].start) as usize;
+            }
+        }
+        debug_assert_eq!(logical_stride as u64, full_reduction_size);
+        reduced_shape_logical_strides
+    };
+
     let output_align = output_dtype.alignment().as_usize();
     let state_in_out_buf = kernel_state_sizeof == output_dtype.itemsize() as usize
         && kernel_state_alignof.as_usize() <= output_align
@@ -418,9 +436,19 @@ where
         .as_ref()
         .iter()
         .all(|&s| s.is_multiple_of(kernel_state_alignof.as_usize())));
-    let mut state_initialized = false;
+    // The state strides lifted to the inner array's axes: zero on a reduced axis, since a reduced
+    // axis does not index the state.
+    let state_strides_inner = {
+        let mut state_strides = state_strides.as_ref().iter().copied();
+        InnerD::vec(inner_ndim, |d| {
+            if is_reduced[d] {
+                0
+            } else {
+                state_strides.next().unwrap()
+            }
+        })
+    };
 
-    let mut items_buf = context.allocate_buf(0, item_dtype.alignment());
     for (bulk_idx, (bulk_inner_offset, bulk_size)) in bulk_iter {
         // The bulk's absolute element range, used as the tile iterator's universe.
         let bulk_begin = InnerD::vec(inner_ndim, |dim| {
@@ -445,12 +473,10 @@ where
             .with_block_offset_size_ext(
                 &bulk_begin,
                 &bulk_end,
-                InnerD::vec(inner_ndim, |d| tile_shape[d]), // TODO: clone
+                InnerD::vec(inner_ndim, |d| tile_shape[d]),
             )
             .build();
 
-        let mut bulk_base_item_idx = 0u64;
-        let mut bulk_initialized = false;
         for (tile_idx, (tile_inner_offset, tile_size)) in tile_iter {
             let tile = InnerD::vec(inner_ndim, |dim| {
                 let start = tile_idx[dim] * tile_shape[dim] + tile_inner_offset[dim];
@@ -464,207 +490,214 @@ where
                 "tile not contained in inner_range_full",
             );
 
-            let tile_reduction_size = (0..inner_ndim)
-                .filter(|&d| is_reduced[d])
-                .map(|d| tile_size[d] as usize)
-                .product::<usize>();
+            let items = inner_array.read_data(tile.as_ref(), context, None)?;
 
-            // Read this tile's items into a `(output, reduced)` layout - reduced dims
-            // innermost/contiguous - so each output's reduced stream is a unit-stride run.
-            // `perm_lstrides[d]` is the element stride of source dim `d` in that layout.
-            let mut perm_strides = InnerD::vec(inner_ndim, |_| 0usize);
-            {
-                let mut red_acc = item_dtype.itemsize() as usize;
-                let mut out_acc = tile_reduction_size * item_dtype.itemsize() as usize;
-                for d in (0..inner_ndim).rev() {
-                    if is_reduced[d] {
-                        perm_strides[d] = red_acc;
-                        red_acc *= tile_size[d] as usize;
-                    } else {
-                        perm_strides[d] = out_acc;
-                        out_acc *= tile_size[d] as usize;
-                    }
-                }
-            }
-            items_buf.set_len(
-                (tile_size.as_ref().iter().product::<u64>() * item_dtype.itemsize() as u64)
-                    as usize,
-            );
-            let items_buf = items_buf.as_mut_slice();
-            // Read the tile into its `(output, reduced)` permuted layout.
-            // SAFETY: `perm_strides` describes the tile's `(output, reduced)` sub-region within
-            // `items_buf`, which is sized to the full tile.
-            let mut inner_out_buf =
-                unsafe { StridedBuf::from_slice_mut(items_buf, perm_strides.as_ref()) };
-            inner_array.read_data(tile.as_ref(), context, Some(&mut inner_out_buf))?;
-            drop(inner_out_buf);
-
-            // Output-iterator setup. `tile_out_shape` is the tile's output sub-region;
-            // `tile_state_base` shifts `state_buf` to its first slot. Items strides come
-            // from the permuted layout (innermost output stride == reduction_size).
-            let items_buf_strides_for_out_iter = perm_strides
-                .as_ref()
-                .iter()
-                .zip(is_reduced.as_ref())
-                .filter_map(|(&s, &reduced)| reduced.not().then_some(s))
-                .collect_dim_vec::<OuterD>(out_ndim);
-
-            let tile_out_shape = (0..inner_ndim)
-                .filter(|&d| !is_reduced[d])
-                .map(|d| tile_size[d])
-                .collect_dim_vec::<OuterD>(out_ndim);
             let state_offset = (0..inner_ndim)
-                .filter(|&d| !is_reduced[d])
-                .enumerate()
-                .map(|(out_d, d)| {
-                    (tile[d].start - inner_range_full[d].start) as usize * state_strides[out_d]
+                .map(|d| {
+                    ((tile[d].start - inner_range_full[d].start) as usize) * state_strides_inner[d]
                 })
                 .sum::<usize>();
-            let tile_state_base = unsafe { state_buf.as_mut_ptr().add(state_offset) };
+            let tile_base_reduced_idx = (0..inner_ndim)
+                .map(|d| {
+                    ((tile[d].start - inner_range_full[d].start) as usize)
+                        * reduced_shape_logical_strides[d]
+                })
+                .sum::<usize>() as u64;
+
+            let tile_shape = InnerD::vec(inner_ndim, |d| tile_size[d] as usize);
+            let tile_state_base = unsafe { state_buf.get_unchecked_mut(state_offset..) };
 
             reduce_tile_fn(ReduceTileArgs {
-                tile_out_shape,
-                items_buf: items_buf.as_ptr(),
-                items_buf_strides: items_buf_strides_for_out_iter,
-                state_buf: tile_state_base,
-                state_buf_strides: state_strides.clone(),
-                merge_into_existing: bulk_initialized,
-                tile_reduction_size,
-                bulk_base_item_idx,
+                tile_shape: tile_shape.as_ref(),
+                items,
+                states_buf: tile_state_base,
+                state_strides: state_strides_inner.as_ref(),
+                tile_base_reduced_idx,
+                reduced_shape_logical_strides: reduced_shape_logical_strides.as_ref(),
             });
-
-            if tile_reduction_size > 0 {
-                bulk_base_item_idx += tile_reduction_size as u64;
-                bulk_initialized = true;
-                state_initialized = true;
-            }
         }
-
-        debug_assert_eq!(
-            bulk_base_item_idx, full_reduction_size,
-            "bulk did not fold each of its outputs over the full reduced stream",
-        );
     }
 
-    // finalize_state. Every output was fully reduced inside its own bulk, so each cell
-    // folded exactly `full_reduction_size` items.
-    let reduction_size_overall = full_reduction_size;
     // CAREFUL: state_buf and out_ptr may alias
     let state_ptr = state_buf.as_mut_ptr();
     // From here on the state/output buffers are touched only through `state_ptr` and
     // `out_ptr`. Dont use `state_buf`.
     finalize_state_fn(FinalizeStateArgs {
-        out_shape,
+        out_shape: out_shape_usize.as_ref(),
         state_buf: state_ptr,
-        state_buf_strides: state_strides,
+        state_buf_strides: state_strides.as_ref(),
         out_buf: out_ptr,
-        out_buf_strides: out_strides,
-        reduction_size_overall,
-        state_initialized,
+        out_buf_strides: out_strides.as_ref(),
+        full_reduction_size,
     });
     Ok(out)
 }
 
-struct ReduceTileArgs<D: Dimension> {
-    tile_out_shape: D::Vec<u64>,
-    items_buf: *const u8,
-    items_buf_strides: D::Vec<usize>,
-    state_buf: *mut u8,
-    state_buf_strides: D::Vec<usize>,
-    merge_into_existing: bool,
-    tile_reduction_size: usize,
-    bulk_base_item_idx: u64,
-}
-fn reduce_tile<T, K, D>(kernel: &K, args: ReduceTileArgs<D>)
-where
-    T: Dtyped,
-    K: ReductionOpKernel<T, Output: Dtyped>,
-    D: Dimension,
-{
-    let ReduceTileArgs {
-        tile_out_shape,
-        items_buf,
-        items_buf_strides,
-        state_buf,
-        state_buf_strides,
-        merge_into_existing,
-        tile_reduction_size,
-        bulk_base_item_idx,
-    } = args;
+struct ReduceTileArgs<'a> {
+    tile_shape: &'a [usize],
+    items: StridedBuf<'a>,
+    states_buf: &'a mut [u8],
+    state_strides: &'a [usize],
 
-    let out_iter = NdIter::builder(tile_out_shape)
-        .with_strides_ptr_ext(items_buf_strides, items_buf)
-        .with_strides_ptr_mut_ext(state_buf_strides, state_buf)
-        .build();
-
-    // The first tile of a bulk seeds each output slot; later tiles of the same
-    // bulk merge their partial fold into it. (Snapshot the flag so mutating
-    // `bulk_initialized` after the fold doesn't clash with the closure's borrow.)
-    // let merge_into_existing = bulk_initialized;
-    // Store one cell's freshly-folded tile state into its slot. `state_ptr` is
-    // this cell's slot in `state_buf`.
-    let store = |cell_state: K::State, state_ptr: *mut MaybeUninit<K::State>| {
-        // SAFETY: `state_ptr` is this cell's slot in `state_buf`.
-        let slot = unsafe { &mut *state_ptr };
-        if merge_into_existing {
-            // CAREFUL: with `state_in_out_buf`, `slot` aliases the output buffer;
-            // read the state out before writing the merged result back into the
-            // same bytes.
-            let prev = unsafe { slot.assume_init_read() };
-            slot.write(kernel.merge_states(prev, cell_state));
-        } else {
-            slot.write(cell_state);
-        }
-    };
-    let out_iter = out_iter.map(|(_out_idx, (src_base, state_ptr))| {
-        // SAFETY: `src_base` points at this cell's contiguous reduced stream
-        // of `reduction_size` items in the permuted (output, reduced) buffer.
-        let src = unsafe { std::slice::from_raw_parts(src_base.cast::<T>(), tile_reduction_size) };
-        let state_ptr = state_ptr.cast::<MaybeUninit<K::State>>();
-        (src, state_ptr)
-    });
-
-    const LANES: usize = 16;
-    if tile_reduction_size >= LANES {
-        for (src, state_ptr) in out_iter {
-            let state = fold_cell::<T, K, LANES>(kernel, src, bulk_base_item_idx);
-            store(state, state_ptr);
-        }
-    } else if tile_reduction_size > 0 {
-        for (src, state_ptr) in out_iter {
-            let state = fold_cell::<T, K, 1>(kernel, src, bulk_base_item_idx);
-            store(state, state_ptr);
-        }
-    }
+    tile_base_reduced_idx: u64,
+    reduced_shape_logical_strides: &'a [usize],
 }
 
-/// Fold one output cell's contiguous reduced stream (`items`, which must hold at least
-/// `LANES` items) into a single accumulator.
-#[inline(always)]
-fn fold_cell<T, K, const LANES: usize>(kernel: &K, items: &[T], base: u64) -> K::State
+fn reduce_tile<T, K>(kernel: &K, args: ReduceTileArgs<'_>)
 where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
-    let n = items.len();
+    let ReduceTileArgs {
+        tile_shape,
+        items,
+        states_buf,
+        state_strides,
+        tile_base_reduced_idx,
+        reduced_shape_logical_strides,
+    } = args;
+
+    let (items_buf, items_strides) = items.data();
+    let iter = NdIterUnordered::<3>::new_with(
+        tile_shape,
+        [items_strides, state_strides, reduced_shape_logical_strides],
+        [
+            (size_of::<T>(), align_of::<T>()),
+            (size_of::<K::State>(), align_of::<K::State>()),
+            (1, 1), // arbitrary
+        ],
+        // reduced_shape_logical_strides are logical strides, not memory strides, ignore them
+        // when choosing an iteration dim order
+        [true, true, false],
+    );
+
+    let inner_len = iter.inner_len();
+    if inner_len == 0 {
+        return; // empty tile
+    }
+    let [_items_inner_stride, state_inner_stride, reduced_inner_stride] = iter.inner_strides();
+    let [items_contiguous, state_contiguous, _] = iter.is_contiguous();
+    let [items_strides_aligned, state_strides_aligned, _] = iter.is_aligned();
+    let items_aligned = items_strides_aligned && items_buf.as_ptr().cast::<T>().is_aligned();
+    // The state buffer is either a fresh pooled allocation made at the state's alignment, or the
+    // caller's output buffer - which `state_in_out_buf` only accepts when it is aligned
+    debug_assert!(state_strides_aligned && states_buf.as_ptr().cast::<K::State>().is_aligned());
+
+    // The inner loop is either over (1) items for a single output cell, or (2) output cells, one
+    // item each.
+    let is_inner_loop_over_items = state_inner_stride == 0;
+
+    let inner_loop_fn = if is_inner_loop_over_items {
+        // The innermost run walks a reduced axis, so all of its items fold into the single state
+        let contiguous = items_contiguous && items_aligned;
+        const LANES: usize = 16;
+        match (inner_len >= LANES, contiguous) {
+            (true, true) => fold_run_into_one_cell_inner_loop::<T, K, LANES, true>,
+            (true, false) => fold_run_into_one_cell_inner_loop::<T, K, LANES, false>,
+            (false, true) => fold_run_into_one_cell_inner_loop::<T, K, 1, true>,
+            (false, false) => fold_run_into_one_cell_inner_loop::<T, K, 1, false>,
+        }
+    } else {
+        // The innermost run walks a non-reduced axis, so we touch inner_len states, one item each
+        debug_assert!(
+            reduced_inner_stride == 0 || inner_len == 1,
+            "a non-reduced innermost axis has no reduced-shape stride",
+        );
+        let contiguous = items_contiguous && items_aligned && state_contiguous;
+        match contiguous {
+            true => fold_run_across_cells_inner_loop::<T, K, true>,
+            false => fold_run_across_cells_inner_loop::<T, K, false>,
+        }
+    };
+
+    iter.foreach_inner_1d(|offsets, inner_len, strides| {
+        let [item_offset, state_offset, base_item_idx] = offsets;
+        let [items_stride, state_stride, idx_stride] = strides;
+
+        let items_buf = unsafe { items_buf.get_unchecked(item_offset..) };
+        let states_buf = unsafe { states_buf.get_unchecked_mut(state_offset..) };
+
+        let base_item_idx = tile_base_reduced_idx + base_item_idx as u64;
+
+        inner_loop_fn(FoldInnerLoopArgs {
+            inner_len,
+            kernel,
+            items: items_buf,
+            states_buf,
+            items_stride,
+            state_stride,
+            idx_stride,
+            base_item_idx,
+        });
+    });
+}
+
+struct FoldInnerLoopArgs<'a, K> {
+    inner_len: usize,
+    kernel: &'a K,
+    items: &'a [u8],
+    states_buf: &'a mut [u8],
+    items_stride: usize,
+    state_stride: usize,
+    idx_stride: usize,
+    base_item_idx: u64,
+}
+
+fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS: bool>(
+    args: FoldInnerLoopArgs<'_, K>,
+) where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    let FoldInnerLoopArgs {
+        inner_len,
+        kernel,
+        items,
+        states_buf,
+        items_stride,
+        state_stride,
+        idx_stride,
+        base_item_idx,
+    } = args;
+
+    debug_assert_eq!(state_stride, 0);
+
+    let read_items_bulk = |offset: usize| -> [T; LANES] {
+        if CONTIGUOUS {
+            unsafe {
+                items
+                    .as_ptr()
+                    .cast::<T>()
+                    .add(offset)
+                    .cast::<[T; LANES]>()
+                    .read()
+            }
+        } else {
+            unsafe {
+                array_from_fn_inline(|b| {
+                    items
+                        .as_ptr()
+                        .add((offset + b) * items_stride)
+                        .cast::<T>()
+                        .read_unaligned()
+                })
+            }
+        }
+    };
+    let item_idx = |i: usize| base_item_idx + (i * idx_stride) as u64;
     let mut i = 0;
 
     // Seed one accumulator per lane from the first LANES items.
-    debug_assert!(n >= LANES);
-    let mut states: [K::State; LANES] = array_from_fn_inline(|b| {
-        let item = unsafe { *items.get_unchecked(b) };
-        kernel.init_state(Some((item, base + b as u64)))
-    });
+    debug_assert!(inner_len >= LANES);
+    let mut states =
+        read_items_bulk(0).map_enumerate(|b, item| kernel.init_state(Some((item, item_idx(b)))));
     i += LANES;
 
-    // Process the main bulk of the stream in LANES-sized chunks.
-    while i + LANES <= n {
-        let items: [T; LANES] = array_from_fn_inline(|b| unsafe { *items.get_unchecked(i + b) });
-        let mut it = states.into_iter();
-        states = array_from_fn_inline(|b| {
-            let state = it.next().unwrap();
-            kernel.update_state(state, items[b], base + (i + b) as u64)
-        });
+    // Process the main bulk of the run in LANES-sized chunks.
+    while i + LANES <= inner_len {
+        let bulk = read_items_bulk(i);
+        states =
+            states.map_enumerate(|b, state| kernel.update_state(state, bulk[b], item_idx(i + b)));
         i += LANES;
     }
 
@@ -672,16 +705,31 @@ where
     let mut state = merge_states::<T, K, LANES>(kernel, states);
 
     // Fold any remaining tail sequentially.
-    while i < n {
-        let item = unsafe { *items.get_unchecked(i) };
-        state = kernel.update_state(state, item, base + i as u64);
+    while i < inner_len {
+        let item = if CONTIGUOUS {
+            unsafe { items.as_ptr().cast::<T>().add(i).read() }
+        } else {
+            unsafe {
+                items
+                    .as_ptr()
+                    .add(i * items_stride)
+                    .cast::<T>()
+                    .read_unaligned()
+            }
+        };
+        state = kernel.update_state(state, item, item_idx(i));
         i += 1;
     }
-    state
-}
 
+    let state_ref = unsafe { &mut *states_buf.as_mut_ptr().cast::<MaybeUninit<K::State>>() };
+    if base_item_idx > 0 {
+        let prev = unsafe { state_ref.assume_init_read() };
+        state = kernel.merge_states(prev, state);
+    }
+    state_ref.write(state);
+}
 /// Collapse `LANES` lane accumulators into one via a bottom-up pairwise tree (dependency
-/// depth `log2(LANES)`). `LANES` must be a power of two (the dispatch only picks 4/8/16).
+/// depth `log2(LANES)`). `LANES` must be a power of two.
 #[inline(always)]
 fn merge_states<T, K, const LANES: usize>(kernel: &K, states: [K::State; LANES]) -> K::State
 where
@@ -703,19 +751,75 @@ where
     unsafe { states[0].assume_init_read() }
 }
 
-struct FinalizeStateArgs<D: Dimension> {
-    out_shape: D::Vec<u64>,
-    state_buf: *mut u8,
-    state_buf_strides: D::Vec<usize>,
-    out_buf: *mut u8,
-    out_buf_strides: D::Vec<usize>,
-    reduction_size_overall: u64,
-    state_initialized: bool,
+/// Inner-loop shape for a non-reduced innermost axis: one item folded into each of the run's cells.
+fn fold_run_across_cells_inner_loop<T, K, const CONTIGUOUS: bool>(args: FoldInnerLoopArgs<'_, K>)
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    let FoldInnerLoopArgs {
+        inner_len: len,
+        kernel,
+        items,
+        states_buf: states,
+        items_stride,
+        state_stride,
+        idx_stride: _,
+        base_item_idx,
+    } = args;
+
+    let read_item = |i: usize| {
+        if CONTIGUOUS {
+            unsafe { items.as_ptr().cast::<T>().add(i).read() }
+        } else {
+            unsafe {
+                items
+                    .as_ptr()
+                    .add(i * items_stride)
+                    .cast::<T>()
+                    .read_unaligned()
+            }
+        }
+    };
+    let mut state_ref = |i: usize| {
+        if CONTIGUOUS {
+            unsafe { &mut *states.as_mut_ptr().cast::<MaybeUninit<K::State>>().add(i) }
+        } else {
+            unsafe {
+                &mut *states
+                    .as_mut_ptr()
+                    .add(i * state_stride)
+                    .cast::<MaybeUninit<K::State>>()
+            }
+        }
+    };
+    if base_item_idx == 0 {
+        for i in 0..len {
+            let item = read_item(i);
+            let state = state_ref(i);
+            state.write(kernel.init_state(Some((item, base_item_idx))));
+        }
+    } else {
+        for i in 0..len {
+            let item = read_item(i);
+            let state = state_ref(i);
+            let prev = unsafe { state.assume_init_read() };
+            state.write(kernel.update_state(prev, item, base_item_idx));
+        }
+    }
 }
-fn finalize_states<T, K, D>(kernel: &K, args: FinalizeStateArgs<D>)
+
+struct FinalizeStateArgs<'a> {
+    out_shape: &'a [usize],
+    state_buf: *mut u8,
+    state_buf_strides: &'a [usize],
+    out_buf: *mut u8,
+    out_buf_strides: &'a [usize],
+    full_reduction_size: u64,
+}
+fn finalize_states<T, K>(kernel: &K, args: FinalizeStateArgs<'_>)
 where
     K: ReductionOpKernel<T>,
-    D: Dimension,
 {
     let FinalizeStateArgs {
         out_shape,
@@ -723,11 +827,10 @@ where
         state_buf_strides,
         out_buf,
         out_buf_strides,
-        reduction_size_overall,
-        state_initialized,
+        full_reduction_size,
     } = args;
 
-    if state_initialized {
+    if full_reduction_size > 0 {
         let state_in_out_buf = core::ptr::eq(state_buf, out_buf);
         if !unsafe { kernel.needs_finalize() } && state_in_out_buf {
             // SAFETY: `needs_finalize() == false` promises `finalize_state` is the identity and that
@@ -737,34 +840,42 @@ where
             return;
         }
 
-        // CAREFUL: state_ptr and out_ptr may alias
-        let out_iter = NdIter::builder(out_shape)
-            .with_strides_ptr_mut_ext(state_buf_strides, state_buf)
-            .with_strides_ptr_mut_ext(out_buf_strides, out_buf)
-            .build();
-        for (_idx, (state, out_ptr)) in out_iter {
-            // CAREFUL: state and out_ptr may alias
-            let res = {
-                let state = state.cast::<MaybeUninit<K::State>>();
-                let state = unsafe { (&*state).assume_init_read() };
-                kernel.finalize_state(state, reduction_size_overall)
-            };
-            unsafe { out_ptr.cast::<K::Output>().write_unaligned(res) };
-        }
+        // CAREFUL: state_buf and out_buf may alias
+        let iter = NdIterUnordered::<2>::new(
+            out_shape,
+            [out_buf_strides, state_buf_strides],
+            [
+                (size_of::<K::Output>(), align_of::<K::Output>()),
+                (size_of::<K::State>(), align_of::<K::State>()),
+            ],
+        );
+        iter.foreach_inner_1d(|offsets, len, inner_strides| {
+            let [out_offset, state_offset] = offsets;
+            let [out_stride, state_stride] = inner_strides;
+            for i in 0..len {
+                let state = unsafe { state_buf.add(state_offset + i * state_stride) };
+                let out = unsafe { out_buf.add(out_offset + i * out_stride) };
+                // CAREFUL: state and out may alias
+                let state = unsafe { state.cast::<K::State>().read_unaligned() };
+                let res = kernel.finalize_state(state, full_reduction_size);
+                unsafe { out.cast::<K::Output>().write_unaligned(res) };
+            }
+        });
     } else {
         // Empty reduction: write the empty-stream result to every output.
-        let out_iter = NdIter::builder(out_shape)
-            .with_strides_ptr_mut_ext(out_buf_strides, out_buf)
-            .build();
-        // debug_assert!( // TODO
-        //     out_nitems == 0 || full_reduction_size == 0,
-        //     "output left unseeded despite a non-empty output and non-empty reduction",
-        // );
-        for (_idx, out_ptr) in out_iter {
-            let state = kernel.init_state(None);
-            let res = kernel.finalize_state(state, 0);
-            unsafe { out_ptr.cast::<K::Output>().write_unaligned(res) };
-        }
+        let iter = NdIterUnordered::<1>::new(
+            out_shape,
+            [out_buf_strides],
+            [(size_of::<K::Output>(), align_of::<K::Output>())],
+        );
+        iter.foreach_inner_1d(|[offset], len, [inner_stride]| {
+            for i in 0..len {
+                let out = unsafe { out_buf.add(offset + i * inner_stride) };
+                let state = kernel.init_state(None);
+                let res = kernel.finalize_state(state, 0);
+                unsafe { out.cast::<K::Output>().write_unaligned(res) };
+            }
+        });
     }
 }
 
@@ -3157,6 +3268,158 @@ pub(crate) mod tests {
         crate::util::assert_array_matches(&zaf.as_ref().argmax(0usize), &array![1u64, 1, 1]);
         // row 0 ties col 0/col 1 at 2.5, row 1 ties col 0/col 1 at 3.0 -> first col (0) wins.
         crate::util::assert_array_matches(&zaf.as_ref().argmax(1usize), &array![0u64, 0]);
+    }
+
+    #[test]
+    fn multi_axis_argmax_reports_the_true_stream_position() {
+        use crate::{Array, DimDyn};
+
+        // `ArgMax` is `single_axis`, so a multi-axis argmax is only reachable by building the
+        // `ReductionOp` directly. Argmax is the one kernel whose result depends on an element's
+        // position in the reduced stream, which makes it the probe for how that position is
+        // computed.
+        //
+        // Two reduced axes and a read window small enough that the reduced extent spans many
+        // tiles, so the stream position has to be carried across them. The maximum sits at
+        // `(1, 0)`, whose row-major position in the reduced stream is `1 * N + 0`.
+        const N: usize = 1 << 12;
+        let mut nd = ndarray::Array2::<i32>::zeros((2, N));
+        nd[[1, 0]] = 1;
+        let mut params = crate::ArrayParams::new();
+        params.read_size((256, 1024));
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+
+        let op = super::ReductionOp::<_, _, DimDyn>::new(
+            za.into_storage(),
+            super::ArgMaxKernel {},
+            [0usize, 1].as_slice(),
+        )
+        .unwrap();
+        let got = Array::from_storage(op).to_ndarray().unwrap();
+        assert_eq!(got[ndarray::IxDyn(&[])], N as u64);
+    }
+
+    #[test]
+    fn reduction_over_plain_with_hand_picked_strides() {
+        use crate::{Array, ArrayParams, DimDyn, Ty};
+
+        // The reduction reads its source in pull mode, and `Plain::read_data` in pull mode hands
+        // back a zero-copy view with exactly the strides it was built with. So a `Plain` array
+        // feeds the in-tile loop a chosen stride pattern directly - one row per shape that loop
+        // can see, including the degenerate and unaligned ones the fast path has to reject.
+        const SHAPE: [usize; 3] = [3, 4, 5];
+        let shape_u64 = SHAPE.iter().map(|&s| s as u64).collect::<Vec<u64>>();
+
+        // Deterministic bytes. Every bit pattern is a valid `i32`, so a read at any offset - even
+        // an unaligned one - is well defined, and both sides read through the same strides, so the
+        // values themselves never matter.
+        let backing = (0..4096u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+            .collect::<Vec<u8>>();
+
+        // (name, byte strides, base byte offset)
+        let rows: &[(&str, [usize; 3], usize)] = &[
+            ("row major", [80, 20, 4], 0),
+            ("reversed, axis 0 innermost", [4, 12, 48], 0),
+            ("permuted, axis 1 innermost", [80, 4, 16], 0),
+            ("zero stride on axis 1", [80, 0, 4], 0),
+            ("zero stride on axis 0", [0, 20, 4], 0),
+            ("gaps on every axis", [320, 80, 8], 0),
+            ("unaligned base", [80, 20, 4], 1),
+            ("unaligned base and strides", [82, 22, 6], 1),
+        ];
+
+        // The default window puts the whole array in one tile; the tiny one forces the reduced
+        // extent across many tiles, so a cell's state is merged rather than only seeded.
+        let windows: &[Option<(u64, u64)>] = &[None, Some((16, 64))];
+
+        for &(name, strides, base) in rows {
+            let val = |idx: [usize; 3]| -> i32 {
+                let off = base + (0..3).map(|d| idx[d] * strides[d]).sum::<usize>();
+                // SAFETY: every row's furthest reachable byte is well inside `backing`.
+                unsafe { backing.as_ptr().add(off).cast::<i32>().read_unaligned() }
+            };
+            // Output index of a full index, dropping the reduced axes.
+            let out_idx = |full: [usize; 3], kept: &[usize]| {
+                ndarray::IxDyn(&kept.iter().map(|&d| full[d]).collect::<Vec<_>>())
+            };
+
+            for &window in windows {
+                let mut params = ArrayParams::new();
+                if let Some(w) = window {
+                    params.read_size(w);
+                }
+                let arr: Array<crate::storage::Plain<_, Ty<i32>, DimDyn>> = unsafe {
+                    // SAFETY: `backing` outlives `arr`, and every index combination stays in bounds.
+                    Array::plain_ndarray_ptr(
+                        backing.as_ptr().add(base),
+                        &shape_u64,
+                        &strides,
+                        <i32 as crate::dtype::Dtyped>::DTYPE,
+                        params,
+                    )
+                }
+                .unwrap();
+
+                for mask in 1u8..8 {
+                    let axes = (0..3)
+                        .filter(|d| mask >> d & 1 == 1)
+                        .collect::<Vec<usize>>();
+                    let kept = (0..3)
+                        .filter(|d| mask >> d & 1 == 0)
+                        .collect::<Vec<usize>>();
+                    let out_shape = kept.iter().map(|&d| SHAPE[d]).collect::<Vec<usize>>();
+                    eprintln!("row={name} window={window:?} axes={axes:?}");
+
+                    let mut exp_sum = ndarray::ArrayD::<i64>::zeros(ndarray::IxDyn(&out_shape));
+                    let mut exp_max =
+                        ndarray::ArrayD::<i32>::from_elem(ndarray::IxDyn(&out_shape), i32::MIN);
+                    for i in 0..SHAPE[0] {
+                        for j in 0..SHAPE[1] {
+                            for k in 0..SHAPE[2] {
+                                let oi = out_idx([i, j, k], &kept);
+                                let v = val([i, j, k]);
+                                exp_sum[oi.clone()] += v as i64;
+                                if v > exp_max[oi.clone()] {
+                                    exp_max[oi] = v;
+                                }
+                            }
+                        }
+                    }
+                    crate::util::assert_array_matches(&arr.as_ref().sum(axes.as_slice()), &exp_sum);
+                    crate::util::assert_array_matches(&arr.as_ref().max(axes.as_slice()), &exp_max);
+                }
+
+                // `argmax` is single-axis, and the only op whose result depends on an element's
+                // position in the reduced stream.
+                for axis in 0..3 {
+                    let kept = (0..3).filter(|&d| d != axis).collect::<Vec<usize>>();
+                    let out_shape = kept.iter().map(|&d| SHAPE[d]).collect::<Vec<usize>>();
+                    eprintln!("row={name} window={window:?} argmax axis={axis}");
+
+                    let dyn_shape = ndarray::IxDyn(&out_shape);
+                    let mut exp = ndarray::ArrayD::<u64>::zeros(dyn_shape.clone());
+                    let mut best = ndarray::ArrayD::<Option<i32>>::from_elem(dyn_shape, None);
+                    for i in 0..SHAPE[0] {
+                        for j in 0..SHAPE[1] {
+                            for k in 0..SHAPE[2] {
+                                // Row-major nesting visits a given output cell with a strictly
+                                // increasing `axis` coordinate, so a strict `>` keeps the first
+                                // maximum - matching the kernel's tie-break.
+                                let full = [i, j, k];
+                                let oi = out_idx(full, &kept);
+                                let v = val(full);
+                                if best[oi.clone()].is_none_or(|b| v > b) {
+                                    best[oi.clone()] = Some(v);
+                                    exp[oi] = full[axis] as u64;
+                                }
+                            }
+                        }
+                    }
+                    crate::util::assert_array_matches(&arr.as_ref().argmax(axis), &exp);
+                }
+            }
+        }
     }
 
     #[test]
