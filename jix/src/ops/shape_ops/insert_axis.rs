@@ -9,7 +9,7 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,
     StridedBuf,
 };
-use crate::util::DimArray;
+use crate::util::{DimArray, DimIdx};
 use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
@@ -83,7 +83,7 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
 /// ```
 pub struct InsertAxis<S: ArrayStorage, D> {
     array: S,
-    original_dims: <S::Dimension as Dimension>::Vec<u8>,
+    original_dims: <S::Dimension as Dimension>::Vec<DimIdx>,
 
     shape: D,
     spec: ArraySpecDynamic,
@@ -102,13 +102,13 @@ where
         let orig_ndim = array.shape().len();
         let new_ndim = orig_ndim + axis.len();
         check_ndim::<D>(new_ndim)?;
-        let mut axes = dim_arr(axis.len(), |i| axis.get(i));
 
         // Each value in `axes` is a gap index in the *input* shape: 0 means "before input dim 0",
         // 1 means "before input dim 1" (i.e. between dims 0 and 1), ..., orig_ndim means "after
         // the last input dim". Duplicates are allowed - each occurrence inserts one additional
         // dim at that gap.
-        for &ax in &axes {
+        for i in 0..axis.len() {
+            let ax = axis.get(i);
             ensure!(
                 ax <= orig_ndim,
                 InvalidShapeOperation,
@@ -116,6 +116,7 @@ where
                      (gap indices must be in 0..={orig_ndim})"
             );
         }
+        let mut axes = dim_arr(axis.len(), |i| axis.get(i) as DimIdx);
         axes.sort_unstable();
 
         let mut is_inserted = dim_arr(orig_ndim, |_| false);
@@ -123,8 +124,8 @@ where
         let orig_spec = array.spec();
         let mut block_shape = orig_spec.block_shape().clone();
         let mut block_shape_fixed_dims = orig_spec.block_shape_fixed_dims();
-        for (inserted_dim_count, dim) in axes.iter().enumerate() {
-            let insert_pos = dim + inserted_dim_count;
+        for (inserted_dim_count, &dim) in axes.iter().enumerate() {
+            let insert_pos = dim as usize + inserted_dim_count;
             is_inserted.insert(insert_pos, true);
             shape.insert(insert_pos, 1);
             block_shape.insert(insert_pos, 1);
@@ -134,7 +135,7 @@ where
         let original_dims = is_inserted
             .iter()
             .enumerate()
-            .filter_map(|(dim, inserted)| (!inserted).then_some(dim as u8))
+            .filter_map(|(dim, inserted)| (!inserted).then_some(dim as DimIdx))
             .collect_dim_vec::<S::Dimension>(array.shape().len());
         let read_shape_scale_order = orig_spec
             .read_shape_scale_order()
@@ -145,7 +146,7 @@ where
                 is_inserted
                     .iter()
                     .enumerate()
-                    .filter_map(|(dim, inserted)| inserted.then_some(dim as u8)),
+                    .filter_map(|(dim, inserted)| inserted.then_some(dim as DimIdx)),
             )
             .collect();
         let spec = ArraySpecDynamic {

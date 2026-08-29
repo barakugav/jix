@@ -1,7 +1,8 @@
 use std::cmp::Ordering;
 
+use crate::dtype::{Alignment, Itemsize};
 use crate::util::iter::NdIter;
-use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, Dimension};
+use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
@@ -47,7 +48,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     pub(crate) fn new(
         shape: &[usize],
         strides: [&[usize]; N_OPERANDS],
-        layouts: [(usize, usize); N_OPERANDS], // (size, alignment) per operand, in its stride unit
+        layouts: [(Itemsize, Alignment); N_OPERANDS], // (size, alignment) per operand, in its stride unit
     ) -> Self {
         Self::new_with(shape, strides, layouts, [true; N_OPERANDS])
     }
@@ -61,7 +62,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     pub(crate) fn new_with(
         shape: &[usize],
         strides: [&[usize]; N_OPERANDS],
-        layouts: [(usize, usize); N_OPERANDS], // (size, alignment) per operand, in its stride unit
+        layouts: [(Itemsize, Alignment); N_OPERANDS], // (size, alignment) per operand, in its stride unit
         affects_dim_order: [bool; N_OPERANDS],
     ) -> Self {
         for s in strides {
@@ -77,14 +78,16 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
                 return Self::empty(layouts); // nothing to iterate
             }
             if len > 1 {
-                dim_perm.push(d);
+                dim_perm.push(d as DimIdx);
             }
         }
         if dim_perm.is_empty() {
             // The whole region is a single element. Treat as 1-d with length 1.
             return Self {
                 shape: DimArray::from_slice(&[1]).unwrap(),
-                strides: array_from_fn_inline(|i| DimArray::from_slice(&[layouts[i].0]).unwrap()),
+                strides: array_from_fn_inline(|i| {
+                    DimArray::from_slice(&[layouts[i].0 as usize]).unwrap()
+                }),
                 is_aligned: [true; N_OPERANDS],
                 is_contiguous: [true; N_OPERANDS],
             };
@@ -92,12 +95,12 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
 
         let (shape, strides) = if dim_perm.len() == 1 {
             // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
-            let d = dim_perm[0];
+            let d = dim_perm[0] as usize;
             let shape = DimArray::from_slice(&[shape[d]]).unwrap();
             let strides = array_from_fn_inline(|i| DimArray::from_slice(&[strides[i][d]]).unwrap());
             (shape, strides)
         } else {
-            axes_sort_by(&mut dim_perm, |d1: usize, d2: usize| {
+            axes_sort_by(&mut dim_perm, |d1, d2| {
                 let mut compared = false;
                 for (op_i, strides) in strides.iter().enumerate() {
                     if !affects_dim_order[op_i] {
@@ -126,32 +129,33 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
             let mut group_inner = DimArray::new(); // input axis of each group's inner axis
             let mut group_len = DimArray::new(); // product of the group's shapes
             for &d in dim_perm.iter() {
+                let d = d as usize;
                 let m = group_inner.len();
                 if m > 0
                     && strides
                         .iter()
-                        .all(|s| s[group_inner[m - 1]] == s[d] * shape[d])
+                        .all(|s| s[group_inner[m - 1] as usize] == s[d] * shape[d])
                 {
-                    group_inner[m - 1] = d; // the group now reaches down to axis `d`
+                    group_inner[m - 1] = d as DimIdx; // the group now reaches down to axis `d`
                     group_len[m - 1] *= shape[d];
                 } else {
-                    group_inner.push(d);
+                    group_inner.push(d as DimIdx);
                     group_len.push(shape[d]);
                 }
             }
             let shape = group_len;
             let strides = array_from_fn_inline::<_, N_OPERANDS>(|i| {
-                dim_arr(group_inner.len(), |g| strides[i][group_inner[g]])
+                dim_arr(group_inner.len(), |g| strides[i][group_inner[g] as usize])
             });
             (shape, strides)
         };
 
         // (3) Compute the innermost-run flags (length, and per-operand alignment / contiguity).
         debug_assert!(!shape.is_empty());
-        let sizes = array_from_fn_inline::<_, N_OPERANDS>(|i| layouts[i].0);
+        let sizes = array_from_fn_inline::<_, N_OPERANDS>(|i| layouts[i].0 as usize);
         let ndim = shape.len();
         let is_aligned = array_from_fn_inline::<_, N_OPERANDS>(|i| {
-            let alignment = layouts[i].1;
+            let alignment = layouts[i].1.as_usize();
             strides[i].iter().all(|s| s.is_multiple_of(alignment))
         });
         let is_contiguous =
@@ -165,12 +169,12 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
         }
     }
 
-    fn empty(layouts: [(usize, usize); N_OPERANDS]) -> Self {
+    fn empty(layouts: [(Itemsize, Alignment); N_OPERANDS]) -> Self {
         let mut shape = DimArray::new();
         shape.push(0);
         let strides = array_from_fn_inline(|op_i| {
             let mut s = DimArray::new();
-            s.push(layouts[op_i].0);
+            s.push(layouts[op_i].0 as usize);
             s
         });
         Self {
@@ -275,13 +279,13 @@ fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, OuterD: Dimension>(
 /// no operand had anything to say about the pair.
 #[inline]
 pub(super) fn axes_sort_by(
-    arr: &mut [usize],
+    arr: &mut [DimIdx],
     mut compare: impl FnMut(usize, usize) -> Option<Ordering>,
 ) {
     for i in 1..arr.len() {
         let mut insertion_idx = i;
         for i1 in (0..i).rev() {
-            match compare(arr[i], arr[i1]) {
+            match compare(arr[i] as usize, arr[i1] as usize) {
                 Some(ord) if ord.is_ge() => break,
                 Some(_) => insertion_idx = i1,
                 None => {} // ambiguous: transparent, keep scanning outward
@@ -302,6 +306,12 @@ mod tests {
     // ---------------------------------------------------------------------------
     // Harness
     // ---------------------------------------------------------------------------
+
+    /// The tests spell a layout as plain `(size, alignment)` integers; the iterator wants the
+    /// narrow types.
+    fn layouts<const N: usize>(raw: [(usize, usize); N]) -> [(Itemsize, Alignment); N] {
+        raw.map(|(size, align)| (size as Itemsize, Alignment::new(align).unwrap()))
+    }
 
     /// The innermost-run flags an [`NdIterUnordered`] reports, captured by value.
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -338,13 +348,14 @@ mod tests {
     fn run_with<const N: usize>(
         shape: &[usize],
         strides: [&[usize]; N],
-        layouts: [(usize, usize); N],
+        layouts_raw: [(usize, usize); N],
         affects_dim_order: [bool; N],
     ) -> Run<N> {
         let mut visited: Vec<[usize; N]> = Vec::new();
         let mut inner_calls = 0usize;
 
-        let iter = NdIterUnordered::new_with(shape, strides, layouts, affects_dim_order);
+        let iter =
+            NdIterUnordered::new_with(shape, strides, layouts(layouts_raw), affects_dim_order);
         let flags = Flags {
             inner_len: iter.inner_len(),
             is_aligned: iter.is_aligned(),
@@ -713,14 +724,14 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// Sort by the axis indices themselves, ascending.
-    fn sorted(mut axes: Vec<usize>) -> Vec<usize> {
+    fn sorted(mut axes: Vec<DimIdx>) -> Vec<DimIdx> {
         axes_sort_by(&mut axes, |a, b| Some(a.cmp(&b)));
         axes
     }
 
     #[test]
     fn axes_sort_by_orders_ascending() {
-        assert_eq!(sorted(vec![]), Vec::<usize>::new());
+        assert_eq!(sorted(vec![]), Vec::<DimIdx>::new());
         assert_eq!(sorted(vec![7]), vec![7]);
         assert_eq!(sorted(vec![1, 2, 3]), vec![1, 2, 3]); // already ordered
         assert_eq!(sorted(vec![3, 2, 1]), vec![1, 2, 3]); // fully reversed
@@ -741,7 +752,7 @@ mod tests {
     fn axes_sort_by_compares_elements_not_positions() {
         // The comparator is handed the *elements* - axis indices - never their positions in `arr`.
         // Every element here is >= 10, so a comparator fed positions would hit the panic.
-        let rank = |axis: usize| match axis {
+        let rank = |axis| match axis {
             10 => 2usize,
             11 => 0,
             12 => 1,
@@ -756,10 +767,10 @@ mod tests {
     fn axes_sort_by_ranks_axes_by_descending_stride() {
         // How both walks use it: rank an axis by its per-operand strides, operand 0 most
         // significant, with the comparison reversed so the largest stride ends up outermost.
-        fn sort_by_strides(strides: &[&[usize]], axes: &mut [usize]) {
+        fn sort_by_strides(strides: &[&[usize]], axes: &mut [DimIdx]) {
             axes_sort_by(axes, |d1, d2| {
                 for s in strides {
-                    match s[d1].cmp(&s[d2]) {
+                    match s[d1 as usize].cmp(&s[d2 as usize]) {
                         Ordering::Less => return Some(Ordering::Greater),
                         Ordering::Equal => {}
                         Ordering::Greater => return Some(Ordering::Less),
@@ -788,7 +799,7 @@ mod tests {
         // Axis 0 is outermost (operand 0's stride is larger), so axis 1 forms the inner run and
         // each operand's inner stride is its own stride on axis 1. Operand 1's strides block the
         // coalesce, so the inner run really is axis 1 and not the whole region.
-        let iter = NdIterUnordered::new(&[2, 3], [&[3, 1], &[1, 2]], [(1, 1); 2]);
+        let iter = NdIterUnordered::new(&[2, 3], [&[3, 1], &[1, 2]], layouts([(1, 1); 2]));
         assert_eq!(iter.inner_strides(), [1, 2]);
         assert_eq!(iter.inner_len(), 3);
     }
@@ -800,7 +811,7 @@ mod tests {
         // decision to operand 1, which puts the larger-stride axis 0 outermost and leaves axis 1 -
         // contiguous for both operands - as the inner run.
         let shape = [4, 5];
-        let iter = NdIterUnordered::new(&shape, [&[0, 8], &[40, 8]], [(8, 8); 2]);
+        let iter = NdIterUnordered::new(&shape, [&[0, 8], &[40, 8]], layouts([(8, 8); 2]));
         assert_eq!(iter.inner_strides(), [8, 8]);
         assert_eq!(iter.is_contiguous(), [true, true]);
         assert_visits(&shape, [&[0, 8], &[40, 8]], [(8, 8); 2]);
@@ -811,12 +822,13 @@ mod tests {
         // Operand 0 ties on both axes, so operand 1 decides - it wants axis 1 outermost, leaving
         // axis 0 (its stride 4) as the inner run.
         let strides: [&[usize]; 2] = [&[8, 8], &[4, 100]];
-        let included = NdIterUnordered::new(&[4, 5], strides, [(4, 4); 2]);
+        let included = NdIterUnordered::new(&[4, 5], strides, layouts([(4, 4); 2]));
         assert_eq!(included.inner_strides(), [8, 4]);
 
         // Excluded from the ordering, operand 1 no longer gets to flip the axes, so the input
         // order stands and axis 1 (its stride 100) becomes the inner run instead.
-        let excluded = NdIterUnordered::new_with(&[4, 5], strides, [(4, 4); 2], [true, false]);
+        let excluded =
+            NdIterUnordered::new_with(&[4, 5], strides, layouts([(4, 4); 2]), [true, false]);
         assert_eq!(excluded.inner_strides(), [8, 100]);
     }
 
@@ -825,8 +837,12 @@ mod tests {
         // Operand 0 alone is fully contiguous and would coalesce both axes into one run of 6.
         // Operand 1 is excluded from the *ordering* but must still constrain the *coalesce*: its
         // stride 5 on axis 0 does not equal 1 * 3, so the axes stay separate.
-        let iter =
-            NdIterUnordered::new_with(&[2, 3], [&[3, 1], &[5, 1]], [(1, 1); 2], [true, false]);
+        let iter = NdIterUnordered::new_with(
+            &[2, 3],
+            [&[3, 1], &[5, 1]],
+            layouts([(1, 1); 2]),
+            [true, false],
+        );
         assert_eq!(iter.inner_len(), 3);
         let run = run_with(&[2, 3], [&[3, 1], &[5, 1]], [(1, 1); 2], [true, false]);
         assert_eq!(run.inner_calls, 2);

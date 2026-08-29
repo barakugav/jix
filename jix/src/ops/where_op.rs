@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use crate::codec::ReadContext;
-use crate::dtype::{Dtype, Dtyped};
+use crate::dtype::{Alignment, Dtype, Dtyped};
 use crate::error::{check_get_range, ensure, Result};
 use crate::storage::params::{combine_block_layout, combine_elementwise_hints, ArraySpecDynamic};
 use crate::storage::{
@@ -176,7 +176,11 @@ where
         let iter = NdIterUnordered::new(
             out_shape.as_ref(),
             [out_strides, condition_strides, y_strides],
-            [(itemsize, alignment), (1, 1), (itemsize, alignment)],
+            [
+                (dtype.itemsize(), dtype.alignment()),
+                (1, Alignment::of::<bool>()),
+                (dtype.itemsize(), dtype.alignment()),
+            ],
         );
         let [x_aligned, _cond_aligned, y_aligned] = iter.is_aligned();
         let aligned = x_aligned

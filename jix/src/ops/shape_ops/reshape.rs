@@ -9,7 +9,7 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
 use crate::util::iter::NdIter;
-use crate::util::{DimArray, IterExt};
+use crate::util::{DimArray, DimIdx, IterExt};
 use crate::{
     default_logical_strides, default_strides_from_iter, ArrayStorage, Dimension, IntoDimension,
 };
@@ -106,7 +106,7 @@ impl<S, D> Reshape<S, D> {
                         break None; // cant really happen, last dims always match, unless orig_shape.len()==0
                     }
                     if orig_logical_strides[*orig_dim_idx] == new_logical_strides[new_dim_idx] {
-                        break Some(*orig_dim_idx as u8);
+                        break Some(*orig_dim_idx as DimIdx);
                     }
                     *orig_dim_idx += 1;
                 })
@@ -146,15 +146,15 @@ impl<S, D> Reshape<S, D> {
         // by output index, so this is always a full permutation even when several output dims - e.g.
         // size-1 dims - share one source).
         let mut in_rank = (0..orig_shape.len())
-            .map(|_| u8::MAX)
-            .collect::<DimArray<u8>>();
+            .map(|_| DimIdx::MAX)
+            .collect::<DimArray<_>>();
         for (pos, &d) in inner_spec.read_shape_scale_order().iter().enumerate() {
-            in_rank[d as usize] = pos as u8;
+            in_rank[d as usize] = pos as DimIdx;
         }
-        let mut read_shape_scale_order = (0..new_shape.len() as u8).collect::<DimArray<u8>>();
+        let mut read_shape_scale_order = (0..new_shape.len() as DimIdx).collect::<DimArray<_>>();
         read_shape_scale_order.sort_by_key(|&d| match same_logical_stride[d as usize] {
             Some(orig) => (in_rank[orig as usize], d),
-            None => (u8::MAX, d),
+            None => (DimIdx::MAX, d),
         });
         let spec = ArraySpecDynamic {
             block_shape,
@@ -318,7 +318,7 @@ where
                         && orig_shape[*orig_dim_idx] >= new_shape[new_dim_idx]
                     // TODO: its possible to remove the dim length conditions
                     {
-                        let matched = *orig_dim_idx as u8;
+                        let matched = *orig_dim_idx as DimIdx;
                         *orig_dim_idx += 1;
                         break Some(matched);
                     }
@@ -330,7 +330,7 @@ where
             let mut inv = S::Dimension::vec(orig_ndim, |_| None);
             for (new_dim, &orig_dim) in same_logical_stride.iter().enumerate() {
                 if let Some(orig_dim) = orig_dim {
-                    inv[orig_dim as usize] = Some(new_dim as u8);
+                    inv[orig_dim as usize] = Some(new_dim as DimIdx);
                 }
             }
             inv

@@ -11,7 +11,7 @@ use crate::storage::{
 };
 use crate::util::iter::NdIter;
 use crate::util::SliceExt;
-use crate::util::{calc_block_end, scale_read_shape, DimArray, USE_NEW_READ_SCALING};
+use crate::util::{calc_block_end, scale_read_shape, DimArray, DimIdx, USE_NEW_READ_SCALING};
 use crate::{
     array_from_fn_inline, default_strides, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
     NdIterUnordered, Ty,
@@ -130,7 +130,7 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             .map(|dim| array.shape()[dim])
             .product::<u64>();
         let element_cost = (spec.element_cost() as f64 * (reduced_prod + 4) as f64) as f32;
-        let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as u8;
+        let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as DimIdx;
         let read_shape_scale_order = spec
             .read_shape_scale_order()
             .iter()
@@ -562,9 +562,12 @@ where
         tile_shape,
         [items_strides, state_strides, reduced_shape_logical_strides],
         [
-            (size_of::<T>(), align_of::<T>()),
-            (size_of::<K::State>(), align_of::<K::State>()),
-            (1, 1), // arbitrary
+            (size_of::<T>() as Itemsize, Alignment::of::<T>()),
+            (
+                size_of::<K::State>() as Itemsize,
+                Alignment::of::<K::State>(),
+            ),
+            (1, Alignment::of::<u8>()), // arbitrary
         ],
         // reduced_shape_logical_strides are logical strides, not memory strides, ignore them
         // when choosing an iteration dim order
@@ -845,8 +848,14 @@ where
             out_shape,
             [out_buf_strides, state_buf_strides],
             [
-                (size_of::<K::Output>(), align_of::<K::Output>()),
-                (size_of::<K::State>(), align_of::<K::State>()),
+                (
+                    size_of::<K::Output>() as Itemsize,
+                    Alignment::of::<K::Output>(),
+                ),
+                (
+                    size_of::<K::State>() as Itemsize,
+                    Alignment::of::<K::State>(),
+                ),
             ],
         );
         iter.foreach_inner_1d(|offsets, len, inner_strides| {
@@ -866,7 +875,10 @@ where
         let iter = NdIterUnordered::<1>::new(
             out_shape,
             [out_buf_strides],
-            [(size_of::<K::Output>(), align_of::<K::Output>())],
+            [(
+                size_of::<K::Output>() as Itemsize,
+                Alignment::of::<K::Output>(),
+            )],
         );
         iter.foreach_inner_1d(|[offset], len, [inner_stride]| {
             for i in 0..len {

@@ -1,7 +1,7 @@
 use std::ptr;
 
 use crate::arrayvec::ArrayVec;
-use crate::dtype::{Dtype, Itemsize};
+use crate::dtype::{Alignment, Dtype, Itemsize};
 use crate::{NdIterUnordered, PtrExt, PtrMutExt};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
@@ -165,7 +165,7 @@ impl<'a> NdCopier<'a> {
         let iter = NdIterUnordered::new(
             shape,
             [dst_strides, src_strides],
-            [(size_of::<T>(), align_of::<T>()); 2],
+            [(size_of::<T>() as Itemsize, Alignment::of::<T>()); 2],
         );
         // The iterator's aligned flags only cover the strides; AND-in the base pointers so the
         // aligned `read`/`write` path runs only when the data really is.
@@ -364,7 +364,11 @@ impl<'a> NdCopier<'a> {
 
         // Byte-wise fallback: each element is `itemsize` opaque bytes copied via `copy_nonoverlapping`
         // (always the unaligned `u8` path). Operand 0 is the destination, operand 1 the source.
-        let iter = NdIterUnordered::new(shape, [dst_strides, src_strides], [(itemsize, 1); 2]);
+        let iter = NdIterUnordered::new(
+            shape,
+            [dst_strides, src_strides],
+            [(dtype.itemsize(), Alignment::of::<u8>()); 2],
+        );
         let [dst_contiguous, src_contiguous] = iter.is_contiguous();
         let inner_loop_fn = match dst_contiguous && src_contiguous {
             true => Self::inner_loop_untyped::<true>,

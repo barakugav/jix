@@ -11,7 +11,7 @@ use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::{
-    array_from_fn_inline, dim_arr, ArrayExt, DimArray, DimDyn, NdCopier, NdIterUnordered,
+    array_from_fn_inline, dim_arr, ArrayExt, DimArray, DimDyn, DimIdx, NdCopier, NdIterUnordered,
     NdIterUnorderedDyn, SliceExt,
 };
 
@@ -137,7 +137,7 @@ where
     };
     let layouts = operands.map_inline_ref(|operand| {
         let dtype = operand.dtype;
-        (dtype.itemsize() as usize, dtype.alignment().as_usize())
+        (dtype.itemsize(), dtype.alignment())
     });
     let strides = operands.map_inline_ref(|operand| operand.strides());
 
@@ -146,10 +146,13 @@ where
 
     let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
         let operand = operands[i];
-        let aligned =
-            iter.is_aligned()[i] && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1);
+        let aligned = iter.is_aligned()[i]
+            && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize());
         (!aligned).then(|| Staging {
-            buf: context.allocate_buf(chunk_len_max * layouts[i].0, operand.dtype.alignment()),
+            buf: context.allocate_buf(
+                chunk_len_max * layouts[i].0 as usize,
+                operand.dtype.alignment(),
+            ),
             copier: NdCopier::new(operand.dtype),
         })
     });
@@ -190,8 +193,10 @@ where
                                 )
                             };
                         }
-                        operand
-                            .set_cursor(staging.buf.as_mut_slice().as_mut_ptr(), layouts[op_i].0);
+                        operand.set_cursor(
+                            staging.buf.as_mut_slice().as_mut_ptr(),
+                            layouts[op_i].0 as usize,
+                        );
                     }
                 }
             }
@@ -237,7 +242,7 @@ where
         .iter()
         .map(|operand| {
             let dtype = operand.dtype;
-            (dtype.itemsize() as usize, dtype.alignment().as_usize())
+            (dtype.itemsize(), dtype.alignment())
         })
         .collect::<Vec<_>>();
     let strides = operands
@@ -252,10 +257,13 @@ where
         .iter()
         .enumerate()
         .map(|(i, operand)| {
-            let aligned =
-                iter.is_aligned()[i] && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1);
+            let aligned = iter.is_aligned()[i]
+                && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize());
             (!aligned).then(|| Staging {
-                buf: context.allocate_buf(chunk_len_max * layouts[i].0, operand.dtype.alignment()),
+                buf: context.allocate_buf(
+                    chunk_len_max * layouts[i].0 as usize,
+                    operand.dtype.alignment(),
+                ),
                 copier: NdCopier::new(operand.dtype),
             })
         })
@@ -297,8 +305,10 @@ where
                                 )
                             };
                         }
-                        operand
-                            .set_cursor(staging.buf.as_mut_slice().as_mut_ptr(), layouts[op_i].0);
+                        operand.set_cursor(
+                            staging.buf.as_mut_slice().as_mut_ptr(),
+                            layouts[op_i].0 as usize,
+                        );
                     }
                 }
             }
@@ -588,18 +598,19 @@ fn pick_output_layout<'s>(
         operands: impl Iterator<Item = &'s Operand<'s>>,
         shape: &[usize],
         itemsize: usize,
-    ) -> Option<DimArray<usize>> {
+    ) -> Option<DimArray<DimIdx>> {
         let ndim = shape.len();
         if ndim <= 1 || shape.iter().product::<usize>() * itemsize <= 4096 {
             return None;
         }
 
-        let mut axis_order: Option<DimArray<usize>> = None;
+        let mut axis_order = None;
         for operand in operands {
             let strides = operand.strides();
             debug_assert_eq!(strides.len(), ndim);
-            let mut operand_order = dim_arr(ndim, |d| d);
+            let mut operand_order = dim_arr(ndim, |d| d as DimIdx);
             operand_order.sort_by_key(|&d| {
+                let d = d as usize;
                 let ignore_axis = shape[d] <= 1 || strides[d] == 0;
                 Reverse(if ignore_axis { usize::MAX } else { strides[d] })
             });
@@ -618,6 +629,7 @@ fn pick_output_layout<'s>(
             let mut strides = dim_arr(shape.len(), |_| itemsize);
             let mut stride = itemsize;
             for &d in axis_order.iter().rev() {
+                let d = d as usize;
                 strides[d] = stride;
                 stride *= shape[d];
             }

@@ -5,7 +5,7 @@ use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_shape_overflow, ensure, Result};
 use crate::storage::params::{combine_block_layout, combine_select_hints, ArraySpecDynamic};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
-use crate::util::{default_strides, ArraySequence, DimArray};
+use crate::util::{default_strides, ArraySequence, DimArray, DimIdx};
 use crate::{Array, ArraySequenceDimension, ArraySequenceElementType, ArrayStorage, Dimension};
 
 /// Joins a sequence of arrays along an existing axis. See [`Concatenate`] for details and examples.
@@ -65,7 +65,7 @@ where
     ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     arrays: ArraysT,
-    concat_axis: usize,
+    concat_axis: DimIdx,
     borders: Vec<u64>,
 
     shape: ArraysT::Dimension,
@@ -152,7 +152,7 @@ where
         Ok(Self {
             shape,
             arrays,
-            concat_axis: axis,
+            concat_axis: axis as DimIdx,
             borders,
             spec,
         })
@@ -206,16 +206,17 @@ where
 
         // When the destination is contiguous and all dims before concat_axis have size <=1, each
         // array's data is a contiguous run in the destination.
+        let concat_axis = self.concat_axis as usize;
         let inner_contiguous = out.is_contiguous(output_shape.as_ref(), dtype)
             && output_shape
                 .as_ref()
                 .iter()
-                .take(self.concat_axis)
+                .take(concat_axis)
                 .all(|&s| s <= 1);
         let (out_buf, output_strides) = out.data_mut();
-        let concat_stride = output_strides[self.concat_axis];
-        let req_start = index[self.concat_axis].start;
-        let req_end = index[self.concat_axis].end;
+        let concat_stride = output_strides[concat_axis];
+        let req_start = index[concat_axis].start;
+        let req_end = index[concat_axis].end;
 
         // Find the first sub-array whose end exceeds req_start (the first that may overlap).
         const BINARY_SEARCH_THRESHOLD: usize = 32;
@@ -243,7 +244,7 @@ where
 
             // Sub-index into array `arr`: same as `index` but concat axis uses local coords.
             let sub_index = Self::Dimension::vec(index.len(), |dim| {
-                if dim == self.concat_axis {
+                if dim == concat_axis {
                     local_start..local_end
                 } else {
                     index[dim].clone()

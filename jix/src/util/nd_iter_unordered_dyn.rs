@@ -1,6 +1,7 @@
+use crate::dtype::{Alignment, Itemsize};
 use crate::util::axes_sort_by;
 use crate::util::iter::NdIter;
-use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension};
+use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// [`NdIterUnordered`](crate::NdIterUnordered) with the operand count known only at runtime.
 ///
@@ -23,7 +24,7 @@ impl NdIterUnorderedDyn {
     pub(crate) fn new(
         shape: &[usize],
         strides: &[&[usize]],
-        layouts: &[(usize, usize)], // (size, alignment) per operand, in its stride unit
+        layouts: &[(Itemsize, Alignment)], // (size, alignment) per operand, in its stride unit
     ) -> Self {
         assert_eq!(strides.len(), layouts.len());
         for s in strides {
@@ -39,7 +40,7 @@ impl NdIterUnorderedDyn {
                 return Self::empty(layouts); // nothing to iterate
             }
             if len > 1 {
-                dim_perm.push(d);
+                dim_perm.push(d as DimIdx);
             }
         }
         if dim_perm.is_empty() {
@@ -48,7 +49,7 @@ impl NdIterUnorderedDyn {
                 shape: DimArray::from_slice(&[1]).unwrap(),
                 strides: layouts
                     .iter()
-                    .map(|&(size, _)| DimArray::from_slice(&[size]).unwrap())
+                    .map(|&(size, _)| DimArray::from_slice(&[size as usize]).unwrap())
                     .collect(),
                 is_aligned: vec![true; strides.len()],
                 is_contiguous: vec![true; strides.len()],
@@ -56,7 +57,7 @@ impl NdIterUnorderedDyn {
         }
         let (shape, strides) = if dim_perm.len() == 1 {
             // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
-            let d = dim_perm[0];
+            let d = dim_perm[0] as usize;
             let shape = DimArray::from_slice(&[shape[d]]).unwrap();
             let strides = strides
                 .iter()
@@ -64,7 +65,7 @@ impl NdIterUnorderedDyn {
                 .collect::<Vec<_>>();
             (shape, strides)
         } else {
-            axes_sort_by(&mut dim_perm, |d1: usize, d2: usize| {
+            axes_sort_by(&mut dim_perm, |d1, d2| {
                 let mut compared = false;
                 for strides in strides.iter() {
                     // A zero stride means this operand does not move along the axis at all, so it
@@ -90,23 +91,24 @@ impl NdIterUnorderedDyn {
             let mut group_inner = DimArray::new(); // input axis of each group's inner axis
             let mut group_len = DimArray::new(); // product of the group's shapes
             for &d in dim_perm.iter() {
+                let d = d as usize;
                 let m = group_inner.len();
                 if m > 0
                     && strides
                         .iter()
-                        .all(|s| s[group_inner[m - 1]] == s[d] * shape[d])
+                        .all(|s| s[group_inner[m - 1] as usize] == s[d] * shape[d])
                 {
-                    group_inner[m - 1] = d; // the group now reaches down to axis `d`
+                    group_inner[m - 1] = d as DimIdx; // the group now reaches down to axis `d`
                     group_len[m - 1] *= shape[d];
                 } else {
-                    group_inner.push(d);
+                    group_inner.push(d as DimIdx);
                     group_len.push(shape[d]);
                 }
             }
             let shape = group_len;
             let strides = strides
                 .iter()
-                .map(|s| dim_arr(group_inner.len(), |g| s[group_inner[g]]))
+                .map(|s| dim_arr(group_inner.len(), |g| s[group_inner[g] as usize]))
                 .collect::<Vec<_>>();
             (shape, strides)
         };
@@ -117,12 +119,12 @@ impl NdIterUnorderedDyn {
         let is_aligned = strides
             .iter()
             .zip(layouts)
-            .map(|(s, &(_, alignment))| s.iter().all(|s| s.is_multiple_of(alignment)))
+            .map(|(s, &(_, alignment))| s.iter().all(|s| s.is_multiple_of(alignment.as_usize())))
             .collect();
         let is_contiguous = strides
             .iter()
             .zip(layouts)
-            .map(|(s, &(size, _))| s[ndim - 1] == size)
+            .map(|(s, &(size, _))| s[ndim - 1] == size as usize)
             .collect();
 
         Self {
@@ -133,14 +135,14 @@ impl NdIterUnorderedDyn {
         }
     }
 
-    fn empty(layouts: &[(usize, usize)]) -> Self {
+    fn empty(layouts: &[(Itemsize, Alignment)]) -> Self {
         let mut shape = DimArray::new();
         shape.push(0);
         let strides = layouts
             .iter()
             .map(|&(size, _)| {
                 let mut s = DimArray::new();
-                s.push(size);
+                s.push(size as usize);
                 s
             })
             .collect::<Vec<_>>();
@@ -224,12 +226,10 @@ fn nd_iter_unordered_nd_walk<OuterD: Dimension>(
             .iter()
             .map(|s| OuterD::vec(ndim - 1, |k| s[k]))
             .collect::<Vec<_>>();
-        let mut iter = NdIter::builder(outer_shape)
+        NdIter::builder(outer_shape)
             .with_strides_offset_multi_dyn_ext(outer_strides, offsets)
-            .build();
-        while let Some((_, offsets)) = iter.advance_and_get() {
-            inner_loop(offsets, inner_len, &inner_strides);
-        }
+            .build()
+            .for_each(|_, offsets| inner_loop(offsets, inner_len, &inner_strides));
     }
 }
 
@@ -274,7 +274,11 @@ mod tests {
     }
 
     fn walk_dyn(shape: &[usize], strides: &[&[usize]], layouts: &[(usize, usize)]) -> Walk {
-        let iter = NdIterUnorderedDyn::new(shape, strides, layouts);
+        let layouts = layouts
+            .iter()
+            .map(|&(size, align)| (size as Itemsize, Alignment::new(align).unwrap()))
+            .collect::<Vec<_>>();
+        let iter = NdIterUnorderedDyn::new(shape, strides, &layouts);
         let (mut visited, mut inner_calls) = (Vec::new(), 0usize);
         iter.foreach_inner_1d(|offsets, len, inner_strides| {
             inner_calls += 1;
@@ -294,6 +298,8 @@ mod tests {
         strides: [&[usize]; N],
         layouts: [(usize, usize); N],
     ) -> Walk {
+        let layouts =
+            layouts.map(|(size, align)| (size as Itemsize, Alignment::new(align).unwrap()));
         let iter = NdIterUnordered::new(shape, strides, layouts);
         let (mut visited, mut inner_calls) = (Vec::new(), 0usize);
         iter.foreach_inner_1d(

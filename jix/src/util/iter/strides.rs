@@ -31,11 +31,11 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffset<D, S> {
         Self: 'a;
 
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+    fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
         self.offset += S::from_u64(diff) * self.strides[dim];
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+    fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
         self.offset -= S::from_u64(diff) * self.strides[dim];
     }
 
@@ -79,14 +79,14 @@ impl<D: Dimension, S: Idx, const N: usize> NdIterExtension
         Self: 'a;
 
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+    fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
         let diff = S::from_u64(diff);
         for i in 0..N {
             self.offsets[i] += diff * self.strides[i][dim];
         }
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+    fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
         let diff = S::from_u64(diff);
         for i in 0..N {
             self.offsets[i] -= diff * self.strides[i][dim];
@@ -130,14 +130,14 @@ impl<D: Dimension, S: Idx> NdIterExtension for NdIterExtStridesOffsetMultiDyn<D,
         Self: 'a;
 
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+    fn on_increase(&mut self, dim: usize, _after: u64, diff: u64) {
         let diff = S::from_u64(diff);
         for (offset, strides) in self.offsets.iter_mut().zip(self.strides.iter()) {
             *offset += diff * strides[dim];
         }
     }
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, _before: u64, _after: u64, diff: u64) {
+    fn on_decrease(&mut self, dim: usize, _after: u64, diff: u64) {
         let diff = S::from_u64(diff);
         for (offset, strides) in self.offsets.iter_mut().zip(self.strides.iter()) {
             *offset -= diff * strides[dim];

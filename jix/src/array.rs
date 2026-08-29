@@ -1494,7 +1494,7 @@ impl<S: ArrayStorage> Array<S> {
     pub fn from_storage(storage: S) -> Self {
         #[cfg(debug_assertions)]
         {
-            use crate::NDIM_MAX;
+            use crate::{DimIdx, NDIM_MAX};
 
             let shape = storage.shape();
             let ndim = shape.len();
@@ -1514,7 +1514,7 @@ impl<S: ArrayStorage> Array<S> {
             debug_assert!(spec.read_size().min <= spec.read_size().max);
             debug_assert!(
                 spec.read_shape_scale_order().len() == ndim
-                    && (0..ndim).all(|d| spec.read_shape_scale_order().contains(&(d as u8)))
+                    && (0..ndim).all(|d| spec.read_shape_scale_order().contains(&(d as DimIdx)))
             );
             debug_assert!(spec.element_cost().is_finite() && spec.element_cost() >= 0.0);
         }

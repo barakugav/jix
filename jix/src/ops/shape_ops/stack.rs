@@ -7,6 +7,7 @@ use crate::storage::params::{combine_block_layout, combine_select_hints, ArraySp
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::{
     default_strides, ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray,
+    DimIdx,
 };
 use crate::{Array, ArrayStorage, Dimension, IterExt};
 
@@ -61,7 +62,7 @@ where
     ArraysT: ArraySequence + ArraySequenceElementType + ArraySequenceDimension,
 {
     arrays: ArraysT,
-    stack_axis: usize,
+    stack_axis: DimIdx,
 
     shape: <ArraysT::Dimension as crate::Dimension>::Larger,
     spec: ArraySpecDynamic,
@@ -132,7 +133,7 @@ where
         let read_shape_scale_order = shared_order
             .iter()
             .map(|&d| if d as usize >= axis { d + 1 } else { d })
-            .chain(std::iter::once(axis as u8))
+            .chain(std::iter::once(axis as DimIdx))
             .collect::<DimArray<_>>();
         let spec = ArraySpecDynamic {
             block_shape,
@@ -145,7 +146,7 @@ where
             shape: new_shape,
             spec,
             arrays,
-            stack_axis: axis,
+            stack_axis: axis as DimIdx,
         })
     }
 
@@ -178,10 +179,11 @@ where
             return Ok(out);
         }
 
+        let stack_axis = self.stack_axis as usize;
         let arr_ndim = shape.len() - 1;
-        let arr_range = index[..self.stack_axis]
+        let arr_range = index[..stack_axis]
             .iter()
-            .chain(index[self.stack_axis + 1..].iter())
+            .chain(index[stack_axis + 1..].iter())
             .cloned()
             .collect_dim_vec::<ArraysT::Dimension>(arr_ndim);
         let arr_range_shape = ArraysT::Dimension::vec(arr_ndim, |dim| {
@@ -189,19 +191,19 @@ where
         });
         let itemsize = dtype.itemsize() as usize;
         let arr_size_bytes = arr_range_shape.as_ref().iter().product::<usize>() * itemsize;
-        let n_stack = (index[self.stack_axis].end - index[self.stack_axis].start) as usize;
+        let n_stack = (index[stack_axis].end - index[stack_axis].start) as usize;
 
         // In-place fast path (each sub-array a contiguous chunk) is valid only when the destination
         // is contiguous and all dims before stack_axis have size <=1; else scatter.
         let in_place = out.is_contiguous(output_shape.as_ref(), dtype)
-            && shape.iter().take(self.stack_axis).all(|&s| s <= 1);
+            && shape.iter().take(stack_axis).all(|&s| s <= 1);
         let (out_buf, out_strides) = out.data_mut();
         // Stride of the stack axis in the output (offset between consecutive sub-arrays).
-        let stack_axis_stride = out_strides[self.stack_axis];
+        let stack_axis_stride = out_strides[stack_axis];
         // Per-sub-array strides = the output strides with the stack axis removed.
         let out_of_place_strides = in_place.not().then(|| {
             ArraysT::Dimension::vec(arr_ndim, |dim| {
-                if dim < self.stack_axis {
+                if dim < stack_axis {
                     out_strides[dim]
                 } else {
                     out_strides[dim + 1]
@@ -211,7 +213,7 @@ where
 
         for arr_idx in 0..n_stack {
             let buf_offset = arr_idx * stack_axis_stride;
-            let arr = index[self.stack_axis].start as usize + arr_idx;
+            let arr = index[stack_axis].start as usize + arr_idx;
             let mut sub = if in_place {
                 let sub_c = default_strides(&arr_range_shape, itemsize);
                 // SAFETY: contiguous destination; array `arr` packs into this contiguous chunk.

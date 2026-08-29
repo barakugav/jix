@@ -8,7 +8,7 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
 use crate::util::calc_block_end;
-use crate::{Array, ArrayStorage, DimArray, Dimension, NdCopier, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimArray, DimIdx, Dimension, NdCopier, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
@@ -36,7 +36,7 @@ use crate::{Array, ArrayStorage, DimArray, Dimension, NdCopier, NDIM_MAX};
 /// ```
 pub struct Repeat<S: ArrayStorage> {
     array: S,
-    axis: usize,
+    axis: DimIdx,
     repeats: u64,
     new_shape: S::Dimension,
     spec: ArraySpecDynamic,
@@ -86,7 +86,7 @@ impl<S: ArrayStorage> Repeat<S> {
         // with one read avoids that, so give `axis` the highest scaling priority (front of order),
         // keeping the inner relative order among the rest.
         let in_order = inner_spec.read_shape_scale_order();
-        let read_shape_scale_order = std::iter::once(axis as u8)
+        let read_shape_scale_order = std::iter::once(axis as DimIdx)
             .chain(in_order.iter().copied().filter(|&d| d as usize != axis))
             .collect::<DimArray<_>>();
         let spec = ArraySpecDynamic {
@@ -98,7 +98,7 @@ impl<S: ArrayStorage> Repeat<S> {
 
         Ok(Self {
             array,
-            axis,
+            axis: axis as DimIdx,
             repeats,
             new_shape,
             spec,
@@ -133,7 +133,7 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
             return Ok(materialize_out_buf(out, context, out_shape.as_ref(), dtype));
         }
 
-        let k = self.axis;
+        let k = self.axis as usize;
         let n = self.repeats; // n > 0
         let s = index[k].start;
         let e = index[k].end;

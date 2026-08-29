@@ -97,7 +97,7 @@ where
     where
         Self: 'a;
     #[inline(always)]
-    fn on_increase(&mut self, dim: usize, _before: u64, after: u64, _diff: u64) {
+    fn on_increase(&mut self, dim: usize, after: u64, _diff: u64) {
         let (low, high) = &self.borders[dim];
         let (offset, size) = if after != high.index {
             debug_assert_ne!(after, low.index);
@@ -110,7 +110,7 @@ where
     }
 
     #[inline(always)]
-    fn on_decrease(&mut self, dim: usize, _before: u64, after: u64, _diff: u64) {
+    fn on_decrease(&mut self, dim: usize, after: u64, _diff: u64) {
         let (low, high) = &self.borders[dim];
         let (offset, size) = if after != low.index {
             debug_assert_ne!(after, high.index);

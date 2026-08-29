@@ -28,7 +28,7 @@ pub(crate) use bitmap::*;
 
 use std::mem::MaybeUninit;
 
-pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray};
+pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray, DimIdx};
 use crate::{DimVec, Dimension};
 
 pub(crate) trait Idx:
