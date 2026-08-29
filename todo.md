@@ -10,7 +10,6 @@
 - add likely/unlikely branch hints
 - add read benchmark of the whole array, also for low entropy data
 - benchmark LANES of {32/64/128/256} / itemsize on x86
-- simplify NdIter state
 - fast path for 0-stride operands in ElementwisePipeline
 - replace array_from_fn_inline with map_enumerate
 - arrays_map, arrays_map_enumerate

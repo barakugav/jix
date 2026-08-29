@@ -226,12 +226,10 @@ fn nd_iter_unordered_nd_walk<OuterD: Dimension>(
             .iter()
             .map(|s| OuterD::vec(ndim - 1, |k| s[k]))
             .collect::<Vec<_>>();
-        let mut iter = NdIter::builder(outer_shape)
+        NdIter::builder(outer_shape)
             .with_strides_offset_multi_dyn_ext(outer_strides, offsets)
-            .build();
-        while let Some((_, offsets)) = iter.advance_and_get() {
-            inner_loop(offsets, inner_len, &inner_strides);
-        }
+            .build()
+            .for_each(|_, offsets| inner_loop(offsets, inner_len, &inner_strides));
     }
 }
 
