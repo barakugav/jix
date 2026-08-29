@@ -45,9 +45,12 @@ def load_rust_records(criterion_dir: Path) -> list[BenchRecord]:
     root = Path(criterion_dir)
     records = []
     for est_path in sorted(root.glob("**/new/estimates.json")):
-        bench_dir = est_path.parent.parent  # <group>/<bench>/new/estimates.json -> <group>/<bench>
-        group = bench_dir.parent.name
-        bench = bench_dir.name
+        # criterion nests <group>/[<function>/]<value>/new/estimates.json - 2 OR 3 levels deep.
+        # Key on the full path from the criterion root (minus /new) so 3-level benches (e.g. the
+        # sum groups: <size>/<dtype>/<axis>) do not collapse onto the same (group, bench).
+        rel = est_path.parent.parent.relative_to(root)
+        group = rel.parts[0] if len(rel.parts) > 1 else ""
+        bench = "/".join(rel.parts[1:]) if len(rel.parts) > 1 else rel.parts[0]
         est = json.loads(est_path.read_text())
         mean = est["mean"]["point_estimate"] / 1e9
         median = est["median"]["point_estimate"] / 1e9
@@ -103,10 +106,14 @@ def load_platform_records(result_dir: Path) -> tuple[dict, Records]:
     crit = result_dir / "rust" / "criterion"
     if crit.exists():
         for r in load_rust_records(crit):
+            if r.key in records:
+                raise ValueError(f"duplicate bench key {r.key} while loading {crit}")
             records[r.key] = r
     pj = result_dir / "python" / "python.json"
     if pj.exists():
         for r in load_python_records(pj):
+            if r.key in records:
+                raise ValueError(f"duplicate bench key {r.key} while loading {pj}")
             records[r.key] = r
     return meta, records
 
@@ -120,6 +127,8 @@ def load_run(run_dir: Path) -> Run:
     for adir in find_artifact_dirs(run_dir):
         meta, records = load_platform_records(adir)
         plat = f"{meta['platform']['os']}-{meta['platform']['arch']}"
+        if plat in out:
+            raise ValueError(f"duplicate platform {plat} in {run_dir} (result dir {adir}); point at a single sha dir")
         out[plat] = (meta, records, adir)
     return out
 
