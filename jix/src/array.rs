@@ -464,17 +464,20 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
 
                 // TODO: nd_iter_unordered
                 let iter = NdIter::builder(read_shape)
-                    .with_strides_ptr_mut_ext(out_strides.to_dim_vec::<D>(), out_buf.as_mut_ptr())
-                    .build();
-                if dst_aligned {
-                    for (idx, dst) in iter {
+                    .with_strides_offset_ext(out_strides.to_dim_vec::<D>(), 0)
+                    .build()
+                    .map(|(idx, dst_offset)| {
                         let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
-                        unsafe { dst.cast::<T>().write(value) };
+                        let dst = unsafe { out_buf.get_unchecked_mut(dst_offset..).as_mut_ptr() };
+                        (value, dst.cast::<T>())
+                    });
+                if dst_aligned {
+                    for (value, dst) in iter {
+                        unsafe { dst.write(value) };
                     }
                 } else {
-                    for (idx, dst) in iter {
-                        let value = (self.f)(D::from_slice(idx.as_ref()).to_index());
-                        unsafe { dst.cast::<T>().write_unaligned(value) };
+                    for (value, dst) in iter {
+                        unsafe { dst.write_unaligned(value) };
                     }
                 }
                 Ok(out)

@@ -3,7 +3,7 @@ use std::hint::unreachable_unchecked;
 use crate::util::iter::block::NdIterExtBlockOffsetSize;
 use crate::util::iter::strides::{
     nd_iter_ext_logical_global_index, NdIterExtStridesOffset, NdIterExtStridesOffsetMulti,
-    NdIterExtStridesOffsetMultiDyn, NdIterExtStridesPtr, NdIterExtStridesPtrMut,
+    NdIterExtStridesOffsetMultiDyn,
 };
 use crate::util::Idx;
 use crate::{DimVec, Dimension};
@@ -455,43 +455,6 @@ impl<D: Dimension> NdIter<D, ()> {
 }
 
 impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
-    /// Adds a [`NdIterExtStridesPtr`]  extension.
-    #[allow(dead_code)] // see the note on `NdIterExtStridesPtr`
-    #[inline]
-    pub(crate) fn with_strides_ptr_ext<T, S>(
-        self,
-        strides: D::Vec<S>,
-        initial_ptr: *const T,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtr<D, T, S>>>
-    where
-        S: Idx,
-    {
-        let ext = NdIterExtStridesPtr::<D, T, S>::new(strides, initial_ptr);
-        NdIterBuilder {
-            begin: self.begin,
-            end: self.end,
-            extensions: self.extensions.merge_extension(ext),
-        }
-    }
-
-    /// Adds a [`NdIterExtStridesPtrMut`] extension.
-    #[inline]
-    pub(crate) fn with_strides_ptr_mut_ext<T, S>(
-        self,
-        strides: D::Vec<S>,
-        initial_ptr: *mut T,
-    ) -> NdIterBuilder<D, E::MergeExtension<NdIterExtStridesPtrMut<D, T, S>>>
-    where
-        S: Idx,
-    {
-        let ext = NdIterExtStridesPtrMut::<D, T, S>::new(strides, initial_ptr);
-        NdIterBuilder {
-            begin: self.begin,
-            end: self.end,
-            extensions: self.extensions.merge_extension(ext),
-        }
-    }
-
     /// Adds a [`NdIterExtStridesOffset`] extension.
     #[inline]
     pub(crate) fn with_strides_offset_ext<S: Idx>(
@@ -581,7 +544,7 @@ impl<D: Dimension, E: NdIterExtension> NdIterBuilder<D, E> {
 mod tests {
 
     use super::*;
-    use crate::util::iter::strides::NdIterExtStridesPtrMut;
+    use crate::util::iter::strides::NdIterExtStridesOffset;
     use crate::util::DimArray;
     use crate::{Dim, DimDyn, SliceExt};
 
@@ -912,61 +875,51 @@ mod tests {
     }
 
     #[test]
-    fn tuple_2_two_ptr_extensions_track_independently() {
-        let mut a = [0u8; 6];
-        let mut b = [0u8; 12]; // b has stride 2
-        let base_a = a.as_mut_ptr();
-        let base_b = b.as_mut_ptr();
+    fn tuple_2_two_offset_extensions_track_independently() {
+        // b has stride 2
         let ext = (
-            NdIterExtStridesPtrMut::new(dv(&[3usize, 1]), base_a),
-            NdIterExtStridesPtrMut::new(dv(&[6usize, 2]), base_b),
+            NdIterExtStridesOffset::new(dv(&[3usize, 1]), 0),
+            NdIterExtStridesOffset::new(dv(&[6usize, 2]), 0),
         );
         let iter = NdIter::new(dv(&[2u64, 3]), ext);
         let mut flat = 0usize;
-        for (_, (pa, pb)) in iter {
-            assert_eq!(pa, unsafe { base_a.add(flat) }, "a step {flat}");
-            assert_eq!(pb, unsafe { base_b.add(flat * 2) }, "b step {flat}");
+        for (_, (oa, ob)) in iter {
+            assert_eq!(oa, flat, "a step {flat}");
+            assert_eq!(ob, flat * 2, "b step {flat}");
             flat += 1;
         }
         assert_eq!(flat, 6);
     }
 
     #[test]
-    fn tuple_2_ptr_and_change_log() {
-        let mut data = [0u8; 4];
-        let base = data.as_mut_ptr();
+    fn tuple_2_offset_and_change_log() {
         let ext = (
-            NdIterExtStridesPtrMut::new(dv(&[1usize]), base),
+            NdIterExtStridesOffset::new(dv(&[1usize]), 0),
             ChangeLog::new(),
         );
         let mut iter = NdIter::new(dv(&[4u64]), ext);
-        let mut ptrs: Vec<*mut u8> = Vec::new();
-        for (_, (ptr, _)) in iter.by_ref() {
-            ptrs.push(ptr);
+        let mut offsets: Vec<usize> = Vec::new();
+        for (_, (offset, _)) in iter.by_ref() {
+            offsets.push(offset);
         }
         // 3 on_change calls: steps 2, 3, 4 each fire once for dim 0
         assert_eq!(iter.extensions.1.log.len(), 3);
-        for (i, &ptr) in ptrs.iter().enumerate() {
-            assert_eq!(ptr, unsafe { base.add(i) }, "ptr {i}");
+        for (i, &offset) in offsets.iter().enumerate() {
+            assert_eq!(offset, i, "offset {i}");
         }
     }
 
     #[test]
     fn tuple_3_all_three_extensions_receive_changes() {
-        let mut a = [0u8; 4];
-        let mut b = [0u8; 4];
-        let mut c = [0u8; 4];
         let ext = (
-            NdIterExtStridesPtrMut::new(dv(&[1usize]), a.as_mut_ptr()),
-            NdIterExtStridesPtrMut::new(dv(&[1usize]), b.as_mut_ptr()),
-            NdIterExtStridesPtrMut::new(dv(&[1usize]), c.as_mut_ptr()),
+            NdIterExtStridesOffset::new(dv(&[1usize]), 0),
+            NdIterExtStridesOffset::new(dv(&[1usize]), 0),
+            NdIterExtStridesOffset::new(dv(&[1usize]), 0),
         );
         let iter = NdIter::new(dv(&[4u64]), ext);
         let mut count = 0usize;
-        for (_, (pa, pb, pc)) in iter {
-            let off_a = unsafe { pa.offset_from(a.as_ptr()) };
-            let off_b = unsafe { pb.offset_from(b.as_ptr()) };
-            let off_c = unsafe { pc.offset_from(c.as_ptr()) };
+        for (_, (off_a, off_b, off_c)) in iter {
+            assert_eq!(off_a, count, "step {count}: a");
             assert_eq!(off_a, off_b, "step {count}: a vs b");
             assert_eq!(off_a, off_c, "step {count}: a vs c");
             count += 1;
@@ -1007,17 +960,15 @@ mod tests {
 
     #[test]
     fn builder_single_ext_yields_bare_item() {
-        // A single extension appends onto `()`, so the item is the bare pointer (not a 1-tuple):
-        // `ptr` below binds directly to `*mut u8` with no tuple destructuring.
-        let mut data = [0u8; 6];
-        let base = data.as_mut_ptr();
+        // A single extension appends onto `()`, so the item is the bare offset (not a 1-tuple):
+        // `offset` below binds directly to `usize` with no tuple destructuring.
         let iter = NdIter::builder(dv(&[2u64, 3]))
-            .with_strides_ptr_mut_ext(dv(&[3usize, 1]), base)
+            .with_strides_offset_ext(dv(&[3usize, 1]), 0)
             .build();
         let mut flat = 0usize;
-        for (_, ptr) in iter {
-            let _: *mut u8 = ptr;
-            assert_eq!(ptr, unsafe { base.add(flat) }, "step {flat}");
+        for (_, offset) in iter {
+            let _: usize = offset;
+            assert_eq!(offset, flat, "step {flat}");
             flat += 1;
         }
         assert_eq!(flat, 6);
@@ -1025,20 +976,17 @@ mod tests {
 
     #[test]
     fn builder_two_exts_yield_flat_pair_in_call_order() {
-        let mut src = [0u8; 6];
-        let mut dst = [0u8; 12]; // dst has stride 2
-        let base_src = src.as_mut_ptr();
-        let base_dst = dst.as_mut_ptr();
+        // dst has stride 2, and a different offset type than src.
         let iter = NdIter::builder(dv(&[2u64, 3]))
-            .with_strides_ptr_ext(dv(&[3usize, 1]), base_src.cast_const())
-            .with_strides_ptr_mut_ext(dv(&[6usize, 2]), base_dst)
+            .with_strides_offset_ext(dv(&[3usize, 1]), 0usize)
+            .with_strides_offset_ext(dv(&[6u64, 2]), 0u64)
             .build();
         let mut flat = 0usize;
-        for (_, (sp, dp)) in iter {
-            let _: *const u8 = sp;
-            let _: *mut u8 = dp;
-            assert_eq!(sp, unsafe { base_src.add(flat) }, "src step {flat}");
-            assert_eq!(dp, unsafe { base_dst.add(flat * 2) }, "dst step {flat}");
+        for (_, (src, dst)) in iter {
+            let _: usize = src;
+            let _: u64 = dst;
+            assert_eq!(src, flat, "src step {flat}");
+            assert_eq!(dst, flat as u64 * 2, "dst step {flat}");
             flat += 1;
         }
         assert_eq!(flat, 6);
@@ -1046,22 +994,18 @@ mod tests {
 
     #[test]
     fn builder_two_exts_match_manual_tuple() {
-        let a = [0u8; 6];
-        let mut b = [0u8; 6];
-        let base_a = a.as_ptr();
-        let base_b = b.as_mut_ptr();
         // The same two extensions, once via the builder and once via a manual tuple constructor.
-        let built: Vec<(*const u8, *mut u8)> = NdIter::builder(dv(&[2u64, 3]))
-            .with_strides_ptr_ext(dv(&[3usize, 1]), base_a)
-            .with_strides_ptr_mut_ext(dv(&[3usize, 1]), base_b)
+        let built: Vec<(usize, usize)> = NdIter::builder(dv(&[2u64, 3]))
+            .with_strides_offset_ext(dv(&[3usize, 1]), 0)
+            .with_strides_offset_ext(dv(&[6usize, 2]), 0)
             .build()
             .map(|(_, pair)| pair)
             .collect();
-        let manual: Vec<(*const u8, *mut u8)> = NdIter::new(
+        let manual: Vec<(usize, usize)> = NdIter::new(
             dv(&[2u64, 3]),
             (
-                NdIterExtStridesPtr::new(dv(&[3usize, 1]), base_a),
-                NdIterExtStridesPtrMut::new(dv(&[3usize, 1]), base_b),
+                NdIterExtStridesOffset::new(dv(&[3usize, 1]), 0),
+                NdIterExtStridesOffset::new(dv(&[6usize, 2]), 0),
             ),
         )
         .map(|(_, pair)| pair)
@@ -1071,19 +1015,14 @@ mod tests {
 
     #[test]
     fn builder_three_exts_yield_flat_triple() {
-        let mut a = [0u8; 4];
-        let mut b = [0u8; 4];
-        let mut c = [0u8; 4];
         let iter = NdIter::builder(dv(&[4u64]))
-            .with_strides_ptr_mut_ext(dv(&[1usize]), a.as_mut_ptr())
-            .with_strides_ptr_mut_ext(dv(&[1usize]), b.as_mut_ptr())
-            .with_strides_ptr_mut_ext(dv(&[1usize]), c.as_mut_ptr())
+            .with_strides_offset_ext(dv(&[1usize]), 0)
+            .with_strides_offset_ext(dv(&[1usize]), 0)
+            .with_strides_offset_ext(dv(&[1usize]), 0)
             .build();
         let mut count = 0usize;
-        for (_, (pa, pb, pc)) in iter {
-            let off_a = unsafe { pa.offset_from(a.as_ptr()) };
-            let off_b = unsafe { pb.offset_from(b.as_ptr()) };
-            let off_c = unsafe { pc.offset_from(c.as_ptr()) };
+        for (_, (off_a, off_b, off_c)) in iter {
+            assert_eq!(off_a, count, "step {count}: a");
             assert_eq!(off_a, off_b, "step {count}: a vs b");
             assert_eq!(off_a, off_c, "step {count}: a vs c");
             count += 1;
