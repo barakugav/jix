@@ -137,7 +137,7 @@ where
     };
     let layouts = operands.map_inline_ref(|operand| {
         let dtype = operand.dtype;
-        (dtype.itemsize() as usize, dtype.alignment().as_usize())
+        (dtype.itemsize(), dtype.alignment())
     });
     let strides = operands.map_inline_ref(|operand| operand.strides());
 
@@ -146,10 +146,13 @@ where
 
     let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
         let operand = operands[i];
-        let aligned =
-            iter.is_aligned()[i] && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1);
+        let aligned = iter.is_aligned()[i]
+            && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize());
         (!aligned).then(|| Staging {
-            buf: context.allocate_buf(chunk_len_max * layouts[i].0, operand.dtype.alignment()),
+            buf: context.allocate_buf(
+                chunk_len_max * layouts[i].0 as usize,
+                operand.dtype.alignment(),
+            ),
             copier: NdCopier::new(operand.dtype),
         })
     });
@@ -190,8 +193,10 @@ where
                                 )
                             };
                         }
-                        operand
-                            .set_cursor(staging.buf.as_mut_slice().as_mut_ptr(), layouts[op_i].0);
+                        operand.set_cursor(
+                            staging.buf.as_mut_slice().as_mut_ptr(),
+                            layouts[op_i].0 as usize,
+                        );
                     }
                 }
             }
@@ -237,7 +242,7 @@ where
         .iter()
         .map(|operand| {
             let dtype = operand.dtype;
-            (dtype.itemsize() as usize, dtype.alignment().as_usize())
+            (dtype.itemsize(), dtype.alignment())
         })
         .collect::<Vec<_>>();
     let strides = operands
@@ -252,10 +257,13 @@ where
         .iter()
         .enumerate()
         .map(|(i, operand)| {
-            let aligned =
-                iter.is_aligned()[i] && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1);
+            let aligned = iter.is_aligned()[i]
+                && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize());
             (!aligned).then(|| Staging {
-                buf: context.allocate_buf(chunk_len_max * layouts[i].0, operand.dtype.alignment()),
+                buf: context.allocate_buf(
+                    chunk_len_max * layouts[i].0 as usize,
+                    operand.dtype.alignment(),
+                ),
                 copier: NdCopier::new(operand.dtype),
             })
         })
@@ -297,8 +305,10 @@ where
                                 )
                             };
                         }
-                        operand
-                            .set_cursor(staging.buf.as_mut_slice().as_mut_ptr(), layouts[op_i].0);
+                        operand.set_cursor(
+                            staging.buf.as_mut_slice().as_mut_ptr(),
+                            layouts[op_i].0 as usize,
+                        );
                     }
                 }
             }
