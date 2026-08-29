@@ -585,6 +585,9 @@ impl IntoDimension for ndarray::IxDyn {
 /// array with more dimensions than supported can overflow this container.
 pub(crate) type DimArray<T> = crate::util::arrayvec::ArrayVec<T, NDIM_MAX>;
 
+/// Integer type used to store an axis index inside a struct.
+pub(crate) type DimIdx = u8;
+
 /// Build a [`DimArray`] by applying `f` to each axis index `0..ndim`.
 ///
 /// Panics if `ndim > NDIM_MAX`.

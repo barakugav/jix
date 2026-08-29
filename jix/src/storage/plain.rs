@@ -7,7 +7,7 @@ use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
-use crate::util::{strided_span_bytes, DimArray, SendSyncPtr};
+use crate::util::{strided_span_bytes, DimArray, DimIdx, SendSyncPtr};
 use crate::{dim_arr, Array, ArrayParams, ArrayStorage, DimBitmap, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
@@ -146,7 +146,7 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
         // Scaling order by contiguity: the most contiguous (smallest stride) real dims scale first;
         {
             let shape = shape.as_slice();
-            let mut order = dim_arr(ndim, |d| d as u8);
+            let mut order = dim_arr(ndim, |d| d as DimIdx);
             order.sort_by_key(|&d| {
                 let d = d as usize;
                 if shape[d] > 1 && strides[d] != 0 {

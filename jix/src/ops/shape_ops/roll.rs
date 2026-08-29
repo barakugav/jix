@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, ensure, Result};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
-use crate::{dim_arr, Array, ArrayStorage, Dimension};
+use crate::{dim_arr, Array, ArrayStorage, DimIdx, Dimension};
 
 /// Rolls elements along an axis, wrapping around at the boundary, returned by
 /// [`Array::roll`](crate::Array::roll).
@@ -37,7 +37,7 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// ```
 pub struct Roll<S: ArrayStorage> {
     array: S,
-    axis: usize,
+    axis: DimIdx,
     /// `shift` normalized to `[0, shape[axis])`. Zero means the op is a pass-through.
     shift: u64,
 }
@@ -60,7 +60,11 @@ impl<S: ArrayStorage> Roll<S> {
             shift.rem_euclid(len as i64) as u64
         };
 
-        Ok(Self { array, axis, shift })
+        Ok(Self {
+            array,
+            axis: axis as DimIdx,
+            shift,
+        })
     }
 
     /// Constructs an array with [`Roll`] storage. See the storage struct docs for semantics and examples.
@@ -82,7 +86,7 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         check_get_range(self.shape(), index)?;
         check_out_buf(out.as_deref(), self.shape())?;
 
-        let k = self.axis;
+        let k = self.axis as usize;
         let shift = self.shift;
 
         let ndim = index.len();

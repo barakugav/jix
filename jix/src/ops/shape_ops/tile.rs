@@ -9,7 +9,7 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
 use crate::util::NdCopier;
-use crate::{Array, ArrayStorage, DimArray, Dimension, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimArray, DimIdx, Dimension, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -51,7 +51,7 @@ use crate::{Array, ArrayStorage, DimArray, Dimension, NDIM_MAX};
 /// ```
 pub struct Tile<S: ArrayStorage> {
     array: S,
-    axis: usize,
+    axis: DimIdx,
     repeats: u64,
     new_shape: S::Dimension,
     spec: ArraySpecDynamic,
@@ -94,7 +94,7 @@ impl<S: ArrayStorage> Tile<S> {
         // there is nothing smarter than reading the whole dimension at once
         block_shape[axis] = (new_len.min(BlockSize::MAX as u64) as BlockSize).max(1);
         block_shape_fixed_dims.set(axis, false);
-        let read_shape_scale_order = std::iter::once(axis as u8)
+        let read_shape_scale_order = std::iter::once(axis as DimIdx)
             .chain(
                 inner_spec
                     .read_shape_scale_order()
@@ -112,7 +112,7 @@ impl<S: ArrayStorage> Tile<S> {
 
         Ok(Self {
             array,
-            axis,
+            axis: axis as DimIdx,
             repeats,
             new_shape,
             spec,
@@ -151,7 +151,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             ));
         }
 
-        let k = self.axis;
+        let k = self.axis as usize;
         let l = self.array.shape()[k];
         let s = index[k].start;
         let e = index[k].end;

@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use crate::util::iter::NdIter;
-use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, Dimension};
+use crate::{array_from_fn_inline, dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// Drive a 1-d inner loop over every element of `N_OPERANDS` identically-shaped strided n-d regions,
 /// described only by their common `shape` (in elements), each operand's `strides`, and each operand's
@@ -77,7 +77,7 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
                 return Self::empty(layouts); // nothing to iterate
             }
             if len > 1 {
-                dim_perm.push(d);
+                dim_perm.push(d as DimIdx);
             }
         }
         if dim_perm.is_empty() {
@@ -92,12 +92,12 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
 
         let (shape, strides) = if dim_perm.len() == 1 {
             // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
-            let d = dim_perm[0];
+            let d = dim_perm[0] as usize;
             let shape = DimArray::from_slice(&[shape[d]]).unwrap();
             let strides = array_from_fn_inline(|i| DimArray::from_slice(&[strides[i][d]]).unwrap());
             (shape, strides)
         } else {
-            axes_sort_by(&mut dim_perm, |d1: usize, d2: usize| {
+            axes_sort_by(&mut dim_perm, |d1, d2| {
                 let mut compared = false;
                 for (op_i, strides) in strides.iter().enumerate() {
                     if !affects_dim_order[op_i] {
@@ -126,22 +126,23 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
             let mut group_inner = DimArray::new(); // input axis of each group's inner axis
             let mut group_len = DimArray::new(); // product of the group's shapes
             for &d in dim_perm.iter() {
+                let d = d as usize;
                 let m = group_inner.len();
                 if m > 0
                     && strides
                         .iter()
-                        .all(|s| s[group_inner[m - 1]] == s[d] * shape[d])
+                        .all(|s| s[group_inner[m - 1] as usize] == s[d] * shape[d])
                 {
-                    group_inner[m - 1] = d; // the group now reaches down to axis `d`
+                    group_inner[m - 1] = d as DimIdx; // the group now reaches down to axis `d`
                     group_len[m - 1] *= shape[d];
                 } else {
-                    group_inner.push(d);
+                    group_inner.push(d as DimIdx);
                     group_len.push(shape[d]);
                 }
             }
             let shape = group_len;
             let strides = array_from_fn_inline::<_, N_OPERANDS>(|i| {
-                dim_arr(group_inner.len(), |g| strides[i][group_inner[g]])
+                dim_arr(group_inner.len(), |g| strides[i][group_inner[g] as usize])
             });
             (shape, strides)
         };
@@ -275,13 +276,13 @@ fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, OuterD: Dimension>(
 /// no operand had anything to say about the pair.
 #[inline]
 pub(super) fn axes_sort_by(
-    arr: &mut [usize],
+    arr: &mut [DimIdx],
     mut compare: impl FnMut(usize, usize) -> Option<Ordering>,
 ) {
     for i in 1..arr.len() {
         let mut insertion_idx = i;
         for i1 in (0..i).rev() {
-            match compare(arr[i], arr[i1]) {
+            match compare(arr[i] as usize, arr[i1] as usize) {
                 Some(ord) if ord.is_ge() => break,
                 Some(_) => insertion_idx = i1,
                 None => {} // ambiguous: transparent, keep scanning outward
@@ -713,14 +714,14 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// Sort by the axis indices themselves, ascending.
-    fn sorted(mut axes: Vec<usize>) -> Vec<usize> {
+    fn sorted(mut axes: Vec<DimIdx>) -> Vec<DimIdx> {
         axes_sort_by(&mut axes, |a, b| Some(a.cmp(&b)));
         axes
     }
 
     #[test]
     fn axes_sort_by_orders_ascending() {
-        assert_eq!(sorted(vec![]), Vec::<usize>::new());
+        assert_eq!(sorted(vec![]), Vec::<DimIdx>::new());
         assert_eq!(sorted(vec![7]), vec![7]);
         assert_eq!(sorted(vec![1, 2, 3]), vec![1, 2, 3]); // already ordered
         assert_eq!(sorted(vec![3, 2, 1]), vec![1, 2, 3]); // fully reversed
@@ -741,7 +742,7 @@ mod tests {
     fn axes_sort_by_compares_elements_not_positions() {
         // The comparator is handed the *elements* - axis indices - never their positions in `arr`.
         // Every element here is >= 10, so a comparator fed positions would hit the panic.
-        let rank = |axis: usize| match axis {
+        let rank = |axis| match axis {
             10 => 2usize,
             11 => 0,
             12 => 1,
@@ -756,10 +757,10 @@ mod tests {
     fn axes_sort_by_ranks_axes_by_descending_stride() {
         // How both walks use it: rank an axis by its per-operand strides, operand 0 most
         // significant, with the comparison reversed so the largest stride ends up outermost.
-        fn sort_by_strides(strides: &[&[usize]], axes: &mut [usize]) {
+        fn sort_by_strides(strides: &[&[usize]], axes: &mut [DimIdx]) {
             axes_sort_by(axes, |d1, d2| {
                 for s in strides {
-                    match s[d1].cmp(&s[d2]) {
+                    match s[d1 as usize].cmp(&s[d2 as usize]) {
                         Ordering::Less => return Some(Ordering::Greater),
                         Ordering::Equal => {}
                         Ordering::Greater => return Some(Ordering::Less),

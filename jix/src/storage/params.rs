@@ -5,7 +5,9 @@ use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::util::{scale_read_shape, DimArray, Idx, IterExt, SendSyncPtr, USE_NEW_READ_SCALING};
+use crate::util::{
+    scale_read_shape, DimArray, DimIdx, Idx, IterExt, SendSyncPtr, USE_NEW_READ_SCALING,
+};
 use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension};
 
 /// Target byte range for a single read region.
@@ -557,7 +559,7 @@ pub(crate) struct ArraySpecDynamic {
     /// This is purely an *order* - there is no magnitude to compare across arrays. An op that
     /// combines several inputs adopts the order of the input with the highest
     /// [`element_cost`](Self::element_cost) (the array whose redundant reads cost the most).
-    pub(crate) read_shape_scale_order: DimArray<u8>,
+    pub(crate) read_shape_scale_order: DimArray<DimIdx>,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -582,7 +584,7 @@ impl ArraySpecOwned {
             element_cost: 1.0,
             // Default to C-order priority: the last, most-contiguous dim ranks highest (scaled
             // first). Leaves with a different layout (e.g. Plain) override this.
-            read_shape_scale_order: dim_arr(ndim, |i| (ndim - 1 - i) as u8),
+            read_shape_scale_order: dim_arr(ndim, |i| (ndim - 1 - i) as DimIdx),
         };
         Self {
             shared: Box::pin((shared, PhantomPinned)),
@@ -670,7 +672,7 @@ impl<'a> ArraySpec<'a> {
     /// [`scale_read_shape`](crate::util::scale_read_shape): C-order `[ndim-1, .., 0]` for a plain
     /// compact leaf; views carrying broadcast/duplication move those dims to the front.
     #[inline(always)]
-    pub(crate) fn read_shape_scale_order(&self) -> &'a DimArray<u8> {
+    pub(crate) fn read_shape_scale_order(&self) -> &'a DimArray<DimIdx> {
         &self.dynamic().read_shape_scale_order
     }
 
@@ -746,7 +748,7 @@ impl<'a> ArraySpec<'a> {
 /// Pick the dim scaling order for a multi-input op: adopt the order of the input with the highest
 /// `element_cost` (the array whose redundant reads cost the most, so its coverage priorities matter
 /// most). `inputs` is non-empty with equal-length order slices; on a tie the earliest input wins.
-fn max_cost_read_shape_scale_order(inputs: &[(f32, &[u8])]) -> DimArray<u8> {
+fn max_cost_read_shape_scale_order(inputs: &[(f32, &[DimIdx])]) -> DimArray<DimIdx> {
     let (_, order) = inputs
         .iter()
         .reduce(|best, cur| if cur.0 > best.0 { cur } else { best })
@@ -760,7 +762,7 @@ fn max_cost_read_shape_scale_order(inputs: &[(f32, &[u8])]) -> DimArray<u8> {
 /// There is no re-reading of any input, so `element_cost` is the worst case across inputs, plus one.
 /// The dim scaling order is taken from the costliest input (see [`max_cost_read_shape_scale_order`]).
 /// `inputs` must be non-empty with equal-length order slices.
-pub(crate) fn combine_select_hints(inputs: &[(f32, &[u8])]) -> (f32, DimArray<u8>) {
+pub(crate) fn combine_select_hints(inputs: &[(f32, &[DimIdx])]) -> (f32, DimArray<DimIdx>) {
     let element_cost = inputs.iter().map(|&(cost, _)| cost).fold(0.0f32, f32::max) + 1.0;
     (element_cost, max_cost_read_shape_scale_order(inputs))
 }
@@ -769,7 +771,7 @@ pub(crate) fn combine_select_hints(inputs: &[(f32, &[u8])]) -> (f32, DimArray<u8
 ///
 /// `element_cost = sum(costs) + 1`; the dim scaling order is taken from the costliest input (see
 /// [`max_cost_read_shape_scale_order`]). `inputs` must be non-empty with equal-length order slices.
-pub(crate) fn combine_elementwise_hints(inputs: &[(f32, &[u8])]) -> (f32, DimArray<u8>) {
+pub(crate) fn combine_elementwise_hints(inputs: &[(f32, &[DimIdx])]) -> (f32, DimArray<DimIdx>) {
     let element_cost = (inputs.iter().map(|&(cost, _)| cost as f64).sum::<f64>() + 1.0) as f32;
     (element_cost, max_cost_read_shape_scale_order(inputs))
 }

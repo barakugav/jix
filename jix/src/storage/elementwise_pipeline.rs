@@ -11,7 +11,7 @@ use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::{
-    array_from_fn_inline, dim_arr, ArrayExt, DimArray, DimDyn, NdCopier, NdIterUnordered,
+    array_from_fn_inline, dim_arr, ArrayExt, DimArray, DimDyn, DimIdx, NdCopier, NdIterUnordered,
     NdIterUnorderedDyn, SliceExt,
 };
 
@@ -588,18 +588,19 @@ fn pick_output_layout<'s>(
         operands: impl Iterator<Item = &'s Operand<'s>>,
         shape: &[usize],
         itemsize: usize,
-    ) -> Option<DimArray<usize>> {
+    ) -> Option<DimArray<DimIdx>> {
         let ndim = shape.len();
         if ndim <= 1 || shape.iter().product::<usize>() * itemsize <= 4096 {
             return None;
         }
 
-        let mut axis_order: Option<DimArray<usize>> = None;
+        let mut axis_order = None;
         for operand in operands {
             let strides = operand.strides();
             debug_assert_eq!(strides.len(), ndim);
-            let mut operand_order = dim_arr(ndim, |d| d);
+            let mut operand_order = dim_arr(ndim, |d| d as DimIdx);
             operand_order.sort_by_key(|&d| {
+                let d = d as usize;
                 let ignore_axis = shape[d] <= 1 || strides[d] == 0;
                 Reverse(if ignore_axis { usize::MAX } else { strides[d] })
             });
@@ -618,6 +619,7 @@ fn pick_output_layout<'s>(
             let mut strides = dim_arr(shape.len(), |_| itemsize);
             let mut stride = itemsize;
             for &d in axis_order.iter().rev() {
+                let d = d as usize;
                 strides[d] = stride;
                 stride *= shape[d];
             }

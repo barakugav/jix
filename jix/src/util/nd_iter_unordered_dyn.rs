@@ -1,6 +1,6 @@
 use crate::util::axes_sort_by;
 use crate::util::iter::NdIter;
-use crate::{dim_arr, Dim, DimArray, DimDyn, Dimension};
+use crate::{dim_arr, Dim, DimArray, DimDyn, DimIdx, Dimension};
 
 /// [`NdIterUnordered`](crate::NdIterUnordered) with the operand count known only at runtime.
 ///
@@ -39,7 +39,7 @@ impl NdIterUnorderedDyn {
                 return Self::empty(layouts); // nothing to iterate
             }
             if len > 1 {
-                dim_perm.push(d);
+                dim_perm.push(d as DimIdx);
             }
         }
         if dim_perm.is_empty() {
@@ -56,7 +56,7 @@ impl NdIterUnorderedDyn {
         }
         let (shape, strides) = if dim_perm.len() == 1 {
             // Only one axis remains after dropping size-1 axes: no sort or coalesce needed.
-            let d = dim_perm[0];
+            let d = dim_perm[0] as usize;
             let shape = DimArray::from_slice(&[shape[d]]).unwrap();
             let strides = strides
                 .iter()
@@ -64,7 +64,7 @@ impl NdIterUnorderedDyn {
                 .collect::<Vec<_>>();
             (shape, strides)
         } else {
-            axes_sort_by(&mut dim_perm, |d1: usize, d2: usize| {
+            axes_sort_by(&mut dim_perm, |d1, d2| {
                 let mut compared = false;
                 for strides in strides.iter() {
                     // A zero stride means this operand does not move along the axis at all, so it
@@ -90,23 +90,24 @@ impl NdIterUnorderedDyn {
             let mut group_inner = DimArray::new(); // input axis of each group's inner axis
             let mut group_len = DimArray::new(); // product of the group's shapes
             for &d in dim_perm.iter() {
+                let d = d as usize;
                 let m = group_inner.len();
                 if m > 0
                     && strides
                         .iter()
-                        .all(|s| s[group_inner[m - 1]] == s[d] * shape[d])
+                        .all(|s| s[group_inner[m - 1] as usize] == s[d] * shape[d])
                 {
-                    group_inner[m - 1] = d; // the group now reaches down to axis `d`
+                    group_inner[m - 1] = d as DimIdx; // the group now reaches down to axis `d`
                     group_len[m - 1] *= shape[d];
                 } else {
-                    group_inner.push(d);
+                    group_inner.push(d as DimIdx);
                     group_len.push(shape[d]);
                 }
             }
             let shape = group_len;
             let strides = strides
                 .iter()
-                .map(|s| dim_arr(group_inner.len(), |g| s[group_inner[g]]))
+                .map(|s| dim_arr(group_inner.len(), |g| s[group_inner[g] as usize]))
                 .collect::<Vec<_>>();
             (shape, strides)
         };

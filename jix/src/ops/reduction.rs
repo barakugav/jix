@@ -11,7 +11,7 @@ use crate::storage::{
 };
 use crate::util::iter::NdIter;
 use crate::util::SliceExt;
-use crate::util::{calc_block_end, scale_read_shape, DimArray, USE_NEW_READ_SCALING};
+use crate::util::{calc_block_end, scale_read_shape, DimArray, DimIdx, USE_NEW_READ_SCALING};
 use crate::{
     array_from_fn_inline, default_strides, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
     NdIterUnordered, Ty,
@@ -130,7 +130,7 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             .map(|dim| array.shape()[dim])
             .product::<u64>();
         let element_cost = (spec.element_cost() as f64 * (reduced_prod + 4) as f64) as f32;
-        let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as u8;
+        let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as DimIdx;
         let read_shape_scale_order = spec
             .read_shape_scale_order()
             .iter()

@@ -7,7 +7,7 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
     check_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo, StridedBuf,
 };
-use crate::util::dim_arr;
+use crate::util::{dim_arr, DimIdx};
 use crate::{Array, ArrayStorage, Dimension};
 
 /// Reorders the axes of an array, returned by [`Array::permute_axes`](crate::Array::permute_axes).
@@ -49,9 +49,9 @@ use crate::{Array, ArrayStorage, Dimension};
 pub struct PermuteAxes<S: ArrayStorage> {
     array: S,
     /// `axes[i]` = index of the input dimension that maps to output dimension `i`.
-    axes: <S::Dimension as Dimension>::Vec<u8>,
+    axes: <S::Dimension as Dimension>::Vec<DimIdx>,
     /// `inv_axes[d]` = index of the output dimension that maps from input dimension `d`.
-    inv_axes: <S::Dimension as Dimension>::Vec<u8>,
+    inv_axes: <S::Dimension as Dimension>::Vec<DimIdx>,
 
     shape: S::Dimension,
     spec: ArraySpecDynamic,
@@ -81,9 +81,9 @@ impl<S: ArrayStorage> PermuteAxes<S> {
             );
             seen[ax] = true;
         }
-        let mut inv_axes = S::Dimension::vec(ndim, |_| 0u8);
+        let mut inv_axes = S::Dimension::vec(ndim, |_| DimIdx::default());
         for (i, &ax) in axes.as_ref().iter().enumerate() {
-            inv_axes[ax] = i as u8;
+            inv_axes[ax] = i as DimIdx;
         }
 
         let input_shape = array.shape();
@@ -104,7 +104,7 @@ impl<S: ArrayStorage> PermuteAxes<S> {
                 .map(|&old| inv_axes[old as usize])
                 .collect(),
         };
-        let axes = S::Dimension::vec(ndim, |i| axes[i] as u8);
+        let axes = S::Dimension::vec(ndim, |i| axes[i] as DimIdx);
         Ok(Self {
             shape,
             spec,

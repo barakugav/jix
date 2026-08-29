@@ -8,7 +8,7 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
     check_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo, StridedBuf,
 };
-use crate::util::DimArray;
+use crate::util::{DimArray, DimIdx};
 use crate::{dim_arr, Array, ArrayStorage, Dimension};
 
 /// Removes length-1 dimensions from an array's shape,
@@ -65,7 +65,7 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// ```
 pub struct RemoveAxis<S, D: Dimension> {
     array: S,
-    axes_mapping: D::Vec<u8>,
+    axes_mapping: D::Vec<DimIdx>,
 
     shape: D,
     spec: ArraySpecDynamic,
@@ -117,7 +117,7 @@ where
 
         for input_dim in 0..input_ndim {
             if !is_removed[input_dim] {
-                axes_mapping.push(input_dim as u8);
+                axes_mapping.push(input_dim as DimIdx);
                 shape.push(array.shape()[input_dim]);
                 block_shape.push(inner_block_shape[input_dim]);
             }
@@ -131,7 +131,7 @@ where
             .enumerate()
             .filter_map(|(dim, c)| (!is_removed[dim]).then_some(c))
             .collect();
-        let out_dim = |d: usize| (d - (0..d).filter(|&j| is_removed[j]).count()) as u8;
+        let out_dim = |d: usize| (d - (0..d).filter(|&j| is_removed[j]).count()) as DimIdx;
         let read_shape_scale_order = inner_spec
             .read_shape_scale_order()
             .iter()
