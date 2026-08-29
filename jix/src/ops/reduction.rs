@@ -646,6 +646,31 @@ struct FoldInnerLoopArgs<'a, K> {
     base_item_idx: u64,
 }
 
+/// Stop LLVM's loop vectorizer from touching the enclosing loop.
+///
+/// The `LANES` lane accumulators below are meant to be vectorized *across lanes* by SLP: one
+/// contiguous vector load per chunk. The loop vectorizer gets first crack at the loop though, and
+/// it vectorizes the other way - across chunk iterations - which leaves each lane's accesses
+/// `LANES`-strided. Stride `LANES` is above LLVM's max interleave-group factor, so it prices those
+/// accesses as gathers, and with avx512f enabled the gather cost model is optimistic enough that
+/// this shape wins: one `vpgather*` per lane. On real hardware it is ~2x slower than the SLP form.
+///
+/// The loop vectorizer only compares against the fully-scalar cost, never against what SLP would
+/// have produced, so it has no way to know it is making things worse. Integer kernels are the ones
+/// that get hit; float kernels are already safe because the loop vectorizer cannot reassociate FP
+/// reductions and so leaves those loops alone.
+///
+/// An empty asm block is a call the loop vectorizer refuses to widen, so it bails out and SLP gets
+/// the loop body. It emits no instructions and does not inhibit SLP.
+#[inline(always)]
+fn keep_loop_vectorizer_out() {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: empty asm, no operands, touches no memory, no stack, preserves flags.
+    unsafe {
+        core::arch::asm!("", options(nomem, nostack, preserves_flags))
+    };
+}
+
 #[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
     // x86-64-v4
     "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
@@ -706,6 +731,9 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
 
     // Process the main bulk of the run in LANES-sized chunks.
     while i + LANES <= inner_len {
+        if CONTIGUOUS && LANES >= 4 {
+            keep_loop_vectorizer_out();
+        }
         let bulk = read_items_bulk(i);
         states =
             states.map_enumerate(|b, state| kernel.update_state(state, bulk[b], item_idx(i + b)));
