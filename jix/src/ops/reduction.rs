@@ -696,16 +696,22 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
         read_items_bulk(0).map_enumerate(|b, item| kernel.init_state(Some((item, item_idx(b)))));
     i += LANES;
 
-    // Process the main bulk of the run in LANES-sized chunks.
-    while i + LANES <= inner_len {
-        let bulk = read_items_bulk(i);
-        states =
-            states.map_enumerate(|b, state| kernel.update_state(state, bulk[b], item_idx(i + b)));
-        i += LANES;
-    }
+    let mut state = if LANES > 1 {
+        // Process the main bulk of the run in LANES-sized chunks.
+        let body_limit = inner_len - inner_len % LANES;
+        while i < body_limit {
+            let bulk = read_items_bulk(i);
+            states = states
+                .map_enumerate(|b, state| kernel.update_state(state, bulk[b], item_idx(i + b)));
+            i += LANES;
+        }
 
-    // merge the LANES states to a single one
-    let mut state = merge_states::<T, K, LANES>(kernel, states);
+        // merge the LANES states to a single one
+        merge_states::<T, K, LANES>(kernel, states)
+    } else {
+        debug_assert_eq!(states.len(), 1);
+        states.into_iter().next().unwrap()
+    };
 
     // Fold any remaining tail sequentially.
     while i < inner_len {

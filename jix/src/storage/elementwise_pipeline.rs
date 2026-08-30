@@ -420,32 +420,39 @@ fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
     if CONTIGUOUS {
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
-    let dst = dst.as_mut_ptr().cast::<T>();
+    let mut dst = dst.as_mut_ptr().cast::<T>();
     debug_assert!(dst.is_aligned());
-    let mut i = 0;
-    while i + LANES <= len {
+
+    let dst_stride = if CONTIGUOUS {
+        size_of::<T>()
+    } else {
+        dst_stride
+    };
+    let mut chunks = len / LANES;
+    while chunks > 0 {
         let chunk = unsafe { pipeline.read_bulk::<LANES, CONTIGUOUS>() };
         if CONTIGUOUS {
-            let elms = unsafe { dst.add(i).cast::<[T; LANES]>() };
-            unsafe { elms.write(chunk) };
+            unsafe { dst.cast::<[T; LANES]>().write(chunk) };
         } else {
             #[allow(clippy::needless_range_loop)]
             for k in 0..LANES {
-                let elm = unsafe { dst.cast::<u8>().add((i + k) * dst_stride).cast::<T>() };
-                unsafe { elm.write(chunk[k]) };
+                unsafe {
+                    dst.cast::<u8>()
+                        .add(k * dst_stride)
+                        .cast::<T>()
+                        .write(chunk[k])
+                };
             }
         }
-        i += LANES;
+        dst = unsafe { dst.cast::<u8>().add(LANES * dst_stride).cast::<T>() };
+        chunks -= 1;
     }
-    while i < len {
+    let mut rest = len % LANES;
+    while rest > 0 {
         let [val] = unsafe { pipeline.read_bulk::<1, CONTIGUOUS>() };
-        let elm = if CONTIGUOUS {
-            unsafe { dst.add(i) }
-        } else {
-            unsafe { dst.cast::<u8>().add(i * dst_stride).cast::<T>() }
-        };
-        unsafe { elm.write(val) };
-        i += 1;
+        unsafe { dst.write(val) };
+        dst = unsafe { dst.cast::<u8>().add(dst_stride).cast::<T>() };
+        rest -= 1;
     }
 }
 

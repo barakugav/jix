@@ -246,7 +246,8 @@ where
             let mut i = 0;
             unsafe {
                 if CONTIGUOUS {
-                    while i + LANES <= len {
+                    let body_limit = len - len % LANES;
+                    while i < body_limit {
                         let x_chunk_ptr = x.add(i).cast::<[T; LANES]>();
                         let x_chunk = x_chunk_ptr.read();
                         let y_chunk = y.add(i).cast::<[T; LANES]>().read();
