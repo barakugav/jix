@@ -215,7 +215,7 @@ impl<'a> NdCopier<'a> {
             }
         };
 
-        iter.foreach_inner_1d(
+        iter.foreach_inner_1d_impl::<true>(
             |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
                 inner_loop_fn(
                     src.get_unchecked(src_offset..),
@@ -374,7 +374,7 @@ impl<'a> NdCopier<'a> {
             true => Self::inner_loop_untyped::<true>,
             false => Self::inner_loop_untyped::<false>,
         };
-        iter.foreach_inner_1d(
+        iter.foreach_inner_1d_impl::<true>(
             |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
                 inner_loop_fn(
                     src.get_unchecked(src_offset..),
