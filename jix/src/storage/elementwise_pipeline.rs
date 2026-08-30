@@ -11,8 +11,8 @@ use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::{
-    array_from_fn_inline, dim_arr, ArrayExt, DimArray, DimDyn, DimIdx, NdCopier, NdIterUnordered,
-    NdIterUnorderedDyn, SliceExt,
+    array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimDyn, DimIdx,
+    NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
 };
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
@@ -201,8 +201,14 @@ where
                 }
             }
 
-            let dst = out_operand.current_ptr.get().cast_mut().cast::<T>();
-            inner_loop_fn(&pipeline, dst, out_operand.inner_stride.get(), chunk_len);
+            let dst_stride = out_operand.inner_stride.get();
+            let dst = unsafe {
+                std::slice::from_raw_parts_mut(
+                    out_operand.current_ptr.get().cast_mut(),
+                    strided_span_bytes(&[chunk_len], &[dst_stride], size_of::<T>()),
+                )
+            };
+            inner_loop_fn(&pipeline, dst, dst_stride, chunk_len);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -313,8 +319,14 @@ where
                 }
             }
 
-            let dst = out_operand.current_ptr.get().cast_mut().cast::<T>();
-            inner_loop_fn(&pipeline, dst, out_operand.inner_stride.get(), chunk_len);
+            let dst_stride = out_operand.inner_stride.get();
+            let dst = unsafe {
+                std::slice::from_raw_parts_mut(
+                    out_operand.current_ptr.get().cast_mut(),
+                    strided_span_bytes(&[chunk_len], &[dst_stride], size_of::<T>()),
+                )
+            };
+            inner_loop_fn(&pipeline, dst, dst_stride, chunk_len);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -399,7 +411,7 @@ impl Staging<'_> {
 #[inline(never)]
 fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
     pipeline: &impl ElementwisePipelineImpl<T>,
-    dst: *mut T, // TODO: slice for noalias
+    dst: &mut [u8],
     dst_stride: usize,
     len: usize,
 ) where
@@ -408,6 +420,7 @@ fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
     if CONTIGUOUS {
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
+    let dst = dst.as_mut_ptr().cast::<T>();
     debug_assert!(dst.is_aligned());
     let mut i = 0;
     while i + LANES <= len {
@@ -436,8 +449,8 @@ fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
     }
 }
 
-type InnerLoopFn<T, P> = fn(&P, *mut T, usize, usize);
-fn pick_inner_loop<T, P, const CONTIGUOUS: bool>() -> InnerLoopFn<T, P>
+type InnerLoopFn<P> = fn(&P, &mut [u8], usize, usize);
+fn pick_inner_loop<T, P, const CONTIGUOUS: bool>() -> InnerLoopFn<P>
 where
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
