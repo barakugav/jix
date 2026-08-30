@@ -35,8 +35,8 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// cursor `N * inner_stride` bytes further along - so a run of calls walks the run the caller
     /// set up, with no offset threaded through the chain.
     ///
-    /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for *every* operand, letting the step
-    /// fold into a compile-time constant.
+    /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for every operand *the pipeline
+    /// reads*, letting the step fold into a compile-time constant.
     ///
     /// # Safety
     ///
@@ -157,16 +157,16 @@ where
         })
     });
 
-    let contiguous = (0..N_OPERANDS).all(|i| {
-        iter.is_contiguous()[i]
-        // A staged operand is read (or written) straight out of its scratch buffer, so it is
-        // contiguous whatever the original strides say.
-        || staging[i].is_some()
-    });
-    let inner_loop_fn = if contiguous {
-        pick_inner_loop::<_, _, true>()
-    } else {
-        pick_inner_loop::<_, _, false>()
+    // A staged operand is read (or written) straight out of its scratch buffer, so it is
+    // contiguous whatever the original strides say.
+    let operand_contiguous = |i: usize| iter.is_contiguous()[i] || staging[i].is_some();
+    let in_contiguous = (1..N_OPERANDS).all(&operand_contiguous);
+    let out_contiguous = operand_contiguous(0);
+    let inner_loop_fn = match (in_contiguous, out_contiguous) {
+        (true, true) => pick_inner_loop::<_, _, true, true>(),
+        (true, false) => pick_inner_loop::<_, _, true, false>(),
+        (false, true) => pick_inner_loop::<_, _, false, true>(),
+        (false, false) => pick_inner_loop::<_, _, false, false>(),
     };
 
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
@@ -275,16 +275,16 @@ where
         })
         .collect::<Vec<_>>();
 
-    let contiguous = (0..operands.len()).all(|i| {
-        iter.is_contiguous()[i]
-        // A staged operand is read (or written) straight out of its scratch buffer, so it is
-        // contiguous whatever the original strides say.
-        || staging[i].is_some()
-    });
-    let inner_loop_fn = if contiguous {
-        pick_inner_loop::<_, _, true>()
-    } else {
-        pick_inner_loop::<_, _, false>()
+    // A staged operand is read (or written) straight out of its scratch buffer, so it is
+    // contiguous whatever the original strides say.
+    let operand_contiguous = |i: usize| iter.is_contiguous()[i] || staging[i].is_some();
+    let in_contiguous = (1..operands.len()).all(&operand_contiguous);
+    let out_contiguous = operand_contiguous(0);
+    let inner_loop_fn = match (in_contiguous, out_contiguous) {
+        (true, true) => pick_inner_loop::<_, _, true, true>(),
+        (true, false) => pick_inner_loop::<_, _, true, false>(),
+        (false, true) => pick_inner_loop::<_, _, false, true>(),
+        (false, false) => pick_inner_loop::<_, _, false, false>(),
     };
 
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
@@ -409,7 +409,7 @@ impl Staging<'_> {
 }
 
 #[inline(never)]
-fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
+fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
     pipeline: &impl ElementwisePipelineImpl<T>,
     dst: &mut [u8],
     dst_stride: usize,
@@ -417,21 +417,21 @@ fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
 ) where
     T: Dtyped,
 {
-    if CONTIGUOUS {
+    if OUT_CONTIGUOUS {
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
     let mut dst = dst.as_mut_ptr().cast::<T>();
     debug_assert!(dst.is_aligned());
 
-    let dst_stride = if CONTIGUOUS {
+    let dst_stride = if OUT_CONTIGUOUS {
         size_of::<T>()
     } else {
         dst_stride
     };
     let mut chunks = len / LANES;
     while chunks > 0 {
-        let chunk = unsafe { pipeline.read_bulk::<LANES, CONTIGUOUS>() };
-        if CONTIGUOUS {
+        let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>() };
+        if OUT_CONTIGUOUS {
             unsafe { dst.cast::<[T; LANES]>().write(chunk) };
         } else {
             #[allow(clippy::needless_range_loop)]
@@ -449,7 +449,7 @@ fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
     }
     let mut rest = len % LANES;
     while rest > 0 {
-        let [val] = unsafe { pipeline.read_bulk::<1, CONTIGUOUS>() };
+        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>() };
         unsafe { dst.write(val) };
         dst = unsafe { dst.cast::<u8>().add(dst_stride).cast::<T>() };
         rest -= 1;
@@ -457,24 +457,24 @@ fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
 }
 
 type InnerLoopFn<P> = fn(&P, &mut [u8], usize, usize);
-fn pick_inner_loop<T, P, const CONTIGUOUS: bool>() -> InnerLoopFn<P>
+fn pick_inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>() -> InnerLoopFn<P>
 where
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
 {
     const {
         match <T as LanesInfo>::LANES {
-            1 => inner_loop::<_, 1, CONTIGUOUS>,
-            2 => inner_loop::<_, 2, CONTIGUOUS>,
-            4 => inner_loop::<_, 4, CONTIGUOUS>,
-            8 => inner_loop::<_, 8, CONTIGUOUS>,
-            16 => inner_loop::<_, 16, CONTIGUOUS>,
-            32 => inner_loop::<_, 32, CONTIGUOUS>,
-            64 => inner_loop::<_, 64, CONTIGUOUS>,
-            128 => inner_loop::<_, 128, CONTIGUOUS>,
-            256 => inner_loop::<_, 256, CONTIGUOUS>,
-            512 => inner_loop::<_, 512, CONTIGUOUS>,
-            _ => inner_loop::<_, 1024, CONTIGUOUS>,
+            1 => inner_loop::<_, 1, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            2 => inner_loop::<_, 2, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            4 => inner_loop::<_, 4, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            8 => inner_loop::<_, 8, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            16 => inner_loop::<_, 16, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            32 => inner_loop::<_, 32, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            64 => inner_loop::<_, 64, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            128 => inner_loop::<_, 128, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            256 => inner_loop::<_, 256, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            512 => inner_loop::<_, 512, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            _ => inner_loop::<_, 1024, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
         }
     }
 }
