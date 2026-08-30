@@ -54,13 +54,12 @@ fn bench_sum_plain(c: &mut Criterion) {
     }
 
     bench_sum_plain_impl(c, 40_000, false);
-    bench_sum_plain_impl(c, 400_000, false);
     bench_sum_plain_impl(c, 1_000_000, true);
 }
 
 fn bench_sum_compact(c: &mut Criterion) {
-    for size in [40_000_u64, 400_000, 1_000_000] {
-        let shape = [size, 300];
+    for size in [40_000_u64, 400_000] {
+        let shape = [size, 420];
         let mut group = c.benchmark_group(format!("sum compact [{size}, 300]"));
         group.sample_size(20);
 
