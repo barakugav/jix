@@ -165,7 +165,10 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+                &self,
+                _offset: usize,
+            ) -> [T; N] {
                 [self.0; N]
             }
         }

@@ -350,10 +350,13 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
-                let condition = unsafe { self.condition.read_bulk::<N, CONTIGUOUS>() };
-                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS>() };
-                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS>() };
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+                &self,
+                offset: usize,
+            ) -> [T; N] {
+                let condition = unsafe { self.condition.read_bulk::<N, CONTIGUOUS>(offset) };
+                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS>(offset) };
+                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS>(offset) };
                 array_from_fn_inline(|i| if condition[i] { x[i] } else { y[i] })
             }
         }

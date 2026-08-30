@@ -29,20 +29,20 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// The leaf operands the pipeline reads from.
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's;
 
-    /// Read the next `N` elements through the pipeline and advance the operand cursors.
+    /// Read `N` elements at `offset` from the pipeline.
     ///
-    /// A node reads `N` elements from each of its children, combines them, and leaves every operand
-    /// cursor `N * inner_stride` bytes further along - so a run of calls walks the run the caller
-    /// set up, with no offset threaded through the chain.
+    /// A node reads `N` elements from each of its children at the same `offset` and combines them.
+    /// Nothing is advanced: every leaf holds the base of the run its cursor was set to, and
+    /// derives the address from `offset`, so the whole tree shares the caller's loop counter.
     ///
-    /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for every operand *the pipeline
-    /// reads*, letting the step fold into a compile-time constant.
+    /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for every operand the pipeline
+    /// reads, letting the step fold into a compile-time constant.
     ///
     /// # Safety
     ///
-    /// Every operand's `current_ptr` must be aligned for its dtype and have at least `N` elements at
-    /// `inner_stride` in bounds of its `original_data`.
-    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N];
+    /// Every operand's `current_ptr` must be aligned for its dtype, and elements
+    /// `offset..offset + N` at `inner_stride` must be in bounds of its `original_data`.
+    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
 
     #[inline(never)]
     fn to_buf<'b>(
@@ -420,39 +420,36 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     if OUT_CONTIGUOUS {
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
-    let mut dst = dst.as_mut_ptr().cast::<T>();
+    let dst = dst.as_mut_ptr().cast::<T>();
     debug_assert!(dst.is_aligned());
 
-    let dst_stride = if OUT_CONTIGUOUS {
-        size_of::<T>()
-    } else {
-        dst_stride
-    };
-    let mut chunks = len / LANES;
-    while chunks > 0 {
-        let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>() };
+    let body_limit = len - len % LANES;
+    let mut i = 0;
+    while i < body_limit {
+        let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>(i) };
         if OUT_CONTIGUOUS {
-            unsafe { dst.cast::<[T; LANES]>().write(chunk) };
+            unsafe { dst.add(i).cast::<[T; LANES]>().write(chunk) };
         } else {
             #[allow(clippy::needless_range_loop)]
             for k in 0..LANES {
                 unsafe {
                     dst.cast::<u8>()
-                        .add(k * dst_stride)
+                        .add((i + k) * dst_stride)
                         .cast::<T>()
                         .write(chunk[k])
                 };
             }
         }
-        dst = unsafe { dst.cast::<u8>().add(LANES * dst_stride).cast::<T>() };
-        chunks -= 1;
+        i += LANES;
     }
-    let mut rest = len % LANES;
-    while rest > 0 {
-        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>() };
-        unsafe { dst.write(val) };
-        dst = unsafe { dst.cast::<u8>().add(dst_stride).cast::<T>() };
-        rest -= 1;
+    while i < len {
+        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>(i) };
+        if OUT_CONTIGUOUS {
+            unsafe { dst.add(i).write(val) };
+        } else {
+            unsafe { dst.cast::<u8>().add(i * dst_stride).cast::<T>().write(val) };
+        }
+        i += 1;
     }
 }
 
@@ -582,29 +579,18 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     }
 
     #[inline(always)]
-    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
         debug_assert!(!base.is_null());
         debug_assert!(base.is_aligned());
 
-        let stride = self.operand.inner_stride.get();
         if CONTIGUOUS {
-            debug_assert_eq!(stride, size_of::<T>());
-            let vals = unsafe { base.cast::<[T; N]>().read() };
-
-            self.operand
-                .current_ptr
-                .set(unsafe { base.add(N).cast::<u8>() });
-            vals
+            debug_assert_eq!(self.operand.inner_stride.get(), size_of::<T>());
+            unsafe { base.add(offset).cast::<[T; N]>().read() }
         } else {
-            let vals = array_from_fn_inline(|i| unsafe {
-                base.cast::<u8>().add(i * stride).cast::<T>().read()
-            });
-
-            self.operand
-                .current_ptr
-                .set(unsafe { base.cast::<u8>().add(N * stride) });
-            vals
+            let stride = self.operand.inner_stride.get();
+            let base = unsafe { base.cast::<u8>().add(offset * stride) };
+            array_from_fn_inline(|k| unsafe { base.add(k * stride).cast::<T>().read() })
         }
     }
 }
@@ -842,9 +828,12 @@ mod tests {
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
                 self.lhs.operands().chain(self.rhs.operands())
             }
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
-                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS>() };
-                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS>() };
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+                &self,
+                offset: usize,
+            ) -> [T; N] {
+                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS>(offset) };
+                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS>(offset) };
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
         }
