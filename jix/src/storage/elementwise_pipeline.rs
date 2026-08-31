@@ -566,12 +566,12 @@ enum OperandData<'a> {
 }
 
 impl<'a> Operand<'a> {
-    #[inline]
+    #[inline(never)]
     pub(crate) fn new_input(original_data: StridedBuf<'a>, dtype: &'a Dtype) -> Self {
         Self::new_impl(OperandData::Input(original_data), dtype)
     }
 
-    #[inline]
+    #[inline(never)]
     pub(crate) fn new_output(out: &'a mut StridedBuf<'_>, dtype: &'a Dtype) -> Self {
         let strides = out.strides().to_dim_vec::<DimDyn>();
         let base_ptr = out.data_ptr_mut().unwrap();
