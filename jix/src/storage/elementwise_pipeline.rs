@@ -460,7 +460,14 @@ where
     P: ElementwisePipelineImpl<T>,
 {
     const {
-        match <T as LanesInfo>::LANES {
+        let default_lanes = <T as LanesInfo>::LANES;
+        const STRIDED_LANES: usize = 4;
+        let lanes = if IN_CONTIGUOUS && OUT_CONTIGUOUS || default_lanes < STRIDED_LANES {
+            default_lanes
+        } else {
+            STRIDED_LANES
+        };
+        match lanes {
             1 => inner_loop::<_, 1, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
             2 => inner_loop::<_, 2, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
             4 => inner_loop::<_, 4, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
