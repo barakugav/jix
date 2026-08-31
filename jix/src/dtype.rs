@@ -27,6 +27,7 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::hint::assert_unchecked;
+use std::mem::ManuallyDrop;
 
 use crate::error::{bail, ensure, error, Error, Result};
 #[cfg(feature = "half")]
@@ -287,7 +288,7 @@ enum DtypeInner {
         alignment: Alignment,
         is_aligned: bool,
         shape: DtypeShape,
-        fields: Box<[(Cow<'static, str>, Itemsize, Dtype)]>,
+        fields: OwnedFields,
     },
     StructBorrowed {
         itemsize: Itemsize,
@@ -297,6 +298,7 @@ enum DtypeInner {
         fields: &'static [(Cow<'static, str>, Itemsize, Dtype)],
     },
 }
+
 const _: () = {
     if size_of::<usize>() == 8 {
         assert!(size_of::<Dtype>() <= 32);
@@ -517,7 +519,7 @@ impl Dtype {
             .collect();
 
         Ok(Self(DtypeInner::StructOwned {
-            fields,
+            fields: OwnedFields::new(fields),
             shape: DtypeShape::new(),
             itemsize,
             alignment,
@@ -617,7 +619,7 @@ impl Dtype {
         };
 
         Ok(Self(DtypeInner::StructOwned {
-            fields,
+            fields: OwnedFields::new(fields),
             shape,
             itemsize,
             alignment,
@@ -1070,6 +1072,41 @@ impl Endianness {
         } else {
             Endianness::Big
         }
+    }
+}
+
+/// The field list of an owned struct dtype.
+///
+/// The sole purpose of this struct is to create a `inline(never)` of a drop, to avoid recursive
+/// drop of Dtype, allowing inlining of `drop` for T::DTYPE.
+struct OwnedFields(ManuallyDrop<Box<[(Cow<'static, str>, Itemsize, Dtype)]>>);
+
+impl OwnedFields {
+    fn new(fields: Box<[(Cow<'static, str>, Itemsize, Dtype)]>) -> Self {
+        Self(ManuallyDrop::new(fields))
+    }
+}
+impl Drop for OwnedFields {
+    #[inline(never)]
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is dropped exactly once, here, and never read afterwards.
+        unsafe { ManuallyDrop::drop(&mut self.0) };
+    }
+}
+impl Clone for OwnedFields {
+    fn clone(&self) -> Self {
+        Self::new((*self.0).clone())
+    }
+}
+impl std::ops::Deref for OwnedFields {
+    type Target = [(Cow<'static, str>, Itemsize, Dtype)];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::fmt::Debug for OwnedFields {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&**self, f)
     }
 }
 
