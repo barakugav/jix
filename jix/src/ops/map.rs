@@ -335,7 +335,7 @@ where
     where
         T: Dtyped,
     {
-        check_dtype(&T::DTYPE, &O::DTYPE)?;
+        check_dtype(Dtype::new_ref::<T>(), Dtype::new_ref::<O>())?;
         let inner = self.arrays.read_as_elementwise_pipeline(index, context)?;
 
         struct MapMultiplePipeline<'a, ArraysT, D, F> {
@@ -390,7 +390,7 @@ where
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        const { &O::DTYPE }
+        Dtype::new_ref::<O>()
     }
 
     #[inline]

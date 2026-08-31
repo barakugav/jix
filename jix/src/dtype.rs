@@ -643,6 +643,11 @@ impl Dtype {
         })
     }
 
+    #[inline(always)]
+    pub(crate) fn new_ref<T: Dtyped>() -> &'static Self {
+        const { &T::DTYPE }
+    }
+
     fn is_aligned_struct(
         fields: &[(Cow<'static, str>, Itemsize, Dtype)],
         itemsize: Itemsize,
@@ -1079,6 +1084,7 @@ impl Endianness {
 ///
 /// The sole purpose of this struct is to create a `inline(never)` of a drop, to avoid recursive
 /// drop of Dtype, allowing inlining of `drop` for T::DTYPE.
+#[allow(clippy::type_complexity)]
 struct OwnedFields(ManuallyDrop<Box<[(Cow<'static, str>, Itemsize, Dtype)]>>);
 
 impl OwnedFields {

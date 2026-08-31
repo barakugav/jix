@@ -55,9 +55,13 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         T: Dtyped,
         Self: Sized,
     {
-        let output_dtype = T::DTYPE;
-        let (shape, mut out) =
-            materialize_pipeline_out_buf(index, &mut self.operands(), &output_dtype, context, out);
+        let (shape, mut out) = materialize_pipeline_out_buf(
+            index,
+            &mut self.operands(),
+            Dtype::new_ref::<T>(),
+            context,
+            out,
+        );
         if shape.contains(&0) {
             return Ok(out); // empty region
         }
@@ -113,8 +117,7 @@ fn to_buf_impl<T, const N_OPERANDS: usize>(
 where
     T: Dtyped,
 {
-    let output_dtype = T::DTYPE;
-    let out_operand = Operand::new_output(out, &output_dtype);
+    let out_operand = Operand::new_output(out, Dtype::new_ref::<T>());
     let operands = {
         let mut operand_iter = std::iter::once(&out_operand).chain(pipeline.operands());
         let operands = array_from_fn_inline::<_, N_OPERANDS>(|_| operand_iter.next().unwrap());
@@ -158,8 +161,7 @@ fn to_buf_impl_dyn<T>(
 where
     T: Dtyped,
 {
-    let output_dtype = T::DTYPE;
-    let out_operand = Operand::new_output(out, &output_dtype);
+    let out_operand = Operand::new_output(out, Dtype::new_ref::<T>());
     let operands = std::iter::once(&out_operand)
         .chain(pipeline.operands())
         .collect::<Vec<_>>();

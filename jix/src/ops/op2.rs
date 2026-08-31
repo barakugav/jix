@@ -86,7 +86,7 @@ where
     where
         T: Dtyped,
     {
-        check_dtype(&T::DTYPE, &K::Output::DTYPE)?;
+        check_dtype(Dtype::new_ref::<T>(), Dtype::new_ref::<K::Output>())?;
         let a = self
             .a
             .read_as_elementwise_pipeline::<S1::Item>(index, context)?;
@@ -149,7 +149,7 @@ where
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        const { &K::Output::DTYPE }
+        Dtype::new_ref::<K::Output>()
     }
 
     #[inline]

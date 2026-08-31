@@ -201,7 +201,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        const { &K::Output::DTYPE }
+        Dtype::new_ref::<K::Output>()
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
