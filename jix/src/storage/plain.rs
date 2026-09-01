@@ -731,7 +731,7 @@ mod tests {
         let base = unsafe { backing.as_mut_ptr().cast::<u8>().add(1) };
         assert!(!(base as usize).is_multiple_of(itemsize));
         for (k, &v) in expected.iter().enumerate() {
-            unsafe { base.add(k * itemsize).cast::<i32>().write_unaligned(v) };
+            unsafe { base.byte_add(k * itemsize).cast::<i32>().write_unaligned(v) };
         }
 
         let strides = [cols * itemsize, itemsize];

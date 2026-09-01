@@ -212,30 +212,57 @@ impl<const N_OPERANDS: usize> NdIterUnordered<N_OPERANDS> {
     #[inline]
     pub(crate) fn foreach_inner_1d(
         &self,
+        inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
+    ) {
+        self.foreach_inner_1d_impl::<false>(inner_loop);
+    }
+
+    #[inline]
+    pub(super) fn foreach_inner_1d_impl<const STATIC_DISPATCH: bool>(
+        &self,
         mut inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
     ) {
         let ndim = self.shape.len();
         let inner_len = self.shape[ndim - 1];
         let inner_strides = array_from_fn_inline::<_, N_OPERANDS>(|i| self.strides[i][ndim - 1]);
         if crate::hint::likely(ndim == 1) {
+            // always static dispatch for 1D
             inner_loop([0; N_OPERANDS], inner_len, inner_strides);
+            return;
+        }
+
+        let strides = self.strides.each_ref().map(|s| s.as_slice());
+        if ndim == 2 {
+            // always static dispatch for 2D
+            nd_iter_unordered_nd_walk_impl::<N_OPERANDS, Dim<1>>(&self.shape, strides, inner_loop);
+            return;
+        }
+
+        if STATIC_DISPATCH {
+            nd_iter_unordered_nd_walk(&self.shape, strides, inner_loop);
         } else {
-            let nd_walk_fn = match ndim {
-                2 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<1>>,
-                3 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<2>>,
-                4 => nd_iter_unordered_nd_walk::<N_OPERANDS, Dim<3>>,
-                _ => nd_iter_unordered_nd_walk::<N_OPERANDS, DimDyn>,
-            };
-            let strides = self.strides.each_ref().map(|s| s.as_slice());
-            nd_walk_fn(&self.shape, strides, &mut inner_loop);
+            let dyn_inner_loop: &mut dyn FnMut(_, _, _) = &mut inner_loop;
+            nd_iter_unordered_nd_walk(&self.shape, strides, dyn_inner_loop);
         }
     }
 }
-#[inline(never)]
-fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize, OuterD: Dimension>(
+#[inline(always)]
+fn nd_iter_unordered_nd_walk<const N_OPERANDS: usize>(
     shape: &[usize],
     strides: [&[usize]; N_OPERANDS],
-    // TODO: accept &dyn FnMut
+    inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
+) {
+    let nd_walk_fn = match shape.len() {
+        3 => nd_iter_unordered_nd_walk_impl::<N_OPERANDS, Dim<2>>,
+        4 => nd_iter_unordered_nd_walk_impl::<N_OPERANDS, Dim<3>>,
+        _ => nd_iter_unordered_nd_walk_impl::<N_OPERANDS, DimDyn>,
+    };
+    nd_walk_fn(shape, strides, inner_loop);
+}
+#[inline(never)]
+fn nd_iter_unordered_nd_walk_impl<const N_OPERANDS: usize, OuterD: Dimension>(
+    shape: &[usize],
+    strides: [&[usize]; N_OPERANDS],
     mut inner_loop: impl FnMut([usize; N_OPERANDS], usize, [usize; N_OPERANDS]),
 ) {
     let ndim = shape.len();

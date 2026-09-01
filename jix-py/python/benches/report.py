@@ -85,11 +85,14 @@ def load_criterion_dir(root):
     root = Path(root)
     rows = []
     for est in sorted(root.glob("**/new/estimates.json")):
-        # .../<root>/<group>/<bench>/new/estimates.json
-        bench_dir = est.parent.parent
-        group = bench_dir.parent.name
+        # criterion nests <group>/[<function>/]<value>/new/estimates.json - 2 OR 3 levels deep.
+        # Use the full path from the criterion root (minus /new) so 3-level benches (e.g. the sum
+        # groups: <size>/<dtype>/<axis>) keep distinct identities instead of collapsing.
+        rel = est.parent.parent.relative_to(root)
+        group = rel.parts[0] if len(rel.parts) > 1 else ""
+        bench = "/".join(rel.parts[1:]) if len(rel.parts) > 1 else rel.parts[0]
         mean_ns = json.loads(est.read_text())["mean"]["point_estimate"]
-        rows.append({"group": group, "bench": bench_dir.name, "mean_ns": mean_ns})
+        rows.append({"group": group, "bench": bench, "mean_ns": mean_ns})
     return rows
 
 

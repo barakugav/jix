@@ -201,7 +201,7 @@ where
     }
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        const { &K::Output::DTYPE }
+        Dtype::new_ref::<K::Output>()
     }
     #[inline]
     fn spec(&self) -> ArraySpec<'_> {
@@ -665,24 +665,14 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
 
     debug_assert_eq!(state_stride, 0);
 
+    let items = items.as_ptr().cast::<T>();
     let read_items_bulk = |offset: usize| -> [T; LANES] {
         if CONTIGUOUS {
-            unsafe {
-                items
-                    .as_ptr()
-                    .cast::<T>()
-                    .add(offset)
-                    .cast::<[T; LANES]>()
-                    .read()
-            }
+            unsafe { items.add(offset).cast::<[T; LANES]>().read() }
         } else {
             unsafe {
                 array_from_fn_inline(|b| {
-                    items
-                        .as_ptr()
-                        .add((offset + b) * items_stride)
-                        .cast::<T>()
-                        .read_unaligned()
+                    items.byte_add((offset + b) * items_stride).read_unaligned()
                 })
             }
         }
@@ -696,29 +686,29 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
         read_items_bulk(0).map_enumerate(|b, item| kernel.init_state(Some((item, item_idx(b)))));
     i += LANES;
 
-    // Process the main bulk of the run in LANES-sized chunks.
-    while i + LANES <= inner_len {
-        let bulk = read_items_bulk(i);
-        states =
-            states.map_enumerate(|b, state| kernel.update_state(state, bulk[b], item_idx(i + b)));
-        i += LANES;
-    }
+    let mut state = if LANES > 1 {
+        // Process the main bulk of the run in LANES-sized chunks.
+        let body_limit = inner_len - inner_len % LANES;
+        while i < body_limit {
+            let bulk = read_items_bulk(i);
+            states = states
+                .map_enumerate(|b, state| kernel.update_state(state, bulk[b], item_idx(i + b)));
+            i += LANES;
+        }
 
-    // merge the LANES states to a single one
-    let mut state = merge_states::<T, K, LANES>(kernel, states);
+        // merge the LANES states to a single one
+        merge_states::<T, K, LANES>(kernel, states)
+    } else {
+        debug_assert_eq!(states.len(), 1);
+        states.into_iter().next().unwrap()
+    };
 
     // Fold any remaining tail sequentially.
     while i < inner_len {
         let item = if CONTIGUOUS {
-            unsafe { items.as_ptr().cast::<T>().add(i).read() }
+            unsafe { items.add(i).read() }
         } else {
-            unsafe {
-                items
-                    .as_ptr()
-                    .add(i * items_stride)
-                    .cast::<T>()
-                    .read_unaligned()
-            }
+            unsafe { items.byte_add(i * items_stride).read_unaligned() }
         };
         state = kernel.update_state(state, item, item_idx(i));
         i += 1;
@@ -771,29 +761,20 @@ where
         base_item_idx,
     } = args;
 
+    let items = items.as_ptr().cast::<T>();
     let read_item = |i: usize| {
         if CONTIGUOUS {
-            unsafe { items.as_ptr().cast::<T>().add(i).read() }
+            unsafe { items.add(i).read() }
         } else {
-            unsafe {
-                items
-                    .as_ptr()
-                    .add(i * items_stride)
-                    .cast::<T>()
-                    .read_unaligned()
-            }
+            unsafe { items.byte_add(i * items_stride).read_unaligned() }
         }
     };
-    let mut state_ref = |i: usize| {
+    let states = states.as_mut_ptr().cast::<MaybeUninit<K::State>>();
+    let state_ref = |i: usize| {
         if CONTIGUOUS {
-            unsafe { &mut *states.as_mut_ptr().cast::<MaybeUninit<K::State>>().add(i) }
+            unsafe { &mut *states.add(i) }
         } else {
-            unsafe {
-                &mut *states
-                    .as_mut_ptr()
-                    .add(i * state_stride)
-                    .cast::<MaybeUninit<K::State>>()
-            }
+            unsafe { &mut *states.byte_add(i * state_stride) }
         }
     };
     if base_item_idx == 0 {

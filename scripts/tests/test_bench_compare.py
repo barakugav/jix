@@ -31,6 +31,28 @@ def test_load_rust_records(tmp_path):
     assert r.samples == [900.0 / 1e9, 1000.0 / 1e9, 1100.0 / 1e9]
 
 
+def test_load_rust_records_three_level_no_collapse(tmp_path):
+    # criterion nests some benches 3 levels deep: <group>/<dtype>/<axis>/new. Distinct groups
+    # must keep distinct keys (the old 2-level logic collapsed all sizes onto one key).
+    _write_criterion(tmp_path, "sum compact [40000, 300]/i32", "all", 1000.0, [1.0, 1.1])
+    _write_criterion(tmp_path, "sum compact [400000, 300]/i32", "all", 2000.0, [2.0, 2.1])
+    keys = {r.key for r in bc.load_rust_records(tmp_path)}
+    assert len(keys) == 2
+    assert bc.BenchKey("rust", "sum compact [40000, 300]", "i32/all", "") in keys
+
+
+def test_load_platform_records_raises_on_duplicate_key(tmp_path):
+    import pytest
+
+    (tmp_path / "meta.json").write_text(json.dumps({"platform": {"os": "linux", "arch": "x86_64"}}))
+    pj = tmp_path / "python" / "python.json"
+    pj.parent.mkdir(parents=True)
+    entry = {"stats": {"mean": 0.001, "data": [0.001, 0.001]}, "extra_info": {"case": "c", "library": "jix", "size": 1}}
+    pj.write_text(json.dumps({"benchmarks": [entry, dict(entry)]}))  # same (case, library, size) twice
+    with pytest.raises(ValueError, match="duplicate bench key"):
+        bc.load_platform_records(tmp_path)
+
+
 def test_load_python_records(tmp_path):
     pj = tmp_path / "python.json"
     pj.write_text(

@@ -335,7 +335,7 @@ where
     where
         T: Dtyped,
     {
-        check_dtype(&T::DTYPE, &O::DTYPE)?;
+        check_dtype(Dtype::new_ref::<T>(), Dtype::new_ref::<O>())?;
         let inner = self.arrays.read_as_elementwise_pipeline(index, context)?;
 
         struct MapMultiplePipeline<'a, ArraysT, D, F> {
@@ -359,15 +359,18 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+                &self,
+                offset: usize,
+            ) -> [T; N] {
                 // The iterator is consumed here and dropped before the next call, as
                 // `read_bulk_as_iter` requires.
-                let mut items = unsafe { self.inner.read_bulk_as_iter::<N, CONTIGUOUS>() };
+                let mut items = unsafe { self.inner.read_bulk_as_iter::<N, CONTIGUOUS>(offset) };
                 array_from_fn_inline(|_| {
                     let x = (self.f)(items.next().unwrap());
 
                     const { assert!(size_of::<O>() == size_of::<T>()) };
-                    // SAFETY: the caller checked `T` and `O` are the same dtype.
+                    // SAFETY: we checked `T` and `O` are the same dtype in the outer func
                     unsafe { std::mem::transmute_copy::<O, T>(&x) }
                 })
             }
@@ -387,7 +390,7 @@ where
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        const { &O::DTYPE }
+        Dtype::new_ref::<O>()
     }
 
     #[inline]

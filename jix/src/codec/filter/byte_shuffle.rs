@@ -25,7 +25,8 @@ impl FilterImpl for ByteShuffleFilter {
             let src_ptr = src.as_ptr();
             let dst_ptr = dst.as_mut_ptr();
             let mut i = 0;
-            while i + LANES <= nitems {
+            let body_limit = nitems - nitems % LANES;
+            while i < body_limit {
                 let elms = unsafe {
                     src_ptr
                         .cast::<[u8; ITEMSIZE]>()
@@ -103,7 +104,8 @@ impl FilterImpl for ByteShuffleFilter {
             let src_ptr = src.as_ptr();
             let dst_ptr = dst.as_mut_ptr();
             let mut i = 0;
-            while i + LANES <= nitems {
+            let body_limit = nitems - nitems % LANES;
+            while i < body_limit {
                 let mut elms = [[std::mem::MaybeUninit::<u8>::uninit(); ITEMSIZE]; LANES];
                 #[allow(clippy::needless_range_loop)]
                 for b in 0..ITEMSIZE {

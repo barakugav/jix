@@ -215,7 +215,7 @@ impl<'a> NdCopier<'a> {
             }
         };
 
-        iter.foreach_inner_1d(
+        iter.foreach_inner_1d_impl::<true>(
             |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
                 inner_loop_fn(
                     src.get_unchecked(src_offset..),
@@ -264,12 +264,12 @@ impl<'a> NdCopier<'a> {
                     let s = if SRC_CONTIGUOUS {
                         src.add(i)
                     } else {
-                        src.cast::<u8>().add(i * src_stride).cast::<T>()
+                        src.byte_add(i * src_stride)
                     };
                     let d = if DST_CONTIGUOUS {
                         dst.add(i)
                     } else {
-                        dst.cast::<u8>().add(i * dst_stride).cast::<T>()
+                        dst.byte_add(i * dst_stride)
                     };
                     let val = s.read_maybe_aligned::<ALIGNED>();
                     d.write_maybe_aligned::<ALIGNED>(val);
@@ -315,8 +315,8 @@ impl<'a> NdCopier<'a> {
                 ptr::copy_nonoverlapping(src, dst, len * itemsize);
             } else {
                 for i in 0..len {
-                    let s = src.add(i * src_stride);
-                    let d = dst.add(i * dst_stride);
+                    let s = src.byte_add(i * src_stride);
+                    let d = dst.byte_add(i * dst_stride);
                     ptr::copy_nonoverlapping(s, d, itemsize);
                 }
             }
@@ -374,7 +374,7 @@ impl<'a> NdCopier<'a> {
             true => Self::inner_loop_untyped::<true>,
             false => Self::inner_loop_untyped::<false>,
         };
-        iter.foreach_inner_1d(
+        iter.foreach_inner_1d_impl::<true>(
             |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
                 inner_loop_fn(
                     src.get_unchecked(src_offset..),

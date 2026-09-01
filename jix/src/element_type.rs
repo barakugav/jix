@@ -79,12 +79,12 @@ where
 
     #[inline(always)]
     fn from_dtype(dtype: Dtype) -> Result<Self> {
-        check_dtype(&dtype, &T::DTYPE)?;
+        check_dtype(&dtype, Dtype::new_ref::<T>())?;
         Ok(Self::new())
     }
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        const { &T::DTYPE }
+        Dtype::new_ref::<T>()
     }
 }

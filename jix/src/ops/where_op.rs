@@ -246,7 +246,8 @@ where
             let mut i = 0;
             unsafe {
                 if CONTIGUOUS {
-                    while i + LANES <= len {
+                    let body_limit = len - len % LANES;
+                    while i < body_limit {
                         let x_chunk_ptr = x.add(i).cast::<[T; LANES]>();
                         let x_chunk = x_chunk_ptr.read();
                         let y_chunk = y.add(i).cast::<[T; LANES]>().read();
@@ -269,7 +270,7 @@ where
                     } else {
                         (
                             x.byte_add(i * x_stride),
-                            condition.add(i * cond_stride),
+                            condition.byte_add(i * cond_stride),
                             y.byte_add(i * y_stride),
                         )
                     };
@@ -297,10 +298,10 @@ where
             let y = y.as_ptr();
             unsafe {
                 for i in 0..len {
-                    let cond = condition.add(i * cond_stride).read();
+                    let cond = condition.byte_add(i * cond_stride).read();
                     if !cond {
-                        let x = x.add(i * x_stride);
-                        let y = y.add(i * y_stride);
+                        let x = x.byte_add(i * x_stride);
+                        let y = y.byte_add(i * y_stride);
                         x.copy_from_nonoverlapping(y, itemsize);
                     }
                 }
@@ -349,10 +350,13 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
-                let condition = unsafe { self.condition.read_bulk::<N, CONTIGUOUS>() };
-                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS>() };
-                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS>() };
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+                &self,
+                offset: usize,
+            ) -> [T; N] {
+                let condition = unsafe { self.condition.read_bulk::<N, CONTIGUOUS>(offset) };
+                let x = unsafe { self.x.read_bulk::<N, CONTIGUOUS>(offset) };
+                let y = unsafe { self.y.read_bulk::<N, CONTIGUOUS>(offset) };
                 array_from_fn_inline(|i| if condition[i] { x[i] } else { y[i] })
             }
         }

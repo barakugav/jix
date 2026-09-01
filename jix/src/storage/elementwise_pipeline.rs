@@ -11,8 +11,8 @@ use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::{
-    array_from_fn_inline, dim_arr, ArrayExt, DimArray, DimDyn, DimIdx, NdCopier, NdIterUnordered,
-    NdIterUnorderedDyn, SliceExt,
+    array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimDyn, DimIdx,
+    NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
 };
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
@@ -29,20 +29,20 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// The leaf operands the pipeline reads from.
     fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's;
 
-    /// Read the next `N` elements through the pipeline and advance the operand cursors.
+    /// Read `N` elements at `offset` from the pipeline.
     ///
-    /// A node reads `N` elements from each of its children, combines them, and leaves every operand
-    /// cursor `N * inner_stride` bytes further along - so a run of calls walks the run the caller
-    /// set up, with no offset threaded through the chain.
+    /// A node reads `N` elements from each of its children at the same `offset` and combines them.
+    /// Nothing is advanced: every leaf holds the base of the run its cursor was set to, and
+    /// derives the address from `offset`, so the whole tree shares the caller's loop counter.
     ///
-    /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for *every* operand, letting the step
-    /// fold into a compile-time constant.
+    /// `CONTIGUOUS` promises `inner_stride == dtype.itemsize()` for every operand the pipeline
+    /// reads, letting the step fold into a compile-time constant.
     ///
     /// # Safety
     ///
-    /// Every operand's `current_ptr` must be aligned for its dtype and have at least `N` elements at
-    /// `inner_stride` in bounds of its `original_data`.
-    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N];
+    /// Every operand's `current_ptr` must be aligned for its dtype, and elements
+    /// `offset..offset + N` at `inner_stride` must be in bounds of its `original_data`.
+    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
 
     #[inline(never)]
     fn to_buf<'b>(
@@ -55,22 +55,13 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         T: Dtyped,
         Self: Sized,
     {
-        let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
-        let output_dtype = T::DTYPE;
-        let mut out = match out {
-            Some(out) => out.view_mut(),
-            None => {
-                let itemsize = output_dtype.itemsize() as usize;
-                let strides = pick_output_layout(self.operands(), shape.as_ref(), itemsize);
-                let buf = context.allocate_buf(
-                    shape.iter().product::<usize>() * itemsize,
-                    output_dtype.alignment(),
-                );
-                // SAFETY: `strides` describe a dense layout of `shape` - a permutation of C order -
-                // over a pooled buffer sized to hold exactly that.
-                unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
-            }
-        };
+        let (shape, mut out) = materialize_pipeline_out_buf(
+            index,
+            &mut self.operands(),
+            Dtype::new_ref::<T>(),
+            context,
+            out,
+        );
         if shape.contains(&0) {
             return Ok(out); // empty region
         }
@@ -126,15 +117,90 @@ fn to_buf_impl<T, const N_OPERANDS: usize>(
 where
     T: Dtyped,
 {
-    let output_dtype = T::DTYPE;
-    let out_operand = Operand::new_output(out, &output_dtype);
-    let is_output_operand = |op_i: usize| op_i == 0;
+    let out_operand = Operand::new_output(out, Dtype::new_ref::<T>());
     let operands = {
         let mut operand_iter = std::iter::once(&out_operand).chain(pipeline.operands());
         let operands = array_from_fn_inline::<_, N_OPERANDS>(|_| operand_iter.next().unwrap());
         debug_assert!(operand_iter.next().is_none());
         operands
     };
+
+    let loop_cc = |dst: &mut [u8], dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, true, true>()(&pipeline, dst, dst_stride, len)
+    };
+    let loop_cs = |dst: &mut [u8], dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, true, false>()(&pipeline, dst, dst_stride, len)
+    };
+    let loop_sc = |dst: &mut [u8], dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, false, true>()(&pipeline, dst, dst_stride, len)
+    };
+    let loop_ss = |dst: &mut [u8], dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, false, false>()(&pipeline, dst, dst_stride, len)
+    };
+    let factory = |flags: InnerLoopFlags| {
+        let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
+            (true, true) => &loop_cc,
+            (true, false) => &loop_cs,
+            (false, true) => &loop_sc,
+            (false, false) => &loop_ss,
+        };
+        loop_fn
+    };
+    to_buf_type_erased(operands, &factory, shape, context);
+
+    Ok(())
+}
+
+// like `to_buf_impl`, but the number of operands is not known at compile time.
+fn to_buf_impl_dyn<T>(
+    pipeline: impl ElementwisePipelineImpl<T>,
+    shape: &[usize],
+    out: &mut StridedBuf<'_>,
+    context: &ReadContext,
+) -> Result<()>
+where
+    T: Dtyped,
+{
+    let out_operand = Operand::new_output(out, Dtype::new_ref::<T>());
+    let operands = std::iter::once(&out_operand)
+        .chain(pipeline.operands())
+        .collect::<Vec<_>>();
+
+    let loop_cc = |dst: &mut [u8], dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, true, true>()(&pipeline, dst, dst_stride, len)
+    };
+    let loop_cs = |dst: &mut [u8], dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, true, false>()(&pipeline, dst, dst_stride, len)
+    };
+    let loop_sc = |dst: &mut [u8], dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, false, true>()(&pipeline, dst, dst_stride, len)
+    };
+    let loop_ss = |dst: &mut [u8], dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, false, false>()(&pipeline, dst, dst_stride, len)
+    };
+    let factory = |flags: InnerLoopFlags| {
+        let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
+            (true, true) => &loop_cc,
+            (true, false) => &loop_cs,
+            (false, true) => &loop_sc,
+            (false, false) => &loop_ss,
+        };
+        loop_fn
+    };
+    to_buf_type_erased_dyn(&operands, &factory, shape, context);
+    Ok(())
+}
+
+#[inline(never)]
+fn to_buf_type_erased<const N_OPERANDS: usize>(
+    operands: [&Operand<'_>; N_OPERANDS],
+    inner_loop_factory: InnerLoopFactory<'_>,
+    shape: &[usize],
+    context: &ReadContext,
+) {
+    let out_operand = operands[0];
+    let output_dtype = out_operand.dtype;
+    let is_output_operand = |op_i: usize| op_i == 0;
     let layouts = operands.map_inline_ref(|operand| {
         let dtype = operand.dtype;
         (dtype.itemsize(), dtype.alignment())
@@ -157,17 +223,14 @@ where
         })
     });
 
-    let contiguous = (0..N_OPERANDS).all(|i| {
-        iter.is_contiguous()[i]
-        // A staged operand is read (or written) straight out of its scratch buffer, so it is
-        // contiguous whatever the original strides say.
-        || staging[i].is_some()
-    });
-    let inner_loop_fn = if contiguous {
-        pick_inner_loop::<_, _, true>()
-    } else {
-        pick_inner_loop::<_, _, false>()
+    // A staged operand is read (or written) straight out of its scratch buffer, so it is
+    // contiguous whatever the original strides say.
+    let operand_contiguous = |i: usize| iter.is_contiguous()[i] || staging[i].is_some();
+    let inner_loop_flags = InnerLoopFlags {
+        inputs_contiguous: (1..N_OPERANDS).all(&operand_contiguous),
+        output_contiguous: operand_contiguous(0),
     };
+    let inner_loop = inner_loop_factory(inner_loop_flags);
 
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
@@ -201,8 +264,14 @@ where
                 }
             }
 
-            let dst = out_operand.current_ptr.get().cast_mut().cast::<T>();
-            inner_loop_fn(&pipeline, dst, out_operand.inner_stride.get(), chunk_len);
+            let dst_stride = out_operand.inner_stride.get();
+            let dst = unsafe {
+                std::slice::from_raw_parts_mut(
+                    out_operand.current_ptr.get().cast_mut(),
+                    strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
+                )
+            };
+            inner_loop(dst, dst_stride, chunk_len);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -212,32 +281,25 @@ where
                         out_operand.base_ptr().add(offset),
                         chunk_len,
                         inner_strides[0],
-                        &output_dtype,
+                        output_dtype,
                     )
                 };
             }
         }
     });
-
-    Ok(())
 }
 
-// Identical to `to_buf_impl`, but the number of operands is not known at compile time.
-fn to_buf_impl_dyn<T>(
-    pipeline: impl ElementwisePipelineImpl<T>,
+// Identical to `to_buf_type_erased`, but the number of operands is not known at compile time.
+#[inline(never)]
+fn to_buf_type_erased_dyn(
+    operands: &[&Operand<'_>],
+    inner_loop_factory: InnerLoopFactory<'_>,
     shape: &[usize],
-    out: &mut StridedBuf<'_>,
     context: &ReadContext,
-) -> Result<()>
-where
-    T: Dtyped,
-{
-    let output_dtype = T::DTYPE;
-    let out_operand = Operand::new_output(out, &output_dtype);
+) {
+    let out_operand = operands[0];
+    let output_dtype = out_operand.dtype;
     let is_output_operand = |op_i: usize| op_i == 0;
-    let operands = std::iter::once(&out_operand)
-        .chain(pipeline.operands())
-        .collect::<Vec<_>>();
     let layouts = operands
         .iter()
         .map(|operand| {
@@ -269,17 +331,14 @@ where
         })
         .collect::<Vec<_>>();
 
-    let contiguous = (0..operands.len()).all(|i| {
-        iter.is_contiguous()[i]
-        // A staged operand is read (or written) straight out of its scratch buffer, so it is
-        // contiguous whatever the original strides say.
-        || staging[i].is_some()
-    });
-    let inner_loop_fn = if contiguous {
-        pick_inner_loop::<_, _, true>()
-    } else {
-        pick_inner_loop::<_, _, false>()
+    // A staged operand is read (or written) straight out of its scratch buffer, so it is
+    // contiguous whatever the original strides say.
+    let operand_contiguous = |i: usize| iter.is_contiguous()[i] || staging[i].is_some();
+    let inner_loop_flags = InnerLoopFlags {
+        inputs_contiguous: (1..operands.len()).all(&operand_contiguous),
+        output_contiguous: operand_contiguous(0),
     };
+    let inner_loop = inner_loop_factory(inner_loop_flags);
 
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
@@ -313,8 +372,14 @@ where
                 }
             }
 
-            let dst = out_operand.current_ptr.get().cast_mut().cast::<T>();
-            inner_loop_fn(&pipeline, dst, out_operand.inner_stride.get(), chunk_len);
+            let dst_stride = out_operand.inner_stride.get();
+            let dst = unsafe {
+                std::slice::from_raw_parts_mut(
+                    out_operand.current_ptr.get().cast_mut(),
+                    strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
+                )
+            };
+            inner_loop(dst, dst_stride, chunk_len);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -324,14 +389,12 @@ where
                         out_operand.base_ptr().add(offset),
                         chunk_len,
                         inner_strides[0],
-                        &output_dtype,
+                        output_dtype,
                     )
                 };
             }
         }
     });
-
-    Ok(())
 }
 
 /// A temporary buffer used to stage a chunk of an operand data during a pipeline run.
@@ -397,64 +460,79 @@ impl Staging<'_> {
 }
 
 #[inline(never)]
-fn inner_loop<T, const LANES: usize, const CONTIGUOUS: bool>(
+fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
     pipeline: &impl ElementwisePipelineImpl<T>,
-    dst: *mut T, // TODO: slice for noalias
+    dst: &mut [u8],
     dst_stride: usize,
     len: usize,
 ) where
     T: Dtyped,
 {
-    if CONTIGUOUS {
+    if OUT_CONTIGUOUS {
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
+    let dst = dst.as_mut_ptr().cast::<T>();
     debug_assert!(dst.is_aligned());
+
+    let body_limit = len - len % LANES;
     let mut i = 0;
-    while i + LANES <= len {
-        let chunk = unsafe { pipeline.read_bulk::<LANES, CONTIGUOUS>() };
-        if CONTIGUOUS {
-            let elms = unsafe { dst.add(i).cast::<[T; LANES]>() };
-            unsafe { elms.write(chunk) };
+    while i < body_limit {
+        let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>(i) };
+        if OUT_CONTIGUOUS {
+            unsafe { dst.add(i).cast::<[T; LANES]>().write(chunk) };
         } else {
             #[allow(clippy::needless_range_loop)]
             for k in 0..LANES {
-                let elm = unsafe { dst.cast::<u8>().add((i + k) * dst_stride).cast::<T>() };
-                unsafe { elm.write(chunk[k]) };
+                unsafe { dst.byte_add((i + k) * dst_stride).write(chunk[k]) };
             }
         }
         i += LANES;
     }
     while i < len {
-        let [val] = unsafe { pipeline.read_bulk::<1, CONTIGUOUS>() };
-        let elm = if CONTIGUOUS {
-            unsafe { dst.add(i) }
+        let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>(i) };
+        if OUT_CONTIGUOUS {
+            unsafe { dst.add(i).write(val) };
         } else {
-            unsafe { dst.cast::<u8>().add(i * dst_stride).cast::<T>() }
-        };
-        unsafe { elm.write(val) };
+            unsafe { dst.byte_add(i * dst_stride).write(val) };
+        }
         i += 1;
     }
 }
 
-type InnerLoopFn<T, P> = fn(&P, *mut T, usize, usize);
-fn pick_inner_loop<T, P, const CONTIGUOUS: bool>() -> InnerLoopFn<T, P>
+#[derive(Clone, Copy)]
+struct InnerLoopFlags {
+    inputs_contiguous: bool,
+    output_contiguous: bool,
+}
+type InnerLoop<'a> = dyn Fn(&mut [u8], usize, usize) + 'a;
+type InnerLoopFactory<'a> = &'a dyn Fn(InnerLoopFlags) -> &'a InnerLoop<'a>;
+
+fn pick_inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
+) -> fn(&P, &mut [u8], usize, usize)
 where
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,
 {
     const {
-        match <T as LanesInfo>::LANES {
-            1 => inner_loop::<_, 1, CONTIGUOUS>,
-            2 => inner_loop::<_, 2, CONTIGUOUS>,
-            4 => inner_loop::<_, 4, CONTIGUOUS>,
-            8 => inner_loop::<_, 8, CONTIGUOUS>,
-            16 => inner_loop::<_, 16, CONTIGUOUS>,
-            32 => inner_loop::<_, 32, CONTIGUOUS>,
-            64 => inner_loop::<_, 64, CONTIGUOUS>,
-            128 => inner_loop::<_, 128, CONTIGUOUS>,
-            256 => inner_loop::<_, 256, CONTIGUOUS>,
-            512 => inner_loop::<_, 512, CONTIGUOUS>,
-            _ => inner_loop::<_, 1024, CONTIGUOUS>,
+        let default_lanes = <T as LanesInfo>::LANES;
+        const STRIDED_LANES: usize = 4;
+        let lanes = if IN_CONTIGUOUS && OUT_CONTIGUOUS || default_lanes < STRIDED_LANES {
+            default_lanes
+        } else {
+            STRIDED_LANES
+        };
+        match lanes {
+            1 => inner_loop::<_, 1, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            2 => inner_loop::<_, 2, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            4 => inner_loop::<_, 4, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            8 => inner_loop::<_, 8, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            16 => inner_loop::<_, 16, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            32 => inner_loop::<_, 32, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            64 => inner_loop::<_, 64, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            128 => inner_loop::<_, 128, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            256 => inner_loop::<_, 256, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            512 => inner_loop::<_, 512, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
+            _ => inner_loop::<_, 1024, IN_CONTIGUOUS, OUT_CONTIGUOUS>,
         }
     }
 }
@@ -485,12 +563,12 @@ enum OperandData<'a> {
 }
 
 impl<'a> Operand<'a> {
-    #[inline]
+    #[inline(never)]
     pub(crate) fn new_input(original_data: StridedBuf<'a>, dtype: &'a Dtype) -> Self {
         Self::new_impl(OperandData::Input(original_data), dtype)
     }
 
-    #[inline]
+    #[inline(never)]
     pub(crate) fn new_output(out: &'a mut StridedBuf<'_>, dtype: &'a Dtype) -> Self {
         let strides = out.strides().to_dim_vec::<DimDyn>();
         let base_ptr = out.data_ptr_mut().unwrap();
@@ -562,40 +640,54 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     }
 
     #[inline(always)]
-    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
+    unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
         debug_assert!(!base.is_null());
         debug_assert!(base.is_aligned());
 
-        let stride = self.operand.inner_stride.get();
         if CONTIGUOUS {
-            debug_assert_eq!(stride, size_of::<T>());
-            let vals = unsafe { base.cast::<[T; N]>().read() };
-
-            self.operand
-                .current_ptr
-                .set(unsafe { base.add(N).cast::<u8>() });
-            vals
+            debug_assert_eq!(self.operand.inner_stride.get(), size_of::<T>());
+            unsafe { base.add(offset).cast::<[T; N]>().read() }
         } else {
-            let vals = array_from_fn_inline(|i| unsafe {
-                base.cast::<u8>().add(i * stride).cast::<T>().read()
-            });
-
-            self.operand
-                .current_ptr
-                .set(unsafe { base.cast::<u8>().add(N * stride) });
-            vals
+            let stride = self.operand.inner_stride.get();
+            let base = unsafe { base.byte_add(offset * stride) };
+            array_from_fn_inline(|k| unsafe { base.byte_add(k * stride).read() })
         }
     }
 }
 
+#[inline(never)]
+fn materialize_pipeline_out_buf<'b, 's>(
+    index: &[Range<u64>],
+    operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
+    output_dtype: &Dtype,
+    context: &'b ReadContext,
+    out: Option<&'b mut StridedBuf<'_>>,
+) -> (DimArray<usize>, StridedBuf<'b>) {
+    let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+    let out = match out {
+        Some(out) => out.view_mut(),
+        None => {
+            let itemsize = output_dtype.itemsize() as usize;
+            let strides = pick_output_layout(operands, shape.as_ref(), itemsize);
+            let buf = context.allocate_buf(
+                shape.iter().product::<usize>() * itemsize,
+                output_dtype.alignment(),
+            );
+            unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
+        }
+    };
+    (shape, out)
+}
+
+#[inline(never)]
 fn pick_output_layout<'s>(
-    operands: impl Iterator<Item = &'s Operand<'s>>,
+    operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
     shape: &[usize],
     itemsize: usize,
 ) -> DimArray<usize> {
     fn pick_axis_order<'s>(
-        operands: impl Iterator<Item = &'s Operand<'s>>,
+        operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
         shape: &[usize],
         itemsize: usize,
     ) -> Option<DimArray<DimIdx>> {
@@ -822,9 +914,12 @@ mod tests {
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
                 self.lhs.operands().chain(self.rhs.operands())
             }
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
-                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS>() };
-                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS>() };
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+                &self,
+                offset: usize,
+            ) -> [T; N] {
+                let lhs = unsafe { self.lhs.read_bulk::<N, CONTIGUOUS>(offset) };
+                let rhs = unsafe { self.rhs.read_bulk::<N, CONTIGUOUS>(offset) };
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
         }
@@ -948,8 +1043,9 @@ mod tests {
             Operand::new_input(buf, &dtype)
         };
 
-        let pick =
-            |ops: &[Operand<'_>], shape: &[usize]| pick_output_layout(ops.iter(), shape, itemsize);
+        let pick = |ops: &[Operand<'_>], shape: &[usize]| {
+            pick_output_layout(&mut ops.iter(), shape, itemsize)
+        };
 
         // Every operand F-ordered -> so is the output.
         let f_ops = [operand(&f_strides), operand(&f_strides)];
@@ -997,7 +1093,7 @@ mod tests {
             let buf =
                 unsafe { StridedBuf::from_raw_parts(data.as_ptr(), &shape, strides, itemsize) };
             let ops = [Operand::new_input(buf, &dtype)];
-            pick_output_layout(ops.iter(), &shape, itemsize)
+            pick_output_layout(&mut ops.iter(), &shape, itemsize)
         };
 
         // Broadcast along axis 0. Axis 1 is the only one actually walked, so it belongs innermost -
@@ -1021,7 +1117,7 @@ mod tests {
         };
         let ops = [Operand::new_input(buf, &dtype)];
         assert_eq!(
-            pick_output_layout(ops.iter(), &shape1, itemsize).as_ref(),
+            pick_output_layout(&mut ops.iter(), &shape1, itemsize).as_ref(),
             c_strides1.as_ref()
         );
     }

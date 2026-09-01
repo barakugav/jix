@@ -67,7 +67,7 @@ where
     where
         T: Dtyped,
     {
-        check_dtype(&T::DTYPE, &K::Output::DTYPE)?;
+        check_dtype(Dtype::new_ref::<T>(), Dtype::new_ref::<K::Output>())?;
         let inner = self
             .array
             .read_as_elementwise_pipeline::<S::Item>(index, context)?;
@@ -91,13 +91,16 @@ where
             }
 
             #[inline(always)]
-            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self) -> [T; N] {
-                let xs = unsafe { self.inner.read_bulk::<N, CONTIGUOUS>() };
+            unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(
+                &self,
+                offset: usize,
+            ) -> [T; N] {
+                let xs = unsafe { self.inner.read_bulk::<N, CONTIGUOUS>(offset) };
                 xs.map_inline(|x| {
                     let x = self.kernel.apply(x);
 
                     const { assert!(size_of::<K::Output>() == size_of::<T>()) };
-                    // SAFETY: the caller checked `T` and `K::Output` are the same dtype.
+                    // SAFETY: we checked `T` and `K::Output` are the same dtype in the outer func
                     unsafe { std::mem::transmute_copy::<K::Output, T>(&x) }
                 })
             }
@@ -117,7 +120,7 @@ where
 
     #[inline(always)]
     fn dtype(&self) -> &Dtype {
-        const { &K::Output::DTYPE }
+        Dtype::new_ref::<K::Output>()
     }
 
     #[inline]
