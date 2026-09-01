@@ -1,11 +1,10 @@
 use jix_core::ArrayAny;
-use numpy::PyArrayDescr;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
 use crate::array::{resolve_array_params, Array};
-use crate::dtype::dtype_from_numpy;
+use crate::dtype::{dtype_from_numpy, numpy_descr_from_any};
 use crate::ops::astype_impl;
 use crate::ops::common::Operand;
 
@@ -63,7 +62,7 @@ pub fn asarray<'py>(
     let mut py_arr = Operand::from_any_with_params(value, params, false)?.into_py_array(py)?;
 
     if let Some(dtype) = dtype {
-        let np_dtype = &PyArrayDescr::new(py, dtype)?;
+        let np_dtype = &numpy_descr_from_any(py, dtype)?;
         let dtype = dtype_from_numpy(np_dtype)?;
         let array = astype_impl(py_arr.get().arr.clone(), &dtype)?;
         py_arr = Bound::new(

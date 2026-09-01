@@ -322,6 +322,12 @@ impl Read for PyReader<'_> {
         };
 
         let n = bytes.len();
+        if n > buf.len() {
+            return Err(io::Error::other(format!(
+                "read() returned {n} bytes for a request of {}",
+                buf.len()
+            )));
+        }
         buf[..n].copy_from_slice(bytes);
         Ok(n)
     }
@@ -439,7 +445,14 @@ impl Write for PyWriter<'_> {
         if result.is_none() {
             return Ok(buf.len());
         }
-        result.extract::<usize>().map_err(py_to_io_err)
+        let n = result.extract::<usize>().map_err(py_to_io_err)?;
+        if n > buf.len() {
+            return Err(io::Error::other(format!(
+                "write() reported {n} bytes written for a buffer of {}",
+                buf.len()
+            )));
+        }
+        Ok(n)
     }
 
     #[inline]

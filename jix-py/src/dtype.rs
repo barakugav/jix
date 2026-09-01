@@ -86,6 +86,18 @@ pub(crate) fn dtype_to_numpy<'py>(
     Ok(numpy_dtype)
 }
 
+pub(crate) fn numpy_descr_from_any<'py>(
+    py: pyo3::Python<'py>,
+    dtype: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyArrayDescr>> {
+    if dtype.is_none() {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "dtype must be a dtype-like object, not None",
+        ));
+    }
+    PyArrayDescr::new(py, dtype)
+}
+
 pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dtype> {
     let shape = numpy_dtype.shape();
     if shape.len() > DTYPE_MAX_NDIM {
@@ -94,18 +106,30 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dt
             shape.len()
         )));
     }
-    let shape: DimArray<Itemsize> = shape
+    let shape = shape
         .iter()
-        .map(|&s| s.try_into().expect("dtype shape should fit into u16"))
-        .collect();
-    let itemsize: Itemsize = numpy_dtype
-        .itemsize()
-        .try_into()
-        .expect("itemsize should fit into u16");
-    let alignment: Alignment = numpy_dtype
-        .alignment()
-        .try_into()
-        .expect("alignment should fit into u16");
+        .map(|&s| {
+            Itemsize::try_from(s).map_err(|_| {
+                PyValueError::new_err(format!(
+                    "Unsupported dtype: sub-array dimension {s} exceeds the maximum supported {}",
+                    Itemsize::MAX
+                ))
+            })
+        })
+        .collect::<PyResult<DimArray<_>>>()?;
+    let itemsize = Itemsize::try_from(numpy_dtype.itemsize()).map_err(|_| {
+        PyValueError::new_err(format!(
+            "Unsupported dtype: itemsize {} exceeds the maximum supported {}",
+            numpy_dtype.itemsize(),
+            Itemsize::MAX
+        ))
+    })?;
+    let alignment = Alignment::new(numpy_dtype.alignment()).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "Unsupported dtype: invalid alignment {}",
+            numpy_dtype.alignment()
+        ))
+    })?;
     let numpy_base = numpy_dtype.base();
     let base_itemsize = numpy_base.itemsize();
 
@@ -157,13 +181,19 @@ pub(crate) fn dtype_from_numpy(numpy_dtype: &Bound<PyArrayDescr>) -> PyResult<Dt
         dtype
     } else {
         // struct
-        let fields = numpy_base
-            .names()
-            .unwrap()
+        let names = numpy_base.names().ok_or_else(|| {
+            PyValueError::new_err(format!("Unsupported struct dtype: {numpy_base:?}"))
+        })?;
+        let fields = names
             .into_iter()
             .map::<PyResult<_>, _>(|field_name| {
-                let (field_dtype, field_offset) = numpy_base.get_field(&field_name).unwrap();
-                let field_offset: Itemsize = field_offset.try_into().unwrap();
+                let (field_dtype, field_offset) = numpy_base.get_field(&field_name)?;
+                let field_offset = Itemsize::try_from(field_offset).map_err(|_| {
+                    PyValueError::new_err(format!(
+                        "Unsupported struct dtype: field '{field_name}' offset {field_offset} exceeds the maximum supported {}",
+                        Itemsize::MAX
+                    ))
+                })?;
                 let field_dtype = dtype_from_numpy(&field_dtype)?;
                 Ok((field_name, field_offset, field_dtype))
             })

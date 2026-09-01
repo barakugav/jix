@@ -66,9 +66,14 @@ impl EncoderParams {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if `level` is out of the valid range (0-19 for zstd).
+    /// Returns `InvalidArgument` if `level` is not in the valid range.
     pub fn level(&mut self, level: i32) -> Result<&mut Self> {
-        self.level = level.try_into().unwrap();
+        self.level = level.try_into().map_err(|_| {
+            error!(
+                InvalidArgument,
+                "compression level {level} is out of the supported range"
+            )
+        })?;
         Ok(self)
     }
 
@@ -389,5 +394,29 @@ impl ReadContext {
 impl Default for ReadContext {
     fn default() -> Self {
         Self::new(&DecoderParams::default()).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ErrorKind;
+
+    #[test]
+    fn level_out_of_i8_range_errors() {
+        for level in [128, 1000, i32::MAX, -129, -1000, i32::MIN] {
+            let err = EncoderParams::default().level(level).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::InvalidArgument);
+            assert!(err.message().contains("compression level"), "{err}");
+        }
+    }
+
+    #[test]
+    fn level_in_i8_range_is_accepted() {
+        for level in [i8::MIN, -5, 0, 3, 19, 22, i8::MAX] {
+            let mut params = EncoderParams::default();
+            params.level(level as i32).unwrap();
+            assert_eq!(params.level, level);
+        }
     }
 }

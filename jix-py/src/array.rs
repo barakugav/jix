@@ -1521,22 +1521,16 @@ pub(crate) fn resolve_array_params(
         params.block_size(block_size);
     }
     if let Some(read_size) = read_size {
-        if read_size.len() > 2 {
+        if read_size.len() != 1 && read_size.len() != 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "read_size must be a scalar or a 2-element sequence, got {} elements",
                 read_size.len()
             )));
         }
-        let read_size = read_size.into_dim_array().unwrap();
-        let pair = match read_size.len() {
-            1 => {
-                let [read_size] = read_size.as_slice().try_into().unwrap();
-                (read_size, read_size)
-            }
-            2 => {
-                let [min, max] = read_size.as_slice().try_into().unwrap();
-                (min, max)
-            }
+        let read_size = read_size.into_dim_array()?;
+        let pair = match *read_size.as_slice() {
+            [read_size] => (read_size, read_size),
+            [min, max] => (min, max),
             _ => unreachable!(),
         };
         params.read_size(pair);
