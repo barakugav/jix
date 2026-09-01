@@ -451,7 +451,7 @@ unsafe fn raw_ptr_add<T>(ptr: *mut T, offset: usize) -> *mut T {
     unsafe {
         if mem::size_of::<T>() == 0 {
             // Special case for ZST
-            ptr.cast::<u8>().wrapping_add(offset).cast::<T>()
+            ptr.wrapping_byte_add(offset)
         } else {
             ptr.add(offset)
         }

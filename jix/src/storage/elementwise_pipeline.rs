@@ -483,12 +483,7 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
         } else {
             #[allow(clippy::needless_range_loop)]
             for k in 0..LANES {
-                unsafe {
-                    dst.cast::<u8>()
-                        .add((i + k) * dst_stride)
-                        .cast::<T>()
-                        .write(chunk[k])
-                };
+                unsafe { dst.byte_add((i + k) * dst_stride).write(chunk[k]) };
             }
         }
         i += LANES;
@@ -498,7 +493,7 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
         if OUT_CONTIGUOUS {
             unsafe { dst.add(i).write(val) };
         } else {
-            unsafe { dst.cast::<u8>().add(i * dst_stride).cast::<T>().write(val) };
+            unsafe { dst.byte_add(i * dst_stride).write(val) };
         }
         i += 1;
     }
@@ -655,8 +650,8 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
             unsafe { base.add(offset).cast::<[T; N]>().read() }
         } else {
             let stride = self.operand.inner_stride.get();
-            let base = unsafe { base.cast::<u8>().add(offset * stride) };
-            array_from_fn_inline(|k| unsafe { base.add(k * stride).cast::<T>().read() })
+            let base = unsafe { base.byte_add(offset * stride) };
+            array_from_fn_inline(|k| unsafe { base.byte_add(k * stride).read() })
         }
     }
 }

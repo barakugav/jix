@@ -270,7 +270,7 @@ where
                     } else {
                         (
                             x.byte_add(i * x_stride),
-                            condition.add(i * cond_stride),
+                            condition.byte_add(i * cond_stride),
                             y.byte_add(i * y_stride),
                         )
                     };
@@ -298,10 +298,10 @@ where
             let y = y.as_ptr();
             unsafe {
                 for i in 0..len {
-                    let cond = condition.add(i * cond_stride).read();
+                    let cond = condition.byte_add(i * cond_stride).read();
                     if !cond {
-                        let x = x.add(i * x_stride);
-                        let y = y.add(i * y_stride);
+                        let x = x.byte_add(i * x_stride);
+                        let y = y.byte_add(i * y_stride);
                         x.copy_from_nonoverlapping(y, itemsize);
                     }
                 }
