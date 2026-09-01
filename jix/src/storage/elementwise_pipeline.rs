@@ -212,12 +212,16 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     let iter = NdIterUnordered::new(shape, strides, layouts);
     let chunk_len_max = iter.inner_len().min(Staging::BUFFER_SIZE);
 
+    let stage_strided = stage_strided_inputs(&iter.is_contiguous());
     let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
         let operand = operands[i];
-        let needs_staging = REQUIRE_ALIGNED
+        let need_staging_unaligned = REQUIRE_ALIGNED
             && !(iter.is_aligned()[i]
                 && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
-        needs_staging.then(|| Staging {
+        let need_staging_strided =
+            stage_strided && !is_output_operand(i) && !iter.is_contiguous()[i];
+        let need_staging = need_staging_unaligned || need_staging_strided;
+        need_staging.then(|| Staging {
             buf: context.allocate_buf(
                 chunk_len_max * layouts[i].0 as usize,
                 operand.dtype.alignment(),
@@ -318,14 +322,18 @@ fn to_buf_type_erased_dyn(
     let iter = NdIterUnorderedDyn::new(shape, &strides, &layouts);
     let chunk_len_max = iter.inner_len().min(Staging::BUFFER_SIZE);
 
+    let stage_strided = stage_strided_inputs(iter.is_contiguous());
     let mut staging = operands
         .iter()
         .enumerate()
         .map(|(i, operand)| {
-            let needs_staging = REQUIRE_ALIGNED
+            let need_staging_unaligned = REQUIRE_ALIGNED
                 && !(iter.is_aligned()[i]
                     && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
-            needs_staging.then(|| Staging {
+            let need_staging_strided =
+                stage_strided && !is_output_operand(i) && !iter.is_contiguous()[i];
+            let need_staging = need_staging_unaligned || need_staging_strided;
+            need_staging.then(|| Staging {
                 buf: context.allocate_buf(
                     chunk_len_max * layouts[i].0 as usize,
                     operand.dtype.alignment(),
@@ -399,6 +407,24 @@ fn to_buf_type_erased_dyn(
             }
         }
     });
+}
+
+/// Whether to stage the non-contiguous *input* operands, on top of the ones staged for alignment.
+fn stage_strided_inputs(is_contiguous: &[bool]) -> bool {
+    let is_contiguous = &is_contiguous[1..]; // ignore index 0 - output operand
+    let n_inputs = is_contiguous.len();
+    let n_contiguous = is_contiguous.iter().filter(|&&c| c).count();
+
+    /// The number of already-contiguous inputs that makes staging the rest worth it.
+    ///
+    /// A single non-contiguous operand turns `inputs_contiguous` off for the *whole* pipeline.
+    /// Copying the odd one out into scratch buys that back for all the others, at the price of one
+    /// extra pass over it. So the win grows with the number of operands that get their wide read
+    /// back while the cost stays at one pass, and it only turns positive once enough of them are
+    /// already contiguous.
+    const STAGE_MIN_CONTIGUOUS_INPUTS: usize = 4;
+
+    n_contiguous >= STAGE_MIN_CONTIGUOUS_INPUTS && n_contiguous >= n_inputs / 2
 }
 
 /// A temporary buffer used to stage a chunk of an operand data during a pipeline run.
@@ -1726,6 +1752,60 @@ mod tests {
         );
         let out = mapped.to_ndarray().unwrap();
         assert_eq!(out.iter().copied().collect::<Vec<i32>>(), expected(16));
+    }
+
+    #[test]
+    fn stage_strided_inputs_needs_enough_contiguous_inputs() {
+        // Entry 0 is the output and never counts. Below the threshold the extra pass is not worth
+        // it; at or above it, and with something left to stage, it is.
+        let f = |flags: &[bool]| stage_strided_inputs(flags);
+        assert!(!f(&[true, false])); // 1 input, none contiguous
+        assert!(!f(&[true, true, false, false])); // 1 of 2 - below the threshold
+        assert!(!f(&[true, true, true, true, false])); // 3 of 4 - still below
+        assert!(f(&[true, true, true, true, true, false])); // 4 of 5 - pays off
+        assert!(f(&[true, false, true, true, true, true, false])); // 4 of 6, two to stage
+        assert!(f(&[false, true, true, true, true, false])); // the output's own flag is ignored
+    }
+
+    #[test]
+    fn staged_for_contiguity_matches_the_unstaged_result() {
+        // Six inputs, five of them contiguous: the odd one out is copied into scratch so the rest
+        // keep their wide read. Run the same sum with the strided operand gapped, broadcast, and
+        // contiguous - every shape has to produce the plain element-wise answer.
+        type T = i32;
+        const N_IN: usize = 6;
+        const LEN: usize = 300;
+
+        for odd_gap in [2usize, 0, 1] {
+            let gaps: [usize; N_IN] =
+                std::array::from_fn(|k| if k + 1 == N_IN { odd_gap } else { 1 });
+            let backings =
+                gaps.map_inline(|gap| (0..LEN * gap.max(1)).map(|i| i as T).collect::<Vec<T>>());
+            let arrays = array_from_fn_inline::<_, N_IN>(|k| {
+                let arr: Array<crate::storage::Plain<_, Ty<T>, _>> = unsafe {
+                    Array::plain_ndarray_ptr(
+                        backings[k].as_ptr().cast::<u8>(),
+                        &[LEN as u64][..],
+                        &[gaps[k] * size_of::<T>()][..],
+                        T::DTYPE,
+                        Default::default(),
+                    )
+                }
+                .unwrap();
+                arr
+            });
+            let expected = (0..LEN)
+                .map(|i| (0..N_IN).map(|k| backings[k][i * gaps[k]]).sum::<T>())
+                .collect::<Vec<T>>();
+
+            let summed = crate::ops::map_multiple(arrays, |xs: [T; N_IN]| xs.iter().sum::<T>());
+            let got = summed.to_ndarray().unwrap();
+            assert_eq!(
+                got.iter().copied().collect::<Vec<T>>(),
+                expected,
+                "odd_gap={odd_gap}"
+            );
+        }
     }
 
     #[test]
