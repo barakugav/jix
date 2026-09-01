@@ -8,8 +8,10 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, n_operands_sum, ArraySpec, ArrayStorageInfo,
     ArrayStorageTyped, ElementwisePipeline, ElementwisePipelineImpl, Operand, StridedBuf,
 };
-use crate::util::cast_slice;
-use crate::{array_from_fn_inline, Array, ArrayStorage, Dimension, NdIterUnordered};
+use crate::util::{cast_slice, REQUIRE_ALIGNED};
+use crate::{
+    array_from_fn_inline, Array, ArrayStorage, Dimension, NdIterUnordered, PtrExt, PtrMutExt,
+};
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
 /// examples.
@@ -182,11 +184,13 @@ where
                 (dtype.itemsize(), dtype.alignment()),
             ],
         );
-        let [x_aligned, _cond_aligned, y_aligned] = iter.is_aligned();
-        let aligned = x_aligned
-            && y_aligned
-            && (out_buf.as_ptr() as usize).is_multiple_of(alignment)
-            && (y_buf.as_ptr() as usize).is_multiple_of(alignment);
+        let aligned = !REQUIRE_ALIGNED || {
+            let [x_aligned, _cond_aligned, y_aligned] = iter.is_aligned();
+            x_aligned
+                && y_aligned
+                && (out_buf.as_ptr() as usize).is_multiple_of(alignment)
+                && (y_buf.as_ptr() as usize).is_multiple_of(alignment)
+        };
         let contiguous = iter.is_contiguous().iter().all(|&c| c);
 
         type InnerLoopFn = unsafe fn(&mut [u8], &[bool], &[u8], usize, [usize; 3], usize);
@@ -249,9 +253,15 @@ where
                     let body_limit = len - len % LANES;
                     while i < body_limit {
                         let x_chunk_ptr = x.add(i).cast::<[T; LANES]>();
-                        let x_chunk = x_chunk_ptr.read();
-                        let y_chunk = y.add(i).cast::<[T; LANES]>().read();
-                        let cond_chunk = condition.add(i).cast::<[bool; LANES]>().read();
+                        let x_chunk = x_chunk_ptr.read_maybe_aligned::<REQUIRE_ALIGNED>();
+                        let y_chunk = y
+                            .add(i)
+                            .cast::<[T; LANES]>()
+                            .read_maybe_aligned::<REQUIRE_ALIGNED>();
+                        let cond_chunk = condition
+                            .add(i)
+                            .cast::<[bool; LANES]>()
+                            .read_maybe_aligned::<REQUIRE_ALIGNED>();
                         let mut out = x_chunk;
                         for k in 0..LANES {
                             out[k] = if cond_chunk[k] {
@@ -260,7 +270,7 @@ where
                                 y_chunk[k]
                             };
                         }
-                        x_chunk_ptr.write(out);
+                        x_chunk_ptr.write_maybe_aligned::<REQUIRE_ALIGNED>(out);
                         i += LANES;
                     }
                 }
@@ -274,10 +284,14 @@ where
                             y.byte_add(i * y_stride),
                         )
                     };
-                    let x_val = x.read();
-                    let y_val = y.read();
-                    let val = if cond.read() { x_val } else { y_val };
-                    x.write(val);
+                    let x_val = x.read_maybe_aligned::<REQUIRE_ALIGNED>();
+                    let y_val = y.read_maybe_aligned::<REQUIRE_ALIGNED>();
+                    let val = if cond.read_maybe_aligned::<REQUIRE_ALIGNED>() {
+                        x_val
+                    } else {
+                        y_val
+                    };
+                    x.write_maybe_aligned::<REQUIRE_ALIGNED>(val);
                     i += 1;
                 }
             }
@@ -835,8 +849,8 @@ mod tests {
     }
 
     // The inner loop is picked by (element width, alignment) and then specialized on
-    // (all-operands-contiguous, aligned), so each width is checked in all three interesting
-    // destination layouts: contiguous+aligned, strided (gap) and contiguous-but-unaligned.
+    // all-operands-contiguous, so each width is checked in all three interesting destination
+    // layouts: contiguous+aligned, strided (gap) and contiguous-but-unaligned.
     macro_rules! test_where_strided_dtype {
         ($dtype:ty, $f:expr) => {
             paste::paste! {
