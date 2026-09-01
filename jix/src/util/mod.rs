@@ -610,6 +610,17 @@ impl<T> SliceExt<T> for [T] {
     }
 }
 
+/// Whether reads and writes of pointers have to be naturally aligned.
+///
+/// x86-64 and aarch64 address unaligned data at full speed, only slower when crossing a cache line
+///
+/// Pass this to [`PtrExt::read_maybe_aligned`] / [`PtrMutExt::write_maybe_aligned`].
+pub(crate) const REQUIRE_ALIGNED: bool = !cfg!(any(
+    target_arch = "x86",
+    target_arch = "x86_64",
+    target_arch = "aarch64"
+));
+
 pub(crate) trait PtrExt<T> {
     unsafe fn read_maybe_aligned<const ALIGNED: bool>(self) -> T;
 }

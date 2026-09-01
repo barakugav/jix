@@ -10,6 +10,7 @@ use crate::error::Result;
 use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
+use crate::util::{PtrExt, PtrMutExt, REQUIRE_ALIGNED};
 use crate::{
     array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimDyn, DimIdx,
     NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
@@ -40,8 +41,9 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     ///
     /// # Safety
     ///
-    /// Every operand's `current_ptr` must be aligned for its dtype, and elements
-    /// `offset..offset + N` at `inner_stride` must be in bounds of its `original_data`.
+    /// Every operand's `current_ptr` must be aligned for its dtype when [`REQUIRE_ALIGNED`] is
+    /// set, and elements `offset..offset + N` at `inner_stride` must be in bounds of its
+    /// `original_data`.
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
 
     #[inline(never)]
@@ -212,9 +214,10 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
 
     let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
         let operand = operands[i];
-        let aligned = iter.is_aligned()[i]
-            && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize());
-        (!aligned).then(|| Staging {
+        let needs_staging = REQUIRE_ALIGNED
+            && !(iter.is_aligned()[i]
+                && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
+        needs_staging.then(|| Staging {
             buf: context.allocate_buf(
                 chunk_len_max * layouts[i].0 as usize,
                 operand.dtype.alignment(),
@@ -319,9 +322,10 @@ fn to_buf_type_erased_dyn(
         .iter()
         .enumerate()
         .map(|(i, operand)| {
-            let aligned = iter.is_aligned()[i]
-                && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize());
-            (!aligned).then(|| Staging {
+            let needs_staging = REQUIRE_ALIGNED
+                && !(iter.is_aligned()[i]
+                    && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
+            needs_staging.then(|| Staging {
                 buf: context.allocate_buf(
                     chunk_len_max * layouts[i].0 as usize,
                     operand.dtype.alignment(),
@@ -472,18 +476,25 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
     let dst = dst.as_mut_ptr().cast::<T>();
-    debug_assert!(dst.is_aligned());
+    debug_assert!(!REQUIRE_ALIGNED || dst.is_aligned());
 
     let body_limit = len - len % LANES;
     let mut i = 0;
     while i < body_limit {
         let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>(i) };
         if OUT_CONTIGUOUS {
-            unsafe { dst.add(i).cast::<[T; LANES]>().write(chunk) };
+            unsafe {
+                dst.add(i)
+                    .cast::<[T; LANES]>()
+                    .write_maybe_aligned::<REQUIRE_ALIGNED>(chunk)
+            };
         } else {
             #[allow(clippy::needless_range_loop)]
             for k in 0..LANES {
-                unsafe { dst.byte_add((i + k) * dst_stride).write(chunk[k]) };
+                unsafe {
+                    dst.byte_add((i + k) * dst_stride)
+                        .write_maybe_aligned::<REQUIRE_ALIGNED>(chunk[k])
+                };
             }
         }
         i += LANES;
@@ -491,9 +502,12 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     while i < len {
         let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>(i) };
         if OUT_CONTIGUOUS {
-            unsafe { dst.add(i).write(val) };
+            unsafe { dst.add(i).write_maybe_aligned::<REQUIRE_ALIGNED>(val) };
         } else {
-            unsafe { dst.byte_add(i * dst_stride).write(val) };
+            unsafe {
+                dst.byte_add(i * dst_stride)
+                    .write_maybe_aligned::<REQUIRE_ALIGNED>(val)
+            };
         }
         i += 1;
     }
@@ -643,15 +657,22 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
         debug_assert!(!base.is_null());
-        debug_assert!(base.is_aligned());
+        debug_assert!(!REQUIRE_ALIGNED || base.is_aligned());
 
         if CONTIGUOUS {
             debug_assert_eq!(self.operand.inner_stride.get(), size_of::<T>());
-            unsafe { base.add(offset).cast::<[T; N]>().read() }
+            unsafe {
+                base.add(offset)
+                    .cast::<[T; N]>()
+                    .read_maybe_aligned::<REQUIRE_ALIGNED>()
+            }
         } else {
             let stride = self.operand.inner_stride.get();
             let base = unsafe { base.byte_add(offset * stride) };
-            array_from_fn_inline(|k| unsafe { base.byte_add(k * stride).read() })
+            array_from_fn_inline(|k| unsafe {
+                base.byte_add(k * stride)
+                    .read_maybe_aligned::<REQUIRE_ALIGNED>()
+            })
         }
     }
 }
@@ -761,7 +782,7 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// An over-aligned byte buffer whose element 0 sits `misalign` bytes in, so a region can be
-    /// forced onto the staged path.
+    /// forced onto the unaligned (and, where [`REQUIRE_ALIGNED`], staged) path.
     struct Bytes {
         backing: Vec<u64>,
         misalign: usize,
@@ -971,15 +992,15 @@ mod tests {
     }
 
     #[test]
-    fn misaligned_operands_are_staged() {
-        // A 1-byte base offset makes u32 reads unaligned, so each of these operands goes through a
-        // scratch buffer - one at a time, then all three at once.
+    fn misaligned_operands() {
+        // A 1-byte base offset makes u32 reads unaligned - read in place where the target allows
+        // it, through a scratch buffer where it does not. One operand at a time, then all three.
         for push in [false, true] {
             check_add(&[3, 4], [&[1, 1]; 3], [1, 0, 0], push);
             check_add(&[3, 4], [&[1, 1]; 3], [0, 1, 0], push);
             check_add(&[3, 4], [&[1, 1]; 3], [0, 0, 1], push);
             check_add(&[3, 4], [&[1, 1]; 3], [1, 1, 1], push);
-            // Staged *and* strided: the gather has to honor the source stride.
+            // Unaligned *and* strided: a gather, where it runs, has to honor the source stride.
             check_add(&[3, 4], [&[1, 2], &[2, 3], &[1, 1]], [1, 1, 1], push);
         }
     }
