@@ -174,26 +174,26 @@ where
         let condition = unsafe { cast_slice::<_, bool>(condition) };
         let (y_buf, y_strides) = y_view.data();
 
-        // Operand 0 is the output buffer, `x`, operand 1 the condition mask and operand 2 `y`.
+        // Operand 0 is the output buffer, `x`, operand 1 `y` and operand 2 the condition mask.
         let iter = NdIterUnordered::new(
             out_shape.as_ref(),
-            [out_strides, condition_strides, y_strides],
+            // order (x, y, condition), to give priority in axes sort for x and y over condition
+            [out_strides, y_strides, condition_strides],
             [
                 (dtype.itemsize(), dtype.alignment()),
-                (1, Alignment::of::<bool>()),
                 (dtype.itemsize(), dtype.alignment()),
+                (1, Alignment::of::<bool>()),
             ],
         );
         let aligned = !REQUIRE_ALIGNED || {
-            let [x_aligned, _cond_aligned, y_aligned] = iter.is_aligned();
-            x_aligned
-                && y_aligned
-                && (out_buf.as_ptr() as usize).is_multiple_of(alignment)
-                && (y_buf.as_ptr() as usize).is_multiple_of(alignment)
+            let [x_aligned, y_aligned, cond_aligned] = iter.is_aligned();
+            debug_assert!(cond_aligned);
+            (x_aligned && (out_buf.as_ptr() as usize).is_multiple_of(alignment))
+                && (y_aligned && (y_buf.as_ptr() as usize).is_multiple_of(alignment))
         };
         let contiguous = iter.is_contiguous().iter().all(|&c| c);
 
-        type InnerLoopFn = unsafe fn(&mut [u8], &[bool], &[u8], usize, [usize; 3], usize);
+        type InnerLoopFn = unsafe fn(&mut [u8], &[u8], &[bool], usize, [usize; 3], usize);
         let mut inner_loop_fn: InnerLoopFn = inner_loop_generic;
         if aligned {
             fn create_inner_loop_fn<T: Copy, const LANES: usize>(contiguous: bool) -> InnerLoopFn {
@@ -217,11 +217,11 @@ where
             }
         }
 
-        iter.foreach_inner_1d(|[out_offset, cond_offset, y_offset], len, strides| unsafe {
+        iter.foreach_inner_1d(|[out_offset, y_offset, cond_offset], len, strides| unsafe {
             inner_loop_fn(
                 out_buf.get_unchecked_mut(out_offset..),
-                condition.get_unchecked(cond_offset..),
                 y_buf.get_unchecked(y_offset..),
+                condition.get_unchecked(cond_offset..),
                 len,
                 strides,
                 itemsize,
@@ -231,17 +231,17 @@ where
         #[inline(never)]
         unsafe fn inner_loop<T: Copy, const LANES: usize, const CONTIGUOUS: bool>(
             x: &mut [u8],
-            condition: &[bool],
             y: &[u8],
+            condition: &[bool],
             len: usize,
             strides: [usize; 3],
             itemsize: usize,
         ) {
-            let [x_stride, cond_stride, y_stride] = strides;
+            let [x_stride, y_stride, cond_stride] = strides;
             if CONTIGUOUS {
                 debug_assert_eq!(x_stride, size_of::<T>());
-                debug_assert_eq!(cond_stride, size_of::<bool>());
                 debug_assert_eq!(y_stride, size_of::<T>());
+                debug_assert_eq!(cond_stride, size_of::<bool>());
             }
             assert_eq!(itemsize, size_of::<T>());
             let x = x.as_mut_ptr().cast::<T>();
@@ -300,13 +300,13 @@ where
         #[inline(never)]
         unsafe fn inner_loop_generic(
             x: &mut [u8],
-            condition: &[bool],
             y: &[u8],
+            condition: &[bool],
             len: usize,
             strides: [usize; 3],
             itemsize: usize,
         ) {
-            let [x_stride, cond_stride, y_stride] = strides;
+            let [x_stride, y_stride, cond_stride] = strides;
             let x = x.as_mut_ptr();
             let condition = condition.as_ptr();
             let y = y.as_ptr();
@@ -357,10 +357,11 @@ where
 
             #[inline]
             fn operands<'s>(&'s self) -> impl Iterator<Item = &'s Operand<'s>> + 's {
-                self.condition
+                // order (x, y, condition), to give priority in axes sort for x and y over condition
+                self.x
                     .operands()
-                    .chain(self.x.operands())
                     .chain(self.y.operands())
+                    .chain(self.condition.operands())
             }
 
             #[inline(always)]
