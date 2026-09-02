@@ -53,10 +53,10 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// let a = Array::compact_ndarray(&array![[[1i32, 2, 3]]])?; // shape [1, 1, 3], Dim<3>
 ///
 /// // usize -> output D = Dim<2> (one fewer than input Dim<3>)
-/// assert_eq!(a.as_ref().remove_axis(0).shape(), &[1, 3]);
+/// assert_eq!(a.view().remove_axis(0).shape(), &[1, 3]);
 ///
 /// // [usize; 2] -> output D = Dim<1> (two fewer than input Dim<3>)
-/// assert_eq!(a.as_ref().remove_axis([0, 1]).shape(), &[3]);
+/// assert_eq!(a.view().remove_axis([0, 1]).shape(), &[3]);
 ///
 /// // &[usize] -> output D = DimDyn
 /// let axes = vec![0, 1];

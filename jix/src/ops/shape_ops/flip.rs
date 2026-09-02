@@ -31,9 +31,9 @@ use crate::{Array, ArrayStorage, Dimension, NdCopier};
 ///
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?;
 /// // Flip along axis 0 reverses the row order (single axis: pass a usize)
-/// assert_eq!(a.as_ref().flip(0).to_ndarray()?, array![[4, 5, 6], [1, 2, 3]]);
+/// assert_eq!(a.view().flip(0).to_ndarray()?, array![[4, 5, 6], [1, 2, 3]]);
 /// // Flip along axis 1 reverses each row
-/// assert_eq!(a.as_ref().flip(1).to_ndarray()?, array![[3, 2, 1], [6, 5, 4]]);
+/// assert_eq!(a.view().flip(1).to_ndarray()?, array![[3, 2, 1], [6, 5, 4]]);
 /// // Flip along both axes (multiple axes: pass an array or tuple)
 /// assert_eq!(a.flip([0, 1]).to_ndarray()?, array![[6, 5, 4], [3, 2, 1]]);
 /// # Ok::<(), jix::Error>(())
@@ -291,14 +291,14 @@ mod tests {
     #[test]
     fn error_axis_out_of_bounds() {
         let a = make(arange(12), &[3u64, 4]);
-        let err = super::Flip::new_array(a.as_ref(), 2).unwrap_err();
+        let err = super::Flip::new_array(a.view(), 2).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 
     #[test]
     fn error_duplicate_axis() {
         let a = make(arange(12), &[3u64, 4]);
-        let err = super::Flip::new_array(a.as_ref(), [1, 1]).unwrap_err();
+        let err = super::Flip::new_array(a.view(), [1, 1]).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 

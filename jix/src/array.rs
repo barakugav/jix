@@ -10,7 +10,7 @@ use crate::storage::block::{BlockTableBuilder, OwnedBlockTableBuilder};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{
     check_out_buf, materialize_out_buf, ArrayBlockTableStorageBase, ArrayStorageAny,
-    ArrayStorageInfo, ArrayStorageTyped, BlockSize, Compact, Plain, Ref, StridedBuf,
+    ArrayStorageInfo, ArrayStorageTyped, BlockSize, Compact, Plain, StridedBuf, View,
 };
 use crate::util::iter::NdIter;
 use crate::util::{
@@ -71,7 +71,7 @@ use crate::{
 /// entire pipeline into a single read loop. The type system *is* the execution plan.
 ///
 /// Operations accept an owned `Array<S>` and return a new `Array<Op<S>>` that wraps the original.
-/// To reuse an array in multiple operations, use [`as_ref()`](Array::as_ref) to create a reference.
+/// To reuse an array in multiple operations, use [`view()`](Array::view) to create a reference.
 ///
 /// # Examples
 ///
@@ -1020,7 +1020,7 @@ impl<S: ArrayStorage> Array<S> {
     /// // Dividing `a` by its per-row std broadcasts the reduction across the columns. Without
     /// // `to_plain` the `std` view would be re-evaluated for every column; materializing it once
     /// // computes each row's std a single time.
-    /// let std = a.as_ref().std(1, 0.0).insert_axis(1).to_plain()?; // shape [2, 1]
+    /// let std = a.view().std(1, 0.0).insert_axis(1).to_plain()?; // shape [2, 1]
     /// let normalized = (a / std.broadcast(&[2, 2])).to_ndarray()?;
     ///
     /// assert_eq!(normalized, array![[1.0f64, 3.0], [2.0, 4.0]]);
@@ -1374,7 +1374,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// Almost all ops on arrays accept ownership of an `Array<S>` rather than a reference, for
     /// example `a + b` for two arrays consume `a` and `b`. To reuse an array without cloning its
-    /// storage, call `as_ref` to get an `Array<Ref<'_, S>>`, which doesn't own the storage but can
+    /// storage, call `view` to get an `Array<View<'_, S>>`, which doesn't own the storage but can
     /// be used in any API that accepts an owned `Array<S>`.
     ///
     /// # Examples
@@ -1384,15 +1384,15 @@ impl<S: ArrayStorage> Array<S> {
     /// use ndarray::array;
     ///
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
-    /// let b = a.as_ref().map(|x| x + 1.0f32); // Array<Map<Ref<Compact>>>
-    /// let c = a.as_ref() * b; // we can use `a` again here because we called as_ref()
+    /// let b = a.view().map(|x| x + 1.0f32); // Array<Map<View<Compact>>>
+    /// let c = a.view() * b; // we can use `a` again here because we called view()
     /// assert_eq!(c.to_ndarray()?[[1, 1]], 6.17 * (6.17 + 1.0));
     /// # Ok::<(), jix::Error>(())
     /// ```
     #[inline]
-    pub fn as_ref(&self) -> Array<Ref<'_, S>> {
+    pub fn view(&self) -> Array<View<'_, S>> {
         Array {
-            storage: Ref(self.storage()),
+            storage: View(self.storage()),
         }
     }
 
@@ -2190,7 +2190,7 @@ mod tests {
         let a = Array::compact_ndarray(&src).unwrap();
 
         // Materializing returns an equal array.
-        let plain = a.as_ref().to_plain().unwrap();
+        let plain = a.view().to_plain().unwrap();
         assert_eq!(plain.shape(), &[2, 3]);
         assert_eq!(plain.to_ndarray().unwrap(), src);
 

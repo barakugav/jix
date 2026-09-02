@@ -17,36 +17,36 @@ fn bench_sum_plain(c: &mut Criterion) {
 
         let arr_i32 = Array::plain_ndarray_ref(&base).unwrap();
         group.bench_function(BenchmarkId::new("i32", "axis=1 (contiguous)"), |b| {
-            b.iter(|| arr_i32.as_ref().sum(1).to_ndarray().unwrap());
+            b.iter(|| arr_i32.view().sum(1).to_ndarray().unwrap());
         });
         group.bench_function(BenchmarkId::new("i32", "axis=0 (strided)"), |b| {
-            b.iter(|| arr_i32.as_ref().sum(0).to_ndarray().unwrap());
+            b.iter(|| arr_i32.view().sum(0).to_ndarray().unwrap());
         });
         group.bench_function(BenchmarkId::new("i32", "all"), |b| {
-            b.iter(|| arr_i32.as_ref().sum((0, 1)).to_ndarray().unwrap());
+            b.iter(|| arr_i32.view().sum((0, 1)).to_ndarray().unwrap());
         });
 
         if all_dtypes {
             let arr_i64 = Array::plain_ndarray(base.mapv(|x| x as i64)).unwrap();
             group.bench_function(BenchmarkId::new("i64", "axis=1 (contiguous)"), |b| {
-                b.iter(|| arr_i64.as_ref().sum(1).to_ndarray().unwrap());
+                b.iter(|| arr_i64.view().sum(1).to_ndarray().unwrap());
             });
             group.bench_function(BenchmarkId::new("i64", "axis=0 (strided)"), |b| {
-                b.iter(|| arr_i64.as_ref().sum(0).to_ndarray().unwrap());
+                b.iter(|| arr_i64.view().sum(0).to_ndarray().unwrap());
             });
             let arr_f32 = Array::plain_ndarray(base.mapv(|x| x as f32)).unwrap();
             group.bench_function(BenchmarkId::new("f32", "axis=1 (contiguous)"), |b| {
-                b.iter(|| arr_f32.as_ref().sum(1).to_ndarray().unwrap());
+                b.iter(|| arr_f32.view().sum(1).to_ndarray().unwrap());
             });
             group.bench_function(BenchmarkId::new("f32", "axis=0 (strided)"), |b| {
-                b.iter(|| arr_f32.as_ref().sum(0).to_ndarray().unwrap());
+                b.iter(|| arr_f32.view().sum(0).to_ndarray().unwrap());
             });
             let arr_f64 = Array::plain_ndarray(base.mapv(|x| x as f64)).unwrap();
             group.bench_function(BenchmarkId::new("f64", "axis=1 (contiguous)"), |b| {
-                b.iter(|| arr_f64.as_ref().sum(1).to_ndarray().unwrap());
+                b.iter(|| arr_f64.view().sum(1).to_ndarray().unwrap());
             });
             group.bench_function(BenchmarkId::new("f64", "axis=0 (strided)"), |b| {
-                b.iter(|| arr_f64.as_ref().sum(0).to_ndarray().unwrap());
+                b.iter(|| arr_f64.view().sum(0).to_ndarray().unwrap());
             });
         }
 
@@ -69,13 +69,13 @@ fn bench_sum_compact(c: &mut Criterion) {
 
         let array = Array::compact_ndarray(&data).unwrap();
         group.bench_function(BenchmarkId::new("i32", "axis=1 (contiguous)"), |b| {
-            b.iter(|| array.as_ref().sum(1).to_ndarray().unwrap());
+            b.iter(|| array.view().sum(1).to_ndarray().unwrap());
         });
         group.bench_function(BenchmarkId::new("i32", "axis=0 (strided)"), |b| {
-            b.iter(|| array.as_ref().sum(0).to_ndarray().unwrap());
+            b.iter(|| array.view().sum(0).to_ndarray().unwrap());
         });
         group.bench_function(BenchmarkId::new("i32", "all"), |b| {
-            b.iter(|| array.as_ref().sum((0, 1)).to_ndarray().unwrap());
+            b.iter(|| array.view().sum((0, 1)).to_ndarray().unwrap());
         });
 
         group.finish();

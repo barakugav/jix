@@ -393,14 +393,14 @@ mod tests {
     #[test]
     fn error_ndim_mismatch() {
         let a = make(arange(6), &[2, 3]);
-        assert!(super::Broadcast::new_array(a.as_ref(), &[2, 3, 1]).is_err());
+        assert!(super::Broadcast::new_array(a.view(), &[2, 3, 1]).is_err());
     }
 
     #[test]
     fn error_non_unit_dim_broadcast() {
         let a = make(arange(6), &[2, 3]);
         // axis 0 has length 2, cannot broadcast to 5
-        assert!(super::Broadcast::new_array(a.as_ref(), &[5, 3]).is_err());
+        assert!(super::Broadcast::new_array(a.view(), &[5, 3]).is_err());
     }
 
     // -----------------------------------------------------------------------

@@ -219,7 +219,7 @@ mod tests {
                     ) {
                         let expected = -&src;
                         let ctx = a.read_ctx();
-                        let result = (-a.as_ref())
+                        let result = (-a.view())
                             .maybe_compact_with(ArrayParams::default(), &ctx)
                             .unwrap();
                         proptest::prop_assert!(result.storage().as_compact().is_some());
@@ -249,7 +249,7 @@ mod tests {
         let a = compact::<i32>(vals, &[3, 4], &[3, 4]);
         let ctx = a.read_ctx();
 
-        let result = (-a.as_ref())
+        let result = (-a.view())
             .maybe_compact_with(arr_params(&[2, 2]), &ctx)
             .unwrap();
 
@@ -297,7 +297,7 @@ mod tests {
         let a = compact::<i32>(vals, &[3, 4, 5], &[2, 2, 3]);
         let ctx = a.read_ctx();
 
-        let result = (a.as_ref() + a.as_ref())
+        let result = (a.view() + a.view())
             .maybe_compact_with(arr_params(&[2, 2, 3]), &ctx)
             .unwrap();
 

@@ -3071,7 +3071,7 @@ pub(crate) mod tests {
                             )
                         ),
                         |nd, za, axes| {
-                            let result = za.as_ref().$op_method(axes);
+                            let result = za.view().$op_method(axes);
                             let expected = crate::ops::reduction::tests::ndarray_reduce(
                                 nd, axes,
                                 |arr| {
@@ -3208,19 +3208,19 @@ pub(crate) mod tests {
         let nd = array![[i32::MIN, 3, -5], [7, i32::MAX, -9]];
         let za = Array::compact_ndarray_with(&nd, crate::util::arr_params(&[2, 2])).unwrap();
         // axis 0 (per column): min(MIN,7)=MIN; min(3,MAX)=3; min(-5,-9)=-9.
-        crate::util::assert_array_matches(&za.as_ref().min(0usize), &array![i32::MIN, 3, -9]);
+        crate::util::assert_array_matches(&za.view().min(0usize), &array![i32::MIN, 3, -9]);
         // axis 1 (per row): min(MIN,3,-5)=MIN; min(7,MAX,-9)=-9.
-        crate::util::assert_array_matches(&za.as_ref().min(1usize), &array![i32::MIN, -9]);
+        crate::util::assert_array_matches(&za.view().min(1usize), &array![i32::MIN, -9]);
         // all axes: overall minimum is i32::MIN.
-        crate::util::assert_array_matches(&za.as_ref().min((0, 1)), &ndarray::arr0(i32::MIN));
+        crate::util::assert_array_matches(&za.view().min((0, 1)), &ndarray::arr0(i32::MIN));
 
         // u8: the unsigned dtype MIN (0) / MAX (255) edges - distinct from the signed case
         // above since unsigned types have no negatives.
         let ndu = array![[0u8, 200, 255], [10, 255, 5]];
         let zau = Array::compact_ndarray(&ndu).unwrap();
-        crate::util::assert_array_matches(&zau.as_ref().min(0usize), &array![0u8, 200, 5]);
-        crate::util::assert_array_matches(&zau.as_ref().min(1usize), &array![0u8, 5]);
-        crate::util::assert_array_matches(&zau.as_ref().min((0, 1)), &ndarray::arr0(0u8));
+        crate::util::assert_array_matches(&zau.view().min(0usize), &array![0u8, 200, 5]);
+        crate::util::assert_array_matches(&zau.view().min(1usize), &array![0u8, 5]);
+        crate::util::assert_array_matches(&zau.view().min((0, 1)), &ndarray::arr0(0u8));
 
         // f32: negatives, zero, +/-infinity. `NaN` is deliberately not used here: for float
         // outputs `ReductionCompare` compares via `assert_array_matches_approx`, whose
@@ -3232,19 +3232,19 @@ pub(crate) mod tests {
         ];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         crate::util::assert_array_matches_approx(
-            &zaf.as_ref().min(0usize),
+            &zaf.view().min(0usize),
             &array![1.5f32, f32::NEG_INFINITY, -3.5],
             1e-3,
             1e-1,
         );
         crate::util::assert_array_matches_approx(
-            &zaf.as_ref().min(1usize),
+            &zaf.view().min(1usize),
             &array![-2.0f32, f32::NEG_INFINITY],
             1e-3,
             1e-1,
         );
         crate::util::assert_array_matches_approx(
-            &zaf.as_ref().min((0, 1)),
+            &zaf.view().min((0, 1)),
             &ndarray::arr0(f32::NEG_INFINITY),
             1e-3,
             1e-1,
@@ -3258,17 +3258,17 @@ pub(crate) mod tests {
         let nd = array![[5i32, 5, 2], [5, -1, -8]];
         let za = Array::compact_ndarray(&nd).unwrap();
         // axis 0 (per column): col 0 ties row 0/row 1 at 5 -> first row (0) wins.
-        crate::util::assert_array_matches(&za.as_ref().argmax(0usize), &array![0u64, 0, 0]);
+        crate::util::assert_array_matches(&za.view().argmax(0usize), &array![0u64, 0, 0]);
         // axis 1 (per row): row 0 ties col 0/col 1 at 5 -> first col (0) wins.
-        crate::util::assert_array_matches(&za.as_ref().argmax(1usize), &array![0u64, 0]);
+        crate::util::assert_array_matches(&za.view().argmax(1usize), &array![0u64, 0]);
 
         // f32 path, same tie-break rule, negatives included. (`NaN` excluded - see
         // `min_concrete` for why.)
         let ndf = array![[2.5f32, 2.5, -1.0], [3.0, 3.0, 0.0]];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
-        crate::util::assert_array_matches(&zaf.as_ref().argmax(0usize), &array![1u64, 1, 1]);
+        crate::util::assert_array_matches(&zaf.view().argmax(0usize), &array![1u64, 1, 1]);
         // row 0 ties col 0/col 1 at 2.5, row 1 ties col 0/col 1 at 3.0 -> first col (0) wins.
-        crate::util::assert_array_matches(&zaf.as_ref().argmax(1usize), &array![0u64, 0]);
+        crate::util::assert_array_matches(&zaf.view().argmax(1usize), &array![0u64, 0]);
     }
 
     #[test]
@@ -3387,8 +3387,8 @@ pub(crate) mod tests {
                             }
                         }
                     }
-                    crate::util::assert_array_matches(&arr.as_ref().sum(axes.as_slice()), &exp_sum);
-                    crate::util::assert_array_matches(&arr.as_ref().max(axes.as_slice()), &exp_max);
+                    crate::util::assert_array_matches(&arr.view().sum(axes.as_slice()), &exp_sum);
+                    crate::util::assert_array_matches(&arr.view().max(axes.as_slice()), &exp_max);
                 }
 
                 // `argmax` is single-axis, and the only op whose result depends on an element's
@@ -3417,7 +3417,7 @@ pub(crate) mod tests {
                             }
                         }
                     }
-                    crate::util::assert_array_matches(&arr.as_ref().argmax(axis), &exp);
+                    crate::util::assert_array_matches(&arr.view().argmax(axis), &exp);
                 }
             }
         }
@@ -3429,15 +3429,15 @@ pub(crate) mod tests {
         let nd = array![[5i32, 5, 2], [5, -1, -8]];
         let za = Array::compact_ndarray(&nd).unwrap();
         // axis 0 (per column): col 0 ties row 0/row 1 at 5 -> first row (0) wins.
-        crate::util::assert_array_matches(&za.as_ref().argmin(0usize), &array![0u64, 1, 1]);
+        crate::util::assert_array_matches(&za.view().argmin(0usize), &array![0u64, 1, 1]);
         // axis 1 (per row): both rows have a unique minimum (2, then -8).
-        crate::util::assert_array_matches(&za.as_ref().argmin(1usize), &array![2u64, 2]);
+        crate::util::assert_array_matches(&za.view().argmin(1usize), &array![2u64, 2]);
 
         let ndf = array![[2.5f32, 2.5, -1.0], [3.0, 3.0, 0.0]];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         // col 0/col 1 tie at 2.5 vs. 3.0 -> row 0 (index 0) wins both.
-        crate::util::assert_array_matches(&zaf.as_ref().argmin(0usize), &array![0u64, 0, 0]);
-        crate::util::assert_array_matches(&zaf.as_ref().argmin(1usize), &array![2u64, 2]);
+        crate::util::assert_array_matches(&zaf.view().argmin(0usize), &array![0u64, 0, 0]);
+        crate::util::assert_array_matches(&zaf.view().argmin(1usize), &array![2u64, 2]);
     }
 
     test_reduction!(
@@ -3482,11 +3482,11 @@ pub(crate) mod tests {
         let nd = array![[2i32, -3, 0], [-1, 5, -2]];
         let za = Array::compact_ndarray(&nd).unwrap();
         // axis 0 (per column): 2*-1=-2; -3*5=-15; 0*-2=0.
-        crate::util::assert_array_matches(&za.as_ref().product(0usize), &array![-2i64, -15, 0]);
+        crate::util::assert_array_matches(&za.view().product(0usize), &array![-2i64, -15, 0]);
         // axis 1 (per row): 2*-3*0=0; -1*5*-2=10.
-        crate::util::assert_array_matches(&za.as_ref().product(1usize), &array![0i64, 10]);
+        crate::util::assert_array_matches(&za.view().product(1usize), &array![0i64, 10]);
         // all axes: the `0` term collapses the whole product to 0.
-        crate::util::assert_array_matches(&za.as_ref().product((0, 1)), &ndarray::arr0(0i64));
+        crate::util::assert_array_matches(&za.view().product((0, 1)), &ndarray::arr0(0i64));
 
         // f32 -> f32 (float product keeps its input width). Negatives, no zero this time so
         // the full multiplication chain is exercised (the i32 case above covers the zero edge).
@@ -3494,20 +3494,20 @@ pub(crate) mod tests {
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         // axis 0 (per column): 1.5*2.0=3.0; -2.0*-1.0=2.0; 0.5*3.0=1.5.
         crate::util::assert_array_matches_approx(
-            &zaf.as_ref().product(0usize),
+            &zaf.view().product(0usize),
             &array![3.0f32, 2.0, 1.5],
             1e-3,
             1e-1,
         );
         // axis 1 (per row): 1.5*-2.0*0.5=-1.5; 2.0*-1.0*3.0=-6.0.
         crate::util::assert_array_matches_approx(
-            &zaf.as_ref().product(1usize),
+            &zaf.view().product(1usize),
             &array![-1.5f32, -6.0],
             1e-3,
             1e-1,
         );
         crate::util::assert_array_matches_approx(
-            &zaf.as_ref().product((0, 1)),
+            &zaf.view().product((0, 1)),
             &ndarray::arr0(9.0f32),
             1e-3,
             1e-1,
@@ -3570,21 +3570,21 @@ pub(crate) mod tests {
     #[test]
     fn variance() {
         let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
-        let var_all = a.as_ref().var((0, 1), 0.0).to_ndarray().unwrap();
+        let var_all = a.view().var((0, 1), 0.0).to_ndarray().unwrap();
         assert!((var_all[[]] - 2.9166).abs() < 0.001);
-        let var_col = a.as_ref().var(0, 0.0).to_ndarray().unwrap();
+        let var_col = a.view().var(0, 0.0).to_ndarray().unwrap();
         assert!((var_col[[0]] - 2.25).abs() < 0.001);
-        let var_row = a.as_ref().var(1, 0.0).to_ndarray().unwrap();
+        let var_row = a.view().var(1, 0.0).to_ndarray().unwrap();
         assert!((var_row[[0]] - 0.6666).abs() < 0.001);
     }
     #[test]
     fn std() {
         let a = Array::compact_ndarray(&array![[7i32, 8, 9], [4, 5, 6]]).unwrap();
-        let std_all = a.as_ref().std((0, 1), 0.0).to_ndarray().unwrap();
+        let std_all = a.view().std((0, 1), 0.0).to_ndarray().unwrap();
         assert!((std_all[[]] - 1.7078).abs() < 0.001);
-        let std_col = a.as_ref().std(0, 0.0).to_ndarray().unwrap();
+        let std_col = a.view().std(0, 0.0).to_ndarray().unwrap();
         assert!((std_col[[0]] - 1.5).abs() < 0.001);
-        let std_row = a.as_ref().std(1, 0.0).to_ndarray().unwrap();
+        let std_row = a.view().std(1, 0.0).to_ndarray().unwrap();
         assert!((std_row[[0]] - 0.8164).abs() < 0.001);
     }
 
@@ -3623,7 +3623,7 @@ pub(crate) mod tests {
         params.read_size(read_size);
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
-        let reduced = za.as_ref().sum(axes);
+        let reduced = za.view().sum(axes);
         let out_shape: Vec<u64> = reduced.shape().to_vec();
         let full_index: Vec<std::ops::Range<u64>> = out_shape.iter().map(|&s| 0..s).collect();
         let n_out: usize = out_shape.iter().product::<u64>() as usize;
@@ -3665,7 +3665,7 @@ pub(crate) mod tests {
 
         let nd = ndarray::ArrayD::from_shape_vec(vec![3usize, 4], (0..12i32).collect()).unwrap();
         let za = Array::compact_ndarray(&nd).unwrap();
-        let reduced = za.as_ref().sum([1usize]);
+        let reduced = za.view().sum([1usize]);
         let ctx = reduced.read_ctx();
         let storage = reduced.into_storage();
 
@@ -3716,7 +3716,7 @@ pub(crate) mod tests {
             ndarray::ArrayD::from_shape_vec(vec![5usize, 5], (0..25i32).map(|x| x as i8).collect())
                 .unwrap();
         let za = Array::compact_ndarray(&nd).unwrap();
-        let reduced = za.as_ref().max(1usize); // output shape [5]
+        let reduced = za.view().max(1usize); // output shape [5]
         let ctx = reduced.read_ctx();
         // An empty sub-range along the (sole) output axis.
         let got = reduced.to_ndarray_sub(&[1..1], &ctx).unwrap();
@@ -3766,7 +3766,7 @@ pub(crate) mod tests {
         params.block_shape(&[2, 2, 2]);
         params.read_size((32, 64));
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
-        let reduced = za.as_ref().sum(1usize); // [4, 4] i64
+        let reduced = za.view().sum(1usize); // [4, 4] i64
         let index = [0..4u64, 0..4];
         let ctx = reduced.read_ctx();
         let storage = reduced.into_storage();
@@ -3826,7 +3826,7 @@ pub(crate) mod tests {
 
         let nd = ndarray::ArrayD::from_shape_vec(vec![3usize, 4], (0..12i32).collect()).unwrap();
         let za = Array::compact_ndarray(&nd).unwrap();
-        let reduced = za.as_ref().var(1usize, 0.0); // [3] f64
+        let reduced = za.view().var(1usize, 0.0); // [3] f64
         let ctx = reduced.read_ctx();
         let storage = reduced.into_storage();
 
@@ -3893,7 +3893,7 @@ pub(crate) mod tests {
                             )
                         ),
                         |nd, za, axes| {
-                            let result = za.as_ref().reduce_unordered(axes, $f);
+                            let result = za.view().reduce_unordered(axes, $f);
                             let expected = ndarray_reduce(nd, axes, |arr| {
                                 arr.iter().cloned().reduce($f).unwrap()
                             });
@@ -3931,22 +3931,22 @@ pub(crate) mod tests {
         let za = Array::compact_ndarray_with(&nd, crate::util::arr_params(&[2, 2])).unwrap();
         // axis 0 (per column): max(1,4)=4; max(5,2)=5; max(3,6)=6.
         crate::util::assert_array_matches(
-            &za.as_ref().reduce_unordered(0usize, maximum::<i32>),
+            &za.view().reduce_unordered(0usize, maximum::<i32>),
             &array![4, 5, 6],
         );
         // axis 1 (per row): max(1,5,3)=5; max(4,2,6)=6.
         crate::util::assert_array_matches(
-            &za.as_ref().reduce_unordered(1usize, maximum::<i32>),
+            &za.view().reduce_unordered(1usize, maximum::<i32>),
             &array![5, 6],
         );
         // all axes -> scalar.
         crate::util::assert_array_matches(
-            &za.as_ref().reduce_unordered((0, 1), maximum::<i32>),
+            &za.view().reduce_unordered((0, 1), maximum::<i32>),
             &ndarray::arr0(6),
         );
         // A reduction over zero axes is a no-op copy: every cell is its own accumulator.
         crate::util::assert_array_matches(
-            &za.as_ref()
+            &za.view()
                 .reduce_unordered([0usize; 0].as_slice(), maximum::<i32>),
             &nd,
         );
@@ -3957,9 +3957,7 @@ pub(crate) mod tests {
         // The output dtype must equal the input dtype (no widening, unlike `sum`/`product`).
         use crate::dtype::Dtyped;
         let a = Array::compact_ndarray(&array![1i8, 2, 3]).unwrap();
-        let r = a
-            .as_ref()
-            .reduce_unordered(0usize, |a, b| a.wrapping_add(b));
+        let r = a.view().reduce_unordered(0usize, |a, b| a.wrapping_add(b));
         assert_eq!(r.dtype(), &<i8 as Dtyped>::DTYPE);
         assert_eq!(r.to_ndarray().unwrap()[[]], 6i8);
     }
@@ -3971,7 +3969,7 @@ pub(crate) mod tests {
         use ndarray::Array2;
         let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
         let a = Array::compact_ndarray(&empty).unwrap();
-        let err = Reduce::new_array(a.as_ref(), 1usize, |a: i32, b: i32| a + b)
+        let err = Reduce::new_array(a.view(), 1usize, |a: i32, b: i32| a + b)
             .expect_err("empty reduced axis must be rejected");
         assert!(
             err.to_string().contains("empty dimension"),
@@ -3981,7 +3979,7 @@ pub(crate) mod tests {
         let empty: Array2<i32> = Array2::from_shape_vec((0, 2), vec![]).unwrap();
         let a = Array::compact_ndarray(&empty).unwrap();
         let r = a
-            .as_ref()
+            .view()
             .reduce_unordered(1usize, |a, b| a + b)
             .to_ndarray()
             .unwrap();
@@ -3995,7 +3993,7 @@ pub(crate) mod tests {
         use ndarray::Array2;
         let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
         let a = Array::compact_ndarray(&empty).unwrap();
-        let _ = a.as_ref().reduce_unordered(1usize, |a, b| a + b);
+        let _ = a.view().reduce_unordered(1usize, |a, b| a + b);
     }
 
     #[test]
@@ -4061,7 +4059,7 @@ pub(crate) mod tests {
         let za = Array::compact_ndarray_with(&nd, params).unwrap();
 
         let calls = Cell::new(0u64);
-        let reduced = za.as_ref().reduce_unordered(axes, |a: u8, b: u8| {
+        let reduced = za.view().reduce_unordered(axes, |a: u8, b: u8| {
             calls.set(calls.get() + 1);
             xor(a, b)
         });
@@ -4107,7 +4105,7 @@ pub(crate) mod tests {
         // ((((100 - 10) - 1) - 2) - 3) = 84.
         let a = Array::compact_ndarray(&array![10i32, 1, 2, 3]).unwrap();
         let r = a
-            .as_ref()
+            .view()
             .fold(0, 100i32, |a, x| a - x)
             .to_ndarray()
             .unwrap();
@@ -4120,14 +4118,14 @@ pub(crate) mod tests {
         // a u8 array into an i64.
         let a = Array::compact_ndarray(&array![[1u8, 2, 3], [4, 5, 6]]).unwrap();
         let r = a
-            .as_ref()
+            .view()
             .fold((0, 1), 0i64, |a, x| a + x as i64)
             .to_ndarray()
             .unwrap();
         assert_eq!(r[[]], 21);
         // dtype is the accumulator type, not the input type.
         use crate::dtype::Dtyped;
-        let r = a.as_ref().fold((0, 1), 0i64, |a, x| a + x as i64);
+        let r = a.view().fold((0, 1), 0i64, |a, x| a + x as i64);
         assert_eq!(r.dtype(), &<i64 as Dtyped>::DTYPE);
     }
 
@@ -4138,7 +4136,7 @@ pub(crate) mod tests {
         // axis, so order is still guaranteed.
         let a = Array::compact_ndarray(&array![[1i32, 5, 3, 7], [4, 2, 8, 1]]).unwrap();
         let r = a
-            .as_ref()
+            .view()
             .fold(1, 0u64, |c, x| c + (x > 3) as u64)
             .to_ndarray()
             .unwrap();
@@ -4154,7 +4152,7 @@ pub(crate) mod tests {
         let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
         let a = Array::compact_ndarray(&empty).unwrap();
         let r = a
-            .as_ref()
+            .view()
             .fold(1, 42i64, |a, x| a + x as i64)
             .to_ndarray()
             .unwrap();
@@ -4169,7 +4167,7 @@ pub(crate) mod tests {
         let empty: Array1<i32> = Array1::from_shape_vec(0, vec![]).unwrap();
         let a = Array::compact_ndarray(&empty).unwrap();
         let r = a
-            .as_ref()
+            .view()
             .fold(0, 999i64, |a, x| a + x as i64)
             .to_ndarray()
             .unwrap();

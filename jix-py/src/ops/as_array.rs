@@ -100,7 +100,7 @@ mod tests {
             .unwrap()
             .get()
             .arr
-            .as_ref()
+            .view()
             .into_typed::<T>()
             .unwrap()
             .to_ndarray()

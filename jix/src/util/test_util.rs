@@ -687,7 +687,7 @@ fn assert_array_matches_dyn<T>(
     assert!(spec.block_size() > 0);
     assert!(spec.read_size().min > 0);
 
-    let actual = actual.as_ref().into_typed::<T>().unwrap();
+    let actual = actual.view().into_typed::<T>().unwrap();
     let full = actual.to_ndarray().unwrap().into_dyn();
     if let Err(msg) = elementwise_eq(&full, &expected, eq) {
         unreachable!("full array mismatch: {msg}");

@@ -1124,19 +1124,19 @@ pub(crate) mod tests {
         let nd = ndarray::array![[-100i32, -1, 0], [1, 5, 100]];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: i32| a * a);
-        crate::util::assert_array_matches(&za.as_ref().square(), &expected);
+        crate::util::assert_array_matches(&za.view().square(), &expected);
 
         // f32/f64: same edge values (negative, zero, positive, near the +/-100.0 bound), plus
         // a non-default block shape on the f64 arm to cross a block boundary.
         let ndf = ndarray::array![[-100.0f32, -0.5, 0.0], [0.5, 5.0, 100.0]];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         let expectedf = ndf.mapv(|a: f32| a * a);
-        crate::util::assert_array_matches(&zaf.as_ref().square(), &expectedf);
+        crate::util::assert_array_matches(&zaf.view().square(), &expectedf);
 
         let ndd = ndarray::array![[-100.0f64, -0.5, 0.0], [0.5, 5.0, 100.0]];
         let zad = Array::compact_ndarray_with(&ndd, crate::util::arr_params(&[1, 2])).unwrap();
         let expectedd = ndd.mapv(|a: f64| a * a);
-        crate::util::assert_array_matches(&zad.as_ref().square(), &expectedd);
+        crate::util::assert_array_matches(&zad.view().square(), &expectedd);
     }
     #[test]
     fn floor_concrete() {
@@ -1146,13 +1146,13 @@ pub(crate) mod tests {
         let nd = ndarray::array![[-2.5f32, -0.5, 0.0], [0.5, 2.5, 3.9]];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.floor());
-        crate::util::assert_array_matches(&za.as_ref().floor(), &expected);
+        crate::util::assert_array_matches(&za.view().floor(), &expected);
 
         // Second dtype (f64) and a non-default block shape to cross block boundaries.
         let nd64 = ndarray::array![[-2.5f64, -0.5, 0.0], [0.5, 2.5, 3.9]];
         let za64 = Array::compact_ndarray_with(&nd64, crate::util::arr_params(&[1, 2])).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.floor());
-        crate::util::assert_array_matches(&za64.as_ref().floor(), &expected64);
+        crate::util::assert_array_matches(&za64.view().floor(), &expected64);
     }
     #[test]
     fn ceil_concrete() {
@@ -1161,12 +1161,12 @@ pub(crate) mod tests {
         let nd = ndarray::array![[-2.5f32, -0.5, 0.0], [0.5, 2.5, 3.9]];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.ceil());
-        crate::util::assert_array_matches(&za.as_ref().ceil(), &expected);
+        crate::util::assert_array_matches(&za.view().ceil(), &expected);
 
         let nd64 = ndarray::array![[-2.5f64, -0.5, 0.0], [0.5, 2.5, 3.9]];
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.ceil());
-        crate::util::assert_array_matches(&za64.as_ref().ceil(), &expected64);
+        crate::util::assert_array_matches(&za64.view().ceil(), &expected64);
     }
     #[test]
     fn round_concrete() {
@@ -1176,12 +1176,12 @@ pub(crate) mod tests {
         let nd = ndarray::array![[-2.5f32, -0.5, 0.0], [0.5, 2.5, 1.4]];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.round());
-        crate::util::assert_array_matches(&za.as_ref().round(), &expected);
+        crate::util::assert_array_matches(&za.view().round(), &expected);
 
         let nd64 = ndarray::array![[-2.5f64, -0.5, 0.0], [0.5, 2.5, 1.4]];
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.round());
-        crate::util::assert_array_matches(&za64.as_ref().round(), &expected64);
+        crate::util::assert_array_matches(&za64.view().round(), &expected64);
     }
     #[test]
     fn sqrt_concrete() {
@@ -1191,12 +1191,12 @@ pub(crate) mod tests {
         let nd = ndarray::array![[0.0f32, 4.0, 2.0], [9.0, 0.25, 100.0]];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.sqrt());
-        crate::util::assert_array_matches_approx(&za.as_ref().sqrt(), &expected, 1e-6, 1e-6);
+        crate::util::assert_array_matches_approx(&za.view().sqrt(), &expected, 1e-6, 1e-6);
 
         let nd64 = ndarray::array![[0.0f64, 4.0, 2.0], [9.0, 0.25, 100.0]];
         let za64 = Array::compact_ndarray_with(&nd64, crate::util::arr_params(&[1, 2])).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.sqrt());
-        crate::util::assert_array_matches_approx(&za64.as_ref().sqrt(), &expected64, 1e-12, 1e-12);
+        crate::util::assert_array_matches_approx(&za64.view().sqrt(), &expected64, 1e-12, 1e-12);
     }
     test_op1!(exp, |a| a.exp(), [f32, f64], op_safe_strategy);
     test_op1!(ln, |a| a.ln(), [f32, f64], op_safe_non_negative_strategy);
@@ -1214,12 +1214,12 @@ pub(crate) mod tests {
         ];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.sin());
-        crate::util::assert_array_matches_approx(&za.as_ref().sin(), &expected, 1e-6, 1e-6);
+        crate::util::assert_array_matches_approx(&za.view().sin(), &expected, 1e-6, 1e-6);
 
         let nd64 = nd.mapv(f64::from);
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.sin());
-        crate::util::assert_array_matches_approx(&za64.as_ref().sin(), &expected64, 1e-12, 1e-12);
+        crate::util::assert_array_matches_approx(&za64.view().sin(), &expected64, 1e-12, 1e-12);
     }
     #[test]
     fn cos_concrete() {
@@ -1234,12 +1234,12 @@ pub(crate) mod tests {
         ];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.cos());
-        crate::util::assert_array_matches_approx(&za.as_ref().cos(), &expected, 1e-6, 1e-6);
+        crate::util::assert_array_matches_approx(&za.view().cos(), &expected, 1e-6, 1e-6);
 
         let nd64 = nd.mapv(f64::from);
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.cos());
-        crate::util::assert_array_matches_approx(&za64.as_ref().cos(), &expected64, 1e-12, 1e-12);
+        crate::util::assert_array_matches_approx(&za64.view().cos(), &expected64, 1e-12, 1e-12);
     }
     #[test]
     fn tan_concrete() {
@@ -1256,12 +1256,12 @@ pub(crate) mod tests {
         ];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.tan());
-        crate::util::assert_array_matches_approx(&za.as_ref().tan(), &expected, 1e-6, 1e-6);
+        crate::util::assert_array_matches_approx(&za.view().tan(), &expected, 1e-6, 1e-6);
 
         let nd64 = nd.mapv(f64::from);
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.tan());
-        crate::util::assert_array_matches_approx(&za64.as_ref().tan(), &expected64, 1e-12, 1e-12);
+        crate::util::assert_array_matches_approx(&za64.view().tan(), &expected64, 1e-12, 1e-12);
     }
     #[test]
     fn asin_concrete() {
@@ -1270,12 +1270,12 @@ pub(crate) mod tests {
         let nd = ndarray::array![-1.0f32, -0.5, 0.0, 0.5, 1.0];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.asin());
-        crate::util::assert_array_matches_approx(&za.as_ref().asin(), &expected, 1e-6, 1e-6);
+        crate::util::assert_array_matches_approx(&za.view().asin(), &expected, 1e-6, 1e-6);
 
         let nd64 = nd.mapv(f64::from);
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.asin());
-        crate::util::assert_array_matches_approx(&za64.as_ref().asin(), &expected64, 1e-12, 1e-12);
+        crate::util::assert_array_matches_approx(&za64.view().asin(), &expected64, 1e-12, 1e-12);
     }
     #[test]
     fn acos_concrete() {
@@ -1284,12 +1284,12 @@ pub(crate) mod tests {
         let nd = ndarray::array![-1.0f32, -0.5, 0.0, 0.5, 1.0];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.acos());
-        crate::util::assert_array_matches_approx(&za.as_ref().acos(), &expected, 1e-6, 1e-6);
+        crate::util::assert_array_matches_approx(&za.view().acos(), &expected, 1e-6, 1e-6);
 
         let nd64 = nd.mapv(f64::from);
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.acos());
-        crate::util::assert_array_matches_approx(&za64.as_ref().acos(), &expected64, 1e-12, 1e-12);
+        crate::util::assert_array_matches_approx(&za64.view().acos(), &expected64, 1e-12, 1e-12);
     }
     #[test]
     fn atan_concrete() {
@@ -1297,12 +1297,12 @@ pub(crate) mod tests {
         let nd = ndarray::array![0.0f32, 1.0, -1.0, 100.0, -100.0];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.atan());
-        crate::util::assert_array_matches_approx(&za.as_ref().atan(), &expected, 1e-6, 1e-6);
+        crate::util::assert_array_matches_approx(&za.view().atan(), &expected, 1e-6, 1e-6);
 
         let nd64 = nd.mapv(f64::from);
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.atan());
-        crate::util::assert_array_matches_approx(&za64.as_ref().atan(), &expected64, 1e-12, 1e-12);
+        crate::util::assert_array_matches_approx(&za64.view().atan(), &expected64, 1e-12, 1e-12);
     }
     #[test]
     fn sign_concrete() {
@@ -1310,27 +1310,27 @@ pub(crate) mod tests {
         let nd = ndarray::array![-5i32, 0, 7];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: i32| a.signum());
-        crate::util::assert_array_matches(&za.as_ref().sign(), &expected);
+        crate::util::assert_array_matches(&za.view().sign(), &expected);
 
         // Unsigned int: zero maps to 0, any positive value maps to 1 (`a - a` is 0,
         // `a - a + 1` is 1).
         let ndu = ndarray::array![0u32, 1, 7];
         let zau = Array::compact_ndarray(&ndu).unwrap();
         let expectedu = ndu.mapv(|a: u32| if a == 0 { a - a } else { a - a + 1 });
-        crate::util::assert_array_matches(&zau.as_ref().sign(), &expectedu);
+        crate::util::assert_array_matches(&zau.view().sign(), &expectedu);
 
         // f32: zero is signed - +0.0 -> +1.0, -0.0 -> -1.0 - plus a negative and a positive
         // value.
         let ndf = ndarray::array![-3.0f32, -0.0, 0.0, 5.0];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         let expectedf = ndf.mapv(|a: f32| a.signum());
-        crate::util::assert_array_matches(&zaf.as_ref().sign(), &expectedf);
+        crate::util::assert_array_matches(&zaf.view().sign(), &expectedf);
 
         // f64: same signed-zero behavior, plus a non-default block shape.
         let ndd = ndarray::array![-3.0f64, -0.0, 0.0, 5.0];
         let zad = Array::compact_ndarray_with(&ndd, crate::util::arr_params(&[2])).unwrap();
         let expectedd = ndd.mapv(|a: f64| a.signum());
-        crate::util::assert_array_matches(&zad.as_ref().sign(), &expectedd);
+        crate::util::assert_array_matches(&zad.view().sign(), &expectedd);
     }
     // abs: same dtype for scalar types; complex types have a different output dtype (see below).
     #[test]
@@ -1341,17 +1341,17 @@ pub(crate) mod tests {
         let nd = ndarray::array![-5i32, 0, 7, -100, 100];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: i32| a.abs());
-        crate::util::assert_array_matches(&za.as_ref().abs(), &expected);
+        crate::util::assert_array_matches(&za.view().abs(), &expected);
 
         let ndf = ndarray::array![-5.0f32, 0.0, 7.5, -100.0];
         let zaf = Array::compact_ndarray(&ndf).unwrap();
         let expectedf = ndf.mapv(|a: f32| a.abs());
-        crate::util::assert_array_matches(&zaf.as_ref().abs(), &expectedf);
+        crate::util::assert_array_matches(&zaf.view().abs(), &expectedf);
 
         let ndd = ndarray::array![-5.0f64, 0.0, 7.5, -100.0];
         let zad = Array::compact_ndarray_with(&ndd, crate::util::arr_params(&[2])).unwrap();
         let expectedd = ndd.mapv(|a: f64| a.abs());
-        crate::util::assert_array_matches(&zad.as_ref().abs(), &expectedd);
+        crate::util::assert_array_matches(&zad.view().abs(), &expectedd);
     }
     // TODO
     // #[cfg(feature = "half")]

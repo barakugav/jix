@@ -19,7 +19,7 @@ use crate::{Array, ArrayStorage, ElementType};
 /// [`Array::into_typed`](crate::Array::into_typed), and
 /// [`Array::into_type_dyn`](crate::Array::into_type_dyn), which either wrap the array in `IntoType`
 /// or, for some storages, swap the element-type parameter in-place. For example,
-/// [`Ref`](crate::storage::Ref) can not be re-tagged in-place, but
+/// [`View`](crate::storage::View) can not be re-tagged in-place, but
 /// [`Compact`](crate::storage::Compact) can.
 ///
 /// # Examples
@@ -36,7 +36,7 @@ use crate::{Array, ArrayStorage, ElementType};
 /// // a: Array<Compact<Ty<f32>, Dim<1>>>
 ///
 /// // Erase the static element type - always succeeds.
-/// let dyn_a = a.as_ref().into_type_dyn();
+/// let dyn_a = a.view().into_type_dyn();
 /// // dyn_a: Array<IntoType<AsRef<Compact<Ty<f32>, Dim<1>>>, TypeDyn>>
 /// // dyn_a: Array<Storage::ElementType = TypeDyn>
 /// assert_eq!(dyn_a.dtype(), &f32::DTYPE);

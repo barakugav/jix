@@ -18,7 +18,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// The typical entry points are [`Array::into_dim`](crate::Array::into_dim) and
 /// [`Array::into_dim_dyn`](crate::Array::into_dim_dyn), which either wrap the array in `IntoDim`
 /// or, for some storages, swap the dimension parameter in-place. For example,
-/// [`Ref`](crate::storage::Ref) can not be re-tagged in-place, but
+/// [`View`](crate::storage::View) can not be re-tagged in-place, but
 /// [`Compact`](crate::storage::Compact) can.
 ///
 /// # Examples
@@ -34,7 +34,7 @@ use crate::{Array, ArrayStorage, Dimension};
 /// // a: Array<Storage::Dimension = DimDyn>
 ///
 /// // Assert it is 3-D; returns an error if the ndim does not match.
-/// let a3d = a.as_ref().into_dim::<Dim<3>>()?;
+/// let a3d = a.view().into_dim::<Dim<3>>()?;
 /// // a3d: Array<IntoDim<AsRef<Compact<TypeDyn, DimDyn>>, Dim<3>>>
 /// // a3d: Array<Storage::Dimension = Dim<3>>
 ///

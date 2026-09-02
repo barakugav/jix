@@ -102,19 +102,19 @@ where
     type Item = T;
 }
 
-/// A borrowed reference to an [`ArrayStorage`], itself implementing [`ArrayStorage`].
+/// A view reference to an [`ArrayStorage`], itself implementing [`ArrayStorage`].
 ///
-/// Created by [`Array::as_ref`](crate::Array::as_ref) to produce an `Array<Ref<'_, S>>`
+/// Created by [`Array::view`](crate::Array::view) to produce an `Array<View<'_, S>>`
 /// from `&Array<S>` without cloning the underlying storage.
-pub struct Ref<'a, S>(pub(crate) &'a S);
-impl<'a, S> Ref<'a, S> {
-    /// Create a new `Ref` wrapper around the given storage reference.
+pub struct View<'a, S>(pub(crate) &'a S);
+impl<'a, S> View<'a, S> {
+    /// Create a new `View` wrapper around the given storage reference.
     #[inline(always)]
     pub fn new(storage: &'a S) -> Self {
         Self(storage)
     }
 }
-impl<'a, S> ArrayStorage for Ref<'a, S>
+impl<'a, S> ArrayStorage for View<'a, S>
 where
     S: ArrayStorage,
 {
@@ -124,12 +124,12 @@ where
     impl_array_storage_forward!('b, T, <S>);
 
     fn info(&self) -> ArrayStorageInfo<'_> {
-        ArrayStorageInfo::new_deps("Ref", [self.0])
+        ArrayStorageInfo::new_deps("View", [self.0])
     }
     crate::ops::impl_dimension_change_default!();
     crate::ops::impl_element_type_change_default!();
 }
-impl<'a, S> Clone for Ref<'a, S> {
+impl<'a, S> Clone for View<'a, S> {
     fn clone(&self) -> Self {
         Self(self.0)
     }

@@ -28,9 +28,9 @@ use crate::{dim_arr, Array, ArrayStorage, DimIdx, Dimension};
 ///
 /// // 1-D positive shift wraps tail to head.
 /// let a = Array::compact_ndarray(&array![0i32, 1, 2, 3, 4])?;
-/// assert_eq!(a.as_ref().roll(2, 0).to_ndarray()?, array![3, 4, 0, 1, 2]);
+/// assert_eq!(a.view().roll(2, 0).to_ndarray()?, array![3, 4, 0, 1, 2]);
 /// // Negative shift wraps head to tail.
-/// assert_eq!(a.as_ref().roll(-1, 0).to_ndarray()?, array![1, 2, 3, 4, 0]);
+/// assert_eq!(a.view().roll(-1, 0).to_ndarray()?, array![1, 2, 3, 4, 0]);
 /// // Shift mod L; shift == L is identity.
 /// assert_eq!(a.roll(5, 0).to_ndarray()?, array![0, 1, 2, 3, 4]);
 /// # Ok::<(), jix::Error>(())
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn error_axis_out_of_bounds() {
         let a = make(arange(12), &[3u64, 4]);
-        let err = super::Roll::new_array(a.as_ref(), 1, 2).unwrap_err();
+        let err = super::Roll::new_array(a.view(), 1, 2).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 

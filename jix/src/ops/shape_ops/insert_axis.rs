@@ -67,18 +67,18 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
 /// let a = Array::compact_ndarray(&array![1i32, 2, 3])?; // shape [3], Dim<1>
 ///
 /// // usize -> output D = Dim<2> (one more than input Dim<1>)
-/// assert_eq!(a.as_ref().insert_axis(0).shape(), &[1, 3]);
-/// assert_eq!(a.as_ref().insert_axis(1).shape(), &[3, 1]);
+/// assert_eq!(a.view().insert_axis(0).shape(), &[1, 3]);
+/// assert_eq!(a.view().insert_axis(1).shape(), &[3, 1]);
 ///
 /// // [usize; 2] -> output D = Dim<3> (two more than input Dim<1>)
-/// assert_eq!(a.as_ref().insert_axis([0, 1]).shape(), &[1, 3, 1]);
+/// assert_eq!(a.view().insert_axis([0, 1]).shape(), &[1, 3, 1]);
 ///
 /// // &[usize] -> output D = DimDyn
 /// let gaps = vec![0, 1];
-/// assert_eq!(a.as_ref().insert_axis(gaps.as_slice()).shape(), &[1, 3, 1]);
+/// assert_eq!(a.view().insert_axis(gaps.as_slice()).shape(), &[1, 3, 1]);
 ///
 /// // duplicates are allowed; each occurrence inserts one dimension
-/// assert_eq!(a.as_ref().insert_axis([0, 0, 1, 1]).shape(), &[1, 1, 3, 1, 1]);
+/// assert_eq!(a.view().insert_axis([0, 0, 1, 1]).shape(), &[1, 1, 3, 1, 1]);
 /// # Ok::<(), jix::Error>(())
 /// ```
 pub struct InsertAxis<S: ArrayStorage, D> {

@@ -705,7 +705,7 @@ mod tests {
         params.read_size((16, 32)); // for i32: a 4..8 item window, narrower than the 10-wide inner dim
         let a = Array::plain_ndarray_with(nd.clone(), params).unwrap();
 
-        let got = a.as_ref().neg().to_ndarray().unwrap();
+        let got = a.view().neg().to_ndarray().unwrap();
         let expected = nd.mapv(|x: i32| -x);
         assert_eq!(got, expected);
     }

@@ -697,7 +697,7 @@ mod tests {
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
         let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a != b);
-        crate::util::assert_array_matches(&za.as_ref().not_equal(zb.as_ref()), &expected);
+        crate::util::assert_array_matches(&za.view().not_equal(zb.view()), &expected);
 
         // float path: NaN != NaN is true; same infinities are equal (so not_equal is false).
         let fa = ndarray::array![f32::NAN, f32::INFINITY, 1.0, f32::NEG_INFINITY];
@@ -707,7 +707,7 @@ mod tests {
         let fexp = ndarray::Zip::from(&fa)
             .and(&fb)
             .map_collect(|&a, &b| a != b);
-        crate::util::assert_array_matches(&zfa.as_ref().not_equal(zfb.as_ref()), &fexp);
+        crate::util::assert_array_matches(&zfa.view().not_equal(zfb.view()), &fexp);
     }
 
     // greater: output is bool, so NaN inputs are safe.
@@ -736,7 +736,7 @@ mod tests {
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
         let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a >= b);
-        crate::util::assert_array_matches(&za.as_ref().greater_equal(zb.as_ref()), &expected);
+        crate::util::assert_array_matches(&za.view().greater_equal(zb.view()), &expected);
 
         // float path: NaN comparisons are false; inf ordering and inf >= inf (true).
         let fa = ndarray::arr1(&CMP_FLOAT_A);
@@ -746,7 +746,7 @@ mod tests {
         let fexp = ndarray::Zip::from(&fa)
             .and(&fb)
             .map_collect(|&a, &b| a >= b);
-        crate::util::assert_array_matches(&zfa.as_ref().greater_equal(zfb.as_ref()), &fexp);
+        crate::util::assert_array_matches(&zfa.view().greater_equal(zfb.view()), &fexp);
 
         // bool path: true>=false, false>=false, true>=true, false>=true.
         let ba = ndarray::array![true, false, true, false];
@@ -756,7 +756,7 @@ mod tests {
         let bexp = ndarray::Zip::from(&ba)
             .and(&bb)
             .map_collect(|&a, &b| a >= b);
-        crate::util::assert_array_matches(&zba.as_ref().greater_equal(zbb.as_ref()), &bexp);
+        crate::util::assert_array_matches(&zba.view().greater_equal(zbb.view()), &bexp);
     }
 
     #[test]
@@ -771,7 +771,7 @@ mod tests {
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
         let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a < b);
-        crate::util::assert_array_matches(&za.as_ref().less(zb.as_ref()), &expected);
+        crate::util::assert_array_matches(&za.view().less(zb.view()), &expected);
 
         // float path: NaN comparisons are false; -inf < finite, inf < inf is false.
         let fa = ndarray::array![f32::NAN, 1.0, f32::NEG_INFINITY, f32::INFINITY];
@@ -779,7 +779,7 @@ mod tests {
         let zfa = Array::compact_ndarray(&fa).unwrap();
         let zfb = Array::compact_ndarray(&fb).unwrap();
         let fexp = ndarray::Zip::from(&fa).and(&fb).map_collect(|&a, &b| a < b);
-        crate::util::assert_array_matches(&zfa.as_ref().less(zfb.as_ref()), &fexp);
+        crate::util::assert_array_matches(&zfa.view().less(zfb.view()), &fexp);
 
         // bool path: false<true (true), true<false (false), equal values are false.
         let ba = ndarray::array![false, true, true, false];
@@ -787,7 +787,7 @@ mod tests {
         let zba = Array::compact_ndarray(&ba).unwrap();
         let zbb = Array::compact_ndarray(&bb).unwrap();
         let bexp = ndarray::Zip::from(&ba).and(&bb).map_collect(|&a, &b| a < b);
-        crate::util::assert_array_matches(&zba.as_ref().less(zbb.as_ref()), &bexp);
+        crate::util::assert_array_matches(&zba.view().less(zbb.view()), &bexp);
     }
 
     #[test]
@@ -799,7 +799,7 @@ mod tests {
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
         let expected = ndarray::Zip::from(&a).and(&b).map_collect(|&a, &b| a <= b);
-        crate::util::assert_array_matches(&za.as_ref().less_equal(zb.as_ref()), &expected);
+        crate::util::assert_array_matches(&za.view().less_equal(zb.view()), &expected);
 
         // float path: NaN <= x is false; inf ordering.
         let fa = ndarray::arr1(&CMP_FLOAT_A);
@@ -809,7 +809,7 @@ mod tests {
         let fexp = ndarray::Zip::from(&fa)
             .and(&fb)
             .map_collect(|&a, &b| a <= b);
-        crate::util::assert_array_matches(&zfa.as_ref().less_equal(zfb.as_ref()), &fexp);
+        crate::util::assert_array_matches(&zfa.view().less_equal(zfb.view()), &fexp);
 
         // bool path on a 2x2 shape with a non-default 1x1 block shape, so a
         // block-boundary bug in the ordering kernel would still show up.
@@ -824,7 +824,7 @@ mod tests {
         let bexp = ndarray::Zip::from(&ba)
             .and(&bb)
             .map_collect(|&a, &b| a <= b);
-        crate::util::assert_array_matches(&zba.as_ref().less_equal(zbb.as_ref()), &bexp);
+        crate::util::assert_array_matches(&zba.view().less_equal(zbb.view()), &bexp);
     }
 
     // approx_equal: output is bool so NaN inputs are safe; use dedicated proptest tests because
@@ -990,7 +990,7 @@ mod tests {
         let expected = ndarray::Zip::from(&a)
             .and(&b)
             .map_collect(|&a, &b| Minimum::minimum(a, b));
-        crate::util::assert_array_matches(&za.as_ref().minimum(zb.as_ref()), &expected);
+        crate::util::assert_array_matches(&za.view().minimum(zb.view()), &expected);
 
         // float path: inf/-inf ordering, all finite outputs (no NaN yet).
         let fa = ndarray::array![f32::NEG_INFINITY, 1.0, f32::INFINITY, -1.0];
@@ -1000,7 +1000,7 @@ mod tests {
         let fexp = ndarray::Zip::from(&fa)
             .and(&fb)
             .map_collect(|&a, &b| Minimum::minimum(a, b));
-        crate::util::assert_array_matches(&zfa.as_ref().minimum(zfb.as_ref()), &fexp);
+        crate::util::assert_array_matches(&zfa.view().minimum(zfb.view()), &fexp);
 
         // NaN-propagation edge: minimum(NaN, x) == NaN for any x, unlike f32::min which
         // discards NaN when exactly one operand is NaN.
@@ -1008,7 +1008,7 @@ mod tests {
         let nb = ndarray::array![2.0f32, f32::NAN];
         let zna = Array::compact_ndarray(&na).unwrap();
         let znb = Array::compact_ndarray(&nb).unwrap();
-        let result = zna.as_ref().minimum(znb.as_ref()).to_ndarray().unwrap();
+        let result = zna.view().minimum(znb.view()).to_ndarray().unwrap();
         assert!(result[[0]].is_nan());
         assert!(result[[1]].is_nan());
     }

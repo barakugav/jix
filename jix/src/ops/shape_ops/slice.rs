@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn no_steps_flag_set_for_contiguous() {
         let a = make2d(arange(12), 3, 4);
-        let s = super::Slice::new_array(a.as_ref(), (1..3, ..).into())
+        let s = super::Slice::new_array(a.view(), (1..3, ..).into())
             .unwrap()
             .into_storage();
         assert!(s.no_steps);
@@ -735,7 +735,7 @@ mod tests {
     #[test]
     fn no_steps_flag_unset_for_strided() {
         let a = make2d(arange(12), 3, 4);
-        let s = super::Slice::new_array(a.as_ref(), (.., SliceItem::new(None, None, 2)).into())
+        let s = super::Slice::new_array(a.view(), (.., SliceItem::new(None, None, 2)).into())
             .unwrap()
             .into_storage();
         assert!(!s.no_steps);
@@ -748,15 +748,14 @@ mod tests {
     #[test]
     fn error_wrong_number_of_items() {
         let a = make2d(arange(12), 3, 4);
-        assert!(super::Slice::new_array(a.as_ref(), (0..3,).into()).is_err());
+        assert!(super::Slice::new_array(a.view(), (0..3,).into()).is_err());
     }
 
     #[test]
     fn error_negative_step() {
         let a = make2d(arange(12), 3, 4);
         assert!(
-            super::Slice::new_array(a.as_ref(), (SliceItem::new(None, None, -1), ..).into())
-                .is_err()
+            super::Slice::new_array(a.view(), (SliceItem::new(None, None, -1), ..).into()).is_err()
         );
     }
 
