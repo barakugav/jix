@@ -438,7 +438,7 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Dim, DimDyn, Ty};
+    use crate::{Dim, Ty};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
@@ -767,7 +767,7 @@ mod tests {
     fn slice_strategy<T>() -> impl Strategy<
         Value = (
             ndarray::ArrayD<T>,
-            Array<Compact<Ty<T>, DimDyn>>,
+            crate::util::TestArray<T>,
             Vec<SliceItem>,
         ),
     >
@@ -780,7 +780,7 @@ mod tests {
                 // Generate (a, b, step) per dim using a fixed range; clamped to dim size below.
                 let raw_slices =
                     prop::collection::vec((0usize..=100, 0usize..=100, 1i64..=5), ndim);
-                let array_strat = crate::util::carray_strategy_from_shape::<T>(
+                let array_strat = crate::util::array_strategy_from_shape::<T>(
                     Just(shape.clone()),
                     T::any_strategy(),
                 );

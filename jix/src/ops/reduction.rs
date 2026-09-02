@@ -2817,8 +2817,7 @@ pub(crate) mod tests {
 
     use super::Reduce;
     use crate::array::Array;
-    use crate::storage::Compact;
-    use crate::{DimDyn, Ty};
+    use crate::DimDyn;
 
     #[test]
     fn reduction_tile_shape_two_scale_and_regular() {
@@ -2993,13 +2992,12 @@ pub(crate) mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn carray_strategy_for_reduction<T: crate::util::ScalarStrategy>(
+    pub(crate) fn array_strategy_for_reduction<T: crate::util::ScalarStrategy>(
         elem_strategy: impl proptest::strategy::Strategy<Value = T> + Clone,
-    ) -> impl proptest::strategy::Strategy<
-        Value = (ArrayD<T>, Rc<Array<Compact<Ty<T>, DimDyn>>>, Vec<usize>),
-    > {
+    ) -> impl proptest::strategy::Strategy<Value = (ArrayD<T>, Rc<crate::util::TestArray<T>>, Vec<usize>)>
+    {
         let shape = reduction_shape_strategy();
-        let array = crate::util::carray_strategy_from_shape::<T>(shape, elem_strategy);
+        let array = crate::util::array_strategy_from_shape::<T>(shape, elem_strategy);
         array
             .prop_map(|(nd, za)| (nd, Rc::new(za)))
             .prop_flat_map(|(nd, za)| {
@@ -3033,10 +3031,10 @@ pub(crate) mod tests {
     pub(crate) fn check_reduction<T>(
         cases: proptest::strategy::BoxedStrategy<(
             ArrayD<T>,
-            Rc<Array<Compact<Ty<T>, DimDyn>>>,
+            Rc<crate::util::TestArray<T>>,
             Vec<usize>,
         )>,
-        check: fn(&ArrayD<T>, &Array<Compact<Ty<T>, DimDyn>>, &[usize]),
+        check: fn(&ArrayD<T>, &crate::util::TestArray<T>, &[usize]),
     ) where
         T: crate::util::ScalarStrategy,
     {
@@ -3066,7 +3064,7 @@ pub(crate) mod tests {
                 fn [<$op_method _ $dtype>]() {
                     crate::ops::reduction::tests::check_reduction::<$dtype>(
                         proptest::strategy::Strategy::boxed(
-                            crate::ops::reduction::tests::carray_strategy_for_reduction::<$dtype>(
+                            crate::ops::reduction::tests::array_strategy_for_reduction::<$dtype>(
                                 <$dtype as crate::util::ScalarStrategy>::$strategy()
                             )
                         ),
@@ -3888,7 +3886,7 @@ pub(crate) mod tests {
                 fn [<reduce_unordered_ $dtype>]() {
                     check_reduction::<$dtype>(
                         proptest::strategy::Strategy::boxed(
-                            carray_strategy_for_reduction::<$dtype>(
+                            array_strategy_for_reduction::<$dtype>(
                                 <$dtype as crate::util::ScalarStrategy>::$strategy()
                             )
                         ),

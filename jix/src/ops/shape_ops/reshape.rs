@@ -1078,7 +1078,7 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn reshape_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>, Vec<u64>)>
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<u64>)>
     where
         T: ScalarStrategy,
     {
@@ -1086,7 +1086,7 @@ mod tests {
             .prop_flat_map(|input_shape| {
                 let n: usize = input_shape.iter().product();
                 let n_u64 = n as u64;
-                let array_strat = crate::util::carray_strategy_from_shape::<T>(
+                let array_strat = crate::util::array_strategy_from_shape::<T>(
                     Just(input_shape),
                     T::any_strategy(),
                 );

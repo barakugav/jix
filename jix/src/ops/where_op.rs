@@ -442,9 +442,7 @@ mod tests {
     use crate::dtype::Dtyped;
     #[cfg(feature = "half")]
     use crate::scalar::f16;
-    use crate::storage::Compact;
     use crate::util::ScalarStrategy;
-    use crate::{DimDyn, Ty};
     #[cfg(feature = "num-complex")]
     #[allow(non_camel_case_types)]
     type complex_f32 = crate::scalar::Complex<f32>;
@@ -458,9 +456,9 @@ mod tests {
             ndarray::ArrayD<bool>,
             ndarray::ArrayD<T>,
             ndarray::ArrayD<T>,
-            Array<Compact<Ty<bool>, DimDyn>>,
-            Array<Compact<Ty<T>, DimDyn>>,
-            Array<Compact<Ty<T>, DimDyn>>,
+            crate::util::TestArray<bool>,
+            crate::util::TestArray<T>,
+            crate::util::TestArray<T>,
         ),
     >
     where
@@ -469,15 +467,15 @@ mod tests {
         crate::util::shape_strategy()
             .prop_flat_map(|shape| {
                 (
-                    crate::util::carray_strategy_from_shape::<bool>(
+                    crate::util::array_strategy_from_shape::<bool>(
                         Just(shape.clone()),
                         <bool as ScalarStrategy>::any_strategy(),
                     ),
-                    crate::util::carray_strategy_from_shape::<T>(
+                    crate::util::array_strategy_from_shape::<T>(
                         Just(shape.clone()),
                         <T as ScalarStrategy>::any_strategy(),
                     ),
-                    crate::util::carray_strategy_from_shape::<T>(
+                    crate::util::array_strategy_from_shape::<T>(
                         Just(shape),
                         <T as ScalarStrategy>::any_strategy(),
                     ),

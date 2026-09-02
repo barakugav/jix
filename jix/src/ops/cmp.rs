@@ -848,7 +848,7 @@ mod tests {
         #[test]
         fn approx_equal_f32(
             (arrays, rtol, atol) in (
-                crate::util::carrays2_strategy_generic::<f32>(
+                crate::util::arrays2_strategy_generic::<f32>(
                     crate::util::shape_strategy(),
                     <f32 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
                 ),
@@ -867,7 +867,7 @@ mod tests {
         #[test]
         fn approx_equal_f64(
             (arrays, rtol, atol) in (
-                crate::util::carrays2_strategy_generic::<f64>(
+                crate::util::arrays2_strategy_generic::<f64>(
                     crate::util::shape_strategy(),
                     <f64 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
                 ),
@@ -889,7 +889,7 @@ mod tests {
         #[test]
         fn approx_equal_f16(
             (arrays, rtol_f32, atol_f32) in (
-                crate::util::carrays2_strategy_generic::<f16>(
+                crate::util::arrays2_strategy_generic::<f16>(
                     crate::util::shape_strategy(),
                     <f16 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
                 ),
@@ -913,7 +913,7 @@ mod tests {
         #[test]
         fn approx_equal_complex_f32(
             (arrays, rtol, atol_re, atol_im) in (
-                crate::util::carrays2_strategy_generic::<complex_f32>(
+                crate::util::arrays2_strategy_generic::<complex_f32>(
                     crate::util::shape_strategy(),
                     <complex_f32 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
                 ),
@@ -937,7 +937,7 @@ mod tests {
         #[test]
         fn approx_equal_complex_f64(
             (arrays, rtol, atol_re, atol_im) in (
-                crate::util::carrays2_strategy_generic::<complex_f64>(
+                crate::util::arrays2_strategy_generic::<complex_f64>(
                     crate::util::shape_strategy(),
                     <complex_f64 as crate::util::ScalarStrategy>::maybe_non_finite_strategy(),
                 ),

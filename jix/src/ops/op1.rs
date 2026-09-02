@@ -1048,17 +1048,14 @@ pub(crate) mod tests {
     #[allow(clippy::type_complexity)]
     pub(crate) fn check_op1<T>(
         strategy: BoxedStrategy<T>,
-        check: fn(
-            &ndarray::ArrayD<T>,
-            crate::Array<crate::storage::Compact<crate::Ty<T>, crate::DimDyn>>,
-        ),
+        check: fn(&ndarray::ArrayD<T>, crate::util::TestArray<T>),
     ) where
         T: crate::util::ScalarStrategy + std::fmt::Debug,
     {
         let mut runner = TestRunner::new(Config::default());
         runner
             .run(
-                &crate::util::carray_strategy_from_shape::<T>(
+                &crate::util::array_strategy_from_shape::<T>(
                     crate::util::shape_strategy(),
                     strategy,
                 ),

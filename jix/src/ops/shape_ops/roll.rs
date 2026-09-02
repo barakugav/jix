@@ -534,7 +534,7 @@ mod tests {
     fn roll_strategy() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<i32>,
-            Array<Compact<Ty<i32>, crate::DimDyn>>,
+            crate::util::TestArray<i32>,
             usize,
             i64,
         ),
@@ -545,7 +545,7 @@ mod tests {
 
         shape.prop_flat_map(|shape| {
             let ndim = shape.len();
-            let array_strat = crate::util::carray_strategy_from_shape::<i32>(
+            let array_strat = crate::util::array_strategy_from_shape::<i32>(
                 Just(shape.clone()),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             );

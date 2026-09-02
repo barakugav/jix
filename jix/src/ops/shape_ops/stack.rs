@@ -398,7 +398,7 @@ mod tests {
     fn stack_strategy<T>() -> impl Strategy<
         Value = (
             Vec<ndarray::ArrayD<T>>,
-            Vec<Array<Compact<Ty<T>, DimDyn>>>,
+            Vec<crate::util::TestArray<T>>,
             usize,
         ),
     >
@@ -416,7 +416,7 @@ mod tests {
             .prop_flat_map(|(shape, axis, n_arrays)| {
                 // All arrays share the same shape; only elements and block shapes vary.
                 let per_array_strat =
-                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                    crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
                 (prop::collection::vec(per_array_strat, n_arrays), Just(axis))
             })
             .prop_map(|(arrays, axis)| {

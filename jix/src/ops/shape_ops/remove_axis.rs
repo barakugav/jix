@@ -275,7 +275,7 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Dim, DimDyn, Ty, NDIM_MAX};
+    use crate::{Dim, Ty, NDIM_MAX};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, Dim<1>>> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
@@ -448,11 +448,7 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn remove_axes_strategy<T>() -> impl proptest::strategy::Strategy<
-        Value = (
-            ndarray::ArrayD<T>,
-            Array<Compact<Ty<T>, DimDyn>>,
-            Vec<usize>,
-        ),
+        Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>),
     >
     where
         T: ScalarStrategy,
@@ -477,7 +473,7 @@ mod tests {
             })
             .prop_flat_map(|(shape, axes)| {
                 let array_strat =
-                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                    crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
                 (array_strat, Just(axes))
             })
             .prop_map(|((nd, za), axes)| (nd, za, axes))

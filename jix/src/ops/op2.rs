@@ -638,8 +638,8 @@ pub(crate) mod tests {
         check: fn(
             &ndarray::ArrayD<T>,
             &ndarray::ArrayD<T>,
-            crate::Array<crate::storage::Compact<crate::Ty<T>, crate::DimDyn>>,
-            crate::Array<crate::storage::Compact<crate::Ty<T>, crate::DimDyn>>,
+            crate::util::TestArray<T>,
+            crate::util::TestArray<T>,
         ),
     ) where
         T: crate::util::ScalarStrategy + std::fmt::Debug,
@@ -647,7 +647,7 @@ pub(crate) mod tests {
         let mut runner = TestRunner::new(Config::default());
         runner
             .run(
-                &crate::util::carrays2_strategy_generic::<T>(
+                &crate::util::arrays2_strategy_generic::<T>(
                     crate::util::shape_strategy(),
                     strategy,
                 ),
@@ -831,7 +831,7 @@ pub(crate) mod tests {
     proptest::proptest! {
         #[test]
         fn sub_u32(
-            ((nd_c, _zc), (nd_b, zb)) in crate::util::carrays2_strategy_generic::<u32>(
+            ((nd_c, _zc), (nd_b, zb)) in crate::util::arrays2_strategy_generic::<u32>(
                 crate::util::shape_strategy(),
                 <u32 as crate::util::ScalarStrategy>::op_safe_strategy()
             )
