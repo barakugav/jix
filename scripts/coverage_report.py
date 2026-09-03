@@ -180,7 +180,12 @@ def cfg_test_lines(source: str) -> set[int]:
 # Parsing the JSON that cargo-llvm-cov and pytest-cov export
 # ----------------------------------------------------------------------------------------------------
 
-LLVM_EXPORT_VERSION = "3.1.0"
+# The export version tracks the LLVM shipped with the toolchain, not the format we parse. Major 3
+# arrived in rustc 1.92 (LLVM 21.1.3, export 3.0.1) and rustc 1.98 emits 3.1.0; the two were checked
+# to produce identical keys, segments and derived counts, so the minor is ignored. Any other major
+# stops the run rather than guessing at a layout that is parsed by position.
+LLVM_EXPORT_MAJOR = "3"
+SEGMENT_FIELDS = 6
 PYTEST_COV_FORMAT = 3
 
 
@@ -266,20 +271,26 @@ def _lines_from_segments(segments: list[list]) -> dict[int, int]:
 def load_llvm_json(path: Path) -> list[FileCoverage]:
     """Load a `cargo llvm-cov report --json` export."""
     doc = json.loads(path.read_bytes())
-    version = doc.get("version")
-    if version != LLVM_EXPORT_VERSION:
+    version = str(doc.get("version", ""))
+    if version.split(".")[0] != LLVM_EXPORT_MAJOR:
         raise RuntimeError(
-            f"{path}: expected llvm-cov export version {LLVM_EXPORT_VERSION}, got {version}. "
-            "The export format changed; check scripts/coverage_report.py before trusting these numbers."
+            f"{path}: llvm-cov export version {version} is not major {LLVM_EXPORT_MAJOR}, which needs "
+            "rustc 1.92 or newer. Check scripts/coverage_report.py before trusting these numbers."
         )
     out = []
     for export in doc["data"]:
         for entry in export["files"]:
+            segments = entry.get("segments", [])
+            if segments and len(segments[0]) != SEGMENT_FIELDS:
+                raise RuntimeError(
+                    f"{path}: expected {SEGMENT_FIELDS}-field llvm-cov segments, got {len(segments[0])}. "
+                    "The segment layout changed and is parsed by position."
+                )
             summary = entry.get("summary", {}).get("lines", {})
             out.append(
                 FileCoverage(
                     path=Path(entry["filename"]),
-                    counts=_lines_from_segments(entry.get("segments", [])),
+                    counts=_lines_from_segments(segments),
                     tool_covered=summary.get("covered", 0),
                     tool_total=summary.get("count", 0),
                 )
