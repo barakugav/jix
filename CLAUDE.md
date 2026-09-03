@@ -45,6 +45,11 @@ pytest python/tests --numprocesses auto   # Python tests - ALWAYS use --numproce
 cd jix-py && python python/benches/run_all.py   # Python comparison suite (jix vs numpy/blosc2/zarr) -> results/
 cd jix && cargo bench                            # Rust benchmarks (criterion; HTML at target/criterion/report/index.html)
 
+# --- Coverage (from repo root) ---
+python scripts/coverage_report.py --out <dir>              # all targets; --out is required
+python scripts/coverage_report.py --out <dir> --fast       # skip the slow instrumented pytest leg
+python scripts/coverage_report.py --out <dir> jix --open   # one target, open the HTML when done
+
 # --- Formatting & linting (per crate, plus ruff/ascii from repo root) ---
 cargo fmt --all -- --check                 # in each of jix/schema, jix-macros, jix, jix-py
 cargo clippy --all-features
