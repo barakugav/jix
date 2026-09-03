@@ -4,6 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/jix)](https://pypi.org/project/jix/)
 [![docs.rs](https://img.shields.io/docsrs/jix?label=docs.rs)](https://docs.rs/jix/latest/jix/)
 [![Read the Docs](https://img.shields.io/badge/readthedocs-passing-brightgreen)](https://jix.readthedocs.io/en/stable/)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/barakugav/jix/internal-main-badges/coverage.json)](https://github.com/barakugav/jix/actions/workflows/coverage.yaml)
 
 
 A multi-dimensional array library with block-compressed storage and lazy-evaluated operations - written in Rust, with Python bindings.
