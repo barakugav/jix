@@ -31,7 +31,7 @@ fn bench_op1_impl<S: ArrayStorageTyped<Item = i32>>(
             let array = create_array(data);
             b.iter_batched(
                 || {},
-                |_| array.as_ref().neg().to_ndarray().unwrap().shape().to_vec(),
+                |_| array.view().neg().to_ndarray().unwrap().shape().to_vec(),
                 criterion::BatchSize::LargeInput,
             );
         });
@@ -48,7 +48,7 @@ fn bench_op1_plain_transposed(c: &mut Criterion) {
         let array = Array::plain_ndarray_ref(&data).unwrap();
 
         for output_transpose in [true, false] {
-            let neg = array.as_ref().neg();
+            let neg = array.view().neg();
             let neg = if output_transpose {
                 neg.transpose() // transpose
             } else {

@@ -205,9 +205,8 @@ mod tests {
     use ndarray::array;
     use proptest::prelude::*;
 
-    use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::{Array, DimDyn, Ty};
+    use crate::Array;
 
     #[test]
     fn test_i32_2d_transpose() {
@@ -323,13 +322,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[allow(clippy::type_complexity)]
-    fn permute_axes_strategy<T>() -> impl Strategy<
-        Value = (
-            ndarray::ArrayD<T>,
-            Array<Compact<Ty<T>, DimDyn>>,
-            Vec<usize>,
-        ),
-    >
+    fn permute_axes_strategy<T>(
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>)>
     where
         T: ScalarStrategy,
     {
@@ -341,7 +335,7 @@ mod tests {
             })
             .prop_flat_map(|(shape, perm)| {
                 let array_strat =
-                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                    crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
                 (array_strat, Just(perm))
             })
             .prop_map(|((nd, za), perm)| (nd, za, perm))

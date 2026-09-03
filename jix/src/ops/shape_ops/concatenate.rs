@@ -308,9 +308,8 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::ops::concatenate;
-    use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::{Array, DimDyn, Ty};
+    use crate::Array;
 
     // in-place path
     #[test]
@@ -438,7 +437,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_empty_panics() {
-        let _ = concatenate(Vec::<Array<Compact<Ty<i32>, DimDyn>>>::new(), 0);
+        let _ = concatenate(Vec::<crate::util::TestArray<i32>>::new(), 0);
     }
 
     // -----------------------------------------------------------------------
@@ -449,7 +448,7 @@ mod tests {
     fn concat_strategy<T>() -> impl Strategy<
         Value = (
             Vec<ndarray::ArrayD<T>>,
-            Vec<Array<Compact<Ty<T>, DimDyn>>>,
+            Vec<crate::util::TestArray<T>>,
             usize,
         ),
     >
@@ -472,10 +471,8 @@ mod tests {
                     s.extend_from_slice(&suffix);
                     s
                 });
-                let per_array_strat = crate::util::carray_strategy_from_shape::<T>(
-                    per_array_strat,
-                    T::any_strategy(),
-                );
+                let per_array_strat =
+                    crate::util::array_strategy_from_shape::<T>(per_array_strat, T::any_strategy());
                 (prop::collection::vec(per_array_strat, n_arrays), Just(axis))
             })
             .prop_map(|(arrays, axis)| {

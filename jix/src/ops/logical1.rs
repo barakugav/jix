@@ -141,12 +141,12 @@ mod tests {
         let nd = ndarray::array![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, 1.0];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.is_finite());
-        crate::util::assert_array_matches(&za.as_ref().is_finite(), &expected);
+        crate::util::assert_array_matches(&za.view().is_finite(), &expected);
 
         let nd64 = ndarray::array![f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 1.0];
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.is_finite());
-        crate::util::assert_array_matches(&za64.as_ref().is_finite(), &expected64);
+        crate::util::assert_array_matches(&za64.view().is_finite(), &expected64);
 
         #[cfg(feature = "half")]
         {
@@ -159,7 +159,7 @@ mod tests {
             ];
             let zah = Array::compact_ndarray(&ndh).unwrap();
             let expectedh = ndh.mapv(|a: f16| a.is_finite());
-            crate::util::assert_array_matches(&zah.as_ref().is_finite(), &expectedh);
+            crate::util::assert_array_matches(&zah.view().is_finite(), &expectedh);
         }
     }
 
@@ -170,12 +170,12 @@ mod tests {
         let nd = ndarray::array![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, 1.0];
         let za = Array::compact_ndarray(&nd).unwrap();
         let expected = nd.mapv(|a: f32| a.is_infinite());
-        crate::util::assert_array_matches(&za.as_ref().is_infinite(), &expected);
+        crate::util::assert_array_matches(&za.view().is_infinite(), &expected);
 
         let nd64 = ndarray::array![f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 1.0];
         let za64 = Array::compact_ndarray(&nd64).unwrap();
         let expected64 = nd64.mapv(|a: f64| a.is_infinite());
-        crate::util::assert_array_matches(&za64.as_ref().is_infinite(), &expected64);
+        crate::util::assert_array_matches(&za64.view().is_infinite(), &expected64);
 
         #[cfg(feature = "half")]
         {
@@ -188,7 +188,7 @@ mod tests {
             ];
             let zah = Array::compact_ndarray(&ndh).unwrap();
             let expectedh = ndh.mapv(|a: f16| a.is_infinite());
-            crate::util::assert_array_matches(&zah.as_ref().is_infinite(), &expectedh);
+            crate::util::assert_array_matches(&zah.view().is_infinite(), &expectedh);
         }
     }
 }

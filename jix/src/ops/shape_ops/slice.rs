@@ -438,7 +438,7 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Dim, DimDyn, Ty};
+    use crate::{Dim, Ty};
 
     fn make2d(vals: Vec<i32>, rows: usize, cols: usize) -> Array<Compact<Ty<i32>, Dim<2>>> {
         let nd = ndarray::Array::from_shape_vec([rows, cols], vals).unwrap();
@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn no_steps_flag_set_for_contiguous() {
         let a = make2d(arange(12), 3, 4);
-        let s = super::Slice::new_array(a.as_ref(), (1..3, ..).into())
+        let s = super::Slice::new_array(a.view(), (1..3, ..).into())
             .unwrap()
             .into_storage();
         assert!(s.no_steps);
@@ -735,7 +735,7 @@ mod tests {
     #[test]
     fn no_steps_flag_unset_for_strided() {
         let a = make2d(arange(12), 3, 4);
-        let s = super::Slice::new_array(a.as_ref(), (.., SliceItem::new(None, None, 2)).into())
+        let s = super::Slice::new_array(a.view(), (.., SliceItem::new(None, None, 2)).into())
             .unwrap()
             .into_storage();
         assert!(!s.no_steps);
@@ -748,15 +748,14 @@ mod tests {
     #[test]
     fn error_wrong_number_of_items() {
         let a = make2d(arange(12), 3, 4);
-        assert!(super::Slice::new_array(a.as_ref(), (0..3,).into()).is_err());
+        assert!(super::Slice::new_array(a.view(), (0..3,).into()).is_err());
     }
 
     #[test]
     fn error_negative_step() {
         let a = make2d(arange(12), 3, 4);
         assert!(
-            super::Slice::new_array(a.as_ref(), (SliceItem::new(None, None, -1), ..).into())
-                .is_err()
+            super::Slice::new_array(a.view(), (SliceItem::new(None, None, -1), ..).into()).is_err()
         );
     }
 
@@ -768,7 +767,7 @@ mod tests {
     fn slice_strategy<T>() -> impl Strategy<
         Value = (
             ndarray::ArrayD<T>,
-            Array<Compact<Ty<T>, DimDyn>>,
+            crate::util::TestArray<T>,
             Vec<SliceItem>,
         ),
     >
@@ -781,7 +780,7 @@ mod tests {
                 // Generate (a, b, step) per dim using a fixed range; clamped to dim size below.
                 let raw_slices =
                     prop::collection::vec((0usize..=100, 0usize..=100, 1i64..=5), ndim);
-                let array_strat = crate::util::carray_strategy_from_shape::<T>(
+                let array_strat = crate::util::array_strategy_from_shape::<T>(
                     Just(shape.clone()),
                     T::any_strategy(),
                 );

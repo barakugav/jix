@@ -300,7 +300,7 @@ mod tests {
         let b = array![[7i32, 8, 9], [10, 11, 12]];
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
-        let actual = stack((za, zb.as_ref()), 0).to_ndarray().unwrap();
+        let actual = stack((za, zb.view()), 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
     }
@@ -311,9 +311,7 @@ mod tests {
         let b = array![[7i32, 8, 9], [10, 11, 12]];
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
-        let actual = stack(vec![za.as_ref(), zb.as_ref()], 1)
-            .to_ndarray()
-            .unwrap();
+        let actual = stack(vec![za.view(), zb.view()], 1).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
     }
@@ -348,7 +346,7 @@ mod tests {
         let b = array![[7.0f32, 8.0], [9.0, 10.0], [11.0, 12.0]];
         let za = Array::compact_ndarray(&a).unwrap();
         let zb = Array::compact_ndarray(&b).unwrap();
-        let actual = stack([za.as_ref(), zb.as_ref()], 1).to_ndarray().unwrap();
+        let actual = stack([za.view(), zb.view()], 1).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(1), &[a.view(), b.view()]).unwrap();
         assert_eq!(actual, expected);
     }
@@ -361,7 +359,7 @@ mod tests {
         let za = Array::compact_ndarray_with(&a, arr_params(&[2])).unwrap();
         let zb = Array::compact_ndarray_with(&b, arr_params(&[2])).unwrap();
         let zc = Array::compact_ndarray_with(&c, arr_params(&[2])).unwrap();
-        let actual = stack((za, zb, zc.as_ref()), 0).to_ndarray().unwrap();
+        let actual = stack((za, zb, zc.view()), 0).to_ndarray().unwrap();
         let expected = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view(), c.view()]).unwrap();
         assert_eq!(actual, expected);
     }
@@ -400,7 +398,7 @@ mod tests {
     fn stack_strategy<T>() -> impl Strategy<
         Value = (
             Vec<ndarray::ArrayD<T>>,
-            Vec<Array<Compact<Ty<T>, DimDyn>>>,
+            Vec<crate::util::TestArray<T>>,
             usize,
         ),
     >
@@ -418,7 +416,7 @@ mod tests {
             .prop_flat_map(|(shape, axis, n_arrays)| {
                 // All arrays share the same shape; only elements and block shapes vary.
                 let per_array_strat =
-                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                    crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
                 (prop::collection::vec(per_array_strat, n_arrays), Just(axis))
             })
             .prop_map(|(arrays, axis)| {

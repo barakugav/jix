@@ -108,16 +108,16 @@ impl<T: Dtyped> LanesInfo for T {
 /// let a = Array::compact_ndarray(&array![[1i32, 2], [3, 4]])?;
 ///
 /// // usize: one axis removed/added - statically one smaller/larger
-/// let b = a.as_ref().sum(0);               // D::Smaller when a: Dim<N> -> Dim<N-1>
-/// let c = a.as_ref().insert_axis(0);       // D::Larger  when a: Dim<N> -> Dim<N+1>
+/// let b = a.view().sum(0);               // D::Smaller when a: Dim<N> -> Dim<N-1>
+/// let c = a.view().insert_axis(0);       // D::Larger  when a: Dim<N> -> Dim<N+1>
 ///
 /// // [usize; 2]: two axes removed - statically two smaller
-/// let b = a.as_ref().sum([0, 1]);          // Dim<N-2>
-/// let c = a.as_ref().insert_axis([0, 1]);  // Dim<N+2>
+/// let b = a.view().sum([0, 1]);          // Dim<N-2>
+/// let c = a.view().insert_axis([0, 1]);  // Dim<N+2>
 ///
 /// // &[usize]: dynamic count -> DimDyn regardless of input dimension
 /// let axes = vec![0, 1];
-/// let b = a.as_ref().sum(axes.as_slice()); // DimDyn
+/// let b = a.view().sum(axes.as_slice()); // DimDyn
 /// # Ok::<(), jix::Error>(())
 /// ```
 #[allow(clippy::len_without_is_empty)]

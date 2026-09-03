@@ -56,14 +56,14 @@ use crate::{
 /// let a = Array::compact_ndarray(&array![[1i32, 2, 3], [4, 5, 6]])?; // shape [2, 3]
 ///
 /// // [u64; 1] -> output D = Dim<1>: compiler knows the result is 1-D
-/// assert_eq!(a.as_ref().reshape([6u64]).shape(), &[6]);
+/// assert_eq!(a.view().reshape([6u64]).shape(), &[6]);
 ///
 /// // (u64, u64) -> output D = Dim<2>: compiler knows the result is 2-D
-/// assert_eq!(a.as_ref().reshape((3u64, 2u64)).shape(), &[3, 2]);
+/// assert_eq!(a.view().reshape((3u64, 2u64)).shape(), &[3, 2]);
 ///
 /// // &[u64] -> output D = DimDyn: ndim only known at runtime
 /// let new_shape = vec![6u64];
-/// assert_eq!(a.as_ref().reshape(new_shape.as_slice()).shape(), &[6]);
+/// assert_eq!(a.view().reshape(new_shape.as_slice()).shape(), &[6]);
 ///
 /// // Elements are the same regardless of argument style
 /// assert_eq!(
@@ -1044,8 +1044,8 @@ mod tests {
     fn flat_order_preserved_4x3_vs_3x4() {
         // Both reshape [12] -> [4,3] and [3,4] must yield same flat sequence
         let a12 = make1d(u8s(12), 12);
-        let r43 = a12.as_ref().reshape([4, 3]);
-        let r34 = a12.as_ref().reshape([3, 4]);
+        let r43 = a12.view().reshape([4, 3]);
+        let r34 = a12.view().reshape([3, 4]);
 
         let flat_43 = r43.reshape(12).to_ndarray().unwrap();
         let flat_34 = r34.reshape(12).to_ndarray().unwrap();
@@ -1078,7 +1078,7 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn reshape_strategy<T>(
-    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, Array<Compact<Ty<T>, DimDyn>>, Vec<u64>)>
+    ) -> impl Strategy<Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<u64>)>
     where
         T: ScalarStrategy,
     {
@@ -1086,7 +1086,7 @@ mod tests {
             .prop_flat_map(|input_shape| {
                 let n: usize = input_shape.iter().product();
                 let n_u64 = n as u64;
-                let array_strat = crate::util::carray_strategy_from_shape::<T>(
+                let array_strat = crate::util::array_strategy_from_shape::<T>(
                     Just(input_shape),
                     T::any_strategy(),
                 );

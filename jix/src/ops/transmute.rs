@@ -200,11 +200,9 @@ mod tests {
     #[test]
     fn new_accepts_any_dtype_of_the_same_itemsize() {
         let arr = Array::compact_ndarray(&ndarray::array![1u32, 2, 3]).unwrap();
-        assert!(unsafe { Transmute::new(arr.as_ref().into_storage(), Ty::<i32>::new()) }.is_ok());
-        assert!(unsafe { Transmute::new(arr.as_ref().into_storage(), Ty::<f32>::new()) }.is_ok());
-        assert!(
-            unsafe { Transmute::new(arr.as_ref().into_storage(), Ty::<[u8; 4]>::new()) }.is_ok()
-        );
+        assert!(unsafe { Transmute::new(arr.view().into_storage(), Ty::<i32>::new()) }.is_ok());
+        assert!(unsafe { Transmute::new(arr.view().into_storage(), Ty::<f32>::new()) }.is_ok());
+        assert!(unsafe { Transmute::new(arr.view().into_storage(), Ty::<[u8; 4]>::new()) }.is_ok());
     }
 
     // -----------------------------------------------------------------------
@@ -289,7 +287,7 @@ mod tests {
         assert_eq!(t.dtype(), &u32::DTYPE);
 
         // Recovering it as the wrong type is refused, as the right one succeeds.
-        assert!(t.as_ref().into_typed::<i32>().is_err());
+        assert!(t.view().into_typed::<i32>().is_err());
         assert_array_matches(
             &t.into_typed::<u32>().unwrap(),
             &ndarray::array![1u32, 2, 3],

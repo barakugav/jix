@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn shape_repeats_one_is_identity() {
         let a = make(arange(12), &[3u64, 4]);
-        let r = super::Repeat::new_array(a.as_ref(), 1, 0)
+        let r = super::Repeat::new_array(a.view(), 1, 0)
             .unwrap()
             .into_storage();
         assert_eq!(r.shape(), &[3, 4]);
@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn error_axis_out_of_bounds() {
         let a = make(arange(12), &[3u64, 4]);
-        let err = super::Repeat::new_array(a.as_ref(), 2, 2).unwrap_err();
+        let err = super::Repeat::new_array(a.view(), 2, 2).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 
@@ -374,7 +374,7 @@ mod tests {
         let shape: [u64; 8] = [1; 8];
         let a = make(arange(1), &shape);
         assert_eq!(a.shape().len(), NDIM_MAX);
-        let err = super::Repeat::new_array(a.as_ref(), 2, 0).unwrap_err();
+        let err = super::Repeat::new_array(a.view(), 2, 0).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 
@@ -382,7 +382,7 @@ mod tests {
     fn error_repeats_overflow() {
         // shape[0] * repeats overflows u64
         let a = make(arange(2), &[2u64]);
-        let err = super::Repeat::new_array(a.as_ref(), u64::MAX, 0).unwrap_err();
+        let err = super::Repeat::new_array(a.view(), u64::MAX, 0).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidShapeOperation);
     }
 
@@ -674,7 +674,7 @@ mod tests {
     fn repeat_strategy() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<i32>,
-            Array<Compact<Ty<i32>, crate::DimDyn>>,
+            crate::util::TestArray<i32>,
             usize,
             u64,
         ),
@@ -689,7 +689,7 @@ mod tests {
 
         shape.prop_flat_map(|shape| {
             let ndim = shape.len();
-            let array_strat = crate::util::carray_strategy_from_shape::<i32>(
+            let array_strat = crate::util::array_strategy_from_shape::<i32>(
                 Just(shape.clone()),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             );

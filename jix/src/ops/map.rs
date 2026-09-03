@@ -741,7 +741,7 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn proptest_map_i32(
-            (nd, za) in crate::util::carray_strategy_from_shape::<i32>(
+            (nd, za) in crate::util::array_strategy_from_shape::<i32>(
                 crate::util::shape_strategy(),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             )
@@ -755,7 +755,7 @@ mod tests {
 
         #[test]
         fn proptest_map_i32_to_f64(
-            (nd, za) in crate::util::carray_strategy_from_shape::<i32>(
+            (nd, za) in crate::util::array_strategy_from_shape::<i32>(
                 crate::util::shape_strategy(),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             )

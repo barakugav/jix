@@ -53,10 +53,10 @@ use crate::{dim_arr, Array, ArrayStorage, Dimension};
 /// let a = Array::compact_ndarray(&array![[[1i32, 2, 3]]])?; // shape [1, 1, 3], Dim<3>
 ///
 /// // usize -> output D = Dim<2> (one fewer than input Dim<3>)
-/// assert_eq!(a.as_ref().remove_axis(0).shape(), &[1, 3]);
+/// assert_eq!(a.view().remove_axis(0).shape(), &[1, 3]);
 ///
 /// // [usize; 2] -> output D = Dim<1> (two fewer than input Dim<3>)
-/// assert_eq!(a.as_ref().remove_axis([0, 1]).shape(), &[3]);
+/// assert_eq!(a.view().remove_axis([0, 1]).shape(), &[3]);
 ///
 /// // &[usize] -> output D = DimDyn
 /// let axes = vec![0, 1];
@@ -275,7 +275,7 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{arr_params, shape_strategy, ScalarStrategy};
-    use crate::{Dim, DimDyn, Ty, NDIM_MAX};
+    use crate::{Dim, Ty, NDIM_MAX};
 
     fn make1d(vals: Vec<i32>, block_size: usize) -> Array<Compact<Ty<i32>, Dim<1>>> {
         let nd = ndarray::Array::from_shape_vec([vals.len()], vals).unwrap();
@@ -448,11 +448,7 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn remove_axes_strategy<T>() -> impl proptest::strategy::Strategy<
-        Value = (
-            ndarray::ArrayD<T>,
-            Array<Compact<Ty<T>, DimDyn>>,
-            Vec<usize>,
-        ),
+        Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>),
     >
     where
         T: ScalarStrategy,
@@ -477,7 +473,7 @@ mod tests {
             })
             .prop_flat_map(|(shape, axes)| {
                 let array_strat =
-                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                    crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
                 (array_strat, Just(axes))
             })
             .prop_map(|((nd, za), axes)| (nd, za, axes))

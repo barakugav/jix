@@ -256,7 +256,7 @@ mod tests {
     use crate::codec::ReadContext;
     use crate::storage::Compact;
     use crate::util::{shape_strategy, ScalarStrategy};
-    use crate::{Array, DimDyn, IntoDimension, Ty, NDIM_MAX};
+    use crate::{Array, IntoDimension, Ty, NDIM_MAX};
 
     fn make<Sh>(vals: Vec<i32>, shape: Sh) -> Array<Compact<Ty<i32>, Sh::Dimension>>
     where
@@ -393,14 +393,14 @@ mod tests {
     #[test]
     fn error_ndim_mismatch() {
         let a = make(arange(6), &[2, 3]);
-        assert!(super::Broadcast::new_array(a.as_ref(), &[2, 3, 1]).is_err());
+        assert!(super::Broadcast::new_array(a.view(), &[2, 3, 1]).is_err());
     }
 
     #[test]
     fn error_non_unit_dim_broadcast() {
         let a = make(arange(6), &[2, 3]);
         // axis 0 has length 2, cannot broadcast to 5
-        assert!(super::Broadcast::new_array(a.as_ref(), &[5, 3]).is_err());
+        assert!(super::Broadcast::new_array(a.view(), &[5, 3]).is_err());
     }
 
     // -----------------------------------------------------------------------
@@ -411,14 +411,14 @@ mod tests {
     fn broadcast_2d_axis0_strategy() -> impl proptest::strategy::Strategy<
         Value = (
             ndarray::ArrayD<i32>,
-            Array<Compact<Ty<i32>, DimDyn>>,
+            crate::util::TestArray<i32>,
             usize,
             usize,
         ),
     > {
         use proptest::prelude::*;
         (1usize..=15, 1usize..=15).prop_flat_map(|(n, m)| {
-            crate::util::carray_strategy_from_shape::<i32>(
+            crate::util::array_strategy_from_shape::<i32>(
                 proptest::strategy::Just(vec![1, m]),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             )
@@ -430,7 +430,7 @@ mod tests {
         #[test]
         fn proptest_broadcast_1d(
             n in 1usize..=30,
-            (nd, za) in crate::util::carray_strategy_from_shape::<i32>(
+            (nd, za) in crate::util::array_strategy_from_shape::<i32>(
                 proptest::strategy::Just(vec![1]),
                 <i32 as crate::util::ScalarStrategy>::any_strategy(),
             )
@@ -501,11 +501,7 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn broadcast_axes_strategy<T>() -> impl proptest::strategy::Strategy<
-        Value = (
-            ndarray::ArrayD<T>,
-            Array<Compact<Ty<T>, DimDyn>>,
-            Vec<usize>,
-        ),
+        Value = (ndarray::ArrayD<T>, crate::util::TestArray<T>, Vec<usize>),
     >
     where
         T: ScalarStrategy,
@@ -545,7 +541,7 @@ mod tests {
             })
             .prop_flat_map(|(shape, broadcast_shape)| {
                 let array_strat =
-                    crate::util::carray_strategy_from_shape::<T>(Just(shape), T::any_strategy());
+                    crate::util::array_strategy_from_shape::<T>(Just(shape), T::any_strategy());
                 (array_strat, Just(broadcast_shape))
             })
             .prop_map(|((nd, za), broadcast_shape)| (nd, za, broadcast_shape))

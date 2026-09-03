@@ -540,7 +540,7 @@ mod tests {
             let nd = ndarray::arr1(&$arr);
             let za = Array::compact_ndarray(&nd).unwrap();
             let expected = nd.mapv(|$a| $body);
-            crate::util::assert_array_matches(&za.as_ref().$method(), &expected);
+            crate::util::assert_array_matches(&za.view().$method(), &expected);
         }};
     }
 
@@ -566,7 +566,7 @@ mod tests {
             let expected = ndarray::Zip::from(&nd_a)
                 .and(&nd_b)
                 .map_collect(|&$a, &$b| $body);
-            crate::util::assert_array_matches(&za.as_ref().$method(zb.as_ref()), &expected);
+            crate::util::assert_array_matches(&za.view().$method(zb.view()), &expected);
         }};
     }
 
@@ -620,7 +620,7 @@ mod tests {
         let a64 = ndarray::arr1(&EDGE_U64);
         let za64 = Array::compact_ndarray_with(&a64, crate::util::arr_params(&[2])).unwrap();
         let expected64 = a64.mapv(|a: u64| !a);
-        crate::util::assert_array_matches(&za64.as_ref().not(), &expected64);
+        crate::util::assert_array_matches(&za64.view().not(), &expected64);
     }
 
     concrete_op1!(

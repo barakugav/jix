@@ -597,7 +597,7 @@ impl Array {
                     itemsize,
                 )
             };
-            to_ndarray_fn(self.arr.as_ref(), &index, &mut out, context).into_py_result()
+            to_ndarray_fn(self.arr.view(), &index, &mut out, context).into_py_result()
         })?;
 
         Ok(np_arr)
@@ -701,7 +701,7 @@ impl Array {
         ) -> std::fmt::Result {
             let info = storage.info();
             let deps = info.dependencies();
-            if ["Ref", "Any", "IntoType", "IntoDim"].contains(&info.name()) && deps.len() == 1 {
+            if ["View", "Any", "IntoType", "IntoDim"].contains(&info.name()) && deps.len() == 1 {
                 return format_storage(deps[0], f, n_printed);
             }
             f.write_str(info.name())?;

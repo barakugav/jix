@@ -393,7 +393,7 @@ mod tests {
                 proptest::proptest! {
                     #[test]
                     fn [<cast_ $src:lower _to_ $dst:lower>](
-                        (nd, za) in crate::util::carray_strategy_from_shape::<$src>(
+                        (nd, za) in crate::util::array_strategy_from_shape::<$src>(
                             crate::util::shape_strategy(),
                             <$src as crate::util::ScalarStrategy>::any_strategy(),
                         )

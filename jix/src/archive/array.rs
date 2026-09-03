@@ -813,7 +813,7 @@ mod tests {
         let a = compact(vals, &[3, 4], &[2, 2]);
         let ctx = a.read_ctx();
 
-        let view = -a.as_ref();
+        let view = -a.view();
         let mut buf = Cursor::new(Vec::new());
         view.write_to_with(&mut buf, arr_params(&[2, 2]), &ctx)
             .unwrap();
@@ -837,7 +837,7 @@ mod tests {
         let a = compact(vals, &[3, 4, 5], &[2, 2, 3]);
         let ctx = a.read_ctx();
 
-        let view = -(-a.as_ref()); // neg * neg = identity
+        let view = -(-a.view()); // neg * neg = identity
         let mut buf = Cursor::new(Vec::new());
         view.write_to_with(&mut buf, arr_params(&[2, 2, 3]), &ctx)
             .unwrap();
@@ -863,7 +863,7 @@ mod tests {
         let a = compact(vals, &[4, 6], &[2, 3]);
         let ctx = a.read_ctx();
 
-        let view = a.as_ref() + a.as_ref();
+        let view = a.view() + a.view();
         let mut buf = Cursor::new(Vec::new());
         view.write_to_with(&mut buf, arr_params(&[2, 3]), &ctx)
             .unwrap();
@@ -1108,7 +1108,7 @@ mod tests {
         };
         let mmap_arr = mmap_arr.into_typed::<i32>().unwrap();
         let ctx = mmap_arr.read_ctx();
-        let view = -mmap_arr.as_ref();
+        let view = -mmap_arr.view();
 
         let mut out_buf = Cursor::new(Vec::new());
         view.write_to_with(&mut out_buf, arr_params(&[2, 2, 3]), &ctx)

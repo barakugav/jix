@@ -224,16 +224,8 @@ mod tests {
             Pair { x: 3, y: 30 },
         ];
         let za = Array::compact_ndarray(&pts).unwrap();
-        let xs = za
-            .as_ref()
-            .dtype_sub_field::<i32>("x")
-            .to_ndarray()
-            .unwrap();
-        let ys = za
-            .as_ref()
-            .dtype_sub_field::<i32>("y")
-            .to_ndarray()
-            .unwrap();
+        let xs = za.view().dtype_sub_field::<i32>("x").to_ndarray().unwrap();
+        let ys = za.view().dtype_sub_field::<i32>("y").to_ndarray().unwrap();
         assert_eq!(xs.as_slice().unwrap(), &[1, 2, 3]);
         assert_eq!(ys.as_slice().unwrap(), &[10, 20, 30]);
     }
@@ -302,8 +294,8 @@ mod tests {
             let expected_y = ndarray::Array::from_shape_vec([n],
                 pairs.iter().map(|&(_, y)| y).collect::<Vec<_>>(),
             ).unwrap();
-            crate::util::assert_array_matches(&za.as_ref().dtype_sub_field::<i32>("x"), &expected_x);
-            crate::util::assert_array_matches(&za.as_ref().dtype_sub_field::<i32>("y"), &expected_y);
+            crate::util::assert_array_matches(&za.view().dtype_sub_field::<i32>("x"), &expected_x);
+            crate::util::assert_array_matches(&za.view().dtype_sub_field::<i32>("y"), &expected_y);
         }
     }
 
@@ -336,14 +328,14 @@ mod tests {
         ];
         let za = Array::compact_ndarray(&items).unwrap();
 
-        let err = crate::ops::SubDtype::<_, TypeDyn>::new_array(za.as_ref(), "nothing")
+        let err = crate::ops::SubDtype::<_, TypeDyn>::new_array(za.view(), "nothing")
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
 
         // The sibling field of a real size is still fine.
         let values = za
-            .as_ref()
+            .view()
             .dtype_sub_field::<i32>("value")
             .to_ndarray()
             .unwrap();

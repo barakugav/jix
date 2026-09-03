@@ -447,13 +447,17 @@ where
         let ndim = self.shape.ndim();
         let out_shape = D::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
 
-        let in_offset = (0..ndim)
-            .map(|dim| index[dim].start as usize * self.strides[dim])
-            .sum::<usize>();
-        let src_ptr = unsafe { self.data.as_ptr().add(in_offset) };
-
         let itemsize = dtype.itemsize() as usize;
         let src_span = strided_span_bytes(out_shape.as_ref(), self.strides.as_ref(), itemsize);
+
+        let src_ptr = if src_span == 0 {
+            self.data.as_ptr()
+        } else {
+            let in_offset = (0..ndim)
+                .map(|dim| index[dim].start as usize * self.strides[dim])
+                .sum::<usize>();
+            unsafe { self.data.as_ptr().add(in_offset) }
+        };
         let src = unsafe { std::slice::from_raw_parts(src_ptr, src_span) };
 
         match out {
@@ -520,6 +524,20 @@ mod tests {
     use crate::Array;
 
     // -----------------------------------------------------------------------
+    /// Reading an empty region whose start sits at the end of an axis must not compute an
+    /// out-of-bounds pointer, even though the resulting slice is empty.
+    #[test]
+    fn read_empty_subrange_at_end_of_axis() {
+        let nd = ndarray::Array3::<i32>::from_shape_vec((2, 3, 4), (0..24).collect()).unwrap();
+        let a = Array::plain_ndarray(nd).unwrap();
+        let ctx = a.read_ctx();
+        // `2..2` is the whole of axis 0, so the start offset alone runs to the end of the
+        // allocation; the non-zero start on axis 2 then pushes it past.
+        let got = a.to_ndarray_sub(&[2..2, 0..3, 1..4], &ctx).unwrap();
+        assert_eq!(got.shape(), &[0, 3, 3]);
+        assert_eq!(got.len(), 0);
+    }
+
     // plain_ndarray (owned)
     // -----------------------------------------------------------------------
 
@@ -705,7 +723,7 @@ mod tests {
         params.read_size((16, 32)); // for i32: a 4..8 item window, narrower than the 10-wide inner dim
         let a = Array::plain_ndarray_with(nd.clone(), params).unwrap();
 
-        let got = a.as_ref().neg().to_ndarray().unwrap();
+        let got = a.view().neg().to_ndarray().unwrap();
         let expected = nd.mapv(|x: i32| -x);
         assert_eq!(got, expected);
     }
