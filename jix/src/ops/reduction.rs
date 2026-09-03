@@ -11,10 +11,12 @@ use crate::storage::{
 };
 use crate::util::iter::NdIter;
 use crate::util::SliceExt;
-use crate::util::{calc_block_end, scale_read_shape, DimArray, DimIdx, USE_NEW_READ_SCALING};
+use crate::util::{
+    calc_block_end, scale_read_shape, DimArray, DimIdx, REQUIRE_ALIGNED, USE_NEW_READ_SCALING,
+};
 use crate::{
     array_from_fn_inline, default_strides, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
-    NdIterUnordered, Ty,
+    NdIterUnordered, PtrExt, Ty,
 };
 
 pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
@@ -581,7 +583,8 @@ where
     let [_items_inner_stride, state_inner_stride, reduced_inner_stride] = iter.inner_strides();
     let [items_contiguous, state_contiguous, _] = iter.is_contiguous();
     let [items_strides_aligned, state_strides_aligned, _] = iter.is_aligned();
-    let items_aligned = items_strides_aligned && items_buf.as_ptr().cast::<T>().is_aligned();
+    let items_aligned =
+        !REQUIRE_ALIGNED || (items_strides_aligned && items_buf.as_ptr().cast::<T>().is_aligned());
     // The state buffer is either a fresh pooled allocation made at the state's alignment, or the
     // caller's output buffer - which `state_in_out_buf` only accepts when it is aligned
     debug_assert!(state_strides_aligned && states_buf.as_ptr().cast::<K::State>().is_aligned());
@@ -668,7 +671,12 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
     let items = items.as_ptr().cast::<T>();
     let read_items_bulk = |offset: usize| -> [T; LANES] {
         if CONTIGUOUS {
-            unsafe { items.add(offset).cast::<[T; LANES]>().read() }
+            unsafe {
+                items
+                    .add(offset)
+                    .cast::<[T; LANES]>()
+                    .read_maybe_aligned::<REQUIRE_ALIGNED>()
+            }
         } else {
             unsafe {
                 array_from_fn_inline(|b| {
@@ -706,7 +714,7 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
     // Fold any remaining tail sequentially.
     while i < inner_len {
         let item = if CONTIGUOUS {
-            unsafe { items.add(i).read() }
+            unsafe { items.add(i).read_maybe_aligned::<REQUIRE_ALIGNED>() }
         } else {
             unsafe { items.byte_add(i * items_stride).read_unaligned() }
         };
@@ -764,7 +772,7 @@ where
     let items = items.as_ptr().cast::<T>();
     let read_item = |i: usize| {
         if CONTIGUOUS {
-            unsafe { items.add(i).read() }
+            unsafe { items.add(i).read_maybe_aligned::<REQUIRE_ALIGNED>() }
         } else {
             unsafe { items.byte_add(i * items_stride).read_unaligned() }
         }

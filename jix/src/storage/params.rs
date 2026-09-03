@@ -195,14 +195,13 @@ impl ArrayParams {
         self
     }
 
-    /// Sets the compression level.
+    /// Set the compression level.
     ///
-    /// Higher levels trade CPU time for a better compression ratio. For Zstd, level 3 is the
-    /// default.
+    /// Higher levels trade CPU time for better compression ratios. For zstd, level 3 is the default.
     ///
     /// # Errors
     ///
-    /// Returns `InvalidArgument` if `level` is out of the valid range (0-19 for Zstd).
+    /// Returns `InvalidArgument` if `level` is not in the valid range.
     pub fn level(&mut self, level: i32) -> Result<&mut Self> {
         self.encoder_params
             .get_or_insert_with(EncoderParams::default)

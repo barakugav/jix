@@ -10,6 +10,7 @@ use crate::error::Result;
 use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
+use crate::util::{PtrExt, PtrMutExt, REQUIRE_ALIGNED};
 use crate::{
     array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimDyn, DimIdx,
     NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
@@ -40,8 +41,9 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     ///
     /// # Safety
     ///
-    /// Every operand's `current_ptr` must be aligned for its dtype, and elements
-    /// `offset..offset + N` at `inner_stride` must be in bounds of its `original_data`.
+    /// Every operand's `current_ptr` must be aligned for its dtype when [`REQUIRE_ALIGNED`] is
+    /// set, and elements `offset..offset + N` at `inner_stride` must be in bounds of its
+    /// `original_data`.
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
 
     #[inline(never)]
@@ -210,11 +212,16 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     let iter = NdIterUnordered::new(shape, strides, layouts);
     let chunk_len_max = iter.inner_len().min(Staging::BUFFER_SIZE);
 
+    let stage_strided = stage_strided_inputs(&iter.is_contiguous());
     let mut staging = array_from_fn_inline::<_, N_OPERANDS>(|i| {
         let operand = operands[i];
-        let aligned = iter.is_aligned()[i]
-            && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize());
-        (!aligned).then(|| Staging {
+        let need_staging_unaligned = REQUIRE_ALIGNED
+            && !(iter.is_aligned()[i]
+                && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
+        let need_staging_strided =
+            stage_strided && !is_output_operand(i) && !iter.is_contiguous()[i];
+        let need_staging = need_staging_unaligned || need_staging_strided;
+        need_staging.then(|| Staging {
             buf: context.allocate_buf(
                 chunk_len_max * layouts[i].0 as usize,
                 operand.dtype.alignment(),
@@ -315,13 +322,18 @@ fn to_buf_type_erased_dyn(
     let iter = NdIterUnorderedDyn::new(shape, &strides, &layouts);
     let chunk_len_max = iter.inner_len().min(Staging::BUFFER_SIZE);
 
+    let stage_strided = stage_strided_inputs(iter.is_contiguous());
     let mut staging = operands
         .iter()
         .enumerate()
         .map(|(i, operand)| {
-            let aligned = iter.is_aligned()[i]
-                && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize());
-            (!aligned).then(|| Staging {
+            let need_staging_unaligned = REQUIRE_ALIGNED
+                && !(iter.is_aligned()[i]
+                    && (operand.base_ptr() as usize).is_multiple_of(layouts[i].1.as_usize()));
+            let need_staging_strided =
+                stage_strided && !is_output_operand(i) && !iter.is_contiguous()[i];
+            let need_staging = need_staging_unaligned || need_staging_strided;
+            need_staging.then(|| Staging {
                 buf: context.allocate_buf(
                     chunk_len_max * layouts[i].0 as usize,
                     operand.dtype.alignment(),
@@ -395,6 +407,24 @@ fn to_buf_type_erased_dyn(
             }
         }
     });
+}
+
+/// Whether to stage the non-contiguous *input* operands, on top of the ones staged for alignment.
+fn stage_strided_inputs(is_contiguous: &[bool]) -> bool {
+    let is_contiguous = &is_contiguous[1..]; // ignore index 0 - output operand
+    let n_inputs = is_contiguous.len();
+    let n_contiguous = is_contiguous.iter().filter(|&&c| c).count();
+
+    /// The number of already-contiguous inputs that makes staging the rest worth it.
+    ///
+    /// A single non-contiguous operand turns `inputs_contiguous` off for the *whole* pipeline.
+    /// Copying the odd one out into scratch buys that back for all the others, at the price of one
+    /// extra pass over it. So the win grows with the number of operands that get their wide read
+    /// back while the cost stays at one pass, and it only turns positive once enough of them are
+    /// already contiguous.
+    const STAGE_MIN_CONTIGUOUS_INPUTS: usize = 4;
+
+    n_contiguous >= STAGE_MIN_CONTIGUOUS_INPUTS && n_contiguous >= n_inputs / 2
 }
 
 /// A temporary buffer used to stage a chunk of an operand data during a pipeline run.
@@ -472,18 +502,27 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
     let dst = dst.as_mut_ptr().cast::<T>();
-    debug_assert!(dst.is_aligned());
+    if REQUIRE_ALIGNED {
+        debug_assert!(dst.is_aligned());
+    }
 
     let body_limit = len - len % LANES;
     let mut i = 0;
     while i < body_limit {
         let chunk = unsafe { pipeline.read_bulk::<LANES, IN_CONTIGUOUS>(i) };
         if OUT_CONTIGUOUS {
-            unsafe { dst.add(i).cast::<[T; LANES]>().write(chunk) };
+            unsafe {
+                dst.add(i)
+                    .cast::<[T; LANES]>()
+                    .write_maybe_aligned::<REQUIRE_ALIGNED>(chunk)
+            };
         } else {
             #[allow(clippy::needless_range_loop)]
             for k in 0..LANES {
-                unsafe { dst.byte_add((i + k) * dst_stride).write(chunk[k]) };
+                unsafe {
+                    dst.byte_add((i + k) * dst_stride)
+                        .write_maybe_aligned::<REQUIRE_ALIGNED>(chunk[k])
+                };
             }
         }
         i += LANES;
@@ -491,9 +530,12 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     while i < len {
         let [val] = unsafe { pipeline.read_bulk::<1, IN_CONTIGUOUS>(i) };
         if OUT_CONTIGUOUS {
-            unsafe { dst.add(i).write(val) };
+            unsafe { dst.add(i).write_maybe_aligned::<REQUIRE_ALIGNED>(val) };
         } else {
-            unsafe { dst.byte_add(i * dst_stride).write(val) };
+            unsafe {
+                dst.byte_add(i * dst_stride)
+                    .write_maybe_aligned::<REQUIRE_ALIGNED>(val)
+            };
         }
         i += 1;
     }
@@ -643,15 +685,24 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
         debug_assert!(!base.is_null());
-        debug_assert!(base.is_aligned());
+        if REQUIRE_ALIGNED {
+            debug_assert!(base.is_aligned());
+        }
 
         if CONTIGUOUS {
             debug_assert_eq!(self.operand.inner_stride.get(), size_of::<T>());
-            unsafe { base.add(offset).cast::<[T; N]>().read() }
+            unsafe {
+                base.add(offset)
+                    .cast::<[T; N]>()
+                    .read_maybe_aligned::<REQUIRE_ALIGNED>()
+            }
         } else {
             let stride = self.operand.inner_stride.get();
             let base = unsafe { base.byte_add(offset * stride) };
-            array_from_fn_inline(|k| unsafe { base.byte_add(k * stride).read() })
+            array_from_fn_inline(|k| unsafe {
+                base.byte_add(k * stride)
+                    .read_maybe_aligned::<REQUIRE_ALIGNED>()
+            })
         }
     }
 }
@@ -761,7 +812,7 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     /// An over-aligned byte buffer whose element 0 sits `misalign` bytes in, so a region can be
-    /// forced onto the staged path.
+    /// forced onto the unaligned (and, where [`REQUIRE_ALIGNED`], staged) path.
     struct Bytes {
         backing: Vec<u64>,
         misalign: usize,
@@ -971,15 +1022,15 @@ mod tests {
     }
 
     #[test]
-    fn misaligned_operands_are_staged() {
-        // A 1-byte base offset makes u32 reads unaligned, so each of these operands goes through a
-        // scratch buffer - one at a time, then all three at once.
+    fn misaligned_operands() {
+        // A 1-byte base offset makes u32 reads unaligned - read in place where the target allows
+        // it, through a scratch buffer where it does not. One operand at a time, then all three.
         for push in [false, true] {
             check_add(&[3, 4], [&[1, 1]; 3], [1, 0, 0], push);
             check_add(&[3, 4], [&[1, 1]; 3], [0, 1, 0], push);
             check_add(&[3, 4], [&[1, 1]; 3], [0, 0, 1], push);
             check_add(&[3, 4], [&[1, 1]; 3], [1, 1, 1], push);
-            // Staged *and* strided: the gather has to honor the source stride.
+            // Unaligned *and* strided: a gather, where it runs, has to honor the source stride.
             check_add(&[3, 4], [&[1, 2], &[2, 3], &[1, 1]], [1, 1, 1], push);
         }
     }
@@ -1705,6 +1756,60 @@ mod tests {
         );
         let out = mapped.to_ndarray().unwrap();
         assert_eq!(out.iter().copied().collect::<Vec<i32>>(), expected(16));
+    }
+
+    #[test]
+    fn stage_strided_inputs_needs_enough_contiguous_inputs() {
+        // Entry 0 is the output and never counts. Below the threshold the extra pass is not worth
+        // it; at or above it, and with something left to stage, it is.
+        let f = |flags: &[bool]| stage_strided_inputs(flags);
+        assert!(!f(&[true, false])); // 1 input, none contiguous
+        assert!(!f(&[true, true, false, false])); // 1 of 2 - below the threshold
+        assert!(!f(&[true, true, true, true, false])); // 3 of 4 - still below
+        assert!(f(&[true, true, true, true, true, false])); // 4 of 5 - pays off
+        assert!(f(&[true, false, true, true, true, true, false])); // 4 of 6, two to stage
+        assert!(f(&[false, true, true, true, true, false])); // the output's own flag is ignored
+    }
+
+    #[test]
+    fn staged_for_contiguity_matches_the_unstaged_result() {
+        // Six inputs, five of them contiguous: the odd one out is copied into scratch so the rest
+        // keep their wide read. Run the same sum with the strided operand gapped, broadcast, and
+        // contiguous - every shape has to produce the plain element-wise answer.
+        type T = i32;
+        const N_IN: usize = 6;
+        const LEN: usize = 300;
+
+        for odd_gap in [2usize, 0, 1] {
+            let gaps: [usize; N_IN] =
+                std::array::from_fn(|k| if k + 1 == N_IN { odd_gap } else { 1 });
+            let backings =
+                gaps.map_inline(|gap| (0..LEN * gap.max(1)).map(|i| i as T).collect::<Vec<T>>());
+            let arrays = array_from_fn_inline::<_, N_IN>(|k| {
+                let arr: Array<crate::storage::Plain<_, Ty<T>, _>> = unsafe {
+                    Array::plain_ndarray_ptr(
+                        backings[k].as_ptr().cast::<u8>(),
+                        &[LEN as u64][..],
+                        &[gaps[k] * size_of::<T>()][..],
+                        T::DTYPE,
+                        Default::default(),
+                    )
+                }
+                .unwrap();
+                arr
+            });
+            let expected = (0..LEN)
+                .map(|i| (0..N_IN).map(|k| backings[k][i * gaps[k]]).sum::<T>())
+                .collect::<Vec<T>>();
+
+            let summed = crate::ops::map_multiple(arrays, |xs: [T; N_IN]| xs.iter().sum::<T>());
+            let got = summed.to_ndarray().unwrap();
+            assert_eq!(
+                got.iter().copied().collect::<Vec<T>>(),
+                expected,
+                "odd_gap={odd_gap}"
+            );
+        }
     }
 
     #[test]

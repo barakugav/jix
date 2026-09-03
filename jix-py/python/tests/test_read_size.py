@@ -24,6 +24,8 @@ def test_read_size_accepts_sequence(seq):
     [
         # Wrong arity is a value error (the elements parse, the length is wrong).
         ((1, 2, 3), ValueError),
+        ((), ValueError),
+        ([], ValueError),
         # Wrong element type / domain fails extraction and surfaces as a type error.
         (4096.0, TypeError),
         (-1, TypeError),
