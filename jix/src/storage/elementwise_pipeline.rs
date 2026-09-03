@@ -502,7 +502,9 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
     let dst = dst.as_mut_ptr().cast::<T>();
-    debug_assert!(!REQUIRE_ALIGNED || dst.is_aligned());
+    if REQUIRE_ALIGNED {
+        debug_assert!(dst.is_aligned());
+    }
 
     let body_limit = len - len % LANES;
     let mut i = 0;
@@ -683,7 +685,9 @@ impl<T: Dtyped> ElementwisePipelineImpl<T> for OperandTyped<'_, T> {
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N] {
         let base = self.operand.current_ptr.get().cast::<T>();
         debug_assert!(!base.is_null());
-        debug_assert!(!REQUIRE_ALIGNED || base.is_aligned());
+        if REQUIRE_ALIGNED {
+            debug_assert!(base.is_aligned());
+        }
 
         if CONTIGUOUS {
             debug_assert_eq!(self.operand.inner_stride.get(), size_of::<T>());
