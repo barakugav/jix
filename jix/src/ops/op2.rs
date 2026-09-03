@@ -39,10 +39,19 @@ impl<S1, S2, K> Op2<S1, S2, K> {
         );
         let a_spec = a.spec();
         let b_spec = b.spec();
-        let (element_cost, read_shape_scale_order) = combine_elementwise_hints(&[
-            (a_spec.element_cost(), a_spec.read_shape_scale_order()),
-            (b_spec.element_cost(), b_spec.read_shape_scale_order()),
-        ]);
+        let (element_cost, read_shape_scale_order, read_layout_order) =
+            combine_elementwise_hints(&[
+                (
+                    a_spec.element_cost(),
+                    a_spec.read_shape_scale_order(),
+                    a_spec.read_layout_order(),
+                ),
+                (
+                    b_spec.element_cost(),
+                    b_spec.read_shape_scale_order(),
+                    b_spec.read_layout_order(),
+                ),
+            ]);
         let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
             (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
             (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
@@ -52,6 +61,7 @@ impl<S1, S2, K> Op2<S1, S2, K> {
         spec.block_shape_fixed_dims = block_shape_fixed_dims;
         spec.element_cost = element_cost;
         spec.read_shape_scale_order = read_shape_scale_order;
+        spec.read_layout_order = read_layout_order;
         Ok(Self { a, b, kernel, spec })
     }
 }

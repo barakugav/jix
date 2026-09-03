@@ -122,11 +122,15 @@ where
         }
         check_shape_overflow(&shape, dtype.itemsize() as _)?;
 
-        let (element_cost, read_shape_scale_order) = {
+        let (element_cost, read_shape_scale_order, read_layout_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
                     let sp = arrays.spec(i);
-                    (sp.element_cost(), sp.read_shape_scale_order().as_slice())
+                    (
+                        sp.element_cost(),
+                        sp.read_shape_scale_order().as_slice(),
+                        sp.read_layout_order().as_slice(),
+                    )
                 })
                 .collect::<Vec<_>>();
             combine_select_hints(&inputs)
@@ -147,6 +151,7 @@ where
         spec.block_shape_fixed_dims = block_shape_fixed_dims;
         spec.element_cost = element_cost;
         spec.read_shape_scale_order = read_shape_scale_order;
+        spec.read_layout_order = read_layout_order;
 
         let shape = ArraysT::Dimension::from_slice(&shape);
         Ok(Self {
@@ -199,7 +204,13 @@ where
         let output_shape = Self::Dimension::vec(index.len(), |dim| {
             (index[dim].end - index[dim].start) as usize
         });
-        let mut out = materialize_out_buf(out, context, output_shape.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            output_shape.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         if output_shape.as_ref().contains(&0) {
             return Ok(out);
         }

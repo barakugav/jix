@@ -153,6 +153,25 @@ where
 {
     default_strides(shape, Ix::ONE)
 }
+
+#[inline]
+pub(crate) fn strides_for_layout_order<Ix: Idx>(
+    shape: &[Ix],
+    itemsize: Ix,
+    layout_order: &[DimIdx],
+) -> DimArray<Ix> {
+    let ndim = shape.len();
+    debug_assert_eq!(layout_order.len(), ndim);
+    let mut strides = dim_arr(ndim, |_| itemsize);
+    let mut acc = itemsize;
+    for &d in layout_order.iter().rev() {
+        let d = d as usize;
+        strides[d] = acc;
+        acc = acc * shape[d];
+    }
+    strides
+}
+
 #[inline]
 pub(crate) fn default_strides_slice<Ix: Idx>(shape: &[Ix], itemsize: Ix) -> DimArray<Ix> {
     let ndim = shape.len();

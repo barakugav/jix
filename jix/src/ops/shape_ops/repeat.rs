@@ -94,6 +94,7 @@ impl<S: ArrayStorage> Repeat<S> {
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
             read_shape_scale_order,
+            read_layout_order: inner_spec.read_layout_order().clone(),
         };
 
         Ok(Self {
@@ -130,7 +131,13 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
         // Empty output (any zero-length range, including repeats == 0) is a no-op.
         if out_shape.as_ref().contains(&0) {
-            return Ok(materialize_out_buf(out, context, out_shape.as_ref(), dtype));
+            return Ok(materialize_out_buf(
+                out,
+                context,
+                out_shape.as_ref(),
+                dtype,
+                self.spec().read_layout_order(),
+            ));
         }
 
         let k = self.axis as usize;
@@ -151,7 +158,13 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
         let inner_buf = self.array.read_data(inner_index.as_ref(), context, None)?;
         let (inner_buf, inner_strides) = inner_buf.data();
 
-        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         let (out_buf, out_strides) = out.data_mut();
         let copier = NdCopier::new(dtype);
 

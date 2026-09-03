@@ -139,6 +139,12 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             .filter(|&&d| !is_reduced[d as usize])
             .map(|&d| dim_orig2new(d as usize))
             .collect();
+        let read_layout_order = spec
+            .read_layout_order()
+            .iter()
+            .filter(|&&d| !is_reduced[d as usize])
+            .map(|&d| dim_orig2new(d as usize))
+            .collect();
         let spec = ArraySpecDynamic {
             block_shape: dim_new2orig
                 .iter()
@@ -152,6 +158,7 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
                 .collect(),
             element_cost,
             read_shape_scale_order,
+            read_layout_order,
         };
 
         Ok(Self {
@@ -194,6 +201,7 @@ where
             index,
             context,
             out,
+            self.spec().read_layout_order(),
         )
     }
 
@@ -251,6 +259,7 @@ fn read_data_impl<'a, InnerD, OuterD>(
     index: &[Range<u64>],
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
+    read_layout_order: &[DimIdx],
 ) -> Result<StridedBuf<'a>>
 where
     InnerD: Dimension,
@@ -262,7 +271,13 @@ where
     check_get_range(outer_shape, index)?;
     check_out_buf(out.as_deref(), outer_shape)?;
     let out_shape_usize = OuterD::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-    let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), output_dtype);
+    let mut out = materialize_out_buf(
+        out,
+        context,
+        out_shape_usize.as_ref(),
+        output_dtype,
+        read_layout_order,
+    );
     let (out_buf, out_strides) = out.data_mut();
     let out_strides = out_strides.to_dim_vec::<OuterD>();
 

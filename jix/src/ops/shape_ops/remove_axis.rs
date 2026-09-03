@@ -138,11 +138,18 @@ where
             .filter(|&&d| !is_removed[d as usize])
             .map(|&d| out_dim(d as usize))
             .collect();
+        let read_layout_order = inner_spec
+            .read_layout_order()
+            .iter()
+            .filter(|&&d| !is_removed[d as usize])
+            .map(|&d| out_dim(d as usize))
+            .collect();
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
             read_shape_scale_order,
+            read_layout_order,
         };
 
         Ok(Self {

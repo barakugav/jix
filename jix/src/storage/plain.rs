@@ -3,7 +3,9 @@ use std::ops::Range;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
 use crate::error::{check_get_range, check_ndim, ensure, Result};
-use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
+use crate::storage::params::{
+    read_layout_order_insert_dont_care_dim, ArraySpecFlags, ArraySpecOwned,
+};
 use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
@@ -157,6 +159,37 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
                 }
             });
             spec.dynamic_mut().read_shape_scale_order = order;
+        }
+
+        // Layout order by contiguity: the outermost (largest stride) real dim comes first.
+        {
+            let shape = shape.as_slice();
+            let degenerate = |d: usize| shape[d] <= 1;
+            let broadcast = |d: usize| !degenerate(d) && strides[d] == 0;
+            let regular = |d: usize| !degenerate(d) && !broadcast(d);
+
+            // sort "regular" axes
+            let mut order = (0..ndim)
+                .filter(|&d| regular(d))
+                .map(|d| d as DimIdx)
+                .collect::<DimArray<_>>();
+            order.sort_by_key(|&d| (std::cmp::Reverse(strides[d as usize]), d));
+
+            // Insert broadcasted dims at the beginning of the order, outermost
+            for broadcasted_dim in (0..ndim)
+                .filter(|&d| broadcast(d))
+                .map(|d| d as DimIdx)
+                .rev()
+            {
+                order.insert(0, broadcasted_dim);
+            }
+
+            // dims with size<=1 are "dont care"
+            for d in (0..ndim).filter(|&d| degenerate(d)) {
+                read_layout_order_insert_dont_care_dim(&mut order, d);
+            }
+
+            spec.dynamic_mut().read_layout_order = order;
         }
 
         let element_type = TypeDyn::from_dtype(dtype).unwrap();

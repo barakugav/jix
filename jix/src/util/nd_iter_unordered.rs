@@ -878,7 +878,7 @@ mod tests {
     #[test]
     fn axes_sort_by_treats_an_ambiguous_comparison_as_transparent() {
         // Axis 2 cannot be compared against axis 1, but it is decisively outermost of axis 0. An
-        // ambiguous neighbour must not stop the scan, or axis 2 never reaches the front.
+        // ambiguous neighbor must not stop the scan, or axis 2 never reaches the front.
         let mut axes = vec![0, 1, 2];
         axes_sort_by(&mut axes, |d0, d1| match (d0, d1) {
             (2, 1) => None,

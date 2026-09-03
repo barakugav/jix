@@ -115,7 +115,13 @@ impl<S: ArrayStorage> ArrayStorage for Roll<S> {
         let len1 = shift - s;
         let len2 = e - shift;
         let out_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
-        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         if out_shape.as_ref().contains(&0) {
             return Ok(out);
         }

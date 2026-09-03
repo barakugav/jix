@@ -129,6 +129,7 @@ where
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
             read_shape_scale_order,
+            read_layout_order: inner_spec.read_layout_order().clone(),
         };
 
         Ok(Self {

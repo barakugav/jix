@@ -156,11 +156,37 @@ impl<S, D> Reshape<S, D> {
             Some(orig) => (in_rank[orig as usize], d),
             None => (DimIdx::MAX, d),
         });
+        let read_layout_order = {
+            let mut new_of = (0..orig_shape.len())
+                .map(|_| DimIdx::MAX)
+                .collect::<DimArray<_>>();
+            let one_to_one = new_shape.len() == orig_shape.len()
+                && same_logical_stride
+                    .iter()
+                    .enumerate()
+                    .all(|(new_dim, &orig)| match orig {
+                        Some(orig) if new_of[orig as usize] == DimIdx::MAX => {
+                            new_of[orig as usize] = new_dim as DimIdx;
+                            true
+                        }
+                        _ => false,
+                    });
+            if one_to_one {
+                inner_spec
+                    .read_layout_order()
+                    .iter()
+                    .map(|&d| new_of[d as usize])
+                    .collect()
+            } else {
+                (0..new_shape.len() as DimIdx).collect::<DimArray<_>>()
+            }
+        };
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
             read_shape_scale_order,
+            read_layout_order,
         };
 
         Ok(Self {
@@ -288,7 +314,13 @@ where
         let dtype = self.dtype();
         let out_shape =
             Self::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         if out_shape.as_ref().contains(&0) {
             return Ok(out);
         }

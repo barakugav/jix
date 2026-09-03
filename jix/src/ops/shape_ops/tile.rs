@@ -108,6 +108,7 @@ impl<S: ArrayStorage> Tile<S> {
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
             read_shape_scale_order,
+            read_layout_order: inner_spec.read_layout_order().clone(),
         };
 
         Ok(Self {
@@ -148,6 +149,7 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
                 context,
                 out_shape_usize.as_ref(),
                 dtype,
+                self.spec().read_layout_order(),
             ));
         }
 
@@ -175,7 +177,13 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
 
         // Cases B and C gather/replicate into a destination.
         let out_shape = S::Dimension::vec(ndim, |d| index[d].end - index[d].start);
-        let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape_usize.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         let (out_buf, out_strides) = out.data_mut();
         let copier = NdCopier::new(dtype);
 

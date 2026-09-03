@@ -111,6 +111,7 @@ impl<S: ArrayStorage> Slice<S> {
             block_shape_fixed_dims: inner_spec.block_shape_fixed_dims(),
             element_cost: inner_spec.element_cost(),
             read_shape_scale_order: inner_spec.read_shape_scale_order().clone(),
+            read_layout_order: inner_spec.read_layout_order().clone(),
         };
 
         Ok(Self {
@@ -175,7 +176,13 @@ impl<S: ArrayStorage> ArrayStorage for Slice<S> {
         // each sub-region from the inner array.
         let dtype = self.dtype();
         let out_shape_usize = S::Dimension::vec(ndim, |dim| out_shape[dim] as usize);
-        let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape_usize.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         if out_shape.as_ref().contains(&0) {
             return Ok(out);
         }
