@@ -271,3 +271,55 @@ impl<R> ArchiveReader<R> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn reading_past_the_end_of_the_archive() {
+        let mut reader = reader_after_metadata(&[]);
+        assert!(reader
+            .try_read_message::<schema::FileMetadata>()
+            .unwrap()
+            .is_none());
+
+        let mut reader = reader_after_metadata(&[]);
+        let err = reader.read_message::<schema::FileMetadata>().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn uleb128_spans_several_bytes() {
+        // 300 = 0b100101100 -> two groups of seven bits, low group first with the continuation bit.
+        let mut reader = reader_after_metadata(&[0xAC, 0x02]);
+        assert_eq!(reader.read_uleb128().unwrap(), Some(300));
+    }
+
+    #[test]
+    fn uleb128_that_never_terminates_is_an_error() {
+        let mut reader = reader_after_metadata(&[0x80]);
+        let err = reader.read_uleb128().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    /// A reader positioned just past the file metadata that `ArchiveWriter::new` writes, with
+    /// `payload` appended as the rest of the stream.
+    fn reader_after_metadata(payload: &[u8]) -> ArchiveReader<Cursor<Vec<u8>>> {
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut writer = ArchiveWriter::new(&mut buf, schema::ArchiveType::ArrayV1).unwrap();
+            // Deref/DerefMut hand out the wrapped writer.
+            assert_eq!(
+                writer.stream_position().unwrap(),
+                (*writer).stream_position().unwrap()
+            );
+            writer.write_all(payload).unwrap();
+        }
+        let mut reader = ArchiveReader::new(Cursor::new(buf.into_inner()), None).unwrap();
+        reader.read_message::<schema::FileMetadata>().unwrap();
+        reader
+    }
+}

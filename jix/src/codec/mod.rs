@@ -419,4 +419,20 @@ mod tests {
             assert_eq!(params.level, level);
         }
     }
+
+    #[test]
+    fn a_two_filter_pipeline_round_trips() {
+        use crate::codec::filter::Filter;
+        use crate::{Array, ArrayParams};
+
+        let nd = ndarray::Array2::from_shape_fn((16, 16), |(i, j)| (i * 16 + j) as i32);
+        let mut params = ArrayParams::new();
+        params.block_shape(&[4, 4]);
+        params
+            .filters(&[Filter::ByteShuffle, Filter::BitShuffle])
+            .unwrap();
+
+        let array = Array::compact_ndarray_with(&nd, params).unwrap();
+        assert_eq!(array.to_ndarray().unwrap(), nd);
+    }
 }

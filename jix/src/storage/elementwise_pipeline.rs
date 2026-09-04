@@ -1834,4 +1834,13 @@ mod tests {
             (0..6).map(|i| 100 * i + 4950).collect::<Vec<i32>>()
         );
     }
+
+    #[test]
+    fn operand_counts_combine() {
+        assert_eq!(n_operands_sum(&[Some(2), Some(3), Some(0)]), Some(5));
+        assert_eq!(n_operands_sum(&[Some(2), None]), None);
+        assert_eq!(n_operands_sum(&[]), Some(0));
+        assert_eq!(n_operands_mul(Some(3), 4), Some(12));
+        assert_eq!(n_operands_mul(None, 4), None);
+    }
 }

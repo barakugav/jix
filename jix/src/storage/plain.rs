@@ -831,4 +831,18 @@ mod tests {
             expected
         );
     }
+
+    #[test]
+    fn plain_ndarray_view_reads_back_the_borrowed_data() {
+        let owned = ndarray::array![[1i32, 2, 3], [4, 5, 6]];
+        let array = Array::plain_ndarray_view(owned.view()).unwrap();
+        assert_eq!(array.to_ndarray().unwrap(), owned);
+
+        // A transposed view is non-contiguous, so the strides come from the view itself.
+        let transposed = Array::plain_ndarray_view(owned.t()).unwrap();
+        assert_eq!(
+            transposed.to_ndarray().unwrap(),
+            owned.t().as_standard_layout().into_owned()
+        );
+    }
 }

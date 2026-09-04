@@ -806,4 +806,19 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
     }
+
+    #[test]
+    fn map_multiple_over_transposed_inputs() {
+        let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i32);
+        let build = || Array::compact_ndarray(&nd).unwrap().transpose();
+
+        let actual = crate::ops::map_multiple([build(), build(), build()], |xs: [i32; 3]| {
+            xs[0] + xs[1] + xs[2]
+        })
+        .to_ndarray()
+        .unwrap();
+
+        let expected = (&nd + &nd + &nd).t().as_standard_layout().into_owned();
+        assert_eq!(actual, expected);
+    }
 }

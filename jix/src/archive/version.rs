@@ -183,4 +183,36 @@ mod tests {
         assert_eq!(v.minor.to_string(), env!("CARGO_PKG_VERSION_MINOR"));
         assert_eq!(v.patch.to_string(), env!("CARGO_PKG_VERSION_PATCH"));
     }
+
+    #[test]
+    fn const_atoi_parses_digits() {
+        assert_eq!(const_atoi(b"0"), 0);
+        assert_eq!(const_atoi(b"1204"), 1204);
+    }
+
+    #[test]
+    #[should_panic(expected = "empty version component")]
+    fn const_atoi_rejects_empty() {
+        const_atoi(b"");
+    }
+
+    #[test]
+    #[should_panic(expected = "non-digit in version component")]
+    fn const_atoi_rejects_non_digit() {
+        const_atoi(b"1a");
+    }
+
+    #[test]
+    fn parse_pre_release_reads_the_trailing_number() {
+        assert_eq!(parse_pre_release(b""), 0);
+        assert_eq!(parse_pre_release(b"3"), 3);
+        assert_eq!(parse_pre_release(b"alpha.1"), 1);
+        assert_eq!(parse_pre_release(b"rc"), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "pre-release must fit in 6 bits")]
+    fn parse_pre_release_rejects_overflow() {
+        parse_pre_release(b"alpha.64");
+    }
 }

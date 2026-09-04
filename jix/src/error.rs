@@ -264,3 +264,66 @@ pub(crate) fn check_get_buffer_size(
     }
     Ok(nitems)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dtype::Dtyped;
+    use crate::{Dim, DimDyn};
+
+    #[test]
+    fn check_ndim_rejects_mismatch() {
+        assert!(check_ndim::<Dim<2>>(2).is_ok());
+        assert!(check_ndim::<DimDyn>(NDIM_MAX).is_ok());
+        let static_mismatch = check_ndim::<Dim<2>>(3).unwrap_err();
+        assert_eq!(static_mismatch.kind(), ErrorKind::TooManyDimensions);
+        let too_many = check_ndim::<DimDyn>(NDIM_MAX + 1).unwrap_err();
+        assert_eq!(too_many.kind(), ErrorKind::TooManyDimensions);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match expected")]
+    fn assert_dim_rejects_static_mismatch() {
+        assert_dim::<Dim<2>>(3);
+    }
+
+    #[test]
+    #[should_panic(expected = "Too many dimensions")]
+    fn assert_dim_rejects_too_many() {
+        assert_dim::<DimDyn>(NDIM_MAX + 1);
+    }
+
+    #[test]
+    fn check_shape_overflow_catches_u64_product() {
+        assert!(check_shape_overflow(&[1000, 1000], 4).is_ok());
+        let err = check_shape_overflow(&[u64::MAX, 2], 4).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidShapeOperation);
+    }
+
+    #[test]
+    #[allow(clippy::reversed_empty_ranges)]
+    fn check_get_range_validates_ndim_and_bounds() {
+        assert!(check_get_range(&[2, 3], &[0..2, 0..3]).is_ok());
+        for bad in [&[0..2][..], &[0..2, 0..4], &[2..0, 0..3]] {
+            assert_eq!(
+                check_get_range(&[2, 3], bad).unwrap_err().kind(),
+                ErrorKind::InvalidIndex,
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn check_get_buffer_size_requires_the_exact_size() {
+        let dtype = i32::DTYPE;
+        let index = [0..2, 0..3];
+        let mut exact = [0u8; 24];
+        assert_eq!(
+            check_get_buffer_size(&index, &dtype, &mut exact).unwrap(),
+            6
+        );
+        let mut short = [0u8; 8];
+        let err = check_get_buffer_size(&index, &dtype, &mut short).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidBufferSize);
+    }
+}
