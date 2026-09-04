@@ -1,6 +1,6 @@
 [package]
 name = "jix-macros"
-version = "0.0.4"
+version = "0.0.5"
 authors = ["Barak Ugav <barakugav@gmail.com>"]
 edition = "2024"
 rust-version = "1.89.0"
