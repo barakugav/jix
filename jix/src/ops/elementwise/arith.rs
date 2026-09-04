@@ -807,6 +807,24 @@ mod tests {
         let resd = zad.view().sign().to_ndarray::<ndarray::Ix1>().unwrap();
         assert_eq!(resd.as_slice().unwrap(), &[-1.0, 0.0, 0.0, 1.0]);
     }
+    /// `abs`/`sign` on `f16` each have their own hand-written kernel impl outside the shared
+    /// macro, and no dtype-driven test reaches them.
+    #[cfg(feature = "half")]
+    #[test]
+    fn abs_and_sign_f16_kernels() {
+        use crate::Array;
+        let half =
+            Array::compact_ndarray(&ndarray::array![f16::from_f32(-1.5), f16::from_f32(2.0)])
+                .unwrap();
+        crate::util::assert_array_matches(
+            &half.view().abs(),
+            &ndarray::array![f16::from_f32(1.5), f16::from_f32(2.0)],
+        );
+        crate::util::assert_array_matches(
+            &half.sign(),
+            &ndarray::array![f16::from_f32(-1.0), f16::from_f32(1.0)],
+        );
+    }
     // abs: same dtype for scalar types; complex types have a different output dtype (see below).
     #[test]
     fn abs_concrete() {

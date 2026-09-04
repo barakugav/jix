@@ -177,4 +177,23 @@ mod tests {
     //     #[cfg(feature = "num-complex")]
     //     [complex_f32, complex_f64]
     // );
+
+    use crate::ops::reduction::common::tests::*;
+    use crate::scalar::bool8;
+
+    // `all`/`any` are otherwise only exercised by the doc examples, which llvm-cov does not
+    // instrument. The property arms also split the reduction across tiles, which is the only
+    // way the kernels' `merge_states` runs.
+    test_reduction!(
+        all,
+        |items| { items.fold(bool8::TRUE, |m, x| m & x) },
+        [bool8],
+        any_strategy
+    );
+    test_reduction!(
+        any,
+        |items| { items.fold(bool8::FALSE, |m, x| m | x) },
+        [bool8],
+        any_strategy
+    );
 }

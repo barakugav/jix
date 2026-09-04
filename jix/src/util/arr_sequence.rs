@@ -729,3 +729,46 @@ impl_array_sequence_for_tuple!(0: S0, D0, 1: S1, D1, 2: S2, D2, 3: S3, D3, 4: S4
 fn out_of_bounds_array_index(arr: usize) -> ! {
     panic!("array index out of bounds: {}", arr);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ArraySequenceImpl;
+    use crate::ops::concatenate;
+    use crate::{Array, ArrayStorage};
+
+    /// Concatenation accepts arrays in several container shapes, each with its own
+    /// `ArraySequenceImpl`. They must all behave identically, through reads (`read_data`,
+    /// `dtype`), through `compact` (`spec`) and through `info` (`as_array_storage`).
+    #[test]
+    fn every_container_form_is_a_sequence() {
+        let build = || Array::compact_ndarray(&ndarray::array![[1i32, 2], [3, 4]]).unwrap();
+        let expected = ndarray::array![[1i32, 2], [3, 4], [1, 2], [3, 4]];
+
+        macro_rules! check {
+            ($arrays:expr) => {{
+                let joined = concatenate($arrays, 0);
+                assert_eq!(joined.storage().info().dependencies().len(), 2);
+                assert_eq!(joined.to_ndarray().unwrap(), expected);
+                let compacted = joined.compact().unwrap();
+                assert_eq!(compacted.to_ndarray().unwrap(), expected);
+            }};
+        }
+
+        let arrays = [build(), build()];
+        check!(&arrays);
+        check!(arrays);
+
+        let arrays = vec![build(), build()];
+        check!(&arrays[..]);
+        check!(arrays);
+
+        check!((build(), build()));
+    }
+
+    #[test]
+    #[should_panic(expected = "array index out of bounds")]
+    fn sequence_index_past_the_end_panics() {
+        let build = || Array::compact_ndarray(&ndarray::array![[1i32, 2], [3, 4]]).unwrap();
+        let _ = (build(), build()).shape(2);
+    }
+}

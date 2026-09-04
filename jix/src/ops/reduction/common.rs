@@ -2410,4 +2410,93 @@ pub(crate) mod tests {
         let ctx = crate::ReadContext::default();
         assert!(v.storage().read_data(&[0..n], &ctx, None).is_err());
     }
+
+    /// Each dims-argument form has its own `DimsArg` impl; a reduction over dim 0 must give the
+    /// same answer through all of them.
+    #[test]
+    fn every_dims_arg_form_selects_the_same_dim() {
+        let build = || Array::compact_ndarray(&array![[1i32, 2], [3, 4]]).unwrap();
+        let expected = array![4i64, 6];
+
+        assert_eq!(build().sum(0usize).to_ndarray().unwrap(), expected);
+        assert_eq!(build().sum(&[0usize][..]).to_ndarray().unwrap(), expected);
+        assert_eq!(build().sum(vec![0usize]).to_ndarray().unwrap(), expected);
+        assert_eq!(build().sum(&vec![0usize]).to_ndarray().unwrap(), expected);
+        assert_eq!(build().sum((0usize,)).to_ndarray().unwrap(), expected);
+
+        // The empty forms reduce nothing, so the array comes back unchanged.
+        let unchanged = array![[1i64, 2], [3, 4]];
+        assert_eq!(build().sum(()).to_ndarray().unwrap(), unchanged);
+        assert_eq!(build().sum([0usize; 0]).to_ndarray().unwrap(), unchanged);
+        assert_eq!(build().sum(&[0usize; 0]).to_ndarray().unwrap(), unchanged);
+    }
+
+    /// A reduction over a zero-length dim skips the read loop entirely and writes the kernel's
+    /// empty-stream value, the only path that calls `finalize_state` on a fresh state.
+    #[test]
+    fn reduction_over_an_empty_dim_writes_the_identity() {
+        use ndarray::Array2;
+
+        let empty: Array2<i32> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
+        let a = Array::compact_ndarray(&empty).unwrap();
+        crate::util::assert_array_matches(&a.view().sum(1usize), &array![0i64, 0]);
+        crate::util::assert_array_matches(&a.view().product(1usize), &array![1i64, 1]);
+
+        let empty_bool: Array2<bool8> = Array2::from_shape_vec((2, 0), vec![]).unwrap();
+        let b = Array::compact_ndarray(&empty_bool).unwrap();
+        let (t, f) = (bool8::TRUE, bool8::FALSE);
+        crate::util::assert_array_matches(&b.view().all(1usize), &array![t, t]);
+        crate::util::assert_array_matches(&b.view().any(1usize), &array![f, f]);
+    }
+
+    /// Splitting a reduction across tiles leaves one partial state per tile, and combining them
+    /// is the only path through a kernel's `merge_states`. The block shape and read size below
+    /// force that split; the reference is the same reduction over the plain ndarray.
+    #[test]
+    fn reductions_merge_partial_states_across_tiles() {
+        let shape = [6usize, 8];
+        let n: usize = shape.iter().product();
+        let nd = ndarray::Array2::from_shape_vec(
+            (shape[0], shape[1]),
+            (0..n as i32).map(|x| (x % 7) + 1).collect(),
+        )
+        .unwrap();
+
+        let params = ArrayParams::new()
+            .block_shape(&[3, 2])
+            .unwrap()
+            .read_size((32, 64));
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+
+        let rows = nd.rows().into_iter();
+        let expected_product: Vec<i64> = rows
+            .map(|r| r.iter().map(|&x| x as i64).product())
+            .collect();
+        crate::util::assert_array_matches(
+            &za.view().product(1usize),
+            &ndarray::Array1::from(expected_product),
+        );
+
+        let expected_var: Vec<f64> = nd
+            .rows()
+            .into_iter()
+            .map(|r| {
+                let mean = r.iter().map(|&x| x as f64).sum::<f64>() / r.len() as f64;
+                r.iter().map(|&x| (x as f64 - mean).powi(2)).sum::<f64>() / r.len() as f64
+            })
+            .collect();
+        crate::util::assert_array_matches_approx(
+            &za.view().var(1usize, 0.0),
+            &ndarray::Array1::from(expected_var.clone()),
+            1e-9,
+            1e-9,
+        );
+        let expected_std: Vec<f64> = expected_var.iter().map(|v| v.sqrt()).collect();
+        crate::util::assert_array_matches_approx(
+            &za.view().std(1usize, 0.0),
+            &ndarray::Array1::from(expected_std),
+            1e-9,
+            1e-9,
+        );
+    }
 }
