@@ -1,6 +1,6 @@
 [package]
 name = "jix-python"
-version = "0.0.4"
+version = "0.0.5"
 authors = ["Barak Ugav <barakugav@gmail.com>"]
 edition = "2024"
 rust-version = "1.89.0"
@@ -20,7 +20,7 @@ crate-type = [
 
 [dependencies]
 pyo3 = "0.29.2"
-jix_core = { package = "jix", path = "../jix", version = "=0.0.4", features = [
+jix_core = { package = "jix", path = "../jix", version = "=0.0.5", features = [
     "half",
     "num-complex",
     "multiversion",
