@@ -151,5 +151,60 @@ fn bench_compact_read_full(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_compact_read_region, bench_compact_read_full);
+/// Reading a transposed view: `hinted` lets the destination follow the source's layout so the
+/// decode writes straight through, while `forced_c_order` pushes into a packed row-major buffer
+/// and pays a transposing copy for every element - the behavior before `read_layout_order`.
+fn bench_compact_read_transposed(c: &mut Criterion) {
+    let mut rng = Rng::with_seed(0x7a110c0f0d3ea501);
+    // Sized to straddle the cache: the hint's win shrinks as the destination grows past it.
+    let configs: &[([u64; 2], [u32; 2])] = &[
+        ([600, 32], [32, 32]),
+        ([600, 460], [32, 32]),
+        ([2_000, 460], [32, 32]),
+        ([11_000, 460], [32, 32]),
+    ];
+
+    let mut group = c.benchmark_group("compact_read_transposed");
+    group.sample_size(20);
+    for (shape, block_shape) in configs {
+        let array = create_compact(shape, block_shape.as_slice(), None, &mut rng);
+        let t = array.view().permute_axes(&[1, 0]);
+        let full = [0..shape[1], 0..shape[0]];
+        let param = format!("shape={shape:?}, block={block_shape:?}");
+
+        group.bench_function(BenchmarkId::new("hinted", &param), |b| {
+            let ctx = t.read_ctx();
+            b.iter(|| t.to_ndarray_sub(&full, &ctx).unwrap());
+        });
+        // The pre-hint baseline: allocate a packed row-major destination per read (exactly what
+        // `to_ndarray_sub` used to do) and push into it, paying a transposing copy. Allocating
+        // inside the loop keeps this comparable to `hinted`, which allocates internally - at these
+        // sizes first-touch page faults on the fresh allocation are a real part of the cost.
+        group.bench_function(BenchmarkId::new("forced_c_order", &param), |b| {
+            let ctx = t.read_ctx();
+            let nitems = (shape[0] * shape[1]) as usize;
+            b.iter(|| {
+                let mut arr = ndarray::Array::<i32, _>::uninit(ndarray::IxDyn(&[
+                    shape[1] as usize,
+                    shape[0] as usize,
+                ]));
+                let buf = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        arr.as_mut_ptr().cast::<u8>(),
+                        nitems * size_of::<i32>(),
+                    )
+                };
+                t.to_ndarray_slice(&full, buf, &ctx).unwrap();
+                unsafe { arr.assume_init() }
+            });
+        });
+    }
+}
+
+criterion_group!(
+    benches,
+    bench_compact_read_region,
+    bench_compact_read_full,
+    bench_compact_read_transposed
+);
 criterion_main!(benches);
