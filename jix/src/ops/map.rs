@@ -282,7 +282,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                     (
                         sp.element_cost(),
                         sp.read_shape_scale_order().as_slice(),
-                        sp.read_layout_order().as_slice(),
+                        sp.read_layout_order(),
                     )
                 })
                 .collect::<Vec<_>>();

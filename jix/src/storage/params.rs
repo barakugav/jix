@@ -691,8 +691,9 @@ impl<'a> ArraySpec<'a> {
     /// The memory layout order (outermost dim first) - see
     /// [`ArraySpecDynamic::read_layout_order`]. C-order `[0, .., ndim-1]` for a compact leaf; a
     /// transposed or F-order view reports the permutation that makes its reads contiguous.
+    #[doc(hidden)]
     #[inline(always)]
-    pub(crate) fn read_layout_order(&self) -> &'a DimArray<DimIdx> {
+    pub fn read_layout_order(&self) -> &'a [DimIdx] {
         &self.dynamic().read_layout_order
     }
 
@@ -1040,10 +1041,7 @@ mod tests {
         )
         .unwrap();
         // Compact blocks are stored C-order, so the outermost-first layout order is [0, 1, 2].
-        assert_eq!(
-            a.storage().spec().read_layout_order().as_slice(),
-            &[0, 1, 2]
-        );
+        assert_eq!(a.storage().spec().read_layout_order(), &[0, 1, 2]);
     }
 
     #[test]
@@ -1052,7 +1050,7 @@ mod tests {
         let arr =
             ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect::<Vec<_>>()).unwrap();
         let a = Array::plain_ndarray(arr).unwrap();
-        assert_eq!(a.storage().spec().read_layout_order().as_slice(), &[1, 0]);
+        assert_eq!(a.storage().spec().read_layout_order(), &[1, 0]);
     }
 
     #[test]
@@ -1061,20 +1059,14 @@ mod tests {
         // path keeps firing.
         let c = ndarray::Array::from_shape_vec([4, 1, 5], (0..20i32).collect::<Vec<_>>()).unwrap();
         let a = Array::plain_ndarray(c).unwrap();
-        assert_eq!(
-            a.storage().spec().read_layout_order().as_slice(),
-            &[0, 1, 2]
-        );
+        assert_eq!(a.storage().spec().read_layout_order(), &[0, 1, 2]);
 
         // F-order [4, 5, 1]: the size-1 axis carries the largest stride (20 items) but is never
         // stepped, so it must not be mistaken for the outermost axis.
         let f =
             ndarray::Array::from_shape_vec([4, 5, 1].f(), (0..20i32).collect::<Vec<_>>()).unwrap();
         let a = Array::plain_ndarray(f).unwrap();
-        assert_eq!(
-            a.storage().spec().read_layout_order().as_slice(),
-            &[1, 0, 2]
-        );
+        assert_eq!(a.storage().spec().read_layout_order(), &[1, 0, 2]);
     }
 
     #[test]
@@ -1085,10 +1077,7 @@ mod tests {
             ndarray::Array::from_shape_vec([4, 1, 5], (0..20i32).collect::<Vec<_>>()).unwrap();
         let view = base.broadcast([4, 3, 5]).unwrap();
         let a = Array::plain_ndarray_view(view).unwrap();
-        assert_eq!(
-            a.storage().spec().read_layout_order().as_slice(),
-            &[1, 0, 2]
-        );
+        assert_eq!(a.storage().spec().read_layout_order(), &[1, 0, 2]);
     }
 
     fn compact_i32(
@@ -1107,17 +1096,11 @@ mod tests {
         // Reversing the axes reverses the layout: the inner dim (2) becomes the outermost output
         // dim (0), so the outermost-first order is [2, 1, 0].
         let t = a.view().permute_axes(&[2, 1, 0]);
-        assert_eq!(
-            t.storage().spec().read_layout_order().as_slice(),
-            &[2, 1, 0]
-        );
+        assert_eq!(t.storage().spec().read_layout_order(), &[2, 1, 0]);
         // A rotation: output dim i reads input axis axes[i], so input dim 0 (outermost) lands on
         // output dim 1, input dim 1 on output dim 2, and input dim 2 on output dim 0.
         let t = a.view().permute_axes(&[2, 0, 1]);
-        assert_eq!(
-            t.storage().spec().read_layout_order().as_slice(),
-            &[1, 2, 0]
-        );
+        assert_eq!(t.storage().spec().read_layout_order(), &[1, 2, 0]);
     }
 
     #[test]
@@ -1126,7 +1109,7 @@ mod tests {
         // Layout [2, 1, 0]; reducing dim 1 leaves dims 2 and 0 in that relative order, renumbered
         // to the output's [1, 0].
         let r = a.view().permute_axes(&[2, 1, 0]).sum(1);
-        assert_eq!(r.storage().spec().read_layout_order().as_slice(), &[1, 0]);
+        assert_eq!(r.storage().spec().read_layout_order(), &[1, 0]);
     }
 
     #[test]
@@ -1134,7 +1117,7 @@ mod tests {
         let a = compact_i32([3, 1, 5]);
         // Layout [2, 1, 0]; removing the size-1 dim 1 leaves dims 2 and 0, renumbered to [1, 0].
         let r = a.view().permute_axes(&[2, 1, 0]).remove_axis(1);
-        assert_eq!(r.storage().spec().read_layout_order().as_slice(), &[1, 0]);
+        assert_eq!(r.storage().spec().read_layout_order(), &[1, 0]);
     }
 
     #[test]
@@ -1145,17 +1128,11 @@ mod tests {
         .unwrap();
         // A C-order input must stay exactly C-order so the readers' fast path keeps firing.
         let i = a.view().insert_axis(1);
-        assert_eq!(
-            i.storage().spec().read_layout_order().as_slice(),
-            &[0, 1, 2]
-        );
+        assert_eq!(i.storage().spec().read_layout_order(), &[0, 1, 2]);
         // Transposed: old dims 0, 1 map to new 0, 2 and keep their [1, 0] relative order as
         // [2, 0]; the new axis splices in ahead of the first higher-numbered dim.
         let i = a.view().permute_axes(&[1, 0]).insert_axis(1);
-        assert_eq!(
-            i.storage().spec().read_layout_order().as_slice(),
-            &[1, 2, 0]
-        );
+        assert_eq!(i.storage().spec().read_layout_order(), &[1, 2, 0]);
     }
 
     #[test]
@@ -1163,14 +1140,11 @@ mod tests {
         let a = compact_i32([3, 4, 5]);
         // Every output dim maps 1:1 to a source dim, so the layout carries through.
         let r = a.view().permute_axes(&[2, 1, 0]).reshape([5, 4, 3]);
-        assert_eq!(
-            r.storage().spec().read_layout_order().as_slice(),
-            &[2, 1, 0]
-        );
+        assert_eq!(r.storage().spec().read_layout_order(), &[2, 1, 0]);
         // Merging dims 0 and 1 has no honest layout - a reshape is defined on C-order flattening -
         // so the output falls back to C-order.
         let r = a.view().permute_axes(&[2, 1, 0]).reshape([20, 3]);
-        assert_eq!(r.storage().spec().read_layout_order().as_slice(), &[0, 1]);
+        assert_eq!(r.storage().spec().read_layout_order(), &[0, 1]);
     }
 
     #[test]
@@ -1181,10 +1155,10 @@ mod tests {
         .unwrap();
         // A unary elementwise op only bumps element_cost; the layout passes straight through.
         let n = a.view().permute_axes(&[1, 0]).map(|x: i32| x * 2);
-        assert_eq!(n.storage().spec().read_layout_order().as_slice(), &[1, 0]);
+        assert_eq!(n.storage().spec().read_layout_order(), &[1, 0]);
         // Broadcast forwards too: a duplicated dim keeps its position.
         let b = a.view().permute_axes(&[1, 0]).broadcast(&[4, 3]);
-        assert_eq!(b.storage().spec().read_layout_order().as_slice(), &[1, 0]);
+        assert_eq!(b.storage().spec().read_layout_order(), &[1, 0]);
     }
 
     fn compact_2d_i32(
@@ -1211,9 +1185,9 @@ mod tests {
 
         // The costlier operand supplies the layout, whichever side it sits on.
         let out = t.view().permute_axes(&[1, 0]).maximum(costly());
-        assert_eq!(out.storage().spec().read_layout_order().as_slice(), &[0, 1]);
+        assert_eq!(out.storage().spec().read_layout_order(), &[0, 1]);
         let out = costly().maximum(t.view().permute_axes(&[1, 0]));
-        assert_eq!(out.storage().spec().read_layout_order().as_slice(), &[0, 1]);
+        assert_eq!(out.storage().spec().read_layout_order(), &[0, 1]);
     }
 
     #[test]
@@ -1231,7 +1205,7 @@ mod tests {
 
         // Input 1 is the costliest, so its F-order layout wins over input 0's C-order.
         let out = crate::ops::concatenate((c_order.view(), costly), 0);
-        assert_eq!(out.storage().spec().read_layout_order().as_slice(), &[1, 0]);
+        assert_eq!(out.storage().spec().read_layout_order(), &[1, 0]);
     }
 
     #[test]
@@ -1251,7 +1225,7 @@ mod tests {
 
         // `y` is the costliest of the three, so its F-order layout wins - not `x`'s.
         let out = crate::ops::where_condition(cond.view(), c_order.view(), costly);
-        assert_eq!(out.storage().spec().read_layout_order().as_slice(), &[1, 0]);
+        assert_eq!(out.storage().spec().read_layout_order(), &[1, 0]);
     }
 
     #[test]
@@ -1266,10 +1240,7 @@ mod tests {
             ),
             1,
         );
-        assert_eq!(
-            out.storage().spec().read_layout_order().as_slice(),
-            &[1, 2, 0]
-        );
+        assert_eq!(out.storage().spec().read_layout_order(), &[1, 2, 0]);
     }
 
     #[test]

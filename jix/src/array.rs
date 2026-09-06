@@ -2324,10 +2324,7 @@ mod tests {
         );
         // `to_plain` goes through `to_ndarray`, so the buffer is F-laid-out; `Plain::new` then
         // re-derives the hint from those strides, and the layout survives into the new leaf.
-        assert_eq!(
-            plain.storage().spec().read_layout_order().as_slice(),
-            &[1, 0]
-        );
+        assert_eq!(plain.storage().spec().read_layout_order(), &[1, 0]);
     }
 
     #[test]

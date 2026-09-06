@@ -9,7 +9,7 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
 use crate::util::NdCopier;
-use crate::{Array, ArrayStorage, DimArray, DimIdx, Dimension, NDIM_MAX};
+use crate::{Array, ArrayStorage, DimArray, DimDyn, DimIdx, Dimension, SliceExt, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -108,7 +108,7 @@ impl<S: ArrayStorage> Tile<S> {
             block_shape_fixed_dims,
             element_cost: inner_spec.element_cost(),
             read_shape_scale_order,
-            read_layout_order: inner_spec.read_layout_order().clone(),
+            read_layout_order: inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         };
 
         Ok(Self {

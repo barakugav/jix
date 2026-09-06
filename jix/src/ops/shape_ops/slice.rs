@@ -8,7 +8,7 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::iter::NdIter;
 use crate::util::{try_dim_arr, DimArray};
-use crate::{Array, ArrayStorage, Dimension, SliceExt};
+use crate::{Array, ArrayStorage, DimDyn, Dimension, SliceExt};
 
 /// Selects a sub-region of an array along each dimension, returned by [`Array::slice`].
 ///
@@ -111,7 +111,7 @@ impl<S: ArrayStorage> Slice<S> {
             block_shape_fixed_dims: inner_spec.block_shape_fixed_dims(),
             element_cost: inner_spec.element_cost(),
             read_shape_scale_order: inner_spec.read_shape_scale_order().clone(),
-            read_layout_order: inner_spec.read_layout_order().clone(),
+            read_layout_order: inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
         };
 
         Ok(Self {
