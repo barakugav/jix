@@ -613,3 +613,22 @@ pub(crate) fn try_dim_arr<T, E>(
 ) -> Result<DimArray<T>, E> {
     (0..ndim).map(f).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dimensions_are_indexable_and_printable() {
+        let mut dynamic = DimDyn::from_slice(&[2, 3, 4]);
+        assert_eq!(dynamic.size(1), 3);
+        dynamic[1] = 5;
+        assert_eq!(dynamic.size(1), 5);
+        assert_eq!(format!("{dynamic:?}"), "[2, 5, 4]");
+
+        let mut fixed = Dim::<3>::from_slice(&[2, 3, 4]);
+        assert_eq!(fixed.size(2), 4);
+        fixed[2] = 6;
+        assert_eq!(format!("{fixed:?}"), "[2, 3, 6]");
+    }
+}

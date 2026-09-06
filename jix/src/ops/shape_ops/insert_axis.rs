@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, ensure, Result};
 use crate::ops::AxesArg;
-use crate::storage::params::ArraySpecDynamic;
+use crate::storage::params::{read_layout_order_insert_dont_care_dim, ArraySpecDynamic};
 use crate::storage::{
     check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,
     StridedBuf,
@@ -149,11 +149,22 @@ where
                     .filter_map(|(dim, inserted)| inserted.then_some(dim as DimIdx)),
             )
             .collect();
+        let mut read_layout_order = orig_spec
+            .read_layout_order()
+            .iter()
+            .map(|&d| original_dims[d as usize])
+            .collect::<DimArray<_>>();
+        for (dim, inserted) in is_inserted.iter().enumerate() {
+            if *inserted {
+                read_layout_order_insert_dont_care_dim(&mut read_layout_order, dim);
+            }
+        }
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost: orig_spec.element_cost(),
             read_shape_scale_order,
+            read_layout_order,
         };
 
         Ok(Self {
@@ -211,7 +222,13 @@ where
         let Some(inner_index) = self.transform_index(index)? else {
             // Empty read
             let out_shape = D::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-            return Ok(materialize_out_buf(out, context, out_shape.as_ref(), dtype));
+            return Ok(materialize_out_buf(
+                out,
+                context,
+                out_shape.as_ref(),
+                dtype,
+                self.spec().read_layout_order(),
+            ));
         };
         unsafe {
             read_data_and_map_strides(

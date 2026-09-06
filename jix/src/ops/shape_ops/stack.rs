@@ -3,7 +3,10 @@ use std::ops::{Not, Range};
 use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{check_get_range, check_ndim, check_shape_overflow, ensure, Result};
-use crate::storage::params::{combine_block_layout, combine_select_hints, ArraySpecDynamic};
+use crate::storage::params::{
+    combine_block_layout, combine_select_hints, read_layout_order_insert_dont_care_dim,
+    ArraySpecDynamic,
+};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::{
     default_strides, ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray,
@@ -121,11 +124,15 @@ where
         };
         block_shape.insert(axis, 1);
         block_shape_fixed_dims.insert(axis, false);
-        let (element_cost, shared_order) = {
+        let (element_cost, shared_order, shared_layout_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
                     let sp = arrays.spec(i);
-                    (sp.element_cost(), sp.read_shape_scale_order().as_slice())
+                    (
+                        sp.element_cost(),
+                        sp.read_shape_scale_order().as_slice(),
+                        sp.read_layout_order(),
+                    )
                 })
                 .collect::<Vec<_>>();
             combine_select_hints(&inputs)
@@ -135,11 +142,17 @@ where
             .map(|&d| if d as usize >= axis { d + 1 } else { d })
             .chain(std::iter::once(axis as DimIdx))
             .collect::<DimArray<_>>();
+        let mut read_layout_order = shared_layout_order
+            .iter()
+            .map(|&d| if d as usize >= axis { d + 1 } else { d })
+            .collect::<DimArray<_>>();
+        read_layout_order_insert_dont_care_dim(&mut read_layout_order, axis);
         let spec = ArraySpecDynamic {
             block_shape,
             block_shape_fixed_dims,
             element_cost,
             read_shape_scale_order,
+            read_layout_order,
         };
 
         Ok(Self {
@@ -174,7 +187,13 @@ where
         check_out_buf(out.as_deref(), shape)?;
         let output_shape =
             Self::Dimension::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
-        let mut out = materialize_out_buf(out, context, output_shape.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            output_shape.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         if output_shape.as_ref().contains(&0) {
             return Ok(out);
         }

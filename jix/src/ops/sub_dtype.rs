@@ -143,7 +143,13 @@ where
             return Ok(unsafe { tmp.with_offset(self.sub_field_offset as usize) });
         }
 
-        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dst_dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape.as_ref(),
+            dst_dtype,
+            self.spec().read_layout_order(),
+        );
         if empty_read {
             return Ok(out);
         }

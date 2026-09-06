@@ -3,8 +3,10 @@ use std::ops::Range;
 use crate::buf_pool::PoolBuf;
 use crate::dtype::Dtype;
 use crate::error::{ensure, Result};
-use crate::util::{default_strides_slice, strided_span_bytes, DimArray, SliceExt};
-use crate::{ArrayStorage, DimDyn, NdCopier, ReadContext};
+use crate::util::{
+    default_strides_slice, strided_span_bytes, strides_for_layout_order, DimArray, SliceExt,
+};
+use crate::{ArrayStorage, DimDyn, DimIdx, NdCopier, ReadContext};
 
 /// A borrowed, strided view over a region of array bytes - the value produced and consumed by
 /// [`ArrayStorage::read_data`](crate::ArrayStorage::read_data).
@@ -291,6 +293,7 @@ pub(crate) fn materialize_out_buf<'a>(
     context: &'a ReadContext,
     out_shape: &[usize],
     dtype: &Dtype,
+    layout_order: &[DimIdx],
 ) -> StridedBuf<'a> {
     match out {
         Some(out) => out.view_mut(),
@@ -300,8 +303,7 @@ pub(crate) fn materialize_out_buf<'a>(
                 out_shape.iter().product::<usize>() * itemsize,
                 dtype.alignment(),
             );
-            let strides = default_strides_slice(out_shape, itemsize);
-            // SAFETY: C-order strides for a pooled buffer sized to `out_shape`.
+            let strides = strides_for_layout_order(out_shape, itemsize, layout_order);
             unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
         }
     }

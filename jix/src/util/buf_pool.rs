@@ -129,3 +129,39 @@ impl Drop for PoolBuf<'_> {
         self.buffers.return_buf(buf);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_alignments_share_one_free_list() {
+        let pool = BufferPool::new();
+        for alignment in [1usize, 8, CACHE_LINE_SIZE] {
+            let buf = pool.get(64, Alignment::new(alignment).unwrap());
+            assert_eq!(buf.as_slice().len(), 64);
+            assert!((buf.as_slice().as_ptr() as usize).is_multiple_of(CACHE_LINE_SIZE));
+        }
+        // Each buffer was returned before the next request, so one allocation served all three.
+        assert!(unsafe { &*pool.align_other.get() }.is_empty());
+        assert_eq!(unsafe { &*pool.align_standard.get() }.len(), 1);
+    }
+
+    #[test]
+    fn over_aligned_buffers_get_a_free_list_each() {
+        let pool = BufferPool::new();
+        let wide = Alignment::new(CACHE_LINE_SIZE * 4).unwrap();
+        let narrow = Alignment::new(CACHE_LINE_SIZE * 2).unwrap();
+
+        // `wide` first so the second request has to insert *before* it and keep the list sorted.
+        for alignment in [wide, narrow, wide] {
+            let buf = pool.get(128, alignment);
+            assert!((buf.as_slice().as_ptr() as usize).is_multiple_of(alignment.as_usize()));
+        }
+
+        let lists = unsafe { &*pool.align_other.get() };
+        assert_eq!(lists.len(), 2);
+        assert_eq!(lists[0].0, narrow);
+        assert_eq!(lists[1].0, wide);
+    }
+}

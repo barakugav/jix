@@ -14,8 +14,8 @@ use crate::storage::{
 };
 use crate::util::iter::NdIter;
 use crate::util::{
-    assert_unchecked_eq, calc_block_end, cast_slice_mut, scale_read_shape, AlignedBytes, IterExt,
-    NdCopier, USE_NEW_READ_SCALING,
+    assert_unchecked_eq, calc_block_end, cast_slice_mut, dim_arr, scale_read_shape, AlignedBytes,
+    IterExt, NdCopier, USE_NEW_READ_SCALING,
 };
 use crate::{
     default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, DimDyn, DimVec,
@@ -454,8 +454,13 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
                 let ndim = self.shape().len();
                 let read_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
                 let read_shape_usize = D::vec(ndim, |dim| read_shape[dim] as usize);
-                let mut out =
-                    materialize_out_buf(out, context, read_shape_usize.as_ref(), self.dtype());
+                let mut out = materialize_out_buf(
+                    out,
+                    context,
+                    read_shape_usize.as_ref(),
+                    self.dtype(),
+                    self.spec().read_layout_order(),
+                );
                 let (out_buf, out_strides) = out.data_mut();
 
                 let alignment = self.dtype().alignment().as_usize();
@@ -601,6 +606,11 @@ impl<S: ArrayStorage> Array<S> {
     /// [`read_ctx`](Array::read_ctx) - that way the codec scratch buffers and decompressor
     /// instance are shared across calls.
     ///
+    /// The returned array is not necessarily C-contiguous. The implementation is free to
+    /// choose any memory layout it prefers, mostly for performance reasons.
+    /// If you need a specific memory layout, use [`to_ndarray_buf`](Array::to_ndarray_buf) and
+    /// pass a pre-allocated buffer with your specified strides.
+    ///
     /// # Errors
     ///
     /// - [`CodecError`](crate::ErrorKind::CodecError) - block decompression fails.
@@ -652,7 +662,12 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// `index` contains one half-open `start..end` range per dimension within
     /// `0..self.shape()[dim]`. The result has shape `[index[0].len(), index[1].len(), ...]`
-    /// and contains the corresponding elements from the source in row-major order.
+    /// and contains the corresponding elements from the source.
+    ///
+    /// The returned array is not necessarily C-contiguous. The implementation is free to
+    /// choose any memory layout it prefers, mostly for performance reasons.
+    /// If you need a specific memory layout, use [`to_ndarray_buf`](Array::to_ndarray_buf) and
+    /// pass a pre-allocated buffer with your specified strides.
     ///
     /// # When to use this over [`to_ndarray`](Array::to_ndarray)
     ///
@@ -759,14 +774,42 @@ impl<S: ArrayStorage> Array<S> {
     {
         check_get_range(self.shape(), index)?;
         let ndim = self.ndim();
+        let itemsize = self.dtype().itemsize() as usize;
         let out_shape = S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start);
-        let out_shape = <S::Dimension as ndarray::IntoDimension>::into_dimension(out_shape);
-        let mut array = ndarray::Array::uninit(out_shape);
-        self.to_ndarray_slice(
-            index,
-            unsafe { cast_slice_mut::<MaybeUninit<S::Item>, u8>(array.as_slice_mut().unwrap()) },
-            context,
-        )?;
+
+        let mut array = {
+            let spec = self.storage.spec();
+            let layout_order = spec.read_layout_order();
+            if layout_order
+                .iter()
+                .enumerate()
+                .all(|(i, &dim)| i == dim as usize)
+            {
+                // C-order hint
+                ndarray::Array::uninit(out_shape)
+            } else {
+                // Custom layout hint
+                let alloc_shape =
+                    S::Dimension::from_fn(ndim, |i| out_shape[layout_order[i] as usize]);
+                let mut inv_order = S::Dimension::from_fn(ndim, |_| 0);
+                for dim in 0..ndim {
+                    inv_order[layout_order[dim] as usize] = dim as u64;
+                }
+                ndarray::Array::uninit(alloc_shape).permuted_axes(inv_order)
+            }
+        };
+
+        {
+            let buf_strides = dim_arr(ndim, |dim| array.strides()[dim] as usize * itemsize);
+            let buf = unsafe {
+                cast_slice_mut::<MaybeUninit<S::Item>, u8>(std::slice::from_raw_parts_mut(
+                    array.as_mut_ptr(),
+                    array.len(),
+                ))
+            };
+            let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides.as_ref()) };
+            self.to_ndarray_buf(index, context, Some(&mut out))?;
+        }
         Ok(unsafe { array.assume_init() })
     }
 
@@ -943,7 +986,13 @@ impl<S: ArrayStorage> Array<S> {
         let spec = self.storage.spec();
         let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
         let out_shape_usize = S::Dimension::vec(ndim, |dim| out_shape[dim] as usize);
-        let mut out = materialize_out_buf(out, context, out_shape_usize.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape_usize.as_ref(),
+            dtype,
+            spec.read_layout_order(),
+        );
         if out_shape.as_ref().contains(&0) {
             return Ok(out);
         }
@@ -1515,6 +1564,10 @@ impl<S: ArrayStorage> Array<S> {
             debug_assert!(
                 spec.read_shape_scale_order().len() == ndim
                     && (0..ndim).all(|d| spec.read_shape_scale_order().contains(&(d as DimIdx)))
+            );
+            debug_assert!(
+                spec.read_layout_order().len() == ndim
+                    && (0..ndim).all(|d| spec.read_layout_order().contains(&(d as DimIdx)))
             );
             debug_assert!(spec.element_cost().is_finite() && spec.element_cost() >= 0.0);
         }
@@ -2230,6 +2283,71 @@ mod tests {
     // -----------------------------------------------------------------------
     // to_ndarray_buf - pull and push modes, over the block-splitting slow path
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn to_ndarray_sub_empty_range_on_a_hinted_layout() {
+        // `to_ndarray_sub` takes its strides from the allocation, and ndarray zeroes *every*
+        // stride once any extent is 0 - so an empty read must not depend on them being dense.
+        let a = Array::compact_ndarray(&ndarray::array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
+        let t = a.view().permute_axes(&[1, 0]);
+        let ctx = t.read_ctx();
+        assert_eq!(
+            t.to_ndarray_sub(&[1..1, 0..2], &ctx).unwrap().shape(),
+            &[0, 2]
+        );
+        assert_eq!(
+            t.to_ndarray_sub(&[0..3, 1..1], &ctx).unwrap().shape(),
+            &[3, 0]
+        );
+        assert_eq!(
+            t.to_ndarray_sub(&[2..2, 1..1], &ctx).unwrap().shape(),
+            &[0, 0]
+        );
+    }
+
+    #[test]
+    fn to_ndarray_allocates_in_the_hinted_layout() {
+        let a = Array::compact_ndarray(&ndarray::array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
+        // A plain C-order read stays C-contiguous.
+        let nd = a.to_ndarray().unwrap();
+        assert_eq!(nd, ndarray::array![[1i32, 2, 3], [4, 5, 6]]);
+        assert!(nd.as_slice().is_some());
+
+        // Transposed: the destination follows the source's layout, so it comes back F-contiguous
+        // and the copy runs straight through instead of transposing every element.
+        let t = a.view().permute_axes(&[1, 0]).to_ndarray().unwrap();
+        assert_eq!(t, ndarray::array![[1i32, 4], [2, 5], [3, 6]]);
+        assert_eq!(t.strides(), &[1, 3]);
+        assert!(t.as_slice().is_none());
+    }
+
+    #[test]
+    fn to_plain_carries_the_hinted_layout_into_the_materialized_leaf() {
+        let a = Array::compact_ndarray(&ndarray::array![[1i32, 2, 3], [4, 5, 6]]).unwrap();
+        let plain = a.view().permute_axes(&[1, 0]).to_plain().unwrap();
+        assert_eq!(plain.shape(), &[3, 2]);
+        assert_eq!(
+            plain.to_ndarray().unwrap(),
+            ndarray::array![[1i32, 4], [2, 5], [3, 6]]
+        );
+        // `to_plain` goes through `to_ndarray`, so the buffer is F-laid-out; `Plain::new` then
+        // re-derives the hint from those strides, and the layout survives into the new leaf.
+        assert_eq!(plain.storage().spec().read_layout_order(), &[1, 0]);
+    }
+
+    #[test]
+    fn pull_mode_allocates_in_the_hinted_layout() {
+        let a = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([4, 5], (0..20i32).collect::<Vec<_>>()).unwrap(),
+        )
+        .unwrap();
+        // Shape [5, 4] with layout order [1, 0]. Flip forwards the layout and allocates its own
+        // pull-mode buffer, which must follow it: dim 1 outermost, dim 0 contiguous.
+        let f = a.view().permute_axes(&[1, 0]).flip(0);
+        let ctx = f.read_ctx();
+        let buf = f.to_ndarray_buf(&[0..5, 0..4], &ctx, None).unwrap();
+        assert_eq!(buf.strides(), &[4, 20]);
+    }
 
     #[test]
     fn to_ndarray_buf_pull_and_push_over_a_split_read() {

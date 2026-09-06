@@ -103,6 +103,11 @@ impl<S: ArrayStorage> PermuteAxes<S> {
                 .iter()
                 .map(|&old| inv_axes[old as usize])
                 .collect(),
+            read_layout_order: inner_spec
+                .read_layout_order()
+                .iter()
+                .map(|&old| inv_axes[old as usize])
+                .collect(),
         };
         let axes = S::Dimension::vec(ndim, |i| axes[i] as DimIdx);
         Ok(Self {

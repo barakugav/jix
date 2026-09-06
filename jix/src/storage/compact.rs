@@ -302,7 +302,13 @@ where
         let dtype = self.blocks.dtype();
         let out_shape = D::vec(shape.len(), |d| (index[d].end - index[d].start) as usize);
         let nitems = out_shape.as_ref().iter().product::<usize>();
-        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape.as_ref(),
+            dtype,
+            self.spec.as_ref().read_layout_order(),
+        );
         if nitems == 0 {
             return Ok(out);
         }

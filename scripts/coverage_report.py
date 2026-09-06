@@ -16,7 +16,8 @@ import subprocess
 import sys
 import webbrowser
 from dataclasses import dataclass, field
-from functools import cache
+from fnmatch import fnmatch
+from functools import lru_cache
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]  # scripts/coverage_report.py -> repo root
@@ -340,6 +341,21 @@ def load_pytest_json(path: Path, root: Path) -> list[FileCoverage]:
 
 SCHEMA_VERSION = 1
 
+EXCLUDES = {
+    "jix": [
+        # prost output
+        "src/archive/schema/_proto_gen/*",
+        # external libraries
+        "src/util/aligned_vec/*",
+        "src/util/arrayvec.rs",
+        # non production code
+        "src/util/test_util.rs",
+        "src/util/bench_util.rs",
+    ],
+    "jix-macros": [],
+    "jix-py": [],
+}
+
 
 @dataclass
 class TargetResult:
@@ -360,7 +376,18 @@ def _percent(covered: int, total: int) -> float:
     return round(100.0 * covered / total, 2) if total else 0.0
 
 
-@cache
+@lru_cache
+def _is_excluded_file(path: Path) -> bool:
+    """True if `path` matches one of its crate's `EXCLUDES`."""
+    try:
+        rel = path.resolve().relative_to(REPO)
+    except ValueError:
+        return False
+    inner = Path(*rel.parts[1:]).as_posix()
+    return any(fnmatch(inner, glob) for glob in EXCLUDES.get(rel.parts[0], []))
+
+
+@lru_cache
 def _excluded_lines(path: Path) -> frozenset[int]:
     """Lines inside `#[cfg(test)]` blocks. Cached: shared sources are filtered per target."""
     return frozenset(cfg_test_lines(path.read_text()))
@@ -379,6 +406,14 @@ def filter_cfg_test_lines(files: list[FileCoverage]) -> tuple[list[FileCoverage]
         dropped += len(fc.counts) - len(kept)
         out.append(FileCoverage(fc.path, kept, fc.tool_covered, fc.tool_total))
     return out, dropped
+
+
+def prepare_files(name: str, files: list[FileCoverage]) -> list[FileCoverage]:
+    """Apply both filters to a freshly parsed report and say what they removed."""
+    kept = [fc for fc in files if not _is_excluded_file(fc.path)]
+    kept, dropped = filter_cfg_test_lines(kept)
+    print(f"[{name}] excluded {len(files) - len(kept)} files and {dropped} lines of inline test code")
+    return kept
 
 
 def union_counts(results: list[TargetResult]) -> dict[Path, dict[int, int]]:
@@ -494,9 +529,7 @@ def llvm_report(name: str, manifest_args: list[str], target_out: Path, failures:
     subprocess.check_call(["cargo", "llvm-cov", "report", *manifest_args, "--html", "--output-dir", str(target_out)])
     json_path = target_out / "coverage.json"
     subprocess.check_call(["cargo", "llvm-cov", "report", *manifest_args, "--json", "--output-path", str(json_path)])
-    files, dropped = filter_cfg_test_lines(load_llvm_json(json_path))
-    print(f"[{name}] excluded {dropped} lines of inline test code")
-    return TargetResult(name, files, failures)
+    return TargetResult(name, prepare_files(name, load_llvm_json(json_path)), failures)
 
 
 def run_cargo_target(name: str, manifest: Path, out: Path, features: list[str], reuse: bool) -> TargetResult:
@@ -636,7 +669,7 @@ def run_python_target(out: Path) -> TargetResult:
     failures: list[str] = []
     check_leg(pytest_run, "python", "pytest", failures)
 
-    files, _ = filter_cfg_test_lines(load_pytest_json(json_path, root=crate_dir))
+    files = prepare_files("python", load_pytest_json(json_path, root=crate_dir))
     return TargetResult("python", files, failures)
 
 

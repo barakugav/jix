@@ -104,7 +104,13 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
         // Read the (unreversed) inner region as a view, then mirror-copy slabs into the destination.
         let tmp = self.array.read_data(inner_index.as_ref(), context, None)?;
         let (tmp_buf, src_strides) = tmp.data();
-        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         if out_shape.as_ref().contains(&0) {
             return Ok(out);
         }

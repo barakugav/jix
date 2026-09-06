@@ -275,11 +275,15 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
             );
         }
-        let (element_cost, read_shape_scale_order) = {
+        let (element_cost, read_shape_scale_order, read_layout_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
                     let sp = arrays.spec(i);
-                    (sp.element_cost(), sp.read_shape_scale_order().as_slice())
+                    (
+                        sp.element_cost(),
+                        sp.read_shape_scale_order().as_slice(),
+                        sp.read_layout_order(),
+                    )
                 })
                 .collect::<Vec<_>>();
             combine_elementwise_hints(&inputs)
@@ -298,6 +302,7 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
         spec.block_shape_fixed_dims = block_shape_fixed_dims;
         spec.element_cost = element_cost;
         spec.read_shape_scale_order = read_shape_scale_order;
+        spec.read_layout_order = read_layout_order;
         Ok(Self {
             arrays,
             map_fn,
@@ -805,5 +810,20 @@ mod tests {
             .map(|_| ())
             .unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::UnsupportedDtype);
+    }
+
+    #[test]
+    fn map_multiple_over_transposed_inputs() {
+        let nd = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as i32);
+        let build = || Array::compact_ndarray(&nd).unwrap().transpose();
+
+        let actual = crate::ops::map_multiple([build(), build(), build()], |xs: [i32; 3]| {
+            xs[0] + xs[1] + xs[2]
+        })
+        .to_ndarray()
+        .unwrap();
+
+        let expected = (&nd + &nd + &nd).t().as_standard_layout().into_owned();
+        assert_eq!(actual, expected);
     }
 }

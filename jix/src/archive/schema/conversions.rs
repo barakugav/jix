@@ -195,6 +195,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn from_proto_rejects_malformed_headers() {
+        use crate::ErrorKind;
+
+        let kind = schema::ScalarKind::I32;
+        assert!(Dtype::from_proto(&make_scalar_proto(kind, 4, 4, vec![])).is_ok());
+
+        let cases = [
+            (
+                make_scalar_proto(kind, 4, 3, vec![]),
+                ErrorKind::InvalidArchive,
+            ),
+            (
+                make_scalar_proto(kind, u32::MAX, 4, vec![]),
+                ErrorKind::InvalidArchive,
+            ),
+            (
+                make_scalar_proto(kind, 4, 4, vec![1; crate::NDIM_MAX + 1]),
+                ErrorKind::TooManyDimensions,
+            ),
+            (
+                make_scalar_proto(kind, 4, 4, vec![u32::MAX, u32::MAX, u32::MAX]),
+                ErrorKind::InvalidArchive,
+            ),
+        ];
+        for (proto, expected) in cases {
+            let res = Dtype::from_proto(&proto);
+            assert_eq!(res.err().map(|e| e.kind()), Some(expected));
+        }
+    }
+
     // ---- round-trip tests ----
 
     #[test]

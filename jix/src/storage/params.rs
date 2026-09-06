@@ -8,7 +8,7 @@ use crate::storage::block::BlockSize;
 use crate::util::{
     scale_read_shape, DimArray, DimIdx, Idx, IterExt, SendSyncPtr, USE_NEW_READ_SCALING,
 };
-use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension};
+use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt};
 
 /// Target byte range for a single read region.
 ///
@@ -559,6 +559,19 @@ pub(crate) struct ArraySpecDynamic {
     /// combines several inputs adopts the order of the input with the highest
     /// [`element_cost`](Self::element_cost) (the array whose redundant reads cost the most).
     pub(crate) read_shape_scale_order: DimArray<DimIdx>,
+    /// The memory layout that is cheapest to read this array into: a permutation of `0..ndim`,
+    /// **outermost (largest stride) first**. C-order is `[0, 1, .., ndim-1]`, F-order is
+    /// `[ndim-1, .., 0]`.
+    ///
+    /// Note this runs in the opposite direction from
+    /// [`read_shape_scale_order`](Self::read_shape_scale_order), which is innermost-first.
+    ///
+    /// A reader that allocates its own destination (e.g.
+    /// [`to_ndarray_sub`](crate::Array::to_ndarray_sub), or pull-mode
+    /// [`materialize_out_buf`](crate::storage::materialize_out_buf)) lays the buffer out in this
+    /// order so the copy runs straight through instead of transposing. It is a pure hint: it never
+    /// changes which values a read produces, only the strides of a freshly allocated destination.
+    pub(crate) read_layout_order: DimArray<DimIdx>,
 }
 impl ArraySpecOwned {
     pub(crate) fn new(
@@ -581,9 +594,10 @@ impl ArraySpecOwned {
             block_shape,
             block_shape_fixed_dims,
             element_cost: 1.0,
-            // Default to C-order priority: the last, most-contiguous dim ranks highest (scaled
-            // first). Leaves with a different layout (e.g. Plain) override this.
+            // Default to C-order priority
             read_shape_scale_order: dim_arr(ndim, |i| (ndim - 1 - i) as DimIdx),
+            // Default to C-order
+            read_layout_order: dim_arr(ndim, |i| i as DimIdx),
         };
         Self {
             shared: Box::pin((shared, PhantomPinned)),
@@ -674,6 +688,14 @@ impl<'a> ArraySpec<'a> {
     pub(crate) fn read_shape_scale_order(&self) -> &'a DimArray<DimIdx> {
         &self.dynamic().read_shape_scale_order
     }
+    /// The memory layout order (outermost dim first) - see
+    /// [`ArraySpecDynamic::read_layout_order`]. C-order `[0, .., ndim-1]` for a compact leaf; a
+    /// transposed or F-order view reports the permutation that makes its reads contiguous.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn read_layout_order(&self) -> &'a [DimIdx] {
+        &self.dynamic().read_layout_order
+    }
 
     // internal use only
     #[doc(hidden)]
@@ -744,46 +766,56 @@ impl<'a> ArraySpec<'a> {
     }
 }
 
-/// Pick the dim scaling order for a multi-input op: adopt the order of the input with the highest
-/// `element_cost` (the array whose redundant reads cost the most, so its coverage priorities matter
-/// most). `inputs` is non-empty with equal-length order slices; on a tie the earliest input wins.
-fn max_cost_read_shape_scale_order(inputs: &[(f32, &[DimIdx])]) -> DimArray<DimIdx> {
-    let (_, order) = inputs
+/// Insert `dim` into a `read_layout_order` when its position in the order carries no meaning.
+pub(crate) fn read_layout_order_insert_dont_care_dim(order: &mut DimArray<DimIdx>, dim: usize) {
+    debug_assert!(!order.contains(&(dim as DimIdx)));
+    let pos = order
         .iter()
-        .reduce(|best, cur| if cur.0 > best.0 { cur } else { best })
-        .unwrap();
-    dim_arr(order.len(), |d| order[d])
+        .position(|&d| d as usize > dim)
+        .unwrap_or(order.len());
+    order.insert(pos, dim as DimIdx);
 }
 
 /// Combine the read hints of the inputs of a *selection* op - one where each output element reads
 /// exactly one input (e.g. [`Concatenate`](crate::ops::Concatenate)/[`Stack`](crate::ops::Stack)).
-///
-/// There is no re-reading of any input, so `element_cost` is the worst case across inputs, plus one.
-/// The dim scaling order is taken from the costliest input (see [`max_cost_read_shape_scale_order`]).
-/// `inputs` must be non-empty with equal-length order slices.
-pub(crate) fn combine_select_hints(inputs: &[(f32, &[DimIdx])]) -> (f32, DimArray<DimIdx>) {
-    let element_cost = inputs.iter().map(|&(cost, _)| cost).fold(0.0f32, f32::max) + 1.0;
-    (element_cost, max_cost_read_shape_scale_order(inputs))
+pub(crate) fn combine_select_hints(
+    inputs: &[(f32, &[DimIdx], &[DimIdx])],
+) -> (f32, DimArray<DimIdx>, DimArray<DimIdx>) {
+    let element_cost = inputs
+        .iter()
+        .map(|&(cost, _, _)| cost)
+        .fold(0.0f32, f32::max)
+        + 1.0;
+    let (scale_order, layout_order) = max_cost_orders(inputs);
+    (element_cost, scale_order, layout_order)
 }
 
 /// Combine the read hints of the inputs of an element-wise op (same shape).
-///
-/// `element_cost = sum(costs) + 1`; the dim scaling order is taken from the costliest input (see
-/// [`max_cost_read_shape_scale_order`]). `inputs` must be non-empty with equal-length order slices.
-pub(crate) fn combine_elementwise_hints(inputs: &[(f32, &[DimIdx])]) -> (f32, DimArray<DimIdx>) {
-    let element_cost = (inputs.iter().map(|&(cost, _)| cost as f64).sum::<f64>() + 1.0) as f32;
-    (element_cost, max_cost_read_shape_scale_order(inputs))
+pub(crate) fn combine_elementwise_hints(
+    inputs: &[(f32, &[DimIdx], &[DimIdx])],
+) -> (f32, DimArray<DimIdx>, DimArray<DimIdx>) {
+    let element_cost = (inputs.iter().map(|&(cost, _, _)| cost as f64).sum::<f64>() + 1.0) as f32;
+    let (scale_order, layout_order) = max_cost_orders(inputs);
+    (element_cost, scale_order, layout_order)
+}
+
+fn max_cost_orders(inputs: &[(f32, &[DimIdx], &[DimIdx])]) -> (DimArray<DimIdx>, DimArray<DimIdx>) {
+    let max_cost_index = inputs
+        .iter()
+        .map(|(cost, _, _)| cost)
+        .enumerate()
+        .max_by(|(i_a, a), (i_b, b)| a.partial_cmp(b).unwrap().then(i_a.cmp(i_b)))
+        .unwrap()
+        .0;
+    let (_, scale_order, layout_order) = inputs[max_cost_index];
+    (
+        scale_order.to_dim_vec::<DimDyn>(),
+        layout_order.to_dim_vec::<DimDyn>(),
+    )
 }
 
 /// Combine the block layout (`block_shape` + `block_shape_fixed_dims`) of several equal-ndim inputs
 /// of an element-wise or selection op (binary, `where`, map-multiple, concatenate, stack).
-///
-/// Per dimension the output block length is the `max` over inputs - the coarsest "minimum read shape
-/// that doesn't waste work" wins, so a broadcasted operand's full-dim coverage is preserved rather
-/// than dropped in favor of a smaller operand's block. A dimension is marked fixed only if every
-/// input agrees on that block length *and* at least one input marks it fixed: a disagreement means
-/// there is no single meaningful storage boundary to preserve. `inputs` must be non-empty with
-/// equal-length block-shape slices, each matching its `block_shape_fixed_dims` length.
 pub(crate) fn combine_block_layout(
     inputs: &[(&[BlockSize], DimBitmap)],
 ) -> (DimArray<BlockSize>, DimBitmap) {
@@ -903,6 +935,8 @@ mod tests {
         combine_block_layout, combine_elementwise_hints, combine_select_hints, ArraySpecFlags,
         DimBitmap, ReadSize,
     };
+    use ndarray::ShapeBuilder;
+
     use crate::{Array, ArrayParams, ArrayStorage};
 
     fn bits(bm: DimBitmap) -> Vec<bool> {
@@ -914,9 +948,11 @@ mod tests {
         // The far more expensive operand supplies the scaling order; element_cost is the sum + 1.
         let cheap = [0u8, 1];
         let costly = [1u8, 0];
-        let (ec, order) = combine_elementwise_hints(&[(1.0, &cheap), (1000.0, &costly)]);
+        let (ec, order, layout) =
+            combine_elementwise_hints(&[(1.0, &cheap, &cheap), (1000.0, &costly, &costly)]);
         assert_eq!(ec, 1.0 + 1000.0 + 1.0);
         assert_eq!(order.as_slice(), &costly);
+        assert_eq!(layout.as_slice(), &costly);
     }
 
     #[test]
@@ -924,9 +960,11 @@ mod tests {
         // Each output reads one input, so element_cost is the max + 1; the costliest input's order wins.
         let cheap = [0u8, 1];
         let costly = [1u8, 0];
-        let (ec, order) = combine_select_hints(&[(1.0, &cheap), (1000.0, &costly)]);
+        let (ec, order, layout) =
+            combine_select_hints(&[(1.0, &cheap, &cheap), (1000.0, &costly, &costly)]);
         assert_eq!(ec, 1000.0 + 1.0);
         assert_eq!(order.as_slice(), &costly);
+        assert_eq!(layout.as_slice(), &costly);
     }
 
     #[test]
@@ -994,6 +1032,215 @@ mod tests {
             order[0], 1,
             "broadcast dim should sort first, got {order:?}"
         );
+    }
+
+    #[test]
+    fn read_layout_order_is_c_order_for_a_compact_leaf() {
+        let a = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([3, 4, 5], (0..60i32).collect()).unwrap(),
+        )
+        .unwrap();
+        // Compact blocks are stored C-order, so the outermost-first layout order is [0, 1, 2].
+        assert_eq!(a.storage().spec().read_layout_order(), &[0, 1, 2]);
+    }
+
+    #[test]
+    fn read_layout_order_follows_strides_for_a_plain_leaf() {
+        // An F-order ndarray: dim 0 has the smallest stride, so dim 1 is the outermost axis.
+        let arr =
+            ndarray::Array::from_shape_vec([3, 4].f(), (0..12i32).collect::<Vec<_>>()).unwrap();
+        let a = Array::plain_ndarray(arr).unwrap();
+        assert_eq!(a.storage().spec().read_layout_order(), &[1, 0]);
+    }
+
+    #[test]
+    fn read_layout_order_keeps_a_size_one_dim_at_its_shape_position() {
+        // C-order with a size-1 axis stays exactly C-order, so readers' "already C-order" fast
+        // path keeps firing.
+        let c = ndarray::Array::from_shape_vec([4, 1, 5], (0..20i32).collect::<Vec<_>>()).unwrap();
+        let a = Array::plain_ndarray(c).unwrap();
+        assert_eq!(a.storage().spec().read_layout_order(), &[0, 1, 2]);
+
+        // F-order [4, 5, 1]: the size-1 axis carries the largest stride (20 items) but is never
+        // stepped, so it must not be mistaken for the outermost axis.
+        let f =
+            ndarray::Array::from_shape_vec([4, 5, 1].f(), (0..20i32).collect::<Vec<_>>()).unwrap();
+        let a = Array::plain_ndarray(f).unwrap();
+        assert_eq!(a.storage().spec().read_layout_order(), &[1, 0, 2]);
+    }
+
+    #[test]
+    fn read_layout_order_puts_a_zero_stride_dim_outermost() {
+        // A broadcast ndarray view has stride 0 on the expanded axis. Outermost is the only
+        // placement that leaves the copy's inner run contiguous for both operands.
+        let base =
+            ndarray::Array::from_shape_vec([4, 1, 5], (0..20i32).collect::<Vec<_>>()).unwrap();
+        let view = base.broadcast([4, 3, 5]).unwrap();
+        let a = Array::plain_ndarray_view(view).unwrap();
+        assert_eq!(a.storage().spec().read_layout_order(), &[1, 0, 2]);
+    }
+
+    fn compact_i32(
+        shape: [usize; 3],
+    ) -> Array<crate::storage::Compact<crate::Ty<i32>, crate::Dim<3>>> {
+        let n = shape.iter().product::<usize>() as i32;
+        Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec(shape, (0..n).collect::<Vec<_>>()).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn read_layout_order_reindexes_through_permute_axes() {
+        let a = compact_i32([3, 4, 5]);
+        // Reversing the axes reverses the layout: the inner dim (2) becomes the outermost output
+        // dim (0), so the outermost-first order is [2, 1, 0].
+        let t = a.view().permute_axes(&[2, 1, 0]);
+        assert_eq!(t.storage().spec().read_layout_order(), &[2, 1, 0]);
+        // A rotation: output dim i reads input axis axes[i], so input dim 0 (outermost) lands on
+        // output dim 1, input dim 1 on output dim 2, and input dim 2 on output dim 0.
+        let t = a.view().permute_axes(&[2, 0, 1]);
+        assert_eq!(t.storage().spec().read_layout_order(), &[1, 2, 0]);
+    }
+
+    #[test]
+    fn read_layout_order_drops_reduced_dims() {
+        let a = compact_i32([3, 4, 5]);
+        // Layout [2, 1, 0]; reducing dim 1 leaves dims 2 and 0 in that relative order, renumbered
+        // to the output's [1, 0].
+        let r = a.view().permute_axes(&[2, 1, 0]).sum(1);
+        assert_eq!(r.storage().spec().read_layout_order(), &[1, 0]);
+    }
+
+    #[test]
+    fn read_layout_order_drops_removed_dims() {
+        let a = compact_i32([3, 1, 5]);
+        // Layout [2, 1, 0]; removing the size-1 dim 1 leaves dims 2 and 0, renumbered to [1, 0].
+        let r = a.view().permute_axes(&[2, 1, 0]).remove_axis(1);
+        assert_eq!(r.storage().spec().read_layout_order(), &[1, 0]);
+    }
+
+    #[test]
+    fn read_layout_order_splices_an_inserted_axis_at_its_shape_position() {
+        let a = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect::<Vec<_>>()).unwrap(),
+        )
+        .unwrap();
+        // A C-order input must stay exactly C-order so the readers' fast path keeps firing.
+        let i = a.view().insert_axis(1);
+        assert_eq!(i.storage().spec().read_layout_order(), &[0, 1, 2]);
+        // Transposed: old dims 0, 1 map to new 0, 2 and keep their [1, 0] relative order as
+        // [2, 0]; the new axis splices in ahead of the first higher-numbered dim.
+        let i = a.view().permute_axes(&[1, 0]).insert_axis(1);
+        assert_eq!(i.storage().spec().read_layout_order(), &[1, 2, 0]);
+    }
+
+    #[test]
+    fn read_layout_order_survives_a_one_to_one_reshape_only() {
+        let a = compact_i32([3, 4, 5]);
+        // Every output dim maps 1:1 to a source dim, so the layout carries through.
+        let r = a.view().permute_axes(&[2, 1, 0]).reshape([5, 4, 3]);
+        assert_eq!(r.storage().spec().read_layout_order(), &[2, 1, 0]);
+        // Merging dims 0 and 1 has no honest layout - a reshape is defined on C-order flattening -
+        // so the output falls back to C-order.
+        let r = a.view().permute_axes(&[2, 1, 0]).reshape([20, 3]);
+        assert_eq!(r.storage().spec().read_layout_order(), &[0, 1]);
+    }
+
+    #[test]
+    fn read_layout_order_forwards_through_elementwise_and_broadcast() {
+        let a = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([3, 1], (0..3i32).collect::<Vec<_>>()).unwrap(),
+        )
+        .unwrap();
+        // A unary elementwise op only bumps element_cost; the layout passes straight through.
+        let n = a.view().permute_axes(&[1, 0]).map(|x: i32| x * 2);
+        assert_eq!(n.storage().spec().read_layout_order(), &[1, 0]);
+        // Broadcast forwards too: a duplicated dim keeps its position.
+        let b = a.view().permute_axes(&[1, 0]).broadcast(&[4, 3]);
+        assert_eq!(b.storage().spec().read_layout_order(), &[1, 0]);
+    }
+
+    fn compact_2d_i32(
+        shape: [usize; 2],
+    ) -> Array<crate::storage::Compact<crate::Ty<i32>, crate::Dim<2>>> {
+        let n = shape.iter().product::<usize>() as i32;
+        Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec(shape, (0..n).collect::<Vec<_>>()).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn read_layout_order_takes_the_costliest_operand_in_a_binary_op() {
+        // A transposed compact leaf: F-order, and cheap at element_cost 8.
+        let t = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([3, 4], (0..12i64).collect::<Vec<_>>()).unwrap(),
+        )
+        .unwrap();
+        // A broadcast reduction over [4, 3]: C-order, and expensive at 8 * (3 + 4) = 56.
+        let src = compact_2d_i32([4, 3]);
+        let costly = || src.view().sum(1).insert_axis(1).broadcast(&[4, 3]);
+        assert_eq!(costly().storage().spec().element_cost(), 8.0 * (3.0 + 4.0));
+
+        // The costlier operand supplies the layout, whichever side it sits on.
+        let out = t.view().permute_axes(&[1, 0]).maximum(costly());
+        assert_eq!(out.storage().spec().read_layout_order(), &[0, 1]);
+        let out = costly().maximum(t.view().permute_axes(&[1, 0]));
+        assert_eq!(out.storage().spec().read_layout_order(), &[0, 1]);
+    }
+
+    #[test]
+    fn read_layout_order_takes_the_costliest_input_in_concatenate() {
+        let c_order = compact_2d_i32([4, 3]);
+        let src = compact_2d_i32([3, 4]);
+        // Three maps over a transposed leaf: F-order at element_cost 8 + 3 = 11.
+        let costly = src
+            .view()
+            .permute_axes(&[1, 0])
+            .map(|x: i32| x)
+            .map(|x: i32| x)
+            .map(|x: i32| x);
+        assert_eq!(costly.storage().spec().element_cost(), 11.0);
+
+        // Input 1 is the costliest, so its F-order layout wins over input 0's C-order.
+        let out = crate::ops::concatenate((c_order.view(), costly), 0);
+        assert_eq!(out.storage().spec().read_layout_order(), &[1, 0]);
+    }
+
+    #[test]
+    fn read_layout_order_takes_the_costliest_input_in_where() {
+        let cond = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([4, 3], vec![true; 12]).unwrap(),
+        )
+        .unwrap();
+        let c_order = compact_2d_i32([4, 3]);
+        let src = compact_2d_i32([3, 4]);
+        let costly = src
+            .view()
+            .permute_axes(&[1, 0])
+            .map(|x: i32| x)
+            .map(|x: i32| x)
+            .map(|x: i32| x);
+
+        // `y` is the costliest of the three, so its F-order layout wins - not `x`'s.
+        let out = crate::ops::where_condition(cond.view(), c_order.view(), costly);
+        assert_eq!(out.storage().spec().read_layout_order(), &[1, 0]);
+    }
+
+    #[test]
+    fn read_layout_order_splices_stacks_new_axis_at_its_shape_position() {
+        let a = compact_2d_i32([3, 4]);
+        // Both inputs are transposed [4, 3] views with layout [1, 0]. Stacking at axis 1 relabels
+        // them to [2, 0], then the new axis splices in ahead of the first higher-numbered dim.
+        let out = crate::ops::stack(
+            (
+                a.view().permute_axes(&[1, 0]),
+                a.view().permute_axes(&[1, 0]),
+            ),
+            1,
+        );
+        assert_eq!(out.storage().spec().read_layout_order(), &[1, 2, 0]);
     }
 
     #[test]

@@ -13,5 +13,4 @@
 - fast path for 0-stride operands in ElementwisePipeline
 - replace array_from_fn_inline with map_enumerate
 - arrays_map, arrays_map_enumerate
-- add read_axis_order to spec()
 - as_compact() doesnt work through Any

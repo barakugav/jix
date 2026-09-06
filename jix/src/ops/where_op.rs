@@ -111,11 +111,24 @@ where
         let c_spec = condition.spec();
         let x_spec = x.spec();
         let y_spec = y.spec();
-        let (element_cost, read_shape_scale_order) = combine_elementwise_hints(&[
-            (c_spec.element_cost(), c_spec.read_shape_scale_order()),
-            (x_spec.element_cost(), x_spec.read_shape_scale_order()),
-            (y_spec.element_cost(), y_spec.read_shape_scale_order()),
-        ]);
+        let (element_cost, read_shape_scale_order, read_layout_order) =
+            combine_elementwise_hints(&[
+                (
+                    c_spec.element_cost(),
+                    c_spec.read_shape_scale_order(),
+                    c_spec.read_layout_order(),
+                ),
+                (
+                    x_spec.element_cost(),
+                    x_spec.read_shape_scale_order(),
+                    x_spec.read_layout_order(),
+                ),
+                (
+                    y_spec.element_cost(),
+                    y_spec.read_shape_scale_order(),
+                    y_spec.read_layout_order(),
+                ),
+            ]);
         let (block_shape, block_shape_fixed_dims) = combine_block_layout(&[
             (c_spec.block_shape(), c_spec.block_shape_fixed_dims()),
             (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
@@ -126,6 +139,7 @@ where
         spec.block_shape_fixed_dims = block_shape_fixed_dims;
         spec.element_cost = element_cost;
         spec.read_shape_scale_order = read_shape_scale_order;
+        spec.read_layout_order = read_layout_order;
         Ok(Self {
             condition,
             x,
@@ -166,7 +180,13 @@ where
 
         let condition_view = self.condition.read_data(index, context, None)?;
         let y_view = self.y.read_data(index, context, None)?;
-        let mut out = materialize_out_buf(out, context, out_shape.as_ref(), dtype);
+        let mut out = materialize_out_buf(
+            out,
+            context,
+            out_shape.as_ref(),
+            dtype,
+            self.spec().read_layout_order(),
+        );
         self.x.read_data(index, context, Some(&mut out))?;
 
         let (out_buf, out_strides) = out.data_mut();

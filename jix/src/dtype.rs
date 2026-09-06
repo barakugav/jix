@@ -1201,6 +1201,114 @@ mod tests {
     // ---- Scalar dtype basics ----
 
     #[test]
+    fn alignment_rejects_values_that_are_not_a_small_power_of_two() {
+        assert!(Alignment::new(0).is_none());
+        assert!(Alignment::new(3).is_none());
+        assert!(Alignment::new(1 << 16).is_none());
+        assert!(Alignment::new(64).is_some());
+        let err = Alignment::try_from(3usize).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    fn borrowed_struct_dtype_matches_the_derived_one() {
+        #[derive(Copy, Clone, Debug, crate::dtype::Dtyped)]
+        #[repr(C)]
+        struct Pair {
+            x: i32,
+            y: i32,
+        }
+
+        static FIELDS: [(Cow<'static, str>, Itemsize, Dtype); 2] = [
+            (Cow::Borrowed("x"), 0, <i32 as Dtyped>::DTYPE),
+            (Cow::Borrowed("y"), 4, <i32 as Dtyped>::DTYPE),
+        ];
+        // This is what `#[derive(Dtyped)]` builds, but at run time rather than in a const.
+        let built = unsafe {
+            Dtype::new_struct_borrowed_unchecked(&FIELDS, 8, Alignment::new(4).unwrap(), true)
+        };
+        assert_eq!(built, Pair::DTYPE);
+        assert!(built.is_aligned());
+
+        // Reshaping goes through the borrowed-struct arms of the shape and itemsize accessors.
+        let mut shaped = built.clone();
+        shaped.set_shape(&[3]).unwrap();
+        assert_eq!(shaped.shape(), &[3]);
+        assert_eq!(shaped.itemsize(), 24);
+    }
+
+    #[test]
+    fn scalar_kind_predicates_and_display() {
+        let cases = &[
+            // kind, Display text, signed, unsigned, float, complex, bool
+            (ScalarKind::I8, "i8", true, false, false, false, false),
+            (ScalarKind::I16, "i16", true, false, false, false, false),
+            (ScalarKind::I32, "i32", true, false, false, false, false),
+            (ScalarKind::I64, "i64", true, false, false, false, false),
+            (ScalarKind::U8, "u8", false, true, false, false, false),
+            (ScalarKind::U16, "u16", false, true, false, false, false),
+            (ScalarKind::U32, "u32", false, true, false, false, false),
+            (ScalarKind::U64, "u64", false, true, false, false, false),
+            (ScalarKind::F16, "f16", false, false, true, false, false),
+            (ScalarKind::F32, "f32", false, false, true, false, false),
+            (ScalarKind::F64, "f64", false, false, true, false, false),
+            (
+                ScalarKind::ComplexF32,
+                "Complex<f32>",
+                false,
+                false,
+                false,
+                true,
+                false,
+            ),
+            (
+                ScalarKind::ComplexF64,
+                "Complex<f64>",
+                false,
+                false,
+                false,
+                true,
+                false,
+            ),
+            (ScalarKind::Bool, "bool", false, false, false, false, true),
+        ];
+        for &(kind, name, signed, unsigned, float, complex, boolean) in cases {
+            assert_eq!(Dtype::new_scalar(kind).to_string(), name);
+            assert_eq!(kind.is_signed_integer(), signed, "{name}");
+            assert_eq!(kind.is_unsigned_integer(), unsigned, "{name}");
+            assert_eq!(kind.is_integer(), signed || unsigned, "{name}");
+            assert_eq!(kind.is_float(), float, "{name}");
+            assert_eq!(kind.is_complex(), complex, "{name}");
+            assert_eq!(kind.is_bool(), boolean, "{name}");
+
+            // Both conversions are defined for exactly the integer kinds, and keep the width.
+            let (to_signed, to_unsigned) = (kind.to_signed_integer(), kind.to_unsigned_integer());
+            assert_eq!(to_signed.is_some(), kind.is_integer(), "{name}");
+            assert_eq!(to_unsigned.is_some(), kind.is_integer(), "{name}");
+            if let (Some(signed_kind), Some(unsigned_kind)) = (to_signed, to_unsigned) {
+                assert!(signed_kind.is_signed_integer(), "{name}");
+                assert!(unsigned_kind.is_unsigned_integer(), "{name}");
+                assert_eq!(signed_kind.itemsize(), kind.itemsize(), "{name}");
+                assert_eq!(unsigned_kind.itemsize(), kind.itemsize(), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn struct_dtype_never_equals_a_scalar_of_the_same_layout() {
+        #[derive(Copy, Clone, Debug, crate::dtype::Dtyped)]
+        #[repr(C)]
+        struct OneI64 {
+            a: i64,
+        }
+
+        // Same itemsize, alignment and shape, so equality comes down to struct-vs-scalar.
+        assert_eq!(OneI64::DTYPE.itemsize(), i64::DTYPE.itemsize());
+        assert_eq!(OneI64::DTYPE.alignment(), i64::DTYPE.alignment());
+        assert_ne!(OneI64::DTYPE, i64::DTYPE);
+    }
+
+    #[test]
     fn scalar_itemsize_and_alignment() {
         let cases: &[(ScalarKind, Itemsize, /* alignment */ usize)] = &[
             (ScalarKind::I8, 1, 1),
