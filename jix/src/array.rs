@@ -18,8 +18,8 @@ use crate::util::{
     IterExt, NdCopier, USE_NEW_READ_SCALING,
 };
 use crate::{
-    default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, DimDyn, DimIdx,
-    DimVec, Dimension, ElementType, IntoDimension, SliceExt, Ty, TypeDyn,
+    default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, DimDyn, DimVec,
+    Dimension, ElementType, IntoDimension, SliceExt, Ty, TypeDyn,
 };
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
@@ -775,34 +775,41 @@ impl<S: ArrayStorage> Array<S> {
         check_get_range(self.shape(), index)?;
         let ndim = self.ndim();
         let itemsize = self.dtype().itemsize() as usize;
-        let out_shape = S::Dimension::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+        let out_shape = S::Dimension::from_fn(ndim, |dim| index[dim].end - index[dim].start);
 
-        let spec = self.storage.spec();
-        let layout_order = spec.read_layout_order();
-        let alloc_shape =
-            S::Dimension::from_fn(ndim, |i| out_shape[layout_order[i] as usize] as u64);
-        let alloc_shape = <S::Dimension as ndarray::IntoDimension>::into_dimension(alloc_shape);
-        let mut inv_order = S::Dimension::vec(ndim, |_| 0);
-        for dim in 0..ndim {
-            inv_order[layout_order[dim] as usize] = dim as DimIdx;
-        }
+        let mut array = {
+            let spec = self.storage.spec();
+            let layout_order = spec.read_layout_order();
+            if layout_order
+                .iter()
+                .enumerate()
+                .all(|(i, &dim)| i == dim as usize)
+            {
+                // C-order hint
+                ndarray::Array::uninit(out_shape)
+            } else {
+                // Custom layout hint
+                let alloc_shape =
+                    S::Dimension::from_fn(ndim, |i| out_shape[layout_order[i] as usize] as u64);
+                let mut inv_order = S::Dimension::from_fn(ndim, |_| 0);
+                for dim in 0..ndim {
+                    inv_order[layout_order[dim] as usize] = dim as u64;
+                }
+                ndarray::Array::uninit(alloc_shape).permuted_axes(inv_order)
+            }
+        };
 
-        let mut array = ndarray::Array::uninit(alloc_shape);
         {
-            let buf_strides = {
-                let alloc_strides = array.strides();
-                dim_arr(ndim, |dim| {
-                    alloc_strides[inv_order[dim] as usize] as usize * itemsize
-                })
-            };
+            let buf_strides = dim_arr(ndim, |dim| array.strides()[dim] as usize * itemsize);
             let buf = unsafe {
-                cast_slice_mut::<MaybeUninit<S::Item>, u8>(array.as_slice_mut().unwrap())
+                cast_slice_mut::<MaybeUninit<S::Item>, u8>(
+                    array.as_slice_memory_order_mut().unwrap(),
+                )
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides.as_ref()) };
             self.to_ndarray_buf(index, context, Some(&mut out))?;
         }
-        let axes = S::Dimension::from_fn(ndim, |dim| inv_order[dim] as u64);
-        Ok(unsafe { array.assume_init() }.permuted_axes(axes))
+        Ok(unsafe { array.assume_init() })
     }
 
     /// Read a rectangular sub-region into a caller-supplied byte buffer.
