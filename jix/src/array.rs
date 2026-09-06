@@ -15,7 +15,7 @@ use crate::storage::{
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, calc_block_end, cast_slice_mut, dim_arr, scale_read_shape, AlignedBytes,
-    IterExt, NdCopier,
+    IterExt, NdCopier, PtrMutNoalias, PtrNoalias,
 };
 use crate::{
     default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, DimDyn, DimVec,
@@ -1348,8 +1348,10 @@ impl<S: ArrayStorage> Array<S> {
                 // In that case, we can compress directly from the chunk buffer
                 unsafe {
                     copier.copy(
-                        chunk_buf.as_slice().get_unchecked(src_byte_offset..),
-                        tmp_block_plain.as_mut_slice(),
+                        PtrNoalias::from_slice(
+                            chunk_buf.as_slice().get_unchecked(src_byte_offset..),
+                        ),
+                        PtrMutNoalias::from_slice(tmp_block_plain.as_mut_slice()),
                         S::Dimension::vec(ndim, |dim| block_active_size[dim] as usize).as_ref(),
                         chunk_strides.as_ref(),
                         block_strides.as_ref(),

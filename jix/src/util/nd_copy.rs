@@ -2,7 +2,7 @@ use std::ptr;
 
 use crate::arrayvec::ArrayVec;
 use crate::dtype::{Alignment, Dtype, Itemsize};
-use crate::{NdIterUnordered, PtrExt, PtrMutExt};
+use crate::{NdIterUnordered, PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias};
 
 /// A reusable, dtype-specialized copier that moves a rectangular n-dimensional region between two
 /// byte slices under independent source and destination strides.
@@ -25,8 +25,8 @@ struct NdCopierStruct<'a> {
     dtypes: ArrayVec<&'a Dtype, 4>,
 }
 struct NdCopyArgs<'a> {
-    src: &'a [u8],
-    dst: &'a mut [u8],
+    src: PtrNoalias<'a, u8>,
+    dst: PtrMutNoalias<'a, u8>,
     shape: &'a [usize],
     src_strides: &'a [usize],
     dst_strides: &'a [usize],
@@ -96,21 +96,21 @@ impl<'a> NdCopier<'a> {
 
     /// Copies a rectangular `shape` region from `src` to `dst` under independent byte strides.
     ///
-    /// `src` and `dst` are the backing byte slices.
-    /// Passing slices - rather than raw pointers - lets the inner loops derive `noalias`-tagged pointers.
+    /// `src` and `dst` are [`PtrNoalias`] / [`PtrMutNoalias`] - references in the ABI, so LLVM
+    /// keeps on the inner loops' operands the `noalias` tag it would drop on a bare raw pointer.
     ///
     /// # Safety
     ///
-    /// - Each slice's byte range must be a superset of every byte the copy touches. For a region
+    /// - Each wrapped byte range must be a superset of every byte the copy touches. For a region
     ///   with the given `shape`/strides that is `sum_d (shape[d] - 1) * stride[d] + itemsize` bytes
-    ///   from the slice start (all byte strides are non-negative). A shorter slice is undefined
+    ///   from the start (all byte strides are non-negative). A shorter range is undefined
     ///   behavior even though no explicit bounds checks run.
     /// - The `src` and `dst` regions must not overlap.
     #[inline(always)]
     pub(crate) unsafe fn copy(
         &self,
-        src: &[u8],
-        dst: &mut [u8],
+        src: PtrNoalias<'_, u8>,
+        dst: PtrMutNoalias<'_, u8>,
         shape: &[usize],
         src_strides: &[usize],
         dst_strides: &[usize],
@@ -172,6 +172,8 @@ impl<'a> NdCopier<'a> {
         let [dst_aligned, src_aligned] = iter.is_aligned();
         let aligned = (dst_aligned && dst.as_ptr().cast::<T>().is_aligned())
             && (src_aligned && src.as_ptr().cast::<T>().is_aligned());
+        // Apply the element type now that the byte-level alignment check above is done.
+        let (src, mut dst) = (src.cast::<T>(), dst.cast::<T>());
         let [dst_contiguous, src_contiguous] = iter.is_contiguous();
 
         // For the both-contiguous run, peel a small fixed length into a single `[T; N]` move
@@ -215,11 +217,14 @@ impl<'a> NdCopier<'a> {
             }
         };
 
+        // `move` so the closure owns the two wrappers. Borrowing them instead would make it
+        // capture `&PtrNoalias` / `&mut PtrMutNoalias`, i.e. read the operands through an extra
+        // pointer on every inner run.
         iter.foreach_inner_1d_impl::<true>(
-            |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
+            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
                 inner_loop_fn(
-                    src.get_unchecked(src_offset..),
-                    dst.get_unchecked_mut(dst_offset..),
+                    src.bytes_offset(src_offset),
+                    dst.bytes_offset(dst_offset),
                     len,
                     src_stride,
                     dst_stride,
@@ -234,8 +239,8 @@ impl<'a> NdCopier<'a> {
         const SRC_CONTIGUOUS: bool,
         const DST_CONTIGUOUS: bool,
     >(
-        src: &[u8],
-        dst: &mut [u8],
+        src: PtrNoalias<T>,
+        dst: PtrMutNoalias<T>,
         len: usize,
         src_stride: usize,
         dst_stride: usize,
@@ -246,8 +251,8 @@ impl<'a> NdCopier<'a> {
         if DST_CONTIGUOUS {
             debug_assert_eq!(dst_stride, size_of::<T>());
         }
-        let src = src.as_ptr().cast::<T>();
-        let dst = dst.as_mut_ptr().cast::<T>();
+        let src = src.as_ptr();
+        let dst = dst.as_mut_ptr();
         unsafe {
             if SRC_CONTIGUOUS && DST_CONTIGUOUS {
                 if ALIGNED {
@@ -281,8 +286,8 @@ impl<'a> NdCopier<'a> {
     /// One inner run where both operands are contiguous and its length is the compile-time `N`:
     /// a single `[T; N]` load/store (branchless), the common small-run fast path.
     unsafe fn inner_loop_contiguous_const_len<T: Copy, const LEN: usize, const ALIGNED: bool>(
-        src: &[u8],
-        dst: &mut [u8],
+        src: PtrNoalias<T>,
+        dst: PtrMutNoalias<T>,
         len: usize,
         src_stride: usize,
         dst_stride: usize,
@@ -297,8 +302,8 @@ impl<'a> NdCopier<'a> {
     }
 
     unsafe fn inner_loop_untyped<const SRC_DST_CONTIGUOUS: bool>(
-        src: &[u8],
-        dst: &mut [u8],
+        src: PtrNoalias<u8>,
+        dst: PtrMutNoalias<u8>,
         len: usize,
         src_stride: usize,
         dst_stride: usize,
@@ -327,7 +332,7 @@ impl<'a> NdCopier<'a> {
     fn copy_struct(struct_copier: &NdCopierStruct, args: NdCopyArgs) {
         let NdCopyArgs {
             src,
-            dst,
+            mut dst,
             shape,
             src_strides,
             dst_strides,
@@ -340,8 +345,8 @@ impl<'a> NdCopier<'a> {
             .zip(struct_copier.dtypes.iter())
         {
             let field_args = NdCopyArgs {
-                src: unsafe { src.get_unchecked(offset as usize..) },
-                dst: unsafe { dst.get_unchecked_mut(offset as usize..) },
+                src: unsafe { src.bytes_offset(offset as usize) },
+                dst: unsafe { dst.bytes_offset(offset as usize) },
                 shape,
                 src_strides,
                 dst_strides,
@@ -354,7 +359,7 @@ impl<'a> NdCopier<'a> {
     fn copy_untyped(args: NdCopyArgs) {
         let NdCopyArgs {
             src,
-            dst,
+            mut dst,
             shape,
             src_strides,
             dst_strides,
@@ -374,11 +379,12 @@ impl<'a> NdCopier<'a> {
             true => Self::inner_loop_untyped::<true>,
             false => Self::inner_loop_untyped::<false>,
         };
+        // `move` for the same reason as in `scalar_fn`.
         iter.foreach_inner_1d_impl::<true>(
-            |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
+            move |[dst_offset, src_offset], len, [dst_stride, src_stride]| unsafe {
                 inner_loop_fn(
-                    src.get_unchecked(src_offset..),
-                    dst.get_unchecked_mut(dst_offset..),
+                    src.bytes_offset(src_offset),
+                    dst.bytes_offset(dst_offset),
                     len,
                     src_stride,
                     dst_stride,
@@ -546,7 +552,14 @@ mod tests {
         let copier = NdCopier::new(&dtype);
         let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
         unsafe {
-            copier.copy(src, dst, shape, src_strides, dst_strides, &dtype);
+            copier.copy(
+                PtrNoalias::from_slice(src),
+                PtrMutNoalias::from_slice(dst),
+                shape,
+                src_strides,
+                dst_strides,
+                &dtype,
+            );
         }
 
         let actual = unsafe { std::slice::from_raw_parts(dst_ptr, dst_len) };

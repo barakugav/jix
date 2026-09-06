@@ -10,7 +10,7 @@ use crate::error::Result;
 use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
-use crate::util::{PtrExt, PtrMutExt, REQUIRE_ALIGNED};
+use crate::util::{PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
 use crate::{
     array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimDyn, DimIdx,
     NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
@@ -127,17 +127,17 @@ where
         operands
     };
 
-    let loop_cc = |dst: &mut [u8], dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, true>()(&pipeline, dst, dst_stride, len)
+    let loop_cc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, true, true>()(&pipeline, dst.cast(), dst_stride, len)
     };
-    let loop_cs = |dst: &mut [u8], dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, false>()(&pipeline, dst, dst_stride, len)
+    let loop_cs = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, true, false>()(&pipeline, dst.cast(), dst_stride, len)
     };
-    let loop_sc = |dst: &mut [u8], dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, true>()(&pipeline, dst, dst_stride, len)
+    let loop_sc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, false, true>()(&pipeline, dst.cast(), dst_stride, len)
     };
-    let loop_ss = |dst: &mut [u8], dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, false>()(&pipeline, dst, dst_stride, len)
+    let loop_ss = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, false, false>()(&pipeline, dst.cast(), dst_stride, len)
     };
     let factory = |flags: InnerLoopFlags| {
         let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
@@ -168,17 +168,17 @@ where
         .chain(pipeline.operands())
         .collect::<Vec<_>>();
 
-    let loop_cc = |dst: &mut [u8], dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, true>()(&pipeline, dst, dst_stride, len)
+    let loop_cc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, true, true>()(&pipeline, dst.cast(), dst_stride, len)
     };
-    let loop_cs = |dst: &mut [u8], dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, false>()(&pipeline, dst, dst_stride, len)
+    let loop_cs = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, true, false>()(&pipeline, dst.cast(), dst_stride, len)
     };
-    let loop_sc = |dst: &mut [u8], dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, true>()(&pipeline, dst, dst_stride, len)
+    let loop_sc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, false, true>()(&pipeline, dst.cast(), dst_stride, len)
     };
-    let loop_ss = |dst: &mut [u8], dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, false>()(&pipeline, dst, dst_stride, len)
+    let loop_ss = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
+        pick_inner_loop::<T, _, false, false>()(&pipeline, dst.cast(), dst_stride, len)
     };
     let factory = |flags: InnerLoopFlags| {
         let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
@@ -273,7 +273,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
 
             let dst_stride = out_operand.inner_stride.get();
             let dst = unsafe {
-                std::slice::from_raw_parts_mut(
+                PtrMutNoalias::new(
                     out_operand.current_ptr.get().cast_mut(),
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
@@ -386,7 +386,7 @@ fn to_buf_type_erased_dyn(
 
             let dst_stride = out_operand.inner_stride.get();
             let dst = unsafe {
-                std::slice::from_raw_parts_mut(
+                PtrMutNoalias::new(
                     out_operand.current_ptr.get().cast_mut(),
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
@@ -448,12 +448,12 @@ impl Staging<'_> {
         let itemsize = dtype.itemsize() as usize;
         let src_span = n.saturating_sub(1) * stride + itemsize;
         // SAFETY: the caller vouches for `n` elements at `stride` behind `src`.
-        let src = unsafe { std::slice::from_raw_parts(src, src_span) };
+        let src = unsafe { PtrNoalias::new(src, src_span) };
         // SAFETY: the two buffers are distinct allocations, per the caller.
         unsafe {
             self.copier.copy(
                 src,
-                self.buf.as_mut_slice(),
+                PtrMutNoalias::from_slice(self.buf.as_mut_slice()),
                 &[n],
                 &[stride],
                 &[itemsize],
@@ -474,11 +474,11 @@ impl Staging<'_> {
         let itemsize = dtype.itemsize() as usize;
         let dst_span = n.saturating_sub(1) * stride + itemsize;
         // SAFETY: the caller vouches for `n` elements at `stride` behind `dst`.
-        let dst = unsafe { std::slice::from_raw_parts_mut(dst, dst_span) };
+        let dst = unsafe { PtrMutNoalias::new(dst, dst_span) };
         // SAFETY: the two buffers are distinct allocations, per the caller.
         unsafe {
             self.copier.copy(
-                self.buf.as_slice(),
+                PtrNoalias::from_slice(self.buf.as_slice()),
                 dst,
                 &[n],
                 &[itemsize],
@@ -492,7 +492,7 @@ impl Staging<'_> {
 #[inline(never)]
 fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
     pipeline: &impl ElementwisePipelineImpl<T>,
-    dst: &mut [u8],
+    dst: PtrMutNoalias<T>,
     dst_stride: usize,
     len: usize,
 ) where
@@ -501,7 +501,7 @@ fn inner_loop<T, const LANES: usize, const IN_CONTIGUOUS: bool, const OUT_CONTIG
     if OUT_CONTIGUOUS {
         debug_assert_eq!(dst_stride, size_of::<T>());
     }
-    let dst = dst.as_mut_ptr().cast::<T>();
+    let dst = dst.as_mut_ptr();
     if REQUIRE_ALIGNED {
         debug_assert!(dst.is_aligned());
     }
@@ -546,11 +546,11 @@ struct InnerLoopFlags {
     inputs_contiguous: bool,
     output_contiguous: bool,
 }
-type InnerLoop<'a> = dyn Fn(&mut [u8], usize, usize) + 'a;
+type InnerLoop<'a> = dyn Fn(PtrMutNoalias<'_, u8>, usize, usize) + 'a;
 type InnerLoopFactory<'a> = &'a dyn Fn(InnerLoopFlags) -> &'a InnerLoop<'a>;
 
 fn pick_inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
-) -> fn(&P, &mut [u8], usize, usize)
+) -> fn(&P, PtrMutNoalias<'_, T>, usize, usize)
 where
     T: Dtyped,
     P: ElementwisePipelineImpl<T>,

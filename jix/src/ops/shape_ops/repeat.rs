@@ -7,7 +7,7 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
-use crate::util::calc_block_end;
+use crate::util::{calc_block_end, PtrMutNoalias, PtrNoalias};
 use crate::{Array, ArrayStorage, DimDyn, DimIdx, Dimension, NdCopier, SliceExt, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
@@ -208,8 +208,8 @@ impl<S: ArrayStorage> ArrayStorage for Repeat<S> {
 
             unsafe {
                 copier.copy(
-                    src,
-                    dst,
+                    PtrNoalias::from_slice(src),
+                    PtrMutNoalias::from_slice(dst),
                     copy_shape.as_ref(),
                     src_strides.as_ref(),
                     dst_strides_split.as_ref(),

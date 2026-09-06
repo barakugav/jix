@@ -43,6 +43,7 @@
         "ncols",
         "ndim",
         "nitems",
+        "Noalias",
         "nonoverlapping",
         "pyclass",
         "pyfunction",

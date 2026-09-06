@@ -8,7 +8,7 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
-use crate::util::{NdCopier, ScaleWeight};
+use crate::util::{NdCopier, PtrMutNoalias, PtrNoalias, ScaleWeight};
 use crate::{Array, ArrayStorage, DimDyn, DimIdx, Dimension, SliceExt, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
@@ -233,8 +233,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
         let src = unsafe { tmp.get_unchecked(src_off..) };
         unsafe {
             copier.copy(
-                src,
-                out_buf,
+                PtrNoalias::from_slice(src),
+                PtrMutNoalias::from_slice(out_buf),
                 copy_shape.as_ref(),
                 src_strides,
                 out_strides,
@@ -278,8 +278,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             let dst = unsafe { out_buf.get_unchecked_mut(dst_off..) };
             unsafe {
                 copier.copy(
-                    tmp,
-                    dst,
+                    PtrNoalias::from_slice(tmp),
+                    PtrMutNoalias::from_slice(dst),
                     copy_shape.as_ref(),
                     src_strides_split.as_ref(),
                     dst_strides_split.as_ref(),
@@ -301,8 +301,8 @@ impl<S: ArrayStorage> ArrayStorage for Tile<S> {
             let dst = unsafe { out_buf.get_unchecked_mut(dst_off..) };
             unsafe {
                 copier.copy(
-                    tmp,
-                    dst,
+                    PtrNoalias::from_slice(tmp),
+                    PtrMutNoalias::from_slice(dst),
                     copy_shape.as_ref(),
                     src_strides,
                     out_strides,

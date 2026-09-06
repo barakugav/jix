@@ -4,7 +4,7 @@ use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_get_range, ensure, Result};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
-use crate::util::NdCopier;
+use crate::util::{NdCopier, PtrMutNoalias, PtrNoalias};
 use crate::{Array, ArrayStorage, Dimension, ElementType, Ty, TypeDyn};
 
 impl<S> Array<S>
@@ -160,8 +160,8 @@ where
         let copier = NdCopier::new(dst_dtype);
         unsafe {
             copier.copy(
-                src,
-                out_buf,
+                PtrNoalias::from_slice(src),
+                PtrMutNoalias::from_slice(out_buf),
                 out_shape.as_ref(),
                 src_strides,
                 out_strides,

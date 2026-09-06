@@ -14,7 +14,7 @@ use crate::util::SliceExt;
 use crate::util::{calc_block_end, DimArray, DimIdx, REQUIRE_ALIGNED};
 use crate::{
     array_from_fn_inline, default_strides, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
-    NdIterUnordered, PtrExt, Ty,
+    NdIterUnordered, PtrExt, PtrMutNoalias, PtrNoalias, Ty,
 };
 
 pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
@@ -519,7 +519,8 @@ where
                 .sum::<usize>() as u64;
 
             let tile_shape = InnerD::vec(inner_ndim, |d| tile_size[d] as usize);
-            let tile_state_base = unsafe { state_buf.get_unchecked_mut(state_offset..) };
+            let tile_state_base =
+                unsafe { PtrMutNoalias::from_slice(state_buf.get_unchecked_mut(state_offset..)) };
 
             reduce_tile_fn(ReduceTileArgs {
                 tile_shape: tile_shape.as_ref(),
@@ -550,7 +551,7 @@ where
 struct ReduceTileArgs<'a> {
     tile_shape: &'a [usize],
     items: StridedBuf<'a>,
-    states_buf: &'a mut [u8],
+    states_buf: PtrMutNoalias<'a, u8>,
     state_strides: &'a [usize],
 
     tile_base_reduced_idx: u64,
@@ -565,7 +566,7 @@ where
     let ReduceTileArgs {
         tile_shape,
         items,
-        states_buf,
+        mut states_buf,
         state_strides,
         tile_base_reduced_idx,
         reduced_shape_logical_strides,
@@ -628,12 +629,13 @@ where
         }
     };
 
-    iter.foreach_inner_1d(|offsets, inner_len, strides| {
+    let items_buf = PtrNoalias::<u8>::from_slice(items_buf);
+    iter.foreach_inner_1d(move |offsets, inner_len, strides| {
         let [item_offset, state_offset, base_item_idx] = offsets;
         let [items_stride, state_stride, idx_stride] = strides;
 
-        let items_buf = unsafe { items_buf.get_unchecked(item_offset..) };
-        let states_buf = unsafe { states_buf.get_unchecked_mut(state_offset..) };
+        let items_buf = unsafe { items_buf.bytes_offset(item_offset) };
+        let states_buf = unsafe { states_buf.bytes_offset(state_offset) };
 
         let base_item_idx = tile_base_reduced_idx + base_item_idx as u64;
 
@@ -653,8 +655,8 @@ where
 struct FoldInnerLoopArgs<'a, K> {
     inner_len: usize,
     kernel: &'a K,
-    items: &'a [u8],
-    states_buf: &'a mut [u8],
+    items: PtrNoalias<'a, u8>,
+    states_buf: PtrMutNoalias<'a, u8>,
     items_stride: usize,
     state_stride: usize,
     idx_stride: usize,

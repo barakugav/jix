@@ -26,6 +26,7 @@ pub(crate) use nd_iter_unordered_dyn::*;
 mod bitmap;
 pub(crate) use bitmap::*;
 
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray, DimIdx};
@@ -642,6 +643,116 @@ pub(crate) const REQUIRE_ALIGNED: bool = !cfg!(any(
     target_arch = "x86_64",
     target_arch = "aarch64"
 ));
+
+/// A `*const T` carried across a function boundary as a reference, so LLVM tags it `noalias`.
+///
+/// Rust only puts `noalias` on a parameter that arrives as a reference; a bare `*const T` gets
+/// nothing, and the callee then has to assume it may alias every other pointer it holds. This
+/// wrapper keeps the reference in the ABI (that is the whole point) while saying in the type what
+/// is really being passed: a non-aliasing pointer to `T`.
+///
+/// `noalias` is a *parameter* attribute, so it only lands on a direct reference-typed argument of
+/// a function that is not inlined away - which in practice means the `#[inline(never)]` inner
+/// loops.
+#[derive(Clone, Copy)]
+pub(crate) struct PtrNoalias<'a, T>(&'a [u8], PhantomData<T>);
+
+impl<'a, T> PtrNoalias<'a, T> {
+    /// Wraps a pointer with a span of `span` bytes.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be valid for reads of `span` bytes, and nothing may write that range for `'a` -
+    /// the same contract as [`std::slice::from_raw_parts`], which is what makes the `noalias` tag
+    /// this type exists for truthful.
+    #[inline(always)]
+    pub(crate) unsafe fn new(ptr: *const u8, span: usize) -> Self {
+        Self(
+            unsafe { std::slice::from_raw_parts(ptr, span) },
+            PhantomData,
+        )
+    }
+
+    /// Wraps the start of `bytes` as a `noalias` pointer to `T`.
+    #[inline(always)]
+    pub(crate) fn from_slice(bytes: &'a [u8]) -> Self {
+        Self(bytes, PhantomData)
+    }
+
+    #[inline(always)]
+    pub(crate) fn as_ptr(&self) -> *const T {
+        self.0.as_ptr().cast::<T>()
+    }
+
+    /// This pointer advanced by `offset` bytes.
+    ///
+    /// # Safety
+    ///
+    /// `offset` must not be past the end of the wrapped byte range.
+    #[inline(always)]
+    pub(crate) unsafe fn bytes_offset(self, offset: usize) -> Self {
+        Self(unsafe { self.0.get_unchecked(offset..) }, PhantomData)
+    }
+
+    #[inline(always)]
+    pub(crate) fn cast<U>(self) -> PtrNoalias<'a, U> {
+        PtrNoalias(self.0, PhantomData)
+    }
+}
+
+/// A `*mut T` carried across a function boundary as a mutable reference, so LLVM tags it `noalias`.
+///
+/// Same as [`PtrNoalias`], but for mutable pointers.
+pub(crate) struct PtrMutNoalias<'a, T>(&'a mut [u8], PhantomData<T>);
+
+impl<'a, T> PtrMutNoalias<'a, T> {
+    /// Wraps a pointer with a span of `span` bytes.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be valid for writes of `span` bytes, and nothing else may access that range for
+    /// `'a` - the same contract as [`std::slice::from_raw_parts_mut`], which is what makes the
+    /// `noalias` tag this type exists for truthful.
+    #[inline(always)]
+    pub(crate) unsafe fn new(ptr: *mut u8, span: usize) -> Self {
+        Self(
+            unsafe { std::slice::from_raw_parts_mut(ptr, span) },
+            PhantomData,
+        )
+    }
+
+    /// Wraps the start of `bytes` as a `noalias` pointer to `T`.
+    #[inline(always)]
+    pub(crate) fn from_slice(bytes: &'a mut [u8]) -> Self {
+        Self(bytes, PhantomData)
+    }
+
+    #[inline(always)]
+    pub(crate) fn as_ptr(&self) -> *const T {
+        self.0.as_ptr().cast::<T>()
+    }
+
+    #[allow(clippy::wrong_self_convention)]
+    #[inline(always)]
+    pub(crate) fn as_mut_ptr(self) -> *mut T {
+        self.0.as_mut_ptr().cast::<T>()
+    }
+
+    /// This pointer advanced by `offset` bytes.
+    ///
+    /// # Safety
+    ///
+    /// `offset` must not be past the end of the wrapped byte range.
+    #[inline(always)]
+    pub(crate) unsafe fn bytes_offset(&mut self, offset: usize) -> PtrMutNoalias<'_, T> {
+        PtrMutNoalias(unsafe { self.0.get_unchecked_mut(offset..) }, PhantomData)
+    }
+
+    #[inline(always)]
+    pub(crate) fn cast<U>(self) -> PtrMutNoalias<'a, U> {
+        PtrMutNoalias(self.0, PhantomData)
+    }
+}
 
 pub(crate) trait PtrExt<T> {
     unsafe fn read_maybe_aligned<const ALIGNED: bool>(self) -> T;

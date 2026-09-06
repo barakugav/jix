@@ -6,7 +6,7 @@ use crate::error::{ensure, Result};
 use crate::util::{
     default_strides_slice, strided_span_bytes, strides_for_layout_order, DimArray, SliceExt,
 };
-use crate::{ArrayStorage, DimDyn, DimIdx, NdCopier, ReadContext};
+use crate::{ArrayStorage, DimDyn, DimIdx, NdCopier, PtrMutNoalias, PtrNoalias, ReadContext};
 
 /// A borrowed, strided view over a region of array bytes - the value produced and consumed by
 /// [`ArrayStorage::read_data`](crate::ArrayStorage::read_data).
@@ -227,7 +227,16 @@ impl<'a> StridedBuf<'a> {
     ) {
         let (dst, dst_strides) = self.data_mut();
         let copier = NdCopier::new(dtype);
-        unsafe { copier.copy(src, dst, shape, src_strides, dst_strides, dtype) };
+        unsafe {
+            copier.copy(
+                PtrNoalias::from_slice(src),
+                PtrMutNoalias::from_slice(dst),
+                shape,
+                src_strides,
+                dst_strides,
+                dtype,
+            )
+        };
     }
 
     /// Create a new view into the same underlying bytes, offset by `n` bytes.
