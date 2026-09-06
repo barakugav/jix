@@ -802,9 +802,10 @@ impl<S: ArrayStorage> Array<S> {
         {
             let buf_strides = dim_arr(ndim, |dim| array.strides()[dim] as usize * itemsize);
             let buf = unsafe {
-                cast_slice_mut::<MaybeUninit<S::Item>, u8>(
-                    array.as_slice_memory_order_mut().unwrap(),
-                )
+                cast_slice_mut::<MaybeUninit<S::Item>, u8>(std::slice::from_raw_parts_mut(
+                    array.as_mut_ptr(),
+                    array.len(),
+                ))
             };
             let mut out = unsafe { StridedBuf::from_slice_mut(buf, buf_strides.as_ref()) };
             self.to_ndarray_buf(index, context, Some(&mut out))?;
