@@ -790,7 +790,7 @@ impl<S: ArrayStorage> Array<S> {
             } else {
                 // Custom layout hint
                 let alloc_shape =
-                    S::Dimension::from_fn(ndim, |i| out_shape[layout_order[i] as usize] as u64);
+                    S::Dimension::from_fn(ndim, |i| out_shape[layout_order[i] as usize]);
                 let mut inv_order = S::Dimension::from_fn(ndim, |_| 0);
                 for dim in 0..ndim {
                     inv_order[layout_order[dim] as usize] = dim as u64;

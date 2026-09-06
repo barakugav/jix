@@ -804,7 +804,7 @@ fn max_cost_orders(inputs: &[(f32, &[DimIdx], &[DimIdx])]) -> (DimArray<DimIdx>,
         .iter()
         .map(|(cost, _, _)| cost)
         .enumerate()
-        .max_by(|(i_a, a), (i_b, b)| a.partial_cmp(&b).unwrap().then(i_a.cmp(i_b)))
+        .max_by(|(i_a, a), (i_b, b)| a.partial_cmp(b).unwrap().then(i_a.cmp(i_b)))
         .unwrap()
         .0;
     let (_, scale_order, layout_order) = inputs[max_cost_index];
