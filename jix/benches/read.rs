@@ -92,7 +92,11 @@ fn bench_compact_read_region(c: &mut Criterion) {
 
                     let ctx = array.read_ctx();
                     b.iter_batched(
-                        || region_iter.next().unwrap(),
+                        || {
+                            let region = region_iter.next().unwrap();
+                            let region: [_; 2] = region.try_into().unwrap();
+                            region
+                        },
                         |region| array.to_ndarray_sub(&region, &ctx).unwrap(),
                         criterion::BatchSize::SmallInput,
                     );
