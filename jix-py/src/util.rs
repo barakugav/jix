@@ -1,5 +1,5 @@
 use jix_core::NDIM_MAX;
-use numpy::npyffi::npy_intp;
+use numpy::npyffi::{npy_intp, PyArray_Dims};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::marker::Ungil;
 use pyo3::prelude::*;
@@ -84,6 +84,36 @@ pub(crate) fn numpy_empty<'py>(
             if is_fortran { -1 } else { 0 },
         )
     };
+    unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
+}
+
+/// Allocate an uninitialized NumPy array of `shape` whose axes are nested in `order` - outermost
+/// axis first - instead of always C-contiguous.
+pub(crate) fn numpy_empty_ordered<'py>(
+    dtype: Bound<'py, PyArrayDescr>,
+    shape: &[u64],
+    order: &[usize],
+) -> PyResult<Bound<'py, PyUntypedArray>> {
+    debug_assert_eq!(order.len(), shape.len());
+    if order.iter().enumerate().all(|(axis, &d)| axis == d) {
+        return numpy_empty(dtype, shape);
+    }
+    let py = dtype.py();
+    let ndim = shape.len();
+    let arr = numpy_empty(dtype, dim_arr(ndim, |i| shape[order[i]]).as_slice())?;
+
+    // Axis `d` of the result is allocation axis `i`, where `order[i] == d`.
+    let mut permute = dim_arr(ndim, |_| 0 as npy_intp);
+    for (i, &d) in order.iter().enumerate() {
+        permute[d] = i as npy_intp;
+    }
+    let mut permute = PyArray_Dims {
+        ptr: permute.as_mut_ptr(),
+        len: ndim as std::ffi::c_int,
+    };
+    // SAFETY: `arr` is a live NumPy array of `ndim` axes and `permute` is a permutation of them.
+    let np_arr =
+        unsafe { numpy::PY_ARRAY_API.PyArray_Transpose(py, arr.as_array_ptr(), &mut permute) };
     unsafe { Bound::from_owned_ptr_or_err(py, np_arr).map(|ob| ob.cast_into_unchecked()) }
 }
 
@@ -265,18 +295,6 @@ pub(crate) trait IterExt: Iterator {
     }
 }
 impl<I> IterExt for I where I: Iterator {}
-
-pub(crate) fn default_strides(shape: &[usize], itemsize: usize) -> DimArray<usize> {
-    let ndim = shape.len();
-    let mut strides = dim_arr(ndim, |_| itemsize);
-    if ndim > 1 {
-        for (i, s) in shape.iter().rev().take(ndim - 1).enumerate() {
-            let dim = ndim - i - 1;
-            strides[dim - 1] = strides[dim] * s;
-        }
-    }
-    strides
-}
 
 /// Compute the byte span of a region accessed by `shape` and `strides`.
 #[inline]

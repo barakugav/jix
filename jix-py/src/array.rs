@@ -17,8 +17,8 @@ use pyo3::types::PyAnyMethods;
 use crate::dtype::dtype_to_numpy;
 use crate::ops::asarray_simple;
 use crate::util::{
-    default_strides, dim_arr, maybe_detach, numpy_empty, strided_span_bytes, DimArray,
-    IntoPyResult, ItemOrSequence,
+    dim_arr, maybe_detach, numpy_empty_ordered, strided_span_bytes, DimArray, IntoPyResult,
+    ItemOrSequence,
 };
 
 /// A multi-dimensional compressed array.
@@ -509,47 +509,67 @@ impl Array {
         let ndim = index.len();
         let read_shape = dim_arr(ndim, |d| (index[d].end - index[d].start) as usize);
 
-        let (np_arr, strides) = match out {
+        let np_arr = match out {
             None => {
-                let np_arr = numpy_empty(self.dtype(py)?, &out_shape)?;
-                let strides = default_strides(&read_shape, itemsize);
-                (np_arr, strides)
+                // Allocate in the axis order the storage reports as cheapest to read into, so the
+                // decode writes straight through instead of transposing.
+                let mut np_axis = dim_arr(ndim, |_| 0usize);
+                let mut n_axes = 0;
+                for dim in 0..ndim {
+                    np_axis[dim] = n_axes;
+                    n_axes += !drop_axes[dim] as usize;
+                }
+
+                let order = self
+                    .arr
+                    .storage()
+                    .spec()
+                    .read_layout_order()
+                    .iter()
+                    .filter(|&&dim| !drop_axes[dim as usize])
+                    .map(|&dim| np_axis[dim as usize])
+                    .collect::<DimArray<_>>();
+                numpy_empty_ordered(self.dtype(py)?, &out_shape, &order)?
             }
             Some(np_arr) => {
                 self.check_output_array(py, &np_arr, &out_shape)?;
+                np_arr
+            }
+        };
 
-                // `to_ndarray_buf` wants one stride per *array* dimension, but an integer index item drops
-                // its axis from `np_arr`. Put a stride back for each dropped axis.
-                let mut np_strides = np_arr.strides().iter().rev();
-                let mut strides = dim_arr(ndim, |_| 0usize);
-                for dim in (0..ndim).rev() {
-                    if drop_axes[dim] {
-                        strides[dim] = if dim + 1 < ndim {
+        // `to_ndarray_buf` wants one stride per *array* dimension, but an integer index item drops
+        // its axis from `np_arr`. Put a stride back for each dropped axis. Reading them back off
+        // `np_arr` keeps one source of truth, whether it is the caller's `out=` or our own
+        // allocation above.
+        let strides = {
+            let mut np_strides = np_arr.strides().iter().rev();
+            let mut strides = dim_arr(ndim, |_| 0usize);
+            for dim in (0..ndim).rev() {
+                if drop_axes[dim] {
+                    strides[dim] = if dim + 1 < ndim {
+                        strides[dim + 1] * read_shape[dim + 1]
+                    } else {
+                        itemsize
+                    };
+                } else {
+                    let stride = *np_strides.next().unwrap();
+                    strides[dim] = if stride >= 0 {
+                        stride as usize
+                    } else {
+                        // `check_output_array` rejected negative strides on axes longer than 1.
+                        // A shorter axis is never stepped, so NumPy reporting a negative stride
+                        // for it (`x[::-1]` where that axis has length 1) is harmless - use the
+                        // C-order value instead of casting a negative number to a huge `usize`.
+                        debug_assert!(read_shape[dim] <= 1);
+                        if dim + 1 < ndim {
                             strides[dim + 1] * read_shape[dim + 1]
                         } else {
                             itemsize
-                        };
-                    } else {
-                        let stride = *np_strides.next().unwrap();
-                        strides[dim] = if stride >= 0 {
-                            stride as usize
-                        } else {
-                            // `check_output_array` rejected negative strides on axes longer than 1.
-                            // A shorter axis is never stepped, so NumPy reporting a negative stride
-                            // for it (`x[::-1]` where that axis has length 1) is harmless - use the
-                            // C-order value instead of casting a negative number to a huge `usize`.
-                            debug_assert!(read_shape[dim] <= 1);
-                            if dim + 1 < ndim {
-                                strides[dim + 1] * read_shape[dim + 1]
-                            } else {
-                                itemsize
-                            }
-                        };
-                    }
+                        }
+                    };
                 }
-
-                (np_arr, strides)
             }
+            strides
         };
 
         let nitems = read_shape.iter().product::<usize>();
