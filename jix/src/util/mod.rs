@@ -463,8 +463,8 @@ impl ScaleWeight {
 ///    boundary doesn't split the requested range along an unaligned start.
 ///
 /// Only the dims listed in `scale_order` are touched; any dim absent from it is left exactly as
-/// seeded. A caller can therefore scale a *subset* of the dims by passing a partial order and
-/// seeding the remaining dims to their final value (typically 1, so they don't consume the budget).
+/// seeded and still counts toward the budget. Both callers pass the spec's full
+/// `read_shape_scale_order`, so in practice every dim is scaled.
 pub(crate) fn scale_read_shape(
     read_shape: &mut [u64],
     max_shape: &[u64],
@@ -1025,8 +1025,7 @@ mod tests {
     #[test]
     fn scale_read_shape_scales_only_ordered_dims() {
         use crate::Dimension;
-        // The order lists only dim 1, so dim 0 is left exactly as seeded and only dim 1 grows -
-        // this is how reduction scales the reduced and non-reduced dim groups separately.
+        // The order lists only dim 1, so dim 0 is left exactly as seeded and only dim 1 grows.
         let shape = [100u64, 100];
         let mut read_shape = DimDyn::from_fn(2, |_| 7);
         scale_read_shape(

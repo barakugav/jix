@@ -719,49 +719,28 @@ impl<'a> ArraySpec<'a> {
         self.flags
     }
 
+    /// Scale a read tile to the preferred read size for `itemsize`. Seeds every dim from
+    /// `block_shape` and scales them in order by
+    /// [`read_shape_scale_order`](ArraySpecDynamic::read_shape_scale_order).
     pub(crate) fn read_shape_heuristic<D>(
         &self,
         max_shape: &[u64],
-        shape: &[u64],
+        array_shape: &[u64],
         itemsize: Itemsize,
     ) -> D
     where
         D: Dimension,
     {
-        self.read_shape_scale_dims(max_shape, shape, self.read_size().nitems(itemsize), |_| {
-            true
-        })
-    }
-
-    /// Scale a read tile covering only the dims selected by `include`, to `target_nitems` (in
-    /// items); dims not included are left at length 1. Seeds the included dims from `block_shape`
-    /// and scales them in order by [`read_shape_scale_order`](ArraySpecDynamic::read_shape_scale_order).
-    pub(crate) fn read_shape_scale_dims<D>(
-        &self,
-        max_shape: &[u64],
-        array_shape: &[u64],
-        target_nitems: (u64, u64),
-        include: impl Fn(usize) -> bool,
-    ) -> D
-    where
-        D: Dimension,
-    {
         let block_shape = self.block_shape();
-        let mut read_shape = D::from_fn(max_shape.len(), |dim| {
-            if include(dim) {
-                block_shape[dim] as u64
-            } else {
-                1
-            }
-        });
+        let mut read_shape = D::from_fn(max_shape.len(), |dim| block_shape[dim] as u64);
         let order = self.read_shape_scale_order();
         scale_read_shape(
             read_shape.as_mut_slice(),
             max_shape,
             array_shape,
-            target_nitems,
+            self.read_size().nitems(itemsize),
             self.read_shape_scale_weight(),
-            order.iter().map(|&d| d as usize).filter(|&d| include(d)),
+            order.iter().map(|&d| d as usize),
         );
         read_shape
     }
