@@ -11,12 +11,10 @@ use crate::storage::{
 };
 use crate::util::iter::NdIter;
 use crate::util::SliceExt;
-use crate::util::{
-    calc_block_end, scale_read_shape, DimArray, DimIdx, REQUIRE_ALIGNED, USE_NEW_READ_SCALING,
-};
+use crate::util::{calc_block_end, DimArray, DimIdx, REQUIRE_ALIGNED};
 use crate::{
     array_from_fn_inline, default_strides, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
-    NdIterUnordered, PtrExt, Ty,
+    NdIterUnordered, PtrExt, PtrMutNoalias, PtrNoalias, Ty,
 };
 
 pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
@@ -133,11 +131,11 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             .product::<u64>();
         let element_cost = (spec.element_cost() as f64 * (reduced_prod + 4) as f64) as f32;
         let dim_orig2new = |d: usize| (d - (0..d).filter(|&j| is_reduced[j]).count()) as DimIdx;
-        let read_shape_scale_order = spec
-            .read_shape_scale_order()
+        let read_shape_scale_weight = spec
+            .read_shape_scale_weight()
             .iter()
-            .filter(|&&d| !is_reduced[d as usize])
-            .map(|&d| dim_orig2new(d as usize))
+            .enumerate()
+            .filter_map(|(d, &w)| (!is_reduced[d]).then_some(w))
             .collect();
         let read_layout_order = spec
             .read_layout_order()
@@ -145,21 +143,20 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             .filter(|&&d| !is_reduced[d as usize])
             .map(|&d| dim_orig2new(d as usize))
             .collect();
-        let spec = ArraySpecDynamic {
-            block_shape: dim_new2orig
+        let spec = ArraySpecDynamic::new(
+            dim_new2orig
                 .iter()
                 .map(|&dim| spec.block_shape()[dim])
                 .collect(),
-            block_shape_fixed_dims: spec
-                .block_shape_fixed_dims()
+            spec.block_shape_fixed_dims()
                 .into_iter()
                 .enumerate()
                 .filter_map(|(dim, c)| is_reduced[dim].not().then_some(c))
                 .collect(),
             element_cost,
-            read_shape_scale_order,
+            read_shape_scale_weight,
             read_layout_order,
-        };
+        );
 
         Ok(Self {
             kernel,
@@ -355,15 +352,10 @@ where
 
     let out_shape = OuterD::vec(index.len(), |dim| index[dim].end - index[dim].start);
 
-    // The read tile is chosen so the reduced dims keep enough volume to amortize per-tile overhead
-    // (see `reduction_tile_shape`). Setting `bulk_shape[non-reduced] = tile_shape[non-reduced]` then
-    // makes the inner read shape come out to `tile_shape` for every tile.
     let tile_max_shape = InnerD::vec(inner_ndim, |dim| {
         inner_range_full[dim].end - inner_range_full[dim].start
     });
-    let tile_shape = reduction_tile_shape::<InnerD>(
-        &inner_array.spec(),
-        is_reduced.as_ref(),
+    let tile_shape = inner_array.spec().read_shape_heuristic::<InnerD>(
         tile_max_shape.as_ref(),
         inner_shape,
         item_dtype.itemsize(),
@@ -522,7 +514,8 @@ where
                 .sum::<usize>() as u64;
 
             let tile_shape = InnerD::vec(inner_ndim, |d| tile_size[d] as usize);
-            let tile_state_base = unsafe { state_buf.get_unchecked_mut(state_offset..) };
+            let tile_state_base =
+                unsafe { PtrMutNoalias::from_slice(state_buf.get_unchecked_mut(state_offset..)) };
 
             reduce_tile_fn(ReduceTileArgs {
                 tile_shape: tile_shape.as_ref(),
@@ -553,7 +546,7 @@ where
 struct ReduceTileArgs<'a> {
     tile_shape: &'a [usize],
     items: StridedBuf<'a>,
-    states_buf: &'a mut [u8],
+    states_buf: PtrMutNoalias<'a, u8>,
     state_strides: &'a [usize],
 
     tile_base_reduced_idx: u64,
@@ -568,7 +561,7 @@ where
     let ReduceTileArgs {
         tile_shape,
         items,
-        states_buf,
+        mut states_buf,
         state_strides,
         tile_base_reduced_idx,
         reduced_shape_logical_strides,
@@ -631,12 +624,13 @@ where
         }
     };
 
-    iter.foreach_inner_1d(|offsets, inner_len, strides| {
+    let items_buf = PtrNoalias::<u8>::from_slice(items_buf);
+    iter.foreach_inner_1d(move |offsets, inner_len, strides| {
         let [item_offset, state_offset, base_item_idx] = offsets;
         let [items_stride, state_stride, idx_stride] = strides;
 
-        let items_buf = unsafe { items_buf.get_unchecked(item_offset..) };
-        let states_buf = unsafe { states_buf.get_unchecked_mut(state_offset..) };
+        let items_buf = unsafe { items_buf.bytes_offset(item_offset) };
+        let states_buf = unsafe { states_buf.bytes_offset(state_offset) };
 
         let base_item_idx = tile_base_reduced_idx + base_item_idx as u64;
 
@@ -656,8 +650,8 @@ where
 struct FoldInnerLoopArgs<'a, K> {
     inner_len: usize,
     kernel: &'a K,
-    items: &'a [u8],
-    states_buf: &'a mut [u8],
+    items: PtrNoalias<'a, u8>,
+    states_buf: PtrMutNoalias<'a, u8>,
     items_stride: usize,
     state_stride: usize,
     idx_stride: usize,
@@ -892,89 +886,6 @@ where
                 unsafe { out.cast::<K::Output>().write_unaligned(res) };
             }
         });
-    }
-}
-
-/// Choose the per-call read tile for a reduction, given the source array's `spec`.
-///
-/// The reduction kernel walks the reduced axes inside each tile, so the tile must keep enough volume
-/// on the reduced dims to amortize per-tile overhead. Which strategy runs is gated by
-/// [`USE_NEW_READ_SCALING`]:
-///
-/// - Balanced (default): seed from `block_shape` and scale with a reduced-dims-first order (each
-///   dim rightmost first), so the reduced dims get first claim on the budget.
-/// - Priority (parked): scale the tile normally
-///   ([`read_shape_heuristic`](ArraySpec::read_shape_heuristic)); if that leaves the reduced dims'
-///   volume below `min(REDUCED_TILE_MIN_NITEMS, full_reduced_extent)`, rebuild it from two
-///   independent scales over the disjoint reduced / non-reduced dim groups (reduced dims to that
-///   floor, non-reduced dims to the remaining budget `max_nitems / floor`), which merge cleanly
-///   since [`read_shape_scale_dims`](ArraySpec::read_shape_scale_dims) scales only its selected dims.
-///
-/// `tile_max_shape` is the per-dim length of the region being read, `array_shape` the full source
-/// shape, and `is_reduced[d]` marks the reduced dims - all with one entry per source dim.
-fn reduction_tile_shape<D: Dimension>(
-    spec: &ArraySpec,
-    is_reduced: &[bool],
-    tile_max_shape: &[u64],
-    array_shape: &[u64],
-    itemsize: Itemsize,
-) -> D {
-    let ndim = tile_max_shape.len();
-    if USE_NEW_READ_SCALING {
-        const REDUCED_TILE_MIN_NITEMS: u64 = 512;
-        let full_reduced = (0..ndim)
-            .filter(|&d| is_reduced[d])
-            .fold(1u64, |v, d| v.saturating_mul(tile_max_shape[d]));
-        let reduced_tile_floor = REDUCED_TILE_MIN_NITEMS.min(full_reduced);
-
-        let tile_shape = spec.read_shape_heuristic::<D>(tile_max_shape, array_shape, itemsize);
-        let reduced_tile_volume = (0..ndim)
-            .filter(|&d| is_reduced[d])
-            .fold(1u64, |v, d| v.saturating_mul(tile_shape[d]));
-        if reduced_tile_volume >= reduced_tile_floor {
-            return tile_shape;
-        }
-
-        // The regular tile starved the reduced dims: rebuild from two disjoint-group scales.
-        let max_nitems = spec.read_size().nitems(itemsize).1;
-        let non_reduced_target = (max_nitems / reduced_tile_floor).max(1);
-        let reduced_tile = spec.read_shape_scale_dims::<D>(
-            tile_max_shape,
-            array_shape,
-            (reduced_tile_floor, reduced_tile_floor),
-            |d| is_reduced[d],
-        );
-        let non_reduced_tile = spec.read_shape_scale_dims::<D>(
-            tile_max_shape,
-            array_shape,
-            (non_reduced_target, non_reduced_target),
-            |d| !is_reduced[d],
-        );
-        D::from_fn(ndim, |d| {
-            if is_reduced[d] {
-                reduced_tile[d]
-            } else {
-                non_reduced_tile[d]
-            }
-        })
-    } else {
-        // Balanced (default): seed from the source block shape and scale with reduced dims first
-        // (rightmost first), then non-reduced (rightmost first), so the reduced dims claim the
-        // budget before the free dims. Uses the balanced `scale_read_shape` (see there).
-        let block_shape = spec.block_shape();
-        let mut read_shape = D::from_fn(ndim, |dim| block_shape[dim] as u64);
-        let order = (0..ndim)
-            .rev()
-            .filter(|&d| is_reduced[d])
-            .chain((0..ndim).rev().filter(|&d| !is_reduced[d]));
-        scale_read_shape(
-            read_shape.as_mut_slice(),
-            tile_max_shape,
-            array_shape,
-            spec.read_size().nitems(itemsize),
-            order,
-        );
-        read_shape
     }
 }
 
@@ -2832,67 +2743,6 @@ pub(crate) mod tests {
 
     use super::Reduce;
     use crate::array::Array;
-    use crate::DimDyn;
-
-    #[test]
-    fn reduction_tile_shape_two_scale_and_regular() {
-        use super::reduction_tile_shape;
-        use crate::dtype::Dtyped;
-        use crate::storage::params::ArraySpecFlags;
-        use crate::{ArrayParams, Dimension};
-
-        // Build a source spec directly (no data allocated): block [8, 8] and a read window in bytes
-        // that, for i32 (itemsize 4), gives known item counts. REDUCED_TILE_MIN_NITEMS is 512.
-        let spec_of = |shape: &[u64], read_min: u64, read_max: u64| {
-            let mut params = ArrayParams::new();
-            params.block_shape(&[8, 8]);
-            params.read_size((read_min, read_max));
-            params
-                .into_spec(shape, &i32::DTYPE, ArraySpecFlags::default())
-                .unwrap()
-        };
-
-        // Reduce axis 0 (the low-priority outer dim). Window (2048, 16384) bytes -> (512, 4096)
-        // items. The regular scale spends the min budget on the inner dim, starving the reduced dim
-        // (8 < 512 floor), so the tile is rebuilt: the reduced dim grows to the 512 floor and the
-        // non-reduced dim fills the rest (4096 / 512 = 8).
-        let a = spec_of(&[1024, 64], 2048, 16384);
-        let tile = reduction_tile_shape::<DimDyn>(
-            &a.as_ref(),
-            &[true, false],
-            &[1024, 64],
-            &[1024, 64],
-            4,
-        );
-        if crate::util::USE_NEW_READ_SCALING {
-            assert_eq!(
-                tile.as_slice(),
-                &[512, 8],
-                "two-scale: reduced dim reaches the floor"
-            );
-        } else {
-            // Balanced/reduced-first: the reduced dim (0) claims the budget before the free dim.
-            assert_eq!(
-                tile.as_slice(),
-                &[64, 8],
-                "reduced-first: reduced dim scaled before the free dim"
-            );
-        }
-
-        // Reduce axis 1 (the high-priority inner dim) with a large min budget (16384, 16384) bytes ->
-        // (4096, 4096) items, so the regular scale already covers the reduced dim past the floor and
-        // `reduction_tile_shape` returns it unchanged.
-        let b = spec_of(&[64, 1024], 16384, 16384);
-        let sp = b.as_ref();
-        let tile = reduction_tile_shape::<DimDyn>(&sp, &[false, true], &[64, 1024], &[64, 1024], 4);
-        let regular = sp.read_shape_heuristic::<DimDyn>(&[64, 1024], &[64, 1024], 4);
-        assert_eq!(
-            tile.as_slice(),
-            regular.as_slice(),
-            "regular tile already covers the reduced dim"
-        );
-        assert!(tile[1] >= 512, "reduced dim meets the floor, got {tile:?}");
-    }
 
     /// Per-dtype comparison policy for the reduction property tests.
     ///

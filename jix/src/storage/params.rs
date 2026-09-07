@@ -5,9 +5,7 @@ use crate::codec::{Codec, DecoderParams, EncoderParams, Filter};
 use crate::dtype::{Dtype, Itemsize};
 use crate::error::{check_dtype_size_nonzero, check_ndim, ensure, Result};
 use crate::storage::block::BlockSize;
-use crate::util::{
-    scale_read_shape, DimArray, DimIdx, Idx, IterExt, SendSyncPtr, USE_NEW_READ_SCALING,
-};
+use crate::util::{scale_read_shape, DimArray, DimIdx, Idx, IterExt, ScaleWeight, SendSyncPtr};
 use crate::{dim_arr, Array, ArrayStorage, DimBitmap, DimDyn, Dimension, SliceExt};
 
 /// Target byte range for a single read region.
@@ -540,6 +538,7 @@ pub(crate) struct ArraySpecDynamic {
     /// [`scale_read_shape`](crate::util::scale_read_shape), which scales the read region down/up from
     /// it.
     pub(crate) block_shape: DimArray<BlockSize>,
+
     /// Per-dimension "fixed" flags for [`block_shape`](Self::block_shape).
     ///
     /// A fixed dim keeps its exact block length when a **new Compact array** is materialized
@@ -547,24 +546,44 @@ pub(crate) struct ArraySpecDynamic {
     /// target block size. This flag only affects Compact materialization - it does *not* enter the
     /// read path (`scale_read_shape` ignores it).
     pub(crate) block_shape_fixed_dims: DimBitmap,
+
     /// Estimated cost of reading a single element from this array, ignoring any broadcasting or
     /// duplication (see [`combine_elementwise_hints`] and the read-hint design).
     pub(crate) element_cost: f32,
-    /// The order in which [`scale_read_shape`](crate::util::scale_read_shape) should scale the dims:
-    /// a permutation of `0..ndim`, **highest coverage-priority first** (the dim most worth covering
-    /// to avoid recomputing an expensive broadcasted/duplicated view). The up-scan grows dims from
-    /// the front, the down-scan shrinks from the back.
+
+    /// Per-dimension coverage weight: the fraction of this array's per-element read cost that is
+    /// *redone once per tile band* along that dim. See [`ScaleWeight`].
     ///
-    /// This is purely an *order* - there is no magnitude to compare across arrays. An op that
-    /// combines several inputs adopts the order of the input with the highest
-    /// [`element_cost`](Self::element_cost) (the array whose redundant reads cost the most).
+    /// [`NONE`](ScaleWeight::NONE) for a leaf (nothing is duplicated, so a wider tile saves no
+    /// work), [`FULL`](ScaleWeight::FULL) for a dim the whole view is duplicated along
+    /// ([`Broadcast`](crate::ops::Broadcast), [`Tile`](crate::ops::Tile)): there, a tile that does
+    /// not cover the dim re-reads the underlying data once per band. Element-wise ops mix their
+    /// inputs' weights by [`element_cost`](Self::element_cost), so an expensive duplicated operand
+    /// dominates a cheap one.
+    ///
+    /// Purely a *coverage* quantity: it says nothing about storage granularity, which lives in
+    /// [`block_shape`](Self::block_shape).
+    pub(crate) read_shape_scale_weight: DimArray<ScaleWeight>,
+
+    /// The order in which [`scale_read_shape`](crate::util::scale_read_shape) scales the dims: a
+    /// permutation of `0..ndim` in **ascending coverage priority** - `[0]` is the dim least worth
+    /// covering, the last entry the one most worth covering.
+    ///
+    /// The two scans run from opposite ends: the down-scan shrinks from the front, the up-scan
+    /// grows from the back. So the *last* entry is the first dim to be grown and the last to be
+    /// shrunk. For a C-contiguous leaf the order is `[0, 1, .., ndim-1]`, which grows the innermost
+    /// dim first.
+    ///
+    /// It is [`read_shape_scale_weight`](Self::read_shape_scale_weight) sorted ascending, with
+    /// [`read_layout_order`](Self::read_layout_order) as the (stable) tie-break - so it runs in the
+    /// same direction as the layout order, and for an array with no duplication at all (every
+    /// weight [`NONE`](ScaleWeight::NONE)) the two are equal. Cached here so a read does not have
+    /// to sort.
     pub(crate) read_shape_scale_order: DimArray<DimIdx>,
+
     /// The memory layout that is cheapest to read this array into: a permutation of `0..ndim`,
     /// **outermost (largest stride) first**. C-order is `[0, 1, .., ndim-1]`, F-order is
     /// `[ndim-1, .., 0]`.
-    ///
-    /// Note this runs in the opposite direction from
-    /// [`read_shape_scale_order`](Self::read_shape_scale_order), which is innermost-first.
     ///
     /// A reader that allocates its own destination (e.g.
     /// [`to_ndarray_sub`](crate::Array::to_ndarray_sub), or pull-mode
@@ -590,15 +609,13 @@ impl ArraySpecOwned {
             decoder_params,
         };
         let ndim = block_shape.len();
-        let dynamic = ArraySpecDynamic {
+        let dynamic = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
-            element_cost: 1.0,
-            // Default to C-order priority
-            read_shape_scale_order: dim_arr(ndim, |i| (ndim - 1 - i) as DimIdx),
-            // Default to C-order
-            read_layout_order: dim_arr(ndim, |i| i as DimIdx),
-        };
+            1.0,
+            dim_arr(ndim, |_| ScaleWeight::NONE),
+            dim_arr(ndim, |i| i as DimIdx), // default to C-order
+        );
         Self {
             shared: Box::pin((shared, PhantomPinned)),
             dynamic,
@@ -681,16 +698,14 @@ impl<'a> ArraySpec<'a> {
     pub(crate) fn element_cost(&self) -> f32 {
         self.dynamic().element_cost
     }
-    /// The dim scaling order (highest coverage-priority first) consumed by
-    /// [`scale_read_shape`](crate::util::scale_read_shape): C-order `[ndim-1, .., 0]` for a plain
-    /// compact leaf; views carrying broadcast/duplication move those dims to the front.
+    #[inline(always)]
+    pub(crate) fn read_shape_scale_weight(&self) -> &'a [ScaleWeight] {
+        &self.dynamic().read_shape_scale_weight
+    }
     #[inline(always)]
     pub(crate) fn read_shape_scale_order(&self) -> &'a DimArray<DimIdx> {
         &self.dynamic().read_shape_scale_order
     }
-    /// The memory layout order (outermost dim first) - see
-    /// [`ArraySpecDynamic::read_layout_order`]. C-order `[0, .., ndim-1]` for a compact leaf; a
-    /// transposed or F-order view reports the permutation that makes its reads contiguous.
     #[doc(hidden)]
     #[inline(always)]
     pub fn read_layout_order(&self) -> &'a [DimIdx] {
@@ -704,66 +719,82 @@ impl<'a> ArraySpec<'a> {
         self.flags
     }
 
+    /// Scale a read tile to the preferred read size for `itemsize`. Seeds every dim from
+    /// `block_shape` and scales them in order by
+    /// [`read_shape_scale_order`](ArraySpecDynamic::read_shape_scale_order).
     pub(crate) fn read_shape_heuristic<D>(
         &self,
         max_shape: &[u64],
-        shape: &[u64],
+        array_shape: &[u64],
         itemsize: Itemsize,
     ) -> D
     where
         D: Dimension,
     {
-        self.read_shape_scale_dims(max_shape, shape, self.read_size().nitems(itemsize), |_| {
-            true
-        })
-    }
-
-    /// Scale a read tile covering only the dims selected by `include`, to `target_nitems` (in
-    /// items); dims not included are left at length 1. Seeds the included dims from `block_shape`
-    /// and scales them in the (filtered) [`read_shape_scale_order`](Self::read_shape_scale_order)
-    /// when [`USE_NEW_READ_SCALING`](crate::util::USE_NEW_READ_SCALING) is set, otherwise in fixed
-    /// C-order (inner dim first). Reduction uses this to size the reduced and non-reduced dim groups
-    /// against separate budgets.
-    pub(crate) fn read_shape_scale_dims<D>(
-        &self,
-        max_shape: &[u64],
-        array_shape: &[u64],
-        target_nitems: (u64, u64),
-        include: impl Fn(usize) -> bool,
-    ) -> D
-    where
-        D: Dimension,
-    {
         let block_shape = self.block_shape();
-        let mut read_shape = D::from_fn(max_shape.len(), |dim| {
-            if include(dim) {
-                block_shape[dim] as u64
-            } else {
-                1
-            }
-        });
-        if USE_NEW_READ_SCALING {
-            let order = self.read_shape_scale_order();
-            scale_read_shape(
-                read_shape.as_mut_slice(),
-                max_shape,
-                array_shape,
-                target_nitems,
-                order.iter().map(|&d| d as usize).filter(|&d| include(d)),
-            );
-        } else {
-            // Pre-hint behavior: ignore read_shape_scale_order and scale in fixed C-order (inner
-            // dim first).
-            scale_read_shape(
-                read_shape.as_mut_slice(),
-                max_shape,
-                array_shape,
-                target_nitems,
-                (0..max_shape.len()).rev().filter(|&d| include(d)),
-            );
-        }
+        let mut read_shape = D::from_fn(max_shape.len(), |dim| block_shape[dim] as u64);
+        let order = self.read_shape_scale_order();
+        scale_read_shape(
+            read_shape.as_mut_slice(),
+            max_shape,
+            array_shape,
+            self.read_size().nitems(itemsize),
+            self.read_shape_scale_weight(),
+            order.iter().map(|&d| d as usize),
+        );
         read_shape
     }
+}
+
+impl ArraySpecDynamic {
+    pub(crate) fn new(
+        block_shape: DimArray<BlockSize>,
+        block_shape_fixed_dims: DimBitmap,
+        element_cost: f32,
+        read_shape_scale_weight: DimArray<ScaleWeight>,
+        read_layout_order: DimArray<DimIdx>,
+    ) -> Self {
+        debug_assert_eq!(read_shape_scale_weight.len(), block_shape.len());
+        debug_assert_eq!(read_layout_order.len(), block_shape.len());
+        let read_shape_scale_order =
+            scale_order_from_weights(&read_shape_scale_weight, &read_layout_order);
+        Self {
+            block_shape,
+            block_shape_fixed_dims,
+            element_cost,
+            read_shape_scale_weight,
+            read_shape_scale_order,
+            read_layout_order,
+        }
+    }
+
+    pub(crate) fn add_elementwise_cost(&mut self, extra: f32) {
+        let old_cost = self.element_cost;
+        let new_cost = old_cost + extra;
+        self.element_cost = new_cost;
+
+        let dilution = if new_cost > 0.0 {
+            (old_cost / new_cost) as f64
+        } else {
+            0.0
+        };
+        for weight in self.read_shape_scale_weight.as_mut_slice() {
+            if !weight.is_none() {
+                *weight = ScaleWeight::new(weight.f64() * dilution);
+            }
+        }
+        self.read_shape_scale_order =
+            scale_order_from_weights(&self.read_shape_scale_weight, &self.read_layout_order);
+    }
+}
+
+pub(crate) fn scale_order_from_weights(
+    weight: &[ScaleWeight],
+    layout_order: &[DimIdx],
+) -> DimArray<DimIdx> {
+    let mut order = DimArray::from_slice(layout_order).unwrap();
+    order.sort_by_key(|&d| weight[d as usize]);
+    order
 }
 
 /// Insert `dim` into a `read_layout_order` when its position in the order carries no meaning.
@@ -776,42 +807,59 @@ pub(crate) fn read_layout_order_insert_dont_care_dim(order: &mut DimArray<DimIdx
     order.insert(pos, dim as DimIdx);
 }
 
+/// One input of a multi-input op's hint combine:
+/// (element cost, per-dim coverage weight, layout order)
+pub(crate) type HintInput<'a> = (f32, &'a [ScaleWeight], &'a [DimIdx]);
+
 /// Combine the read hints of the inputs of a *selection* op - one where each output element reads
 /// exactly one input (e.g. [`Concatenate`](crate::ops::Concatenate)/[`Stack`](crate::ops::Stack)).
+///
+/// `weights[i]` is the number of output elements taken from input `i` (any consistent unit - only
+/// the ratios matter). A selection reads one input per output element, so both the cost and the
+/// weights are the *weighted average* over the inputs, not a sum.
 pub(crate) fn combine_select_hints(
-    inputs: &[(f32, &[DimIdx], &[DimIdx])],
-) -> (f32, DimArray<DimIdx>, DimArray<DimIdx>) {
-    let element_cost = inputs
-        .iter()
-        .map(|&(cost, _, _)| cost)
-        .fold(0.0f32, f32::max)
-        + 1.0;
-    let (scale_order, layout_order) = max_cost_orders(inputs);
-    (element_cost, scale_order, layout_order)
+    inputs: &[HintInput<'_>],
+    weights: &[f64],
+) -> (f32, DimArray<ScaleWeight>, DimArray<DimIdx>) {
+    debug_assert_eq!(inputs.len(), weights.len());
+    let total = weights.iter().sum::<f64>().max(f64::MIN_POSITIVE);
+    combine_hints(inputs, |i| weights[i] / total)
 }
 
 /// Combine the read hints of the inputs of an element-wise op (same shape).
+///
+/// Every output element reads *every* input, so the costs add (weight 1 each).
 pub(crate) fn combine_elementwise_hints(
-    inputs: &[(f32, &[DimIdx], &[DimIdx])],
-) -> (f32, DimArray<DimIdx>, DimArray<DimIdx>) {
-    let element_cost = (inputs.iter().map(|&(cost, _, _)| cost as f64).sum::<f64>() + 1.0) as f32;
-    let (scale_order, layout_order) = max_cost_orders(inputs);
-    (element_cost, scale_order, layout_order)
+    inputs: &[HintInput<'_>],
+) -> (f32, DimArray<ScaleWeight>, DimArray<DimIdx>) {
+    combine_hints(inputs, |_| 1.0)
 }
 
-fn max_cost_orders(inputs: &[(f32, &[DimIdx], &[DimIdx])]) -> (DimArray<DimIdx>, DimArray<DimIdx>) {
+fn combine_hints(
+    inputs: &[HintInput<'_>],
+    input_weight: impl Fn(usize) -> f64,
+) -> (f32, DimArray<ScaleWeight>, DimArray<DimIdx>) {
+    let ndim = inputs[0].1.len();
+    let weighted_cost = |i: usize| input_weight(i) * inputs[i].0 as f64;
+    let element_cost = (0..inputs.len()).map(weighted_cost).sum::<f64>() + 1.0;
+    let weight = dim_arr(ndim, |d| {
+        let duplicated = (0..inputs.len())
+            .map(|i| weighted_cost(i) * inputs[i].1[d].f64())
+            .sum::<f64>();
+        ScaleWeight::new(duplicated / element_cost)
+    });
+    (element_cost as f32, weight, max_cost_layout_order(inputs))
+}
+
+fn max_cost_layout_order(inputs: &[HintInput<'_>]) -> DimArray<DimIdx> {
     let max_cost_index = inputs
         .iter()
         .map(|(cost, _, _)| cost)
         .enumerate()
-        .max_by(|(i_a, a), (i_b, b)| a.partial_cmp(b).unwrap().then(i_a.cmp(i_b)))
+        .max_by(|(i_a, a), (i_b, b)| a.partial_cmp(b).unwrap().then(i_b.cmp(i_a)))
         .unwrap()
         .0;
-    let (_, scale_order, layout_order) = inputs[max_cost_index];
-    (
-        scale_order.to_dim_vec::<DimDyn>(),
-        layout_order.to_dim_vec::<DimDyn>(),
-    )
+    inputs[max_cost_index].2.to_dim_vec::<DimDyn>()
 }
 
 /// Combine the block layout (`block_shape` + `block_shape_fixed_dims`) of several equal-ndim inputs
@@ -937,34 +985,144 @@ mod tests {
     };
     use ndarray::ShapeBuilder;
 
+    use super::scale_order_from_weights;
+    use crate::util::ScaleWeight;
     use crate::{Array, ArrayParams, ArrayStorage};
 
     fn bits(bm: DimBitmap) -> Vec<bool> {
         bm.into_iter().collect()
     }
 
-    #[test]
-    fn combine_elementwise_hints_adopts_costliest_order() {
-        // The far more expensive operand supplies the scaling order; element_cost is the sum + 1.
-        let cheap = [0u8, 1];
-        let costly = [1u8, 0];
-        let (ec, order, layout) =
-            combine_elementwise_hints(&[(1.0, &cheap, &cheap), (1000.0, &costly, &costly)]);
-        assert_eq!(ec, 1.0 + 1000.0 + 1.0);
-        assert_eq!(order.as_slice(), &costly);
-        assert_eq!(layout.as_slice(), &costly);
+    /// Assert a weight equals `fraction`, up to the quantization step of [`ScaleWeight`].
+    #[track_caller]
+    fn assert_weight(weight: ScaleWeight, fraction: f64) {
+        let step = 1.0 / u16::MAX as f64;
+        let diff = (weight.f64() - fraction).abs();
+        assert!(diff <= step, "{weight:?} is not {fraction} (diff {diff})");
     }
 
     #[test]
-    fn combine_select_hints_adopts_costliest_order() {
-        // Each output reads one input, so element_cost is the max + 1; the costliest input's order wins.
-        let cheap = [0u8, 1];
-        let costly = [1u8, 0];
-        let (ec, order, layout) =
-            combine_select_hints(&[(1.0, &cheap, &cheap), (1000.0, &costly, &costly)]);
-        assert_eq!(ec, 1000.0 + 1.0);
-        assert_eq!(order.as_slice(), &costly);
-        assert_eq!(layout.as_slice(), &costly);
+    fn combine_elementwise_hints_weights_by_cost() {
+        // Both operands are fully duplicated along one dim, but along different dims. The weights
+        // are carried across as absolute duplicated cost and renormalized, so the expensive
+        // operand's dim ends up worth far more - and it supplies the layout order too.
+        let cheap_layout = [0u8, 1];
+        let costly_layout = [1u8, 0];
+        let full = [ScaleWeight::FULL, ScaleWeight::NONE];
+        let (ec, weight, layout) = combine_elementwise_hints(&[
+            (1.0, &full, &cheap_layout),
+            (1000.0, &[full[1], full[0]], &costly_layout),
+        ]);
+        assert_eq!(ec, 1.0 + 1000.0 + 1.0);
+        assert_weight(weight[0], 1.0 / 1002.0);
+        assert_weight(weight[1], 1000.0 / 1002.0);
+        assert_eq!(layout.as_slice(), &costly_layout);
+        // The derived order runs lowest-weight first, so the costly operand's dim is scaled first.
+        assert_eq!(
+            scale_order_from_weights(&weight, &costly_layout).as_slice(),
+            &[0, 1]
+        );
+    }
+
+    #[test]
+    fn combine_select_hints_weights_by_output_share() {
+        // Each output element reads exactly one input, so cost and weight are the *weighted
+        // average* over the inputs - here the costly input supplies three quarters of the output.
+        let layout = [0u8, 1];
+        let full = [ScaleWeight::FULL, ScaleWeight::NONE];
+        let (ec, weight, _) = combine_select_hints(
+            &[
+                (1.0, &full, &layout),
+                (1000.0, &[full[1], full[0]], &layout),
+            ],
+            &[1.0, 3.0],
+        );
+        let expected_ec = 0.25 * 1.0 + 0.75 * 1000.0 + 1.0;
+        assert_eq!(ec, expected_ec as f32);
+        assert_weight(weight[0], 0.25 / expected_ec);
+        assert_weight(weight[1], (0.75 * 1000.0) / expected_ec);
+    }
+
+    #[test]
+    fn max_cost_layout_order_breaks_ties_toward_the_first_input() {
+        let first = [1u8, 0];
+        let second = [0u8, 1];
+        let none = [ScaleWeight::NONE; 2];
+        let (_, _, layout) =
+            combine_elementwise_hints(&[(8.0, &none, &first), (8.0, &none, &second)]);
+        assert_eq!(layout.as_slice(), &first);
+    }
+
+    #[test]
+    fn scale_weight_round_trips_and_keeps_a_positive_fraction_positive() {
+        assert_eq!(ScaleWeight::new(0.0), ScaleWeight::NONE);
+        assert_eq!(ScaleWeight::new(-1.0), ScaleWeight::NONE);
+        assert_eq!(ScaleWeight::new(1.0), ScaleWeight::FULL);
+        assert_eq!(ScaleWeight::new(2.0), ScaleWeight::FULL);
+        assert_eq!(ScaleWeight::NONE.f64(), 0.0);
+        assert_eq!(ScaleWeight::FULL.f64(), 1.0);
+        for fraction in [1e-9, 1e-5, 0.25, 0.47, 0.999] {
+            let w = ScaleWeight::new(fraction);
+            assert!(!w.is_none(), "a positive fraction must not quantize away");
+            assert_weight(w, fraction.max(1.0 / u16::MAX as f64));
+        }
+        // Ordering the u16 directly orders the fractions, which is what the scale order relies on.
+        assert!(ScaleWeight::new(0.1) < ScaleWeight::new(0.2));
+    }
+
+    #[test]
+    fn a_unary_op_dilutes_the_scale_weight() {
+        let a = Array::compact_ndarray(
+            &ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap(),
+        )
+        .unwrap();
+        // A compact leaf reads at cost 8; broadcasting dim 1 duplicates the whole of it.
+        let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4]);
+        let cost = bc.storage().spec().element_cost();
+        assert_eq!(
+            bc.storage().spec().read_shape_scale_weight(),
+            &[ScaleWeight::NONE, ScaleWeight::FULL]
+        );
+
+        // Each unary op adds one unit of work per *output* element, which a tile boundary never
+        // makes anyone redo - so the duplicated share of the total shrinks.
+        let once = std::ops::Neg::neg(bc.view());
+        assert_eq!(once.storage().spec().element_cost(), cost + 1.0);
+        assert_weight(
+            once.storage().spec().read_shape_scale_weight()[1],
+            (cost / (cost + 1.0)) as f64,
+        );
+
+        let twice = std::ops::Neg::neg(once.view());
+        assert_eq!(twice.storage().spec().element_cost(), cost + 2.0);
+        assert_weight(
+            twice.storage().spec().read_shape_scale_weight()[1],
+            (cost / (cost + 2.0)) as f64,
+        );
+
+        // Diluting never claims a dim stopped being duplicated, and never invents duplication.
+        assert!(!twice.storage().spec().read_shape_scale_weight()[1].is_none());
+        assert_eq!(
+            twice.storage().spec().read_shape_scale_weight()[0],
+            ScaleWeight::NONE
+        );
+        // The order is a pure function of the weights, so it survives the rescale.
+        assert_eq!(
+            twice.storage().spec().read_shape_scale_order().as_slice(),
+            bc.storage().spec().read_shape_scale_order().as_slice()
+        );
+    }
+
+    #[test]
+    fn scale_order_is_the_layout_order_when_nothing_is_duplicated() {
+        // With no duplication every weight ties, and the stable sort leaves the layout order
+        // intact - which is what keeps a strided leaf's contiguity preference.
+        for layout in [[0u8, 1, 2], [2, 0, 1], [1, 2, 0]] {
+            assert_eq!(
+                scale_order_from_weights(&[ScaleWeight::NONE; 3], &layout).as_slice(),
+                &layout
+            );
+        }
     }
 
     #[test]
@@ -977,16 +1135,21 @@ mod tests {
         {
             let sp = a.storage().spec();
             assert_eq!(sp.element_cost(), 8.0);
-            assert_eq!(sp.read_shape_scale_order().as_slice(), &[1, 0]);
+            assert_eq!(sp.read_shape_scale_weight(), &[ScaleWeight::NONE; 2]);
+            assert_eq!(sp.read_shape_scale_order().as_slice(), &[0, 1]);
         }
         // Reduce over axis 1 (extent 4), re-insert the axis, and broadcast back to [3, 4].
         let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4]);
         let sp = bc.storage().spec();
         // Reduction folds the whole reduced extent per output: 8 * (4 + 4) = 64.
         assert_eq!(sp.element_cost(), 64.0);
-        // The broadcast dim (1) is scaled first.
+        // The broadcast dim (1) is the one worth covering, so it scales first - last in the order.
         assert_eq!(
-            sp.read_shape_scale_order()[0],
+            sp.read_shape_scale_weight(),
+            &[ScaleWeight::NONE, ScaleWeight::FULL]
+        );
+        assert_eq!(
+            *sp.read_shape_scale_order().last().unwrap(),
             1,
             "broadcast dim should scale first, got {:?}",
             sp.read_shape_scale_order()
@@ -1009,28 +1172,36 @@ mod tests {
         let sp = out.storage().spec();
         // element_cost = plain (8) + broadcasted reduction (64) + 1.
         assert_eq!(sp.element_cost(), 8.0 + 64.0 + 1.0);
-        // The costlier operand (the broadcasted reduction) supplies the order: broadcast dim first.
-        assert_eq!(sp.read_shape_scale_order()[0], 1);
+        // The costlier operand (the broadcasted reduction) dominates the gain: its broadcast dim
+        // is scaled first, i.e. last in the order.
+        assert!(sp.read_shape_scale_weight()[1] > sp.read_shape_scale_weight()[0]);
+        assert_eq!(*sp.read_shape_scale_order().last().unwrap(), 1);
     }
 
     #[test]
-    fn read_shape_scale_order_is_c_order_for_compact_and_follows_weights_for_views() {
+    fn read_shape_scale_order_is_layout_order_for_compact_and_follows_gain_for_views() {
         let a = Array::compact_ndarray(
             &ndarray::Array::from_shape_vec([3, 4, 5], (0..60i32).collect()).unwrap(),
         )
         .unwrap();
-        // Compact leaf: C-order weights, inner dim highest priority -> [2, 1, 0].
+        // A compact leaf duplicates nothing, so the order is just its layout order.
         assert_eq!(
             a.storage().spec().read_shape_scale_order().as_slice(),
-            &[2, 1, 0]
+            a.storage().spec().read_layout_order()
+        );
+        assert_eq!(
+            a.storage().spec().read_shape_scale_order().as_slice(),
+            &[0, 1, 2]
         );
 
-        // A broadcast makes its dim the highest-priority (covered first in the read tile).
+        // A broadcast makes its dim the one worth covering: highest gain, so it sorts last and is
+        // grown first.
         let bc = a.sum(1).insert_axis(1).broadcast(&[3, 4, 5]);
         let order = bc.storage().spec().read_shape_scale_order();
         assert_eq!(
-            order[0], 1,
-            "broadcast dim should sort first, got {order:?}"
+            order.as_slice(),
+            &[0, 2, 1],
+            "broadcast dim should sort last, got {order:?}"
         );
     }
 
@@ -1256,8 +1427,10 @@ mod tests {
     }
 
     #[test]
-    fn binary_op_preserves_broadcast_full_dim_block() {
-        // A small explicit block on dim 1, so the broadcast's full-dim coverage is strictly larger.
+    fn binary_op_keeps_block_shape_a_granularity_and_moves_coverage_to_gain() {
+        // A small explicit block on dim 1. The broadcast must NOT inflate it: `block_shape` is the
+        // storage granularity, and a tile cut below it re-decodes every block once per band. The
+        // "cover this dim" wish lives in `read_shape_scale_weight` instead.
         // The ops consume their receiver, so build two identical arrays.
         let mk = || {
             let mut params = ArrayParams::new();
@@ -1271,29 +1444,44 @@ mod tests {
         let a = mk();
         assert_eq!(a.storage().spec().block_shape()[1], 2);
 
-        // std-like: reduce axis 1, re-insert it, broadcast back. The broadcast dim's block covers
-        // the whole extent so the reduction is not recomputed per column-tile.
+        // std-like: reduce axis 1, re-insert it, broadcast back.
         let bc = mk().sum(1).insert_axis(1).broadcast(&[3, 4]);
-        assert_eq!(bc.storage().spec().block_shape()[1], 4);
+        {
+            let sp = bc.storage().spec();
+            // The reduction dropped dim 1 and `insert_axis` put back a length-1 dim, so the
+            // granularity there really is 1 - and the broadcast leaves it alone instead of
+            // inflating it to the full extent 4, which is what used to force the tile off the
+            // block grid.
+            assert_eq!(sp.block_shape()[1], 1, "broadcast forwards the granularity");
+            assert_eq!(
+                sp.read_shape_scale_weight(),
+                &[ScaleWeight::NONE, ScaleWeight::FULL]
+            );
+        }
 
-        // The binary op must keep the broadcasted full-dim coverage: max(2, 4) = 4, not `a`'s 2.
         let out = a.maximum(bc);
         let sp = out.storage().spec();
-        assert_eq!(sp.block_shape().as_slice(), &[3, 4]);
-        // dim 0: equal block (3) and `a` fixed -> fixed. dim 1: differing block (2 vs 4) -> not fixed.
+        assert_eq!(sp.block_shape().as_slice(), &[3, 2]);
+        // dim 0: equal block (3) and `a` fixed -> fixed. dim 1: differing block (2 vs 1) -> not fixed.
         assert_eq!(bits(sp.block_shape_fixed_dims()), [true, false]);
+        // The broadcasted operand is much the costlier (64 vs 8), so it dominates the combined
+        // gain: 64 * 1.0 / (8 + 64 + 1).
+        assert_eq!(sp.element_cost(), 8.0 + 64.0 + 1.0);
+        assert_eq!(sp.read_shape_scale_weight()[0], ScaleWeight::NONE);
+        assert_weight(sp.read_shape_scale_weight()[1], 64.0 / 73.0);
     }
 
     #[test]
     fn plain_leaf_read_shape_scale_order_follows_strides() {
-        // C-contiguous: most contiguous (last) dim scales first, like a compact leaf.
+        // C-contiguous: most contiguous (last) dim scales first, like a compact leaf - i.e. it
+        // sorts last in the order.
         let c = Array::plain_ndarray(
             ndarray::Array::from_shape_vec([3, 4], (0..12i32).collect()).unwrap(),
         )
         .unwrap();
         assert_eq!(
             c.storage().spec().read_shape_scale_order().as_slice(),
-            &[1, 0]
+            &[0, 1]
         );
 
         // A size-1 dim reads the same regardless of coverage, so it scales last.

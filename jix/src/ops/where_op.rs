@@ -8,9 +8,10 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, n_operands_sum, ArraySpec, ArrayStorageInfo,
     ArrayStorageTyped, ElementwisePipeline, ElementwisePipelineImpl, Operand, StridedBuf,
 };
-use crate::util::{cast_slice, REQUIRE_ALIGNED};
+use crate::util::REQUIRE_ALIGNED;
 use crate::{
     array_from_fn_inline, Array, ArrayStorage, Dimension, NdIterUnordered, PtrExt, PtrMutExt,
+    PtrMutNoalias, PtrNoalias,
 };
 
 /// Element-wise selection from `x` or `y` based on `condition`. See [`Where`] for details and
@@ -111,21 +112,21 @@ where
         let c_spec = condition.spec();
         let x_spec = x.spec();
         let y_spec = y.spec();
-        let (element_cost, read_shape_scale_order, read_layout_order) =
+        let (element_cost, read_shape_scale_weight, read_layout_order) =
             combine_elementwise_hints(&[
                 (
                     c_spec.element_cost(),
-                    c_spec.read_shape_scale_order(),
+                    c_spec.read_shape_scale_weight(),
                     c_spec.read_layout_order(),
                 ),
                 (
                     x_spec.element_cost(),
-                    x_spec.read_shape_scale_order(),
+                    x_spec.read_shape_scale_weight(),
                     x_spec.read_layout_order(),
                 ),
                 (
                     y_spec.element_cost(),
-                    y_spec.read_shape_scale_order(),
+                    y_spec.read_shape_scale_weight(),
                     y_spec.read_layout_order(),
                 ),
             ]);
@@ -134,12 +135,13 @@ where
             (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
             (y_spec.block_shape(), y_spec.block_shape_fixed_dims()),
         ]);
-        let mut spec = x_spec.dynamic().clone();
-        spec.block_shape = block_shape;
-        spec.block_shape_fixed_dims = block_shape_fixed_dims;
-        spec.element_cost = element_cost;
-        spec.read_shape_scale_order = read_shape_scale_order;
-        spec.read_layout_order = read_layout_order;
+        let spec = ArraySpecDynamic::new(
+            block_shape,
+            block_shape_fixed_dims,
+            element_cost,
+            read_shape_scale_weight,
+            read_layout_order,
+        );
         Ok(Self {
             condition,
             x,
@@ -191,7 +193,6 @@ where
 
         let (out_buf, out_strides) = out.data_mut();
         let (condition, condition_strides) = condition_view.data();
-        let condition = unsafe { cast_slice::<_, bool>(condition) };
         let (y_buf, y_strides) = y_view.data();
 
         // Operand 0 is the output buffer, `x`, operand 1 `y` and operand 2 the condition mask.
@@ -213,7 +214,14 @@ where
         };
         let contiguous = iter.is_contiguous().iter().all(|&c| c);
 
-        type InnerLoopFn = unsafe fn(&mut [u8], &[u8], &[bool], usize, [usize; 3], usize);
+        type InnerLoopFn = unsafe fn(
+            PtrMutNoalias<'_, u8>,
+            PtrNoalias<'_, u8>,
+            PtrNoalias<'_, bool>,
+            usize,
+            [usize; 3],
+            usize,
+        );
         let mut inner_loop_fn: InnerLoopFn = inner_loop_generic;
         if aligned {
             fn create_inner_loop_fn<T: Copy, const LANES: usize>(contiguous: bool) -> InnerLoopFn {
@@ -237,22 +245,27 @@ where
             }
         }
 
-        iter.foreach_inner_1d(|[out_offset, y_offset, cond_offset], len, strides| unsafe {
-            inner_loop_fn(
-                out_buf.get_unchecked_mut(out_offset..),
-                y_buf.get_unchecked(y_offset..),
-                condition.get_unchecked(cond_offset..),
-                len,
-                strides,
-                itemsize,
-            )
-        });
+        let mut out_buf = PtrMutNoalias::<u8>::from_slice(out_buf);
+        let y_buf = PtrNoalias::<u8>::from_slice(y_buf);
+        let condition = PtrNoalias::<bool>::from_slice(condition);
+        iter.foreach_inner_1d(
+            move |[out_offset, y_offset, cond_offset], len, strides| unsafe {
+                inner_loop_fn(
+                    out_buf.bytes_offset(out_offset),
+                    y_buf.bytes_offset(y_offset),
+                    condition.bytes_offset(cond_offset),
+                    len,
+                    strides,
+                    itemsize,
+                )
+            },
+        );
 
         #[inline(never)]
         unsafe fn inner_loop<T: Copy, const LANES: usize, const CONTIGUOUS: bool>(
-            x: &mut [u8],
-            y: &[u8],
-            condition: &[bool],
+            x: PtrMutNoalias<u8>,
+            y: PtrNoalias<u8>,
+            condition: PtrNoalias<bool>,
             len: usize,
             strides: [usize; 3],
             itemsize: usize,
@@ -319,9 +332,9 @@ where
 
         #[inline(never)]
         unsafe fn inner_loop_generic(
-            x: &mut [u8],
-            y: &[u8],
-            condition: &[bool],
+            x: PtrMutNoalias<u8>,
+            y: PtrNoalias<u8>,
+            condition: PtrNoalias<bool>,
             len: usize,
             strides: [usize; 3],
             itemsize: usize,

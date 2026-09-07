@@ -29,7 +29,7 @@ impl<S, K> Op1<S, K> {
     {
         check_dtype_size_nonzero(&K::Output::DTYPE)?;
         let mut spec = array.spec().dynamic().clone();
-        spec.element_cost += 1.0;
+        spec.add_elementwise_cost(1.0);
         Ok(Self {
             array,
             kernel,

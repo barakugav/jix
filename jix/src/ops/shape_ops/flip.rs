@@ -6,7 +6,7 @@ use crate::error::{check_get_range, ensure, Result};
 use crate::ops::AxesArg;
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::iter::NdIter;
-use crate::{Array, ArrayStorage, Dimension, NdCopier};
+use crate::{Array, ArrayStorage, Dimension, NdCopier, PtrMutNoalias, PtrNoalias};
 
 /// Reverses the order of elements along one or more axes, returned by
 /// [`Array::flip`](crate::Array::flip).
@@ -151,8 +151,8 @@ impl<S: ArrayStorage> ArrayStorage for Flip<S> {
 
             unsafe {
                 nd_copy.copy(
-                    tmp_buf.get_unchecked(src_off..),
-                    out_buf.get_unchecked_mut(dst_off..),
+                    PtrNoalias::from_slice(tmp_buf.get_unchecked(src_off..)),
+                    PtrMutNoalias::from_slice(out_buf.get_unchecked_mut(dst_off..)),
                     slab_shape.as_ref(),
                     src_strides,
                     out_strides,

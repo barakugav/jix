@@ -94,5 +94,9 @@ harness = false
 name = "nd_copy"
 harness = false
 
+[[bench]]
+name = "normalize"
+harness = false
+
 [lib]
 bench = false

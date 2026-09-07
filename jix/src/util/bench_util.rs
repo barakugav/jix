@@ -1,4 +1,4 @@
-use crate::{dtype::Dtype, NdCopier};
+use crate::{dtype::Dtype, NdCopier, PtrMutNoalias, PtrNoalias};
 
 /// Copy `shape` elements from `src` to `dst`, using the given strides and data type.
 ///
@@ -16,5 +16,14 @@ pub unsafe fn nd_copy(
     dst_strides: &[usize],
     dtype: &Dtype,
 ) {
-    unsafe { NdCopier::new(dtype).copy(src, dst, shape, src_strides, dst_strides, dtype) }
+    unsafe {
+        NdCopier::new(dtype).copy(
+            PtrNoalias::from_slice(src),
+            PtrMutNoalias::from_slice(dst),
+            shape,
+            src_strides,
+            dst_strides,
+            dtype,
+        )
+    }
 }

@@ -275,13 +275,13 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 (0..narrays).map(|i| arrays.shape(i)).collect::<Vec<_>>()
             );
         }
-        let (element_cost, read_shape_scale_order, read_layout_order) = {
+        let (element_cost, read_shape_scale_weight, read_layout_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
                     let sp = arrays.spec(i);
                     (
                         sp.element_cost(),
-                        sp.read_shape_scale_order().as_slice(),
+                        sp.read_shape_scale_weight(),
                         sp.read_layout_order(),
                     )
                 })
@@ -297,12 +297,13 @@ impl<ArraysT, F> MapMultiple<ArraysT, F> {
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
-        let mut spec = arrays.spec(0).dynamic().clone();
-        spec.block_shape = block_shape;
-        spec.block_shape_fixed_dims = block_shape_fixed_dims;
-        spec.element_cost = element_cost;
-        spec.read_shape_scale_order = read_shape_scale_order;
-        spec.read_layout_order = read_layout_order;
+        let spec = ArraySpecDynamic::new(
+            block_shape,
+            block_shape_fixed_dims,
+            element_cost,
+            read_shape_scale_weight,
+            read_layout_order,
+        );
         Ok(Self {
             arrays,
             map_fn,

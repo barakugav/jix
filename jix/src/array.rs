@@ -15,7 +15,7 @@ use crate::storage::{
 use crate::util::iter::NdIter;
 use crate::util::{
     assert_unchecked_eq, calc_block_end, cast_slice_mut, dim_arr, scale_read_shape, AlignedBytes,
-    IterExt, NdCopier, USE_NEW_READ_SCALING,
+    IterExt, NdCopier, PtrMutNoalias, PtrNoalias,
 };
 use crate::{
     default_logical_strides, default_strides, ArrayAny, ArrayParams, ArrayStorage, DimDyn, DimVec,
@@ -1257,26 +1257,14 @@ impl<S: ArrayStorage> Array<S> {
             (read_size.min / block_size_bytes as u64).max(1),
             (read_size.max / block_size_bytes as u64).max(1),
         );
-        if USE_NEW_READ_SCALING {
-            let scale_order = spec.read_shape_scale_order();
-            scale_read_shape(
-                chunk_shape_in_blocks.as_mut_slice(),
-                block_grid_shape.as_ref(),
-                block_grid_shape.as_ref(),
-                (min_chunk, max_chunk),
-                scale_order.iter().map(|&d| d as usize),
-            );
-        } else {
-            // Pre-hint behavior: ignore read_shape_scale_order and scale in fixed C-order (inner
-            // dim first).
-            scale_read_shape(
-                chunk_shape_in_blocks.as_mut_slice(),
-                block_grid_shape.as_ref(),
-                block_grid_shape.as_ref(),
-                (min_chunk, max_chunk),
-                (0..ndim).rev(),
-            );
-        }
+        scale_read_shape(
+            chunk_shape_in_blocks.as_mut_slice(),
+            block_grid_shape.as_ref(),
+            block_grid_shape.as_ref(),
+            (min_chunk, max_chunk),
+            spec.read_shape_scale_weight(),
+            spec.read_shape_scale_order().iter().map(|&i| i as usize),
+        );
 
         // A chunk spans `chunk_shape_in_blocks` target blocks per dimension (element units). We read
         // a whole chunk from `self` in one pass, then carve the target blocks out of it.
@@ -1360,8 +1348,10 @@ impl<S: ArrayStorage> Array<S> {
                 // In that case, we can compress directly from the chunk buffer
                 unsafe {
                     copier.copy(
-                        chunk_buf.as_slice().get_unchecked(src_byte_offset..),
-                        tmp_block_plain.as_mut_slice(),
+                        PtrNoalias::from_slice(
+                            chunk_buf.as_slice().get_unchecked(src_byte_offset..),
+                        ),
+                        PtrMutNoalias::from_slice(tmp_block_plain.as_mut_slice()),
                         S::Dimension::vec(ndim, |dim| block_active_size[dim] as usize).as_ref(),
                         chunk_strides.as_ref(),
                         block_strides.as_ref(),

@@ -9,8 +9,8 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, read_data_and_map_strides, ArraySpec, ArrayStorageInfo,
     StridedBuf,
 };
-use crate::util::{DimArray, DimIdx};
-use crate::{dim_arr, Array, ArrayStorage, Dimension, IterExt};
+use crate::util::{DimArray, DimIdx, ScaleWeight};
+use crate::{dim_arr, Array, ArrayStorage, DimDyn, Dimension, IterExt, SliceExt};
 
 /// Inserts new length-1 dimensions at specified positions in an array's shape,
 /// returned by [`Array::insert_axis`](crate::Array::insert_axis). The inverse operation
@@ -137,18 +137,13 @@ where
             .enumerate()
             .filter_map(|(dim, inserted)| (!inserted).then_some(dim as DimIdx))
             .collect_dim_vec::<S::Dimension>(array.shape().len());
-        let read_shape_scale_order = orig_spec
-            .read_shape_scale_order()
-            .iter()
-            .map(|&d| original_dims[d as usize])
-            .chain(
-                // inserted dims carry no coverage benefit, so they scale last (lowest priority)
-                is_inserted
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(dim, inserted)| inserted.then_some(dim as DimIdx)),
-            )
-            .collect();
+        let mut read_shape_scale_weight =
+            orig_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>();
+        for (dim, inserted) in is_inserted.iter().enumerate() {
+            if *inserted {
+                read_shape_scale_weight.insert(dim, ScaleWeight::NONE);
+            }
+        }
         let mut read_layout_order = orig_spec
             .read_layout_order()
             .iter()
@@ -159,13 +154,13 @@ where
                 read_layout_order_insert_dont_care_dim(&mut read_layout_order, dim);
             }
         }
-        let spec = ArraySpecDynamic {
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
-            element_cost: orig_spec.element_cost(),
-            read_shape_scale_order,
+            orig_spec.element_cost(),
+            read_shape_scale_weight,
             read_layout_order,
-        };
+        );
 
         Ok(Self {
             array,

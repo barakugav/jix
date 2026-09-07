@@ -19,7 +19,7 @@ use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::params::{ArraySpecFlags, ArraySpecOwned};
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ElementType, StridedBuf};
 use crate::util::iter::NdIter;
-use crate::util::{calc_block_end, NdCopier};
+use crate::util::{calc_block_end, NdCopier, PtrMutNoalias, PtrNoalias};
 use crate::{default_strides, ArrayParams, ArrayStorage, Dim, DimDyn, DimVec, Dimension};
 
 /// Heap-allocated, block-compressed nd-array storage.
@@ -424,8 +424,8 @@ where
 
             unsafe {
                 copier.copy(
-                    src,
-                    buf,
+                    PtrNoalias::from_slice(src),
+                    PtrMutNoalias::from_slice(buf),
                     out_shape.as_ref(),
                     block_strides.as_ref(),
                     out_strides,
@@ -492,8 +492,8 @@ where
 
                 unsafe {
                     copier.copy(
-                        src,
-                        dst,
+                        PtrNoalias::from_slice(src),
+                        PtrMutNoalias::from_slice(dst),
                         ActualD::vec(ndim, |dim| block_size[dim] as usize).as_ref(),
                         block_strides.as_ref(),
                         out_strides,

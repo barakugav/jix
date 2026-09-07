@@ -26,6 +26,7 @@ pub(crate) use nd_iter_unordered_dyn::*;
 mod bitmap;
 pub(crate) use bitmap::*;
 
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 pub(crate) use crate::dimension::{dim_arr, try_dim_arr, DimArray, DimIdx};
@@ -401,55 +402,84 @@ impl<'a> AlternatingBuffers<'a> {
     }
 }
 
-/// Master compile-time toggle for the read-shape-hint feature on the *consumption* side.
+/// A per-dim read-shape scaling weight: the fraction of an array's per-element read cost that is
+/// *redone once per tile band* along that dim (see
+/// [`read_shape_scale_weight`](crate::storage::params::ArraySpecDynamic::read_shape_scale_weight)).
 ///
-/// When `true`, read tiles are steered by the propagated `read_shape_scale_order`: [`scale_read_shape`]
-/// runs the priority strategy (fully cover the highest-priority broadcast/reduction dims first), and
-/// every consumer - the read heuristic / subset scaling (`read_shape_scale_dims`), the compaction
-/// read path, and reductions - consults that order.
+/// Always in `[0, 1]`: leaves duplicate nothing ([`NONE`](Self::NONE)), a fully duplicated dim is
+/// [`FULL`](Self::FULL), and every combine renormalizes by a divisor strictly larger than the sum it
+/// divides. Stored as `u16` fixed point rather than `f32` to keep [`ArraySpecDynamic`] small.
 ///
-/// When `false` (default) the order is ignored everywhere: [`scale_read_shape`] runs the balanced
-/// strategy (cap all dims to a common shrinking bound -> near-square tiles) and every consumer scales
-/// in fixed C-order (inner dim first), reproducing the pre-hint behavior. The priority strategy wins
-/// only when the covered axis is contiguous; it regresses the common row-major / block-compressed
-/// case (block-orthogonal reads), so it is parked until the heuristic is made stride/block-aware.
-///
-/// `element_cost` and `read_shape_scale_order` are still *propagated* through the ops regardless;
-/// this flag only controls whether the scaling functions *consume* them.
-pub(crate) const USE_NEW_READ_SCALING: bool = false;
+/// [`ArraySpecDynamic`]: crate::storage::params::ArraySpecDynamic
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+pub(crate) struct ScaleWeight(u16);
+
+impl ScaleWeight {
+    /// Nothing is duplicated along this dim, so a wider tile saves no work.
+    pub(crate) const NONE: Self = Self(0);
+    /// The whole view is duplicated along this dim: a tile that does not cover it re-reads
+    /// everything underneath once per band.
+    pub(crate) const FULL: Self = Self(u16::MAX);
+
+    pub(crate) fn new(fraction: f64) -> Self {
+        if fraction <= 0.0 {
+            return Self::NONE;
+        }
+        if fraction >= 1.0 {
+            return Self::FULL;
+        }
+        Self(((fraction * Self::FULL.0 as f64).round() as u16).max(1))
+    }
+
+    pub(crate) fn f64(self) -> f64 {
+        self.0 as f64 / Self::FULL.0 as f64
+    }
+
+    pub(crate) fn is_none(self) -> bool {
+        self == Self::NONE
+    }
+}
 
 /// Choose a read tile from a block-shape seed, steered by a per-dim coverage priority.
 ///
-/// Which strategy runs is gated by [`USE_NEW_READ_SCALING`]. The priority strategy (below):
-/// `read_shape` enters holding the block-shape seed (the minimum non-wasteful read shape) and
-/// leaves holding the chosen tile. `scale_order` is the coverage priority, **highest first**: the
-/// down-scan shrinks from the low-priority end and the up-scan grows from the high-priority end, so
-/// the dim we would grow first is the last we would shrink. Concretely:
+/// `read_shape` enters holding the block-shape seed - the storage granularity, i.e. the smallest
+/// per-dim read below which blocks would be decoded more than once - and leaves holding the chosen
+/// tile. `scale_order` lists the dims in **ascending coverage priority** (see
+/// [`read_shape_scale_order`](crate::storage::params::ArraySpecDynamic::read_shape_scale_order)):
+/// the down-scan shrinks from the front and the up-scan grows from the back, so the *last* dim
+/// listed is the first one grown - for a C-contiguous leaf that is the innermost dim.
+///
+/// `weight[d]` is the per-dim coverage weight: non-[`NONE`](ScaleWeight::NONE) means a tile that does
+/// not cover `d` re-reads underlying data once per band, so growing `d` buys real work. Those dims
+/// may spend up to 2 times the byte budget; dims that save nothing stop at
+/// `min_nitems`, since past that a bigger tile only costs cache.
 ///
 /// 1. clamp each scaled dim into `[1, max_shape]`,
-/// 2. scale down to `<= max_nitems` by shrinking the lowest-priority dims first, each only as much
-///    as needed so higher-priority dims stay fully covered,
-/// 3. scale up to `>= min_nitems` by growing the highest-priority dims first, by an integer multiple
-///    of the (block-aligned) seed toward each dim's extent,
+/// 2. scale down to `<= max_nitems` if the seed itself does not fit - shrinking the lowest-priority
+///    dims first.
+/// 3. scale up in priority order, highest first, by an integer multiple of the (block-aligned)
+///    seed toward each dim's extent, up to that dim's target,
 /// 4. snap any scaled dim that reached `max_shape[d]` to the full `array_shape[d]`, so the read
 ///    boundary doesn't split the requested range along an unaligned start.
 ///
 /// Only the dims listed in `scale_order` are touched; any dim absent from it is left exactly as
-/// seeded. A caller can therefore scale a *subset* of the dims by passing a partial order and
-/// seeding the remaining dims to their final value (typically 1, so they don't consume the budget).
+/// seeded and still counts toward the budget. Both callers pass the spec's full
+/// `read_shape_scale_order`, so in practice every dim is scaled.
 pub(crate) fn scale_read_shape(
     read_shape: &mut [u64],
     max_shape: &[u64],
     array_shape: &[u64],
     target_nitems: (u64, u64),
+    weight: &[ScaleWeight],
     scale_order: impl Iterator<Item = usize>,
 ) {
     let ndim = max_shape.len();
     assert_eq!(array_shape.len(), ndim);
     assert_eq!(read_shape.len(), ndim);
+    assert_eq!(weight.len(), ndim);
     let (min_nitems, max_nitems) = target_nitems;
 
-    // The dims to scale, in coverage priority (highest first); dims absent from it are left as seeded.
+    // The dims to scale, in ascending coverage priority; dims absent from it are left as seeded.
     let order = scale_order.collect::<DimArray<_>>();
     debug_assert!(order.len() <= ndim);
 
@@ -458,58 +488,32 @@ pub(crate) fn scale_read_shape(
         read_shape[dim] = read_shape[dim].clamp(1, max_shape[dim].max(1));
     }
 
-    if USE_NEW_READ_SCALING {
-        // PRIORITY strategy (parked): shrink lowest-priority dims first so high-priority
-        // (broadcast/reduction) dims stay fully covered - anisotropic tiles. O(ndim): the running
-        // volume is maintained across both scans instead of recomputing the product each step.
-        let mut current_volume = read_shape.iter().product::<u64>();
-        for &dim in order.iter().rev() {
-            if current_volume <= max_nitems {
-                break;
-            }
-            let others = current_volume / read_shape[dim];
-            let new_len = (max_nitems / others.max(1)).clamp(1, read_shape[dim]);
-            current_volume = others * new_len;
-            read_shape[dim] = new_len;
+    // Scale down, lowest priority first
+    let mut current_volume = read_shape.iter().product::<u64>();
+    for &dim in order.iter() {
+        if current_volume <= max_nitems {
+            break;
         }
-        for &dim in order.iter() {
-            let dim_len = max_shape[dim].max(1);
-            let mult_by_budget = min_nitems / current_volume.max(1);
-            let mult_by_range = dim_len.div_ceil(read_shape[dim]);
-            let multiplier = mult_by_budget.min(mult_by_range).max(1);
-            let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
-            current_volume = current_volume / read_shape[dim] * new_read_size;
-            read_shape[dim] = new_read_size;
-        }
-    } else {
-        // BALANCED strategy (default): cap every scaled dim to a common bound that halves until the
-        // volume fits `max_nitems` - order-independent, so it yields near-square tiles that stay
-        // aligned with storage blocks / contiguous runs. Then grow in priority order toward
-        // `min_nitems`.
-        let mut max_dim_size = (1u64 << 30).min(max_nitems.next_power_of_two());
-        loop {
-            for &dim in order.iter() {
-                read_shape[dim] = read_shape[dim]
-                    .min(max_dim_size)
-                    .min(max_shape[dim].max(1))
-                    .max(1);
-            }
-            let read_size = read_shape.iter().product::<u64>();
-            if read_size / 2 <= max_nitems || max_dim_size <= 1 {
-                break;
-            }
-            max_dim_size = (max_dim_size / 2).max(1);
-        }
-        let mut current_volume = read_shape.iter().product::<u64>();
-        for &dim in order.iter() {
-            let dim_len = max_shape[dim].max(1);
-            let mult_by_budget = min_nitems / current_volume.max(1);
-            let mult_by_range = dim_len.div_ceil(read_shape[dim]);
-            let multiplier = mult_by_budget.min(mult_by_range).max(1);
-            let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
-            current_volume = current_volume / read_shape[dim] * new_read_size;
-            read_shape[dim] = new_read_size;
-        }
+        let others = current_volume / read_shape[dim];
+        let new_len = (max_nitems / others.max(1)).clamp(1, read_shape[dim]);
+        current_volume = others * new_len;
+        read_shape[dim] = new_len;
+    }
+
+    // Scale up, highest priority first
+    for &dim in order.iter().rev() {
+        let dim_len = max_shape[dim].max(1);
+        let target = if weight[dim].is_none() {
+            min_nitems
+        } else {
+            max_nitems.saturating_mul(2)
+        };
+        let mult_by_budget = target / current_volume.max(1);
+        let mult_by_range = dim_len.div_ceil(read_shape[dim]);
+        let multiplier = mult_by_budget.min(mult_by_range).max(1);
+        let new_read_size = (read_shape[dim] * multiplier).min(dim_len);
+        current_volume = current_volume / read_shape[dim] * new_read_size;
+        read_shape[dim] = new_read_size;
     }
 
     // Snap any scaled dim already covering its full requested range to `array_shape[d]` so the read
@@ -640,6 +644,116 @@ pub(crate) const REQUIRE_ALIGNED: bool = !cfg!(any(
     target_arch = "aarch64"
 ));
 
+/// A `*const T` carried across a function boundary as a reference, so LLVM tags it `noalias`.
+///
+/// Rust only puts `noalias` on a parameter that arrives as a reference; a bare `*const T` gets
+/// nothing, and the callee then has to assume it may alias every other pointer it holds. This
+/// wrapper keeps the reference in the ABI (that is the whole point) while saying in the type what
+/// is really being passed: a non-aliasing pointer to `T`.
+///
+/// `noalias` is a *parameter* attribute, so it only lands on a direct reference-typed argument of
+/// a function that is not inlined away - which in practice means the `#[inline(never)]` inner
+/// loops.
+#[derive(Clone, Copy)]
+pub(crate) struct PtrNoalias<'a, T>(&'a [u8], PhantomData<T>);
+
+impl<'a, T> PtrNoalias<'a, T> {
+    /// Wraps a pointer with a span of `span` bytes.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be valid for reads of `span` bytes, and nothing may write that range for `'a` -
+    /// the same contract as [`std::slice::from_raw_parts`], which is what makes the `noalias` tag
+    /// this type exists for truthful.
+    #[inline(always)]
+    pub(crate) unsafe fn new(ptr: *const u8, span: usize) -> Self {
+        Self(
+            unsafe { std::slice::from_raw_parts(ptr, span) },
+            PhantomData,
+        )
+    }
+
+    /// Wraps the start of `bytes` as a `noalias` pointer to `T`.
+    #[inline(always)]
+    pub(crate) fn from_slice(bytes: &'a [u8]) -> Self {
+        Self(bytes, PhantomData)
+    }
+
+    #[inline(always)]
+    pub(crate) fn as_ptr(&self) -> *const T {
+        self.0.as_ptr().cast::<T>()
+    }
+
+    /// This pointer advanced by `offset` bytes.
+    ///
+    /// # Safety
+    ///
+    /// `offset` must not be past the end of the wrapped byte range.
+    #[inline(always)]
+    pub(crate) unsafe fn bytes_offset(self, offset: usize) -> Self {
+        Self(unsafe { self.0.get_unchecked(offset..) }, PhantomData)
+    }
+
+    #[inline(always)]
+    pub(crate) fn cast<U>(self) -> PtrNoalias<'a, U> {
+        PtrNoalias(self.0, PhantomData)
+    }
+}
+
+/// A `*mut T` carried across a function boundary as a mutable reference, so LLVM tags it `noalias`.
+///
+/// Same as [`PtrNoalias`], but for mutable pointers.
+pub(crate) struct PtrMutNoalias<'a, T>(&'a mut [u8], PhantomData<T>);
+
+impl<'a, T> PtrMutNoalias<'a, T> {
+    /// Wraps a pointer with a span of `span` bytes.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be valid for writes of `span` bytes, and nothing else may access that range for
+    /// `'a` - the same contract as [`std::slice::from_raw_parts_mut`], which is what makes the
+    /// `noalias` tag this type exists for truthful.
+    #[inline(always)]
+    pub(crate) unsafe fn new(ptr: *mut u8, span: usize) -> Self {
+        Self(
+            unsafe { std::slice::from_raw_parts_mut(ptr, span) },
+            PhantomData,
+        )
+    }
+
+    /// Wraps the start of `bytes` as a `noalias` pointer to `T`.
+    #[inline(always)]
+    pub(crate) fn from_slice(bytes: &'a mut [u8]) -> Self {
+        Self(bytes, PhantomData)
+    }
+
+    #[inline(always)]
+    pub(crate) fn as_ptr(&self) -> *const T {
+        self.0.as_ptr().cast::<T>()
+    }
+
+    #[allow(clippy::wrong_self_convention)]
+    #[inline(always)]
+    pub(crate) fn as_mut_ptr(self) -> *mut T {
+        self.0.as_mut_ptr().cast::<T>()
+    }
+
+    /// This pointer advanced by `offset` bytes.
+    ///
+    /// # Safety
+    ///
+    /// `offset` must not be past the end of the wrapped byte range.
+    #[inline(always)]
+    pub(crate) unsafe fn bytes_offset(&mut self, offset: usize) -> PtrMutNoalias<'_, T> {
+        PtrMutNoalias(unsafe { self.0.get_unchecked_mut(offset..) }, PhantomData)
+    }
+
+    #[inline(always)]
+    pub(crate) fn cast<U>(self) -> PtrMutNoalias<'a, U> {
+        PtrMutNoalias(self.0, PhantomData)
+    }
+}
+
 pub(crate) trait PtrExt<T> {
     unsafe fn read_maybe_aligned<const ALIGNED: bool>(self) -> T;
 }
@@ -676,8 +790,7 @@ impl<T> PtrMutExt<T> for *mut T {
 #[cfg(test)]
 mod tests {
     use super::{
-        calc_block_end, default_strides_slice, scale_read_shape, AlternatingBuffers,
-        USE_NEW_READ_SCALING,
+        calc_block_end, default_strides_slice, scale_read_shape, AlternatingBuffers, ScaleWeight,
     };
     use crate::DimDyn;
 
@@ -829,7 +942,8 @@ mod tests {
             &total,
             &total,
             (16, 256),
-            (0..1).rev(),
+            &[ScaleWeight::NONE],
+            0..1,
         );
         let v = read_shape[0];
         assert!(v >= 16, "expected scale-up to reach the min floor, got {v}");
@@ -846,7 +960,8 @@ mod tests {
             &total,
             &total,
             (16, 256),
-            (0..1).rev(),
+            &[ScaleWeight::NONE],
+            0..1,
         );
         let v = read_shape[0];
         assert!(v <= 256, "expected scale-down to cap at max, got {v}");
@@ -860,7 +975,7 @@ mod tests {
     fn scale_read_shape_prioritizes_high_order_dim() {
         use crate::Dimension;
         // 2-D [100, 100], budget max=200 items. Seed the whole thing (over budget -> scale down).
-        // Priority order = [dim1, dim0] (dim1 highest).
+        // Order is lowest-priority-first, so dim 1 is the one worth covering.
         let shape = [100u64, 100];
         let mut read_shape = DimDyn::from_fn(2, |_| 100);
         scale_read_shape(
@@ -868,34 +983,49 @@ mod tests {
             &shape,
             &shape,
             (1, 200),
-            [1usize, 0].into_iter(),
+            &[ScaleWeight::NONE, ScaleWeight::FULL],
+            [0usize, 1].into_iter(),
         );
-        if USE_NEW_READ_SCALING {
-            // Priority: dim0 (low) is shrunk first, dim1 (high) stays fully covered.
-            assert_eq!(read_shape[1], 100, "high-priority dim stays fully covered");
-            assert!(
-                read_shape[0] <= 2,
-                "low-priority dim absorbs the shrink, got {}",
-                read_shape[0]
+        assert_eq!(read_shape[1], 100, "high-priority dim stays fully covered");
+        assert!(
+            read_shape[0] <= 2,
+            "low-priority dim absorbs the shrink, got {}",
+            read_shape[0]
+        );
+    }
+
+    #[test]
+    fn scale_read_shape_overshoots_only_for_a_dim_worth_covering() {
+        use crate::Dimension;
+        // Seed [4, 4] on a [1000, 1000] array, budget (16, 64). Dim 1 is highest priority in both
+        // runs; it may only spend past the max budget when its weight says covering it saves work.
+        let shape = [1000u64, 1000];
+        let scale = |weight: [ScaleWeight; 2]| {
+            let mut read_shape = DimDyn::from_fn(2, |_| 4);
+            scale_read_shape(
+                read_shape.as_mut_slice(),
+                &shape,
+                &shape,
+                (16, 64),
+                &weight,
+                [0usize, 1].into_iter(),
             );
-        } else {
-            // Balanced: both dims capped to a common bound (near-square), volume within ~max.
-            assert_eq!(
-                read_shape[0], read_shape[1],
-                "balanced strategy yields a near-square tile, got {read_shape:?}"
-            );
-            assert!(
-                read_shape[0] * read_shape[1] <= 2 * 200,
-                "volume stays within ~max budget, got {read_shape:?}"
-            );
-        }
+            read_shape[0] * read_shape[1]
+        };
+        assert!(
+            scale([ScaleWeight::NONE; 2]) <= 64,
+            "nothing to cover -> stop at the min budget"
+        );
+        assert!(
+            scale([ScaleWeight::NONE, ScaleWeight::FULL]) > 64,
+            "a dim worth covering may overshoot"
+        );
     }
 
     #[test]
     fn scale_read_shape_scales_only_ordered_dims() {
         use crate::Dimension;
-        // The order lists only dim 1, so dim 0 is left exactly as seeded and only dim 1 grows -
-        // this is how reduction scales the reduced and non-reduced dim groups separately.
+        // The order lists only dim 1, so dim 0 is left exactly as seeded and only dim 1 grows.
         let shape = [100u64, 100];
         let mut read_shape = DimDyn::from_fn(2, |_| 7);
         scale_read_shape(
@@ -903,6 +1033,7 @@ mod tests {
             &shape,
             &shape,
             (200, 200),
+            &[ScaleWeight::NONE; 2],
             std::iter::once(1usize),
         );
         assert_eq!(read_shape[0], 7, "unlisted dim is left exactly as seeded");

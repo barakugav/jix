@@ -39,16 +39,16 @@ impl<S1, S2, K> Op2<S1, S2, K> {
         );
         let a_spec = a.spec();
         let b_spec = b.spec();
-        let (element_cost, read_shape_scale_order, read_layout_order) =
+        let (element_cost, read_shape_scale_weight, read_layout_order) =
             combine_elementwise_hints(&[
                 (
                     a_spec.element_cost(),
-                    a_spec.read_shape_scale_order(),
+                    a_spec.read_shape_scale_weight(),
                     a_spec.read_layout_order(),
                 ),
                 (
                     b_spec.element_cost(),
-                    b_spec.read_shape_scale_order(),
+                    b_spec.read_shape_scale_weight(),
                     b_spec.read_layout_order(),
                 ),
             ]);
@@ -56,12 +56,13 @@ impl<S1, S2, K> Op2<S1, S2, K> {
             (a_spec.block_shape(), a_spec.block_shape_fixed_dims()),
             (b_spec.block_shape(), b_spec.block_shape_fixed_dims()),
         ]);
-        let mut spec = a_spec.dynamic().clone();
-        spec.block_shape = block_shape;
-        spec.block_shape_fixed_dims = block_shape_fixed_dims;
-        spec.element_cost = element_cost;
-        spec.read_shape_scale_order = read_shape_scale_order;
-        spec.read_layout_order = read_layout_order;
+        let spec = ArraySpecDynamic::new(
+            block_shape,
+            block_shape_fixed_dims,
+            element_cost,
+            read_shape_scale_weight,
+            read_layout_order,
+        );
         Ok(Self { a, b, kernel, spec })
     }
 }
