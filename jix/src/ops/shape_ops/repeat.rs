@@ -8,9 +8,7 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
 use crate::util::calc_block_end;
-use crate::{
-    Array, ArrayStorage, DimArray, DimDyn, DimIdx, Dimension, NdCopier, SliceExt, NDIM_MAX,
-};
+use crate::{Array, ArrayStorage, DimDyn, DimIdx, Dimension, NdCopier, SliceExt, NDIM_MAX};
 
 /// Replicates each element along an axis by a scalar count, returned by
 /// [`Array::repeat`](crate::Array::repeat).
@@ -84,20 +82,13 @@ impl<S: ArrayStorage> Repeat<S> {
             .saturating_mul(repeats.min(BlockSize::MAX as u64) as BlockSize)
             .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
             .max(1);
-        // Repeating re-reads each inner element `repeats` times along `axis`; covering it in full
-        // with one read avoids that, so give `axis` the highest scaling priority (front of order),
-        // keeping the inner relative order among the rest.
-        let in_order = inner_spec.read_shape_scale_order();
-        let read_shape_scale_order = std::iter::once(axis as DimIdx)
-            .chain(in_order.iter().copied().filter(|&d| d as usize != axis))
-            .collect::<DimArray<_>>();
-        let spec = ArraySpecDynamic {
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
-            element_cost: inner_spec.element_cost(),
-            read_shape_scale_order,
-            read_layout_order: inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
-        };
+            inner_spec.element_cost(),
+            inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>(),
+            inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
+        );
 
         Ok(Self {
             array,

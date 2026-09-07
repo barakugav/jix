@@ -9,7 +9,7 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
 use crate::util::iter::NdIter;
-use crate::util::{DimArray, DimIdx, IterExt};
+use crate::util::{dim_arr, DimArray, DimIdx, IterExt, ScaleWeight};
 use crate::{
     default_logical_strides, default_strides_from_iter, ArrayStorage, Dimension, IntoDimension,
 };
@@ -140,21 +140,9 @@ impl<S, D> Reshape<S, D> {
                 None => false,
             })
             .collect();
-        // Carried dims (a 1:1 source mapping) keep their source's relative priority; split/merged
-        // dims have no single source, so they trail at the end. Rank each input dim by its position
-        // in the input scaling order, then sort the output dims by their source's rank (ties broken
-        // by output index, so this is always a full permutation even when several output dims - e.g.
-        // size-1 dims - share one source).
-        let mut in_rank = (0..orig_shape.len())
-            .map(|_| DimIdx::MAX)
-            .collect::<DimArray<_>>();
-        for (pos, &d) in inner_spec.read_shape_scale_order().iter().enumerate() {
-            in_rank[d as usize] = pos as DimIdx;
-        }
-        let mut read_shape_scale_order = (0..new_shape.len() as DimIdx).collect::<DimArray<_>>();
-        read_shape_scale_order.sort_by_key(|&d| match same_logical_stride[d as usize] {
-            Some(orig) => (in_rank[orig as usize], d),
-            None => (DimIdx::MAX, d),
+        let read_shape_scale_weight = dim_arr(new_shape.len(), |d| match same_logical_stride[d] {
+            Some(orig) => inner_spec.read_shape_scale_weight()[orig as usize],
+            None => ScaleWeight::NONE,
         });
         let read_layout_order = {
             let mut new_of = (0..orig_shape.len())
@@ -181,13 +169,13 @@ impl<S, D> Reshape<S, D> {
                 (0..new_shape.len() as DimIdx).collect::<DimArray<_>>()
             }
         };
-        let spec = ArraySpecDynamic {
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
-            element_cost: inner_spec.element_cost(),
-            read_shape_scale_order,
+            inner_spec.element_cost(),
+            read_shape_scale_weight,
             read_layout_order,
-        };
+        );
 
         Ok(Self {
             new_shape: new_shape_raw,

@@ -4,8 +4,8 @@ use crate::codec::ReadContext;
 use crate::dtype::Dtype;
 use crate::error::{bail, check_get_range, check_ndim, check_shape_overflow, ensure, Result};
 use crate::storage::params::ArraySpecDynamic;
-use crate::storage::{check_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf};
-use crate::util::{dim_arr, DimArray};
+use crate::storage::{check_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
+use crate::util::ScaleWeight;
 use crate::{Array, ArrayStorage, DimDyn, Dimension, SliceExt};
 
 /// Expands an array to a larger shape by repeating elements along length-1 dimensions,
@@ -92,45 +92,24 @@ where
 
         let new_shape = S::Dimension::from_slice(new_shape);
 
-        // For broadcast dims: not fixed, block_shape=max. For unchanged dims: inherit from inner.
         let inner_spec = array.spec();
-        let block_shape = dim_arr(ndim, |dim| {
-            if is_broadcast[dim] {
-                (new_shape[dim].min(BlockSize::MAX as u64) as BlockSize).max(1)
-            } else {
-                inner_spec.block_shape()[dim]
-            }
-        });
+        let block_shape = inner_spec.block_shape().clone();
         let mut block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
+        let mut read_shape_scale_weight =
+            inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>();
         for dim in 0..ndim {
             if is_broadcast[dim] {
                 block_shape_fixed_dims.set(dim, false);
+                read_shape_scale_weight[dim] = ScaleWeight::FULL;
             }
         }
-        let read_shape_scale_order = {
-            let in_order = inner_spec.read_shape_scale_order();
-            let broadcasted_dims = in_order
-                .iter()
-                .copied()
-                .filter(|&d| is_broadcast[d as usize]);
-            let non_broadcasted_dims = in_order
-                .iter()
-                .copied()
-                .filter(|&d| !is_broadcast[d as usize]);
-            // A broadcast dim re-reads the same inner element `new_shape[dim]` times, so covering each
-            // in full with one read avoids that redundant work: move the broadcast dims to the front of
-            // the scaling order (highest priority), keeping the inner relative order within both groups.
-            broadcasted_dims
-                .chain(non_broadcasted_dims)
-                .collect::<DimArray<_>>()
-        };
-        let spec = ArraySpecDynamic {
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
-            element_cost: inner_spec.element_cost(),
-            read_shape_scale_order,
-            read_layout_order: inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
-        };
+            inner_spec.element_cost(),
+            read_shape_scale_weight,
+            inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
+        );
 
         Ok(Self {
             array,

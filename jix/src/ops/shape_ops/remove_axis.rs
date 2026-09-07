@@ -132,11 +132,11 @@ where
             .filter_map(|(dim, c)| (!is_removed[dim]).then_some(c))
             .collect();
         let out_dim = |d: usize| (d - (0..d).filter(|&j| is_removed[j]).count()) as DimIdx;
-        let read_shape_scale_order = inner_spec
-            .read_shape_scale_order()
+        let read_shape_scale_weight = inner_spec
+            .read_shape_scale_weight()
             .iter()
-            .filter(|&&d| !is_removed[d as usize])
-            .map(|&d| out_dim(d as usize))
+            .enumerate()
+            .filter_map(|(d, &w)| (!is_removed[d]).then_some(w))
             .collect();
         let read_layout_order = inner_spec
             .read_layout_order()
@@ -144,13 +144,13 @@ where
             .filter(|&&d| !is_removed[d as usize])
             .map(|&d| out_dim(d as usize))
             .collect();
-        let spec = ArraySpecDynamic {
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
-            element_cost: inner_spec.element_cost(),
-            read_shape_scale_order,
+            inner_spec.element_cost(),
+            read_shape_scale_weight,
             read_layout_order,
-        };
+        );
 
         Ok(Self {
             array,

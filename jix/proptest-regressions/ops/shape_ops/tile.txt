@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 18a2661b0a5811de66b04f322e7495417349840b57bddc534ab0a78e5ed59625 # shrinks to (nd, za, axis, reps) = ([], shape=[0], strides=[0], layout=CFcf (0xf), dynamic ndim=1, Array { shape: [0], dtype: Dtype::Scalar { scalar: I32, shape: [], itemsize: 4, alignment: 4 } }, 0, 2)
+cc 487f9bd8e53603fc45571058712c47fd2d3810ecd75df5eb55b94031d7ffb3c7 # shrinks to (nd, za, axis, repeats) = ([[0, -140, -312932789, -823147121],  [229602756, 341980645, -1999763729, -1563529808],  [2063885885, -1479449240, 98561430, 656185988],  [1174570541, 1300715295, -1054961429, -688403998],  [687484928, 256320040, -2089090223, 1330103383]], shape=[5, 4], strides=[4, 1], layout=Cc (0x5), dynamic ndim=2, Array { shape: [5, 4], dtype: Dtype { scalar: I32, shape: [], itemsize: 4, alignment: 4 } }, 0, 0)

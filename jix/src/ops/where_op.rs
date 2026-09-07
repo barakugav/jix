@@ -111,21 +111,21 @@ where
         let c_spec = condition.spec();
         let x_spec = x.spec();
         let y_spec = y.spec();
-        let (element_cost, read_shape_scale_order, read_layout_order) =
+        let (element_cost, read_shape_scale_weight, read_layout_order) =
             combine_elementwise_hints(&[
                 (
                     c_spec.element_cost(),
-                    c_spec.read_shape_scale_order(),
+                    c_spec.read_shape_scale_weight(),
                     c_spec.read_layout_order(),
                 ),
                 (
                     x_spec.element_cost(),
-                    x_spec.read_shape_scale_order(),
+                    x_spec.read_shape_scale_weight(),
                     x_spec.read_layout_order(),
                 ),
                 (
                     y_spec.element_cost(),
-                    y_spec.read_shape_scale_order(),
+                    y_spec.read_shape_scale_weight(),
                     y_spec.read_layout_order(),
                 ),
             ]);
@@ -134,12 +134,13 @@ where
             (x_spec.block_shape(), x_spec.block_shape_fixed_dims()),
             (y_spec.block_shape(), y_spec.block_shape_fixed_dims()),
         ]);
-        let mut spec = x_spec.dynamic().clone();
-        spec.block_shape = block_shape;
-        spec.block_shape_fixed_dims = block_shape_fixed_dims;
-        spec.element_cost = element_cost;
-        spec.read_shape_scale_order = read_shape_scale_order;
-        spec.read_layout_order = read_layout_order;
+        let spec = ArraySpecDynamic::new(
+            block_shape,
+            block_shape_fixed_dims,
+            element_cost,
+            read_shape_scale_weight,
+            read_layout_order,
+        );
         Ok(Self {
             condition,
             x,

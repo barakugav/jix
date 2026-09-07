@@ -8,8 +8,8 @@ use crate::storage::params::ArraySpecDynamic;
 use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, BlockSize, StridedBuf,
 };
-use crate::util::NdCopier;
-use crate::{Array, ArrayStorage, DimArray, DimDyn, DimIdx, Dimension, SliceExt, NDIM_MAX};
+use crate::util::{NdCopier, ScaleWeight};
+use crate::{Array, ArrayStorage, DimDyn, DimIdx, Dimension, SliceExt, NDIM_MAX};
 
 /// Replicates the array along one axis by a scalar count, returned by
 /// [`Array::tile`](crate::Array::tile).
@@ -90,26 +90,21 @@ impl<S: ArrayStorage> Tile<S> {
 
         let inner_spec = array.spec();
         let mut block_shape = inner_spec.block_shape().clone();
+        block_shape[axis] = block_shape[axis]
+            .min(new_len.min(BlockSize::MAX as u64) as BlockSize)
+            .max(1);
         let mut block_shape_fixed_dims = inner_spec.block_shape_fixed_dims();
-        // there is nothing smarter than reading the whole dimension at once
-        block_shape[axis] = (new_len.min(BlockSize::MAX as u64) as BlockSize).max(1);
         block_shape_fixed_dims.set(axis, false);
-        let read_shape_scale_order = std::iter::once(axis as DimIdx)
-            .chain(
-                inner_spec
-                    .read_shape_scale_order()
-                    .iter()
-                    .copied()
-                    .filter(|&d| d as usize != axis),
-            )
-            .collect::<DimArray<_>>();
-        let spec = ArraySpecDynamic {
+        let mut read_shape_scale_weight =
+            inner_spec.read_shape_scale_weight().to_dim_vec::<DimDyn>();
+        read_shape_scale_weight[axis] = ScaleWeight::FULL;
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
-            element_cost: inner_spec.element_cost(),
-            read_shape_scale_order,
-            read_layout_order: inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
-        };
+            inner_spec.element_cost(),
+            read_shape_scale_weight,
+            inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
+        );
 
         Ok(Self {
             array,

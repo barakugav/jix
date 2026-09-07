@@ -10,7 +10,7 @@ use crate::storage::params::{
 use crate::storage::{check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, StridedBuf};
 use crate::util::{
     default_strides, ArraySequence, ArraySequenceDimension, ArraySequenceElementType, DimArray,
-    DimIdx,
+    DimIdx, ScaleWeight,
 };
 use crate::{Array, ArrayStorage, Dimension, IterExt};
 
@@ -124,36 +124,34 @@ where
         };
         block_shape.insert(axis, 1);
         block_shape_fixed_dims.insert(axis, false);
-        let (element_cost, shared_order, shared_layout_order) = {
+        let (element_cost, shared_weight, shared_layout_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
                     let sp = arrays.spec(i);
                     (
                         sp.element_cost(),
-                        sp.read_shape_scale_order().as_slice(),
+                        sp.read_shape_scale_weight(),
                         sp.read_layout_order(),
                     )
                 })
                 .collect::<Vec<_>>();
-            combine_select_hints(&inputs)
+            let weights = vec![1.0; narrays];
+            combine_select_hints(&inputs, &weights)
         };
-        let read_shape_scale_order = shared_order
-            .iter()
-            .map(|&d| if d as usize >= axis { d + 1 } else { d })
-            .chain(std::iter::once(axis as DimIdx))
-            .collect::<DimArray<_>>();
+        let mut read_shape_scale_weight = shared_weight;
+        read_shape_scale_weight.insert(axis, ScaleWeight::NONE);
         let mut read_layout_order = shared_layout_order
             .iter()
             .map(|&d| if d as usize >= axis { d + 1 } else { d })
             .collect::<DimArray<_>>();
         read_layout_order_insert_dont_care_dim(&mut read_layout_order, axis);
-        let spec = ArraySpecDynamic {
+        let spec = ArraySpecDynamic::new(
             block_shape,
             block_shape_fixed_dims,
             element_cost,
-            read_shape_scale_order,
+            read_shape_scale_weight,
             read_layout_order,
-        };
+        );
 
         Ok(Self {
             shape: new_shape,

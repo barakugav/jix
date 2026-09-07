@@ -10,7 +10,7 @@ use crate::storage::{
     check_out_buf, ArraySpec, ArrayStorageInfo, ElementType, StridedBuf, Ty, TypeDyn,
 };
 use crate::util::{strided_span_bytes, DimArray, DimIdx, SendSyncPtr};
-use crate::{dim_arr, Array, ArrayParams, ArrayStorage, DimBitmap, Dimension, IntoDimension};
+use crate::{Array, ArrayParams, ArrayStorage, DimBitmap, Dimension, IntoDimension};
 
 /// Storage type that provides a zero-copy view into an arbitrary strided buffer.
 ///
@@ -145,22 +145,6 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
             &dtype,
             ArraySpecFlags::new().set_plain_read(),
         )?;
-        // Scaling order by contiguity: the most contiguous (smallest stride) real dims scale first;
-        {
-            let shape = shape.as_slice();
-            let mut order = dim_arr(ndim, |d| d as DimIdx);
-            order.sort_by_key(|&d| {
-                let d = d as usize;
-                if shape[d] > 1 && strides[d] != 0 {
-                    (0u8, strides[d] as u64)
-                } else {
-                    // zero-stride / size-<=1 dims have no coverage benefit, so they trail at the end.
-                    (1u8, 0)
-                }
-            });
-            spec.dynamic_mut().read_shape_scale_order = order;
-        }
-
         // Layout order by contiguity: the outermost (largest stride) real dim comes first.
         {
             let shape = shape.as_slice();
@@ -189,7 +173,12 @@ impl<A, D: Dimension> Plain<A, TypeDyn, D> {
                 read_layout_order_insert_dont_care_dim(&mut order, d);
             }
 
-            spec.dynamic_mut().read_layout_order = order;
+            let dynamic = spec.dynamic_mut();
+            dynamic.read_shape_scale_order = crate::storage::params::scale_order_from_weights(
+                &dynamic.read_shape_scale_weight,
+                &order,
+            );
+            dynamic.read_layout_order = order;
         }
 
         let element_type = TypeDyn::from_dtype(dtype).unwrap();

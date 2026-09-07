@@ -122,18 +122,21 @@ where
         }
         check_shape_overflow(&shape, dtype.itemsize() as _)?;
 
-        let (element_cost, read_shape_scale_order, read_layout_order) = {
+        let (element_cost, read_shape_scale_weight, read_layout_order) = {
             let inputs = (0..narrays)
                 .map(|i| {
                     let sp = arrays.spec(i);
                     (
                         sp.element_cost(),
-                        sp.read_shape_scale_order().as_slice(),
+                        sp.read_shape_scale_weight(),
                         sp.read_layout_order(),
                     )
                 })
                 .collect::<Vec<_>>();
-            combine_select_hints(&inputs)
+            let weights = (0..narrays)
+                .map(|i| arrays.shape(i)[axis] as f64)
+                .collect::<Vec<_>>();
+            combine_select_hints(&inputs, &weights)
         };
         // Combine the block layout over every input, on all dims including the concat axis (where
         // the inputs' differing lengths naturally leave it non-fixed).
@@ -146,12 +149,13 @@ where
                 .collect::<Vec<_>>();
             combine_block_layout(&inputs)
         };
-        let mut spec = arrays.spec(0).dynamic().clone();
-        spec.block_shape = block_shape;
-        spec.block_shape_fixed_dims = block_shape_fixed_dims;
-        spec.element_cost = element_cost;
-        spec.read_shape_scale_order = read_shape_scale_order;
-        spec.read_layout_order = read_layout_order;
+        let spec = ArraySpecDynamic::new(
+            block_shape,
+            block_shape_fixed_dims,
+            element_cost,
+            read_shape_scale_weight,
+            read_layout_order,
+        );
 
         let shape = ArraysT::Dimension::from_slice(&shape);
         Ok(Self {

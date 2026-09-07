@@ -14,3 +14,5 @@
 - replace array_from_fn_inline with map_enumerate
 - arrays_map, arrays_map_enumerate
 - as_compact() doesnt work through Any
+- Use UniquePtr instead of &[u8]
+- remove REDUCED_TILE_MIN_NITEMS

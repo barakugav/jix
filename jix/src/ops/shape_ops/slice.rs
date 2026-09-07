@@ -106,13 +106,13 @@ impl<S: ArrayStorage> Slice<S> {
                 // block_shape_fixed_dims is unchanged
             }
         }
-        let spec = ArraySpecDynamic {
+        let spec = ArraySpecDynamic::new(
             block_shape,
-            block_shape_fixed_dims: inner_spec.block_shape_fixed_dims(),
-            element_cost: inner_spec.element_cost(),
-            read_shape_scale_order: inner_spec.read_shape_scale_order().clone(),
-            read_layout_order: inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
-        };
+            inner_spec.block_shape_fixed_dims(),
+            inner_spec.element_cost(),
+            DimArray::from_slice(inner_spec.read_shape_scale_weight()).unwrap(),
+            inner_spec.read_layout_order().to_dim_vec::<DimDyn>(),
+        );
 
         Ok(Self {
             array,
