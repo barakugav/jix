@@ -1,6 +1,5 @@
 use std::mem::MaybeUninit;
 use std::ops::Range;
-use std::sync::Arc;
 
 use crate::codec::{DecoderCodecConfig, Encoder, ReadContext};
 use crate::dtype::{Dtype, Dtyped};
@@ -1443,7 +1442,7 @@ impl<S: ArrayStorage> Array<S> {
     where
         S: ArrayStorage + Send + Sync + 'static,
     {
-        Array::from_storage(ArrayStorageAny::new(Arc::new(self.into_storage())))
+        Array::from_storage(ArrayStorageAny::new(self.into_storage()))
     }
 
     /// Check if this array storage is compact block-compressed storage.
