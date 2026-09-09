@@ -10,11 +10,10 @@ use crate::storage::{
     check_out_buf, materialize_out_buf, ArraySpec, ArrayStorageInfo, ArrayStorageTyped, StridedBuf,
 };
 use crate::util::iter::NdIter;
-use crate::util::SliceExt;
 use crate::util::{calc_block_end, DimArray, DimIdx, REQUIRE_ALIGNED};
 use crate::{
-    array_from_fn_inline, default_strides, Array, ArrayExt, ArrayStorage, DimVec, Dimension,
-    NdIterUnordered, PtrExt, PtrMutNoalias, PtrNoalias, Ty,
+    array_from_fn_inline, default_strides, dim_arr, Array, ArrayExt, ArrayStorage, DimVec,
+    Dimension, NdIterUnordered, PtrExt, PtrMutNoalias, PtrNoalias, Ty,
 };
 
 pub(crate) struct ReductionOp<S: ArrayStorage, K, D> {
@@ -194,16 +193,18 @@ where
         context: &'a ReadContext,
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
-        read_data_impl::<S::Dimension, D>(
+        read_data_impl::<S::Dimension>(
             &self.array,
             self.shape(),
             self.dtype(),
             size_of::<K::State>(),
             Alignment::of::<K::State>(),
             &self.is_reduced,
+            K::NEEDS_FINALIZE,
             &|args| reduce_tile::<S::Item, K>(&self.kernel, args),
-            &|args| {
-                finalize_states::<S::Item, K>(&self.kernel, args);
+            &|args| finalize_states_inner_loop::<S::Item, K>(&self.kernel, args),
+            &|out, len, out_stride| {
+                finalize_states_empty_inner_loop(&self.kernel, out, len, out_stride)
             },
             index,
             context,
@@ -254,15 +255,17 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-fn read_data_impl<'a, InnerD, OuterD>(
+fn read_data_impl<'a, InnerD>(
     inner_array: &dyn ArrayStorage,
     outer_shape: &[u64],
     output_dtype: &Dtype,
     kernel_state_sizeof: usize,
     kernel_state_alignof: Alignment,
     is_reduced: &InnerD::Vec<bool>,
+    needs_finalize: bool,
     reduce_tile_fn: &dyn Fn(ReduceTileArgs<'_>),
-    finalize_state_fn: &dyn Fn(FinalizeStateArgs<'_>),
+    finalize_state_fn: &dyn Fn(Finalize1DArgs),
+    finalize_state_empty_fn: &dyn Fn(*mut u8, usize, usize),
     index: &[Range<u64>],
     context: &'a ReadContext,
     out: Option<&'a mut StridedBuf<'_>>,
@@ -270,14 +273,13 @@ fn read_data_impl<'a, InnerD, OuterD>(
 ) -> Result<StridedBuf<'a>>
 where
     InnerD: Dimension,
-    OuterD: Dimension,
 {
     // This method accept some &dyn fns to avoid monomorphizing the whole method for every combination
     // of kernel, dimension, dtype, and backing storage.
 
     check_get_range(outer_shape, index)?;
     check_out_buf(out.as_deref(), outer_shape)?;
-    let out_shape_usize = OuterD::vec(index.len(), |d| (index[d].end - index[d].start) as usize);
+    let out_shape_usize = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
     let mut out = materialize_out_buf(
         out,
         context,
@@ -286,7 +288,6 @@ where
         read_layout_order,
     );
     let (out_buf, out_strides) = out.data_mut();
-    let out_strides = out_strides.to_dim_vec::<OuterD>();
 
     // Streams the reduction over a two-level chunking of the inner array so peak scratch
     // memory stays bounded *and* each downstream `self.array.read_data` call is sized to
@@ -360,7 +361,7 @@ where
         })
     };
 
-    let out_shape = OuterD::vec(index.len(), |dim| index[dim].end - index[dim].start);
+    let out_shape = dim_arr(index.len(), |dim| index[dim].end - index[dim].start);
 
     let tile_max_shape = InnerD::vec(inner_ndim, |dim| {
         inner_range_full[dim].end - inner_range_full[dim].start
@@ -442,7 +443,7 @@ where
     let (state_buf, state_strides) = if state_in_out_buf {
         // Reuse the output bytes as the state buffer
         let state_buf = unsafe { std::slice::from_raw_parts_mut(out_ptr, out_buf_len) };
-        (state_buf, out_strides.clone())
+        (state_buf, DimArray::from_slice(out_strides).unwrap())
     } else {
         tmp_state_buf =
             context.allocate_buf(out_nitems * kernel_state_sizeof, kernel_state_alignof);
@@ -542,14 +543,21 @@ where
     let state_ptr = state_buf.as_mut_ptr();
     // From here on the state/output buffers are touched only through `state_ptr` and
     // `out_ptr`. Dont use `state_buf`.
-    finalize_state_fn(FinalizeStateArgs {
-        out_shape: out_shape_usize.as_ref(),
-        state_buf: state_ptr,
-        state_buf_strides: state_strides.as_ref(),
-        out_buf: out_ptr,
-        out_buf_strides: out_strides.as_ref(),
-        full_reduction_size,
-    });
+    finalize_states(
+        FinalizeStateArgs {
+            out_shape: out_shape_usize.as_ref(),
+            state_buf: state_ptr,
+            state_buf_strides: state_strides.as_ref(),
+            out_buf: out_ptr,
+            out_buf_strides: out_strides.as_ref(),
+            full_reduction_size,
+        },
+        (kernel_state_sizeof as Itemsize, kernel_state_alignof),
+        (output_dtype.itemsize(), output_dtype.alignment()),
+        needs_finalize,
+        finalize_state_fn,
+        finalize_state_empty_fn,
+    );
     Ok(out)
 }
 
@@ -904,10 +912,15 @@ struct FinalizeStateArgs<'a> {
     out_buf_strides: &'a [usize],
     full_reduction_size: u64,
 }
-fn finalize_states<T, K>(kernel: &K, args: FinalizeStateArgs<'_>)
-where
-    K: ReductionOpKernel<T>,
-{
+#[inline(never)]
+fn finalize_states(
+    args: FinalizeStateArgs<'_>,
+    state_layout: (Itemsize, Alignment),
+    output_layout: (Itemsize, Alignment),
+    needs_finalize: bool,
+    finalize_run: &dyn Fn(Finalize1DArgs),
+    empty_run: &dyn Fn(*mut u8, usize, usize),
+) {
     let FinalizeStateArgs {
         out_shape,
         state_buf,
@@ -919,7 +932,7 @@ where
 
     if full_reduction_size > 0 {
         let state_in_out_buf = core::ptr::eq(state_buf, out_buf);
-        if !K::NEEDS_FINALIZE && state_in_out_buf {
+        if !needs_finalize && state_in_out_buf {
             // SAFETY: `NEEDS_FINALIZE == false` promises `finalize_state` is the identity and that
             // `K::Output` has `K::State`'s layout. With `state_in_out_buf` the states were folded
             // straight into the output buffer at the output strides, so those bytes already are the
@@ -931,47 +944,67 @@ where
         let iter = NdIterUnordered::<2>::new(
             out_shape,
             [out_buf_strides, state_buf_strides],
-            [
-                (
-                    size_of::<K::Output>() as Itemsize,
-                    Alignment::of::<K::Output>(),
-                ),
-                (
-                    size_of::<K::State>() as Itemsize,
-                    Alignment::of::<K::State>(),
-                ),
-            ],
+            [output_layout, state_layout],
         );
         iter.foreach_inner_1d(|offsets, len, inner_strides| {
             let [out_offset, state_offset] = offsets;
             let [out_stride, state_stride] = inner_strides;
-            for i in 0..len {
-                let state = unsafe { state_buf.add(state_offset + i * state_stride) };
-                let out = unsafe { out_buf.add(out_offset + i * out_stride) };
-                // CAREFUL: state and out may alias
-                let state = unsafe { state.cast::<K::State>().read_unaligned() };
-                let res = kernel.finalize_state(state, full_reduction_size);
-                unsafe { out.cast::<K::Output>().write_unaligned(res) };
-            }
+            finalize_run(Finalize1DArgs {
+                state: unsafe { state_buf.add(state_offset) },
+                state_stride,
+                out: unsafe { out_buf.add(out_offset) },
+                out_stride,
+                len,
+                full_reduction_size,
+            });
         });
     } else {
         // Empty reduction: write the empty-stream result to every output.
-        let iter = NdIterUnordered::<1>::new(
-            out_shape,
-            [out_buf_strides],
-            [(
-                size_of::<K::Output>() as Itemsize,
-                Alignment::of::<K::Output>(),
-            )],
-        );
+        let iter = NdIterUnordered::<1>::new(out_shape, [out_buf_strides], [output_layout]);
         iter.foreach_inner_1d(|[offset], len, [inner_stride]| {
-            for i in 0..len {
-                let out = unsafe { out_buf.add(offset + i * inner_stride) };
-                let state = kernel.init_state(None);
-                let res = kernel.finalize_state(state, 0);
-                unsafe { out.cast::<K::Output>().write_unaligned(res) };
-            }
+            empty_run(unsafe { out_buf.add(offset) }, len, inner_stride);
         });
+    }
+}
+
+struct Finalize1DArgs {
+    state: *mut u8,
+    state_stride: usize,
+    out: *mut u8,
+    out_stride: usize,
+    len: usize,
+    full_reduction_size: u64,
+}
+fn finalize_states_inner_loop<T, K>(kernel: &K, args: Finalize1DArgs)
+where
+    K: ReductionOpKernel<T>,
+{
+    let Finalize1DArgs {
+        state,
+        state_stride,
+        out,
+        out_stride,
+        len,
+        full_reduction_size,
+    } = args;
+    for i in 0..len {
+        // CAREFUL: state and out may alias
+        let state = unsafe { state.add(i * state_stride).cast::<K::State>() };
+        let out = unsafe { out.add(i * out_stride).cast::<K::Output>() };
+        let state = unsafe { state.read_unaligned() };
+        let res = kernel.finalize_state(state, full_reduction_size);
+        unsafe { out.write_unaligned(res) };
+    }
+}
+fn finalize_states_empty_inner_loop<T, K>(kernel: &K, out: *mut u8, len: usize, out_stride: usize)
+where
+    K: ReductionOpKernel<T>,
+{
+    for i in 0..len {
+        let out = unsafe { out.add(i * out_stride) };
+        let state = kernel.init_state(None);
+        let res = kernel.finalize_state(state, 0);
+        unsafe { out.cast::<K::Output>().write_unaligned(res) };
     }
 }
 
