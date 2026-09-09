@@ -530,7 +530,7 @@ where
 
             reduce_tile_fn(ReduceTileArgs {
                 tile_shape: tile_shape.as_ref(),
-                items,
+                items: &items,
                 states_buf: tile_state_base,
                 state_strides: state_strides_inner.as_ref(),
                 tile_base_reduced_idx,
@@ -563,7 +563,7 @@ where
 
 struct ReduceTileArgs<'a> {
     tile_shape: &'a [usize],
-    items: StridedBuf<'a>,
+    items: &'a StridedBuf<'a>,
     states_buf: PtrMutNoalias<'a, u8>,
     state_strides: &'a [usize],
 
@@ -576,6 +576,46 @@ where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
+    const LANES: usize = 16;
+    reduce_tile_impl(
+        args,
+        (size_of::<T>() as Itemsize, Alignment::of::<T>()),
+        (
+            size_of::<K::State>() as Itemsize,
+            Alignment::of::<K::State>(),
+        ),
+        &|args: FoldInnerLoopArgs<'_>, flags: FoldInnerLoopFlags| match flags {
+            FoldInnerLoopFlags::OneCell { contiguous: true } => {
+                fold_run_into_one_cell_inner_loop::<T, K, LANES, true>(kernel, args)
+            }
+            FoldInnerLoopFlags::OneCell { contiguous: false } => {
+                fold_run_into_one_cell_inner_loop::<T, K, LANES, false>(kernel, args)
+            }
+            FoldInnerLoopFlags::AcrossCells { contiguous: true } => {
+                fold_run_across_cells_inner_loop::<T, K, true>(kernel, args)
+            }
+            FoldInnerLoopFlags::AcrossCells { contiguous: false } => {
+                fold_run_across_cells_inner_loop::<T, K, false>(kernel, args)
+            }
+        },
+    );
+}
+
+type FoldInnerLoops<'a> = dyn Fn(FoldInnerLoopArgs<'_>, FoldInnerLoopFlags) + 'a;
+
+#[derive(Clone, Copy)]
+enum FoldInnerLoopFlags {
+    OneCell { contiguous: bool },
+    AcrossCells { contiguous: bool },
+}
+
+#[inline(never)]
+fn reduce_tile_impl(
+    args: ReduceTileArgs<'_>,
+    item_layout: (Itemsize, Alignment),
+    state_layout: (Itemsize, Alignment),
+    inner_loop: &FoldInnerLoops<'_>,
+) {
     let ReduceTileArgs {
         tile_shape,
         items,
@@ -590,11 +630,8 @@ where
         tile_shape,
         [items_strides, state_strides, reduced_shape_logical_strides],
         [
-            (size_of::<T>() as Itemsize, Alignment::of::<T>()),
-            (
-                size_of::<K::State>() as Itemsize,
-                Alignment::of::<K::State>(),
-            ),
+            item_layout,
+            state_layout,
             (1, Alignment::of::<u8>()), // arbitrary
         ],
         // reduced_shape_logical_strides are logical strides, not memory strides, ignore them
@@ -609,37 +646,32 @@ where
     let [_items_inner_stride, state_inner_stride, reduced_inner_stride] = iter.inner_strides();
     let [items_contiguous, state_contiguous, _] = iter.is_contiguous();
     let [items_strides_aligned, state_strides_aligned, _] = iter.is_aligned();
-    let items_aligned =
-        !REQUIRE_ALIGNED || (items_strides_aligned && items_buf.as_ptr().cast::<T>().is_aligned());
+    let items_aligned = !REQUIRE_ALIGNED
+        || (items_strides_aligned
+            && (items_buf.as_ptr() as usize).is_multiple_of(item_layout.1.as_usize()));
     // The state buffer is either a fresh pooled allocation made at the state's alignment, or the
     // caller's output buffer - which `state_in_out_buf` only accepts when it is aligned
-    debug_assert!(state_strides_aligned && states_buf.as_ptr().cast::<K::State>().is_aligned());
+    debug_assert!(
+        state_strides_aligned
+            && (states_buf.as_ptr() as usize).is_multiple_of(state_layout.1.as_usize()),
+        "the state buffer must be aligned for the kernel state",
+    );
 
     // The inner loop is either over (1) items for a single output cell, or (2) output cells, one
     // item each.
-    let is_inner_loop_over_items = state_inner_stride == 0;
-
-    let inner_loop_fn = if is_inner_loop_over_items {
-        // The innermost run walks a reduced axis, so all of its items fold into the single state
-        let contiguous = items_contiguous && items_aligned;
-        const LANES: usize = 16;
-        match contiguous {
-            true => fold_run_into_one_cell_inner_loop::<T, K, LANES, true>,
-            false => fold_run_into_one_cell_inner_loop::<T, K, LANES, false>,
+    let flags = if state_inner_stride == 0 {
+        FoldInnerLoopFlags::OneCell {
+            contiguous: items_contiguous && items_aligned,
         }
     } else {
-        // The innermost run walks a non-reduced axis, so we touch inner_len states, one item each
         debug_assert!(
             reduced_inner_stride == 0 || inner_len == 1,
             "a non-reduced innermost axis has no reduced-shape stride",
         );
-        let contiguous = items_contiguous && items_aligned && state_contiguous;
-        match contiguous {
-            true => fold_run_across_cells_inner_loop::<T, K, true>,
-            false => fold_run_across_cells_inner_loop::<T, K, false>,
+        FoldInnerLoopFlags::AcrossCells {
+            contiguous: items_contiguous && items_aligned && state_contiguous,
         }
     };
-
     let items_buf = PtrNoalias::<u8>::from_slice(items_buf);
     iter.foreach_inner_1d(move |offsets, inner_len, strides| {
         let [item_offset, state_offset, base_item_idx] = offsets;
@@ -650,22 +682,23 @@ where
 
         let base_item_idx = tile_base_reduced_idx + base_item_idx as u64;
 
-        inner_loop_fn(FoldInnerLoopArgs {
-            inner_len,
-            kernel,
-            items: items_buf,
-            states_buf,
-            items_stride,
-            state_stride,
-            idx_stride,
-            base_item_idx,
-        });
+        inner_loop(
+            FoldInnerLoopArgs {
+                inner_len,
+                items: items_buf,
+                states_buf,
+                items_stride,
+                state_stride,
+                idx_stride,
+                base_item_idx,
+            },
+            flags,
+        );
     });
 }
 
-struct FoldInnerLoopArgs<'a, K> {
+struct FoldInnerLoopArgs<'a> {
     inner_len: usize,
-    kernel: &'a K,
     items: PtrNoalias<'a, u8>,
     states_buf: PtrMutNoalias<'a, u8>,
     items_stride: usize,
@@ -675,14 +708,14 @@ struct FoldInnerLoopArgs<'a, K> {
 }
 
 fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS: bool>(
-    args: FoldInnerLoopArgs<'_, K>,
+    kernel: &K,
+    args: FoldInnerLoopArgs<'_>,
 ) where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
     let FoldInnerLoopArgs {
         inner_len,
-        kernel,
         items,
         states_buf,
         items_stride,
@@ -859,14 +892,15 @@ where
 }
 
 /// Inner-loop shape for a non-reduced innermost axis: one item folded into each of the run's cells.
-fn fold_run_across_cells_inner_loop<T, K, const CONTIGUOUS: bool>(args: FoldInnerLoopArgs<'_, K>)
-where
+fn fold_run_across_cells_inner_loop<T, K, const CONTIGUOUS: bool>(
+    kernel: &K,
+    args: FoldInnerLoopArgs<'_>,
+) where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
     let FoldInnerLoopArgs {
         inner_len: len,
-        kernel,
         items,
         states_buf: states,
         items_stride,
