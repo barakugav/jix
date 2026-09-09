@@ -328,8 +328,10 @@ where
         out: Option<&'a mut StridedBuf<'_>>,
     ) -> Result<StridedBuf<'a>> {
         check_out_buf(out.as_deref(), self.shape())?;
-        self.read_as_elementwise_pipeline::<O>(index, context)?
-            .to_buf(index, context, out)
+        let out = self
+            .read_as_elementwise_pipeline::<O>(index, context)?
+            .to_buf(index, context, out);
+        Ok(out)
     }
 
     #[inline]
