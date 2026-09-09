@@ -46,9 +46,8 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// `original_data`.
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
 
-    #[inline(never)]
     fn to_buf<'b>(
-        self,
+        &mut self,
         index: &[Range<u64>],
         context: &'b ReadContext,
         out: Option<&'b mut StridedBuf<'_>>,
@@ -71,7 +70,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
         let to_buf_fn = const {
             #[allow(clippy::type_complexity)]
             let mut to_buf_fn: Option<
-                fn(Self, &[usize], &mut StridedBuf<'_>, &ReadContext) -> Result<()>,
+                fn(&Self, &[usize], &mut StridedBuf<'_>, &ReadContext) -> Result<()>,
             > = None;
 
             if let Some(n_operands) = Self::N_OPERANDS {
@@ -111,7 +110,7 @@ pub(crate) trait ElementwisePipelineImpl<T> {
 impl<P, T> ElementwisePipeline<T> for P where P: ElementwisePipelineImpl<T> {}
 
 fn to_buf_impl<T, const N_OPERANDS: usize>(
-    pipeline: impl ElementwisePipelineImpl<T>,
+    pipeline: &impl ElementwisePipelineImpl<T>,
     shape: &[usize],
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
@@ -128,16 +127,16 @@ where
     };
 
     let loop_cc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, true>()(&pipeline, dst.cast(), dst_stride, len)
+        pick_inner_loop::<T, _, true, true>()(pipeline, dst.cast(), dst_stride, len)
     };
     let loop_cs = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, false>()(&pipeline, dst.cast(), dst_stride, len)
+        pick_inner_loop::<T, _, true, false>()(pipeline, dst.cast(), dst_stride, len)
     };
     let loop_sc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, true>()(&pipeline, dst.cast(), dst_stride, len)
+        pick_inner_loop::<T, _, false, true>()(pipeline, dst.cast(), dst_stride, len)
     };
     let loop_ss = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, false>()(&pipeline, dst.cast(), dst_stride, len)
+        pick_inner_loop::<T, _, false, false>()(pipeline, dst.cast(), dst_stride, len)
     };
     let factory = |flags: InnerLoopFlags| {
         let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
@@ -155,7 +154,7 @@ where
 
 // like `to_buf_impl`, but the number of operands is not known at compile time.
 fn to_buf_impl_dyn<T>(
-    pipeline: impl ElementwisePipelineImpl<T>,
+    pipeline: &impl ElementwisePipelineImpl<T>,
     shape: &[usize],
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
@@ -169,16 +168,16 @@ where
         .collect::<Vec<_>>();
 
     let loop_cc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, true>()(&pipeline, dst.cast(), dst_stride, len)
+        pick_inner_loop::<T, _, true, true>()(pipeline, dst.cast(), dst_stride, len)
     };
     let loop_cs = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, false>()(&pipeline, dst.cast(), dst_stride, len)
+        pick_inner_loop::<T, _, true, false>()(pipeline, dst.cast(), dst_stride, len)
     };
     let loop_sc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, true>()(&pipeline, dst.cast(), dst_stride, len)
+        pick_inner_loop::<T, _, false, true>()(pipeline, dst.cast(), dst_stride, len)
     };
     let loop_ss = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, false>()(&pipeline, dst.cast(), dst_stride, len)
+        pick_inner_loop::<T, _, false, false>()(pipeline, dst.cast(), dst_stride, len)
     };
     let factory = |flags: InnerLoopFlags| {
         let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
@@ -974,7 +973,7 @@ mod tests {
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
         }
-        let node = AddNode {
+        let mut node = AddNode {
             lhs: lhs_pipeline,
             rhs: rhs_pipeline,
         };
