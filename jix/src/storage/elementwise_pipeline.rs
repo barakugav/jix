@@ -121,28 +121,17 @@ fn to_buf_impl<T, const N_OPERANDS: usize>(
         operands
     };
 
-    let loop_cc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, true>()(pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_cs = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, false>()(pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_sc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, true>()(pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_ss = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, false>()(pipeline, dst.cast(), dst_stride, len)
-    };
-    let factory = |flags: InnerLoopFlags| {
-        let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => &loop_cc,
-            (true, false) => &loop_cs,
-            (false, true) => &loop_sc,
-            (false, false) => &loop_ss,
-        };
-        loop_fn
-    };
-    to_buf_type_erased(operands, &factory, index, context);
+    to_buf_type_erased(operands, index, context, &|dst, dst_stride, len, flags| {
+        let dst = dst.cast();
+        match (flags.inputs_contiguous, flags.output_contiguous) {
+            (true, true) => pick_inner_loop::<T, _, true, true>()(pipeline, dst, dst_stride, len),
+            (true, false) => pick_inner_loop::<T, _, true, false>()(pipeline, dst, dst_stride, len),
+            (false, true) => pick_inner_loop::<T, _, false, true>()(pipeline, dst, dst_stride, len),
+            (false, false) => {
+                pick_inner_loop::<T, _, false, false>()(pipeline, dst, dst_stride, len)
+            }
+        }
+    });
 }
 
 // like `to_buf_impl`, but the number of operands is not known at compile time.
@@ -159,36 +148,25 @@ fn to_buf_impl_dyn<T>(
         .chain(pipeline.operands())
         .collect::<Vec<_>>();
 
-    let loop_cc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, true>()(pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_cs = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, false>()(pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_sc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, true>()(pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_ss = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, false>()(pipeline, dst.cast(), dst_stride, len)
-    };
-    let factory = |flags: InnerLoopFlags| {
-        let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => &loop_cc,
-            (true, false) => &loop_cs,
-            (false, true) => &loop_sc,
-            (false, false) => &loop_ss,
-        };
-        loop_fn
-    };
-    to_buf_type_erased_dyn(&operands, &factory, index, context);
+    to_buf_type_erased_dyn(&operands, index, context, &|dst, dst_stride, len, flags| {
+        let dst = dst.cast();
+        match (flags.inputs_contiguous, flags.output_contiguous) {
+            (true, true) => pick_inner_loop::<T, _, true, true>()(pipeline, dst, dst_stride, len),
+            (true, false) => pick_inner_loop::<T, _, true, false>()(pipeline, dst, dst_stride, len),
+            (false, true) => pick_inner_loop::<T, _, false, true>()(pipeline, dst, dst_stride, len),
+            (false, false) => {
+                pick_inner_loop::<T, _, false, false>()(pipeline, dst, dst_stride, len)
+            }
+        }
+    });
 }
 
 #[inline(never)]
 fn to_buf_type_erased<const N_OPERANDS: usize>(
     operands: [&Operand<'_>; N_OPERANDS],
-    inner_loop_factory: InnerLoopFactory<'_>,
     index: &[Range<u64>],
     context: &ReadContext,
+    inner_loop: &InnerLoop<'_>,
 ) {
     let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
     let shape = shape.as_ref();
@@ -232,7 +210,6 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         inputs_contiguous: (1..N_OPERANDS).all(&operand_contiguous),
         output_contiguous: operand_contiguous(0),
     };
-    let inner_loop = inner_loop_factory(inner_loop_flags);
 
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
@@ -273,7 +250,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            inner_loop(dst, dst_stride, chunk_len);
+            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -295,9 +272,9 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
 #[inline(never)]
 fn to_buf_type_erased_dyn(
     operands: &[&Operand<'_>],
-    inner_loop_factory: InnerLoopFactory<'_>,
     index: &[Range<u64>],
     context: &ReadContext,
+    inner_loop: &InnerLoop<'_>,
 ) {
     let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
     let shape = shape.as_ref();
@@ -350,7 +327,6 @@ fn to_buf_type_erased_dyn(
         inputs_contiguous: (1..operands.len()).all(&operand_contiguous),
         output_contiguous: operand_contiguous(0),
     };
-    let inner_loop = inner_loop_factory(inner_loop_flags);
 
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
@@ -391,7 +367,7 @@ fn to_buf_type_erased_dyn(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            inner_loop(dst, dst_stride, chunk_len);
+            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -546,10 +522,9 @@ struct InnerLoopFlags {
     inputs_contiguous: bool,
     output_contiguous: bool,
 }
-type InnerLoop<'a> = dyn Fn(PtrMutNoalias<'_, u8>, usize, usize) + 'a;
-type InnerLoopFactory<'a> = &'a dyn Fn(InnerLoopFlags) -> &'a InnerLoop<'a>;
+type InnerLoop<'a> = dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags) + 'a;
 
-fn pick_inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
+const fn pick_inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
 ) -> fn(&P, PtrMutNoalias<'_, T>, usize, usize)
 where
     T: Dtyped,
