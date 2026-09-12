@@ -33,7 +33,7 @@ pub(crate) trait ReductionOpKernel<T> {
 
     /// Build the initial accumulator. `init_item` is the first stream element together with
     /// its TRUE global stream position (0-based), or `None` when the kernel was invoked on an
-    /// empty reduction. Kernels with [`supports_empty`](Self::supports_empty) returning
+    /// empty reduction. Kernels with [`SUPPORTS_EMPTY`](Self::SUPPORTS_EMPTY) set to
     /// `false` may unwrap `init_item` - the caller guarantees it is `Some` for those kernels.
     ///
     /// The bundled index is not always `0`: a lane accumulator is seeded from an interior
@@ -57,23 +57,33 @@ pub(crate) trait ReductionOpKernel<T> {
     /// were folded into `state`, so `nitems == 0` exactly when the reduction was empty.
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output;
 
+    /// Whether the kernel can produce a result for an empty stream - see
+    /// [`init_state`](Self::init_state), which receives `None` exactly then.
+    const SUPPORTS_EMPTY: bool;
+
     /// Whether [`finalize_state`](Self::finalize_state) does any actual work.
     ///
-    /// Returning `false` lets the caller skip the whole finalization pass and treat the state
-    /// bytes as the output bytes.
+    /// `false` lets the caller skip the whole finalization pass and treat the state bytes as the
+    /// output bytes.
     ///
     /// # Safety
     ///
-    /// Returning `false` is a promise that `finalize_state(state, nitems)` is the identity for
-    /// every `state` and `nitems`: [`Output`](Self::Output) must have the same layout as
-    /// [`State`](Self::State), and the returned value must be bit-identical to `state`. The caller
-    /// relies on this to reinterpret one buffer as the other without touching it.
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        true
-    }
+    /// Setting this to `false` is an unsafe promise. `false` asserts that
+    /// `finalize_state(state, nitems)` is the identity for every `state` and `nitems`:
+    /// [`Output`](Self::Output) must have the same layout as [`State`](Self::State), and the
+    /// returned value must be bit-identical to `state`. The caller relies on this to reinterpret
+    /// one buffer as the other without touching it.
+    const NEEDS_FINALIZE: bool = true;
 
-    fn supports_empty(&self) -> bool;
+    /// Whether a balanced merge tree is worth building for this kernel.
+    ///
+    /// `true` asks the fold to split a long run in half recursively, so that
+    /// [`merge_states`](Self::merge_states) combines partials of similar size and the result is
+    /// reached through a `log(n)`-deep tree rather than one linear chain. That is what floating
+    /// point accumulation wants. `false` says the kernel's result does not depend on how the
+    /// stream is grouped - exact integer or comparison folds - so the whole run is folded in one
+    /// pass and the tree is skipped entirely.
+    const PREFER_TREE_MERGE: bool;
 }
 
 impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
@@ -99,7 +109,7 @@ impl<S: ArrayStorage, K, D> ReductionOp<S, K, D> {
             is_reduced[ax] = true;
         }
 
-        if !kernel.supports_empty()
+        if !K::SUPPORTS_EMPTY
             && array
                 .shape()
                 .iter()
@@ -676,59 +686,34 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
     } = args;
 
     debug_assert_eq!(state_stride, 0);
-
-    let items = items.as_ptr().cast::<T>();
-    let read_items_bulk = |offset: usize| -> [T; LANES] {
-        if CONTIGUOUS {
-            unsafe {
-                items
-                    .add(offset)
-                    .cast::<[T; LANES]>()
-                    .read_maybe_aligned::<REQUIRE_ALIGNED>()
-            }
-        } else {
-            unsafe {
-                array_from_fn_inline(|b| {
-                    items.byte_add((offset + b) * items_stride).read_unaligned()
-                })
-            }
-        }
-    };
-    let item_idx = |i: usize| base_item_idx + (i * idx_stride) as u64;
-    let mut i = 0;
-
-    // Seed one accumulator per lane from the first LANES items.
     debug_assert!(inner_len >= LANES);
-    let mut states =
-        read_items_bulk(0).map_enumerate(|b, item| kernel.init_state(Some((item, item_idx(b)))));
-    i += LANES;
 
-    let mut state = if LANES > 1 {
-        // Process the main bulk of the run in LANES-sized chunks.
-        let body_limit = inner_len - inner_len % LANES;
-        while i < body_limit {
-            let bulk = read_items_bulk(i);
-            states = states
-                .map_enumerate(|b, state| kernel.update_state(state, bulk[b], item_idx(i + b)));
-            i += LANES;
-        }
-
-        // merge the LANES states to a single one
-        merge_states::<T, K, LANES>(kernel, states)
-    } else {
-        debug_assert_eq!(states.len(), 1);
-        states.into_iter().next().unwrap()
+    let ctx = FoldRunCtx {
+        kernel,
+        items: items.cast::<T>(),
+        items_stride,
+        idx_stride,
+        base_item_idx,
     };
 
-    // Fold any remaining tail sequentially.
-    while i < inner_len {
-        let item = if CONTIGUOUS {
-            unsafe { items.add(i).read_maybe_aligned::<REQUIRE_ALIGNED>() }
-        } else {
-            unsafe { items.byte_add(i * items_stride).read_unaligned() }
-        };
-        state = kernel.update_state(state, item, item_idx(i));
+    // Fold the body of the run as a pairwise tree
+    let body_len = inner_len - inner_len % LANES;
+    let mut state = fold_run_pairwise::<T, K, LANES, CONTIGUOUS>(&ctx, 0, body_len);
+
+    // Fold the tail sequentially
+    let tail_len = inner_len - body_len;
+    debug_assert!(tail_len < LANES);
+    if tail_len > 0 {
+        let mut i = body_len;
+        let mut tail_state =
+            kernel.init_state(Some((ctx.read_item::<CONTIGUOUS>(i), ctx.item_idx(i))));
         i += 1;
+        while i < inner_len {
+            tail_state =
+                kernel.update_state(tail_state, ctx.read_item::<CONTIGUOUS>(i), ctx.item_idx(i));
+            i += 1;
+        }
+        state = kernel.merge_states(state, tail_state);
     }
 
     let state_ref = unsafe { &mut *states_buf.as_mut_ptr().cast::<MaybeUninit<K::State>>() };
@@ -737,6 +722,107 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
         state = kernel.merge_states(prev, state);
     }
     state_ref.write(state);
+}
+
+struct FoldRunCtx<'a, T, K> {
+    kernel: &'a K,
+    items: PtrNoalias<'a, T>,
+    items_stride: usize,
+    idx_stride: usize,
+    base_item_idx: u64,
+}
+
+impl<T: Dtyped, K> FoldRunCtx<'_, T, K> {
+    #[inline(always)]
+    fn item_idx(&self, i: usize) -> u64 {
+        self.base_item_idx + (i * self.idx_stride) as u64
+    }
+
+    #[inline(always)]
+    fn read_item<const CONTIGUOUS: bool>(&self, i: usize) -> T {
+        let items = self.items.as_ptr();
+        if CONTIGUOUS {
+            unsafe { items.add(i).read_maybe_aligned::<REQUIRE_ALIGNED>() }
+        } else {
+            unsafe { items.byte_add(i * self.items_stride).read_unaligned() }
+        }
+    }
+
+    #[inline(always)]
+    fn read_items_bulk<const LANES: usize, const CONTIGUOUS: bool>(&self, i: usize) -> [T; LANES] {
+        let items = self.items.as_ptr();
+        if CONTIGUOUS {
+            unsafe {
+                items
+                    .add(i)
+                    .cast::<[T; LANES]>()
+                    .read_maybe_aligned::<REQUIRE_ALIGNED>()
+            }
+        } else {
+            unsafe {
+                array_from_fn_inline(|b| {
+                    items.byte_add((i + b) * self.items_stride).read_unaligned()
+                })
+            }
+        }
+    }
+}
+
+fn fold_run_pairwise<T, K, const LANES: usize, const CONTIGUOUS: bool>(
+    ctx: &FoldRunCtx<'_, T, K>,
+    begin: usize,
+    len: usize,
+) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    const SPLIT_THRESHOLD: usize = 512;
+
+    const { assert!(SPLIT_THRESHOLD >= 2 * LANES) };
+    debug_assert!(len >= LANES && len.is_multiple_of(LANES));
+
+    if len <= SPLIT_THRESHOLD || !K::PREFER_TREE_MERGE {
+        return fold_run_leaf::<T, K, LANES, CONTIGUOUS>(ctx, begin, len);
+    }
+
+    let half = len / 2;
+    let left_len = half - (half) % LANES;
+    debug_assert!(left_len >= LANES && len - left_len >= LANES);
+    let left = fold_run_pairwise::<T, K, LANES, CONTIGUOUS>(ctx, begin, left_len);
+    let right = fold_run_pairwise::<T, K, LANES, CONTIGUOUS>(ctx, begin + left_len, len - left_len);
+    ctx.kernel.merge_states(left, right)
+}
+
+#[inline(never)]
+fn fold_run_leaf<T, K, const LANES: usize, const CONTIGUOUS: bool>(
+    ctx: &FoldRunCtx<'_, T, K>,
+    begin: usize,
+    len: usize,
+) -> K::State
+where
+    T: Dtyped,
+    K: ReductionOpKernel<T>,
+{
+    debug_assert!(len >= LANES && len.is_multiple_of(LANES));
+    let kernel = ctx.kernel;
+
+    // Seed one accumulator per lane from the first LANES items, then walk the rest in
+    // LANES-sized chunks - exactly `len / LANES - 1` of them, with nothing left over.
+    let mut states = ctx
+        .read_items_bulk::<LANES, CONTIGUOUS>(begin)
+        .map_enumerate(|b, item| kernel.init_state(Some((item, ctx.item_idx(begin + b)))));
+    let end = begin + len;
+    let mut i = begin + LANES;
+    while i < end {
+        let bulk = ctx.read_items_bulk::<LANES, CONTIGUOUS>(i);
+        states = states
+            .map_enumerate(|b, state| kernel.update_state(state, bulk[b], ctx.item_idx(i + b)));
+        i += LANES;
+    }
+
+    // merge the LANES states to a single one
+    merge_states::<T, K, LANES>(kernel, states)
 }
 /// Collapse `LANES` lane accumulators into one via a bottom-up pairwise tree (dependency
 /// depth `log2(LANES)`). `LANES` must be a power of two.
@@ -833,8 +919,8 @@ where
 
     if full_reduction_size > 0 {
         let state_in_out_buf = core::ptr::eq(state_buf, out_buf);
-        if !unsafe { kernel.needs_finalize() } && state_in_out_buf {
-            // SAFETY: `needs_finalize() == false` promises `finalize_state` is the identity and that
+        if !K::NEEDS_FINALIZE && state_in_out_buf {
+            // SAFETY: `NEEDS_FINALIZE == false` promises `finalize_state` is the identity and that
             // `K::Output` has `K::State`'s layout. With `state_in_out_buf` the states were folded
             // straight into the output buffer at the output strides, so those bytes already are the
             // final output and there is nothing left to do.
@@ -1041,6 +1127,10 @@ pub(crate) mod _traits {
     pub trait Sum {
         /// The sum element type: `i64`/`u64` for integers and `bool`, otherwise the input type.
         type Output;
+        /// Whether summing this type is exact: `true` for the integer accumulators, whose
+        /// result does not depend on how the stream is grouped, `false` for the float and
+        /// complex ones, where every partial sum rounds.
+        const IS_PRECISE: bool;
         /// Return the initial accumulator (zero).
         fn init() -> Self::Output;
         /// Fold `item` into the running sum.
@@ -1050,9 +1140,11 @@ pub(crate) mod _traits {
     }
 
     macro_rules! impl_sum {
-        ($item_ty:ty, $output_ty:ty) => {
+        ($item_ty:ty, $output_ty:ty, is_precise = $is_precise:expr) => {
             impl Sum for $item_ty {
                 type Output = $output_ty;
+
+                const IS_PRECISE: bool = $is_precise;
 
                 #[inline(always)]
                 fn init() -> Self::Output {
@@ -1069,23 +1161,23 @@ pub(crate) mod _traits {
             }
         };
     }
-    impl_sum!(i8, i64);
-    impl_sum!(i16, i64);
-    impl_sum!(i32, i64);
-    impl_sum!(i64, i64);
-    impl_sum!(u8, u64);
-    impl_sum!(u16, u64);
-    impl_sum!(u32, u64);
-    impl_sum!(u64, u64);
+    impl_sum!(i8, i64, is_precise = true);
+    impl_sum!(i16, i64, is_precise = true);
+    impl_sum!(i32, i64, is_precise = true);
+    impl_sum!(i64, i64, is_precise = true);
+    impl_sum!(u8, u64, is_precise = true);
+    impl_sum!(u16, u64, is_precise = true);
+    impl_sum!(u32, u64, is_precise = true);
+    impl_sum!(u64, u64, is_precise = true);
     #[cfg(feature = "half")]
-    impl_sum!(f16, f16);
-    impl_sum!(f32, f32);
-    impl_sum!(f64, f64);
+    impl_sum!(f16, f16, is_precise = false);
+    impl_sum!(f32, f32, is_precise = false);
+    impl_sum!(f64, f64, is_precise = false);
     #[cfg(feature = "num-complex")]
-    impl_sum!(Complex<f32>, Complex<f32>);
+    impl_sum!(Complex<f32>, Complex<f32>, is_precise = false);
     #[cfg(feature = "num-complex")]
-    impl_sum!(Complex<f64>, Complex<f64>);
-    impl_sum!(bool, u64);
+    impl_sum!(Complex<f64>, Complex<f64>, is_precise = false);
+    impl_sum!(bool, u64, is_precise = true);
 
     /// Scalar kernel trait for the element-wise `product` reduction.
     ///
@@ -1152,6 +1244,8 @@ pub(crate) mod _traits {
         type Output;
         /// Accumulator state - the running sum.
         type State;
+        /// Whether the sum this mean accumulates is exact.
+        const IS_PRECISE_SUM: bool;
         /// Return the initial (empty) accumulator.
         fn init() -> Self::State;
         /// Fold `item` into the running sum.
@@ -1167,6 +1261,8 @@ pub(crate) mod _traits {
             impl Mean for $item_ty {
                 type Output = $output_ty;
                 type State = <Self as Sum>::Output;
+
+                const IS_PRECISE_SUM: bool = <Self as Sum>::IS_PRECISE;
 
                 #[inline(always)]
                 fn init() -> Self::State {
@@ -1402,14 +1498,9 @@ where
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        false
-    }
+    const SUPPORTS_EMPTY: bool = false;
+    const NEEDS_FINALIZE: bool = false;
+    const PREFER_TREE_MERGE: bool = false;
 }
 
 define_reduction_op!(
@@ -1473,14 +1564,9 @@ where
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        false
-    }
+    const SUPPORTS_EMPTY: bool = false;
+    const NEEDS_FINALIZE: bool = false;
+    const PREFER_TREE_MERGE: bool = false;
 }
 
 define_reduction_op!(
@@ -1582,10 +1668,8 @@ where
         let (best_idx, _best_val) = state;
         best_idx
     }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        false
-    }
+    const SUPPORTS_EMPTY: bool = false;
+    const PREFER_TREE_MERGE: bool = false;
 }
 
 define_reduction_op!(
@@ -1686,10 +1770,8 @@ where
         let (best_idx, _best_val) = state;
         best_idx
     }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        false
-    }
+    const SUPPORTS_EMPTY: bool = false;
+    const PREFER_TREE_MERGE: bool = false;
 }
 
 define_reduction_op!(
@@ -1770,14 +1852,9 @@ where
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        true
-    }
+    const SUPPORTS_EMPTY: bool = true;
+    const NEEDS_FINALIZE: bool = false;
+    const PREFER_TREE_MERGE: bool = !<T as crate::scalar::Sum>::IS_PRECISE;
 }
 
 define_reduction_op!(
@@ -1858,14 +1935,9 @@ where
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        true
-    }
+    const SUPPORTS_EMPTY: bool = true;
+    const NEEDS_FINALIZE: bool = false;
+    const PREFER_TREE_MERGE: bool = false;
 }
 
 define_reduction_op!(
@@ -1935,10 +2007,8 @@ where
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
         <T as crate::scalar::Mean>::finalize(state, nitems).unwrap()
     }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        false
-    }
+    const SUPPORTS_EMPTY: bool = false;
+    const PREFER_TREE_MERGE: bool = !<T as crate::scalar::Mean>::IS_PRECISE_SUM;
 }
 
 define_reduction_op!(
@@ -2014,10 +2084,8 @@ where
     fn finalize_state(&self, state: Self::State, nitems: u64) -> Self::Output {
         <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems)
     }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        false
-    }
+    const SUPPORTS_EMPTY: bool = false;
+    const PREFER_TREE_MERGE: bool = true;
 }
 
 define_reduction_op!(
@@ -2090,10 +2158,8 @@ where
         let var = <T as crate::scalar::Variance>::finalize(state, self.ddof, nitems);
         <_ as num_traits::Float>::sqrt(var)
     }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        false
-    }
+    const SUPPORTS_EMPTY: bool = false;
+    const PREFER_TREE_MERGE: bool = true;
 }
 
 define_reduction_op!(
@@ -2156,14 +2222,9 @@ impl ReductionOpKernel<bool> for AllKernel {
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        true
-    }
+    const SUPPORTS_EMPTY: bool = true;
+    const NEEDS_FINALIZE: bool = false;
+    const PREFER_TREE_MERGE: bool = false;
 }
 
 define_reduction_op!(
@@ -2226,14 +2287,9 @@ impl ReductionOpKernel<bool> for AnyKernel {
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        true
-    }
+    const SUPPORTS_EMPTY: bool = true;
+    const NEEDS_FINALIZE: bool = false;
+    const PREFER_TREE_MERGE: bool = false;
 }
 
 /// Reduces one or more axes by combining the elements along those axes with a user-supplied
@@ -2351,14 +2407,9 @@ where
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        false
-    }
+    const SUPPORTS_EMPTY: bool = false;
+    const NEEDS_FINALIZE: bool = false;
+    const PREFER_TREE_MERGE: bool = true;
 }
 impl<S, D, F> ArrayStorage for Reduce<S, D, F>
 where
@@ -2524,14 +2575,9 @@ where
     fn finalize_state(&self, state: Self::State, _nitems: u64) -> Self::Output {
         state
     }
-    #[inline(always)]
-    unsafe fn needs_finalize(&self) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn supports_empty(&self) -> bool {
-        true
-    }
+    const SUPPORTS_EMPTY: bool = true;
+    const NEEDS_FINALIZE: bool = false;
+    const PREFER_TREE_MERGE: bool = true;
 }
 impl<S, D, B, F> ArrayStorage for Fold<S, D, B, F>
 where
@@ -3609,6 +3655,39 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sum_f32_pairwise_error_does_not_grow_with_run_length() {
+        // `fold_run_pairwise` splits a run longer than `SPLIT_THRESHOLD` in half, so a long f32 sum
+        // accumulates in a log-deep tree rather than one linear chain per lane. One huge leading
+        // value followed by ones makes the difference visible: at 2^24 an f32 cannot represent an
+        // odd neighbour, so every `1.0` folded straight onto the big running total is lost. A
+        // linear chain loses ~len/LANES of them and gets worse the longer the run, while pairwise
+        // loses only the few inside the one leaf holding the big value, however long the run is.
+        const N: usize = 65536;
+        let mut data = vec![1.0f32; N];
+        data[0] = (1u32 << 24) as f32;
+        // Exact in f64 - both 2^24 and the count of ones are represented exactly.
+        let exact = f64::from(1u32 << 24) + (N - 1) as f64;
+
+        let nd = ndarray::ArrayD::from_shape_vec(vec![N], data).unwrap();
+        let mut params = crate::ArrayParams::new();
+        // One block and one tile over the whole array, so the run reaches a single
+        // `fold_run_pairwise` call rather than being split across tiles and merged sequentially.
+        params.block_shape(&[N as u32]);
+        params.read_size((1 << 19, 1 << 20));
+        let za = Array::compact_ndarray_with(&nd, params).unwrap();
+
+        let got = f64::from(za.view().sum(0usize).to_ndarray().unwrap()[[]]);
+        let err = (exact - got).abs();
+        // Pairwise loses 7 of the ones; a 16-lane linear chain over the whole run loses 4095.
+        // The bound is loose enough to survive retuning LANES / SPLIT_THRESHOLD, tight enough that
+        // going back to a single linear pass fails it.
+        assert!(
+            err <= 64.0,
+            "f32 sum lost {err} (got {got}, exact {exact}) - is the run still folded pairwise?",
+        );
+    }
+
+    #[test]
     fn sum_into_strided_2d_output_multi_bulk() {
         // A reduction must write straight into a *strided* (non-contiguous) destination using the
         // caller's own byte-strides - not stage through a contiguous scratch and scatter. This
@@ -4166,9 +4245,8 @@ pub(crate) mod tests {
             fn finalize_state(&self, _state: Self::State, _nitems: u64) -> Self::Output {
                 []
             }
-            fn supports_empty(&self) -> bool {
-                true
-            }
+            const SUPPORTS_EMPTY: bool = true;
+            const PREFER_TREE_MERGE: bool = false;
         }
 
         let za = Array::compact_ndarray(&array![1i32, 2, 3]).unwrap();
