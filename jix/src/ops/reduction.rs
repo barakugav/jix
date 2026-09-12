@@ -549,7 +549,7 @@ where
             state_buf: state_ptr,
             state_buf_strides: state_strides.as_ref(),
             out_buf: out_ptr,
-            out_buf_strides: out_strides.as_ref(),
+            out_buf_strides: out_strides,
             full_reduction_size,
         },
         (kernel_state_sizeof as Itemsize, kernel_state_alignof),
@@ -576,7 +576,6 @@ where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
-    const LANES: usize = 16;
     reduce_tile_impl(
         args,
         (size_of::<T>() as Itemsize, Alignment::of::<T>()),
@@ -586,10 +585,10 @@ where
         ),
         &|args: FoldInnerLoopArgs<'_>, flags: FoldInnerLoopFlags| match flags {
             FoldInnerLoopFlags::OneCell { contiguous: true } => {
-                fold_run_into_one_cell_inner_loop::<T, K, LANES, true>(kernel, args)
+                fold_run_into_one_cell_inner_loop::<T, K, true>(kernel, args)
             }
             FoldInnerLoopFlags::OneCell { contiguous: false } => {
-                fold_run_into_one_cell_inner_loop::<T, K, LANES, false>(kernel, args)
+                fold_run_into_one_cell_inner_loop::<T, K, false>(kernel, args)
             }
             FoldInnerLoopFlags::AcrossCells { contiguous: true } => {
                 fold_run_across_cells_inner_loop::<T, K, true>(kernel, args)
@@ -697,6 +696,8 @@ fn reduce_tile_impl(
     });
 }
 
+const ONE_CELL_LANES: usize = 16;
+
 struct FoldInnerLoopArgs<'a> {
     inner_len: usize,
     items: PtrNoalias<'a, u8>,
@@ -706,8 +707,7 @@ struct FoldInnerLoopArgs<'a> {
     idx_stride: usize,
     base_item_idx: u64,
 }
-
-fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS: bool>(
+fn fold_run_into_one_cell_inner_loop<T, K, const CONTIGUOUS: bool>(
     kernel: &K,
     args: FoldInnerLoopArgs<'_>,
 ) where
@@ -736,13 +736,13 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
     };
 
     // Fold the body of the run as a pairwise tree
-    let body_len = inner_len - inner_len % LANES;
+    let body_len = inner_len - inner_len % ONE_CELL_LANES;
     let mut state =
-        (body_len > 0).then(|| fold_run_pairwise::<T, K, LANES, CONTIGUOUS>(&ctx, 0, body_len));
+        (body_len > 0).then(|| fold_run_pairwise::<T, K, CONTIGUOUS>(&ctx, 0, body_len));
 
     // Fold the tail sequentially
     let tail_len = inner_len - body_len;
-    debug_assert!(tail_len < LANES);
+    debug_assert!(tail_len < ONE_CELL_LANES);
     if tail_len > 0 {
         let mut i = body_len;
         let mut tail_state =
@@ -812,7 +812,7 @@ impl<T: Dtyped, K> FoldRunCtx<'_, T, K> {
     }
 }
 
-fn fold_run_pairwise<T, K, const LANES: usize, const CONTIGUOUS: bool>(
+fn fold_run_pairwise<T, K, const CONTIGUOUS: bool>(
     ctx: &FoldRunCtx<'_, T, K>,
     begin: usize,
     len: usize,
@@ -822,24 +822,25 @@ where
     K: ReductionOpKernel<T>,
 {
     const SPLIT_THRESHOLD: usize = 512;
+    const LANES: usize = ONE_CELL_LANES;
 
     const { assert!(SPLIT_THRESHOLD >= 2 * LANES) };
     debug_assert!(len >= LANES && len.is_multiple_of(LANES));
 
     if len <= SPLIT_THRESHOLD || !K::PREFER_TREE_MERGE {
-        return fold_run_leaf::<T, K, LANES, CONTIGUOUS>(ctx, begin, len);
+        return fold_run_leaf::<T, K, CONTIGUOUS>(ctx, begin, len);
     }
 
     let half = len / 2;
     let left_len = half - (half) % LANES;
     debug_assert!(left_len >= LANES && len - left_len >= LANES);
-    let left = fold_run_pairwise::<T, K, LANES, CONTIGUOUS>(ctx, begin, left_len);
-    let right = fold_run_pairwise::<T, K, LANES, CONTIGUOUS>(ctx, begin + left_len, len - left_len);
+    let left = fold_run_pairwise::<T, K, CONTIGUOUS>(ctx, begin, left_len);
+    let right = fold_run_pairwise::<T, K, CONTIGUOUS>(ctx, begin + left_len, len - left_len);
     ctx.kernel.merge_states(left, right)
 }
 
 #[inline(never)]
-fn fold_run_leaf<T, K, const LANES: usize, const CONTIGUOUS: bool>(
+fn fold_run_leaf<T, K, const CONTIGUOUS: bool>(
     ctx: &FoldRunCtx<'_, T, K>,
     begin: usize,
     len: usize,
@@ -848,6 +849,7 @@ where
     T: Dtyped,
     K: ReductionOpKernel<T>,
 {
+    const LANES: usize = ONE_CELL_LANES;
     debug_assert!(len >= LANES && len.is_multiple_of(LANES));
     let kernel = ctx.kernel;
 
