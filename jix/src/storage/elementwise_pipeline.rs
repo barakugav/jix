@@ -6,7 +6,6 @@ use std::ops::Range;
 use crate::buf_pool::PoolBuf;
 use crate::codec::ReadContext;
 use crate::dtype::{Dtype, Dtyped};
-use crate::error::Result;
 use crate::ops::LanesInfo;
 use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
@@ -46,32 +45,28 @@ pub(crate) trait ElementwisePipelineImpl<T> {
     /// `original_data`.
     unsafe fn read_bulk<const N: usize, const CONTIGUOUS: bool>(&self, offset: usize) -> [T; N];
 
-    #[inline(never)]
     fn to_buf<'b>(
-        self,
+        &mut self,
         index: &[Range<u64>],
         context: &'b ReadContext,
         out: Option<&'b mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'b>>
+    ) -> StridedBuf<'b>
     where
         T: Dtyped,
         Self: Sized,
     {
-        let (shape, mut out) = materialize_pipeline_out_buf(
+        let mut out = materialize_pipeline_out_buf(
             index,
             &mut self.operands(),
             Dtype::new_ref::<T>(),
             context,
             out,
         );
-        if shape.contains(&0) {
-            return Ok(out); // empty region
-        }
 
         let to_buf_fn = const {
             #[allow(clippy::type_complexity)]
             let mut to_buf_fn: Option<
-                fn(Self, &[usize], &mut StridedBuf<'_>, &ReadContext) -> Result<()>,
+                fn(&Self, &[Range<u64>], &mut StridedBuf<'_>, &ReadContext),
             > = None;
 
             if let Some(n_operands) = Self::N_OPERANDS {
@@ -103,20 +98,19 @@ pub(crate) trait ElementwisePipelineImpl<T> {
             }
         };
 
-        to_buf_fn(self, shape.as_ref(), &mut out, context)?;
+        to_buf_fn(self, index, &mut out, context);
 
-        Ok(out)
+        out
     }
 }
 impl<P, T> ElementwisePipeline<T> for P where P: ElementwisePipelineImpl<T> {}
 
 fn to_buf_impl<T, const N_OPERANDS: usize>(
-    pipeline: impl ElementwisePipelineImpl<T>,
-    shape: &[usize],
+    pipeline: &impl ElementwisePipelineImpl<T>,
+    index: &[Range<u64>],
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
-) -> Result<()>
-where
+) where
     T: Dtyped,
 {
     let out_operand = Operand::new_output(out, Dtype::new_ref::<T>());
@@ -127,40 +121,26 @@ where
         operands
     };
 
-    let loop_cc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, true>()(&pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_cs = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, false>()(&pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_sc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, true>()(&pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_ss = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, false>()(&pipeline, dst.cast(), dst_stride, len)
-    };
-    let factory = |flags: InnerLoopFlags| {
-        let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => &loop_cc,
-            (true, false) => &loop_cs,
-            (false, true) => &loop_sc,
-            (false, false) => &loop_ss,
-        };
-        loop_fn
-    };
-    to_buf_type_erased(operands, &factory, shape, context);
-
-    Ok(())
+    to_buf_type_erased(operands, index, context, &|dst, dst_stride, len, flags| {
+        let dst = dst.cast();
+        match (flags.inputs_contiguous, flags.output_contiguous) {
+            (true, true) => pick_inner_loop::<T, _, true, true>()(pipeline, dst, dst_stride, len),
+            (true, false) => pick_inner_loop::<T, _, true, false>()(pipeline, dst, dst_stride, len),
+            (false, true) => pick_inner_loop::<T, _, false, true>()(pipeline, dst, dst_stride, len),
+            (false, false) => {
+                pick_inner_loop::<T, _, false, false>()(pipeline, dst, dst_stride, len)
+            }
+        }
+    });
 }
 
 // like `to_buf_impl`, but the number of operands is not known at compile time.
 fn to_buf_impl_dyn<T>(
-    pipeline: impl ElementwisePipelineImpl<T>,
-    shape: &[usize],
+    pipeline: &impl ElementwisePipelineImpl<T>,
+    index: &[Range<u64>],
     out: &mut StridedBuf<'_>,
     context: &ReadContext,
-) -> Result<()>
-where
+) where
     T: Dtyped,
 {
     let out_operand = Operand::new_output(out, Dtype::new_ref::<T>());
@@ -168,38 +148,31 @@ where
         .chain(pipeline.operands())
         .collect::<Vec<_>>();
 
-    let loop_cc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, true>()(&pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_cs = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, true, false>()(&pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_sc = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, true>()(&pipeline, dst.cast(), dst_stride, len)
-    };
-    let loop_ss = |dst: PtrMutNoalias<'_, u8>, dst_stride: usize, len: usize| {
-        pick_inner_loop::<T, _, false, false>()(&pipeline, dst.cast(), dst_stride, len)
-    };
-    let factory = |flags: InnerLoopFlags| {
-        let loop_fn: &'_ InnerLoop<'_> = match (flags.inputs_contiguous, flags.output_contiguous) {
-            (true, true) => &loop_cc,
-            (true, false) => &loop_cs,
-            (false, true) => &loop_sc,
-            (false, false) => &loop_ss,
-        };
-        loop_fn
-    };
-    to_buf_type_erased_dyn(&operands, &factory, shape, context);
-    Ok(())
+    to_buf_type_erased_dyn(&operands, index, context, &|dst, dst_stride, len, flags| {
+        let dst = dst.cast();
+        match (flags.inputs_contiguous, flags.output_contiguous) {
+            (true, true) => pick_inner_loop::<T, _, true, true>()(pipeline, dst, dst_stride, len),
+            (true, false) => pick_inner_loop::<T, _, true, false>()(pipeline, dst, dst_stride, len),
+            (false, true) => pick_inner_loop::<T, _, false, true>()(pipeline, dst, dst_stride, len),
+            (false, false) => {
+                pick_inner_loop::<T, _, false, false>()(pipeline, dst, dst_stride, len)
+            }
+        }
+    });
 }
 
 #[inline(never)]
 fn to_buf_type_erased<const N_OPERANDS: usize>(
     operands: [&Operand<'_>; N_OPERANDS],
-    inner_loop_factory: InnerLoopFactory<'_>,
-    shape: &[usize],
+    index: &[Range<u64>],
     context: &ReadContext,
+    inner_loop: &InnerLoop<'_>,
 ) {
+    let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+    let shape = shape.as_ref();
+    if shape.contains(&0) {
+        return;
+    }
     let out_operand = operands[0];
     let output_dtype = out_operand.dtype;
     let is_output_operand = |op_i: usize| op_i == 0;
@@ -237,7 +210,6 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         inputs_contiguous: (1..N_OPERANDS).all(&operand_contiguous),
         output_contiguous: operand_contiguous(0),
     };
-    let inner_loop = inner_loop_factory(inner_loop_flags);
 
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
@@ -278,7 +250,7 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            inner_loop(dst, dst_stride, chunk_len);
+            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -300,10 +272,15 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
 #[inline(never)]
 fn to_buf_type_erased_dyn(
     operands: &[&Operand<'_>],
-    inner_loop_factory: InnerLoopFactory<'_>,
-    shape: &[usize],
+    index: &[Range<u64>],
     context: &ReadContext,
+    inner_loop: &InnerLoop<'_>,
 ) {
+    let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+    let shape = shape.as_ref();
+    if shape.contains(&0) {
+        return;
+    }
     let out_operand = operands[0];
     let output_dtype = out_operand.dtype;
     let is_output_operand = |op_i: usize| op_i == 0;
@@ -350,7 +327,6 @@ fn to_buf_type_erased_dyn(
         inputs_contiguous: (1..operands.len()).all(&operand_contiguous),
         output_contiguous: operand_contiguous(0),
     };
-    let inner_loop = inner_loop_factory(inner_loop_flags);
 
     iter.foreach_inner_1d(|offsets, len, inner_strides| {
         for pos in (0..len).step_by(chunk_len_max) {
@@ -391,7 +367,7 @@ fn to_buf_type_erased_dyn(
                     strided_span_bytes(&[chunk_len], &[dst_stride], layouts[0].0 as usize),
                 )
             };
-            inner_loop(dst, dst_stride, chunk_len);
+            inner_loop(dst, dst_stride, chunk_len, inner_loop_flags);
 
             if let Some(staging) = &staging[0] {
                 // Scatter the chunk just written back out of the destination's scratch buffer.
@@ -546,10 +522,9 @@ struct InnerLoopFlags {
     inputs_contiguous: bool,
     output_contiguous: bool,
 }
-type InnerLoop<'a> = dyn Fn(PtrMutNoalias<'_, u8>, usize, usize) + 'a;
-type InnerLoopFactory<'a> = &'a dyn Fn(InnerLoopFlags) -> &'a InnerLoop<'a>;
+type InnerLoop<'a> = dyn Fn(PtrMutNoalias<'_, u8>, usize, usize, InnerLoopFlags) + 'a;
 
-fn pick_inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
+const fn pick_inner_loop<T, P, const IN_CONTIGUOUS: bool, const OUT_CONTIGUOUS: bool>(
 ) -> fn(&P, PtrMutNoalias<'_, T>, usize, usize)
 where
     T: Dtyped,
@@ -714,9 +689,9 @@ fn materialize_pipeline_out_buf<'b, 's>(
     output_dtype: &Dtype,
     context: &'b ReadContext,
     out: Option<&'b mut StridedBuf<'_>>,
-) -> (DimArray<usize>, StridedBuf<'b>) {
+) -> StridedBuf<'b> {
     let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
-    let out = match out {
+    match out {
         Some(out) => out.view_mut(),
         None => {
             let itemsize = output_dtype.itemsize() as usize;
@@ -727,8 +702,7 @@ fn materialize_pipeline_out_buf<'b, 's>(
             );
             unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
         }
-    };
-    (shape, out)
+    }
 }
 
 #[inline(never)]
@@ -974,7 +948,7 @@ mod tests {
                 array_from_fn_inline(|i| lhs[i] + rhs[i])
             }
         }
-        let node = AddNode {
+        let mut node = AddNode {
             lhs: lhs_pipeline,
             rhs: rhs_pipeline,
         };
@@ -984,14 +958,14 @@ mod tests {
                 let mut out = unsafe {
                     StridedBuf::from_raw_parts_mut(dst.ptr_mut(), shape, &strides[0], itemsize)
                 };
-                node.to_buf(&index, &context, Some(&mut out)).unwrap();
+                node.to_buf(&index, &context, Some(&mut out));
             }
             let got = (0..nitems)
                 .map(|k| dst.get::<T>(offs[0][k]))
                 .collect::<Vec<T>>();
             assert_eq!(got, expected, "shape={shape:?} strides={strides:?}");
         } else {
-            let buf = node.to_buf(&index, &context, None).unwrap();
+            let buf = node.to_buf(&index, &context, None);
             // The buffer picks its own layout, so walk it by its own strides.
             let got = offsets(shape, buf.strides())
                 .into_iter()
@@ -1233,8 +1207,7 @@ mod tests {
             let buf = storage
                 .read_as_elementwise_pipeline::<T>(index, &context)
                 .unwrap()
-                .to_buf(index, &context, None)
-                .unwrap();
+                .to_buf(index, &context, None);
             let strides = crate::util::default_strides_slice(&shape, itemsize);
             offsets(&shape, strides.as_ref())
                 .into_iter()
@@ -1254,8 +1227,7 @@ mod tests {
             storage
                 .read_as_elementwise_pipeline::<T>(index, &context)
                 .unwrap()
-                .to_buf(index, &context, Some(&mut out))
-                .unwrap();
+                .to_buf(index, &context, Some(&mut out));
         }
         let pushed = offsets(&shape, &dst_strides)
             .into_iter()

@@ -1,83 +1,101 @@
+use std::convert::Infallible;
 use std::hint::unreachable_unchecked;
 use std::mem::MaybeUninit;
 
 #[inline(always)]
 pub(crate) fn array_from_fn_inline<T, const N: usize>(mut f: impl FnMut(usize) -> T) -> [T; N] {
-    array_try_from_fn_inline(|i| Ok(f(i)))
-        .unwrap_or_else(|_: ()| unsafe { unreachable_unchecked() })
+    match array_try_from_fn_inline(|i| Result::<_, Infallible>::Ok(f(i))) {
+        Ok(arr) => arr,
+        Err(_) => unsafe { unreachable_unchecked() },
+    }
 }
 #[inline(always)]
 pub(crate) fn array_try_from_fn_inline<T, E, const N: usize>(
     mut f: impl FnMut(usize) -> Result<T, E>,
 ) -> Result<[T; N], E> {
-    struct Guard<'a, T, const N: usize> {
-        data: &'a mut [MaybeUninit<T>; N],
-        initialized: usize,
-    }
-    impl<T, const N: usize> Drop for Guard<'_, T, N> {
-        #[inline(always)]
-        fn drop(&mut self) {
-            unsafe { std::hint::assert_unchecked(self.initialized <= N) };
-            for i in 0..self.initialized {
-                unsafe { std::ptr::drop_in_place(self.data[i].as_mut_ptr()) };
+    let mut data = MaybeUninit::<[T; N]>::uninit();
+    let ptr = data.as_mut_ptr().cast::<T>();
+    if const { !std::mem::needs_drop::<T>() } {
+        for i in 0..N {
+            #[allow(clippy::question_mark)]
+            let value = match f(i) {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            };
+            unsafe { ptr.add(i).write(value) };
+        }
+    } else {
+        struct InitGuard<T> {
+            ptr: *mut T,
+            initialized: usize,
+        }
+        impl<T> Drop for InitGuard<T> {
+            #[inline(always)]
+            fn drop(&mut self) {
+                unsafe {
+                    std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
+                        self.ptr,
+                        self.initialized,
+                    ))
+                };
             }
         }
+        let mut guard = InitGuard {
+            ptr,
+            initialized: 0,
+        };
+        while guard.initialized < N {
+            #[allow(clippy::question_mark)]
+            let value = match f(guard.initialized) {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            };
+            unsafe { ptr.add(guard.initialized).write(value) };
+            guard.initialized += 1;
+        }
+        std::mem::forget(guard);
     }
-    let mut data = MaybeUninit::<[T; N]>::uninit();
-    let mut guard = Guard {
-        data: unsafe { &mut *(&mut data as *mut MaybeUninit<[T; N]> as *mut [MaybeUninit<T>; N]) },
-        initialized: 0,
-    };
-    for i in 0..N {
-        guard.data[i].write(f(i)?);
-        guard.initialized += 1;
-    }
-    std::mem::forget(guard);
     Ok(unsafe { data.assume_init() })
 }
 
 pub(crate) trait ArrayExt<T, const N: usize> {
-    #[inline(always)]
-    fn map_inline<U>(self, mut f: impl FnMut(T) -> U) -> [U; N]
+    fn map_inline<U>(self, f: impl FnMut(T) -> U) -> [U; N]
     where
-        Self: Sized,
-    {
-        self.try_map_inline(|x| Ok(f(x)))
-            .unwrap_or_else(|_: ()| unsafe { unreachable_unchecked() })
-    }
+        Self: Sized;
 
     fn try_map_inline<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
     where
         Self: Sized;
 
-    #[inline(always)]
-    fn map_inline_ref<U>(&self, mut f: impl FnMut(&T) -> U) -> [U; N]
+    fn map_inline_ref<U>(&self, f: impl FnMut(&T) -> U) -> [U; N]
     where
-        Self: Sized,
-    {
-        self.try_map_inline_ref(|x| Ok(f(x)))
-            .unwrap_or_else(|_: ()| unsafe { unreachable_unchecked() })
-    }
+        Self: Sized;
 
     #[allow(unused)]
     fn try_map_inline_ref<U, E>(&self, f: impl FnMut(&T) -> Result<U, E>) -> Result<[U; N], E>
     where
         Self: Sized;
 
+    fn map_enumerate<U>(self, f: impl FnMut(usize, T) -> U) -> [U; N]
+    where
+        Self: Sized;
+}
+impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     #[inline(always)]
-    fn map_enumerate<U>(self, mut f: impl FnMut(usize, T) -> U) -> [U; N]
+    fn map_inline<U>(self, mut f: impl FnMut(T) -> U) -> [U; N]
     where
         Self: Sized,
     {
-        let mut i = 0;
-        self.map_inline(|x| {
-            let res = f(i, x);
-            i += 1;
-            res
-        })
+        let mut data = self.into_iter();
+        // use array_try_from_fn_inline directly to avoid extra monomorphizations
+        match array_try_from_fn_inline(|_| {
+            Result::<_, Infallible>::Ok(f(unsafe { data.next().unwrap_unchecked() }))
+        }) {
+            Ok(arr) => arr,
+            Err(_) => unsafe { unreachable_unchecked() },
+        }
     }
-}
-impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
+
     #[inline(always)]
     fn try_map_inline<U, E>(self, mut f: impl FnMut(T) -> Result<U, E>) -> Result<[U; N], E>
     where
@@ -88,12 +106,45 @@ impl<T, const N: usize> ArrayExt<T, N> for [T; N] {
     }
 
     #[inline(always)]
+    fn map_inline_ref<U>(&self, mut f: impl FnMut(&T) -> U) -> [U; N]
+    where
+        Self: Sized,
+    {
+        let mut data = self.iter();
+        // use array_try_from_fn_inline directly to avoid extra monomorphizations
+        match array_try_from_fn_inline(|_| {
+            Result::<_, Infallible>::Ok(f(unsafe { data.next().unwrap_unchecked() }))
+        }) {
+            Ok(arr) => arr,
+            Err(_) => unsafe { unreachable_unchecked() },
+        }
+    }
+
+    #[inline(always)]
     fn try_map_inline_ref<U, E>(&self, mut f: impl FnMut(&T) -> Result<U, E>) -> Result<[U; N], E>
     where
         Self: Sized,
     {
         let mut data = self.iter();
         array_try_from_fn_inline(|_| f(unsafe { data.next().unwrap_unchecked() }))
+    }
+
+    #[inline(always)]
+    fn map_enumerate<U>(self, mut f: impl FnMut(usize, T) -> U) -> [U; N]
+    where
+        Self: Sized,
+    {
+        let mut data = self.into_iter();
+        let mut i = 0;
+        // use array_try_from_fn_inline directly to avoid extra monomorphizations
+        match array_try_from_fn_inline(|_| {
+            let res = f(i, unsafe { data.next().unwrap_unchecked() });
+            i += 1;
+            Result::<_, Infallible>::Ok(res)
+        }) {
+            Ok(arr) => arr,
+            Err(_) => unsafe { unreachable_unchecked() },
+        }
     }
 }
 

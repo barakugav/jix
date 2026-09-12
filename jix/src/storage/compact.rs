@@ -313,7 +313,6 @@ where
             return Ok(out);
         }
         let is_contiguous = out.is_contiguous(out_shape.as_ref(), dtype);
-        let (out_buf, out_strides) = out.data_mut();
 
         let ndim = shape.len();
         let block_shape = self.block_shape();
@@ -344,166 +343,37 @@ where
             && is_block_aligned
             && is_contiguous
         {
+            let (out_buf, _out_strides) = out.data_mut();
             let buf = &mut out_buf[..nitems * dtype.itemsize() as usize];
             self.blocks.read_block(single_block_idx, buf, context)?;
-        } else {
-            self.read_data_slow(index, out_buf, out_strides, context, single_block_idx)?;
+            return Ok(out);
         }
-        Ok(out)
-    }
 
-    fn read_data_slow(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        out_strides: &[usize],
-        context: &ReadContext,
-        single_block_idx: Option<u64>,
-    ) -> Result<()>
-    where
-        ET: ElementType,
-        D: Dimension,
-    {
-        let read_fn = if D::NDIM.is_some() {
-            Self::read_data_slow_impl::<D>
+        let read_fn = if const { D::NDIM.is_some() } {
+            read_data_slow::<D>
         } else {
             match self.shape().len() {
-                1 => Self::read_data_slow_impl::<Dim<1>>,
-                2 => Self::read_data_slow_impl::<Dim<2>>,
-                3 => Self::read_data_slow_impl::<Dim<3>>,
-                4 => Self::read_data_slow_impl::<Dim<4>>,
-                _ => Self::read_data_slow_impl::<DimDyn>,
+                1 => read_data_slow::<Dim<1>>,
+                2 => read_data_slow::<Dim<2>>,
+                3 => read_data_slow::<Dim<3>>,
+                4 => read_data_slow::<Dim<4>>,
+                _ => read_data_slow::<DimDyn>,
             }
         };
-        read_fn(self, index, buf, out_strides, context, single_block_idx)
-    }
+        read_fn(
+            &DynStorage {
+                shape: self.shape(),
+                dtype: self.blocks.dtype(),
+                block_shape: self.block_shape(),
+                read_block_fn: &|block_idx, dst| self.blocks.read_block(block_idx, dst, context),
+            },
+            index,
+            &mut out,
+            context,
+            single_block_idx,
+        )?;
 
-    #[inline(never)]
-    fn read_data_slow_impl<ActualD: Dimension>(
-        &self,
-        index: &[Range<u64>],
-        buf: &mut [u8],
-        out_strides: &[usize],
-        context: &ReadContext,
-        single_block_idx: Option<u64>,
-    ) -> Result<()>
-    where
-        ET: ElementType,
-        D: Dimension,
-    {
-        let shape = self.shape();
-        let ndim = shape.len();
-        let block_shape = self.block_shape();
-        assert_eq!(ndim, block_shape.len());
-
-        let dtype = self.blocks.dtype();
-        let itemsize = dtype.itemsize() as usize;
-        let out_shape = ActualD::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
-        let block_shape_u64 = ActualD::vec(ndim, |dim| block_shape[dim] as u64);
-        let block_strides = default_strides(&block_shape_u64, itemsize);
-        let copier = NdCopier::new(dtype);
-
-        // Pre-allocate a buffer large enough for a full block.
-        let full_buf_len =
-            block_shape_u64.as_ref().iter().copied().product::<u64>() as usize * itemsize;
-        let mut tmp_buf = context.allocate_buf(full_buf_len, dtype.alignment());
-        let tmp_buf = tmp_buf.as_mut_slice();
-
-        // Fast path for (unaligned) single-block read
-        if let Some(single_block_idx) = single_block_idx {
-            self.blocks.read_block(single_block_idx, tmp_buf, context)?;
-
-            // Byte offset into `tmp_buf` of the requested region's first element.
-            let active_start = (0..ndim)
-                .map(|dim| {
-                    let inner_offset = index[dim].start % block_shape_u64[dim];
-                    inner_offset as usize * block_strides[dim]
-                })
-                .sum::<usize>();
-            let src = unsafe { tmp_buf.get_unchecked(active_start..) };
-
-            unsafe {
-                copier.copy(
-                    PtrNoalias::from_slice(src),
-                    PtrMutNoalias::from_slice(buf),
-                    out_shape.as_ref(),
-                    block_strides.as_ref(),
-                    out_strides,
-                    dtype,
-                )
-            };
-            return Ok(());
-        }
-
-        // A block can be decoded straight into `buf` - skipping `tmp_buf` and the
-        // `nd_copy` scatter - when the destination is C-contiguous and the block is a single
-        // contiguous run
-        let read_into_out = {
-            let c_strides = default_strides(&out_shape, itemsize);
-            let out_buf_contiguous =
-                (0..ndim).all(|d| out_shape[d] == 1 || out_strides[d] == c_strides[d]);
-            let lead_dim = (0..ndim).find(|&d| block_shape[d] > 1);
-            let inner_full_width = lead_dim
-                .is_none_or(|k| (k + 1..ndim).all(|d| out_shape[d] == block_shape[d] as usize));
-            out_buf_contiguous && inner_full_width
-        };
-
-        // Block-space begin/end for NdIter.
-        let block_begin = ActualD::vec(ndim, |dim| index[dim].start / block_shape_u64[dim]);
-        let block_end = ActualD::vec(ndim, |dim| {
-            calc_block_end(index[dim].start, index[dim].end, block_shape_u64[dim])
-        });
-        let block_grid_shape =
-            ActualD::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
-
-        let block_iter = NdIter::builder_with_begin(block_begin, block_end)
-            .with_logical_global_index_ext(block_grid_shape.as_ref())
-            .with_block_offset_size_ext(
-                &ActualD::vec(ndim, |dim| index[dim].start),
-                &ActualD::vec(ndim, |dim| index[dim].end),
-                block_shape_u64.clone(),
-            )
-            .build();
-        for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
-            // Map the active region's start to its position in the output array.
-            let out_start = (0..ndim)
-                .map(|dim| {
-                    let full_idx = block_idx[dim] * block_shape_u64[dim] + block_inner_offset[dim];
-                    let out_idx = full_idx - index[dim].start;
-                    out_idx as usize * out_strides[dim]
-                })
-                .sum::<usize>();
-
-            let direct = read_into_out && (0..ndim).all(|d| block_size[d] == block_shape_u64[d]);
-            let read_dst = if direct {
-                &mut buf[out_start..out_start + full_buf_len]
-            } else {
-                &mut tmp_buf[..]
-            };
-
-            self.blocks.read_block(block_global_id, read_dst, context)?;
-
-            if !direct {
-                let active_start = (0..ndim)
-                    .map(|dim| block_inner_offset[dim] as usize * block_strides[dim])
-                    .sum::<usize>();
-                let src = unsafe { tmp_buf.get_unchecked(active_start..) };
-                let dst = unsafe { buf.get_unchecked_mut(out_start..) };
-
-                unsafe {
-                    copier.copy(
-                        PtrNoalias::from_slice(src),
-                        PtrMutNoalias::from_slice(dst),
-                        ActualD::vec(ndim, |dim| block_size[dim] as usize).as_ref(),
-                        block_strides.as_ref(),
-                        out_strides,
-                        dtype,
-                    )
-                };
-            }
-        }
-
-        Ok(())
+        Ok(out)
     }
 
     #[inline]
@@ -535,6 +405,134 @@ where
             spec: self.spec,
         })
     }
+}
+
+struct DynStorage<'a> {
+    shape: &'a [u64],
+    dtype: &'a Dtype,
+    block_shape: &'a [BlockSize],
+    read_block_fn: &'a dyn Fn(u64, &mut [u8]) -> Result<()>,
+}
+#[inline(never)]
+fn read_data_slow<ActualD: Dimension>(
+    storage: &DynStorage<'_>,
+    index: &[Range<u64>],
+    out: &mut StridedBuf<'_>,
+    context: &ReadContext,
+    single_block_idx: Option<u64>,
+) -> Result<()> {
+    let shape = storage.shape;
+    let dtype = storage.dtype;
+    let block_shape = storage.block_shape;
+    let (buf, out_strides) = out.data_mut();
+    let ndim = shape.len();
+    assert_eq!(ndim, storage.block_shape.len());
+    let itemsize = dtype.itemsize() as usize;
+    let out_shape = ActualD::vec(ndim, |dim| (index[dim].end - index[dim].start) as usize);
+    let block_shape_u64 = ActualD::vec(ndim, |dim| block_shape[dim] as u64);
+    let block_strides = default_strides(&block_shape_u64, itemsize);
+    let copier = NdCopier::new(dtype);
+
+    // Pre-allocate a buffer large enough for a full block.
+    let full_buf_len =
+        block_shape_u64.as_ref().iter().copied().product::<u64>() as usize * itemsize;
+    let mut tmp_buf = context.allocate_buf(full_buf_len, dtype.alignment());
+    let tmp_buf = tmp_buf.as_mut_slice();
+
+    // Fast path for (unaligned) single-block read
+    if let Some(single_block_idx) = single_block_idx {
+        (storage.read_block_fn)(single_block_idx, tmp_buf)?;
+
+        // Byte offset into `tmp_buf` of the requested region's first element.
+        let active_start = (0..ndim)
+            .map(|dim| {
+                let inner_offset = index[dim].start % block_shape_u64[dim];
+                inner_offset as usize * block_strides[dim]
+            })
+            .sum::<usize>();
+        let src = unsafe { tmp_buf.get_unchecked(active_start..) };
+
+        unsafe {
+            copier.copy(
+                PtrNoalias::from_slice(src),
+                PtrMutNoalias::from_slice(buf),
+                out_shape.as_ref(),
+                block_strides.as_ref(),
+                out_strides,
+                dtype,
+            )
+        };
+        return Ok(());
+    }
+
+    // A block can be decoded straight into `buf` - skipping `tmp_buf` and the
+    // `nd_copy` scatter - when the destination is C-contiguous and the block is a single
+    // contiguous run
+    let read_into_out = {
+        let c_strides = default_strides(&out_shape, itemsize);
+        let out_buf_contiguous =
+            (0..ndim).all(|d| out_shape[d] == 1 || out_strides[d] == c_strides[d]);
+        let lead_dim = (0..ndim).find(|&d| block_shape[d] > 1);
+        let inner_full_width =
+            lead_dim.is_none_or(|k| (k + 1..ndim).all(|d| out_shape[d] == block_shape[d] as usize));
+        out_buf_contiguous && inner_full_width
+    };
+
+    // Block-space begin/end for NdIter.
+    let block_begin = ActualD::vec(ndim, |dim| index[dim].start / block_shape_u64[dim]);
+    let block_end = ActualD::vec(ndim, |dim| {
+        calc_block_end(index[dim].start, index[dim].end, block_shape_u64[dim])
+    });
+    let block_grid_shape = ActualD::vec(ndim, |dim| shape[dim].div_ceil(block_shape[dim] as u64));
+
+    let block_iter = NdIter::builder_with_begin(block_begin, block_end)
+        .with_logical_global_index_ext(block_grid_shape.as_ref())
+        .with_block_offset_size_ext(
+            &ActualD::vec(ndim, |dim| index[dim].start),
+            &ActualD::vec(ndim, |dim| index[dim].end),
+            block_shape_u64.clone(),
+        )
+        .build();
+    for (block_idx, (block_global_id, (block_inner_offset, block_size))) in block_iter {
+        // Map the active region's start to its position in the output array.
+        let out_start = (0..ndim)
+            .map(|dim| {
+                let full_idx = block_idx[dim] * block_shape_u64[dim] + block_inner_offset[dim];
+                let out_idx = full_idx - index[dim].start;
+                out_idx as usize * out_strides[dim]
+            })
+            .sum::<usize>();
+
+        let direct = read_into_out && (0..ndim).all(|d| block_size[d] == block_shape_u64[d]);
+        let read_dst = if direct {
+            &mut buf[out_start..out_start + full_buf_len]
+        } else {
+            &mut tmp_buf[..]
+        };
+
+        (storage.read_block_fn)(block_global_id, read_dst)?;
+
+        if !direct {
+            let active_start = (0..ndim)
+                .map(|dim| block_inner_offset[dim] as usize * block_strides[dim])
+                .sum::<usize>();
+            let src = unsafe { tmp_buf.get_unchecked(active_start..) };
+            let dst = unsafe { buf.get_unchecked_mut(out_start..) };
+
+            unsafe {
+                copier.copy(
+                    PtrNoalias::from_slice(src),
+                    PtrMutNoalias::from_slice(dst),
+                    ActualD::vec(ndim, |dim| block_size[dim] as usize).as_ref(),
+                    block_strides.as_ref(),
+                    out_strides,
+                    dtype,
+                )
+            };
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
