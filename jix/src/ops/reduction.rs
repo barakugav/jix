@@ -623,11 +623,9 @@ where
         // The innermost run walks a reduced axis, so all of its items fold into the single state
         let contiguous = items_contiguous && items_aligned;
         const LANES: usize = 16;
-        match (inner_len >= LANES, contiguous) {
-            (true, true) => fold_run_into_one_cell_inner_loop::<T, K, LANES, true>,
-            (true, false) => fold_run_into_one_cell_inner_loop::<T, K, LANES, false>,
-            (false, true) => fold_run_into_one_cell_inner_loop::<T, K, 1, true>,
-            (false, false) => fold_run_into_one_cell_inner_loop::<T, K, 1, false>,
+        match contiguous {
+            true => fold_run_into_one_cell_inner_loop::<T, K, LANES, true>,
+            false => fold_run_into_one_cell_inner_loop::<T, K, LANES, false>,
         }
     } else {
         // The innermost run walks a non-reduced axis, so we touch inner_len states, one item each
@@ -694,7 +692,7 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
     } = args;
 
     debug_assert_eq!(state_stride, 0);
-    debug_assert!(inner_len >= LANES);
+    debug_assert!(inner_len >= 1);
 
     let ctx = FoldRunCtx {
         kernel,
@@ -706,7 +704,8 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
 
     // Fold the body of the run as a pairwise tree
     let body_len = inner_len - inner_len % LANES;
-    let mut state = fold_run_pairwise::<T, K, LANES, CONTIGUOUS>(&ctx, 0, body_len);
+    let mut state =
+        (body_len > 0).then(|| fold_run_pairwise::<T, K, LANES, CONTIGUOUS>(&ctx, 0, body_len));
 
     // Fold the tail sequentially
     let tail_len = inner_len - body_len;
@@ -721,9 +720,13 @@ fn fold_run_into_one_cell_inner_loop<T, K, const LANES: usize, const CONTIGUOUS:
                 kernel.update_state(tail_state, ctx.read_item::<CONTIGUOUS>(i), ctx.item_idx(i));
             i += 1;
         }
-        state = kernel.merge_states(state, tail_state);
+        state = Some(match state {
+            Some(state) => kernel.merge_states(state, tail_state),
+            None => tail_state,
+        });
     }
 
+    let mut state = state.unwrap();
     let state_ref = unsafe { &mut *states_buf.as_mut_ptr().cast::<MaybeUninit<K::State>>() };
     if base_item_idx > 0 {
         let prev = unsafe { state_ref.assume_init_read() };
