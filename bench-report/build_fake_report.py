@@ -116,11 +116,10 @@ FAKE = {
 # handle honestly: a win on one platform that shrinks on another. The integer reduction is the live
 # example - jix is tuned on arm64, numpy has had far more x86 attention. Keyed (section, case idx).
 PLATFORM_TWEAKS = {
-    "macos-aarch64": {},
     "linux-x86_64": {("reduction", 3): 2.6, ("reduction", 4): 2.9},
     "linux-aarch64": {("reduction", 3): 1.1, ("reduction", 4): 1.15},
 }
-PLATFORM_SCALE = {"macos-aarch64": 1.0, "linux-x86_64": 1.18, "linux-aarch64": 1.32}
+PLATFORM_SCALE = {"linux-x86_64": 1.18, "linux-aarch64": 1.32}
 
 
 def rows_for(platform):

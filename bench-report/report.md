@@ -8,8 +8,8 @@ jix is a multi-dimensional array library with block-compressed storage and lazy 
 This page measures both against the libraries you would otherwise reach for: `ndarray` in Rust,
 NumPy, Blosc2 and Zarr in Python.
 
-**Machine.** Apple M2 Pro, 10 cores, 32 GB, macOS 15.6; plus linux-x86_64 and linux-aarch64 CI
-runners. rustc 1.89.0, Python 3.13, numpy 2.3.1, blosc2 4.9.1, zarr 3.0.6.
+**Machines.** GitHub-hosted runners: `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm` (aarch64).
+rustc 1.89.0, Python 3.13, numpy 2.3.1, blosc2 4.9.1, zarr 3.0.6.
 
 **Everything is single-threaded.** jix has no threading. Blosc2, Zarr and numexpr are each pinned to
 one thread, and NumPy's elementwise and reduction kernels are single-threaded regardless. A
@@ -67,12 +67,12 @@ so Blosc2 is shown at its best as well as at its default.
 
 | case | numpy | jix-plain | jix | blosc2 | blosc2-chunked | zarr |
 |---|---|---|---|---|---|---|
-| block 16x200 read 1x200 800 B | 400 ns | 500 ns | 1.60 us | 76.00 us | 34.00 us | 330.00 us |
-| block 16x200 read 16x200 13 KB | 600 ns | 700 ns | 2.60 us | 80.00 us | 36.00 us | 340.00 us |
-| block 64x200 read 16x16 1 KB | 350 ns | 450 ns | 3.60 us | 52.00 us | 42.00 us | 336.00 us |
-| block 64x200 read 256x200 205 KB | 12.00 us | 13.00 us | 26.00 us | 128.00 us | 95.00 us | 420.00 us |
-| block 64x200 read 4096x200 3 MB | 190.00 us | 200.00 us | 380.00 us | 880.00 us | 780.00 us | 1.20 ms |
-| block 64x200 read whole array 104 MB | 5.20 ms | 5.50 ms | 12.00 ms | 23.00 ms | 22.00 ms | 40.00 ms |
+| block 16x200 read 1x200 800 B | 472 ns | 590 ns | 1.89 us | 89.68 us | 40.12 us | 389.40 us |
+| block 16x200 read 16x200 13 KB | 708 ns | 826 ns | 3.07 us | 94.40 us | 42.48 us | 401.20 us |
+| block 64x200 read 16x16 1 KB | 413 ns | 531 ns | 4.25 us | 61.36 us | 49.56 us | 396.48 us |
+| block 64x200 read 256x200 205 KB | 14.16 us | 15.34 us | 30.68 us | 151.04 us | 112.10 us | 495.60 us |
+| block 64x200 read 4096x200 3 MB | 224.20 us | 236.00 us | 448.40 us | 1.04 ms | 920.40 us | 1.42 ms |
+| block 64x200 read whole array 104 MB | 6.14 ms | 6.49 ms | 14.16 ms | 27.14 ms | 25.96 ms | 47.20 ms |
 
 </details>
 
@@ -85,9 +85,9 @@ so Blosc2 is shown at its best as well as at its default.
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| block 32x32 read 32x32 4 KB | 280 ns | 300 ns | 1.60 us |
-| block 32x32 read 1x200 800 B | 350 ns | 380 ns | 10.50 us |
-| block 512x32 read 128x200 102 KB | 11.00 us | 11.50 us | 42.00 us |
+| block 32x32 read 32x32 4 KB | 330 ns | 354 ns | 1.89 us |
+| block 32x32 read 1x200 800 B | 413 ns | 448 ns | 12.39 us |
+| block 512x32 read 128x200 102 KB | 12.98 us | 13.57 us | 49.56 us |
 
 </details>
 
@@ -131,10 +131,10 @@ behind the distribution cases in the next section.
 
 | case | jix-noshuffle | jix | blosc2-noshuffle | blosc2 | zarr |
 |---|---|---|---|---|---|
-| random | 133 ms | 190 ms | 128 ms | 196 ms | 540 ms |
-| smooth | 163 ms | 133 ms | 176 ms | 147 ms | 610 ms |
-| 16 unique | 88 ms | 74 ms | 102 ms | 88 ms | 420 ms |
-| 4 unique | 71 ms | 62 ms | 84 ms | 72 ms | 390 ms |
+| random | 157 ms | 224 ms | 151 ms | 231 ms | 637 ms |
+| smooth | 192 ms | 157 ms | 208 ms | 173 ms | 720 ms |
+| 16 unique | 104 ms | 87 ms | 120 ms | 104 ms | 496 ms |
+| 4 unique | 84 ms | 73 ms | 99 ms | 85 ms | 460 ms |
 
 </details>
 
@@ -156,8 +156,8 @@ it is not being billed for a pass jix skips.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| f32 | 2.16 ms | 2.19 ms | 49.60 ms | 443.00 ms | 30.80 ms |
-| i32 | 2.21 ms | 2.25 ms | 45.00 ms | 420.00 ms | 30.00 ms |
+| f32 | 2.55 ms | 2.58 ms | 58.53 ms | 522.74 ms | 36.34 ms |
+| i32 | 2.61 ms | 2.66 ms | 53.10 ms | 495.60 ms | 35.40 ms |
 
 </details>
 
@@ -179,10 +179,10 @@ of the work.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| random | 2.16 ms | 2.19 ms | 96.40 ms | 510.00 ms | 44.00 ms |
-| smooth | 2.16 ms | 2.19 ms | 49.60 ms | 443.00 ms | 30.80 ms |
-| 16 unique | 2.16 ms | 2.19 ms | 34.50 ms | 210.00 ms | 21.00 ms |
-| 4 unique | 2.16 ms | 2.19 ms | 21.30 ms | 155.00 ms | 16.00 ms |
+| random | 2.55 ms | 2.58 ms | 113.75 ms | 601.80 ms | 51.92 ms |
+| smooth | 2.55 ms | 2.58 ms | 58.53 ms | 522.74 ms | 36.34 ms |
+| 16 unique | 2.55 ms | 2.58 ms | 40.71 ms | 247.80 ms | 24.78 ms |
+| 4 unique | 2.55 ms | 2.58 ms | 25.13 ms | 182.90 ms | 18.88 ms |
 
 </details>
 
@@ -199,8 +199,8 @@ The same shape as negate with two operands instead of one.
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| f32 | 2.89 ms | 2.88 ms | 99.10 ms | 561.00 ms | 59.20 ms |
-| i32 | 2.95 ms | 2.94 ms | 94.00 ms | 540.00 ms | 58.00 ms |
+| f32 | 3.41 ms | 3.40 ms | 116.94 ms | 661.98 ms | 69.86 ms |
+| i32 | 3.48 ms | 3.47 ms | 110.92 ms | 637.20 ms | 68.44 ms |
 
 </details>
 
@@ -215,7 +215,7 @@ would be choosing which result to show.
 
 jix's reduction kernels read in whatever layout the source already has rather than forcing a
 canonical order, and they vectorize integer accumulation that NumPy leaves scalar. **Compare the
-three platform rows before reading anything into the integer numbers**: jix's kernels are tuned on
+two platform rows before reading anything into the integer numbers**: jix's kernels are tuned on
 arm64, and NumPy is a general-purpose library with far more x86 attention behind its hot paths.
 That is a statement about which machine you are on, not about which library is faster.
 
@@ -228,13 +228,13 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 
 | case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
-| sum f32 axis 0 | 2.33 ms | 2.03 ms | 49.60 ms | 34.70 ms | 30.90 ms |
-| sum f32 axis 1 | 3.97 ms | 1.55 ms | 49.00 ms | 36.30 ms | 32.90 ms |
-| sum f32 all | 3.21 ms | 1.31 ms | 48.60 ms | 39.60 ms | 31.50 ms |
-| sum i32 axis 0 | 11.70 ms | 3.12 ms | 22.00 ms | 20.40 ms | 37.10 ms |
-| sum i32 all | 4.39 ms | 1.36 ms | 18.60 ms | 14.20 ms | 29.60 ms |
-| std f32 axis 0 | 11.06 ms | 14.44 ms | 61.70 ms | 72.90 ms | 41.90 ms |
-| std f32 all | 10.74 ms | 34.81 ms | 82.40 ms | 74.00 ms | 39.10 ms |
+| sum f32 axis 0 | 2.75 ms | 2.40 ms | 58.53 ms | 40.95 ms | 36.46 ms |
+| sum f32 axis 1 | 4.68 ms | 1.83 ms | 57.82 ms | 42.83 ms | 38.82 ms |
+| sum f32 all | 3.79 ms | 1.55 ms | 57.35 ms | 46.73 ms | 37.17 ms |
+| sum i32 axis 0 | 13.81 ms | 9.57 ms | 67.50 ms | 24.07 ms | 43.78 ms |
+| sum i32 all | 5.18 ms | 4.65 ms | 63.65 ms | 16.76 ms | 34.93 ms |
+| std f32 axis 0 | 13.05 ms | 17.04 ms | 72.81 ms | 86.02 ms | 49.44 ms |
+| std f32 all | 12.67 ms | 41.08 ms | 97.23 ms | 87.32 ms | 46.14 ms |
 
 </details>
 
@@ -247,13 +247,13 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| negate f32 | 11.00 ms | 11.20 ms | 49.50 ms |
-| negate i32 | 10.90 ms | 11.10 ms | 45.00 ms |
-| add f32 | 16.10 ms | 16.40 ms | 99.00 ms |
-| add i32 | 16.00 ms | 16.30 ms | 95.00 ms |
-| sum f32 axis 0 | 7.10 ms | 5.40 ms | 49.00 ms |
-| sum f32 axis 1 | 5.20 ms | 4.90 ms | 48.00 ms |
-| sum i32 all | 6.80 ms | 2.80 ms | 19.00 ms |
+| negate f32 | 12.98 ms | 13.22 ms | 58.41 ms |
+| negate i32 | 12.86 ms | 13.10 ms | 53.10 ms |
+| add f32 | 19.00 ms | 19.35 ms | 116.82 ms |
+| add i32 | 18.88 ms | 19.23 ms | 112.10 ms |
+| sum f32 axis 0 | 8.38 ms | 6.37 ms | 57.82 ms |
+| sum f32 axis 1 | 6.14 ms | 5.78 ms | 56.64 ms |
+| sum i32 all | 8.02 ms | 3.30 ms | 22.42 ms |
 
 </details>
 
@@ -285,11 +285,11 @@ kernel dominates.
 
 | case | numpy | jix-plain | jix |
 |---|---|---|---|
-| 1 op | 2.90 ms | 2.90 ms | 50.00 ms |
-| 2 ops | 6.10 ms | 3.40 ms | 51.00 ms |
-| 4 ops | 12.80 ms | 4.60 ms | 53.00 ms |
-| 8 ops | 26.00 ms | 7.10 ms | 57.00 ms |
-| exp/log | 80.90 ms | 90.90 ms | 138.00 ms |
+| 1 op | 3.42 ms | 3.42 ms | 59.00 ms |
+| 2 ops | 7.20 ms | 4.01 ms | 60.18 ms |
+| 4 ops | 15.10 ms | 5.43 ms | 62.54 ms |
+| 8 ops | 30.68 ms | 8.38 ms | 67.26 ms |
+| exp/log | 95.46 ms | 107.26 ms | 162.84 ms |
 
 </details>
 
@@ -328,12 +328,12 @@ iterators and which `ndarray` materializes at every step.
 
 | case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| 1 op | 11.00 ms | 11.20 ms | 50.00 ms |
-| 2 ops | 22.40 ms | 12.10 ms | 52.00 ms |
-| 4 ops | 45.10 ms | 13.80 ms | 55.00 ms |
-| 8 ops | 90.30 ms | 17.20 ms | 60.00 ms |
-| normalize axis 0 | 96.00 ms | 38.00 ms | 88.00 ms |
-| normalize axis 1 | 104.00 ms | 41.00 ms | 92.00 ms |
+| 1 op | 12.98 ms | 13.22 ms | 59.00 ms |
+| 2 ops | 26.43 ms | 14.28 ms | 61.36 ms |
+| 4 ops | 53.22 ms | 16.28 ms | 64.90 ms |
+| 8 ops | 106.55 ms | 20.30 ms | 70.80 ms |
+| normalize axis 0 | 113.28 ms | 44.84 ms | 103.84 ms |
+| normalize axis 1 | 122.72 ms | 48.38 ms | 108.56 ms |
 
 </details>
 
@@ -359,10 +359,10 @@ specific to layouts `ndarray` cannot classify, not a general claim about strided
 
 | case | ndarray | jix-plain |
 |---|---|---|
-| 3-D rotate [1,2,0] f32 | 88.00 ms | 12.00 ms |
-| 3-D rotate [1,2,0] i32 | 86.00 ms | 11.80 ms |
-| 3-D reverse [2,1,0] f32 | 12.00 ms | 12.20 ms |
-| 2-D transpose f32 | 2.00 ms | 1.90 ms |
+| 3-D rotate [1,2,0] f32 | 103.84 ms | 14.16 ms |
+| 3-D rotate [1,2,0] i32 | 101.48 ms | 13.92 ms |
+| 3-D reverse [2,1,0] f32 | 14.16 ms | 14.40 ms |
+| 2-D transpose f32 | 2.36 ms | 2.24 ms |
 
 </details>
 
