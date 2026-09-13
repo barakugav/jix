@@ -254,19 +254,15 @@ pub(crate) trait BlockTableBuilder {
 /// In-memory implementor of [`BlockTableBuilder`].
 ///
 /// Accumulates compressed blocks into heap `Vec`s and produces a [`BlockTable<Owned>`].
-pub(crate) struct OwnedBlockTableBuilder<ET> {
+pub(crate) struct OwnedBlockTableBuilder {
     block_data: Vec<u8>,
     blocks_loc: Vec<BlockLocation2>,
     block_size: BlockSize,
     decoder_config: DecoderCodecConfig,
     nblocks: u64,
-    _marker: PhantomData<ET>,
 }
 
-impl<ET> OwnedBlockTableBuilder<ET>
-where
-    ET: ElementType,
-{
+impl OwnedBlockTableBuilder {
     pub(crate) fn start(
         nblocks: u64,
         block_size: BlockSize,
@@ -278,16 +274,25 @@ where
             block_size,
             decoder_config,
             nblocks,
-            _marker: PhantomData,
         })
+    }
+
+    pub(crate) unsafe fn into_table<ET>(self) -> Result<BlockTable<Owned, ET>>
+    where
+        ET: ElementType,
+    {
+        BlockTable::new(
+            self.block_data,
+            self.blocks_loc,
+            self.nblocks,
+            self.block_size,
+            self.decoder_config,
+        )
     }
 }
 
-impl<ET> BlockTableBuilder for OwnedBlockTableBuilder<ET>
-where
-    ET: ElementType,
-{
-    type Output = BlockTable<Owned, ET>;
+impl BlockTableBuilder for OwnedBlockTableBuilder {
+    type Output = Self;
 
     /// Append one compressed block's bytes - in call order, contiguously - and record its
     /// `(offset, len)` location at `block_index`. The offset is the current end of the data buffer
@@ -302,14 +307,8 @@ where
         Ok(())
     }
 
-    fn finalize(self) -> Result<BlockTable<Owned, ET>> {
-        BlockTable::new(
-            self.block_data,
-            self.blocks_loc,
-            self.nblocks,
-            self.block_size,
-            self.decoder_config,
-        )
+    fn finalize(self) -> Result<Self> {
+        Ok(self)
     }
 }
 

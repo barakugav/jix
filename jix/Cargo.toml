@@ -46,7 +46,6 @@ half = ["dep:half"]
 # and Complex<f64>.
 num-complex = ["dep:num-complex"]
 
-
 # Compile SIMD-specialized function clones dispatched at runtime by CPU features.
 # By enabling this feature, you can get better performance on CPUs that support SIMD, specifically
 # x86 system, with the cost of bigger binary size.
