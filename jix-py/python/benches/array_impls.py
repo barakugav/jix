@@ -1,4 +1,5 @@
 import blosc2
+import numexpr
 import numpy as np
 import zarr
 from zarr.codecs import BloscCodec, BloscShuffle
@@ -11,6 +12,7 @@ CODEC_DESC = f"zstd level {ZSTD_LEVEL}, byte-shuffle, {NTHREADS} thread (jix, bl
 
 blosc2.set_nthreads(NTHREADS)
 blosc2.nthreads = NTHREADS
+numexpr.set_num_threads(NTHREADS)
 
 
 class AbstractArray:
