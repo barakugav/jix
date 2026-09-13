@@ -17,10 +17,9 @@ proc-macro = true
 [dependencies]
 syn = "3.0"
 quote = "1.0"
-proc-macro-crate = "3.5"
 
 
 [dev-dependencies]
-# `jix` is pulled in under a *different* name on purpose to test a few edge cases in the derive macro
+# `jix` is pulled in under a *different* name on purpose, to exercise `#[dtyped(crate = "...")]`
 jix_core = { package = "jix", path = "../jix" }
 ndarray = ">=0.16,<0.18"

@@ -561,7 +561,7 @@ impl<S: ArrayStorage> Array<S> {
     ///
     /// See [`Dtype`] for details on the supported dtypes and their properties.
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// use jix::Array;
     /// use jix::dtype::Dtyped;
     /// use ndarray::array;
@@ -569,12 +569,15 @@ impl<S: ArrayStorage> Array<S> {
     /// let a = Array::compact_ndarray(&array![[1.5f32, 2.0], [3.14, 6.17]])?;
     /// assert_eq!(a.dtype(), &f32::DTYPE);
     ///
-    /// let b = Array::plain_ndarray_ref(&array![[false, true]])?;
+    /// let bools = array![[false, true]];
+    /// let b = Array::plain_ndarray_ref(&bools)?;
     /// assert_eq!(b.dtype(), &bool::DTYPE);
     ///
-    /// #[derive(Dtyped, Copy, Clone)]
+    /// #[derive(Copy, Clone, Dtyped)]
+    /// #[repr(C)]
     /// struct Point { x: f32, y: f32 }
-    /// let c = Array::plain_ndarray_ref(&array![Point { x: 1.0, y: 2.0 }])?;
+    /// let points = array![Point { x: 1.0, y: 2.0 }];
+    /// let c = Array::plain_ndarray_ref(&points)?;
     /// assert_eq!(c.dtype(), &Point::DTYPE);
     /// # Ok::<(), jix::Error>(())
     /// ```

@@ -51,7 +51,7 @@ where
 /// [`Array::dtype_sub_field()`](crate::Array::dtype_sub_field).
 ///
 /// # Examples
-/// ```rust,ignore
+/// ```rust
 /// use jix::Array;
 /// use ndarray::array;
 ///
@@ -216,6 +216,7 @@ mod tests {
     use crate::{Array, TypeDyn};
 
     #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(C)]
     struct Pair {
         x: i32,
@@ -311,10 +312,12 @@ mod tests {
         // verbatim. The resulting view reuses the parent's spec, so it never passes through
         // `ArrayParams::tune` - the check has to live in `SubDtype::new`.
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Empty {}
 
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct WithEmpty {
             nothing: Empty,

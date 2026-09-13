@@ -1,5 +1,9 @@
 // `#[derive(Dtyped)]` tests the way a downstream crate uses it.
 // This reach some edge cases that cant be used by tests that exists inside the jix crate itself.
+//
+// `jix` is renamed to `jix_core` here, so every struct needs `#[dtyped(crate = "::jix_core")]` to
+// redirect the generated code away from the default `::jix`. The default path is covered by the
+// doc tests in the `jix` crate, which compile as real downstream crates.
 
 #![allow(dead_code)]
 
@@ -8,6 +12,7 @@ use jix_core::dtype::{Dtype, Dtyped};
 // ---- #[repr(C)] structs with named fields ----
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(C)]
 struct Pixel {
     r: u8,
@@ -36,6 +41,7 @@ fn repr_c_named_fields() {
 }
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(C)]
 struct Padded {
     a: u8,
@@ -57,6 +63,7 @@ fn repr_c_inserts_padding() {
 // ---- packed structs ----
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(C, packed)]
 struct PackedC {
     a: u8,
@@ -67,6 +74,7 @@ struct PackedC {
 // spelling is not one of the strings the macro accepts), so the lint has to be allowed here.
 #[allow(clippy::repr_packed_without_abi)]
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(packed)]
 struct PackedBare {
     a: u8,
@@ -93,6 +101,7 @@ fn repr_packed_has_no_padding() {
 // ---- #[repr(transparent)] newtypes ----
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(transparent)]
 struct Meters(f32);
 
@@ -106,6 +115,7 @@ fn repr_transparent_forwards_inner_dtype() {
 // ---- zero-sized struct ----
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(C)]
 struct Empty {}
 
@@ -121,6 +131,7 @@ fn empty_struct_is_zero_sized() {
 // ---- array fields ----
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(C)]
 struct Vertex {
     pos: [f32; 3],
@@ -141,6 +152,7 @@ fn array_field() {
 // ---- nested derived structs ----
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(C)]
 struct Point {
     x: f32,
@@ -148,6 +160,7 @@ struct Point {
 }
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(C)]
 struct Segment {
     start: Point,
@@ -171,6 +184,7 @@ fn nested_struct_field() {
 // item it sits in, so a generic `#[repr(C)]` struct does not compile.
 
 #[derive(Copy, Clone, Dtyped)]
+#[dtyped(crate = "::jix_core")]
 #[repr(transparent)]
 struct Tagged<T>(T);
 

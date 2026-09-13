@@ -170,15 +170,16 @@
 //! The [`Dtyped`](dtype::Dtyped) trait maps a Rust type to its `Dtype` at compile time.
 //! Implement it for your own `#[repr(C)]` structs:
 //!
-//! ```rust,ignore
+//! ```rust
 //! use jix::dtype::{Dtype, Dtyped};
 //!
 //! #[derive(Copy, Clone, Dtyped)]
 //! #[repr(C)]
 //! struct Pixel { r: u8, g: u8, b: u8 }
 //!
-//! assert_eq!(Pixel::DTYPE.itemsize(), 3);
-//! let fields = Pixel::DTYPE.fields().unwrap();
+//! let pixel_dtype = Pixel::DTYPE;
+//! assert_eq!(pixel_dtype.itemsize(), 3);
+//! let fields = pixel_dtype.fields().unwrap();
 //! assert_eq!(fields[0].0, "r");
 //! ```
 //!
