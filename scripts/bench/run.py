@@ -91,6 +91,7 @@ def main():
                 sha,
                 "--ref",
                 ref,
+                *fast,
             ],
             cwd=REPO,
         )
@@ -141,6 +142,7 @@ def main():
                 sha,
                 "--ref",
                 gitsha,
+                *fast,
             ],
             cwd=worktree,
             env=env,

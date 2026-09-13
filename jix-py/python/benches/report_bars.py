@@ -169,8 +169,9 @@ def plot_section(rows, section, out_dir):
     metric = section.get("metric", "time")
     cases, libraries = section["cases"], section["libraries"]
     by_platform = defaultdict(dict)  # platform -> (case, library) -> value
+    source = section.get("source", section["key"])
     for row in rows:
-        if row["section"] == section["key"]:
+        if row["section"] == source:
             by_platform[row["platform"]][(row["case"], row["library"])] = row["value"]
     platforms = [p for p in section.get("platforms", sorted(by_platform)) if p in by_platform]
     if not section.get("per_platform", True):
@@ -308,8 +309,9 @@ def markdown_table(rows, section):
     """The collapsed ground-truth table that sits under a plot: absolute values, one row per case."""
     metric = section.get("metric", "time")
     cells = defaultdict(dict)
+    source = section.get("source", section["key"])
     for row in rows:
-        if row["section"] == section["key"]:
+        if row["section"] == source:
             cells[row["case"]][row["library"]] = row["value"]
     libraries = section["libraries"]
     lines = [
