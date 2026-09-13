@@ -22,15 +22,10 @@ import jix
 ZSTD_LEVEL = 3
 NTHREADS = 1
 
-# Read-region byte budget for the chain benchmarks, as (min, max). jix materializes a lazy chain
-# one read region at a time, so every intermediate for that region stays in cache while the inputs
-# and the output stream past it. A region small enough to sit in L1 is what turns that into a win;
-# the default is chosen for cache sizes generally rather than for long elementwise chains.
-#
-# Only for uncompressed storage. On a compact array a small read region is much worse than the
-# default: a region smaller than a block still decompresses the whole block and throws most of it
-# away, and neighbouring regions decompress it again.
-CHAIN_READ_SIZE = (12 * 1024, 24 * 1024)
+# `read_size` is plumbed through `from_numpy` because it is the knob that decides whether a lazy
+# chain's intermediates stay in cache. The benchmarks leave it at the default - see
+# bench-report/FINDINGS.md for what tuning it is worth, and why the right value differs between
+# compressed and uncompressed storage.
 CODEC_DESC = f"zstd level {ZSTD_LEVEL}, byte-shuffle, {NTHREADS} thread (jix, blosc2, zarr matched)"
 
 blosc2.set_nthreads(NTHREADS)

@@ -1,6 +1,4 @@
-> **DRAFT.** Rendered from fake benchmark output by `build_fake_report.py` so the plot style can be
-> iterated on before any real run. Some values are real (measured locally, single run); the rest are
-> invented. Do not quote anything here.
+<!-- banner -->
 
 # jix benchmarks
 
@@ -181,10 +179,16 @@ by a compiler into a single operation, which measures nothing at all.
 
 A chain of N steps is N x 26M element-operations whether or not it is fused, so the total time
 grows either way. What fusing removes is the memory traffic: NumPy re-reads an operand and writes a
-full intermediate per step, while jix reads both arrays once and keeps the running value in
-registers. The bars therefore show whether jix's arithmetic throughput is high enough to convert
-that saved traffic into a win - which is why the descent across chain lengths is the result, and a
-single chain length would be a number with no mechanism behind it.
+full intermediate per step, while jix materializes the chain one read region at a time, so every
+intermediate for that region stays in cache. The bars show whether that saved traffic is enough to
+win, which is why the trend across chain lengths is the result and a single length would be a
+number with no mechanism behind it.
+
+Everything here runs at jix's default read region. That default is derived from the CPU's cache
+sizes, and on a machine with a large L2 it comes out far larger than a chain wants - shrinking it
+to a region that fits L1 is worth a further 1.4x on the longest chains. That is a tuning result
+rather than what a caller gets by default, so it is not what these bars show; the measurement is in
+the repository's benchmark notes.
 
 `f32` only here; the integer chain behaves the same way and adds nothing but width.
 

@@ -29,7 +29,8 @@ That writes one directory per runner (`bench-linux-x86_64-<run>`, `bench-linux-a
     python bench-report/build_report.py --artifacts bench-artifacts
 
 Writes `bench-report/plots/*.png` and `bench-report/report.md`. It prints one line per artifact it
-read - check both platforms are listed before trusting the output.
+read - check both platforms are listed before trusting the output. The report is stamped with the
+machines it came from; a draft built from `build_fake_report.py` is stamped as invented instead.
 
 ## 4. Publish
 
@@ -43,11 +44,19 @@ For a single-machine check. Results are noisy and only one platform wide, so the
 development, not for publishing.
 
     cd jix-py && maturin develop --release     # the Python benches need the release build
+
+To produce a full local report, run both suites the way CI does and point step 3 at the output:
+
+    python scripts/bench/run.py --suites both --fast
+    python bench-report/build_report.py --artifacts scripts/bench/.results
+
+Or run one suite on its own:
+
     python jix-py/python/benches/run_all.py --out /tmp/bench-python
     python jix/benches/run.py --report
 
-Add `--fast` to either for a quick pass. `--report` restricts the Rust run to `vs_ndarray`, the
-only target the report uses; without it you get the whole optimization suite too.
+Drop `--fast` for real timings. `--report` restricts the Rust run to `vs_ndarray`, the only target
+the report uses; `scripts/bench/run.py` does that by default, and `--all-rust-benches` turns it off.
 
 ## Iterating on the plot style
 
@@ -64,4 +73,5 @@ colors can be changed without waiting for a real run:
 | `report.md` | generated - do not edit |
 | `../jix-py/python/benches/report_spec.py` | every plot's cases and libraries; the benches read it too |
 | `../jix-py/python/benches/report_bars.py` | the renderer |
+| `FINDINGS.md` | what we learned about jix, numpy, blosc2 and ndarray while building this |
 | `NOTES.md` | design notes and the decision log |

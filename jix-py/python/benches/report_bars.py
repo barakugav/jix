@@ -333,13 +333,13 @@ def natural_key(text):
     return [int(tok) if tok.isdigit() else tok for tok in re.split(r"(\d+)", str(text))]
 
 
-def render_report(rows, template, out_path, plots_dir, sections):
+def render_report(rows, template, out_path, plots_dir, sections, banner=""):
     """Expand ``<!-- plot:KEY -->`` and ``<!-- table:KEY -->`` markers in a template.
 
     Keeps the report's numbers generated rather than typed: the tables come from the same rows the
     plots do, so a table can never drift from the chart above it.
     """
-    text = Path(template).read_text()
+    text = Path(template).read_text().replace("<!-- banner -->", banner)
     for section in sections:
         key = section["key"]
         rel = f"{Path(plots_dir).name}/{key}.png"
