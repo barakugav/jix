@@ -11,15 +11,21 @@ Every comparison in the report is the same chart, so the reader learns to read i
   a dtype, a data distribution, a block/read shape, a reduction axis.
 - **bars within a case: one per library.** Same color for the same library everywhere in the
   report, so the legend stops being needed after the first plot.
-- **y axis: speedup relative to the baseline**, log scale, bars anchored at 1.0. Above the line is
-  faster than the baseline, below is slower. numpy is the baseline in Python, ndarray in Rust.
-- **The baseline is always drawn as its own 1x bar**, not just as a gridline, so a case never looks
-  like it is missing a library.
+- **y axis: performance relative to the baseline**, log scale. Bars rise from a common floor and a
+  black rule is drawn at 1x, so the baseline's own bar tops out exactly on the rule and every other
+  bar is read against it. Taller is better - faster, smaller stored, or less memory depending on
+  the metric, and the subtitle says which.
+- **The baseline is always drawn as its own gray 1x bar**, not just as a gridline, so a case never
+  looks like it is missing a library. Its value label is suppressed: it is 1.00x by construction.
 - **Every bar is labelled** with its ratio and its absolute time.
 
-Anchoring at 1.0 on a log axis is what makes this work across the spread we actually have. A 40x
-win and a 3x loss appear on the same plot at readable sizes, and "above the line" is legible at a
-glance without reading a single number.
+A log axis with a rule at 1x is what makes this work across the spread we actually have: a 3.7x win
+and a 1/800 loss appear on the same plot at readable sizes, and "above the rule" is legible at a
+glance without reading a single number. There is always headroom above the rule, so it reads as a
+reference line rather than the top edge of the plot.
+
+Implemented in `jix-py/python/benches/report_bars.py`; every plot's cases and library order are
+declared in `report_spec.py`, which the benchmarks also read, so the x axis is defined once.
 
 One plot per operation, sometimes two - typically one for uncompressed storage and one for
 compressed, or one for dtype and one for data distribution. Never more than two.
@@ -56,7 +62,8 @@ would bury the plots; absent entirely would make the report unciteable.
 Three runners: linux x86_64, linux aarch64, macos aarch64. One PNG per operation, with the
 platforms **stacked vertically as subplots** sharing the x cases and a single legend. One image,
 three rows, so a platform-specific result is obvious rather than something the reader has to
-reconstruct by opening three files.
+reconstruct by opening three files. A section whose metric does not vary by CPU - compression
+ratio - sets `per_platform: False` and renders one panel.
 
 Any result that flips sign between platforms gets called out in the text of that section. Several
 probably will - see the note on integer reductions in `PLAN.md`.
@@ -74,3 +81,15 @@ probably will - see the note on integer reductions in `PLAN.md`.
   zarr each keep one color in every plot on the page.
 - **State the machine once, prominently** - CPU model, core count, single-threaded, library
   versions, from `meta.json`.
+
+## Palette
+
+Seven categorical slots, one per library, fixed across the whole report; baseline libraries
+(`numpy`, `ndarray`) are neutral gray because they are a reference rather than a series. Validated
+with the data-viz validator in light mode: all checks pass, worst adjacent CVD dE 9.1, worst
+adjacent normal-vision dE 19.6. Three slots sit below 3:1 contrast on the light surface, which
+obliges relief - satisfied by the per-bar value labels and the table under every plot.
+
+Each plot draws a *subset* of the libraries, so bars that end up adjacent are not always adjacent
+palette slots. Every section's drawn subset was validated separately and all pass. **Re-run that
+check when the library set of any plot changes.**

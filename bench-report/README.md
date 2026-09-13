@@ -10,7 +10,9 @@ decide *what* to measure and *how* to show it before writing a single new benchm
 | `PLAN.md` | The spine. One section per operation, the exact cases on each plot's x axis, and whether the benchmark exists today or must be written. |
 | `FINDINGS.md` | Facts about ndarray, blosc2 and zarr established by reading their source or by introspection. These decide what the benchmarks have to look like. |
 | `DISPLAY.md` | The chart and table vocabulary. How each claim gets rendered, and what we refuse to render. |
-| `report.md` | A fake, fully-written docs page with placeholder numbers. The point is to find out what we need to run. |
+| `report.template.md` | The report's prose, with `<!-- plot:KEY -->` and `<!-- table:KEY -->` markers. **Edit this, never `report.md`.** |
+| `report.md` | Generated. The full docs page with real plots rendered from fake numbers. |
+| `build_fake_report.py` | Makes up benchmark output, drives the real renderer over it, and expands the template. Lets the plot style be iterated on with no benchmark run. |
 | `readme-snippet.md` | The fake 4-number block destined for the top-level `README.md`. |
 
 ## How to use this
@@ -77,3 +79,26 @@ cheap chains.
 
 Stopped headlining the integer-reduction win: it is probably jix-tuned-for-arm64 against
 numpy-tuned-for-x86, and may invert on linux-x86_64.
+
+### Iteration 4
+
+Built the thing that renders the report. `jix-py/python/benches/report_bars.py` is the real
+renderer; `report_spec.py` declares every plot's cases and library order in one place, so the
+benchmarks and the renderer cannot disagree about what an x tick means.
+`bench-report/build_fake_report.py` invents benchmark output, runs it through the real loader and
+renderer, and expands `report.template.md` into `report.md`. So `report.md` is now generated, plots
+and tables alike - nothing in it is typed by hand.
+
+    python bench-report/build_fake_report.py
+
+Chart shape settled by rendering it and looking: bars rise from a common floor on a log axis with a
+rule at 1x, rather than growing out of the 1x line. Growing from the line left the baseline as a
+zero-height invisible bar, which is the opposite of showing it.
+
+Measured blosc2's decompression unit rather than guessing: the block, as expected, but an 8.7 MiB
+auto-chunk still costs 2.3x a 4 KiB one. `FINDINGS.md` has the table.
+
+Config: one array shape `[130000, 200]` everywhere; read section moved ahead of compression; numpy
+kept as a memcpy baseline on plots where it has no codec; compression ratio normalized to
+`prod(shape) * itemsize`; peak RSS restructured to record into `extra_info` the way `test_compress`
+does, so it lands in `python.json` with everything else.
