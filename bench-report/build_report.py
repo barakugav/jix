@@ -57,10 +57,15 @@ def main(argv=None):
         rows += run_rows
         print(f"{platform}: {len(run_rows)} rows from {meta['sha'][:8]} ({meta['platform']['cpu_model']})")
 
+    # Published reports come from the two CI runners, in that order. A local run is on whatever
+    # machine you are sitting at, so fall back to plotting what is actually there.
     ordered = [p for p in report_spec.PLATFORMS if p in platforms]
-    missing = sorted(set(platforms) - set(ordered))
-    if missing:
-        print(f"warning: results from unexpected platforms, not plotted: {missing}")
+    extra = sorted(set(platforms) - set(ordered))
+    if extra:
+        print(f"note: results from platforms the report does not publish: {extra}")
+    ordered = ordered or extra
+    if not ordered:
+        raise SystemExit("no usable results found")
 
     for section in report_spec.SECTIONS:
         out = report_bars.plot_section(rows, {**section, "platforms": ordered}, args.out)
