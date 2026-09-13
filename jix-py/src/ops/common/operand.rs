@@ -4,11 +4,12 @@ use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt};
 
-use jix_core::dtype::{Dtyped, ScalarKind};
+use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
 use jix_core::scalar::{f16, Complex};
 use jix_core::{Array as CoreArray, ArrayAny, ArrayParams};
 
 use crate::dtype::dtype_from_numpy;
+use crate::ops::astype_impl;
 use crate::ops::common::{Precision, Rank};
 use crate::util::{check_ndim, DimArray, IntoPyResult};
 use crate::Array;
@@ -196,6 +197,36 @@ impl Operand {
         Ok(Self::Array(CoreArray::from_storage(storage).into_any()))
     }
 
+    pub(crate) fn cast(self, kind: ScalarKind) -> PyResult<Self> {
+        if let Self::Scalar {
+            value,
+            precision: _,
+            shape,
+            params,
+        } = self
+        {
+            return Ok(Self::Scalar {
+                value: value.cast(kind)?,
+                precision: scalar_kind_to_rank_precision(kind).1,
+                shape,
+                params,
+            });
+        }
+
+        if let Self::PyArray(array) = &self {
+            let arr = array.get();
+            if arr.arr.dtype() == &Dtype::new_scalar(kind) {
+                let Self::PyArray(array) = self else {
+                    unreachable!()
+                };
+                return Ok(Self::PyArray(array));
+            }
+        }
+
+        let array = self.into_array()?;
+        Ok(Self::Array(astype_impl(array, &Dtype::new_scalar(kind))?))
+    }
+
     pub(crate) fn into_array(self) -> PyResult<ArrayAny> {
         match self {
             Operand::PyArray(array) => Ok(array.get().arr.clone()),
@@ -333,5 +364,59 @@ impl Scalar {
                 Err(PyErr::new::<PyTypeError, _>("expected a scalar value"))
             }
         }
+    }
+
+    fn cast(self, kind: ScalarKind) -> PyResult<Self> {
+        use jix_core::scalar::Cast;
+
+        fn cast_to<D>(value: impl Cast<D>) -> D {
+            value.cast()
+        }
+
+        macro_rules! cast_num {
+            ($value:expr) => {{
+                let value = $value;
+                match kind {
+                    ScalarKind::Bool => Self::Bool(cast_to::<bool>(value)),
+                    ScalarKind::I8 => Self::Int(cast_to::<i8>(value) as i64),
+                    ScalarKind::I16 => Self::Int(cast_to::<i16>(value) as i64),
+                    ScalarKind::I32 => Self::Int(cast_to::<i32>(value) as i64),
+                    ScalarKind::I64 => Self::Int(cast_to::<i64>(value)),
+                    ScalarKind::U8 => Self::UInt(cast_to::<u8>(value) as u64),
+                    ScalarKind::U16 => Self::UInt(cast_to::<u16>(value) as u64),
+                    ScalarKind::U32 => Self::UInt(cast_to::<u32>(value) as u64),
+                    ScalarKind::U64 => Self::UInt(cast_to::<u64>(value)),
+                    ScalarKind::F16 => Self::Float(cast_to::<f16>(value).to_f64()),
+                    ScalarKind::F32 => Self::Float(cast_to::<f32>(value) as f64),
+                    ScalarKind::F64 => Self::Float(cast_to::<f64>(value)),
+                    ScalarKind::ComplexF32 => {
+                        Self::Complex(cast_to::<Complex<f64>>(cast_to::<Complex<f32>>(value)))
+                    }
+                    ScalarKind::ComplexF64 => Self::Complex(cast_to::<Complex<f64>>(value)),
+                }
+            }};
+        }
+
+        Ok(match self {
+            Self::Bool(value) => cast_num!(value),
+            Self::UInt(value) => cast_num!(value),
+            Self::Int(value) => cast_num!(value),
+            Self::Float(value) => cast_num!(value),
+            // A complex value can only be cast to another complex type or to `bool`.
+            Self::Complex(value) => match kind {
+                ScalarKind::Bool => Self::Bool(cast_to::<bool>(value)),
+                ScalarKind::ComplexF32 => {
+                    Self::Complex(cast_to::<Complex<f64>>(cast_to::<Complex<f32>>(value)))
+                }
+                ScalarKind::ComplexF64 => Self::Complex(value),
+                _ => {
+                    return Err(PyErr::new::<PyTypeError, _>(format!(
+                        "Unsupported cast from {} to {}",
+                        Dtype::new_scalar(ScalarKind::ComplexF64),
+                        Dtype::new_scalar(kind)
+                    )))
+                }
+            },
+        })
     }
 }

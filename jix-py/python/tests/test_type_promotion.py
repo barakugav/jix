@@ -498,3 +498,64 @@ def test_power_rejects_complex():
     b = jix.compact(np.array([1 + 0j, 2 + 0j], dtype=np.complex64))
     with pytest.raises(Exception):
         _ = jix.power(a, b).numpy()
+
+
+# ---------------------------------------------------------------------------
+# Scalar operands are built directly at the dispatch dtype.
+#
+# Dispatch casts every operand to the dtype of the impl it picked. For an array
+# that means wrapping it in a lazy `Cast` view, but a scalar has nothing to wrap:
+# the value is cast up front and the `Scalar` storage is created at the target
+# dtype. A `Cast<Scalar>` in the storage chain means that stopped happening.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("arr_dtype", [np.int8, np.int32, np.int64, np.float32, np.float64])
+@pytest.mark.parametrize("scalar", [2, 2.0, True, np.float32(2.0), np.int8(2), np.float16(2.0)])
+def test_scalar_operand_has_no_cast_view(arr_dtype, scalar):
+    a = jix.compact(np.array([1, 2, 3], dtype=arr_dtype))
+    storage = repr(a * scalar)
+    assert "Scalar" in storage, storage
+    # `Cast<Compact>` is fine - the array operand really does need a lazy cast view.
+    assert "Cast<Scalar" not in storage, storage
+
+
+def test_scalar_operand_has_no_cast_view_for_cmp_and_bitwise():
+    a = jix.compact(np.array([1, 2, 3], dtype=np.float32))
+    assert "Cast<Scalar" not in repr(a > 2.0)
+    b = jix.compact(np.array([1, 2, 3], dtype=np.int32))
+    assert "Cast<Scalar" not in repr(b | 1)
+
+
+def test_scalar_operand_complex_has_no_cast_view():
+    a = jix.compact(np.array([1 + 2j, 3 + 4j], dtype=np.complex64))
+    storage = repr(a * 2.0)
+    assert "Scalar" in storage, storage
+    assert "Cast<Scalar" not in storage, storage
+
+
+def test_python_float_scalar_rounds_to_dispatch_dtype():
+    """`0.1` is not representable in f32: the scalar must round exactly the way numpy's
+    float32(0.1) does, whether it is cast before or after the Scalar storage is built."""
+    arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    a = jix.compact(arr)
+    np.testing.assert_array_equal((a * 0.1).numpy(), arr * np.float32(0.1))
+
+
+def test_float16_scalar_keeps_its_value():
+    arr = np.array([1.0, 2.0, 3.0], dtype=np.float16)
+    a = jix.compact(arr)
+    np.testing.assert_array_equal((a * np.float16(0.1)).numpy(), arr * np.float16(0.1))
+
+
+def test_bool_scalar_keeps_its_value():
+    arr = np.array([1, 2, 3], dtype=np.int32)
+    a = jix.compact(arr)
+    np.testing.assert_array_equal((a * True).numpy(), arr * np.int32(1))
+    np.testing.assert_array_equal((a * False).numpy(), arr * np.int32(0))
+
+
+def test_complex_scalar_keeps_its_value():
+    arr = np.array([1 + 2j, 3 + 4j], dtype=np.complex64)
+    a = jix.compact(arr)
+    np.testing.assert_array_equal((a * (0.1 + 0.2j)).numpy(), arr * np.complex64(0.1 + 0.2j))

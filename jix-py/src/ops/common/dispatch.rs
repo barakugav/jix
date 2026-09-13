@@ -1,12 +1,11 @@
 use std::borrow::Cow;
 
-use jix_core::dtype::{Dtype, Dtyped, ScalarKind};
+use jix_core::dtype::{Dtyped, ScalarKind};
 use jix_core::ops::IntoType;
 use jix_core::storage::ArrayStorageAny;
 use jix_core::{Array as CoreArray, ArrayAny, Ty};
 use pyo3::prelude::*;
 
-use crate::ops::astype_impl;
 use crate::ops::common::{CastKind, Operand, Precision, Rank, Scalar};
 use crate::util::{IntoPyResult, ItemOrSequence, IterExt};
 
@@ -201,10 +200,7 @@ impl<const IN_N: usize, ExtraArgs> OpDescriptor<IN_N, ExtraArgs> {
                 let inputs: [ArrayAny; IN_N] = inputs
                     .into_iter()
                     .zip(op_fn.input_desc.iter())
-                    .map(|(input, input_desc)| {
-                        let input = input.into_array()?;
-                        astype_impl(input, &Dtype::new_scalar(input_desc.dtype))
-                    })
+                    .map(|(input, input_desc)| input.cast(input_desc.dtype)?.into_array())
                     .try_collect_array()?
                     .unwrap();
 
