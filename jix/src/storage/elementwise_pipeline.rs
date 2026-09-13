@@ -11,8 +11,8 @@ use crate::storage::StridedBuf;
 use crate::util::default_strides_slice;
 use crate::util::{PtrExt, PtrMutExt, PtrMutNoalias, PtrNoalias, REQUIRE_ALIGNED};
 use crate::{
-    array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimDyn, DimIdx,
-    NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
+    array_from_fn_inline, dim_arr, strided_span_bytes, ArrayExt, DimArray, DimBitmap, DimDyn,
+    DimIdx, NdCopier, NdIterUnordered, NdIterUnorderedDyn, SliceExt,
 };
 
 /// A lazy pipeline of element-wise operations over a rectangular region.
@@ -168,7 +168,16 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
     context: &ReadContext,
     inner_loop: &InnerLoop<'_>,
 ) {
-    let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+    let strides = operands.map_inline_ref(|operand| operand.strides());
+    let shape = dim_arr(index.len(), |d| {
+        let len = (index[d].end - index[d].start) as usize;
+        let is_real_dim = strides.iter().any(|s| s[d] != 0);
+        if is_real_dim || len == 0 {
+            len
+        } else {
+            1 // degenerated dim, all operands have stride zero
+        }
+    });
     let shape = shape.as_ref();
     if shape.contains(&0) {
         return;
@@ -180,7 +189,6 @@ fn to_buf_type_erased<const N_OPERANDS: usize>(
         let dtype = operand.dtype;
         (dtype.itemsize(), dtype.alignment())
     });
-    let strides = operands.map_inline_ref(|operand| operand.strides());
 
     let iter = NdIterUnordered::new(shape, strides, layouts);
     let chunk_len_max = iter.inner_len().min(Staging::BUFFER_SIZE);
@@ -276,7 +284,19 @@ fn to_buf_type_erased_dyn(
     context: &ReadContext,
     inner_loop: &InnerLoop<'_>,
 ) {
-    let shape = dim_arr(index.len(), |d| (index[d].end - index[d].start) as usize);
+    let strides = operands
+        .iter()
+        .map(|operand| operand.strides())
+        .collect::<Vec<_>>();
+    let shape = dim_arr(index.len(), |d| {
+        let len = (index[d].end - index[d].start) as usize;
+        let is_real_dim = strides.iter().any(|s| s[d] != 0);
+        if is_real_dim || len == 0 {
+            len
+        } else {
+            1 // degenerated dim, all operands have stride zero
+        }
+    });
     let shape = shape.as_ref();
     if shape.contains(&0) {
         return;
@@ -290,10 +310,6 @@ fn to_buf_type_erased_dyn(
             let dtype = operand.dtype;
             (dtype.itemsize(), dtype.alignment())
         })
-        .collect::<Vec<_>>();
-    let strides = operands
-        .iter()
-        .map(|operand| operand.strides())
         .collect::<Vec<_>>();
 
     let iter = NdIterUnorderedDyn::new(shape, &strides, &layouts);
@@ -695,11 +711,11 @@ fn materialize_pipeline_out_buf<'b, 's>(
         Some(out) => out.view_mut(),
         None => {
             let itemsize = output_dtype.itemsize() as usize;
-            let strides = pick_output_layout(operands, shape.as_ref(), itemsize);
-            let buf = context.allocate_buf(
-                shape.iter().product::<usize>() * itemsize,
-                output_dtype.alignment(),
-            );
+            let (strides, real_axes) = pick_output_layout(operands, shape.as_ref(), itemsize);
+            let nitems = (0..shape.len())
+                .map(|d| if real_axes.get(d) { shape[d] } else { 1 })
+                .product::<usize>();
+            let buf = context.allocate_buf(nitems * itemsize, output_dtype.alignment());
             unsafe { StridedBuf::from_pool(buf, strides.as_ref()) }
         }
     }
@@ -710,50 +726,57 @@ fn pick_output_layout<'s>(
     operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
     shape: &[usize],
     itemsize: usize,
-) -> DimArray<usize> {
-    fn pick_axis_order<'s>(
-        operands: &mut dyn Iterator<Item = &'s Operand<'s>>,
-        shape: &[usize],
-        itemsize: usize,
-    ) -> Option<DimArray<DimIdx>> {
-        let ndim = shape.len();
-        if ndim <= 1 || shape.iter().product::<usize>() * itemsize <= 4096 {
-            return None;
-        }
+) -> (DimArray<usize>, DimBitmap) {
+    let ndim = shape.len();
+    let small = ndim <= 1 || shape.iter().product::<usize>() * itemsize <= 4096;
 
-        let mut axis_order = None;
-        for operand in operands {
-            let strides = operand.strides();
-            debug_assert_eq!(strides.len(), ndim);
-            let mut operand_order = dim_arr(ndim, |d| d as DimIdx);
-            operand_order.sort_by_key(|&d| {
-                let d = d as usize;
-                let ignore_axis = shape[d] <= 1 || strides[d] == 0;
-                Reverse(if ignore_axis { usize::MAX } else { strides[d] })
-            });
-            match &axis_order {
-                None => axis_order = Some(operand_order),
-                Some(axis_order) if *axis_order == operand_order => {}
-                Some(_) => return None,
+    let mut real_axes = (0..ndim).map(|d| shape[d] <= 1).collect::<DimBitmap>();
+    let mut axis_order: Option<DimArray<DimIdx>> = None;
+    let mut axis_order_agreed = true;
+    for operand in operands {
+        let strides = operand.strides();
+        debug_assert_eq!(strides.len(), ndim);
+        for d in 0..ndim {
+            if strides[d] != 0 {
+                real_axes.set(d, true);
             }
         }
-        axis_order
+        if small || !axis_order_agreed {
+            continue;
+        }
+        let mut operand_order = dim_arr(ndim, |d| d as DimIdx);
+        operand_order.sort_by_key(|&d| {
+            let d = d as usize;
+            let ignore_axis = shape[d] <= 1 || strides[d] == 0;
+            Reverse(if ignore_axis { usize::MAX } else { strides[d] })
+        });
+        match &axis_order {
+            None => axis_order = Some(operand_order),
+            Some(order) if *order == operand_order => {}
+            Some(_) => axis_order_agreed = false,
+        }
     }
 
-    let axis_order = pick_axis_order(operands, shape, itemsize);
-    match axis_order {
+    let out_shape = dim_arr(ndim, |d| if real_axes.get(d) { shape[d] } else { 1 });
+    let mut strides = match axis_order.filter(|_| axis_order_agreed) {
         Some(axis_order) => {
-            let mut strides = dim_arr(shape.len(), |_| itemsize);
+            let mut strides = dim_arr(ndim, |_| itemsize);
             let mut stride = itemsize;
             for &d in axis_order.iter().rev() {
                 let d = d as usize;
                 strides[d] = stride;
-                stride *= shape[d];
+                stride *= out_shape[d];
             }
             strides
         }
-        None => default_strides_slice(shape, itemsize),
+        None => default_strides_slice(out_shape.as_ref(), itemsize),
+    };
+    for d in 0..ndim {
+        if !real_axes.get(d) {
+            strides[d] = 0;
+        }
     }
+    (strides, real_axes)
 }
 
 pub(crate) const fn n_operands_sum(counts: &[Option<usize>]) -> Option<usize> {
@@ -1069,7 +1092,7 @@ mod tests {
         };
 
         let pick = |ops: &[Operand<'_>], shape: &[usize]| {
-            pick_output_layout(&mut ops.iter(), shape, itemsize)
+            pick_output_layout(&mut ops.iter(), shape, itemsize).0
         };
 
         // Every operand F-ordered -> so is the output.
@@ -1084,8 +1107,9 @@ mod tests {
         let mixed = [operand(c_strides.as_ref()), operand(&f_strides)];
         assert_eq!(pick(&mixed, &big).as_ref(), c_strides.as_ref());
 
-        // No operands at all -> C order.
-        assert_eq!(pick(&[], &big).as_ref(), c_strides.as_ref());
+        // No operands at all -> nothing walks any axis, so the whole region collapses to one
+        // element and every stride is zero.
+        assert_eq!(pick(&[], &big).as_ref(), &[0, 0]);
 
         // Small outputs stay C-ordered whatever the operands look like: 8 * 8 * 4 = 256 bytes.
         let small = [8usize, 8];
@@ -1104,6 +1128,40 @@ mod tests {
     }
 
     #[test]
+    fn out_layout_collapses_axes_no_operand_walks() {
+        type T = u32;
+        let itemsize = size_of::<T>();
+        let dtype = T::DTYPE;
+
+        let shape = [64usize, 64];
+        let data = vec![0u8; shape[0] * shape[1] * itemsize];
+        let pick = |strides: &[usize]| {
+            // SAFETY: every layout used here stays inside `data`, sized for the full shape.
+            let buf =
+                unsafe { StridedBuf::from_raw_parts(data.as_ptr(), &shape, strides, itemsize) };
+            let ops = [Operand::new_input(buf, &dtype)];
+            let (strides, real_axes) = pick_output_layout(&mut ops.iter(), &shape, itemsize);
+            (
+                strides.as_ref().to_vec(),
+                real_axes.into_iter().collect::<Vec<_>>(),
+            )
+        };
+
+        // Broadcast along axis 0: the output holds one row, with a zero stride down axis 0, and
+        // axis 1 is packed as if the shape were [1, 64].
+        assert_eq!(pick(&[0, itemsize]), (vec![0, itemsize], vec![false, true]));
+        // Broadcast along axis 1 instead.
+        assert_eq!(pick(&[itemsize, 0]), (vec![itemsize, 0], vec![true, false]));
+        // Broadcast along both: a single element.
+        assert_eq!(pick(&[0, 0]), (vec![0, 0], vec![false, false]));
+        // Nothing broadcast -> nothing collapses.
+        assert_eq!(
+            pick(&[itemsize * 64, itemsize]),
+            (vec![itemsize * 64, itemsize], vec![true, true])
+        );
+    }
+
+    #[test]
     fn out_layout_ignores_axes_the_operand_does_not_walk() {
         type T = u32;
         let itemsize = size_of::<T>();
@@ -1113,19 +1171,30 @@ mod tests {
         let c_strides = crate::util::default_strides_slice(&shape, itemsize);
         let f_strides = [itemsize, itemsize * shape[0]];
         let data = vec![0u8; shape[0] * shape[1] * itemsize];
-        let pick = |strides: &[usize]| {
+        // Two operands: the first is broadcast along one axis, the second walks both so no axis
+        // collapses and the layout question is really about the axis *order*.
+        let pick = |broadcast: &[usize], dense: &[usize]| {
             // SAFETY: every layout used here stays inside `data`, sized for the full shape.
-            let buf =
-                unsafe { StridedBuf::from_raw_parts(data.as_ptr(), &shape, strides, itemsize) };
-            let ops = [Operand::new_input(buf, &dtype)];
-            pick_output_layout(&mut ops.iter(), &shape, itemsize)
+            let buf = |strides: &[usize]| unsafe {
+                StridedBuf::from_raw_parts(data.as_ptr(), &shape, strides, itemsize)
+            };
+            let ops = [
+                Operand::new_input(buf(broadcast), &dtype),
+                Operand::new_input(buf(dense), &dtype),
+            ];
+            let (strides, real_axes) = pick_output_layout(&mut ops.iter(), &shape, itemsize);
+            assert!(real_axes.all());
+            strides
         };
 
-        // Broadcast along axis 0. Axis 1 is the only one actually walked, so it belongs innermost -
-        // C order, not the F order a raw sort by stride would pick for a 0.
-        assert_eq!(pick(&[0, itemsize]).as_ref(), c_strides.as_ref());
+        // Broadcast along axis 0. Axis 1 is the only one the first operand walks, so it belongs
+        // innermost - C order, not the F order a raw sort by stride would pick for a 0.
+        assert_eq!(
+            pick(&[0, itemsize], c_strides.as_ref()).as_ref(),
+            c_strides.as_ref()
+        );
         // Broadcast along axis 1 instead: now axis 0 is the walked one, so it goes innermost.
-        assert_eq!(pick(&[itemsize, 0]).as_ref(), &f_strides);
+        assert_eq!(pick(&[itemsize, 0], &f_strides).as_ref(), &f_strides);
 
         // An extent-1 axis carries no preference either, whatever stride it happens to hold, so a
         // junk stride there must not flip the layout of the axes that do matter.
@@ -1142,7 +1211,9 @@ mod tests {
         };
         let ops = [Operand::new_input(buf, &dtype)];
         assert_eq!(
-            pick_output_layout(&mut ops.iter(), &shape1, itemsize).as_ref(),
+            pick_output_layout(&mut ops.iter(), &shape1, itemsize)
+                .0
+                .as_ref(),
             c_strides1.as_ref()
         );
     }
@@ -1203,13 +1274,14 @@ mod tests {
         let nitems = shape.iter().product::<usize>();
         let itemsize = size_of::<T>();
 
+        // Pull mode picks its own layout - and collapses any axis no operand walks to a single
+        // element with a zero stride - so read the result back through the strides it hands out.
         let pulled = {
             let buf = storage
                 .read_as_elementwise_pipeline::<T>(index, &context)
                 .unwrap()
                 .to_buf(index, &context, None);
-            let strides = crate::util::default_strides_slice(&shape, itemsize);
-            offsets(&shape, strides.as_ref())
+            offsets(&shape, buf.strides())
                 .into_iter()
                 .map(|off| unsafe { buf.data_ptr().add(off).cast::<T>().read_unaligned() })
                 .collect::<Vec<T>>()
@@ -1445,6 +1517,126 @@ mod tests {
             pipeline_elements::<_, f32>(&sum.storage, &index),
             read_data_elements::<_, f32>(&sum.storage, &index),
         );
+    }
+
+    /// `read_data` in pull mode, as `(strides, elements)` read back through those strides.
+    fn pull_strides_and_elements<S, T>(storage: &S, index: &[Range<u64>]) -> (Vec<usize>, Vec<T>)
+    where
+        S: crate::ArrayStorage,
+        T: Dtyped,
+    {
+        let context = ReadContext::default();
+        let shape = index
+            .iter()
+            .map(|r| (r.end - r.start) as usize)
+            .collect::<Vec<_>>();
+        let buf = storage.read_data(index, &context, None).unwrap();
+        let elements = offsets(&shape, buf.strides())
+            .into_iter()
+            .map(|off| unsafe { buf.data_ptr().add(off).cast::<T>().read_unaligned() })
+            .collect::<Vec<T>>();
+        (buf.strides().to_vec(), elements)
+    }
+
+    #[test]
+    fn pull_collapses_broadcast_axes() {
+        // A `Neg` over a [1, 1] input broadcast to [4, 5]: no operand steps along either axis, so
+        // the pull computes one element and hands the region back with all-zero strides rather
+        // than writing the same value 20 times.
+        use core::ops::Neg;
+
+        let nd = ndarray::Array2::from_shape_fn((1, 1), |_| 3.0f32);
+        let neg = crate::Array::compact_ndarray(&nd)
+            .unwrap()
+            .broadcast(&[4, 5])
+            .neg();
+        let index = full_index(neg.storage.shape());
+
+        let (strides, elements) = pull_strides_and_elements::<_, f32>(&neg.storage, &index);
+        assert_eq!(strides, vec![0, 0]);
+        assert_eq!(elements, vec![-3.0f32; 20]);
+    }
+
+    #[test]
+    fn pull_collapses_only_the_broadcast_axis() {
+        // Broadcast along axis 1 alone: axis 0 is still walked, so only axis 1 collapses.
+        use core::ops::Neg;
+
+        let nd = ndarray::Array2::from_shape_fn((4, 1), |(i, _)| i as f32);
+        let neg = crate::Array::compact_ndarray(&nd)
+            .unwrap()
+            .broadcast(&[4, 5])
+            .neg();
+        let index = full_index(neg.storage.shape());
+
+        let (strides, elements) = pull_strides_and_elements::<_, f32>(&neg.storage, &index);
+        assert_eq!(strides, vec![size_of::<f32>(), 0]);
+        let expected = (0..4).flat_map(|i| [-(i as f32); 5]).collect::<Vec<_>>();
+        assert_eq!(elements, expected);
+    }
+
+    #[test]
+    fn pull_collapses_a_scalar_only_pipeline() {
+        // A `Scalar` contributes no operands at all, so every axis collapses.
+        use core::ops::Neg;
+
+        let neg = scalar_4x5(7.0).neg();
+        let index = full_index(neg.storage.shape());
+
+        let (strides, elements) = pull_strides_and_elements::<_, f32>(&neg.storage, &index);
+        assert_eq!(strides, vec![0, 0]);
+        assert_eq!(elements, vec![-7.0f32; 20]);
+    }
+
+    #[test]
+    fn pull_keeps_axes_any_operand_walks() {
+        // One side broadcast, the other not: the walked side keeps every axis real.
+        use core::ops::Add;
+
+        let lhs = ndarray::Array2::from_shape_fn((4, 5), |(i, j)| (i * 5 + j) as f32);
+        let rhs = ndarray::Array2::from_shape_fn((1, 1), |_| 100.0f32);
+        let sum = crate::Array::compact_ndarray(&lhs).unwrap().add(
+            crate::Array::compact_ndarray(&rhs)
+                .unwrap()
+                .broadcast(&[4, 5]),
+        );
+        let index = full_index(sum.storage.shape());
+
+        let (strides, elements) = pull_strides_and_elements::<_, f32>(&sum.storage, &index);
+        assert!(strides.iter().all(|&s| s != 0), "{strides:?}");
+        let expected = (0..20).map(|k| k as f32 + 100.0).collect::<Vec<_>>();
+        assert_eq!(elements, expected);
+    }
+
+    #[test]
+    fn push_never_collapses() {
+        // The caller owns the destination in push mode, so every element of it gets written even
+        // when nothing walks the axis.
+        use core::ops::Neg;
+
+        let nd = ndarray::Array2::from_shape_fn((1, 1), |_| 3.0f32);
+        let neg = crate::Array::compact_ndarray(&nd)
+            .unwrap()
+            .broadcast(&[4, 5])
+            .neg();
+        let index = full_index(neg.storage.shape());
+
+        let itemsize = size_of::<f32>();
+        let shape = [4usize, 5];
+        let strides = crate::util::default_strides_slice(&shape, itemsize);
+        let mut dst = Bytes::new(20 * itemsize, 0);
+        {
+            let mut out = unsafe {
+                StridedBuf::from_raw_parts_mut(dst.ptr_mut(), &shape, strides.as_ref(), itemsize)
+            };
+            neg.storage
+                .read_data(&index, &ReadContext::default(), Some(&mut out))
+                .unwrap();
+        }
+        let written = (0..20)
+            .map(|k| dst.get::<f32>(k * itemsize))
+            .collect::<Vec<_>>();
+        assert_eq!(written, vec![-3.0f32; 20]);
     }
 
     #[test]
