@@ -132,49 +132,55 @@ use that, and would be a different benchmark.
 against single-threaded jix and numpy. Fixed in `array_impls.py` with
 `numexpr.set_num_threads(NTHREADS)`.
 
-## jix fuses chains in Rust but not through the Python scalar-operand path
+## jix fuses chains; the Python scalar-operand path costs 2.6x per element-op
 
-Found by the first local run. Measured on an Apple M3 Pro, `[130000, 200] f32`, chain of alternating
-`* 2.0` / `+ 1.0` steps. Rust is Criterion at `--fast`; Python is the best of five warm rounds.
+Rust fuses exactly as claimed. `[130000, 200] f32`, alternating `* 2.0` / `+ 1.0`, Criterion at
+`--fast`:
 
-| steps | Rust ndarray | Rust jix-plain | Python numpy | Python jix-plain |
+| steps | ndarray | jix-plain |
+|---|---|---|
+| 1 | 2.6 ms | 2.6 ms |
+| 8 | 20.9 ms | **4.0 ms** |
+
+ndarray is linear because it allocates per step; jix is flat, 5.2x faster at eight steps.
+
+Python fuses too - eight steps build one nested view materialized once - but a chain of eight steps
+is 208M element-ops whether or not it is fused, so the number that matters is the cost per
+element-op, not whether the total is flat. Normalized, on an Apple M3 Pro:
+
+| 8-step chain | numpy | jix-plain | ratio | jix ns per element-op |
 |---|---|---|---|---|
-| 1 | 2.6 ms | 2.6 ms | 2.2 ms | 6.2 ms |
-| 2 | 5.2 ms | 2.5 ms | 4.2 ms | 12.2 ms |
-| 4 | 9.9 ms | 2.7 ms | 8.7 ms | 24.1 ms |
-| 8 | 20.9 ms | **4.0 ms** | 17.5 ms | **48.6 ms** |
+| unary `-a` | 17.8 ms | **15.2 ms** | **0.85x** | 0.073 |
+| `a * 2.0` / `a + 1.0` | 16.7 ms | 39.2 ms | 2.34x | 0.189 |
 
-**Rust is flat and ndarray is linear** - 5.2x faster at eight steps. That is the library's central
-claim, working exactly as advertised.
+**The unary chain already wins**, so fusion pays off in Python as well. The scalar-operand path
+costs 2.6x more per element-op than the unary path, and that difference is the whole gap. At
+0.073 ns per element-op the unary kernel runs about 3.3 element-ops per cycle - vectorized. At
+0.189 it runs about 1.3, which is what a stride-0 broadcast operand fetched inside the loop would
+cost rather than one hoisted out of it.
 
-**Python is linear, at about 5 ms per step.** The chain is genuinely lazy - the storage tree is
-`Add<Mul<Add<Mul<Plain, Cast<Scalar>>, ...>, ...>, ...>`, one view materialized once - so this is
-not a missing-fusion bug. It is that each `array op scalar` step costs a full pass worth of time
-even when fused. For 26M elements, 5 ms per step is roughly 0.8 cycles per element per step, which
-is what a scalar loop costs and about 25x what a vectorized one should.
+Bringing `Mul<X, Scalar>` to the throughput `Neg<X>` already reaches would put the eight-step chain
+near 15 ms against numpy's 16.7 ms, widening with chain length.
 
-Two things it is not:
-- **Not dtype promotion.** `f32 * 2.0` stays `f32` in jix, same as numpy under NEP 50.
-- **Not the `Cast`.** Passing `np.float32` constants instead of Python floats avoids the cast and
-  saves only ~15% (40.6 ms against 48.6 ms at eight steps); the linear scaling is unchanged.
+An earlier round of this measurement also showed a `Cast<Scalar>` in the tree for Python float
+constants. That has since been fixed - `a * 2.0` now builds `Mul<Plain, Scalar>` directly and
+Python floats cost the same as `np.float32` constants - which took about 19% off the chain
+(48.6 ms to 39.4 ms at eight steps). The per-element-op gap above is what remains underneath it.
 
-The difference in formulation matters when reading this: Rust has no scalar-operand operators, so
-the Rust arm chains `.map(|x| x * 2.0)` closures, while Python chains `Mul<X, Cast<Scalar>>` binary
-ops against a broadcast scalar. So the comparison localizes the cost to the broadcast-scalar
-elementwise kernel rather than to the Python bindings as such.
+## `normalize` over a long axis re-runs the reduction per output element
 
-Until this is addressed, the chain section of the report will show jix losing to numpy in Python
-and beating ndarray in Rust. Both are true, and the report should say so.
-
-## `normalize` over axis 0 is 17x slower than ndarray
-
-From the same run, `a / a.std(axis).insert_axis(axis).broadcast(shape)` on `[130000, 200] f32`:
+`a / a.std(axis).insert_axis(axis).broadcast(shape)` on `[130000, 200] f32`:
 
 | axis | ndarray | jix-plain | jix (compact) |
 |---|---|---|---|
-| 0 | 6.2 ms | **109.0 ms** | 397.0 ms |
-| 1 | 84.1 ms | 48.4 ms | 121.2 ms |
+| 0 | 6.2 ms | 109.0 ms (17.6x) | 397.0 ms (64x) |
+| 1 | 84.1 ms | **48.4 ms** (0.58x) | 121.2 ms (1.44x) |
 
-Axis 1 goes the expected way - jix is 1.7x faster. Axis 0 is a 17.6x loss, and the asymmetry
-between the two axes is far larger for jix than for ndarray. Worth a look independently of the
-report; `--fast` Criterion settings on a busy laptop do not produce a 17x artifact.
+Not a kernel deficiency - it is what fusing a broadcast reduction costs. The `std` is inside the
+lazy pipeline, so reading an output element re-runs the reduction over its whole column. Over axis
+0 each column is 130000 long, so the work is O(N*M) instead of O(N+M). Over axis 1 the reduced axis
+is 200 long and jix comes out ahead.
+
+The lesson is the one `ops/mod.rs` already gives for reshape: materialize the reduction before
+broadcasting it when the reduced axis is long. Worth saying in the report next to this plot, since
+a reader will otherwise take the axis-0 bar as a general result.
