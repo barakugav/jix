@@ -197,6 +197,37 @@ small. The gap should be wider on a machine with less bandwidth per core - the x
 decompresses the whole block and discards most of it, and the next region decompresses it again.
 The same `(12K, 24K)` that wins on `Plain` takes a compact unary chain from 45 ms to 244 ms.
 
+### No array shape wins with the default read region, because the default is an L2-derived byte budget
+
+Sweeping aspect ratio at a fixed 26M elements - `(26000000,)`, `(2600000, 10)`, `(260000, 100)`,
+`(130000, 200)`, `(26000, 1000)`, `(2600, 10000)`, `(260, 100000)`, `(26, 1000000)` - gives
+1.07x to 1.09x at 8, 16 and 32 steps. Every shape. Sweeping total size (1M to 64M elements) and
+dtype (f32, f64) stays in the same 1.00x to 1.09x band.
+
+That is what should happen. The read region is a *byte* budget, so its size does not depend on the
+array's shape at all, and `params.rs` derives it as:
+
+```rust
+let read_size_min = max(l1_data / 2, l2 / 16).max(block_size);
+let read_size_max = l2 / 2;
+```
+
+On an Apple M3 Pro (L1d 128 KB, L2 16 MB) that is `max(64 KB, 1024 KB) .. 8 MB` - the L2 term wins
+and the floor lands at 1 MB, **85x larger than the 12-24 KB optimum measured above**. No shape can
+move it.
+
+The reason the optimum is well below L1 rather than at it: a chain has roughly four or five live
+buffers at any moment - two inputs, the running value, the output. At 12-24 KB each that is
+60-120 KB and fits a 128 KB L1; at 64 KB each it is over 300 KB and spills. The budget wants to be
+L1 divided by the number of live buffers, not L1 itself.
+
+Worth considering, though it is a library change rather than a benchmark one: the floor is a poor
+fit for any CPU with a large L2, and Apple Silicon is the extreme case. **It cannot simply be made
+smaller, though** - compact storage wants the opposite. A region smaller than a block decompresses
+the whole block and discards most of it, which is why `(12K, 24K)` takes a compact unary chain from
+45 ms to 244 ms. A budget that serves both would have to depend on whether the pipeline's leaves
+are compressed.
+
 ### Compact beats numpy too, but only on very long chains
 
 Unary chain (one leaf reference, so the array is decompressed once), default read region:
