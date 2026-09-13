@@ -112,8 +112,8 @@ FAKE = {
         "jix": [1007.0, 125.3],
     },
     "rust_axis_order": {
-        "ndarray": [88.0, 86.0, 12.0, 2.0],
-        "jix-plain": [12.0, 11.8, 12.2, 1.9],
+        "ndarray": [88.0, 86.0, 13.0, 12.5],
+        "jix-plain": [14.0, 13.8, 13.5, 13.0],
     },
 }
 
@@ -143,9 +143,7 @@ def rows_for(platform):
                     value *= 1e-3 * scale  # ms -> s, then the platform's overall speed
                     if library.startswith("jix"):
                         value *= tweaks.get((key, index), 1.0)
-                rows.append(
-                    {"platform": platform, "section": tag, "case": case, "library": library, "value": value}
-                )
+                rows.append({"platform": platform, "section": tag, "case": case, "library": library, "value": value})
     return rows
 
 

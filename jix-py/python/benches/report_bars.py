@@ -352,3 +352,15 @@ def render_report(rows, template, out_path, plots_dir, sections, banner=""):
         raise SystemExit(f"unknown markers in {template}: {leftover}")
     Path(out_path).write_text(text)
     return out_path
+
+
+def headline(rows, section, case, library, baseline=None):
+    """One (absolute, ratio-to-baseline) pair, for the handful of numbers the README quotes."""
+    found = {
+        (row["case"], row["library"]): row["value"]
+        for row in rows
+        if row["section"] == section and row["case"] == case
+    }
+    value = found.get((case, library))
+    base = found.get((case, baseline)) if baseline else None
+    return value, (base / value if value and base else None)

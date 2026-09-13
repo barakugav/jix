@@ -165,3 +165,29 @@ And two findings about jix itself, in `FINDINGS.md`: the Rust chain fuses perfec
 4.0 ms across 1 to 8 steps, against ndarray's linear 2.6 to 20.9) while the Python scalar-operand
 path is linear at ~5 ms per step; and `normalize` over axis 0 is 17x slower than ndarray while axis
 1 is 1.7x faster.
+
+### Iteration 8 - first CI run, and a benchmark that measured nothing
+
+The fast validation run went green on both runners and `build_report.py` consumed both artifacts
+end to end. The Linux peak-RSS sampling path, never previously executed, works.
+
+The headline result is much stronger on CI hardware than on a dev Mac: the Python chain reaches
+0.31x of numpy at 32 steps on x86_64 and 0.33x on aarch64, **on the default read region**, where an
+M3 Pro only managed 1.22x. The mechanism predicted this - the win is numpy's DRAM traffic, and CI
+machines have far less bandwidth per core.
+
+Three corrections the real data forced, all of them cases where the earlier draft was wrong rather
+than merely incomplete:
+
+- **The axis-order benchmark measured nothing.** All four cases agreed to within 1.08-1.39x,
+  controls included, which is the signature. `ndarray`'s contiguity check sorts strides before
+  testing, so a permutation of a contiguous array is still contiguous in memory order and takes a
+  flat fast path. The view has to be sliced first. Fixed, but unverified - it has not run.
+- **The peak-memory claim was wrong.** numpy frees each intermediate as the next is produced, so
+  its peak is flat in chain length and avoiding intermediates is worth a fifth, not a multiple. The
+  factor comes from the compact arm holding its inputs compressed.
+- **`normalize` needed its own plot**, at 81x and 162x it flattened the chain result into a sliver.
+
+Also: `meta.json` now records whether a run was `--fast`, and both builders stamp low-fidelity
+output. `readme-snippet.md` is now generated from the same rows as the report, so the README's
+numbers cannot drift from it.
