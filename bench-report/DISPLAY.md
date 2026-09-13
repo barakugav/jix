@@ -64,10 +64,10 @@ would bury the plots; absent entirely would make the report unciteable.
 
 ## Per-platform
 
-Three runners: linux x86_64, linux aarch64, macos aarch64. One PNG per operation, with the
-platforms **stacked vertically as subplots** sharing the x cases and a single legend. One image,
-three rows, so a platform-specific result is obvious rather than something the reader has to
-reconstruct by opening three files. A section whose metric does not vary by CPU - compression
+Two runners: `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm` (aarch64). One PNG per operation, with
+the platforms **stacked vertically as subplots** sharing the x cases and a single legend. One
+image, one row per platform, so a platform-specific result is obvious rather than something the
+reader has to reconstruct by opening several files. A section whose metric does not vary by CPU - compression
 ratio - sets `per_platform: False` and renders one panel.
 
 Any result that flips sign between platforms gets called out in the text of that section. Several

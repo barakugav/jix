@@ -3,7 +3,7 @@
   {
    "name": "read[numpy]",
    "stats": {
-    "mean": 4.0000000000000003e-07,
+    "mean": 4.7200000000000004e-07,
     "rounds": 20
    },
    "extra_info": {
@@ -15,7 +15,7 @@
   {
    "name": "read[numpy]",
    "stats": {
-    "mean": 6e-07,
+    "mean": 7.079999999999999e-07,
     "rounds": 20
    },
    "extra_info": {
@@ -27,7 +27,7 @@
   {
    "name": "read[numpy]",
    "stats": {
-    "mean": 3.5e-07,
+    "mean": 4.13e-07,
     "rounds": 20
    },
    "extra_info": {
@@ -39,7 +39,7 @@
   {
    "name": "read[numpy]",
    "stats": {
-    "mean": 1.2e-05,
+    "mean": 1.4160000000000002e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -51,7 +51,7 @@
   {
    "name": "read[numpy]",
    "stats": {
-    "mean": 0.00019,
+    "mean": 0.0002242,
     "rounds": 20
    },
    "extra_info": {
@@ -63,7 +63,7 @@
   {
    "name": "read[numpy]",
    "stats": {
-    "mean": 0.005200000000000001,
+    "mean": 0.006136000000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -75,7 +75,7 @@
   {
    "name": "read[jix-plain]",
    "stats": {
-    "mean": 5e-07,
+    "mean": 5.900000000000001e-07,
     "rounds": 20
    },
    "extra_info": {
@@ -87,7 +87,7 @@
   {
    "name": "read[jix-plain]",
    "stats": {
-    "mean": 7e-07,
+    "mean": 8.26e-07,
     "rounds": 20
    },
    "extra_info": {
@@ -99,7 +99,7 @@
   {
    "name": "read[jix-plain]",
    "stats": {
-    "mean": 4.5e-07,
+    "mean": 5.31e-07,
     "rounds": 20
    },
    "extra_info": {
@@ -111,7 +111,7 @@
   {
    "name": "read[jix-plain]",
    "stats": {
-    "mean": 1.3e-05,
+    "mean": 1.534e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -123,7 +123,7 @@
   {
    "name": "read[jix-plain]",
    "stats": {
-    "mean": 0.0002,
+    "mean": 0.00023600000000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -135,7 +135,7 @@
   {
    "name": "read[jix-plain]",
    "stats": {
-    "mean": 0.0055,
+    "mean": 0.00649,
     "rounds": 20
    },
    "extra_info": {
@@ -147,7 +147,7 @@
   {
    "name": "read[jix]",
    "stats": {
-    "mean": 1.6000000000000001e-06,
+    "mean": 1.8880000000000002e-06,
     "rounds": 20
    },
    "extra_info": {
@@ -159,7 +159,7 @@
   {
    "name": "read[jix]",
    "stats": {
-    "mean": 2.6e-06,
+    "mean": 3.068e-06,
     "rounds": 20
    },
    "extra_info": {
@@ -171,7 +171,7 @@
   {
    "name": "read[jix]",
    "stats": {
-    "mean": 3.6e-06,
+    "mean": 4.248e-06,
     "rounds": 20
    },
    "extra_info": {
@@ -183,7 +183,7 @@
   {
    "name": "read[jix]",
    "stats": {
-    "mean": 2.6e-05,
+    "mean": 3.068e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -195,7 +195,7 @@
   {
    "name": "read[jix]",
    "stats": {
-    "mean": 0.00038,
+    "mean": 0.0004484,
     "rounds": 20
    },
    "extra_info": {
@@ -207,7 +207,7 @@
   {
    "name": "read[jix]",
    "stats": {
-    "mean": 0.012,
+    "mean": 0.01416,
     "rounds": 20
    },
    "extra_info": {
@@ -219,7 +219,7 @@
   {
    "name": "read[blosc2]",
    "stats": {
-    "mean": 7.6e-05,
+    "mean": 8.968000000000001e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -231,7 +231,7 @@
   {
    "name": "read[blosc2]",
    "stats": {
-    "mean": 8e-05,
+    "mean": 9.44e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -243,7 +243,7 @@
   {
    "name": "read[blosc2]",
    "stats": {
-    "mean": 5.2e-05,
+    "mean": 6.136e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -255,7 +255,7 @@
   {
    "name": "read[blosc2]",
    "stats": {
-    "mean": 0.000128,
+    "mean": 0.00015104000000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -267,7 +267,7 @@
   {
    "name": "read[blosc2]",
    "stats": {
-    "mean": 0.00088,
+    "mean": 0.0010384,
     "rounds": 20
    },
    "extra_info": {
@@ -279,7 +279,7 @@
   {
    "name": "read[blosc2]",
    "stats": {
-    "mean": 0.023,
+    "mean": 0.02714,
     "rounds": 20
    },
    "extra_info": {
@@ -291,7 +291,7 @@
   {
    "name": "read[blosc2-chunked]",
    "stats": {
-    "mean": 3.4000000000000007e-05,
+    "mean": 4.012e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -303,7 +303,7 @@
   {
    "name": "read[blosc2-chunked]",
    "stats": {
-    "mean": 3.6e-05,
+    "mean": 4.248e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -315,7 +315,7 @@
   {
    "name": "read[blosc2-chunked]",
    "stats": {
-    "mean": 4.2000000000000004e-05,
+    "mean": 4.9560000000000007e-05,
     "rounds": 20
    },
    "extra_info": {
@@ -327,7 +327,7 @@
   {
    "name": "read[blosc2-chunked]",
    "stats": {
-    "mean": 9.5e-05,
+    "mean": 0.0001121,
     "rounds": 20
    },
    "extra_info": {
@@ -339,7 +339,7 @@
   {
    "name": "read[blosc2-chunked]",
    "stats": {
-    "mean": 0.0007800000000000001,
+    "mean": 0.0009204,
     "rounds": 20
    },
    "extra_info": {
@@ -351,7 +351,7 @@
   {
    "name": "read[blosc2-chunked]",
    "stats": {
-    "mean": 0.022,
+    "mean": 0.02596,
     "rounds": 20
    },
    "extra_info": {
@@ -363,7 +363,7 @@
   {
    "name": "read[zarr]",
    "stats": {
-    "mean": 0.00033,
+    "mean": 0.00038940000000000003,
     "rounds": 20
    },
    "extra_info": {
@@ -375,7 +375,7 @@
   {
    "name": "read[zarr]",
    "stats": {
-    "mean": 0.00034,
+    "mean": 0.00040120000000000005,
     "rounds": 20
    },
    "extra_info": {
@@ -387,7 +387,7 @@
   {
    "name": "read[zarr]",
    "stats": {
-    "mean": 0.00033600000000000004,
+    "mean": 0.00039648000000000005,
     "rounds": 20
    },
    "extra_info": {
@@ -399,7 +399,7 @@
   {
    "name": "read[zarr]",
    "stats": {
-    "mean": 0.00042,
+    "mean": 0.0004956,
     "rounds": 20
    },
    "extra_info": {
@@ -411,7 +411,7 @@
   {
    "name": "read[zarr]",
    "stats": {
-    "mean": 0.0012,
+    "mean": 0.001416,
     "rounds": 20
    },
    "extra_info": {
@@ -423,7 +423,7 @@
   {
    "name": "read[zarr]",
    "stats": {
-    "mean": 0.04,
+    "mean": 0.047200000000000006,
     "rounds": 20
    },
    "extra_info": {
@@ -435,7 +435,7 @@
   {
    "name": "compress[jix-noshuffle]",
    "stats": {
-    "mean": 0.133,
+    "mean": 0.15694,
     "rounds": 20
    },
    "extra_info": {
@@ -447,7 +447,7 @@
   {
    "name": "compress[jix-noshuffle]",
    "stats": {
-    "mean": 0.163,
+    "mean": 0.19234,
     "rounds": 20
    },
    "extra_info": {
@@ -459,7 +459,7 @@
   {
    "name": "compress[jix-noshuffle]",
    "stats": {
-    "mean": 0.088,
+    "mean": 0.10384,
     "rounds": 20
    },
    "extra_info": {
@@ -471,7 +471,7 @@
   {
    "name": "compress[jix-noshuffle]",
    "stats": {
-    "mean": 0.07100000000000001,
+    "mean": 0.08378000000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -483,7 +483,7 @@
   {
    "name": "compress[jix]",
    "stats": {
-    "mean": 0.19,
+    "mean": 0.2242,
     "rounds": 20
    },
    "extra_info": {
@@ -495,7 +495,7 @@
   {
    "name": "compress[jix]",
    "stats": {
-    "mean": 0.133,
+    "mean": 0.15694,
     "rounds": 20
    },
    "extra_info": {
@@ -507,7 +507,7 @@
   {
    "name": "compress[jix]",
    "stats": {
-    "mean": 0.074,
+    "mean": 0.08732000000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -519,7 +519,7 @@
   {
    "name": "compress[jix]",
    "stats": {
-    "mean": 0.062,
+    "mean": 0.07316,
     "rounds": 20
    },
    "extra_info": {
@@ -531,7 +531,7 @@
   {
    "name": "compress[blosc2-noshuffle]",
    "stats": {
-    "mean": 0.128,
+    "mean": 0.15104,
     "rounds": 20
    },
    "extra_info": {
@@ -543,7 +543,7 @@
   {
    "name": "compress[blosc2-noshuffle]",
    "stats": {
-    "mean": 0.176,
+    "mean": 0.20768,
     "rounds": 20
    },
    "extra_info": {
@@ -555,7 +555,7 @@
   {
    "name": "compress[blosc2-noshuffle]",
    "stats": {
-    "mean": 0.10200000000000001,
+    "mean": 0.12036000000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -567,7 +567,7 @@
   {
    "name": "compress[blosc2-noshuffle]",
    "stats": {
-    "mean": 0.084,
+    "mean": 0.09912,
     "rounds": 20
    },
    "extra_info": {
@@ -579,7 +579,7 @@
   {
    "name": "compress[blosc2]",
    "stats": {
-    "mean": 0.196,
+    "mean": 0.23128,
     "rounds": 20
    },
    "extra_info": {
@@ -591,7 +591,7 @@
   {
    "name": "compress[blosc2]",
    "stats": {
-    "mean": 0.147,
+    "mean": 0.17346,
     "rounds": 20
    },
    "extra_info": {
@@ -603,7 +603,7 @@
   {
    "name": "compress[blosc2]",
    "stats": {
-    "mean": 0.088,
+    "mean": 0.10384,
     "rounds": 20
    },
    "extra_info": {
@@ -615,7 +615,7 @@
   {
    "name": "compress[blosc2]",
    "stats": {
-    "mean": 0.07200000000000001,
+    "mean": 0.08496000000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -627,7 +627,7 @@
   {
    "name": "compress[zarr]",
    "stats": {
-    "mean": 0.54,
+    "mean": 0.6372,
     "rounds": 20
    },
    "extra_info": {
@@ -639,7 +639,7 @@
   {
    "name": "compress[zarr]",
    "stats": {
-    "mean": 0.61,
+    "mean": 0.7198,
     "rounds": 20
    },
    "extra_info": {
@@ -651,7 +651,7 @@
   {
    "name": "compress[zarr]",
    "stats": {
-    "mean": 0.42,
+    "mean": 0.49560000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -663,7 +663,7 @@
   {
    "name": "compress[zarr]",
    "stats": {
-    "mean": 0.39,
+    "mean": 0.4602,
     "rounds": 20
    },
    "extra_info": {
@@ -675,7 +675,7 @@
   {
    "name": "negate[numpy]",
    "stats": {
-    "mean": 0.002157,
+    "mean": 0.00254526,
     "rounds": 20
    },
    "extra_info": {
@@ -687,7 +687,7 @@
   {
    "name": "negate[numpy]",
    "stats": {
-    "mean": 0.00221,
+    "mean": 0.0026078,
     "rounds": 20
    },
    "extra_info": {
@@ -699,7 +699,7 @@
   {
    "name": "negate[jix-plain]",
    "stats": {
-    "mean": 0.002186,
+    "mean": 0.00257948,
     "rounds": 20
    },
    "extra_info": {
@@ -711,7 +711,7 @@
   {
    "name": "negate[jix-plain]",
    "stats": {
-    "mean": 0.0022500000000000003,
+    "mean": 0.0026550000000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -723,7 +723,7 @@
   {
    "name": "negate[jix]",
    "stats": {
-    "mean": 0.049600000000000005,
+    "mean": 0.058528000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -735,7 +735,7 @@
   {
    "name": "negate[jix]",
    "stats": {
-    "mean": 0.045,
+    "mean": 0.0531,
     "rounds": 20
    },
    "extra_info": {
@@ -747,7 +747,7 @@
   {
    "name": "negate[blosc2]",
    "stats": {
-    "mean": 0.443,
+    "mean": 0.52274,
     "rounds": 20
    },
    "extra_info": {
@@ -759,7 +759,7 @@
   {
    "name": "negate[blosc2]",
    "stats": {
-    "mean": 0.42,
+    "mean": 0.49560000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -771,7 +771,7 @@
   {
    "name": "negate[zarr]",
    "stats": {
-    "mean": 0.0308,
+    "mean": 0.036344,
     "rounds": 20
    },
    "extra_info": {
@@ -783,7 +783,7 @@
   {
    "name": "negate[zarr]",
    "stats": {
-    "mean": 0.03,
+    "mean": 0.0354,
     "rounds": 20
    },
    "extra_info": {
@@ -795,7 +795,7 @@
   {
    "name": "negate_dist[numpy]",
    "stats": {
-    "mean": 0.002157,
+    "mean": 0.00254526,
     "rounds": 20
    },
    "extra_info": {
@@ -807,7 +807,7 @@
   {
    "name": "negate_dist[numpy]",
    "stats": {
-    "mean": 0.002157,
+    "mean": 0.00254526,
     "rounds": 20
    },
    "extra_info": {
@@ -819,7 +819,7 @@
   {
    "name": "negate_dist[numpy]",
    "stats": {
-    "mean": 0.002157,
+    "mean": 0.00254526,
     "rounds": 20
    },
    "extra_info": {
@@ -831,7 +831,7 @@
   {
    "name": "negate_dist[numpy]",
    "stats": {
-    "mean": 0.002157,
+    "mean": 0.00254526,
     "rounds": 20
    },
    "extra_info": {
@@ -843,7 +843,7 @@
   {
    "name": "negate_dist[jix-plain]",
    "stats": {
-    "mean": 0.002186,
+    "mean": 0.00257948,
     "rounds": 20
    },
    "extra_info": {
@@ -855,7 +855,7 @@
   {
    "name": "negate_dist[jix-plain]",
    "stats": {
-    "mean": 0.002186,
+    "mean": 0.00257948,
     "rounds": 20
    },
    "extra_info": {
@@ -867,7 +867,7 @@
   {
    "name": "negate_dist[jix-plain]",
    "stats": {
-    "mean": 0.002186,
+    "mean": 0.00257948,
     "rounds": 20
    },
    "extra_info": {
@@ -879,7 +879,7 @@
   {
    "name": "negate_dist[jix-plain]",
    "stats": {
-    "mean": 0.002186,
+    "mean": 0.00257948,
     "rounds": 20
    },
    "extra_info": {
@@ -891,7 +891,7 @@
   {
    "name": "negate_dist[jix]",
    "stats": {
-    "mean": 0.09640000000000001,
+    "mean": 0.113752,
     "rounds": 20
    },
    "extra_info": {
@@ -903,7 +903,7 @@
   {
    "name": "negate_dist[jix]",
    "stats": {
-    "mean": 0.049600000000000005,
+    "mean": 0.058528000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -915,7 +915,7 @@
   {
    "name": "negate_dist[jix]",
    "stats": {
-    "mean": 0.0345,
+    "mean": 0.04071,
     "rounds": 20
    },
    "extra_info": {
@@ -927,7 +927,7 @@
   {
    "name": "negate_dist[jix]",
    "stats": {
-    "mean": 0.0213,
+    "mean": 0.025134000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -939,7 +939,7 @@
   {
    "name": "negate_dist[blosc2]",
    "stats": {
-    "mean": 0.51,
+    "mean": 0.6018,
     "rounds": 20
    },
    "extra_info": {
@@ -951,7 +951,7 @@
   {
    "name": "negate_dist[blosc2]",
    "stats": {
-    "mean": 0.443,
+    "mean": 0.52274,
     "rounds": 20
    },
    "extra_info": {
@@ -963,7 +963,7 @@
   {
    "name": "negate_dist[blosc2]",
    "stats": {
-    "mean": 0.21,
+    "mean": 0.24780000000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -975,7 +975,7 @@
   {
    "name": "negate_dist[blosc2]",
    "stats": {
-    "mean": 0.155,
+    "mean": 0.1829,
     "rounds": 20
    },
    "extra_info": {
@@ -987,7 +987,7 @@
   {
    "name": "negate_dist[zarr]",
    "stats": {
-    "mean": 0.044,
+    "mean": 0.05192,
     "rounds": 20
    },
    "extra_info": {
@@ -999,7 +999,7 @@
   {
    "name": "negate_dist[zarr]",
    "stats": {
-    "mean": 0.0308,
+    "mean": 0.036344,
     "rounds": 20
    },
    "extra_info": {
@@ -1011,7 +1011,7 @@
   {
    "name": "negate_dist[zarr]",
    "stats": {
-    "mean": 0.021,
+    "mean": 0.02478,
     "rounds": 20
    },
    "extra_info": {
@@ -1023,7 +1023,7 @@
   {
    "name": "negate_dist[zarr]",
    "stats": {
-    "mean": 0.016,
+    "mean": 0.01888,
     "rounds": 20
    },
    "extra_info": {
@@ -1035,7 +1035,7 @@
   {
    "name": "add[numpy]",
    "stats": {
-    "mean": 0.002886,
+    "mean": 0.0034054800000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -1047,7 +1047,7 @@
   {
    "name": "add[numpy]",
    "stats": {
-    "mean": 0.0029500000000000004,
+    "mean": 0.0034810000000000006,
     "rounds": 20
    },
    "extra_info": {
@@ -1059,7 +1059,7 @@
   {
    "name": "add[jix-plain]",
    "stats": {
-    "mean": 0.002882,
+    "mean": 0.0034007600000000005,
     "rounds": 20
    },
    "extra_info": {
@@ -1071,7 +1071,7 @@
   {
    "name": "add[jix-plain]",
    "stats": {
-    "mean": 0.00294,
+    "mean": 0.0034692,
     "rounds": 20
    },
    "extra_info": {
@@ -1083,7 +1083,7 @@
   {
    "name": "add[jix]",
    "stats": {
-    "mean": 0.0991,
+    "mean": 0.116938,
     "rounds": 20
    },
    "extra_info": {
@@ -1095,7 +1095,7 @@
   {
    "name": "add[jix]",
    "stats": {
-    "mean": 0.094,
+    "mean": 0.11092,
     "rounds": 20
    },
    "extra_info": {
@@ -1107,7 +1107,7 @@
   {
    "name": "add[blosc2]",
    "stats": {
-    "mean": 0.561,
+    "mean": 0.66198,
     "rounds": 20
    },
    "extra_info": {
@@ -1119,7 +1119,7 @@
   {
    "name": "add[blosc2]",
    "stats": {
-    "mean": 0.54,
+    "mean": 0.6372,
     "rounds": 20
    },
    "extra_info": {
@@ -1131,7 +1131,7 @@
   {
    "name": "add[zarr]",
    "stats": {
-    "mean": 0.0592,
+    "mean": 0.069856,
     "rounds": 20
    },
    "extra_info": {
@@ -1143,7 +1143,7 @@
   {
    "name": "add[zarr]",
    "stats": {
-    "mean": 0.058,
+    "mean": 0.06844,
     "rounds": 20
    },
    "extra_info": {
@@ -1155,7 +1155,7 @@
   {
    "name": "reduction[numpy]",
    "stats": {
-    "mean": 0.00233,
+    "mean": 0.0027494000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -1167,7 +1167,7 @@
   {
    "name": "reduction[numpy]",
    "stats": {
-    "mean": 0.0039700000000000004,
+    "mean": 0.004684600000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1179,7 +1179,7 @@
   {
    "name": "reduction[numpy]",
    "stats": {
-    "mean": 0.00321,
+    "mean": 0.0037878,
     "rounds": 20
    },
    "extra_info": {
@@ -1191,7 +1191,7 @@
   {
    "name": "reduction[numpy]",
    "stats": {
-    "mean": 0.0117,
+    "mean": 0.013806,
     "rounds": 20
    },
    "extra_info": {
@@ -1203,7 +1203,7 @@
   {
    "name": "reduction[numpy]",
    "stats": {
-    "mean": 0.00439,
+    "mean": 0.0051802,
     "rounds": 20
    },
    "extra_info": {
@@ -1215,7 +1215,7 @@
   {
    "name": "reduction[numpy]",
    "stats": {
-    "mean": 0.01106,
+    "mean": 0.013050800000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1227,7 +1227,7 @@
   {
    "name": "reduction[numpy]",
    "stats": {
-    "mean": 0.010740000000000001,
+    "mean": 0.0126732,
     "rounds": 20
    },
    "extra_info": {
@@ -1239,7 +1239,7 @@
   {
    "name": "reduction[jix-plain]",
    "stats": {
-    "mean": 0.0020299999999999997,
+    "mean": 0.0023954,
     "rounds": 20
    },
    "extra_info": {
@@ -1251,7 +1251,7 @@
   {
    "name": "reduction[jix-plain]",
    "stats": {
-    "mean": 0.0015500000000000002,
+    "mean": 0.0018290000000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1263,7 +1263,7 @@
   {
    "name": "reduction[jix-plain]",
    "stats": {
-    "mean": 0.0013100000000000002,
+    "mean": 0.0015458000000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -1275,7 +1275,7 @@
   {
    "name": "reduction[jix-plain]",
    "stats": {
-    "mean": 0.0031200000000000004,
+    "mean": 0.009572160000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1287,7 +1287,7 @@
   {
    "name": "reduction[jix-plain]",
    "stats": {
-    "mean": 0.00136,
+    "mean": 0.004653920000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1299,7 +1299,7 @@
   {
    "name": "reduction[jix-plain]",
    "stats": {
-    "mean": 0.01444,
+    "mean": 0.0170392,
     "rounds": 20
    },
    "extra_info": {
@@ -1311,7 +1311,7 @@
   {
    "name": "reduction[jix-plain]",
    "stats": {
-    "mean": 0.03481,
+    "mean": 0.0410758,
     "rounds": 20
    },
    "extra_info": {
@@ -1323,7 +1323,7 @@
   {
    "name": "reduction[jix]",
    "stats": {
-    "mean": 0.049600000000000005,
+    "mean": 0.058528000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -1335,7 +1335,7 @@
   {
    "name": "reduction[jix]",
    "stats": {
-    "mean": 0.049,
+    "mean": 0.05782,
     "rounds": 20
    },
    "extra_info": {
@@ -1347,7 +1347,7 @@
   {
    "name": "reduction[jix]",
    "stats": {
-    "mean": 0.048600000000000004,
+    "mean": 0.057348,
     "rounds": 20
    },
    "extra_info": {
@@ -1359,7 +1359,7 @@
   {
    "name": "reduction[jix]",
    "stats": {
-    "mean": 0.022,
+    "mean": 0.067496,
     "rounds": 20
    },
    "extra_info": {
@@ -1371,7 +1371,7 @@
   {
    "name": "reduction[jix]",
    "stats": {
-    "mean": 0.018600000000000002,
+    "mean": 0.0636492,
     "rounds": 20
    },
    "extra_info": {
@@ -1383,7 +1383,7 @@
   {
    "name": "reduction[jix]",
    "stats": {
-    "mean": 0.061700000000000005,
+    "mean": 0.07280600000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1395,7 +1395,7 @@
   {
    "name": "reduction[jix]",
    "stats": {
-    "mean": 0.0824,
+    "mean": 0.09723200000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1407,7 +1407,7 @@
   {
    "name": "reduction[blosc2]",
    "stats": {
-    "mean": 0.0347,
+    "mean": 0.040946,
     "rounds": 20
    },
    "extra_info": {
@@ -1419,7 +1419,7 @@
   {
    "name": "reduction[blosc2]",
    "stats": {
-    "mean": 0.0363,
+    "mean": 0.042834,
     "rounds": 20
    },
    "extra_info": {
@@ -1431,7 +1431,7 @@
   {
    "name": "reduction[blosc2]",
    "stats": {
-    "mean": 0.0396,
+    "mean": 0.046728000000000006,
     "rounds": 20
    },
    "extra_info": {
@@ -1443,7 +1443,7 @@
   {
    "name": "reduction[blosc2]",
    "stats": {
-    "mean": 0.020399999999999998,
+    "mean": 0.024072,
     "rounds": 20
    },
    "extra_info": {
@@ -1455,7 +1455,7 @@
   {
    "name": "reduction[blosc2]",
    "stats": {
-    "mean": 0.014199999999999999,
+    "mean": 0.016756,
     "rounds": 20
    },
    "extra_info": {
@@ -1467,7 +1467,7 @@
   {
    "name": "reduction[blosc2]",
    "stats": {
-    "mean": 0.0729,
+    "mean": 0.08602200000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -1479,7 +1479,7 @@
   {
    "name": "reduction[blosc2]",
    "stats": {
-    "mean": 0.074,
+    "mean": 0.08732000000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1491,7 +1491,7 @@
   {
    "name": "reduction[zarr]",
    "stats": {
-    "mean": 0.0309,
+    "mean": 0.036462,
     "rounds": 20
    },
    "extra_info": {
@@ -1503,7 +1503,7 @@
   {
    "name": "reduction[zarr]",
    "stats": {
-    "mean": 0.0329,
+    "mean": 0.038822,
     "rounds": 20
    },
    "extra_info": {
@@ -1515,7 +1515,7 @@
   {
    "name": "reduction[zarr]",
    "stats": {
-    "mean": 0.0315,
+    "mean": 0.03717,
     "rounds": 20
    },
    "extra_info": {
@@ -1527,7 +1527,7 @@
   {
    "name": "reduction[zarr]",
    "stats": {
-    "mean": 0.0371,
+    "mean": 0.043778000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -1539,7 +1539,7 @@
   {
    "name": "reduction[zarr]",
    "stats": {
-    "mean": 0.0296,
+    "mean": 0.034928,
     "rounds": 20
    },
    "extra_info": {
@@ -1551,7 +1551,7 @@
   {
    "name": "reduction[zarr]",
    "stats": {
-    "mean": 0.0419,
+    "mean": 0.049442,
     "rounds": 20
    },
    "extra_info": {
@@ -1563,7 +1563,7 @@
   {
    "name": "reduction[zarr]",
    "stats": {
-    "mean": 0.0391,
+    "mean": 0.046138000000000005,
     "rounds": 20
    },
    "extra_info": {
@@ -1575,7 +1575,7 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.0029,
+    "mean": 0.003422,
     "rounds": 20
    },
    "extra_info": {
@@ -1587,7 +1587,7 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.0060999999999999995,
+    "mean": 0.0071979999999999995,
     "rounds": 20
    },
    "extra_info": {
@@ -1599,7 +1599,7 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.0128,
+    "mean": 0.015104000000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1611,7 +1611,7 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.026000000000000002,
+    "mean": 0.030680000000000002,
     "rounds": 20
    },
    "extra_info": {
@@ -1623,7 +1623,7 @@
   {
    "name": "chain[numpy]",
    "stats": {
-    "mean": 0.08090000000000001,
+    "mean": 0.095462,
     "rounds": 20
    },
    "extra_info": {
@@ -1635,7 +1635,7 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.0029,
+    "mean": 0.003422,
     "rounds": 20
    },
    "extra_info": {
@@ -1647,7 +1647,7 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.0034,
+    "mean": 0.004012,
     "rounds": 20
    },
    "extra_info": {
@@ -1659,7 +1659,7 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.0046,
+    "mean": 0.005428,
     "rounds": 20
    },
    "extra_info": {
@@ -1671,7 +1671,7 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.0070999999999999995,
+    "mean": 0.008378,
     "rounds": 20
    },
    "extra_info": {
@@ -1683,7 +1683,7 @@
   {
    "name": "chain[jix-plain]",
    "stats": {
-    "mean": 0.09090000000000001,
+    "mean": 0.10726200000000001,
     "rounds": 20
    },
    "extra_info": {
@@ -1695,7 +1695,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.05,
+    "mean": 0.059000000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -1707,7 +1707,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.051000000000000004,
+    "mean": 0.060180000000000004,
     "rounds": 20
    },
    "extra_info": {
@@ -1719,7 +1719,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.053,
+    "mean": 0.06254,
     "rounds": 20
    },
    "extra_info": {
@@ -1731,7 +1731,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.057,
+    "mean": 0.06726,
     "rounds": 20
    },
    "extra_info": {
@@ -1743,7 +1743,7 @@
   {
    "name": "chain[jix]",
    "stats": {
-    "mean": 0.138,
+    "mean": 0.16284,
     "rounds": 20
    },
    "extra_info": {

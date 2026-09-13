@@ -65,45 +65,53 @@ def library_color(library):
 def load_python(path, platform):
     """Rows from a pytest-benchmark --benchmark-json file.
 
-    Each benchmark's ``extra_info`` must carry ``section``, ``case`` and ``library``. Entries that
-    also carry ``ratio`` or ``peak_rss_bytes`` emit an extra row under a ``<section>`` of their own
-    so a single run can feed a time plot and a ratio plot without being benchmarked twice.
+    Each benchmark's ``extra_info`` must carry ``section``, ``case`` and ``library``. Two optional
+    fields let one run feed more than the obvious plot:
+
+    - ``value_field`` names an ``extra_info`` field to use instead of the measured time, for
+      benchmarks whose point is something other than how long they took.
+    - ``also`` maps additional section keys to the ``extra_info`` field holding their value, for a
+      run that yields two metrics at once - compressing produces both a time and a stored size.
     """
     rows = []
     for bench in json.loads(Path(path).read_text())["benchmarks"]:
         info = bench["extra_info"]
         if "section" not in info:
             continue  # a benchmark that predates the report spec, or is dev-only
-        common = {
-            "platform": platform,
-            "case": info["case"],
-            "library": info["library"],
-        }
-        rows.append({**common, "section": info["section"], "value": bench["stats"]["mean"]})
-        for key, suffix in (("ratio", "_ratio"), ("peak_rss_bytes", "_memory")):
-            if key in info:
-                rows.append({**common, "section": info["section"] + suffix, "value": info[key]})
+        common = {"platform": platform, "case": info["case"], "library": info["library"]}
+        field = info.get("value_field")
+        value = info[field] if field else bench["stats"]["mean"]
+        rows.append({**common, "section": info["section"], "value": value})
+        for section, extra_field in info.get("also", {}).items():
+            rows.append({**common, "section": section, "value": info[extra_field]})
     return rows
 
 
-def load_rust(criterion_root, platform):
+def load_rust(criterion_root, platform, case_labels=None):
     """Rows from a Criterion output tree.
 
     Only groups named ``report_<section>`` are read; the rest of the Criterion suite exists to
-    optimize the library and has no place in the report. Benchmark ids are ``<library>/<case>``.
+    optimize the library and has no place in the report. Benchmark ids are ``<library>/<case>``,
+    where the case is a filesystem-safe id. ``case_labels`` maps ``(section, case_id)`` to the
+    label the plot shows, because Criterion ids become directory names and plot labels contain
+    newlines and spaces.
     """
     rows = []
+    case_labels = case_labels or {}
     for estimates in sorted(Path(criterion_root).glob("**/new/estimates.json")):
         parts = estimates.parent.parent.relative_to(criterion_root).parts
         if len(parts) < 3 or not parts[0].startswith("report_"):
             continue
+        section = parts[0].removeprefix("report_")
+        case_id = "/".join(parts[2:])
         rows.append(
             {
                 "platform": platform,
-                "section": parts[0].removeprefix("report_"),
+                "section": section,
                 "library": parts[1],
-                "case": "/".join(parts[2:]),
-                "value": json.loads(estimates.read_text())["mean"]["point_estimate"],
+                "case": case_labels.get((section, case_id), case_id),
+                # Criterion reports nanoseconds; the rest of the report is in seconds.
+                "value": json.loads(estimates.read_text())["mean"]["point_estimate"] * 1e-9,
             }
         )
     return rows
@@ -320,3 +328,22 @@ def markdown_table(rows, section):
 def natural_key(text):
     """Natural sort key: '20' before '100', 'a2' before 'a10'."""
     return [int(tok) if tok.isdigit() else tok for tok in re.split(r"(\d+)", str(text))]
+
+
+def render_report(rows, template, out_path, plots_dir, sections):
+    """Expand ``<!-- plot:KEY -->`` and ``<!-- table:KEY -->`` markers in a template.
+
+    Keeps the report's numbers generated rather than typed: the tables come from the same rows the
+    plots do, so a table can never drift from the chart above it.
+    """
+    text = Path(template).read_text()
+    for section in sections:
+        key = section["key"]
+        rel = f"{Path(plots_dir).name}/{key}.png"
+        text = text.replace(f"<!-- plot:{key} -->", f"![{section['title']}]({rel})")
+        text = text.replace(f"<!-- table:{key} -->", markdown_table(rows, section))
+    leftover = [line for line in text.splitlines() if "<!-- plot:" in line or "<!-- table:" in line]
+    if leftover:
+        raise SystemExit(f"unknown markers in {template}: {leftover}")
+    Path(out_path).write_text(text)
+    return out_path

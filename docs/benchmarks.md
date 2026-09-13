@@ -4,7 +4,7 @@
 
 Trigger the `Benchmarks` workflow manually (Actions -> Benchmarks -> Run workflow):
 
-- Check the runners to use (ubuntu x86_64, ubuntu aarch64, macos arm64) - all off by default.
+- Check the runners to use (ubuntu x86_64, ubuntu aarch64) - both off by default.
 - `suites`: run both suites, or just `rust` / `python`.
 - `fast`: a quick, low-fidelity run (reduced Criterion sampling and pytest-benchmark timing) for
   short dev cycles - not for authoritative numbers.
@@ -62,4 +62,5 @@ significance 0.05 and noise threshold 0.01 (Improved / Regressed / WithinNoise /
   noise floor. Prefer `compare_to` (same-machine A/B) for PR-vs-main.
 - GitHub rotates runner hardware; two same-label runs can land on different CPUs. `meta.json`
   records the CPU model and `compare` warns when base/new CPUs differ.
-- macOS/Windows runners carry minute multipliers; keep the checkboxes off unless needed.
+- Both runners are Linux; GitHub's macOS runners carry a minute multiplier and are not in the
+  matrix.

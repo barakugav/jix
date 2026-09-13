@@ -12,8 +12,7 @@ FAST_PYTEST_ARGS = ["--benchmark-max-time=0.1", "--benchmark-min-rounds=1", "--b
 
 sys.path.insert(0, str(BENCH_DIR.parent))  # put python/ on the path
 
-from benches import report  # noqa: E402
-from benches.array_impls import CODEC_DESC  # noqa: E402
+from benches import report_bars, report_spec  # noqa: E402
 
 
 def run_benchmarks(out_dir: Path, pytest_args: list[str]):
@@ -43,17 +42,22 @@ def run_benchmarks(out_dir: Path, pytest_args: list[str]):
     return json_path
 
 
-def build_reports(json_path: Path, out_dir: Path):
-    """Build the throughput PNGs + compression-ratio table from an existing python.json.
+def build_reports(json_path: Path, out_dir: Path, platform: str = "local"):
+    """Plot the Python half of the report from an existing python.json.
 
-    Returns the list of written paths. Runs no benchmarks.
+    Returns the list of written paths. Runs no benchmarks. The full report, with both platforms
+    and the Rust half, is built by `bench-report/build_report.py`; this is the quick local view.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    benchmarks = report.load_pytest_json(json_path)
+    rows = report_bars.load_python(json_path, platform)
     written = []
-    written += report.plot_throughput(benchmarks, out_dir)
-    written.append(report.write_ratio_table(benchmarks, out_dir, CODEC_DESC))
+    for section in report_spec.SECTIONS:
+        if section["key"].startswith("rust_"):
+            continue
+        png = report_bars.plot_section(rows, section, out_dir)
+        if png is not None:
+            written.append(png)
     return written
 
 
