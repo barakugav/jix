@@ -19,10 +19,18 @@ multi-threaded Blosc2 will beat jix on throughput-bound work; that comparison is
 is `[130000, 200]` throughout, in Rust and Python alike - 104 MB as `f32`.
 
 **Reading the plots.** Each tick on the x axis is one configuration; each bar is one library. Bars
-are scaled to the baseline - NumPy in Python, `ndarray` in Rust - which is the gray bar, and which
-by definition tops out on the black rule at 1x. **Taller is better.** The scale is logarithmic, so
-a bar half the height of the rule is not half the speed; the number above each bar is exact, and
-the collapsed table under each plot has the absolute measurements.
+are scaled to the baseline - NumPy in Python, `ndarray` in Rust - which is the gray bar and which by
+definition tops out on the black rule at 1x. **Shorter is better**: a bar at 4x took four times as
+long, or used four times the memory, or stored four times the bytes. The one exception is
+compression throughput, which is plotted in absolute MB/s with no baseline, where taller is faster.
+
+The scale is logarithmic, so a bar twice the height of another is not twice the number. The value
+above each bar is exact, and the collapsed table under each plot carries the absolute measurements.
+
+`jix` and `blosc2` always mean the byte-shuffled build - the configuration anyone would actually
+use. The unfiltered variants appear only in the compression section, where the filter is the thing
+being measured. `jix-plain` is jix over an ordinary uncompressed in-memory buffer: it isolates the
+cost of jix's operation machinery from the cost of decompression.
 
 ---
 
@@ -43,7 +51,7 @@ The first three cases are dominated by per-call overhead. The last three are whe
 real work, and they are the honest measure of decode throughput - Zarr in particular spends most of
 a small read inside its Python indexing layer rather than its codec.
 
-`b64x200 / r16x16` is the case to learn from: a read smaller than a block still decompresses a
+The `block 64x200 / read 16x16` case is the one to learn from: a read smaller than a block still decompresses a
 whole block and throws most of it away. **Match the block shape to how you read.** jix picks a
 block shape from the CPU cache sizes when you do not pass one, which is a fair default and a poor
 choice if your access pattern is lopsided.
@@ -51,19 +59,20 @@ choice if your access pattern is lopsided.
 `blosc2-chunked` is Blosc2 with `chunks` forced equal to `blocks`. Left to choose for itself Blosc2
 picks ~8.7 MiB chunks against a 4 KiB block; the block is still the decompression unit, but walking
 a large chunk's block table costs real time - about 2.3x here. It also silently rewrites a
-requested `(64, 200)` block to `(52, 200)` unless `chunks` is pinned too.
+requested `(64, 200)` block to `(52, 200)` unless `chunks` is pinned too. Both arms are on the plot
+so Blosc2 is shown at its best as well as at its default.
 
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix | jix-shuffle | blosc2 | blosc2-chunked | zarr |
+| case | numpy | jix-plain | jix | blosc2 | blosc2-chunked | zarr |
 |---|---|---|---|---|---|---|
-| b16x200 r1x200 | 400 ns | 1.40 us | 1.60 us | 78.00 us | 34.00 us | 330.00 us |
-| b16x200 r16x200 | 600 ns | 2.40 us | 2.60 us | 82.00 us | 36.00 us | 340.00 us |
-| b64x200 r16x16 | 350 ns | 3.20 us | 3.60 us | 54.00 us | 42.00 us | 336.00 us |
-| b64x200 r256x200 | 12.00 us | 28.00 us | 26.00 us | 130.00 us | 95.00 us | 420.00 us |
-| b64x200 r4096x200 | 190.00 us | 420.00 us | 380.00 us | 900.00 us | 780.00 us | 1.20 ms |
-| b64x200 full | 5.20 ms | 14.00 ms | 12.00 ms | 24.00 ms | 22.00 ms | 40.00 ms |
+| block 16x200 read 1x200 800 B | 400 ns | 500 ns | 1.60 us | 76.00 us | 34.00 us | 330.00 us |
+| block 16x200 read 16x200 13 KB | 600 ns | 700 ns | 2.60 us | 80.00 us | 36.00 us | 340.00 us |
+| block 64x200 read 16x16 1 KB | 350 ns | 450 ns | 3.60 us | 52.00 us | 42.00 us | 336.00 us |
+| block 64x200 read 256x200 205 KB | 12.00 us | 13.00 us | 26.00 us | 128.00 us | 95.00 us | 420.00 us |
+| block 64x200 read 4096x200 3 MB | 190.00 us | 200.00 us | 380.00 us | 880.00 us | 780.00 us | 1.20 ms |
+| block 64x200 read whole array 104 MB | 5.20 ms | 5.50 ms | 12.00 ms | 23.00 ms | 22.00 ms | 40.00 ms |
 
 </details>
 
@@ -74,11 +83,11 @@ requested `(64, 200)` block to `(52, 200)` unless `chunks` is pinned too.
 <details>
 <summary>Absolute numbers</summary>
 
-| case | ndarray | jix | jix-shuffle |
+| case | ndarray | jix-plain | jix |
 |---|---|---|---|
-| b32x32 r32x32 | 280 ns | 1.40 us | 1.60 us |
-| b32x32 r1x200 | 350 ns | 9.80 us | 10.50 us |
-| b512x32 r128x200 | 11.00 us | 46.00 us | 42.00 us |
+| block 32x32 read 32x32 4 KB | 280 ns | 300 ns | 1.60 us |
+| block 32x32 read 1x200 800 B | 350 ns | 380 ns | 10.50 us |
+| block 512x32 read 128x200 102 KB | 11.00 us | 11.50 us | 42.00 us |
 
 </details>
 
@@ -86,39 +95,46 @@ requested `(64, 200)` block to `(52, 200)` unless `chunks` is pinned too.
 
 ## Compression
 
-![Compression ratio](plots/compress_ratio.png)
+![Compressed size](plots/compress_ratio.png)
 
-Ratios track Blosc2 closely, which is what should happen - same codec, same filter, so what is
+Each bar is what the library stores as a fraction of the raw array, `prod(shape) * itemsize`, so
+NumPy is 1x by definition and shorter means smaller on disk. This is the one section where the
+unfiltered builds appear, because the byte-shuffle filter is exactly what separates them.
+
+Sizes track Blosc2 closely, which is what should happen - same codec, same filter, so what is
 really being measured is the cost of the block layout. Zarr uses Blosc internally and lands on the
 same numbers.
 
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix | jix-shuffle | blosc2 | blosc2-shuffle | zarr |
+| case | numpy | jix-noshuffle | jix | blosc2-noshuffle | blosc2 | zarr |
 |---|---|---|---|---|---|---|
-| random | 1.0x | 1.0x | 1.0x | 1.0x | 1.0x | 1.0x |
-| smooth | 1.0x | 3.5x | 3.9x | 3.4x | 3.7x | 3.7x |
-| 16 unique | 1.0x | 24.0x | 31.0x | 22.5x | 28.4x | 28.4x |
-| 4 unique | 1.0x | 46.0x | 55.2x | 41.0x | 48.6x | 48.6x |
+| random | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller | 1.0x smaller |
+| smooth | 1.0x smaller | 3.5x smaller | 3.9x smaller | 3.4x smaller | 3.7x smaller | 3.7x smaller |
+| 16 unique | 1.0x smaller | 24.0x smaller | 31.0x smaller | 22.5x smaller | 28.4x smaller | 28.4x smaller |
+| 4 unique | 1.0x smaller | 46.0x smaller | 55.2x smaller | 41.0x smaller | 48.6x smaller | 48.6x smaller |
 
 </details>
 
 ![Compression throughput](plots/compress.png)
 
-NumPy here is a plain `memcpy` of the same array: the price of not compressing at all. Note that
-the more compressible the data, the *faster* compression gets - that is the mechanism behind the
-distribution cases in the next section.
+Absolute throughput, in original array bytes per second - no baseline, and taller is faster. This
+is the one plot on the page that is not a ratio: there is no meaningful NumPy arm to normalize
+against, since not compressing is not a compression speed.
+
+Note that the more compressible the data, the *faster* compression gets. That is the mechanism
+behind the distribution cases in the next section.
 
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix | jix-shuffle | blosc2 | blosc2-shuffle | zarr |
-|---|---|---|---|---|---|---|
-| random | 5.20 ms | 133.00 ms | 190.00 ms | 128.00 ms | 196.00 ms | 540.00 ms |
-| smooth | 5.20 ms | 163.00 ms | 133.00 ms | 176.00 ms | 147.00 ms | 610.00 ms |
-| 16 unique | 5.20 ms | 88.00 ms | 74.00 ms | 102.00 ms | 88.00 ms | 420.00 ms |
-| 4 unique | 5.20 ms | 71.00 ms | 62.00 ms | 84.00 ms | 72.00 ms | 390.00 ms |
+| case | jix-noshuffle | jix | blosc2-noshuffle | blosc2 | zarr |
+|---|---|---|---|---|---|
+| random | 133 ms | 190 ms | 128 ms | 196 ms | 540 ms |
+| smooth | 163 ms | 133 ms | 176 ms | 147 ms | 610 ms |
+| 16 unique | 88 ms | 74 ms | 102 ms | 88 ms | 420 ms |
+| 4 unique | 71 ms | 62 ms | 84 ms | 72 ms | 390 ms |
 
 </details>
 
@@ -138,10 +154,10 @@ it is not being billed for a pass jix skips.
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix-plain | jix | jix-shuffle | blosc2 | blosc2-shuffle | zarr |
-|---|---|---|---|---|---|---|---|
-| f32 | 2.16 ms | 2.19 ms | 69.50 ms | 49.60 ms | 470.00 ms | 443.00 ms | 30.80 ms |
-| i32 | 2.21 ms | 2.25 ms | 62.00 ms | 45.00 ms | 480.00 ms | 420.00 ms | 30.00 ms |
+| case | numpy | jix-plain | jix | blosc2 | zarr |
+|---|---|---|---|---|---|
+| f32 | 2.16 ms | 2.19 ms | 49.60 ms | 443.00 ms | 30.80 ms |
+| i32 | 2.21 ms | 2.25 ms | 45.00 ms | 420.00 ms | 30.00 ms |
 
 </details>
 
@@ -161,12 +177,12 @@ of the work.
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix-shuffle | blosc2-shuffle |
-|---|---|---|---|
-| random | 2.16 ms | 96.40 ms | 510.00 ms |
-| smooth | 2.16 ms | 49.60 ms | 443.00 ms |
-| 16 unique | 2.16 ms | 34.50 ms | 210.00 ms |
-| 4 unique | 2.16 ms | 21.30 ms | 155.00 ms |
+| case | numpy | jix-plain | jix | blosc2 | zarr |
+|---|---|---|---|---|---|
+| random | 2.16 ms | 2.19 ms | 96.40 ms | 510.00 ms | 44.00 ms |
+| smooth | 2.16 ms | 2.19 ms | 49.60 ms | 443.00 ms | 30.80 ms |
+| 16 unique | 2.16 ms | 2.19 ms | 34.50 ms | 210.00 ms | 21.00 ms |
+| 4 unique | 2.16 ms | 2.19 ms | 21.30 ms | 155.00 ms | 16.00 ms |
 
 </details>
 
@@ -181,10 +197,10 @@ The same shape as negate with two operands instead of one.
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix-plain | jix | jix-shuffle | blosc2 | blosc2-shuffle | zarr |
-|---|---|---|---|---|---|---|---|
-| f32 | 2.89 ms | 2.88 ms | 136.00 ms | 99.10 ms | 626.00 ms | 561.00 ms | 59.20 ms |
-| i32 | 2.95 ms | 2.94 ms | 128.00 ms | 94.00 ms | 610.00 ms | 540.00 ms | 58.00 ms |
+| case | numpy | jix-plain | jix | blosc2 | zarr |
+|---|---|---|---|---|---|
+| f32 | 2.89 ms | 2.88 ms | 99.10 ms | 561.00 ms | 59.20 ms |
+| i32 | 2.95 ms | 2.94 ms | 94.00 ms | 540.00 ms | 58.00 ms |
 
 </details>
 
@@ -210,7 +226,7 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix-plain | jix-shuffle | blosc2-shuffle | zarr |
+| case | numpy | jix-plain | jix | blosc2 | zarr |
 |---|---|---|---|---|---|
 | sum f32 axis 0 | 2.33 ms | 2.03 ms | 49.60 ms | 34.70 ms | 30.90 ms |
 | sum f32 axis 1 | 3.97 ms | 1.55 ms | 49.00 ms | 36.30 ms | 32.90 ms |
@@ -229,7 +245,7 @@ out on reductions while losing badly on elementwise; both facts are in the same 
 <details>
 <summary>Absolute numbers</summary>
 
-| case | ndarray | jix-plain | jix-shuffle |
+| case | ndarray | jix-plain | jix |
 |---|---|---|---|
 | negate f32 | 11.00 ms | 11.20 ms | 49.50 ms |
 | negate i32 | 10.90 ms | 11.10 ms | 45.00 ms |
@@ -252,8 +268,11 @@ step, so the gap should grow with the length of the chain.
 ![Operation chains](plots/chain.png)
 
 NumPy's cost is linear in chain length because it makes one full pass per operation. jix's is
-nearly flat: read once, apply the fused chain in registers, write once. The slope is the result -
-a single chain length would be a number with no mechanism behind it.
+nearly flat: read once, apply the fused chain in registers, write once. Since bars are relative to
+NumPy and NumPy is the one growing, jix's bars *fall* as the chain gets longer - that descent is
+the result. A single chain length would be a number with no mechanism behind it.
+
+`f32` only here; the integer chain behaves the same way and adds nothing but width.
 
 The `exp/log` case is the counter-example, and it is on the plot on purpose.
 `(exp(a) * 0.5 + 1).log()` is dominated by transcendental math rather than memory traffic, so
@@ -264,16 +283,13 @@ kernel dominates.
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix-plain | jix-shuffle |
+| case | numpy | jix-plain | jix |
 |---|---|---|---|
-| f32 1 op | 2.90 ms | 2.90 ms | 50.00 ms |
-| f32 2 ops | 6.10 ms | 3.40 ms | 51.00 ms |
-| f32 4 ops | 12.80 ms | 4.60 ms | 53.00 ms |
-| f32 8 ops | 26.00 ms | 7.10 ms | 57.00 ms |
-| f32 exp/log | 80.90 ms | 90.90 ms | 138.00 ms |
-| i32 1 op | 3.00 ms | 3.00 ms | 46.00 ms |
-| i32 4 ops | 13.10 ms | 4.80 ms | 49.00 ms |
-| i32 8 ops | 26.50 ms | 7.30 ms | 52.00 ms |
+| 1 op | 2.90 ms | 2.90 ms | 50.00 ms |
+| 2 ops | 6.10 ms | 3.40 ms | 51.00 ms |
+| 4 ops | 12.80 ms | 4.60 ms | 53.00 ms |
+| 8 ops | 26.00 ms | 7.10 ms | 57.00 ms |
+| exp/log | 80.90 ms | 90.90 ms | 138.00 ms |
 
 </details>
 
@@ -289,12 +305,12 @@ makes this the cleanest evidence on the page.
 <details>
 <summary>Absolute numbers</summary>
 
-| case | numpy | jix-plain | jix-shuffle |
+| case | numpy | jix-plain | jix |
 |---|---|---|---|
-| f32 1 op | 218 MB | 215 MB | 135 MB |
-| f32 2 ops | 322 MB | 215 MB | 135 MB |
-| f32 4 ops | 428 MB | 215 MB | 135 MB |
-| f32 8 ops | 430 MB | 215 MB | 135 MB |
+| 1 op | 218 MB | 215 MB | 135 MB |
+| 2 ops | 322 MB | 215 MB | 135 MB |
+| 4 ops | 428 MB | 215 MB | 135 MB |
+| 8 ops | 430 MB | 215 MB | 135 MB |
 
 </details>
 
@@ -310,14 +326,14 @@ iterators and which `ndarray` materializes at every step.
 <details>
 <summary>Absolute numbers</summary>
 
-| case | ndarray | jix-plain |
-|---|---|---|
-| 1 op | 11.00 ms | 11.20 ms |
-| 2 ops | 22.40 ms | 12.10 ms |
-| 4 ops | 45.10 ms | 13.80 ms |
-| 8 ops | 90.30 ms | 17.20 ms |
-| normalize axis 0 | 96.00 ms | 38.00 ms |
-| normalize axis 1 | 104.00 ms | 41.00 ms |
+| case | ndarray | jix-plain | jix |
+|---|---|---|---|
+| 1 op | 11.00 ms | 11.20 ms | 50.00 ms |
+| 2 ops | 22.40 ms | 12.10 ms | 52.00 ms |
+| 4 ops | 45.10 ms | 13.80 ms | 55.00 ms |
+| 8 ops | 90.30 ms | 17.20 ms | 60.00 ms |
+| normalize axis 0 | 96.00 ms | 38.00 ms | 88.00 ms |
+| normalize axis 1 | 104.00 ms | 41.00 ms | 92.00 ms |
 
 </details>
 

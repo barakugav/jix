@@ -37,30 +37,29 @@ THEME = {
 }
 SLOTS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
 
-# Draw order for bars within a case. Baseline libraries are gray; the seven remaining series take
-# one slot each, in this order, so bars that end up adjacent are adjacent palette slots - which is
-# the pairlist the palette was validated against.
-LIBRARY_ORDER = [
-    "numpy",
-    "ndarray",
+# Slot assignment order. Baselines are neutral gray - a reference, not a series. The four libraries
+# that appear on nearly every plot come first, so in the common case the bars drawn next to each
+# other are consecutive palette slots, which is the pairlist the palette was validated against.
+# `jix` and `blosc2` always mean the byte-shuffled build; the unfiltered ones appear only in the
+# compression section, where the filter is the subject.
+COLOR_ORDER = [
     "jix-plain",
     "jix",
-    "jix-shuffle",
     "blosc2",
-    "blosc2-chunked",
-    "blosc2-shuffle",
     "zarr",
+    "blosc2-chunked",
+    "jix-noshuffle",
+    "blosc2-noshuffle",
 ]
 BASELINE_LIBRARIES = {"numpy", "ndarray"}
-SERIES = [lib for lib in LIBRARY_ORDER if lib not in BASELINE_LIBRARIES]
-assert len(SERIES) <= len(SLOTS), "more series than validated palette slots"
+assert len(COLOR_ORDER) <= len(SLOTS), "more series than validated palette slots"
 
 
 def library_color(library):
     """Fixed color per library, shared by every plot in the report."""
     if library in BASELINE_LIBRARIES:
         return THEME["baseline"]
-    return SLOTS[SERIES.index(library)]
+    return SLOTS[COLOR_ORDER.index(library)]
 
 
 def load_python(path, platform):
@@ -110,24 +109,41 @@ def load_rust(criterion_root, platform):
     return rows
 
 
-def _score(value, baseline, metric):
-    """Turn a raw measurement into an up-is-better multiple of the baseline."""
-    if metric == "ratio":
-        return value  # already relative to the uncompressed array
-    return baseline / value  # time and bytes: less is better, so invert
+# How each metric is turned into a bar height, and which direction is good. Everything except
+# throughput is a multiple of the baseline where shorter is better - so a bar twice the height of
+# the 1x rule took twice as long, used twice the memory, or stored twice the bytes.
+RELATIVE = {
+    "time": "shorter is faster",
+    "bytes": "shorter is less memory",
+    "stored": "shorter is smaller on disk",
+}
+ABSOLUTE = {"throughput": "taller is faster"}
 
 
-def _format_score(score):
-    """A multiple of the baseline, with just enough digits to stay distinguishable."""
-    for threshold, digits in ((10, 0), (2, 1), (0.1, 2), (0.01, 3)):
+def _score(value, baseline, metric, section):
+    """Turn a raw measurement into a bar height."""
+    if metric == "throughput":
+        return section["raw_bytes"] / value / 1e6  # MB/s of original array bytes
+    if metric == "stored":
+        return 1.0 / value  # recorded as raw/stored; shown as the fraction of the raw array kept
+    return value / baseline  # time and bytes: a multiple of the baseline, less is better
+
+
+def _format_score(score, metric="time"):
+    """A bar's label: a multiple of the baseline, or an absolute rate for throughput."""
+    if metric in ABSOLUTE:
+        return f"{score:,.0f}"
+    for threshold, digits in ((100, 0), (10, 0), (2, 1), (0.1, 2), (0.01, 3)):
         if score >= threshold:
             return f"{score:.{digits}f}x"
     return f"{score:.4f}x"
 
 
 def _format_value(value, metric):
-    if metric == "ratio":
-        return f"{value:.1f}x"
+    if metric == "stored":
+        return f"{value:.1f}x smaller"
+    if metric == "throughput":
+        return f"{value * 1e3:.0f} ms"
     if metric == "bytes":
         return f"{value / 1e6:.0f} MB"
     for unit, div in (("s", 1.0), ("ms", 1e-3), ("us", 1e-6)):
@@ -163,24 +179,29 @@ def plot_section(rows, section, out_dir):
             baseline = cells.get((case, section["baseline"]))
             for library in libraries:
                 value = cells.get((case, library))
-                if value is None or (baseline is None and metric != "ratio"):
+                if value is None or (baseline is None and metric in RELATIVE and metric != "stored"):
                     continue
-                score = _score(value, baseline, metric)
+                score = _score(value, baseline, metric, section)
                 if score > 0:
                     got[(case, library)] = score
         scores[platform] = got
     everything = [s for got in scores.values() for s in got.values()]
     if not everything:
         return None
-    if metric == "ratio":
-        floor = 1 / 1.4  # the uncompressed array is the floor; leave just enough for a 1x stub
-    else:
-        floor = 10 ** (math.floor(math.log10(min(everything))) - 0.15)
-    # Always keep headroom above the 1.0 rule, so it reads as a reference line rather than the
-    # top edge of the plot even when every library is slower than the baseline.
-    ceiling = max(10 ** (math.log10(max(everything)) + 0.55), 1.9)
+    floor = 10 ** (math.floor(math.log10(min(everything))) - 0.15)
+    ceiling = 10 ** (math.log10(max(everything)) + 0.55)
+    if metric in RELATIVE:
+        # Keep headroom on both sides of the 1x rule, so it reads as a reference line rather than
+        # the top or bottom edge of the plot when every library lands on one side of it.
+        floor, ceiling = min(floor, 1 / 1.5), max(ceiling, 1.9)
 
-    width = min(15.0, max(7.0, 0.30 * len(cases) * len(libraries) + 2.2))
+    if metric in RELATIVE:
+        legend_line = f"relative to {section['baseline']}; {RELATIVE[metric]}"
+    else:
+        legend_line = ABSOLUTE[metric]
+    subtitle = f"{section.get('subtitle', '')} - {legend_line}"
+    # Wide enough for the bars, but never so narrow that the header text runs off the edge.
+    width = min(16.0, max(7.0, 0.30 * len(cases) * len(libraries) + 2.2, 0.058 * len(subtitle) + 0.4))
     height = 2.55 * len(platforms) + 1.5
     fig, axes = plt.subplots(len(platforms), 1, figsize=(width, height), squeeze=False, sharex=True)
     fig.set_facecolor(THEME["surface"])
@@ -215,10 +236,10 @@ def plot_section(rows, section, out_dir):
                     zorder=3,
                     linewidth=0,
                 )
-                if library in BASELINE_LIBRARIES:
-                    continue  # the bar tops out on the 1.0 line; a "1.00x" label adds nothing
+                if library in BASELINE_LIBRARIES and metric in RELATIVE:
+                    continue  # the bar tops out on the 1x rule; a "1.00x" label adds nothing
                 ax.annotate(
-                    _format_score(score),
+                    _format_score(score, metric),
                     (x, score),
                     textcoords="offset points",
                     xytext=(0, 3),
@@ -228,25 +249,27 @@ def plot_section(rows, section, out_dir):
                     rotation=90,
                     color=THEME["sub"],
                 )
-        # The baseline: every bar is read against this line, and it is where the 1x bar tops out.
-        ax.axhline(1.0, color=THEME["ink"], lw=1.2, zorder=4)
+        if metric in RELATIVE:
+            # Every bar is read against this line, and it is where the baseline's own bar tops out.
+            ax.axhline(1.0, color=THEME["ink"], lw=1.2, zorder=4)
         decades = range(math.floor(math.log10(floor)), math.ceil(math.log10(ceiling)) + 1)
         ticks = [10.0**d for d in decades if floor <= 10.0**d <= ceiling]
         ax.yaxis.set_major_locator(FixedLocator(ticks))
-        ax.set_yticklabels([_format_score(t) for t in ticks], fontsize=7.5)
+        ax.set_yticklabels([_format_score(t, metric) for t in ticks], fontsize=7.5)
         ax.minorticks_off()
-        ax.set_ylabel(platform, color=THEME["sub"], fontsize=9)
+        ax.set_ylabel(
+            f"{platform}\n{section['unit']}" if "unit" in section else platform, color=THEME["sub"], fontsize=9
+        )
 
     axes[-1].set_xticks(range(len(cases)))
     axes[-1].set_xticklabels(cases, fontsize=8, color=THEME["sub"])
     axes[-1].set_xlim(-0.5, len(cases) - 0.5)
 
-    better = {"time": "faster", "bytes": "less memory", "ratio": "smaller stored"}[metric]
     fig.text(0.008, 0.985, section["title"], fontsize=13.5, fontweight="bold", color=THEME["ink"], va="top")
     fig.text(
         0.008,
         0.951,
-        f"{section.get('subtitle', '')} - relative to {section['baseline']}; taller is {better}",
+        subtitle,
         fontsize=8.2,
         color=THEME["muted"],
         va="top",
