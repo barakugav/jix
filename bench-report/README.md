@@ -102,3 +102,19 @@ Config: one array shape `[130000, 200]` everywhere; read section moved ahead of 
 kept as a memcpy baseline on plots where it has no codec; compression ratio normalized to
 `prod(shape) * itemsize`; peak RSS restructured to record into `extra_info` the way `test_compress`
 does, so it lands in `python.json` with everything else.
+
+### Iteration 5
+
+Direction flipped: every relative plot now shows **cost** against the baseline, so shorter is
+better and "blosc2 is 190x slower" reads straight off the bar instead of having to be inverted from
+a 0.005x speedup. Compression throughput is the single exception - absolute MB/s, no baseline, no
+rule, taller is faster.
+
+Library set cut to what a reader would actually use: `jix` and `blosc2` now always mean the
+byte-shuffled build, with `-noshuffle` arms only in the compression section where the filter is the
+subject. `jix-plain` added to every non-compression plot, since without it a compressed-storage
+number cannot be split between op machinery and decompression.
+
+Also: chains are f32 only; array shape and per-case read sizes are on every plot; all thirteen
+per-section palette subsets re-validated after the library changes (all pass); figure width now
+accounts for the header text, which was being clipped on the narrow plots.

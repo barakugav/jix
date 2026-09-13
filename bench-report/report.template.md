@@ -19,10 +19,18 @@ multi-threaded Blosc2 will beat jix on throughput-bound work; that comparison is
 is `[130000, 200]` throughout, in Rust and Python alike - 104 MB as `f32`.
 
 **Reading the plots.** Each tick on the x axis is one configuration; each bar is one library. Bars
-are scaled to the baseline - NumPy in Python, `ndarray` in Rust - which is the gray bar, and which
-by definition tops out on the black rule at 1x. **Taller is better.** The scale is logarithmic, so
-a bar half the height of the rule is not half the speed; the number above each bar is exact, and
-the collapsed table under each plot has the absolute measurements.
+are scaled to the baseline - NumPy in Python, `ndarray` in Rust - which is the gray bar and which by
+definition tops out on the black rule at 1x. **Shorter is better**: a bar at 4x took four times as
+long, or used four times the memory, or stored four times the bytes. The one exception is
+compression throughput, which is plotted in absolute MB/s with no baseline, where taller is faster.
+
+The scale is logarithmic, so a bar twice the height of another is not twice the number. The value
+above each bar is exact, and the collapsed table under each plot carries the absolute measurements.
+
+`jix` and `blosc2` always mean the byte-shuffled build - the configuration anyone would actually
+use. The unfiltered variants appear only in the compression section, where the filter is the thing
+being measured. `jix-plain` is jix over an ordinary uncompressed in-memory buffer: it isolates the
+cost of jix's operation machinery from the cost of decompression.
 
 ---
 
@@ -43,7 +51,7 @@ The first three cases are dominated by per-call overhead. The last three are whe
 real work, and they are the honest measure of decode throughput - Zarr in particular spends most of
 a small read inside its Python indexing layer rather than its codec.
 
-`b64x200 / r16x16` is the case to learn from: a read smaller than a block still decompresses a
+The `block 64x200 / read 16x16` case is the one to learn from: a read smaller than a block still decompresses a
 whole block and throws most of it away. **Match the block shape to how you read.** jix picks a
 block shape from the CPU cache sizes when you do not pass one, which is a fair default and a poor
 choice if your access pattern is lopsided.
@@ -51,7 +59,8 @@ choice if your access pattern is lopsided.
 `blosc2-chunked` is Blosc2 with `chunks` forced equal to `blocks`. Left to choose for itself Blosc2
 picks ~8.7 MiB chunks against a 4 KiB block; the block is still the decompression unit, but walking
 a large chunk's block table costs real time - about 2.3x here. It also silently rewrites a
-requested `(64, 200)` block to `(52, 200)` unless `chunks` is pinned too.
+requested `(64, 200)` block to `(52, 200)` unless `chunks` is pinned too. Both arms are on the plot
+so Blosc2 is shown at its best as well as at its default.
 
 <!-- table:read -->
 
@@ -67,7 +76,11 @@ requested `(64, 200)` block to `(52, 200)` unless `chunks` is pinned too.
 
 <!-- plot:compress_ratio -->
 
-Ratios track Blosc2 closely, which is what should happen - same codec, same filter, so what is
+Each bar is what the library stores as a fraction of the raw array, `prod(shape) * itemsize`, so
+NumPy is 1x by definition and shorter means smaller on disk. This is the one section where the
+unfiltered builds appear, because the byte-shuffle filter is exactly what separates them.
+
+Sizes track Blosc2 closely, which is what should happen - same codec, same filter, so what is
 really being measured is the cost of the block layout. Zarr uses Blosc internally and lands on the
 same numbers.
 
@@ -75,9 +88,12 @@ same numbers.
 
 <!-- plot:compress -->
 
-NumPy here is a plain `memcpy` of the same array: the price of not compressing at all. Note that
-the more compressible the data, the *faster* compression gets - that is the mechanism behind the
-distribution cases in the next section.
+Absolute throughput, in original array bytes per second - no baseline, and taller is faster. This
+is the one plot on the page that is not a ratio: there is no meaningful NumPy arm to normalize
+against, since not compressing is not a compression speed.
+
+Note that the more compressible the data, the *faster* compression gets. That is the mechanism
+behind the distribution cases in the next section.
 
 <!-- table:compress -->
 
@@ -159,8 +175,11 @@ step, so the gap should grow with the length of the chain.
 <!-- plot:chain -->
 
 NumPy's cost is linear in chain length because it makes one full pass per operation. jix's is
-nearly flat: read once, apply the fused chain in registers, write once. The slope is the result -
-a single chain length would be a number with no mechanism behind it.
+nearly flat: read once, apply the fused chain in registers, write once. Since bars are relative to
+NumPy and NumPy is the one growing, jix's bars *fall* as the chain gets longer - that descent is
+the result. A single chain length would be a number with no mechanism behind it.
+
+`f32` only here; the integer chain behaves the same way and adds nothing but width.
 
 The `exp/log` case is the counter-example, and it is on the plot on purpose.
 `(exp(a) * 0.5 + 1).log()` is dominated by transcendental math rather than memory traffic, so
