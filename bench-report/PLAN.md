@@ -26,8 +26,7 @@ always drawn as a 1x bar.
 | codec | zstd level 3 |
 | filters | byte-shuffle, with a no-shuffle arm where the filter is informative |
 | data distribution | `smooth`, except where distribution is a case |
-| python array | `[130_000, 200]` (104 MB f32) |
-| rust array | **`[300_000, 80]`** (96 MB f32) |
+| array shape | **`[130_000, 200]` in both Rust and Python** (104 MB as f32) |
 
 Two dtypes is not a sweep - it is the minimum honest sample. The suite already shows the two
 diverging sharply (`sum` all-axis: jix beats numpy 3.2x on `i32` and 2.4x on `f32`), and showing
@@ -42,7 +41,7 @@ framed as a property of the library, and the per-platform stacking will show it 
 
 ## Sections, and what each one measures
 
-### 1. Compression
+### 2. Compression
 
 Ratio and compression throughput. Cases on x: the three data distributions.
 
@@ -53,10 +52,13 @@ Ratio and compression throughput. Cases on x: the three data distributions.
 | dtype | `i32` |
 | status | EXISTS (`test_compress.py`); join ratio and throughput into one section |
 
-Two plots: compression ratio, and compress throughput. Both against the raw array as the 1x
-reference rather than numpy, since numpy does not compress.
+Two plots: compression ratio, and compress throughput.
 
-### 2. Read
+Ratio is normalized to the uncompressed array, `prod(shape) * itemsize`, so the raw array is 1x by
+definition. For throughput the numpy bar is a plain `memcpy` of the same array - the price of not
+compressing at all - which keeps the baseline meaningful on a plot where numpy has no codec.
+
+### 1. Read
 
 Random regions - each timed call reads a different one of 1024 pre-generated regions. This is the
 data-loader pattern, and the only read pattern worth measuring.
@@ -83,13 +85,14 @@ The three new rows are the ones that answer "how do these libraries behave once 
 call overhead". zarr's flat ~330 us at every small read size looks like pure Python indexing cost;
 the large-read cases are where its codec performance actually shows.
 
-**Fairness arm to add:** blosc2 with `chunks == blocks`. blosc2 currently auto-selects 8.7 MiB
-chunks against a 4 KiB block, and silently rewrites a requested `(64,70)` block to `(52,70)` - so
-the `b64x70` case has never compared equal block shapes. See `FINDINGS.md`. Both are fixed by
-forcing `chunks`, which blosc2 accepts and honors exactly.
+**`blosc2-chunked` arm, measured and justified.** The block *is* blosc2's decompression unit, as
+expected - an 8.7 MiB chunk costs 2.3x a 4 KiB one, not the ~2000x that chunk-granular decompression
+would imply. But 2.3x is not nothing, and blosc2 also silently rewrites a requested `(64, 200)`
+block to `(52, 200)` unless `chunks` is pinned too. So the arm ships as "blosc2 at its best
+configuration", not as a correction to an unfair one. Numbers in `FINDINGS.md`.
 
-**Rust half:** jix `Compact` against `ndarray` slicing, `[11_000, 460] i32`, the three alignment
-cases. Existing Rust read sizes are fine as they are.
+**Rust half:** jix `Compact` against `ndarray` slicing on the same `[130_000, 200] i32` array, the
+three alignment cases.
 
 ### 3. Negate, and 4. Add
 
@@ -150,10 +153,13 @@ by transcendental math rather than memory traffic, so numpy's vectorized libm de
 and jix comes out 1.12x slower (90.9 ms against 80.9 ms). It stays in the report as one extra case
 labelled `exp/log`, next to the cheap-op cases, where the contrast is the point.
 
-**Peak memory** is a second plot in this section, same cases: peak RSS from a fresh subprocess per
-(library, chain length), via `resource.getrusage(RUSAGE_SELF).ru_maxrss`. `tracemalloc` cannot see
-numpy's C allocations. Python only. Memory has no noise floor, which makes it the cleanest evidence
-on the page.
+**Peak memory** is a second plot in this section, same cases. It works the way `test_compress`
+works: a normal pytest-benchmark test that records the extra metric into `extra_info`, so it lands
+in `python.json` next to everything else and needs no separate file or merge step. The measurement
+itself runs the chain in a fresh subprocess and reads its `ru_maxrss`, because `tracemalloc` cannot
+see numpy's C-level allocations and an in-process high-water mark is contaminated by every test
+that ran before it. Python only. Memory has no noise floor, which makes it the cleanest evidence on
+the page.
 
 **Rust half:** the same cheap chain against idiomatic `ndarray` (one allocation per step), plus
 `normalize.rs` given an `ndarray` arm. That second one matters more - for pure elementwise chains
@@ -191,7 +197,8 @@ out.
 - `test_compress.py`: keep, one size.
 - `data.py`: add a unique-value-count generator to replace the fixed `low_entropy` profile.
 - `array_impls.py`: add `Blosc2ChunkedArray` with `chunks == blocks`.
-- New: `bench_peak_rss.py`, a standalone runner rather than a pytest-benchmark test.
+- New: `test_peak_rss.py`, shaped like `test_compress.py` - a pytest-benchmark test that records
+  `peak_rss_bytes` into `extra_info`, measured in a subprocess.
 
 ### Rust - add only, never trim
 
@@ -221,11 +228,7 @@ pay for the optimization benches.
 
 ## Open questions
 
-1. Python's canonical array stays `[130_000, 200]` while Rust moves to `[300_000, 80]`. Should the
-   Python one follow, or is matching wall-clock more useful than matching shape?
-2. The read section's "full array" case makes jix, blosc2 and zarr comparable on pure throughput
-   but has no meaningful numpy counterpart beyond a memcpy. Keep numpy's 1x bar there anyway?
-3. Compression ratio has no numpy baseline. Normalize those two plots against the raw array size
-   instead, or leave them as absolute values - the only plots on the page that are not ratios?
-4. `bench_peak_rss.py` runs outside pytest-benchmark, so its output does not land in `python.json`.
-   Separate JSON that `report.py` merges, or bend it into a pytest-benchmark test?
+1. The renderer, the spec and the fake-data harness are in place; the plots in `report.md` are real
+   output from fake numbers. Style feedback on those is the next thing needed.
+2. `report_spec.py` declares every case label. The benchmarks do not tag themselves with those
+   labels yet - that is the next chunk of work, and it touches every Python bench file.

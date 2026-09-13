@@ -1,0 +1,1912 @@
+{
+ "benchmarks": [
+  {
+   "name": "read[numpy]",
+   "stats": {
+    "mean": 4e-07,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr1x200",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "read[jix]",
+   "stats": {
+    "mean": 1.4e-06,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr1x200",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "read[jix-shuffle]",
+   "stats": {
+    "mean": 1.6e-06,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr1x200",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "read[blosc2]",
+   "stats": {
+    "mean": 7.8e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr1x200",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "read[blosc2-chunked]",
+   "stats": {
+    "mean": 3.4e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr1x200",
+    "library": "blosc2-chunked"
+   }
+  },
+  {
+   "name": "read[zarr]",
+   "stats": {
+    "mean": 0.00033,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr1x200",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "read[numpy]",
+   "stats": {
+    "mean": 6e-07,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr16x200",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "read[jix]",
+   "stats": {
+    "mean": 2.4e-06,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr16x200",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "read[jix-shuffle]",
+   "stats": {
+    "mean": 2.6e-06,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr16x200",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "read[blosc2]",
+   "stats": {
+    "mean": 8.2e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr16x200",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "read[blosc2-chunked]",
+   "stats": {
+    "mean": 3.6e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr16x200",
+    "library": "blosc2-chunked"
+   }
+  },
+  {
+   "name": "read[zarr]",
+   "stats": {
+    "mean": 0.00033999999999999997,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b16x200\nr16x200",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "read[numpy]",
+   "stats": {
+    "mean": 3.5e-07,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr16x16",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "read[jix]",
+   "stats": {
+    "mean": 3.2e-06,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr16x16",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "read[jix-shuffle]",
+   "stats": {
+    "mean": 3.6e-06,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr16x16",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "read[blosc2]",
+   "stats": {
+    "mean": 5.4e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr16x16",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "read[blosc2-chunked]",
+   "stats": {
+    "mean": 4.2e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr16x16",
+    "library": "blosc2-chunked"
+   }
+  },
+  {
+   "name": "read[zarr]",
+   "stats": {
+    "mean": 0.000336,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr16x16",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "read[numpy]",
+   "stats": {
+    "mean": 1.2e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr256x200",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "read[jix]",
+   "stats": {
+    "mean": 2.8e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr256x200",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "read[jix-shuffle]",
+   "stats": {
+    "mean": 2.6e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr256x200",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "read[blosc2]",
+   "stats": {
+    "mean": 0.00013,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr256x200",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "read[blosc2-chunked]",
+   "stats": {
+    "mean": 9.499999999999999e-05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr256x200",
+    "library": "blosc2-chunked"
+   }
+  },
+  {
+   "name": "read[zarr]",
+   "stats": {
+    "mean": 0.00041999999999999996,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr256x200",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "read[numpy]",
+   "stats": {
+    "mean": 0.00018999999999999998,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr4096x200",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "read[jix]",
+   "stats": {
+    "mean": 0.00041999999999999996,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr4096x200",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "read[jix-shuffle]",
+   "stats": {
+    "mean": 0.00037999999999999997,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr4096x200",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "read[blosc2]",
+   "stats": {
+    "mean": 0.0009,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr4096x200",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "read[blosc2-chunked]",
+   "stats": {
+    "mean": 0.00078,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr4096x200",
+    "library": "blosc2-chunked"
+   }
+  },
+  {
+   "name": "read[zarr]",
+   "stats": {
+    "mean": 0.0012,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nr4096x200",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "read[numpy]",
+   "stats": {
+    "mean": 0.005200000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nfull",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "read[jix]",
+   "stats": {
+    "mean": 0.014,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nfull",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "read[jix-shuffle]",
+   "stats": {
+    "mean": 0.012,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nfull",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "read[blosc2]",
+   "stats": {
+    "mean": 0.024,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nfull",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "read[blosc2-chunked]",
+   "stats": {
+    "mean": 0.022,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nfull",
+    "library": "blosc2-chunked"
+   }
+  },
+  {
+   "name": "read[zarr]",
+   "stats": {
+    "mean": 0.04,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "read",
+    "case": "b64x200\nfull",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "compress[numpy]",
+   "stats": {
+    "mean": 0.005200000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "random",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "compress[jix]",
+   "stats": {
+    "mean": 0.133,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "random",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "compress[jix-shuffle]",
+   "stats": {
+    "mean": 0.19,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "random",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "compress[blosc2]",
+   "stats": {
+    "mean": 0.128,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "random",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "compress[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.196,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "random",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "compress[zarr]",
+   "stats": {
+    "mean": 0.54,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "random",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "compress[numpy]",
+   "stats": {
+    "mean": 0.005200000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "smooth",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "compress[jix]",
+   "stats": {
+    "mean": 0.163,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "smooth",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "compress[jix-shuffle]",
+   "stats": {
+    "mean": 0.133,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "smooth",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "compress[blosc2]",
+   "stats": {
+    "mean": 0.176,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "smooth",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "compress[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.147,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "smooth",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "compress[zarr]",
+   "stats": {
+    "mean": 0.61,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "smooth",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "compress[numpy]",
+   "stats": {
+    "mean": 0.005200000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "16 unique",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "compress[jix]",
+   "stats": {
+    "mean": 0.088,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "16 unique",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "compress[jix-shuffle]",
+   "stats": {
+    "mean": 0.074,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "16 unique",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "compress[blosc2]",
+   "stats": {
+    "mean": 0.10200000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "16 unique",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "compress[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.088,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "16 unique",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "compress[zarr]",
+   "stats": {
+    "mean": 0.42,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "16 unique",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "compress[numpy]",
+   "stats": {
+    "mean": 0.005200000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "4 unique",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "compress[jix]",
+   "stats": {
+    "mean": 0.07100000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "4 unique",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "compress[jix-shuffle]",
+   "stats": {
+    "mean": 0.062,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "4 unique",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "compress[blosc2]",
+   "stats": {
+    "mean": 0.084,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "4 unique",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "compress[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.07200000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "4 unique",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "compress[zarr]",
+   "stats": {
+    "mean": 0.39,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "compress",
+    "case": "4 unique",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "negate[numpy]",
+   "stats": {
+    "mean": 0.002157,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "f32",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "negate[jix-plain]",
+   "stats": {
+    "mean": 0.002186,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "f32",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "negate[jix]",
+   "stats": {
+    "mean": 0.0695,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "f32",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "negate[jix-shuffle]",
+   "stats": {
+    "mean": 0.049600000000000005,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "f32",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "negate[blosc2]",
+   "stats": {
+    "mean": 0.47000000000000003,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "f32",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "negate[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.443,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "f32",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "negate[zarr]",
+   "stats": {
+    "mean": 0.0308,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "f32",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "negate[numpy]",
+   "stats": {
+    "mean": 0.00221,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "i32",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "negate[jix-plain]",
+   "stats": {
+    "mean": 0.0022500000000000003,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "i32",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "negate[jix]",
+   "stats": {
+    "mean": 0.062,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "i32",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "negate[jix-shuffle]",
+   "stats": {
+    "mean": 0.045,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "i32",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "negate[blosc2]",
+   "stats": {
+    "mean": 0.48,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "i32",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "negate[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.42,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "i32",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "negate[zarr]",
+   "stats": {
+    "mean": 0.03,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate",
+    "case": "i32",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "add[numpy]",
+   "stats": {
+    "mean": 0.002886,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "f32",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "add[jix-plain]",
+   "stats": {
+    "mean": 0.002882,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "f32",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "add[jix]",
+   "stats": {
+    "mean": 0.136,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "f32",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "add[jix-shuffle]",
+   "stats": {
+    "mean": 0.0991,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "f32",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "add[blosc2]",
+   "stats": {
+    "mean": 0.626,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "f32",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "add[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.561,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "f32",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "add[zarr]",
+   "stats": {
+    "mean": 0.0592,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "f32",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "add[numpy]",
+   "stats": {
+    "mean": 0.0029500000000000004,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "i32",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "add[jix-plain]",
+   "stats": {
+    "mean": 0.00294,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "i32",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "add[jix]",
+   "stats": {
+    "mean": 0.128,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "i32",
+    "library": "jix"
+   }
+  },
+  {
+   "name": "add[jix-shuffle]",
+   "stats": {
+    "mean": 0.094,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "i32",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "add[blosc2]",
+   "stats": {
+    "mean": 0.61,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "i32",
+    "library": "blosc2"
+   }
+  },
+  {
+   "name": "add[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.54,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "i32",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "add[zarr]",
+   "stats": {
+    "mean": 0.058,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "add",
+    "case": "i32",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "negate_dist[numpy]",
+   "stats": {
+    "mean": 0.002157,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "random",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "negate_dist[jix-shuffle]",
+   "stats": {
+    "mean": 0.09640000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "random",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "negate_dist[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.51,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "random",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "negate_dist[numpy]",
+   "stats": {
+    "mean": 0.002157,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "smooth",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "negate_dist[jix-shuffle]",
+   "stats": {
+    "mean": 0.049600000000000005,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "smooth",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "negate_dist[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.443,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "smooth",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "negate_dist[numpy]",
+   "stats": {
+    "mean": 0.002157,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "16 unique",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "negate_dist[jix-shuffle]",
+   "stats": {
+    "mean": 0.0345,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "16 unique",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "negate_dist[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.21,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "16 unique",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "negate_dist[numpy]",
+   "stats": {
+    "mean": 0.002157,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "4 unique",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "negate_dist[jix-shuffle]",
+   "stats": {
+    "mean": 0.0213,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "4 unique",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "negate_dist[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.155,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "negate_dist",
+    "case": "4 unique",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "reduction[numpy]",
+   "stats": {
+    "mean": 0.00233,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 0",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "reduction[jix-plain]",
+   "stats": {
+    "mean": 0.0020299999999999997,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 0",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "reduction[jix-shuffle]",
+   "stats": {
+    "mean": 0.049600000000000005,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 0",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "reduction[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.0347,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 0",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "reduction[zarr]",
+   "stats": {
+    "mean": 0.0309,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 0",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "reduction[numpy]",
+   "stats": {
+    "mean": 0.0039700000000000004,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 1",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "reduction[jix-plain]",
+   "stats": {
+    "mean": 0.0015500000000000002,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 1",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "reduction[jix-shuffle]",
+   "stats": {
+    "mean": 0.049,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 1",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "reduction[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.0363,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 1",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "reduction[zarr]",
+   "stats": {
+    "mean": 0.0329,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\naxis 1",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "reduction[numpy]",
+   "stats": {
+    "mean": 0.00321,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\nall",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "reduction[jix-plain]",
+   "stats": {
+    "mean": 0.0013100000000000002,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\nall",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "reduction[jix-shuffle]",
+   "stats": {
+    "mean": 0.048600000000000004,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\nall",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "reduction[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.0396,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\nall",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "reduction[zarr]",
+   "stats": {
+    "mean": 0.0315,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum f32\nall",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "reduction[numpy]",
+   "stats": {
+    "mean": 0.0117,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\naxis 0",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "reduction[jix-plain]",
+   "stats": {
+    "mean": 0.0031200000000000004,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\naxis 0",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "reduction[jix-shuffle]",
+   "stats": {
+    "mean": 0.022,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\naxis 0",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "reduction[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.020399999999999998,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\naxis 0",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "reduction[zarr]",
+   "stats": {
+    "mean": 0.0371,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\naxis 0",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "reduction[numpy]",
+   "stats": {
+    "mean": 0.00439,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\nall",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "reduction[jix-plain]",
+   "stats": {
+    "mean": 0.00136,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\nall",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "reduction[jix-shuffle]",
+   "stats": {
+    "mean": 0.018600000000000002,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\nall",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "reduction[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.014199999999999999,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\nall",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "reduction[zarr]",
+   "stats": {
+    "mean": 0.0296,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "sum i32\nall",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "reduction[numpy]",
+   "stats": {
+    "mean": 0.01106,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\naxis 0",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "reduction[jix-plain]",
+   "stats": {
+    "mean": 0.01444,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\naxis 0",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "reduction[jix-shuffle]",
+   "stats": {
+    "mean": 0.061700000000000005,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\naxis 0",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "reduction[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.0729,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\naxis 0",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "reduction[zarr]",
+   "stats": {
+    "mean": 0.0419,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\naxis 0",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "reduction[numpy]",
+   "stats": {
+    "mean": 0.010740000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\nall",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "reduction[jix-plain]",
+   "stats": {
+    "mean": 0.03481,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\nall",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "reduction[jix-shuffle]",
+   "stats": {
+    "mean": 0.0824,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\nall",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "reduction[blosc2-shuffle]",
+   "stats": {
+    "mean": 0.074,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\nall",
+    "library": "blosc2-shuffle"
+   }
+  },
+  {
+   "name": "reduction[zarr]",
+   "stats": {
+    "mean": 0.0391,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "reduction",
+    "case": "std f32\nall",
+    "library": "zarr"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.0029,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n1 op",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.0029,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n1 op",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-shuffle]",
+   "stats": {
+    "mean": 0.05,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n1 op",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.0060999999999999995,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n2 ops",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.0034,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n2 ops",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-shuffle]",
+   "stats": {
+    "mean": 0.051000000000000004,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n2 ops",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.0128,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n4 ops",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.0046,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n4 ops",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-shuffle]",
+   "stats": {
+    "mean": 0.053,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n4 ops",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.026000000000000002,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n8 ops",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.0070999999999999995,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n8 ops",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-shuffle]",
+   "stats": {
+    "mean": 0.057,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\n8 ops",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.08090000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\nexp/log",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.09090000000000001,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\nexp/log",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-shuffle]",
+   "stats": {
+    "mean": 0.138,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "f32\nexp/log",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.003,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n1 op",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.003,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n1 op",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-shuffle]",
+   "stats": {
+    "mean": 0.046,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n1 op",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.0131,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n4 ops",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.0048,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n4 ops",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-shuffle]",
+   "stats": {
+    "mean": 0.049,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n4 ops",
+    "library": "jix-shuffle"
+   }
+  },
+  {
+   "name": "chain[numpy]",
+   "stats": {
+    "mean": 0.0265,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n8 ops",
+    "library": "numpy"
+   }
+  },
+  {
+   "name": "chain[jix-plain]",
+   "stats": {
+    "mean": 0.0073,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n8 ops",
+    "library": "jix-plain"
+   }
+  },
+  {
+   "name": "chain[jix-shuffle]",
+   "stats": {
+    "mean": 0.052000000000000005,
+    "rounds": 20
+   },
+   "extra_info": {
+    "section": "chain",
+    "case": "i32\n8 ops",
+    "library": "jix-shuffle"
+   }
+  }
+ ]
+}

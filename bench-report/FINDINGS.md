@@ -49,6 +49,26 @@ benchmarked:
 A reversal permutation (`[2,1,0]`) does *not* qualify - it is exactly F-layout. The distinction is
 rotation versus reversal, and it needs three or more dimensions to exist at all.
 
+## blosc2's decompression unit is the block, but chunk size still costs
+
+Measured directly (one-off, 130000x70 i32, 16x70 block, reading 16x70 regions, single-threaded):
+
+| chunk | chunk size | us per read |
+|---|---|---|
+| `(16, 70)` = the block | 4 KiB | 33.6 |
+| `(1024, 70)` | 280 KiB | 34.1 |
+| `(16384, 70)` | 4.4 MiB | 53.2 |
+| `(32512, 70)` = auto | 8.7 MiB | 75.9 |
+
+If the chunk were the decompression unit, the 8.7 MiB case would cost roughly two thousand times
+the 4 KiB case rather than 2.3x. So the block is the unit, as expected. But the cost is flat only
+to ~280 KiB and then climbs, which looks like the price of walking a large chunk's block-offset
+table on every read. blosc2's own auto-chunking is the worst case in the table.
+
+Consequence: the `blosc2-chunked` arm (`chunks == blocks`) is worth carrying, but as "blosc2 given
+its best configuration" rather than as a correction to an unfair comparison. Expect it to move the
+read gap by roughly 2x.
+
 ## blosc2 auto-selects chunks two thousand times larger than the block
 
 Measured by introspection, not benchmarking:
