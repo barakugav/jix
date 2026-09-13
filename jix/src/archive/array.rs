@@ -187,7 +187,7 @@ impl Array<CompactMmap<TypeDyn, DimDyn>> {
     /// This function is marked `unsafe` because of the potential for *Undefined Behavior* (UB)
     /// using the mmap array if the underlying file is subsequently modified, in or
     /// out of process. Applications must consider the risk and take appropriate precautions when using
-    /// file-backed array. Solutions such as file permissions, locks or process-private (e.g. unlinked)
+    /// file-backed arrays. Solutions such as file permissions, locks or process-private (e.g. unlinked)
     /// files exist but are platform specific and limited.
     ///
     /// # Examples
@@ -283,7 +283,7 @@ where
         self.write_to(writer)
     }
 
-    /// Write the array to generic writer.
+    /// Write the array to a generic writer.
     ///
     /// Like [`write_to_file`](Array::write_to_file) but accepts an arbitrary writer - useful for
     /// writing into an in-memory buffer, writing multiple arrays into a single open file handle,

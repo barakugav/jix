@@ -34,7 +34,7 @@ where
 /// itemsize, without converting or copying any bytes.
 ///
 /// This is the array-level analogue of transmuting a slice: the stored bytes are unchanged and only
-/// the element type is relabelled, so an `f32` array can be viewed as its raw `u32` bit patterns, or
+/// the element type is relabeled, so an `f32` array can be viewed as its raw `u32` bit patterns, or
 /// a `#[derive(Dtyped)]` struct as an equally-sized `[u8; N]`. To numerically *convert* values
 /// instead (e.g. round `f32` to `i32`), use [`Array::cast()`](crate::Array::cast). The source and
 /// destination dtypes must have the same itemsize but may differ in alignment (e.g. `u32` align 4 vs
@@ -201,7 +201,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // The bytes are relabelled, not converted
+    // The bytes are relabeled, not converted
     // -----------------------------------------------------------------------
 
     /// `f32 -> u32` hands back each element's raw bit pattern rather than its numeric value - the

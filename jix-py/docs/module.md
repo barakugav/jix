@@ -10,7 +10,7 @@ Only the blocks that overlap a read request are decompressed, so random access i
 
 **Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast - returns a new view that wraps the
 input(s) and records the transformation, nothing is computed until data is explicitly requested.
-A chain of such operations build a pipeline that runs in a single decompression pass the moment you ask for output.
+A chain of such operations builds a pipeline that runs in a single decompression pass the moment you ask for output.
 
 The library is NumPy-compatible: arrays expose a NumPy `dtype`, accept NumPy index syntax,
 and materialize to NumPy arrays on demand.
@@ -86,7 +86,7 @@ output.
 | Function | Description |
 |---|---|
 | `jix.compact(...)` | Compress any array-like (NumPy array, list, scalar) into a new jix array. This is the primary constructor. |
-| `jix.asarray(...)` | Wrap any array-like as a zero-copy jix view without compressing. Useful for mixing plain NumPy data with jix arrays in ations. |
+| `jix.asarray(...)` | Wrap any array-like as a zero-copy jix view without compressing. Useful for mixing plain NumPy data with jix arrays in operations. |
 | `jix.read_array(...)` | Load a `.jix` file from disk. |
 
 **Reading data from an `Array`:**
@@ -172,7 +172,7 @@ b = jix.read_array("data.jix")
 c = jix.read_array("data.jix", mmap=True)
 ```
 
-`write_array` accept a file path or any writable binary
+`write_array` accepts a file path or any writable binary
 file-like object. `read_array` accepts a file path or any seekable binary file-like
 object.
 
@@ -185,5 +185,5 @@ disk.
 # Limits
 
 - Maximum array dimensions: 8.
-- Maximum inner-shape dimensions for struct dtypes: 4.
+- Maximum inner-shape dimensions for dtypes: 4.
 - Little-endian platforms only.

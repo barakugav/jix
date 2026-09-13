@@ -23,14 +23,14 @@ use crate::{
 
 /// A multi-dimensional array, usually compressed, backed by a generic storage.
 ///
-/// `Array<S>` is the central type in jix. It behave like a regular n-dimensional array, but
+/// `Array<S>` is the central type in jix. It behaves like a regular n-dimensional array, but
 /// its data is stored in a compressed format and decoded on demand. Its core functionality is
 /// provided by [`shape()`](Array::shape), [`dtype()`](Array::dtype),
 /// and [`to_ndarray_buf()`](Array::to_ndarray_buf), all other functions are built on top of those.
 ///
 /// An array is generic over `S: ArrayStorage`, which provides the implementation of the three core
 /// methods. The main concrete storage backend is the block-compressed [`Compact`] type, which
-/// divides the array into n-dimensional blocks and compresses each block independently, and its
+/// divides the array into n-dimensional blocks and compresses each block independently, and it's
 /// the return type of the common creation methods for arrays
 /// (e.g.[`compact_ndarray()`](Array::compact_ndarray) and [`compact()`](Array::compact)).
 ///
@@ -41,7 +41,7 @@ use crate::{
 /// | Type | Description |
 /// |------|-------------|
 /// | [`Array<Compact>`](crate::storage::Compact) | Heap-allocated block-compressed array. The main storage backend. |
-/// | [`Array<Add<S1, S2>> or Array<Neg<S>> ...`](crate::ops) | Lazy operations views that wrap one or more arrays and apply a transformation at read time. Created by methods in [`ops`](crate::ops). |
+/// | [`Array<Add<S1, S2>> or Array<Neg<S>> ...`](crate::ops) | Lazy operation views that wrap one or more arrays and apply a transformation at read time. Created by methods in [`ops`](crate::ops). |
 /// | [`Array<Plain<...>>`](crate::storage::Plain) | Zero-copy view into an uncompressed (possibly strided) in-memory buffer. Created by [`plain_ndarray`](Array::plain_ndarray) and [`plain_ndarray_ref`](Array::plain_ndarray_ref). |
 ///
 /// # Operations and lazy evaluation
@@ -309,7 +309,7 @@ impl<D> Array<Compact<TypeDyn, D>> {
     ///
     /// `ptr` must point to a readable buffer, laid out with the given
     /// `strides` (in bytes, one per dimension).
-    /// The buffer should contains elements of the given `dtype`.
+    /// The buffer should contain elements of the given `dtype`.
     /// Accessing the buffer according to the shape, strides and dtype must be memory-safe and yield
     /// valid elements.
     pub unsafe fn compact_nd_ptr<Sh>(
@@ -337,7 +337,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// The function `f` is called with the index of each element in the output array, and should
     /// return the value for that element.
     /// Elements are visited in an arbitrary order - this is not some theoretical use case, most of
-    /// the times elements will NOT be visited in row-major order, and the function should not rely
+    /// the time elements will NOT be visited in row-major order, and the function should not rely
     /// on any specific order for correctness or performance.
     ///
     /// # Arguments
@@ -397,7 +397,7 @@ impl<T, D> Array<Compact<Ty<T>, D>> {
     /// The function `f` is called with the index of each element in the output array, and should
     /// return the value for that element.
     /// Elements are visited in an arbitrary order - this is not some theoretical use case, most of
-    /// the times elements will NOT be visited in row-major order, and the function should not rely
+    /// the time elements will NOT be visited in row-major order, and the function should not rely
     /// on any specific order for correctness or performance.
     ///
     /// # Arguments
@@ -1103,10 +1103,10 @@ impl<S: ArrayStorage> Array<S> {
     /// Compress the data of this array into a new `Array<Compact>` with new blocks.
     ///
     /// The primary use of `compact` is to materialize a lazy operation chain:
-    /// An `Array<S>` can have an arbitrary storage implementation, often a lazy view of some one or
-    /// more computation, for example `Array<Floor<Map<Compact>>>` (see the examples).
+    /// An `Array<S>` can have an arbitrary storage implementation, often a lazy view of one or
+    /// more computations, for example `Array<Floor<Map<Compact>>>` (see the examples).
     /// Reads to such lazy view arrays always perform the whole computation pipeline on the fly,
-    /// which is very flexible but can be inefficient for repeated access. Coping the data and
+    /// which is very flexible but can be inefficient for repeated access. Copying the data and
     /// re-compressing it into a new array with `compact` breaks the lazy storage chain and materializes
     /// the result as a standalone `Array<Compact>`.
     ///
@@ -1117,10 +1117,10 @@ impl<S: ArrayStorage> Array<S> {
     /// derived block shape that matches the new layout. The block shape of copied arrays is
     /// automatically derived and tuned from the underlying storage(s), using a heuristic that aims
     /// to preserve user choices (that may depend on the user knowledge of the access pattern), but
-    /// its not perfect - you may want to explicitly pass some parameters via
+    /// it's not perfect - you may want to explicitly pass some parameters via
     /// [`compact_with`](Array::compact_with).
     ///
-    /// Its also possible to materialize a lazy operation chain directly into a file without holding
+    /// It's also possible to materialize a lazy operation chain directly into a file without holding
     /// the whole result (compressed or decompressed) in memory.
     /// See [`write_to_file`](Array::write_to_file) and its variants for details and examples.
     ///
@@ -1443,7 +1443,7 @@ impl<S: ArrayStorage> Array<S> {
     /// Create an array with a storage reference to this array, without cloning the underlying data.
     ///
     /// Almost all ops on arrays accept ownership of an `Array<S>` rather than a reference, for
-    /// example `a + b` for two arrays consume `a` and `b`. To reuse an array without cloning its
+    /// example `a + b` for two arrays consumes `a` and `b`. To reuse an array without cloning its
     /// storage, call `view` to get an `Array<View<'_, S>>`, which doesn't own the storage but can
     /// be used in any API that accepts an owned `Array<S>`.
     ///
@@ -1479,7 +1479,7 @@ impl<S: ArrayStorage> Array<S> {
 
     /// Check if this array storage is compact block-compressed storage.
     ///
-    /// This functions returns `true` for arrays that are stored in compact block-compressed form,
+    /// This function returns `true` for arrays that are stored in compact block-compressed form,
     /// i.e. those created by [`compact_ndarray`](Array::compact_ndarray), [`compact`](Array::compact),
     /// [`read_from_file`](Array::read_from_file), etc., and `false` for arrays with storage
     /// implementations with uncompressed data, such as lazy operation views, plain ndarray views,
@@ -1679,8 +1679,8 @@ where
     /// Generally speaking, the compiler can optimize more aggressively when the dimension is
     /// statically known, which can yield better performance.
     ///
-    /// This method replace the inner storage with `S::DimensionChange<D>`, which is implemented by
-    /// simpler [`IntoDim<S, D>`](crate::ops::IntoDim) adaptor for some storages, but may be implemented
+    /// This method replaces the inner storage with `S::DimensionChange<D>`, which is implemented by
+    /// the simpler [`IntoDim<S, D>`](crate::ops::IntoDim) adaptor for some storages, but may be implemented
     /// as an in-place replacement for others.
     ///
     /// See [`into_dim_dyn`](Self::into_dim_dyn).

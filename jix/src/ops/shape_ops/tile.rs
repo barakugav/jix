@@ -6,7 +6,7 @@ use crate::ops::prelude::*;
 /// [`Array::tile`](crate::Array::tile).
 ///
 /// Output shape equals the input except `shape[axis]` becomes `shape[axis] * repeats`. The
-/// rolled axis is *not* extended: `axis` must satisfy `axis < ndim`. Element `i` along the
+/// ndim is *not* extended: `axis` must satisfy `axis < ndim`. Element `i` along the
 /// output axis comes from input element `i mod L`, where `L = input.shape()[axis]`.
 ///
 /// This differs from [`Repeat`](crate::ops::Repeat): `tile` repeats the whole sequence

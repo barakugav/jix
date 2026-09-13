@@ -253,7 +253,7 @@ fn trans_bit_byte(src: &[u8], dst: &mut [u8], n_full: usize, typesize: usize) {
 /// of `G = N/8` bytes.
 ///
 /// Equivalent to `bshuf_trans_bitrow_eight` in the reference, itself a
-/// specialisation of `bshuf_trans_elem(lda=8, ldb=B, elem_size=G)`.
+/// specialization of `bshuf_trans_elem(lda=8, ldb=B, elem_size=G)`.
 #[cfg_attr(feature = "multiversion", multiversion::multiversion(targets(
     // x86-64-v4
     "x86_64+sse3+ssse3+sse4.1+sse4.2+popcnt+cmpxchg16b+avx+avx2+bmi1+bmi2+f16c+fma+lzcnt+movbe+xsave+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",

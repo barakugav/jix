@@ -12,7 +12,7 @@ define_op2!(
     /// The result is a lazy view; no computation occurs until the array is read.
     ///
     /// This struct is the bare storage implementation, the operation is also available as
-    /// as the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand).
+    /// the `&` operator or [`Array::bitand()`](core::ops::BitAnd::bitand).
     ///
     /// # Examples
     /// ```

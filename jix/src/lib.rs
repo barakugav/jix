@@ -80,7 +80,7 @@
 //! - **Long and/or complex pipelines of operations.**
 //!   Plain iterators over regular ndarrays already
 //!   give you lazy element-wise evaluation for free (although naive use of the `ndarray` crate may still
-//!   produces NumPy-style intermediates), so for simple `map`/`zip`-style pipelines
+//!   produce NumPy-style intermediates), so for simple `map`/`zip`-style pipelines
 //!   jix offers little over hand-written iterator code.
 //!   The advantage shows up once the pipeline includes
 //!   operations that change the shape or the access pattern - reductions, broadcasts,
@@ -123,7 +123,7 @@
 //! # Operations
 //!
 //! All operations live in [`ops`] and are also available as methods on [`Array<S>`](Array).
-//! The support list of operations is still growing, but includes:
+//! The supported list of operations is still growing, but includes:
 //!
 //! **Element-wise unary** - `neg`, `abs`, `exp`, `ln`, `sqrt`, `floor`, `ceil`,
 //! `round`, `sign`, `sin`, `cos`, `tan`, ...
@@ -372,7 +372,7 @@
 //!   'static` and must not implement `Drop`.
 //!
 //!
-//! # Disclaimer
+//! # Acknowledgements
 //!
 //! This project would not exist without the work of several upstream authors and communities.
 //! Specifically, this project was greatly inspired by the [C-Blosc2](https://github.com/Blosc/c-blosc2) library.

@@ -18,8 +18,8 @@ use crate::{Dimension, ElementType};
 /// # Primary storage backends
 ///
 /// The main concrete storages are the block-compressed backends:
-/// `compressed::Compact` (heap-allocated) and `compressed::CompactMmap` (memory-mapped file)
-///  These store the array as independently
+/// `compact::Compact` (heap-allocated) and `compact::CompactMmap` (memory-mapped file).
+/// These store the array as independently
 /// compressed nd-blocks and are the primary on-disk format.
 ///
 /// # Adapter
@@ -79,7 +79,7 @@ pub trait ArrayStorage {
     /// Operations that change the number of axes determine the output dimension by either using
     /// the input dimension's associated type (e.g. `S::Dimension::Smaller` or `S::Dimension::Larger`)
     /// or by accepting an explicit dimension argument from the caller
-    /// (e.g. `reshape()` accept IntoDimension, `max()` accept `AxesArg`).
+    /// (e.g. `reshape()` accepts IntoDimension, `max()` accepts `AxesArg`).
     type Dimension: Dimension
     where
         Self: Sized;
@@ -124,11 +124,11 @@ pub trait ArrayStorage {
 
     /// Read a sub-region as an element-wise pipeline over `T`.
     ///
-    /// Compare to [`read_data`](Self::read_data), which materializes the region into a single
-    /// buffer, this method hands back a pipeline that build a tree of operations in which the
+    /// Compared to [`read_data`](Self::read_data), which materializes the region into a single
+    /// buffer, this method hands back a pipeline that builds a tree of operations in which the
     /// leaves are operands and inner nodes are ops. The default implementation of this method
     /// reads the region in a leaf buffer, but ops override it to build a tree recursively from
-    /// their inner storages dependencies.
+    /// their inner storage dependencies.
     ///
     /// # Arguments
     ///

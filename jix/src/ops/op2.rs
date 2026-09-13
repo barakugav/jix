@@ -552,7 +552,7 @@ define_op2!(
     /// Element-wise division of two arrays (`a / b`).
     ///
     /// For **integer** types the result is truncating (rounds towards zero); dividing
-    /// by zero panics in debug builds and the result is implementation-defined in release.
+    /// by zero panics in both debug and release builds.
     /// For **float** types semantics follow `f32::div`.
     /// For **complex** types this is full complex division.
     ///

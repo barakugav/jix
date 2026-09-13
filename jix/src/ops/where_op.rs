@@ -21,7 +21,7 @@ where
     Where::new_array(condition, x, y).unwrap()
 }
 
-/// Selects elements element-wise from `x` or `y` depending on `condition`
+/// Selects elements element-wise from `x` or `y` depending on `condition`.
 ///
 /// For each index `i`, the output is `x[i]` if `condition[i]` is `true`, otherwise `y[i]`.
 /// Semantics match `numpy.where(condition, x, y)`.

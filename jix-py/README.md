@@ -7,7 +7,7 @@ Only the blocks that overlap a read request are decompressed, so random access i
 
 **Lazy operation chains.** Every operation - arithmetic, shape change, reduction, type cast - returns a new view that wraps the
 input(s) and records the transformation, nothing is computed until data is explicitly requested.
-A chain of such operations build a pipeline that runs in a single decompression pass the moment you ask for output.
+A chain of such operations builds a pipeline that runs in a single decompression pass the moment you ask for output.
 
 ```python
 import jix

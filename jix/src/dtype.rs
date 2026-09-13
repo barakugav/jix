@@ -137,7 +137,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// - **How many bytes** does one logical element occupy ([`itemsize`](Self::itemsize))?
 /// - **What alignment** is required when placing an element in memory ([`alignment`](Self::alignment))?
 ///
-/// # Two Flavours
+/// # Two Flavors
 ///
 /// ## Scalar dtypes
 ///
@@ -402,7 +402,7 @@ impl Dtype {
         })
     }
 
-    /// Creates a new struct dtype from a set of fields definitions.
+    /// Creates a new struct dtype from a set of field definitions.
     ///
     /// # Arguments
     ///
@@ -546,7 +546,7 @@ impl Dtype {
     ///   or equal to the itemsize.
     ///
     /// The fields should be either in packed or aligned offsets. See [`Self::is_aligned`] for details.
-    /// Thw shape, itemsize and alignment will be validated against the fields.
+    /// The shape, itemsize and alignment will be validated against the fields.
     ///
     /// ```rust
     /// use jix::dtype::{Dtype, Dtyped, Alignment, Itemsize};
@@ -1083,7 +1083,7 @@ impl Endianness {
 
 /// The field list of an owned struct dtype.
 ///
-/// The sole purpose of this struct is to create a `inline(never)` of a drop, to avoid recursive
+/// The sole purpose of this struct is to create an `inline(never)` of a drop, to avoid recursive
 /// drop of Dtype, allowing inlining of `drop` for T::DTYPE.
 #[allow(clippy::type_complexity)]
 struct OwnedFields(ManuallyDrop<Box<[(Cow<'static, str>, Itemsize, Dtype)]>>);
@@ -1119,11 +1119,11 @@ impl std::fmt::Debug for OwnedFields {
 
 /// A trait for types that can be represented by a [`Dtype`].
 ///
-/// `jix` maintain the dtype of each array dynamically using a [`Dtype`].
-/// For safe conversions between (typed erased) arrays and other typed arrays (for example [`ndarray::ArrayBase`])
+/// `jix` maintains the dtype of each array dynamically using a [`Dtype`].
+/// For safe conversions between (type erased) arrays and other typed arrays (for example [`ndarray::ArrayBase`])
 /// the `Dtyped` trait is used to verify type compatibility.
 ///
-/// The trait also force `Copy`, and elements in arrays should not implement `Drop`.
+/// The trait also forces `Copy`, and elements in arrays should not implement `Drop`.
 ///
 /// Use the derive macro [`Dtyped`] to automatically implement this trait for structs.
 /// ```rust

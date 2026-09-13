@@ -318,7 +318,8 @@ define_op2!(
     ///
     /// Shifts the bits of each element of `a` left by the corresponding value in `b`.
     /// Vacated bits are filled with zeros. Shifting by a value greater than or equal to the
-    /// bit width of the type produces zero.
+    /// bit width of the type panics in debug builds and masks the shift amount modulo the bit
+    /// width in release builds (it does NOT produce zero).
     ///
     /// **Type promotion**: if `a` and `b` have different integer dtypes, both are cast to
     /// the smallest integer type that can represent both (Safe casting rules).
@@ -360,7 +361,8 @@ define_op2!(
     /// For **unsigned** types this is a logical shift: vacated bits are filled with zeros.
     /// For **signed** types this is an arithmetic shift: vacated bits are filled with the
     /// sign bit (the result preserves the sign). Shifting by a value greater than or equal
-    /// to the bit width produces zero (unsigned) or the sign-extended value (signed).
+    /// to the bit width panics in debug builds and masks the shift amount modulo the bit width
+    /// in release builds (it does NOT produce zero).
     ///
     /// **Type promotion**: if `a` and `b` have different integer dtypes, both are cast to
     /// the smallest integer type that can represent both (Safe casting rules).

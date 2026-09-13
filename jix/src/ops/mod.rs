@@ -66,7 +66,7 @@
 //! Arrays loaded from disk carry [`TypeDyn`](crate::TypeDyn) and [`DimDyn`](crate::DimDyn) because
 //! the element type and shape are only known at runtime.
 //! Use [`Array::into_typed`](crate::Array::into_typed) and [`Array::into_dim`](crate::Array::into_dim)
-//! to assert the  expected element type and dimension and recover compile-time tracking:
+//! to assert the expected element type and dimension and recover compile-time tracking:
 //!
 //! ```no_run
 //! use std::path::Path;

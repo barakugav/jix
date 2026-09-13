@@ -82,7 +82,7 @@ where
     S: ArrayStorage,
     D: Dimension,
 {
-    /// Constructs a [`InsertAxis`] storage. See the struct docs for semantics and examples.
+    /// Constructs an [`InsertAxis`] storage. See the struct docs for semantics and examples.
     pub fn new<Ax>(array: S, axis: Ax) -> Result<Self>
     where
         Ax: AxesArg<ExpandedDimension<S::Dimension> = D>,

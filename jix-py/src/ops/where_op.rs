@@ -24,7 +24,7 @@ use crate::Array;
 ///     y: Values to use where `condition` is False.
 ///
 /// Returns:
-///     A lazy [`jix.Array`][jix.Array] with the same shape as the broadcast of `condition`, `x`, and `y`.
+///     A lazy [`jix.Array`][jix.Array] with the same shape as `condition`, `x`, and `y`.
 ///         Elements are drawn from `x` where `condition` is `True`, and from `y` elsewhere.
 ///
 /// Examples:

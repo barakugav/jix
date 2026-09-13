@@ -1,6 +1,6 @@
 - use cargo workspace
 - consider AlignedBytes with compile time alignment
-- build wheels for wsam
+- build wheels for wasm
 - compress offsets array
 - delegate power to square/sqrt if exponent is 2/0.5
 - if RHS in op2 is a scalar, use .map() instead of broadcasting in python impl

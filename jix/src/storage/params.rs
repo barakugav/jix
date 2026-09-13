@@ -499,7 +499,7 @@ pub struct ArraySpec<'a> {
 }
 /// Owned version of [`ArraySpec`].
 ///
-/// The structs holds two sets of parameters:
+/// The struct holds two sets of parameters:
 /// - "shared" parameters: these are parameters that an array allocated on the heap, and any views
 ///   derived from it hold a raw pointer to it, using [`ArraySpecPtr`].
 /// - "dynamic" parameters: these are parameters that are stored directly in the array struct. With
@@ -510,7 +510,7 @@ pub struct ArraySpec<'a> {
 /// Arc creates contention on cache lines between CPUs. Raw pointers are not safe, but views always
 /// hold a reference to the source array, so they are guaranteed to be valid as long as the source
 /// array is alive.
-/// This resemble self referential structs.
+/// This resembles self referential structs.
 #[derive(Clone)]
 pub(crate) struct ArraySpecOwned {
     shared: Pin<Box<(ArraySpecShared, PhantomPinned)>>,
