@@ -11,17 +11,22 @@ Every comparison in the report is the same chart, so the reader learns to read i
   a dtype, a data distribution, a block/read shape, a reduction axis.
 - **bars within a case: one per library.** Same color for the same library everywhere in the
   report, so the legend stops being needed after the first plot.
-- **y axis: performance relative to the baseline**, log scale. Bars rise from a common floor and a
-  black rule is drawn at 1x, so the baseline's own bar tops out exactly on the rule and every other
-  bar is read against it. Taller is better - faster, smaller stored, or less memory depending on
-  the metric, and the subtitle says which.
+- **y axis: cost relative to the baseline**, log scale. Bars rise from a common floor and a black
+  rule is drawn at 1x, so the baseline's own bar tops out exactly on the rule and every other bar is
+  read against it. **Shorter is better** - a bar at 4x took four times as long, used four times the
+  memory, or stored four times the bytes. The subtitle says which.
+- **One exception: compression throughput** is plotted in absolute MB/s with no baseline and no
+  rule, where taller is faster. There is no meaningful NumPy arm to normalize against, because not
+  compressing is not a compression speed.
 - **The baseline is always drawn as its own gray 1x bar**, not just as a gridline, so a case never
   looks like it is missing a library. Its value label is suppressed: it is 1.00x by construction.
 - **Every bar is labelled** with its ratio and its absolute time.
 
-A log axis with a rule at 1x is what makes this work across the spread we actually have: a 3.7x win
-and a 1/800 loss appear on the same plot at readable sizes, and "above the rule" is legible at a
-glance without reading a single number. There is always headroom above the rule, so it reads as a
+A log axis with a rule at 1x is what makes this work across the spread we actually have: a 0.27x
+win and an 825x loss appear on the same plot at readable sizes, and "below the rule" is legible at a
+glance without reading a single number. Costs read more naturally than speedups here - "blosc2 is
+190x slower" lands better than "jix is 190x faster", and it keeps every metric pointing the same
+way. There is always headroom above the rule, so it reads as a
 reference line rather than the top edge of the plot.
 
 Implemented in `jix-py/python/benches/report_bars.py`; every plot's cases and library order are
@@ -85,7 +90,9 @@ probably will - see the note on integer reductions in `PLAN.md`.
 ## Palette
 
 Seven categorical slots, one per library, fixed across the whole report; baseline libraries
-(`numpy`, `ndarray`) are neutral gray because they are a reference rather than a series. Validated
+(`numpy`, `ndarray`) are neutral gray because they are a reference rather than a series. Slots are
+assigned in `COLOR_ORDER`, which puts the libraries that appear on nearly every plot first, so the
+common case draws consecutive palette slots. Validated
 with the data-viz validator in light mode: all checks pass, worst adjacent CVD dE 9.1, worst
 adjacent normal-vision dE 19.6. Three slots sit below 3:1 contrast on the light surface, which
 obliges relief - satisfied by the per-bar value labels and the table under every plot.
@@ -93,3 +100,14 @@ obliges relief - satisfied by the per-bar value labels and the table under every
 Each plot draws a *subset* of the libraries, so bars that end up adjacent are not always adjacent
 palette slots. Every section's drawn subset was validated separately and all pass. **Re-run that
 check when the library set of any plot changes.**
+
+## Library naming
+
+`jix` and `blosc2` always mean the byte-shuffled build - the configuration anyone would actually
+use - so a bar's identity never changes meaning between plots. The unfiltered builds appear only in
+the compression section, where the filter is the thing being measured, and are named
+`jix-noshuffle` / `blosc2-noshuffle` there.
+
+`jix-plain` (jix over an ordinary uncompressed buffer) is on every plot except the compression
+ones. It is what separates the cost of jix's operation machinery from the cost of decompression,
+and without it every compressed-storage number is unattributable.

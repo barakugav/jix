@@ -24,9 +24,9 @@ always drawn as a 1x bar.
 | read dtype | **`i32` only** |
 | ndim | 2, except the axis-order section which needs 3 |
 | codec | zstd level 3 |
-| filters | byte-shuffle, with a no-shuffle arm where the filter is informative |
+| filters | byte-shuffle. `jix` and `blosc2` always mean the shuffled build; `-noshuffle` arms appear only in the compression section |
 | data distribution | `smooth`, except where distribution is a case |
-| array shape | **`[130_000, 200]` in both Rust and Python** (104 MB as f32) |
+| array shape | **`[130_000, 200]` in both Rust and Python** (104 MB as f32), stated on every plot |
 
 Two dtypes is not a sweep - it is the minimum honest sample. The suite already shows the two
 diverging sharply (`sum` all-axis: jix beats numpy 3.2x on `i32` and 2.4x on `f32`), and showing
