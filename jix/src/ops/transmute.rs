@@ -176,6 +176,7 @@ mod tests {
     /// An 8-byte struct dtype, to check that a transmute handles a composite element type and not
     /// just scalars.
     #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(C)]
     struct Pair {
         x: i32,

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::archive::block::{BlockArchiveWriter, BlockTableStorageRead};
 use crate::archive::common::{ArchiveReader, ArchiveWriter};
 use crate::archive::schema;
-use crate::codec::ReadContext;
+use crate::codec::{DecoderCodecConfig, ReadContext};
 use crate::error::{check_ndim, ensure, error, Error, Result};
 use crate::storage::block::{BlockSize, BlockTable, BlockTableStorage};
 use crate::storage::{ArrayBlockTableStorageBase, Compact, CompactMmap};
@@ -406,10 +406,12 @@ where
             return writer.flush().map_err(Error::io);
         }
 
-        self.compact_into_builder(
-            &mut params,
-            context,
-            |nblocks, block_shape, decoder_config| {
+        fn builder_init<'w, W: Write + Seek>(
+            writer: &'w mut ArchiveWriter<W>,
+            shape: Vec<u64>,
+        ) -> impl FnOnce(u64, &[BlockSize], DecoderCodecConfig) -> Result<BlockArchiveWriter<'w, W>>
+        {
+            move |nblocks, block_shape, decoder_config| {
                 let header = schema::ArrayHeader {
                     shape,
                     block_shape: block_shape.iter().map(|s| *s as u64).collect(),
@@ -417,9 +419,11 @@ where
                 writer.write_message(&header).map_err(Error::io)?;
 
                 let block_size = block_shape.iter().cloned().try_product().unwrap();
-                BlockArchiveWriter::start(&mut writer, nblocks, block_size, &decoder_config)
-            },
-        )?;
+                BlockArchiveWriter::start(writer, nblocks, block_size, &decoder_config)
+            }
+        }
+
+        self.compact_into_builder(&mut params, context, builder_init(&mut writer, shape))?;
 
         writer.flush().map_err(Error::io)
     }

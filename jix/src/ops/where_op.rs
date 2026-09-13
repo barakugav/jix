@@ -923,6 +923,7 @@ mod tests {
         // The (4, 2) width branch: 4 bytes wide but only 2-byte aligned, so it is served by
         // `[u16; 2]` rather than `u32`. No scalar dtype lands here.
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct U16Pair {
             a: u16,
@@ -945,6 +946,7 @@ mod tests {
         // A 12-byte / 4-aligned dtype matches none of the scalar-width branches, so this drives the
         // byte-wise `inner_loop_generic` fallback into a strided destination.
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Triple {
             a: i32,
@@ -1028,6 +1030,7 @@ mod tests {
     #[test]
     fn struct_dtype_fallback_path() {
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Pair {
             a: i32,

@@ -30,6 +30,18 @@
 //! - Every field must itself implement `Dtyped`.
 //! - Unit structs and enums are not supported.
 //! - Tuple structs must be `#[repr(transparent)]` and contain exactly one field.
+//!
+//! ### Renaming the `jix` dependency
+//!
+//! The generated code refers to the `jix` crate as `::jix`. When that path is wrong - because
+//! `jix` was renamed in `Cargo.toml` - spell out the right path with `#[dtyped(crate = "...")]`:
+//!
+//! ```rust,ignore
+//! #[derive(Copy, Clone, Dtyped)]
+//! #[dtyped(crate = "::my_jix")]
+//! #[repr(C)]
+//! struct Pixel { r: u8, g: u8, b: u8 }
+//! ```
 
 extern crate proc_macro;
 
@@ -39,8 +51,11 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, Meta};
 
 /// Derive macro generating an impl of the trait `Dtyped`.
 ///
+/// The generated code refers to the `jix` crate as `::jix`. Use `#[dtyped(crate = "...")]` to
+/// override that path when `jix` is renamed in `Cargo.toml`.
+///
 /// See `jix::dtype::Dtyped` for more details on the trait and its requirements.
-#[proc_macro_derive(Dtyped)]
+#[proc_macro_derive(Dtyped, attributes(dtyped))]
 pub fn derive_dtyped(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     derive_dtyped_impl(input).unwrap_or_else(|err| syn::Error::into_compile_error(err).into())
@@ -88,13 +103,7 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         ));
     };
 
-    let jix_crate = match proc_macro_crate::crate_name("jix").expect("jix crate not found") {
-        proc_macro_crate::FoundCrate::Itself => quote::quote! { crate },
-        proc_macro_crate::FoundCrate::Name(name) => {
-            let name = syn::Ident::new(&name, input.span());
-            quote::quote! { ::#name }
-        }
-    };
+    let jix_crate = jix_crate_path(&input.attrs)?;
     let struct_name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let field_types;
@@ -256,4 +265,21 @@ fn derive_dtyped_impl(input: syn::DeriveInput) -> syn::Result<TokenStream> {
     };
 
     Ok(TokenStream::from(tokens))
+}
+
+fn jix_crate_path(attrs: &[syn::Attribute]) -> syn::Result<syn::Path> {
+    let mut jix_crate = None;
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("dtyped")) {
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("crate") {
+                return Err(meta.error("unsupported dtyped option, expected `crate`"));
+            }
+            if jix_crate.is_some() {
+                return Err(meta.error("duplicate dtyped `crate` option"));
+            }
+            jix_crate = Some(meta.value()?.parse::<syn::LitStr>()?.parse()?);
+            Ok(())
+        })?;
+    }
+    Ok(jix_crate.unwrap_or_else(|| syn::parse_quote!(::jix)))
 }

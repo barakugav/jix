@@ -406,6 +406,7 @@ mod tests {
     // fields, copying each field is equivalent to copying the whole element - which
     // is exactly what the byte-level `reference_copy` does, so the two agree.
     #[derive(Copy, Clone, crate::dtype::Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(C)]
     struct StructNoPad {
         a: i32,

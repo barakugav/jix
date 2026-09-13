@@ -498,6 +498,7 @@ mod tests {
     #[test]
     fn map_integer_to_struct() {
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Point {
             x: i32,
@@ -522,6 +523,7 @@ mod tests {
     #[test]
     fn map_chain_integer_to_struct_to_bigger_struct() {
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Small {
             x: i32,
@@ -529,6 +531,7 @@ mod tests {
         }
 
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Big {
             x: i32,
@@ -707,6 +710,7 @@ mod tests {
     #[test]
     fn map_multiple_struct_output() {
         #[derive(Copy, Clone, PartialEq, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Point {
             x: i32,

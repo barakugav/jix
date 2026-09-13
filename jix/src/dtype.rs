@@ -184,7 +184,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// Create struct dtypes with [`Dtype::from_fields`] (auto-detects layout) or
 /// [`Dtype::new_struct`] (explicit control when auto-detection is ambiguous):
 ///
-/// ```rust,ignore
+/// ```rust
 /// use jix::dtype::{Dtype, Dtyped};
 ///
 /// // Aligned layout: id (u8) at 0, 3 bytes padding, grade (f32) at 4, 0 bytes tail padding.
@@ -243,7 +243,7 @@ type DtypeShape = ArrayVec<Itemsize, DTYPE_MAX_NDIM>;
 /// The [`Dtyped`] derive macro generates the `const DTYPE` for any `#[repr(C)]` or
 /// `#[repr(C, packed)]` struct:
 ///
-/// ```rust,ignore
+/// ```rust
 /// use jix::dtype::{Dtype, Dtyped};
 ///
 /// #[derive(Copy, Clone, Dtyped)]
@@ -414,11 +414,11 @@ impl Dtype {
     /// There are some cases in which it is ambiguous whether the offsets are packed or aligned, and it may affect the
     /// computed total itemsize of the struct. In these cases, consider using the explicit [`Self::new_struct`].
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// use jix::dtype::{Dtype, Dtyped};
     ///
     /// /// A student struct with aligned fields.
-    /// #[derive(Dtyped)]
+    /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C)]
     /// struct Student {
     ///   id: u8,
@@ -429,9 +429,10 @@ impl Dtype {
     ///   ("grade".to_string(), 4, f32::DTYPE),
     /// ]).unwrap();
     /// assert_eq!(student_dtype.fields().unwrap().len(), 2);
-    /// let mut fields = student_dtype.fields().unwrap().iter();
-    /// assert_eq!(fields.next().unwrap(), ("id".into(), 0, u8::DTYPE));
-    /// assert_eq!(fields.next().unwrap(), ("grade".into(), 4, f32::DTYPE));
+    /// let fields = student_dtype.fields().unwrap();
+    /// let mut fields = fields.iter();
+    /// assert_eq!(*fields.next().unwrap(), ("id".into(), 0, u8::DTYPE));
+    /// assert_eq!(*fields.next().unwrap(), ("grade".into(), 4, f32::DTYPE));
     /// assert_eq!(student_dtype.scalar_kind(), None);
     /// assert_eq!(student_dtype.itemsize(), 8);
     /// assert_eq!(student_dtype.alignment().as_usize(), 4);
@@ -441,7 +442,7 @@ impl Dtype {
     /// assert_eq!(Student::DTYPE, student_dtype);
     ///
     /// /// A packed student struct.
-    /// #[derive(Dtyped)]
+    /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C, packed)]
     /// struct StudentPacked {
     ///   id: u8,
@@ -547,10 +548,10 @@ impl Dtype {
     /// The fields should be either in packed or aligned offsets. See [`Self::is_aligned`] for details.
     /// Thw shape, itemsize and alignment will be validated against the fields.
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// use jix::dtype::{Dtype, Dtyped, Alignment, Itemsize};
     ///
-    /// #[derive(Dtyped)]
+    /// #[derive(Copy, Clone, Dtyped)]
     /// #[repr(C)]
     /// struct Person {
     ///   weight: f32,
@@ -568,7 +569,7 @@ impl Dtype {
     ///     ("weight".to_string(), 0, f32::DTYPE),
     ///     ("age".to_string(), 4, u8::DTYPE),
     ///   ],
-    ///   &[1, 2],
+    ///   &[],
     ///   8,
     ///   Alignment::new(4).unwrap(),
     /// ).unwrap();
@@ -1125,10 +1126,10 @@ impl std::fmt::Debug for OwnedFields {
 /// The trait also force `Copy`, and elements in arrays should not implement `Drop`.
 ///
 /// Use the derive macro [`Dtyped`] to automatically implement this trait for structs.
-/// ```rust,ignore
+/// ```rust
 /// use jix::dtype::{Dtype, Dtyped};
 ///
-/// #[derive(Dtyped)]
+/// #[derive(Copy, Clone, Dtyped)]
 /// #[repr(C)]
 /// struct MyStruct {
 ///     a: i32,
@@ -1213,6 +1214,7 @@ mod tests {
     #[test]
     fn borrowed_struct_dtype_matches_the_derived_one() {
         #[derive(Copy, Clone, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Pair {
             x: i32,
@@ -1297,6 +1299,7 @@ mod tests {
     #[test]
     fn struct_dtype_never_equals_a_scalar_of_the_same_layout() {
         #[derive(Copy, Clone, Debug, crate::dtype::Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct OneI64 {
             a: i64,
@@ -1602,6 +1605,7 @@ mod tests {
     // ---- Derive macro ----
 
     #[derive(Copy, Clone, Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(C)]
     struct SimpleStruct {
         a: u8,
@@ -1628,6 +1632,7 @@ mod tests {
     }
 
     #[derive(Copy, Clone, Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(C, packed)]
     struct PackedStruct {
         a: u8,
@@ -1654,6 +1659,7 @@ mod tests {
     }
 
     #[derive(Copy, Clone, Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(transparent)]
     struct NewtypeWrapper(SimpleStruct);
 
@@ -1667,6 +1673,7 @@ mod tests {
     }
 
     #[derive(Copy, Clone, Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(C)]
     struct NestedStruct {
         a: SimpleStruct,
@@ -1691,6 +1698,7 @@ mod tests {
     }
 
     #[derive(Copy, Clone, Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(C)]
     struct ArrayFieldStruct {
         a: [i32; 3],
@@ -1717,6 +1725,7 @@ mod tests {
     }
 
     #[derive(Copy, Clone, Dtyped)]
+    #[dtyped(crate = "crate")]
     #[repr(C)]
     struct DeepNested {
         inner: NestedStruct,
@@ -1876,6 +1885,7 @@ mod tests {
     #[test]
     fn derived_empty_struct_has_zero_itemsize() {
         #[derive(Copy, Clone, Dtyped)]
+        #[dtyped(crate = "crate")]
         #[repr(C)]
         struct Empty {}
 
