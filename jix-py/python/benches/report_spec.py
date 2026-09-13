@@ -157,7 +157,7 @@ SECTIONS = [
     {
         "key": "chain",
         "title": "Operation chains",
-        "subtitle": f"f32 {ARRAY} x2; array-operand steps at a cache-sized read region, plus an exp/log chain",
+        "subtitle": f"f32 {ARRAY} x2; array-operand steps, plus one chain dominated by exp/log",
         "baseline": "numpy",
         "metric": "time",
         "cases": [chain_label(case) for case in CHAIN_CASES],
