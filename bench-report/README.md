@@ -27,16 +27,22 @@ That writes one directory per runner (`bench-linux-x86_64-<run>`, `bench-linux-a
 ## 3. Build the report
 
     python bench-report/build_report.py --artifacts bench-artifacts
+    python bench-report/build_readme_snippet.py --artifacts bench-artifacts
 
-Writes `bench-report/plots/*.png` and `bench-report/report.md`. It prints one line per artifact it
-read - check both platforms are listed before trusting the output. The report is stamped with the
-machines it came from; a draft built from `build_fake_report.py` is stamped as invented instead.
+The first writes `bench-report/plots/*.png` and `bench-report/report.md`; the second writes
+`bench-report/readme-snippet.md`, the block that goes in the top-level `README.md`. Both are
+generated from the same rows, so the README's numbers cannot drift from the report's.
+
+`build_report.py` prints one line per artifact it read - check both platforms are listed before
+trusting the output. Output is stamped with the machines it came from, and marked low-fidelity if
+the run used `fast`. A draft built from `build_fake_report.py` is stamped as invented instead.
 
 ## 4. Publish
 
 Edit the prose in `report.template.md`, never in `report.md` - `report.md` is generated and any
 edit to it is overwritten on the next build. Re-run step 3 after editing, then commit
-`report.template.md`, `report.md` and `plots/`.
+`report.template.md`, `report.md`, `readme-snippet.md` and `plots/`. Paste `readme-snippet.md` into
+the top-level `README.md`.
 
 ## Running locally
 
@@ -71,6 +77,7 @@ colors can be changed without waiting for a real run:
 |---|---|
 | `report.template.md` | the report's prose, with `<!-- plot:KEY -->` and `<!-- table:KEY -->` markers |
 | `report.md` | generated - do not edit |
+| `readme-snippet.md` | generated - the block for the top-level README |
 | `../jix-py/python/benches/report_spec.py` | every plot's cases and libraries; the benches read it too |
 | `../jix-py/python/benches/report_bars.py` | the renderer |
 | `FINDINGS.md` | what we learned about jix, numpy, blosc2 and ndarray while building this |

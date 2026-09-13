@@ -18,7 +18,7 @@ use std::ops::Neg;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use jix::storage::Compact;
 use jix::{Array, ArrayParams, DimDyn, Filter, Ty};
-use ndarray::{Array2, ArrayD, Axis, IxDyn, Slice};
+use ndarray::{ArrayD, Axis, Slice};
 
 use crate::common::{create_data, Profile};
 
@@ -443,21 +443,47 @@ fn bench_chain(c: &mut Criterion) {
 // report_rust_axis_order - jix sorts axes by stride; ndarray classifies layout four ways.
 // ---------------------------------------------------------------------------------------------
 
-/// `ndarray`'s `array_layout` returns C, F, first-axis-contiguous, last-axis-contiguous, or
-/// nothing, and on nothing it iterates in logical order however the strides actually run. A 3-D
-/// rotation lands on nothing with the largest stride innermost; a reversal is exactly F layout and
-/// a 2-D transpose is too, so both of those are controls that should show no difference.
-macro_rules! bench_permuted {
-    ($group:expr, $case:expr, $data:expr, $axes:expr) => {{
+/// jix sorts every axis by descending stride before iterating. `ndarray` does not: `map` takes a
+/// flat fast path when the view is contiguous *in memory order*, and otherwise falls back to
+/// `iter()`, which walks logical index order however the strides actually run.
+///
+/// The catch, and the reason an earlier version of this benchmark measured nothing: a pure
+/// permutation of a contiguous array is still contiguous in memory order - `is_contiguous` sorts
+/// the strides before checking - so the fast path is taken and no permutation shows a difference.
+/// The view has to be genuinely non-contiguous first, which is what the slice is for.
+///
+/// With the slice, `[1,2,0]` leaves the largest stride on the innermost logical axis, so `ndarray`
+/// jumps a full plane per element. The controls are a permutation that keeps logical order close
+/// to memory order, and a contiguous rotation that still reaches the fast path.
+macro_rules! bench_axis_order {
+    ($group:expr, $case:expr, $data:expr, $keep:expr, $axes:expr) => {{
         let data = $data;
+        let keep: usize = $keep;
         let axes: &[usize] = $axes;
-        let permuted = data.view().permuted_axes(axes);
+        let sliced = data.slice_each_axis(|ax| {
+            if ax.axis.index() == 2 {
+                Slice::from(0..keep)
+            } else {
+                Slice::from(0..ax.len)
+            }
+        });
+        let permuted = sliced.permuted_axes(axes);
         $group.bench_function(BenchmarkId::new("ndarray", $case), |b| {
             b.iter(|| permuted.map(|&x| x.neg()));
         });
+
         let plain = Array::plain_ndarray_ref(&data).unwrap();
+        let shape = data.shape().to_vec();
         $group.bench_function(BenchmarkId::new("jix-plain", $case), |b| {
-            b.iter(|| plain.view().permute_axes(axes).neg().to_ndarray().unwrap());
+            b.iter(|| {
+                plain
+                    .view()
+                    .slice((0..shape[0] as i64, 0..shape[1] as i64, 0..keep as i64))
+                    .permute_axes(axes)
+                    .neg()
+                    .to_ndarray()
+                    .unwrap()
+            });
         });
     }};
 }
@@ -467,31 +493,37 @@ fn bench_axis_order(c: &mut Criterion) {
     group.sample_size(SAMPLES);
 
     let shape3 = [300u64, 400, 500];
-    bench_permuted!(
+    const KEEP: usize = 250; // slice the last axis so the view is not contiguous in memory order
+
+    bench_axis_order!(
         group,
         "rotate_f32",
         create_data::<f32>(Profile::Smooth, &shape3, SEED),
+        KEEP,
         &[1, 2, 0]
     );
-    bench_permuted!(
+    bench_axis_order!(
         group,
         "rotate_i32",
         create_data::<i32>(Profile::Smooth, &shape3, SEED),
+        KEEP,
         &[1, 2, 0]
     );
-    bench_permuted!(
+    // Control: logical order already close to memory order, so nothing to sort.
+    bench_axis_order!(
         group,
-        "reverse_f32",
+        "identity_f32",
         create_data::<f32>(Profile::Smooth, &shape3, SEED),
-        &[2, 1, 0]
+        KEEP,
+        &[0, 1, 2]
     );
-    bench_permuted!(
+    // Control: no slice, so the view stays contiguous and ndarray reaches its flat fast path.
+    bench_axis_order!(
         group,
-        "transpose2d_f32",
-        Array2::<f32>::from_shape_fn((1200, 1200), |(i, j)| (i * 1200 + j) as f32)
-            .into_dimensionality::<IxDyn>()
-            .unwrap(),
-        &[1, 0]
+        "contig_rotate_f32",
+        create_data::<f32>(Profile::Smooth, &shape3, SEED),
+        500,
+        &[1, 2, 0]
     );
 
     group.finish();

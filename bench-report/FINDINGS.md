@@ -3,51 +3,37 @@
 Investigation results that shape the benchmark design. Facts about other libraries, established
 by reading their source or by direct introspection - not by benchmarking.
 
-## ndarray has no axis sorting, only a 4-way layout classifier
+## ndarray has no axis sorting - but reaching that fact is harder than it looks
 
-`ndarray-0.17.2/src/zip/mod.rs::array_layout`:
+`ndarray-0.17.2/src/zip/mod.rs::array_layout` is a four-way classifier - C, F,
+first-axis-contiguous, last-axis-contiguous, or nothing - with no general axis sort anywhere. jix
+sorts every axis by descending stride (`jix/src/storage/plain.rs:160`). So jix should win whenever
+the stride-sorted order differs from logical order.
 
-```rust
-if is_layout_c(dim, strides) { Layout::c() }
-else if n > 1 && is_layout_f(dim, strides) { Layout::f() }
-else if n > 1 {
-    if dim[0] > 1 && strides[0] == 1 { Layout::fpref() }
-    else if dim[n-1] > 1 && strides[n-1] == 1 { Layout::cpref() }
-    else { Layout::none() }
-} else { Layout::none() }
-```
+**Measured, and it did not.** The first version of this benchmark negated permuted views of a
+contiguous array and reported 1.08x to 1.39x - jix slightly *slower* - identically across the
+treatment and both controls. Treatment and controls agreeing is the tell that the benchmark is
+measuring nothing.
 
-That is the whole of it. C, F, "first axis is contiguous", "last axis is contiguous", or nothing.
-On `Layout::none()` the `Zip` machinery iterates in logical index order regardless of what the
-strides actually are.
+Two reasons, and the second is the one that matters:
 
-jix sorts *every* axis by descending stride (`jix/src/storage/plain.rs:160`), which is a full
-permutation rather than a four-way choice.
+1. `array_layout` governs `Zip`, which is what binary operations go through. `ArrayBase::map`, which
+   a unary operation uses, has its own short-circuit: `as_slice_memory_order()`, falling back to
+   `self.iter()` in logical order.
+2. `as_slice_memory_order` requires `is_contiguous`, and **that check sorts the strides first**
+   (`dimension_trait.rs:295` calls `_fastest_varying_stride_order`). A pure permutation of a
+   contiguous array is therefore still contiguous *in memory order*, so the flat fast path is taken
+   for every permutation, rotation and reversal alike. There is nothing to measure.
 
-**Consequence for the benchmark.** jix can only win where the stride-sorted permutation differs
-from logical order *and* ndarray fails to classify the array. That rules out the case currently
-benchmarked:
+To reach the logical-order iterator the view has to be genuinely non-contiguous, so the benchmark
+now slices the last axis before permuting. With `[1,2,0]` on a sliced view the largest stride ends
+up on the innermost logical axis and `ndarray` jumps a full plane per element, while jix sorts and
+walks memory in order. Controls: a permutation that keeps logical order near memory order, and a
+contiguous rotation that still reaches the fast path.
 
-- **2-D transpose does not qualify.** A transposed contiguous array is exactly F-layout, so
-  `array_layout` returns `Layout::f()` and ndarray handles it properly. On top of that,
-  `ArrayBase::map` short-circuits through `as_slice_memory_order()` whenever the array is
-  contiguous in memory order, which a transpose is. `op1.rs::bench_op1_plain_transposed` is
-  therefore measuring nothing interesting on the ndarray side.
-- **Strided 2-D slices do not qualify either.** `s![..;2, ..;2]` gives strides `(2B, 2)`, which is
-  `Layout::none()`, but logical order already walks it in descending-stride order, so jix's sort
-  produces the same permutation. No difference to measure.
-- **3-D with a rotation does qualify.** Take `[A,B,C]` C-contiguous, strides `(B*C, C, 1)`, and
-  permute axes to `[1,2,0]`. Shape becomes `[B,C,A]` with strides `(C, 1, B*C)`:
-  - not C, not F
-  - `strides[0] == C != 1`, so not `fpref`
-  - `strides[n-1] == B*C != 1`, so not `cpref`
-  - therefore `Layout::none()`
-
-  ndarray then iterates logically, making the **innermost** loop the one with stride `B*C` - a
-  full row jump per element. jix sorts to `A, B, C` and walks memory in order.
-
-A reversal permutation (`[2,1,0]`) does *not* qualify - it is exactly F-layout. The distinction is
-rotation versus reversal, and it needs three or more dimensions to exist at all.
+**This is not yet confirmed.** The fix has not run on CI, and the honest state of the claim is that
+the mechanism is real in the source but has never been demonstrated in a measurement. It should not
+appear in a published report until a run says otherwise.
 
 ## blosc2's decompression unit is the block, but chunk size still costs
 
