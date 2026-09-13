@@ -966,72 +966,84 @@ impl<S: ArrayStorage> Array<S> {
             // Fast path for small reads
             self.storage.read_data(index, context, out)
         } else {
-            self.to_ndarray_buf_slow(index, context, out)
+            to_ndarray_buf_slow(&self.storage, index, context, out)
         }
     }
+}
 
-    // index range and buffer size are not checked
-    #[inline(never)]
-    fn to_ndarray_buf_slow<'a>(
-        &'a self,
-        index: &[Range<u64>],
-        context: &'a ReadContext,
-        out: Option<&'a mut StridedBuf<'_>>,
-    ) -> Result<StridedBuf<'a>> {
-        let shape = self.shape();
-        let ndim = shape.len();
-        let dtype = self.dtype();
+#[inline(never)]
+fn to_ndarray_buf_slow<'a, S: ArrayStorage>(
+    storage: &'a S,
+    index: &[Range<u64>],
+    context: &'a ReadContext,
+    out: Option<&'a mut StridedBuf<'_>>,
+) -> Result<StridedBuf<'a>> {
+    // Erase the storage so the body is monomorphized once per D
+    let storage: &dyn ArrayStorage = storage;
+    to_ndarray_buf_slow_dyn::<S::Dimension>(storage, index, context, out)
+}
 
-        let spec = self.storage.spec();
-        let out_shape = S::Dimension::vec(ndim, |dim| index[dim].end - index[dim].start);
-        let out_shape_usize = S::Dimension::vec(ndim, |dim| out_shape[dim] as usize);
-        let mut out = materialize_out_buf(
-            out,
-            context,
-            out_shape_usize.as_ref(),
-            dtype,
-            spec.read_layout_order(),
-        );
-        if out_shape.as_ref().contains(&0) {
-            return Ok(out);
-        }
-        let read_shape: S::Dimension =
-            spec.read_shape_heuristic(out_shape.as_ref(), shape, dtype.itemsize());
-        // Block-space begin/end for NdIter.
-        let block_begin = S::Dimension::vec(ndim, |dim| index[dim].start / read_shape[dim]);
-        let block_end = S::Dimension::vec(ndim, |dim| {
-            calc_block_end(index[dim].start, index[dim].end, read_shape[dim])
+// index range and buffer size are not checked
+#[inline(never)]
+fn to_ndarray_buf_slow_dyn<'a, D: Dimension>(
+    storage: &'a dyn ArrayStorage,
+    index: &[Range<u64>],
+    context: &'a ReadContext,
+    out: Option<&'a mut StridedBuf<'_>>,
+) -> Result<StridedBuf<'a>> {
+    let shape = storage.shape();
+    let ndim = shape.len();
+    let dtype = storage.dtype();
+
+    let spec = storage.spec();
+    let out_shape = D::vec(ndim, |dim| index[dim].end - index[dim].start);
+    let out_shape_usize = D::vec(ndim, |dim| out_shape[dim] as usize);
+    let mut out = materialize_out_buf(
+        out,
+        context,
+        out_shape_usize.as_ref(),
+        dtype,
+        spec.read_layout_order(),
+    );
+    if out_shape.as_ref().contains(&0) {
+        return Ok(out);
+    }
+    let read_shape = spec.read_shape_heuristic::<D>(out_shape.as_ref(), shape, dtype.itemsize());
+    // Block-space begin/end for NdIter.
+    let block_begin = D::vec(ndim, |dim| index[dim].start / read_shape[dim]);
+    let block_end = D::vec(ndim, |dim| {
+        calc_block_end(index[dim].start, index[dim].end, read_shape[dim])
+    });
+    // NdIter that yields blocks of size <= read_shape
+    let block_iter = NdIter::builder_with_begin(block_begin, block_end)
+        .with_block_offset_size_ext(
+            &D::vec(ndim, |dim| index[dim].start),
+            &D::vec(ndim, |dim| index[dim].end),
+            D::vec(ndim, |dim| read_shape[dim]),
+        )
+        .build();
+
+    let (out_buf, out_strides) = out.data_mut();
+
+    for (block_idx, (block_inner_offset, block_size)) in block_iter {
+        let inner_index = D::vec(ndim, |dim| {
+            let start = block_idx[dim] * read_shape[dim] + block_inner_offset[dim];
+            let end = start + block_size[dim];
+            start..end
         });
-        // NdIter that yields blocks of size <= read_shape
-        let block_iter = NdIter::builder_with_begin(block_begin, block_end)
-            .with_block_offset_size_ext(
-                &S::Dimension::vec(ndim, |dim| index[dim].start),
-                &S::Dimension::vec(ndim, |dim| index[dim].end),
-                S::Dimension::vec(ndim, |dim| read_shape[dim]), // TODO: clone
-            )
-            .build();
 
-        let (out_buf, out_strides) = out.data_mut();
+        let out_offset = (0..ndim)
+            .map(|dim| (inner_index[dim].start - index[dim].start) as usize * out_strides[dim])
+            .sum::<usize>();
 
-        for (block_idx, (block_inner_offset, block_size)) in block_iter {
-            let inner_index = S::Dimension::vec(ndim, |dim| {
-                let start = block_idx[dim] * read_shape[dim] + block_inner_offset[dim];
-                let end = start + block_size[dim];
-                start..end
-            });
-
-            let out_offset = (0..ndim)
-                .map(|dim| (inner_index[dim].start - index[dim].start) as usize * out_strides[dim])
-                .sum::<usize>();
-
-            let mut block_out =
-                unsafe { StridedBuf::from_slice_mut(&mut out_buf[out_offset..], out_strides) };
-            self.storage
-                .read_data(inner_index.as_ref(), context, Some(&mut block_out))?;
-        }
-        Ok(out)
+        let mut block_out =
+            unsafe { StridedBuf::from_slice_mut(&mut out_buf[out_offset..], out_strides) };
+        storage.read_data(inner_index.as_ref(), context, Some(&mut block_out))?;
     }
+    Ok(out)
+}
 
+impl<S: ArrayStorage> Array<S> {
     /// Read the entire array into a fresh heap-allocated `Array<Plain>`.
     ///
     /// Similar to [`to_ndarray`](Array::to_ndarray), but returns a jix `Array<Plain>` instead of an
