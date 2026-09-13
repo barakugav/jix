@@ -7,11 +7,16 @@ carry every allocation every earlier test made.
 Sampling RSS in a thread rather than reading `ru_maxrss` is deliberate. `ru_maxrss` only ever
 increases, so it would report the transient of building the array - identical for every library and
 large enough to bury the thing being measured. Sampling bounds the window to the chain itself.
+
+Sampling needs `/proc/self/statm`, so it works on the Linux runners the report is published from.
+Elsewhere - a macOS dev machine, say - it falls back to `ru_maxrss`, which still produces a number
+but one that includes the construction transient. Local numbers are for checking the plumbing.
 """
 
 import argparse
 import gc
 import json
+import resource
 import sys
 import threading
 import time
@@ -27,16 +32,18 @@ from benches.data import make_data
 SAMPLE_SECONDS = 0.001
 
 
-def rss_bytes():
-    """Resident set size of this process, or None where it cannot be read cheaply."""
-    try:
-        # statm fields are in pages; the second is resident.
-        resident = int(Path("/proc/self/statm").read_text().split()[1])
-    except OSError:
-        return None
-    import resource
+STATM = Path("/proc/self/statm")
+SAMPLED = STATM.exists()
 
-    return resident * resource.getpagesize()
+
+def rss_bytes():
+    """Resident set size of this process, in bytes."""
+    if SAMPLED:
+        # statm fields are in pages; the second is resident.
+        return int(STATM.read_text().split()[1]) * resource.getpagesize()
+    # No /proc: fall back to the high-water mark. Linux reports KiB, macOS and BSD report bytes.
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak if sys.platform == "darwin" else peak * 1024
 
 
 class PeakSampler:
@@ -49,23 +56,21 @@ class PeakSampler:
 
     def _sample(self):
         while not self._stop.is_set():
-            current = rss_bytes()
-            if current is not None:
-                self.peak = max(self.peak, current)
+            self.peak = max(self.peak, rss_bytes())
             time.sleep(SAMPLE_SECONDS)
 
     def __enter__(self):
-        self.peak = rss_bytes() or 0
-        self._thread = threading.Thread(target=self._sample, daemon=True)
-        self._thread.start()
+        self.peak = rss_bytes()
+        if SAMPLED:
+            self._thread = threading.Thread(target=self._sample, daemon=True)
+            self._thread.start()
         return self
 
     def __exit__(self, *exc):
         self._stop.set()
-        self._thread.join(timeout=1.0)
-        current = rss_bytes()
-        if current is not None:
-            self.peak = max(self.peak, current)
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+        self.peak = max(self.peak, rss_bytes())
 
 
 def main(argv=None):
@@ -82,7 +87,7 @@ def main(argv=None):
     with PeakSampler() as sampler:
         out = arr.chain(args.steps)
         assert out is not None
-    print(json.dumps({"peak_rss_bytes": sampler.peak}))
+    print(json.dumps({"peak_rss_bytes": sampler.peak, "sampled": SAMPLED}))
     return sampler.peak
 
 

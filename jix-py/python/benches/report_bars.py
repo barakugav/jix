@@ -273,15 +273,18 @@ def plot_section(rows, section, out_dir):
     axes[-1].set_xticklabels(cases, fontsize=8, color=THEME["sub"])
     axes[-1].set_xlim(-0.5, len(cases) - 0.5)
 
-    fig.text(0.008, 0.985, section["title"], fontsize=13.5, fontweight="bold", color=THEME["ink"], va="top")
+    # Header offsets in inches, converted to figure fractions: a fraction would put the title and
+    # subtitle on top of each other whenever the figure is short (one platform instead of two).
     fig.text(
         0.008,
-        0.951,
-        subtitle,
-        fontsize=8.2,
-        color=THEME["muted"],
+        1 - 0.16 / height,
+        section["title"],
+        fontsize=13.5,
+        fontweight="bold",
+        color=THEME["ink"],
         va="top",
     )
+    fig.text(0.008, 1 - 0.45 / height, subtitle, fontsize=8.2, color=THEME["muted"], va="top")
     handles = [plt.Rectangle((0, 0), 1, 1, fc=library_color(lib), ec="none") for lib in libraries]
     fig.legend(
         handles,
@@ -293,7 +296,7 @@ def plot_section(rows, section, out_dir):
         labelcolor=THEME["sub"],
         bbox_to_anchor=(0.5, 0.002),
     )
-    fig.tight_layout(rect=(0, 0.04 + 0.2 / height, 1, 1 - 0.62 / height))
+    fig.tight_layout(rect=(0, 0.04 + 0.2 / height, 1, 1 - 0.72 / height))
     out = Path(out_dir) / f"{section['key']}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, facecolor=THEME["surface"])

@@ -146,3 +146,22 @@ about the timings would have shown this. The chain loop now lives once in `Abstr
 than four times, so the arms cannot drift apart again.
 
 Platforms cut to `ubuntu-24.04` and `ubuntu-24.04-arm`, in the report and in the workflow.
+
+### Iteration 7 - first real run
+
+Ran the suite locally end to end (`scripts/bench/run.py --suites both --fast`, then
+`build_report.py`). 242 rows, all thirteen plots, both halves parsed - so the plumbing works.
+
+Two fixes it forced:
+
+- **Peak RSS needs a fallback.** `/proc/self/statm` does not exist on macOS, so all twelve
+  `test_peak_rss` benchmarks asserted zero and failed the run. Now falls back to `ru_maxrss` off
+  `/proc`, which includes the construction transient - fine, since the report is published from
+  Linux runners where the sampled path is used.
+- **Header spacing was a fraction of figure height**, so the subtitle sat on the title whenever a
+  plot had one platform row instead of two. Now offset in inches.
+
+And two findings about jix itself, in `FINDINGS.md`: the Rust chain fuses perfectly (flat 2.6 ms to
+4.0 ms across 1 to 8 steps, against ndarray's linear 2.6 to 20.9) while the Python scalar-operand
+path is linear at ~5 ms per step; and `normalize` over axis 0 is 17x slower than ndarray while axis
+1 is 1.7x faster.
